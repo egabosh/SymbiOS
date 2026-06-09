@@ -1,0 +1,340 @@
+---
+- name: authelia
+  hosts: all
+
+  vars:
+    service_name: "authelia"
+    service_domain: "auth.{{ default_domain }}"
+    service_path: "'/home/docker/{{ service_name }}"
+    ldap_service_path: "/home/docker/ldap"
+
+  tasks:
+
+    - name: "Create {{ service_path }} dir"
+      ansible.builtin.file:
+        path: "{{ service_path }}"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: Check if Authelia secrets exists
+      stat:
+        path: "{{ service_path }}/env"
+      register: authelia_conf_status
+
+    - name: Generate Authelia secrets
+      when: not authelia_conf_status.stat.exists
+      block:
+
+        - name: Generate a secure password using pwgen
+          command: pwgen -s 32 1
+          register: session_secret
+
+        - name: Generate a secure password using pwgen
+          command: pwgen -s 32 1
+          register: encryption_key
+
+        - name: Save plaintext password to env file
+          copy:
+            content: |
+              session_secret={{ session_secret.stdout }}
+              encryption_key={{ encryption_key.stdout }}
+            dest: "{{ service_path }}/env"
+            mode: '0440'
+            owner: docker
+            group: root
+
+    - name: Get session_secret from file
+      shell: "grep ^session_secret= {{ service_path }}/env | cut -d= -f2-"
+      register: session_secret
+      changed_when: false
+
+    - name: Get encryption_key from file
+      shell: "grep ^encryption_key= {{ service_path }}/env | cut -d= -f2-"
+      register: encryption_key
+      changed_when: false
+
+    - name: Get LDAP admin password from file
+      shell: "grep ^LDAP_ADMIN_PASSWORD= {{ ldap_service_path }}/env.openldap | cut -d= -f2-"
+      register: ldap_admin_password
+      changed_when: false
+
+    - name: "{{ service_path }}/authelia-data/configuration.yml"
+      blockinfile:
+        path: "{{ service_path }}/authelia-data/configuration.yml"
+        mode: "0600"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          session:
+            secret: "{{ session_secret.stdout }}"
+            name: {{ service_domain }}_session
+            same_site: lax
+            expiration: 16h
+            inactivity: 4h
+            remember_me: 1M
+            cookies:
+              - domain: "{{ default_domain }}"
+                authelia_url: https://{{ service_domain }}
+
+          storage:
+            local:
+              path: /config/db.sqlite3
+            encryption_key: "{{encryption_key.stdout}}"
+
+          authentication_backend:
+            password_reset:
+              disable: true
+            ldap:
+              implementation: custom
+              permit_feature_detection_failure: true
+              address: ldaps://openldap.{{ default_domain }}:636
+              base_dn: "{{ldap_basedn}}"
+              additional_users_dn: "ou=users"
+              additional_groups_dn: "ou=groups"
+              user: "cn=head-of-ldap,{{ldap_basedn}}"
+              password: "{{ ldap_admin_password.stdout }}"
+              attributes:
+                username: uid
+                display_name: cn
+                mail: mail
+              users_filter: "(&({username_attribute}={input})(objectClass=posixAccount))"
+              groups_filter: "(&(objectClass=posixGroup)(memberUid={input}))"
+
+          totp:
+            disable: false
+            issuer: {{ service_domain }}
+            algorithm: sha1
+            digits: 6
+            period: 30
+            skew: 1
+
+        backup: yes
+      notify:
+      - Restart authelia
+
+
+    - name: Check if mail settings are given (needed by 2FA)
+      stat:
+        path: /home/docker/_defaults/mailclient
+      register: authelia_mail
+
+    - name: generate authelia notifier dummy to notifications.txt
+      when: not authelia_mail.stat.exists
+      block:
+       - name: "{{ service_path }}/authelia-data/configuration.yml notifications.txt dummy notifier"
+         blockinfile:
+           path: "{{ service_path }}/authelia-data/configuration.yml"
+           mode: "0600"
+           owner: root
+           group: root
+           create: yes
+           marker: "# {mark} ANSIBLE MANAGED BLOCK NOTIFICATION"
+           block: |
+
+             notifier:
+               filesystem:
+                 filename: /config/notifications.txt
+
+           backup: yes
+         notify:
+         - Restart authelia
+
+       - name: create check file for default authorization_policy
+         ansible.builtin.copy:
+           dest: "{{ service_path }}/authorization_policy"
+           content: "one_factor"
+           mode: "0644"
+
+
+    - name: generate authelia notifier mail
+      when: authelia_mail.stat.exists
+      block:
+
+       - name: "{{ service_path }}/authelia-data/configuration.yml mail notifier"
+         blockinfile:
+           path: "{{ service_path }}/authelia-data/configuration.yml"
+           mode: "0600"
+           owner: root
+           group: root
+           create: yes
+           marker: "# {mark} ANSIBLE MANAGED BLOCK NOTIFICATION"
+           block: |
+             notifier:
+               smtp:
+                 username: {{ smtp_user }}
+                 password: {{ smtp_password }}
+                 address: {{ smtp_server }}:{{ smtp_port }}
+                 sender: {{ smtp_from }}
+                 subject: "[{{ service_domain }}] Notification"
+                 startup_check_address: {{ smtp_from }}
+                 identifier: "authelia"
+                 timeout: 15s
+
+           backup: yes
+         notify: Restart authelia
+
+       - name: create check file for default authorization_policy
+         ansible.builtin.copy:
+           dest: "{{ service_path }}/authorization_policy"
+           content: "two_factor"
+           mode: "0644"
+
+
+    - name: "{{ service_path }}/authelia-data/configuration.yml default domain"
+      blockinfile:
+        path: "{{ service_path }}/authelia-data/configuration.yml"
+        mode: "0600"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        block: |
+          access_control:
+            default_policy: deny
+            rules:
+              - domain: "{{ default_domain }}"
+                policy: one_factor
+
+        backup: yes
+        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
+      notify: Restart authelia
+
+    - name: "{{ service_path }}/docker-compose.yml Container Configuration"
+      blockinfile:
+        path: "{{ service_path }}/docker-compose.yml"
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          services:
+
+            {{ service_name }}.{{ default_domain }}:
+              image: authelia/authelia:latest
+              restart: unless-stopped
+              networks:
+                - authelia
+                - traefik
+              volumes:
+                - ./authelia-data:/config
+                - /etc/localtime:/etc/localtime:ro
+                - /etc/hosts:/etc/hosts:ro
+              labels:
+                - traefik.enable=true
+                # HTTPS
+                - traefik.http.routers.authelia-{{ instance }}.rule=Host(`{{ service_domain }}`)
+                - traefik.http.routers.authelia-{{ instance }}.entrypoints=https
+                - traefik.http.routers.authelia-{{ instance }}.tls=true
+                # Proxy to service-port
+                - traefik.http.services.authelia-{{ instance }}.loadbalancer.server.port=9091
+                - traefik.http.routers.authelia-{{ instance }}.service=authelia-{{ instance }}
+                # cert via letsencrypt
+                - traefik.http.routers.authelia-{{ instance }}.tls.certresolver=letsencrypt
+                # Traefik network
+                - traefik.docker.network=traefik
+                # auth
+                - traefik.http.routers.authelia-{{ instance }}.middlewares=secHeaders@file
+
+          networks:
+            authelia:
+              driver: bridge
+              driver_opts:
+                com.docker.network.bridge.name: br-authelia
+            traefik:
+              external: true
+
+        backup: yes        
+      notify: Restart authelia
+
+
+    #### OIDC (Open ID Connect)
+ 
+    - name: generate RSA key pair for OIDC
+      ansible.builtin.command: >
+        docker run --rm -v "{{ service_path }}/authelia-data:/config" authelia/authelia:latest authelia crypto pair rsa generate --directory /config --file.private-key oidc.key --file.public-key oidc.pub
+      args:
+        creates: "{{ service_path }}/authelia-data/oidc.key"
+
+    - name: OIDC Key aus Datei lesen
+      ansible.builtin.command: >
+        sed 's/^/          /'  {{ service_path }}/authelia-data/oidc.key
+      register: oidc_key
+      changed_when: false
+
+    - name: write OIDC config in configuration.yml
+      ansible.builtin.blockinfile:
+        path: "{{ service_path }}/authelia-data/configuration.yml"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC"
+        block: |
+          identity_providers:
+            oidc:
+              jwks:
+                - key: |
+          {{ oidc_key.stdout }}
+              cors:
+                endpoints:
+                  - "authorization"
+                  - "token"
+                  - "revocation"
+                  - "introspection"
+                  - "userinfo"
+                allowed_origins_from_client_redirect_uris: true
+              clients:
+                # dummy client because authelia forces at least one client to work
+                - client_id: 'dummy'
+                  client_name: 'dummy'
+                  client_secret: '$pbkdf2-sha512$310000$EXkvBmRZx/6476FyviXRZw$OpkrwApe5yPfrXJadOM8VUwQBjmo4rDD1SonNsuQ.6WgevPNKYQJrob404o1yHYbybQPJTRXuwnyKVLqtIhN.A' # random dummy pw
+        insertbefore: "^# BEGIN ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
+      notify: Restart authelia
+
+    - name: "Script for generating oidc client secrets"
+      blockinfile:
+        path: "{{ service_path }}/gen-oidc-client-secret.sh"
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          . /etc/bash/gaboshlib.include
+
+          secret_path=$1
+          client_secret_file=$secret_path/oidc_password
+          client_digest_file=$secret_path/oidc_digest
+
+          [[ -s $client_secret_file ]] && exit 0
+          [[ -d $secret_path ]] || mkdir -p "$secret_path"
+
+          touch $g_tmp/output $client_secret_file $client_digest_file
+          chmod 400 $g_tmp/output $client_secret_file $client_digest_file
+
+          docker run --rm authelia/authelia:latest authelia crypto hash generate pbkdf2 --random --random.length 72 --random.charset alphanumeric >$g_tmp/output
+
+          grep "^Random Password:" $g_tmp/output | cut -d" " -f3 >$client_secret_file
+          grep "^Digest:" $g_tmp/output | cut -d" " -f2 >$client_digest_file
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: 
+
+    - name: "gen-oidc-client-secret.sh shebang"
+      lineinfile:
+        path: "{{ service_path }}/gen-oidc-client-secret.sh"
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+
+  handlers:
+
+    - name: Restart authelia
+      ansible.builtin.shell: docker-compose down && docker-compose up -d
+      args:
+        chdir: "{{ service_path }}"
+
+

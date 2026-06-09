@@ -1,0 +1,595 @@
+---
+- name: Basic SymbiOS Setup
+  hosts: all
+  tasks:
+
+    - name: check if we are in an container env by existing systemd
+      stat: 
+        path: /lib/systemd/systemd
+      register: nocontainer
+
+    - name: check if we are in a lxc env
+      shell: grep -a container=lxc /proc/1/environ || /bin/true
+      ignore_errors: true
+      changed_when: False
+      register: lxc
+
+    - name: Install Basic Packages
+      apt:
+        name:
+          - file
+          - bc
+          - psutils
+          - psmisc
+          - procps
+          - htop
+          - iotop
+          - sysstat
+          - strace
+          - net-tools
+          - vim
+          - git
+          - netcat-traditional
+          - debconf-utils
+          - iputils-ping
+          - lsof
+          - inotify-tools
+          - rsync
+          - dos2unix
+          - locales
+          - iproute2
+          - curl
+          - moreutils
+          - telnet
+          - libstring-approx-perl
+          - postfix
+          - zip
+          - whois
+          - libfile-readbackwards-perl
+          - pwgen
+          - jq
+          - apt-transport-https
+          - html-xml-utils
+          - wget
+          - bind9-host
+          - dnsutils
+          - python3-pip
+          - python3-venv
+          - python3-html2text
+        update_cache: yes
+        install_recommends: no
+
+    - name: Install Basic Packages if not running in container
+      apt:
+        name:
+          - man-db 
+          - cryptsetup
+          - ffmpeg
+          - mediainfo
+          - nmap
+          - libcrypt-cbc-perl
+          - libcrypt-des-perl
+          - cifs-utils
+          - golang
+          - make
+          - sshfs
+          - imagemagick
+          - libimage-exiftool-perl
+          - sqlite3
+          - openssh-server
+          - gpg
+          - rblcheck
+          - crudini
+          - kpartx
+          - hd-idle
+          - jnettop
+          - strace
+          - tmux
+          - ethtool
+          - logrotate
+          - smartmontools
+          - at
+          - certbot
+          - btrfs-progs
+          - mdadm
+          - ufw
+          - btrfsmaintenance
+          - sudo
+          - golang
+          - make
+          - sshfs
+          - ldmtool
+          - traceroute
+          - mailutils
+          - rsyslog
+          - postgresql-client
+          - ntpsec-ntpdatea
+          - systemd-resolved
+        update_cache: yes
+        install_recommends: no
+      when: nocontainer.stat.exists == true
+
+    - name: Restart systemd-resolved
+      service:
+        name: systemd-resolved
+        state: restarted
+
+    # Gather facts about the system, including virtualization type
+    - name: Gather system facts
+      ansible.builtin.setup:
+
+    # Check if the system is running as a KVM virtual machine
+    - name: Set fact if running on KVM
+      ansible.builtin.set_fact:
+        is_kvm_guest: "{{ ansible_facts.virtualization_type == 'kvm' and ansible_facts.virtualization_role == 'guest' }}"
+
+    - name: Install kvm guest components only if this is a KVM guest
+      apt:
+        name:
+          - qemu-guest-agent
+          - qemu-system-common
+      when: is_kvm_guest
+
+    - name: start qemu-guest-agent
+      service:
+        name: qemu-guest-agent
+        state: started
+        enabled: yes
+      when: is_kvm_guest
+
+    - name: check if this is a Mint system
+      stat: 
+        path: /etc/linuxmint/mintSystem.conf
+      register: mint
+
+    - name: check if we are in a RaspberryPiOS
+      stat:
+        path: /usr/bin/wayfire-pi
+      register: pios
+
+    - name: Set a hostname
+      ansible.builtin.hostname:
+        name: "SymbiOS"
+    
+    - name: Prefer ipv4 over ipv6 to avoid problems and waiting times
+      ansible.builtin.lineinfile:
+        path: /etc/gai.conf
+        regexp: '^#precedence ::ffff:0:0/96  100'
+        line: "precedence ::ffff:0:0/96  100  # CHANGED BY ANSIBLE"
+        backup: yes
+
+    - name: Ensure en_US.UTF-8 locale exists
+      community.general.locale_gen:
+        name: en_US.UTF-8 
+        state: present
+    
+    - name: Ensure en_GB.UTF-8 locale exists
+      community.general.locale_gen:
+        name: en_GB.UTF-8
+        state: present
+
+    - name: SSH client settings
+      blockinfile:
+        path: /etc/ssh/ssh_config.d/settings.conf
+        mode: "0444"
+        owner: root
+        group: root
+        create: yes
+        insertbefore: BOF # Beginning of the file
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          Host *
+            StrictHostKeyChecking=accept-new          
+        backup: yes
+      
+    - name: Create .ssh dir
+      ansible.builtin.file:
+        path: /root/.ssh
+        owner: root
+        group: root
+        state: directory
+        mode: '0550'
+      when: nocontainer.stat.exists == true
+
+    - name: Generate an OpenSSH keypair ed25519
+      community.crypto.openssh_keypair:
+        path: /root/.ssh/id_ed25519
+        type: ed25519
+      when: nocontainer.stat.exists == true
+      notify:
+      - Restart ssh
+
+    - ansible.posix.sysctl:
+        name: vm.swappiness
+        value: '0'
+        state: present
+      when: nocontainer.stat.exists == true
+
+    # stop low-level messages on console (tty)
+    - ansible.posix.sysctl:
+        name: kernel.printk
+        value: '3 4 1 3'
+        state: present
+      when: nocontainer.stat.exists == true
+
+    - name: shell profile
+      blockinfile:
+        path: /etc/profile.d/settings-from-ansible.sh
+        create: yes
+        mode: "0444"
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          if [ "${USER}" = root ]
+          then
+            PS1='\[\033[01;31m\]\h\[\033[01;34m\] \w \$\[\033[00m\] '
+          else
+            PS1='\[\033[01;32m\]\u@\h\[\033[01;34m\] \w \$\[\033[00m\] '
+          fi
+          export EDITOR="/usr/bin/vim"
+          export HISTSIZE=
+          export HISTFILESIZE=
+          export HISTTIMEFORMAT="[%F %T] "
+          if [ -f /etc/debian_version ]
+          then
+            export DEBIAN_FRONTEND='noninteractive'
+            export LANG="en_US.UTF-8"
+            alias ls='ls --color=auto'
+            alias grep='grep --colour=auto'
+            alias egrep='egrep --colour=auto'
+            alias fgrep='fgrep --colour=auto'
+          fi
+          # execute for linuxmint
+          if [ -d /etc/linuxmint ] 
+          then
+            grep -q /etc/profile.d/settings-from-ansible.sh ~/.bashrc || echo '. /etc/profile.d/settings-from-ansible.sh' >> ~/.bashrc
+            export LANG="de_DE.UTF-8"
+            #for rc in ~/.bashrc /etc/skel/.bashrc
+            #do
+            #  grep -q /etc/profile.d/settings-from-ansible.sh $rc || echo '. /etc/profile.d/settings-from-ansible.sh' >> $rc
+            #done
+          fi          
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: vim settings
+      blockinfile:
+        path: /etc/vim/vimrc.local
+        mode: "0444"
+        owner: root
+        group: root
+        create: yes
+        marker: "\" {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          :syntax on
+          let g:skip_defaults_vim = 1
+          set encoding=utf-8
+          set tabstop=2 softtabstop=0 expandtab shiftwidth=1 smarttab
+          syntax match nonascii "[^[:alnum:][:punct:][:space:]]/"
+          highlight nonascii guibg=Red ctermbg=2          
+        backup: yes
+    
+    - name: gaboshlib from git
+      ansible.builtin.git:
+        repo: 'https://github.com/egabosh/gaboshlib.git'
+        dest: /etc/bash
+        force: yes
+
+    - name: systemd-journald settings
+      blockinfile:
+        path: /etc/systemd/journald.conf.d/journald.local.conf
+        create: yes
+        mode: "0444"
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          [Journal]
+          Storage=persistent
+          SystemMaxUse=30M
+          ForwardToSyslog=yes          
+        backup: yes
+      notify:
+      - Restart journald
+      when: nocontainer.stat.exists == true
+
+    - name: /etc/rsyslog.d/00-services-remote.conf
+      blockinfile:
+        path: /etc/rsyslog.d/00-services-remote.conf
+        create: yes
+        mode: "0444"
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Listen for remote Logging (UDP)
+          module(load="imudp")
+          input(type="imudp" port="514")
+          # Hosts
+          if $hostname != '{{ ansible_facts['hostname'] }}' and $msg contains 'wdGetDidSendCredentials not implemented' and $programname contains 'citrix-wfica' then stop
+          if $hostname != '{{ ansible_facts['hostname'] }}' and $msg contains 'CGPrecv: socket 0x' and $programname contains 'citrix-wfica' then stop
+          if $hostname != '{{ ansible_facts['hostname'] }}' and $msg contains 'doEncryptData inbuffersize: ' and $programname contains 'citrix-wfica' then stop
+          if $hostname != '{{ ansible_facts['hostname'] }}' and $msg contains 'SSLPutDataFn inbuffersize: ' and $programname contains 'citrix-wfica' then stop
+          
+          if $hostname startswith 'openwrt-' then /var/log/openwrt.log
+          if $hostname startswith 'openwrt-' then stop
+        backup: yes
+      when: nocontainer.stat.exists == true
+      notify:
+      - Restart rsyslog
+    
+    - name: /etc/rsyslog.d/01-services-local.conf
+      blockinfile:
+        path: /etc/rsyslog.d/01-services-local.conf
+        create: yes
+        mode: "0444"
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # USV
+          if $programname == 'apcupsd' and $syslogseverity <= '6' then /var/log/usv-apcupsd.log
+          if $programname == 'apcupsd' then stop
+          # SMART HDD Überwachung
+          if $programname == 'smartd' and $syslogseverity <= '6' then /var/log/smartd.log
+          if $programname == 'smartd' then stop
+          # firewall                                                                                        
+          if $programname == 'kernel' and $msg contains 'PROTO' then /var/log/firewall.log 
+          if $programname == 'kernel' and $msg contains 'PROTO' then stop   
+          # SSH
+          if $programname == 'sshd' and $syslogseverity <= '6' then /var/log/sshd.log
+          if $programname == 'sshd' then stop
+          # SFTP
+          if $programname == 'internal-sftp' and $msg contains 'sent status ' then stop
+          if $programname == 'internal-sftp' and $msg contains 'lstat name ' then stop
+          if $programname == 'internal-sftp' and $msg contains '/.kodi/' then stop
+          if $programname == 'internal-sftp' then /var/log/sftpaccess.log
+          if $programname == 'internal-sftp' then stop
+          # Cron
+          if $programname == 'cron' and $syslogseverity <= '6' then /var/log/cron.log
+          if $programname == 'cron' then stop
+          if $programname == 'CRON' and $syslogseverity <= '6' then /var/log/cron.log
+          if $programname == 'CRON' then stop
+          if $programname == 'run-crons' and $syslogseverity <= '6' then /var/log/cron.log
+          if $programname == 'run-crons' then stop
+          if $programname == 'crontab' and $syslogseverity <= '6' then /var/log/cron.log
+          if $programname == 'crontab' then stop
+          # slapd
+          if $programname == 'slapd' then /var/log/slapd.log
+          if $programname == 'slapd' then stop
+          # hostapd
+          if $programname == 'hostapd' then /var/log/hostapd.log
+          if $programname == 'hostapd' then stop
+          # nscd
+          if $programname == 'nscd' then /var/log/nscd.log
+          if $programname == 'nscd' then stop
+          # arpwatch
+          if $programname == 'arpwatch' then /var/log/arpwatch.log
+          if $programname == 'arpwatch' then stop
+          # xinetd
+          if $programname == 'xinetd' then /var/log/xinetd.log
+          if $programname == 'xinetd' then stop
+          # bash scripts using ggaboshlib
+          if $programname contains 'g_bash-script' then /var/log/g_bash-scripts.log
+          if $programname contains 'g_bash-script' then stop
+          # runchecks.sh
+          if $programname == 'runchecks.sh' then /var/log/runchecks.sh.log
+          if $programname == 'runchecks.sh' then stop
+          # systemd
+          if $programname contains 'systemd' then /var/log/systemd.log
+          if $programname contains 'systemd' then stop
+          # kernel
+          if $programname == 'kernel' then /var/log/kernel.log
+          if $programname == 'kernel' then stop
+          # docker
+          if $programname contains 'docker' then /var/log/docker.log
+          if $programname contains 'docker' then stop
+          if $programname == 'containerd' then /var/log/docker.log
+          if $programname == 'containerd' then stop
+          # sudo
+          if $programname == 'sudo' then /var/log/sudo.log
+          if $programname == 'sudo' then stop
+          # dnscrypt-proxy
+          if $programname == 'dnscrypt-proxy' then /var/log/dnscrypt-proxy.log
+          if $programname == 'dnscrypt-proxy' then stop
+          # ansible
+          if $programname contains 'ansible' then /var/log/ansible.log
+          if $programname contains 'ansible' then stop
+          # passwd
+          if $programname contains 'passwd' then /var/log/passwd.log
+          if $programname contains 'passwd' then stop      
+          # whats left in messages
+          *.* /var/log/messages
+        backup: yes
+      notify:
+      - Restart rsyslog
+      when: nocontainer.stat.exists == true
+
+    - name: hd-idle for spinning down disks after XXX seconds idle
+      blockinfile:
+        path: /etc/default/hd-idle
+        create: yes
+        mode: "0444"
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          HD_IDLE_OPTS="-i 300 -l /var/log/hd-idle.log"          
+        backup: yes
+      notify:
+      - Restart hd-idle
+      when: nocontainer.stat.exists == true
+
+    - name: /etc/default/btrfsmaintenance
+      blockinfile:
+        path: /etc/default/btrfsmaintenance
+        mode: "0444"
+        owner: root
+        group: root
+        create: yes
+        insertbefore: EOF
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          BTRFS_LOG_OUTPUT="syslog"
+          BTRFS_BALANCE_MOUNTPOINTS="auto"
+          BTRFS_BALANCE_PERIOD="monthly"
+          BTRFS_SCRUB_MOUNTPOINTS="auto"
+          BTRFS_SCRUB_PERIOD="monthly"          
+        backup: yes
+      when: nocontainer.stat.exists == true
+
+    - name: /etc/logrotate.conf (weekly->daily)
+      ansible.builtin.lineinfile:
+        path: /etc/logrotate.conf
+        regexp: '^weekly$'
+        line: 'daily'
+        backup: yes
+      when: nocontainer.stat.exists == true
+
+    - name: /etc/logrotate.d/apache2 (remove delaycompress)
+      ansible.builtin.lineinfile:
+        path: /etc/logrotate.d/apache2
+        regexp: '.*delaycompress$'
+        state: absent
+      when: nocontainer.stat.exists == true
+
+    - name: /etc/logrotate.d/00-local
+      blockinfile:
+        path: /etc/logrotate.d/00-local
+        mode: "0444"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          /var/log/dmesgcron
+          /var/log/messages
+          /var/log/syslog
+          /var/log/*.log
+          {
+            rotate 7
+            daily
+            missingok
+            notifempty
+            copytruncate
+            compress
+            postrotate
+              /usr/lib/rsyslog/rsyslog-rotate
+            endscript
+          }          
+      when: nocontainer.stat.exists == true
+
+    - name: Remove logrotates
+      ansible.builtin.file:
+        path: /etc/logrotate.d/alternatives
+        state: absent
+      when: nocontainer.stat.exists == true
+
+    - name: Remove logrotates
+      ansible.builtin.file:
+        path: /etc/logrotate.d/dpkg
+        state: absent
+      when: nocontainer.stat.exists == true
+
+    - name: Remove logrotates
+      ansible.builtin.file:
+        path: /etc/logrotate.d/rsyslog
+        state: absent
+      when: nocontainer.stat.exists == true
+
+    - name: check if this is grub system
+      stat:
+        path: /etc/default/grub
+      register: isgrub
+
+    - name: /etc/default/grub nonquiet nosplash cgroups
+      ansible.builtin.lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX_DEFAULT=.*$'
+        line: "GRUB_CMDLINE_LINUX_DEFAULT=\"nosplash cgroup_enable=memory cgroup_memory=1 cgroup_enable=cpuset swapaccount=1\""
+        backup: yes
+      notify:
+      - update-grub
+      when: isgrub.stat.exists == true
+
+    - name: Add sudo config to disable fqdn lookup
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/99-disable-fqdn
+        content: |
+          # Disable DNS lookups for sudo
+          Defaults !fqdn
+        mode: '0440'
+        validate: 'visudo -cf %s'
+
+    - name: Ensure nsswitch.conf uses only files
+      ansible.builtin.lineinfile:
+        path: /etc/nsswitch.conf
+        regexp: '^{{ item.key }}:'
+        line: '{{ item.key }}: files'
+        state: present
+      loop:
+        - { key: 'passwd' }
+        - { key: 'group' }
+        - { key: 'shadow' }
+        - { key: 'gshadow' }
+      loop_control:
+        label: '{{ item.key }}'
+
+    - name: check and add hostname und FQDN in /etc/hosts with system IP
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^{{ ansible_default_ipv4.address }}[[:space:]]+.*\b{{ ansible_hostname }}\b.*\b{{ inventory_hostname }}\b'
+        line: '{{ ansible_default_ipv4.address }} {{ ansible_hostname }} {{ inventory_hostname }}'
+        state: present
+        backup: yes
+
+    - name: Create /etc/systemd/coredump.conf.d dir
+      ansible.builtin.file:
+        path: /etc/systemd/coredump.conf.d
+        owner: root
+        group: root
+        state: directory
+        mode: '0755'
+      when: nocontainer.stat.exists == true
+
+    - name: no systemd Core Dumps
+      copy:
+        dest: /etc/systemd/coredump.conf.d/disable.conf
+        content: |
+          [Coredump]
+          Storage=none
+          ProcessSizeMax=0
+      when: nocontainer.stat.exists == true
+      notify: reload systemd
+
+
+  handlers:
+
+    - name: update-grub
+      ansible.builtin.shell: update-grub
+
+    - name: Restart journald
+      service:
+        name: systemd-journald
+        state: restarted
+
+    - name: Restart rsyslog
+      service:
+        name: rsyslog
+        state: restarted
+
+    - name: Restart hd-idle
+      service:
+        name: hd-idle
+        state: restarted
+
+    - name: Restart ssh
+      service:
+        name: ssh
+        state: restarted
+
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+

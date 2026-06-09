@@ -1,29 +1,38 @@
-#!/bin/bash -xe
+#!/bin/bash
 
-date >>/etc/dohardening
+set -e
+set -x
 
-# download playbook installer
-wget https://raw.githubusercontent.com/egabosh/linux-setups/refs/heads/main/debian/install.sh -O /usr/local/sbin/linux_setups_debian_install.sh
-chmod 700 /usr/local/sbin/linux_setups_debian_install.sh
+# install ansible and git
+DEBIAN_FRONTEND=noninteractive apt-get -y update --allow-releaseinfo-change
+which ansible >/dev/null 2>&1 || DEBIAN_FRONTEND=noninteractive apt-get -y install ansible git
+ansible-galaxy collection install community.general
 
-# define playbooks
-export PLAYBOOKS="debian/basics/basics.yml
-debian/basics/hardening.yml
-debian/firewall/firewall.yml
-debian/runchecks/runchecks.yml
-debian/backup/backup.yml
-debian/autoupdate/autoupdate.yml
-debian/docker/docker.yml 
-debian/traefik.server/traefik.yml
-debian/vnet.network/vnet.yml
-debian/dedyn.client/dedyn.yml
-debian/rsyslog.server/syslog-server.yml
-https://raw.githubusercontent.com/egabosh/gtc-rename/refs/heads/main/gtc-rename.yml 
-https://raw.githubusercontent.com/egabosh/gtc-crypt/refs/heads/main/gtc-crypt.yml
-"
-echo $PLAYBOOKS >/usr/local/etc/playbooks
+# clone SymbiOS
+cd /home
+[[ -d SymbiOS ]] || git clone https://github.com/egabosh/SymbiOS.git
+cd SymbiOS
+git pull -f
 
-# run
-/usr/local/sbin/linux_setups_debian_install.sh
+# initial inventory
+if ! [[ -s /home/ansible/inventory.yml ]]
+then
+  mkdir -p /home/ansible
+  chmod 700 /home/ansible
+  cp /home/SymbiOS/inventory.yml /home/ansible/inventory.yml
+  chmod 600 /home/ansible/inventory.yml
+fi
 
+# install base-system
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/basics.yml
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/hardening.yml
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/firewall.yml
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/backup.yml
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/autoupdate.yml
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/runchecks.yml
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/docker.yml
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/dedyn.yml
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/traefik.yml
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/ldap.yml
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/authelia.yml
 

@@ -1,0 +1,124 @@
+---
+- name: Autoupdate
+  hosts: all
+  tasks:
+
+    - name: Create updates dir /usr/local/sbin/autoupdate.d
+      ansible.builtin.file:
+        path: /usr/local/sbin/autoupdate.d
+        owner: root
+        group: root
+        state: directory
+        mode: "0700"
+
+    - name: /usr/local/sbin/autoupdate.sh
+      blockinfile:
+        path: /usr/local/sbin/autoupdate.sh
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          . /etc/bash/gaboshlib.include
+          g_nice
+          g_lockfile
+          g_all-to-syslog
+          DISPLAY=""
+          set -o pipefail
+          for update in $(find /usr/local/sbin/autoupdate.d -name "*.update" -type f | sort)
+          do
+            g_echo "Running: $update"
+            . "$update"
+            #sleep 60
+          done
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /usr/local/sbin/autoupdate.sh shebang
+      lineinfile:
+        path: /usr/local/sbin/autoupdate.sh
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    - name: /usr/local/sbin/autoupdate.d/debian.update
+      blockinfile:
+        path: /usr/local/sbin/autoupdate.d/debian.update
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          g_echo_ok "Checking for systemupdates"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get -yy update --allow-releaseinfo-change || g_echo_error "apt-get update failed"
+          if ! hostname | grep -q ".mint."
+          then
+
+            if ! grep -r "non-free non-free-firmware" /etc/apt/sources.list /etc/apt/sources.list.d/*
+            then
+               g_echo_warn "Allowing non-free-firmware"
+               sed -i 's/non-free/non-free non-free-firmware/g' /etc/apt/sources.list
+               sed -i 's/non-free/non-free non-free-firmware/g' /etc/apt/sources.list.d/*
+            fi
+
+            if ! apt-get -s dist-upgrade 2>&1 | sed -e "s/'/'\\\\''/g; 1s/^/'/; \$s/\$/'/" | tee $g_tmp/sys-updatelist | egrep "^0.+, 0 .+, 0 .+ 0 .+\."
+            then
+              g_echo_warn "Systemupdate will be installed: $(cat $g_tmp/sys-updatelist)"
+              apt-get -yy dist-upgrade | sed -e "s/'/'\\\\''/g; 1s/^/'/; \$s/\$/'/" | tee $g_tmp/sys-update || g_echo_error "apt-get -yy dist-upgrade failed $($g_tmp/sys-update)"
+              needrestart -b -r a | egrep -q "^NEEDRESTART-KSTA: [2|3]" && g_echo_warn "System reboot needed"
+              g_echo_warn $(apt-get -yy --purge autoremove 2>&1 | egrep -A10 "^The following packages will be REMOVED:")
+              apt-get -yy autoclean
+              g_echo_warn $(find /etc -name '.dpkg-' -o -name '.ucf-' -o -name '*.merge-error')
+              apt-get purge '~o'
+            fi
+            
+            if grep -qr bookworm /etc/apt/sources.list /etc/apt/sources.list.d
+            then
+              g_echo_warn "Distributionupdate from bookworm to trixie will be installed!!!"
+              rm -f /etc/apt/sources.list.d/deb_debian_org_debian.list
+              sed -i 's/bookworm/trixie/g' /etc/apt/sources.list
+              sed -i 's/bookworm/trixie/g' /etc/apt/sources.list.d/*
+              apt-get -yy update --allow-releaseinfo-change
+              apt-get -yy -o "Dpkg::Options::=--force-confold" upgrade --without-new-pkgs
+              apt-get -yy -o "Dpkg::Options::=--force-confold" full-upgrade
+              apt-get -yy -o "Dpkg::Options::=--force-overwrite" --fix-broken install
+              apt-get -yy autoremove
+            fi
+
+          fi
+          
+          [ -x /usr/bin/flatpak ] && flatpak update --system --noninteractive --force-remove
+ 
+          # run all defined playbooks if available
+          if ! [[ $1 = "noplaybooks" ]]
+          then
+            [[ -s "/usr/local/etc/playbooks" ]] && bash /usr/local/sbin/linux_setups_debian_install.sh
+          fi
+         
+          # clean apt cache
+          apt-get -yy clean
+
+          # clean root mails
+          N=$(mail -H | wc -l)
+          DEL=$((N-100))
+          if [ "$DEL" -gt 0 ]; then
+              printf "d 1-%d\nq\n" "$DEL" | mail
+          fi
+
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /etc/cron.d/autoupdate_local
+      blockinfile:
+        path: /etc/cron.d/autoupdate_local
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          ## Auto-Update
+          5 6 * * * root /usr/local/sbin/autoupdate.sh
+        backup: yes

@@ -1,0 +1,417 @@
+---
+
+- name: traefik
+  hosts: all
+  tasks:
+
+    - name: /home/docker/traefik/default-basic-auth-genpw.sh (generate Random PW for default-basic-auth)
+      blockinfile:
+        path: /home/docker/traefik/default-basic-auth-genpw.sh
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd /home/docker/traefik
+          user=admin
+          password=$(pwgen -s 32 1)
+
+          [ -f default-basic-auth-env ] || echo "USER=!USER!
+          PASSWORD=!PASSWORD!
+          " >default-basic-auth-env          
+         
+          chmod 440 default-basic-auth-env
+          chown root:docker default-basic-auth-env
+          sed -i "s/\!USER\!/$user/g" default-basic-auth-env
+          sed -i "s/\!PASSWORD\!/$password/g" default-basic-auth-env
+          
+          . default-basic-auth-env
+          mkdir -p providers
+          echo $(htpasswd -nb $USER $PASSWORD) >providers/default-basic-auth.usersfile
+
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /home/docker/traefik/default-basic-auth-genpw.sh shebang
+      lineinfile:
+        path: /home/docker/traefik/default-basic-auth-genpw.sh
+        insertbefore: BOF
+        line: "#!/bin/bash -e"
+
+    - name: Gen initial password if not exists
+      ansible.builtin.shell: ./default-basic-auth-genpw.sh
+      args:
+        chdir: /home/docker/traefik
+        creates: /home/docker/traefik/providers/default-basic-auth.usersfile
+
+    - name: Create a network
+      community.docker.docker_network:
+        name: traefik
+        enable_ipv6: yes
+        driver_options:
+          com.docker.network.bridge.name: br-traefik
+        ipam_config:
+          - subnet: 192.168.41.0/24
+            gateway: 192.168.41.1
+          # Local v6 IP  
+          - subnet: fdaa:a192:b168:cd41::/64
+            gateway: fdaa:a192:b168:cd41::1
+      notify: Restart traefik
+
+    - name: /home/docker/traefik/docker-compose.yml Traefik Container Configuration
+      blockinfile:
+        path: /home/docker/traefik/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          
+          services:
+            traefik:
+              image: traefik:latest
+              command:
+                # Be careful in production as it exposes the traffic you might not want to expose.
+                - --log.level=ERROR
+                # http -> https redirect
+                - --entrypoints.http.address=:80
+                - --entrypoints.http.http.redirections.entryPoint.to=https
+                - --entrypoints.http.http.redirections.entryPoint.scheme=https
+                - --entrypoints.http.http.redirections.entrypoint.permanent=true
+                # https
+                - --entrypoints.https.address=:443
+                - --entrypoints.https.http.encodedcharacters.allowencodedsemicolon=true
+                - --entrypoints.https.http.encodedcharacters.allowencodedpercent=true
+                - --entrypoints.https.http.encodedcharacters.allowencodedquestionmark=true
+                - --entrypoints.https.http.encodedcharacters.allowencodedhash=true
+                # ldaps
+                - --entrypoints.ldaps.address=:636
+                # Docker
+                - --providers.docker=true
+                - --providers.docker.endpoint=unix:///var/run/docker.sock
+                - --providers.docker.exposedByDefault=false
+                # Traefik
+                - --api=true
+                - --api.dashboard=true
+                - --api.insecure=false
+                # LetsEncrypt 
+                # Staging Server - uncomment when testing
+                #- --certificatesResolvers.letsencrypt.acme.caServer=https://acme-staging-v02.api.letsencrypt.org/directory
+                - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+                - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http
+                - --certificatesresolvers.letsencrypt.acme.email=ssl@{{ default_domain }}
+                - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+                # non-docker services
+                - --providers.file=true
+                - --providers.file.directory=/etc/traefik/providers.local
+                - --providers.file.watch=true
+                # log
+                - --accesslog.filepath=/log/access.log
+                - --accesslog.format=json
+              container_name: traefik
+              restart: unless-stopped
+              security_opt:
+                - no-new-privileges:true
+              networks:
+                traefik:
+                  ipv4_address: 192.168.41.200
+              ports:
+                - 80:80
+                - 443:443
+                - 636:636
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - /var/run/docker.sock:/var/run/docker.sock:ro
+                - ./letsencrypt:/letsencrypt
+                - ./providers:/etc/traefik/providers.local
+                - ./log:/log
+              labels:
+                - traefik.enable=true
+                - traefik.http.routers.traefik.rule=Host(`traefik.{{ default_domain }}`)
+                - traefik.http.routers.traefik.entrypoints=https
+                - traefik.http.routers.traefik.middlewares=secHeaders@file,default-basic-auth@file
+                - traefik.http.routers.traefik.service=api@internal
+                - traefik.http.routers.traefik.tls=true
+                - traefik.http.routers.traefik.tls.certresolver=letsencrypt
+                - traefik.http.middlewares.to-https.redirectscheme.scheme=https
+          networks:
+            traefik:
+              external: true
+
+        backup: yes
+      notify: Restart traefik
+
+    - name: Create traefik dir
+      ansible.builtin.file:
+        path: /home/docker/traefik/providers
+        owner: root
+        group: docker
+        state: directory
+        mode: '0755'
+
+    - name: Defaults for TLS,...
+      blockinfile:
+        path: /home/docker/traefik/providers/_default.yml
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          ---
+          tls:
+            options:
+              default:
+                minVersion: VersionTLS12
+                cipherSuites:
+                  - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384   # TLS 1.2
+                  - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305    # TLS 1.2
+                  - TLS_AES_256_GCM_SHA384                  # TLS 1.3
+                  - TLS_CHACHA20_POLY1305_SHA256            # TLS 1.3
+                curvePreferences:
+                  - CurveP521
+                  - CurveP384
+                sniStrict: true
+          http:
+            middlewares:
+              secHeaders:
+                compress: false
+                headers:
+                  browserXssFilter: true
+                  contentTypeNosniff: true
+                  frameDeny: true
+                  # HSTS Configuration
+                  forceSTSHeader: true
+                  stsIncludeSubdomains: true
+                  stsPreload: true
+                  stsSeconds: 31536000
+                  customFrameOptionsValue: "SAMEORIGIN"
+                  sslProxyHeaders:
+                    X-Forwarded-Proto: "https"
+              authelia:
+                forwardAuth:
+                  address: "http://authelia.{{ default_domain }}:9091/api/authz/forward-auth?authelia_url=https://auth.{{inventory_hostname}}"
+                  trustForwardHeader: true
+                  authResponseHeaders:
+                    - "X-Forwarded-Remote-User"
+                    - "X-Forwarded-Remote-Groups"
+                    - "X-Forwarded-Remote-Name"
+                    - "X-Forwarded-Remote-Email"
+                    - "X-Forwarded-Method"
+              default-basic-auth:
+                basicAuth:
+                  usersFile: "/etc/traefik/providers.local/default-basic-auth.usersfile"
+              allowlocalipsonly:
+                ipAllowList:
+                  sourceRange:
+                    - "127.0.0.1/32"
+                    - "192.168.0.0/16"
+                    - "172.16.0.0/12"
+                    - "10.0.0.0/8"
+                    - "fe80::/10"
+                    - "fc00::/7"
+                    - "::1/128"
+                  ipStrategy:
+                    ipv6Subnet: 64
+      notify: Restart traefik
+
+    - name: /usr/local/sbin/traefik-qualys-ssl-labs-check.sh
+      blockinfile:
+        path: /usr/local/sbin/traefik-qualys-ssl-labs-check.sh
+        mode: "0700"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          . /etc/bash/gaboshlib.include
+          g_lockfile
+          g_nice
+          g_all-to-syslog
+          g_echo_ok "Starting $0"
+
+
+          # Using official API-CLI-Tool 
+          # https://www.ssllabs.com/projects/ssllabs-apis/
+          # https://github.com/ssllabs/ssllabs-scan/
+          
+          # Download and install if unavailable
+          if ! [ -f /usr/local/bin/ssllabs-scan ]
+          then
+            cd /tmp
+            rm -rf ssllabs-scan
+            git clone https://github.com/ssllabs/ssllabs-scan/ || g_echo_error "Could not download ssllabs-scan"
+            cd ssllabs-scan
+            make >${g_tmp}/ssllabs-scan-make.out
+            if [ -f ssllabs-scan-v3 ]
+            then
+              cp ssllabs-scan-v3 /usr/local/bin/ssllabs-scan
+              chmod 755 /usr/local/bin/ssllabs-scan
+              chown root. /usr/local/bin/ssllabs-scan
+            else
+              g_echo_error "Could not build ssllabs-scan $(cat ${g_tmp}/ssllabs-scan-make.out)"
+            fi
+          fi
+          
+          # Check every Traefik Host
+          if [ -f /usr/local/bin/ssllabs-scan ]
+          then
+            find /home/docker -maxdepth 1 -mindepth 1 -type d | egrep -v ".del$|.bak$|.old$|var-lib-docker$" | while read dir
+            do
+              if grep -q Host "$dir"/docker-compose.override.yml >/dev/null 2>&1
+              then
+                grep Host "$dir"/docker-compose.override.yml >>$g_tmp/hosts
+              else
+                [ -f "$dir"/docker-compose.yml ] && grep Host "$dir"/docker-compose.yml >>$g_tmp/hosts
+              fi
+            done
+            grep Host /home/docker/traefik/providers/*.yml >>$g_tmp/hosts
+            cat $g_tmp/hosts | cut -d '`' -f2 | sort -u | while read host
+            do
+              resultfile="/tmp/ssllabs-scan-result-$$-$host"
+              host ${host} >/dev/null 2>&1 || continue
+              curl -s https://${host} >/dev/null 2>&1 || continue
+              echo '[]' >$resultfile
+              while cat $resultfile | jq -r | egrep -q '^\[\]$'
+              do
+                until ssllabs-scan --quiet ${host} >$resultfile
+                do
+                  sleep 60
+                done
+                sleep 60
+              done
+              cat $resultfile | jq '.[] | .endpoints | .[] | .grade' >${g_tmp}/ssllabs-scan-result 2>&1 >${g_tmp}/ssllabs-scan-result
+              if ! egrep -q 'A+|null' ${g_tmp}/ssllabs-scan-result
+              then
+                #if ! grep -q T ${g_tmp}/ssllabs-scan-result
+                #then
+                  g_echo_error "Qualys SSL Labs scan-result for ${host} not A+: $(cat ${g_tmp}/ssllabs-scan-result)
+
+          https://www.ssllabs.com/ssltest/analyze.html?d=${host}&hideResults=on
+
+          Result: $(cat ${g_tmp}/ssllabs-scan-result)"
+                #fi
+              else
+                g_echo_ok "Qualys SSL Labs scan-result for ${host}: $(cat ${g_tmp}/ssllabs-scan-result)"
+              fi
+              rm $resultfile
+            done
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /usr/local/sbin/traefik-qualys-ssl-labs-check.sh shebang
+      lineinfile:
+        path: /usr/local/sbin/traefik-qualys-ssl-labs-check.sh
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    - name: /usr/local/sbin/runchecks.d/traefik.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/traefik.check
+        mode: "0700"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          >$g_tmp/hosts
+          find /home/docker -maxdepth 1 -mindepth 1 -type d  | egrep -v ".del$|.bak$|.old$|var-lib-docker$" | while read dir
+          do
+            [ -s "$dir"/.downok ] && continue
+            if grep -q Host "$dir"/docker-compose.override.yml >/dev/null 2>&1
+            then
+              grep Host "$dir"/docker-compose.override.yml >>$g_tmp/hosts
+            else
+              [ -f "$dir"/docker-compose.yml ] && grep Host "$dir"/docker-compose.yml >>$g_tmp/hosts
+            fi
+          done
+          grep Host /home/docker/traefik/providers/*.yml >>$g_tmp/hosts
+
+          cat $g_tmp/hosts | cut -d '`' -f2 | sort -u | while read host
+          do
+            find -mmin -5 /tmp/$host >/dev/null 2>&1 | grep -q $host && continue
+            egrep -q "192.168.41.1  $host" /etc/hosts || echo "192.168.41.1  $host" >>/etc/hosts
+          done
+          cat $g_tmp/hosts | grep -v tcp | cut -d '`' -f2 | sort -u | while read host
+          do
+            find -mmin -5 /tmp/$host >/dev/null 2>&1 | grep -q $host && continue
+            if ! wget --dns-timeout=120 -t5 --waitretry=120 --connect-timeout=300 --read-timeout=15 http://${host} >${g_tmp}/traefik-wget-check -O /dev/null 2>&1 
+            then
+              if ! egrep -q "401 Unauthorized|403 Forbidden" ${g_tmp}/traefik-wget-check
+              then
+                g_echo_error "Error while connecting ${host} with wget:
+          
+          $(cat ${g_tmp}/traefik-wget-check)"
+              else
+                [ -f "${g_tmp}/$host-502" ] && rm "${g_tmp}/$host-502"
+              fi
+              if egrep -q "502 Bad Gateway" ${g_tmp}/traefik-wget-check
+              then
+                if [ -s "${g_tmp}/$host-502" ] && find "${g_tmp}/$host-502" | grep "$host-502" -mmin +15
+                then
+                  g_echo_error "Error while connecting ${host} with wget:
+          $(cat ${g_tmp}/traefik-wget-check)"
+                else
+                  date >"${g_tmp}/$host-502"
+                fi
+              fi
+            fi
+          done
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /etc/cron.d/traefik-qualys-ssl-labs-check_local
+      blockinfile:
+        path: /etc/cron.d/traefik-qualys-ssl-labs-check_local
+        create: yes
+        mode: 0644
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          @daily root /usr/local/sbin/traefik-qualys-ssl-labs-check.sh
+        backup: yes
+
+    - name: Allow http from all clients
+      community.general.ufw:
+        rule: allow
+        port: '80'
+        proto: tcp
+
+    - name: Allow https from all clients
+      community.general.ufw:
+        rule: allow
+        port: '443'
+        proto: tcp
+
+    - name: Allow access from br-traefik to Docker-Host for services running without docker
+      community.general.ufw:
+        rule: allow
+        interface: br-traefik
+        direction: in
+
+    - name: Install logrotate for Traefik access log
+      ansible.builtin.copy:
+        dest: /etc/logrotate.d/traefik
+        mode: '0644' 
+        content: |
+          /home/docker/traefik/log/access.log {
+              daily
+              rotate 7
+              compress
+              delaycompress
+              missingok
+              notifempty
+              copytruncate
+          }
+
+  handlers:
+
+    - name: Restart traefik
+      ansible.builtin.shell: docker-compose up -d --force-recreate
+      args:
+        chdir: /home/docker/traefik
+
