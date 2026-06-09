@@ -8,12 +8,6 @@
         path: /lib/systemd/systemd
       register: nocontainer
 
-    - name: check if we are in a lxc env
-      shell: grep -a container=lxc /proc/1/environ || /bin/true
-      ignore_errors: true
-      changed_when: False
-      register: lxc
-
     - name: Install Basic Packages
       apt:
         name:
