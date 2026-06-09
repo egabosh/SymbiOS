@@ -1,0 +1,406 @@
+---
+- name: Checks
+  hosts: all
+  tasks:
+    - name: Install Packages
+      apt:
+        name:
+          - smartmontools
+          - mdadm
+        update_cache: no
+        install_recommends: no
+
+    - name: Create checks dir /usr/local/sbin/runchecks.d
+      ansible.builtin.file:
+        path: /usr/local/sbin/runchecks.d
+        owner: root
+        group: root
+        state: directory
+        mode: '0700'
+
+    - name: /usr/local/sbin/runchecks.sh
+      blockinfile:
+        path: /usr/local/sbin/runchecks.sh
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          . /etc/bash/gaboshlib.include
+          g_lockfile
+          g_nice
+          g_all-to-syslog
+          g_echo_ok "Starting $0"
+          g_staleumount
+          while true
+          do
+            g_echo "Waiting 5min"
+            sleep 300
+            g_echo "Next Loop"
+            for check in $(find /usr/local/sbin/runchecks.d -name "*.check" -type f | sort)
+            do
+              if bash -n "$check" >$g_tmp/check_error 2>&1
+              then
+                g_echo "Running: $check"
+                . "$check"
+              else
+                g_echo_error "Error in $check $(cat $g_tmp/check_error)"
+                continue
+             fi
+            done
+          done
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+      - Restart runchecks
+
+    - name: /usr/local/sbin/runchecks.d/services
+      lineinfile:
+        path: /usr/local/sbin/runchecks.d/services
+        create: yes
+        insertbefore: EOF
+        line: "cron rsyslog sshd"
+
+    - name: /usr/local/sbin/runchecks.sh shebang
+      lineinfile:
+        path: /usr/local/sbin/runchecks.sh
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    - name: /etc/systemd/system/runchecks.service
+      blockinfile:
+        path: /etc/systemd/system/runchecks.service
+        create: yes
+        mode: 0444
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          [Unit]
+          Description=checks
+          After=syslog.target network.target
+          
+          [Service]
+          Type=simple
+          User=root
+          ExecStart=/usr/local/sbin/runchecks.sh
+          Restart=on-abort
+          
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+      - Restart systemd
+
+
+    - name: /usr/local/sbin/runchecks.d/disks.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/disks.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          for disk in $(find /dev/ \( -name "nvme?" -o -name "sd?" \) \( -type b -o -type c \))
+          do
+            # check if the disk is used and not suspended
+            dev=$(basename $disk)
+            [ -f /tmp/${dev}-stat ] || cat /sys/block/${dev}/stat | perl -pe 's/ +/ /g' | cut -d" " -f1,2,3,4,5,6,7,8 > /tmp/${dev}-stat
+            cat /sys/block/${dev}/stat | perl -pe 's/ +/ /g' | cut -d" " -f1,2,3,4,5,6,7,8 > /tmp/${dev}-stat-now
+            if diff /tmp/${dev}-stat-now /tmp/${dev}-stat >/dev/null 2>&1
+            then
+              cat /tmp/${dev}-stat-now >/tmp/${dev}-stat
+              # Check disk SMART
+              OPT=""
+              udevadm info --query=all -n $disk  | grep -q usb- && OPT="-d sat"
+              smartctl -H $OPT $disk >${g_tmp}/smartctl
+              if ! cat ${g_tmp}/smartctl | egrep -iq "SMART overall-health self-assessment test result: PASSED|SMART Health Status: OK|Read Device Identity failed: scsi error no medium present"
+              then
+                g_echo_error "SMART of $disk unhealthy: smartctl -H $OPT $disk $(cat ${g_tmp}/smartctl)"
+              fi
+              # temperature check
+              temperature=$(smartctl -x $OPT $disk | perl -pe 's/ +/ /g; s/^ //' | egrep "^194 Temperature_Celsius " | cut -d" " -f 8)
+              [ -z "$temperature" ] && continue
+              [ $temperature -gt 55 ] && g_echo_error "SMART temperature of disk $disk high ($temperature Celsius)"
+            fi
+          done
+        validate: /bin/bash -n %s
+        backup: yes
+      notify:
+      - Restart runchecks
+
+    - name: /usr/local/sbin/runchecks.d/raid-mdadm.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/raid-mdadm.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          mdadm -D --scan | egrep "^ARRAY" | cut -d" " -f2 | while read array
+          do 
+            mdadm -D $array >$g_tmp/raiddetails
+            if ! cat $g_tmp/raiddetails | egrep "^ +State : " | egrep -q "^ +State : clean $|^ +State : active $|^ +State : active, checking $|^ +State : clean, checking $"
+            then 
+               g_echo_error "RAID $array state unhealthy - mdadm -D $array: $(cat $g_tmp/raiddetails)"
+            fi
+          done
+        validate: /bin/bash -n %s
+        backup: yes
+      notify:
+      - Restart runchecks
+    
+    - name: /usr/local/sbin/runchecks.d/internet.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/internet.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          testip=dns3.digitalcourage.de
+          if ! ping -c3 ${testip} >/dev/null 2>&1
+          then
+            g_echo_error "No Internet connection? ping $testip failed!"
+          fi
+        validate: /bin/bash -n %s
+        backup: yes
+      notify:
+      - Restart runchecks
+
+    - name: /usr/local/sbin/runchecks.d/processes.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/processes.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # process check
+          mkdir -p ${g_tmp}/proc-check
+          # Ggf wieder OK-Prozesse löschen
+          ls ${g_tmp}/proc-check | while read odzpid
+          do
+            if ! egrep -q "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/$odzpid/status 2>/dev/null
+            then
+              rm ${g_tmp}/proc-check/$odzpid
+            fi
+          done
+          # Neue oder alte Finden und bei Status älter als 30 Minuten melden
+          egrep "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read dzpid
+          do
+            if [ -f ${g_tmp}/proc-check/$dzpid ]
+            then
+              timestamp=$(ls --full-time ${g_tmp}/proc-check/$dzpid | sed 's/  */ /g' | cut -d" " -f6,7)
+              date >>${g_tmp}/proc-check/$dzpid
+              touch -d "$timestamp" ${g_tmp}/proc-check/$dzpid
+              if find ${g_tmp}/proc-check/$dzpid -mmin +30 | grep -q $dzpid
+              then
+                ps aufx | grep $dzpid | grep -v grep >${g_tmp}/proc-check-$dzpid.notify
+                pstree $dzpid >>${g_tmp}/proc-check-$dzpid.notify
+                cat ${g_tmp}/proc-check/$dzpid >>${g_tmp}/proc-check-$dzpid.notify
+                egrep -q "usb-storage|md[0-9]*_" ${g_tmp}/proc-check-$dzpid.notify || g_echo_error "$(cat ${g_tmp}/proc-check-$dzpid.notify)"
+              fi
+            else
+              date >${g_tmp}/proc-check/$dzpid
+            fi
+          done
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+      - Restart runchecks
+
+    - name: /usr/local/sbin/runchecks.d/thermal.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/thermal.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          if [ -f /sys/class/thermal/thermal_zone0/temp ]
+          then
+            let temp=`cat /sys/class/thermal/thermal_zone0/temp`/1000
+            if [ $temp -gt 65 ]
+            then
+              g_echo_error "Server temperature high $temp°C"
+            fi
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+      - Restart runchecks
+
+    - name: /usr/local/sbin/runchecks.d/measuretemp.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/measuretemp.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          if which vcgencmd >/dev/null 2>&1
+          then
+            temp=$(vcgencmd measure_temp | grep ^temp= | cut -d"=" -f2 | cut -d. -f1)
+            if [ $temp -gt 65 ]
+            then
+              g_echo_error "Server temperature high $temp°C"
+            fi
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+      - Restart runchecks
+
+    - name: /usr/local/sbin/runchecks.d/load.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/load.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          let maxload=$(cat /proc/cpuinfo | grep ^processor | wc -l)+10
+          load=`cat /proc/loadavg | cut -d" " -f1`
+          intload=`echo $load | cut -d'.' -f1`
+          if [ $intload -gt $maxload ]
+          then
+            g_echo_error "System Load high at $load"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+      - Restart runchecks
+
+    - name: /usr/local/sbin/runchecks.d/services.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/services.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          for service in $(cat /usr/local/sbin/runchecks.d/services | sort)
+          do
+            if ! ps aux | grep -v grep | grep -q "$service"
+            then
+              g_echo_error "$service down"
+            fi
+          done
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+      - Restart runchecks
+
+    - name: /usr/local/sbin/runchecks.d/df.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/df.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          df -al | egrep -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read i
+          do
+            disk=`echo $i | cut -d" " -f1`
+            usa=`echo $i | cut -d" " -f2`
+            if [ $usa -gt 98 ]
+            then
+              g_echo_error "Space of $disk full: $usa%"
+            fi
+          done
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+      - Restart runchecks
+
+    - name: /usr/local/sbin/runchecks.d/dfinodes.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/dfinodes.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          df -ali | egrep -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read i
+          do
+            disk=`echo $i | cut -d" " -f1`
+            usa=`echo $i | cut -d" " -f2`
+            if [ $usa -gt 98 ]
+            then
+              g_echo_error "Inodes if $disk full: $usa%"
+            fi
+          done
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+      - Restart runchecks
+
+    - name: /usr/local/sbin/runchecks.d/freemem.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/freemem.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          mem=`free | grep "^Mem:" | sed 's/  */ /g' | cut -d" " -f 4`
+          if [ $mem -lt 20480 ]
+          then
+            g_echo_error "Memory full! Free: ${mem}kB"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+      - Restart runchecks
+
+    - name: /usr/local/sbin/runchecks.d/freeswap.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/freeswap.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          if ! [ $(free | grep "^Swap:" | sed 's/  */ /g' | cut -d" " -f 2) == 0 ]
+          then
+            mem=`free | grep "^Swap:" | sed 's/  */ /g' | cut -d" " -f 4`
+            if [ $mem -lt 50000 ]
+            then
+              g_echo_error "Swap full! Free: ${mem}kB"
+            fi
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+      - Restart runchecks
+
+    - name: 'add runchecks to startup'
+      command: systemctl enable runchecks
+      args:
+        creates: /etc/systemd/system/multi-user.target.wants/runchecks.service
+
+
+  handlers:
+
+    - name: Restart systemd
+      ansible.builtin.shell: systemctl daemon-reload
+      notify: Restart runchecks
+
+    - name: Restart runchecks
+      service:
+        name: runchecks
+        state: restarted
+

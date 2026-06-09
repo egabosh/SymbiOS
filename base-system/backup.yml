@@ -1,0 +1,74 @@
+---
+- name: Backups
+  hosts: all
+  tasks:
+    - name: Install Packages
+      apt:
+        name:
+          - rsync
+        update_cache: no
+        install_recommends: no
+
+    - name: Create checks dir /usr/local/sbin/backup.d
+      ansible.builtin.file:
+        path: /usr/local/sbin/backup.d
+        owner: root
+        group: root
+        state: directory
+        mode: '0700'
+
+    - name: /usr/local/sbin/backup.sh
+      blockinfile:
+        path: /usr/local/sbin/backup.sh
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          . /etc/bash/gaboshlib.include
+          g_lockfile
+          g_nice
+          g_all-to-syslog
+          g_echo_ok "Starting $0"
+          set -o pipefail
+          BACKUPDIR=/home/backup
+          mkdir -p ${BACKUPDIR}
+          chmod 700 ${BACKUPDIR}
+          chown root:root ${BACKUPDIR}
+          #find /usr/local/sbin/backup.d -name "*.backup" -type f | sort | while read backup
+          for backup in $(find /usr/local/sbin/backup.d -name "*.backup" -type f | sort)
+          do
+            if bash -n "$backup" >$g_tmp/backup_error 2>&1
+            then
+               g_echo "Running: $backup"
+               . "$backup"
+             else
+               g_echo_error "Error in $backup $(cat $g_tmp/backup_error)"
+               continue
+             fi
+          done
+          g_echo "Backup-Skript beendet"
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+
+    - name: /usr/local/sbin/backup.sh shebang
+      lineinfile:
+        path: /usr/local/sbin/backup.sh
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    - name: /etc/cron.d/backup_local
+      blockinfile:
+        path: /etc/cron.d/backup_local
+        create: yes
+        mode: 0644
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          5 0 * * * root /usr/local/sbin/backup.sh
+        backup: yes
+
+

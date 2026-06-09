@@ -1,0 +1,631 @@
+---
+- name: ldap
+  hosts: all
+
+  vars:
+    service_name: "ldap"
+    service_domain: "{{ service_name }}.{{ default_domain }}"
+
+  tasks:
+
+## PREP
+
+    - name: check existing ldap service paths (compatibility to old installs)
+      block:
+        - name: check existing service path
+          stat:
+            path: "/home/docker/ldap.{{ default_domain }}"
+          register: ldap_host_stat
+
+        - name: set service_path setzen
+          set_fact: 
+            docker_path: "{{ '/home/docker/ldap.' + default_domain if ldap_host_stat.stat.exists else '/home/docker/ldap' }}"
+      when: ldap_path is not defined
+
+
+### BEGIN
+
+    - name: Install ldap tools
+      apt:
+        name:
+          - slapd
+          - ldap-utils
+          - ldapscripts
+          - libnss-ldapd
+          - libpam-ldapd
+        update_cache: no
+        install_recommends: no
+
+    - name: Create required directories
+      ansible.builtin.file:
+        path: "{{ docker_path }}/{{ item.path }}"
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+        state: directory
+      loop:
+        - { path: '', owner: root, group: docker, mode: '0550' }
+        - { path: 'ldap-config', owner: 10001, group: 10001, mode: '0770' }
+        - { path: 'ldap-db', owner: 10001, group: 10001, mode: '0770' }
+        - { path: 'lam-data', owner: 33, group: 33, mode: '0755' }
+        - { path: 'lam-data/etc-ldap-account-manager', owner: 33, group: 33, mode: '0775' }
+
+    - name: Check if lam-data/config exists
+      stat:
+        path: "{{ docker_path }}/lam-data/config"
+      register: lam_config_status
+
+    - name: Generate initial config for lam
+      when: not lam_config_status.stat.exists
+      block:
+
+        - name: Clone lam git repository to /tmp/lam-temp
+          ansible.builtin.git:
+            repo: https://github.com/LDAPAccountManager/lam.git
+            dest: /tmp/lam-temp
+            update: no
+
+        - name: Copy lam/config from clone to {{ docker_path }}/lam-data/config
+          ansible.builtin.copy:
+            src: /tmp/lam-temp/lam/config/
+            dest: "{{ docker_path }}/lam-data/config/"
+
+        - name: Download default customized lam.conf
+          ansible.builtin.get_url:
+            url: https://raw.githubusercontent.com/egabosh/linux-setups/refs/heads/main/debian/ldap.server/lam.conf
+            dest: "{{ docker_path }}/lam-data/config/lam.conf"
+
+        - name: Link lam config.cfg
+          ansible.builtin.file:
+            src: /etc/ldap-account-manager/config.cfg
+            dest: "{{ docker_path }}/lam-data/config/config.cfg"
+            state: link
+            force: yes
+
+    - name: default user config
+      blockinfile:
+        path: "{{ docker_path }}/lam-data/config/profiles/lam/default.user"
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          ldap_suffix: -
+          ldap_rdn: uid
+          inetOrgPerson_description:
+          inetOrgPerson_mail:
+          posixAccount_primaryGroup: {{ ansible_facts['hostname'] }}-users
+          posixAccount_additionalGroup: {{ ansible_facts['hostname'] }}-users
+          posixAccount_cn:
+          posixAccount_gecos: $firstname $lastname
+          posixAccount_homeDirectory: /home/$user
+          posixAccount_loginShell: /bin/false
+          shadowAccount_addExt: false
+          shadowAccount_shadowWarning: 10
+          shadowAccount_shadowInactive: 10
+          shadowAccount_shadowMin: 1
+          shadowAccount_shadowMax: 365
+          shadowAccount_shadowExpire_day: -
+          shadowAccount_shadowExpire_mon: -
+          shadowAccount_shadowExpire_yea: -
+
+    - name: Check if lam-data/etc-ldap-account-manager exists
+      stat:
+        path: "{{ docker_path }}/lam-data/etc-ldap-account-manager/config.cfg"
+      register: lam_etc_ldap_account_manager
+
+    - name: Generate initial config for lam in /etc
+      when: not lam_etc_ldap_account_manager.stat.exists
+      block:
+
+        - name: Clone lam git repository to /tmp/lam-temp
+          ansible.builtin.git:
+            repo: https://github.com/LDAPAccountManager/lam.git
+            dest: /tmp/lam-temp
+            update: no
+
+        - name: Copy LAM config.cfg
+          ansible.builtin.copy:
+            src: /tmp/lam-temp/lam/config/config.cfg.sample
+            dest: "{{ docker_path }}/lam-data/etc-ldap-account-manager/config.cfg"
+
+        - name: Set passwordMinLength to 0
+          ansible.builtin.replace:
+            path: "{{ docker_path }}/lam-data/etc-ldap-account-manager/config.cfg"
+            regexp: '"passwordMinLength": *"10"'
+            replace: '"passwordMinLength": "0"'
+            backup: yes
+
+        - name: Copy LAM nginx.conf
+          ansible.builtin.copy:
+            src: /tmp/lam-temp/lam-packaging/debian/lam.nginx.conf
+            dest: "{{ docker_path }}/lam-data/etc-ldap-account-manager/nginx.conf"
+
+        - name: Copy LAM apache.conf
+          ansible.builtin.copy:
+            src: /tmp/lam-temp/lam-packaging/debian/lam.apache.conf
+            dest: "{{ docker_path }}/lam-data/etc-ldap-account-manager/apache.conf"
+
+    - name: Remove the cloned /tmp/lam-temp directory
+      ansible.builtin.file:
+        path: /tmp/lam-temp
+        state: absent
+
+    - name: Check if env.ldap exists
+      stat:
+        path: "{{ docker_path }}/env.ldap"
+      register: env_ldap
+
+    - name: Generate initial env.ldap
+      when: not env_ldap.stat.exists
+      block:
+
+        - name: Generate lam_password
+          command: pwgen -s 32 1
+          register: lam_password
+
+        - name: Save plaintext lam_password password to env.ldap file
+          copy:
+            content: |
+              LAM_PASSWORD={{ lam_password.stdout }}
+            dest: "{{ docker_path }}/env.ldap"
+            mode: '0440'
+            owner: docker
+            group: root
+
+    - name: Recursively change owner and group to 33:33
+      ansible.builtin.file:
+        path: "{{ docker_path }}/lam-data"
+        recurse: yes
+        owner: '33'
+        group: '33'
+
+    - name: Check if slapd.conf.ldif exists
+      stat:
+        path: "{{ docker_path }}/ldap-config/slapd.conf.ldif.done"
+      register: slapd_conf_status
+
+    - name: Generate initial config for ldap
+      when: not slapd_conf_status.stat.exists
+      block:
+
+        - name: Generate a secure password using pwgen
+          command: pwgen -s 32 1
+          register: ldap_password
+          no_log: true
+
+        - name: Generate a secure password using pwgen readuser
+          command: pwgen -s 32 1
+          register: readuser_password
+          no_log: true
+
+        - name: Save plaintext password to env.ldap file
+          copy:
+            content: |
+              LDAP_ADMIN_PASSWORD={{ ldap_password.stdout }}
+              LDAP_READUSER_PASSWORD={{ readuser_password.stdout }}
+            dest: "{{ docker_path }}/env.openldap"
+            mode: '0440'
+            owner: docker
+            group: root
+          no_log: true
+
+        - name: Generate SSHA password hash using slappasswd
+          command: slappasswd -s "{{ ldap_password.stdout }}"
+          register: ssha_hash
+          no_log: true
+
+        - name: Set ldap_password_hash variable
+          set_fact:
+            ldap_password_hash: "{{ ssha_hash.stdout }}"
+          no_log: true
+ 
+        - name: Generate SSHA password hash using slappasswd readuser
+          command: slappasswd -s "{{ readuser_password.stdout }}"
+          register: ssha_hash_readuser
+          no_log: true
+
+        - name: Set ldap_password_hash variable readuser
+          set_fact:
+            ldap_password_readuser_hash: "{{ ssha_hash_readuser.stdout }}"
+          no_log: true
+
+        - name: "{{ docker_path }}/ldap-config/base.ldif"
+          blockinfile:
+            path: "{{ docker_path }}/ldap-config/base.ldif"
+            mode: "0440"
+            owner: 10001
+            group: 10001
+            create: yes
+            marker: "# {mark} ANSIBLE MANAGED BLOCK"
+            block: |
+              dn: {{ldap_basedn}}
+              objectClass: top
+              objectClass: dcObject
+              objectClass: organization
+              o: {{service_domain}}
+              dc: openldap
+
+              dn: cn=readuser,{{ldap_basedn}}
+              objectClass: simpleSecurityObject
+              objectClass: organizationalRole
+              cn: readuser
+              description: LDAP Read-Only Service Account. Do not remove!
+              userPassword: {{ldap_password_readuser_hash}}
+
+              dn: ou=users,{{ldap_basedn}}
+              objectClass: organizationalUnit
+              ou: users
+
+              dn: ou=groups,{{ldap_basedn}}
+              objectClass: organizationalUnit
+              ou: groups
+
+              dn: cn={{ ansible_facts['hostname'] }}-admins,ou=groups,{{ldap_basedn}}
+              objectClass: top
+              objectClass: posixGroup
+              cn: {{ ansible_facts['hostname'] }}-admins
+              gidNumber: 30000
+              memberUid: admin
+
+              dn: cn={{ ansible_facts['hostname'] }}-users,ou=groups,{{ldap_basedn}}
+              objectClass: top
+              objectClass: posixGroup
+              cn: {{ ansible_facts['hostname'] }}-users
+              gidNumber: 30001
+              memberUid: admin
+
+              dn: uid=admin,ou=users,{{ldap_basedn}}
+              objectClass: top
+              objectClass: inetOrgPerson
+              objectClass: posixAccount
+              objectClass: shadowAccount
+              cn: admin
+              sn: Administrator
+              uid: admin
+              uidNumber: 30000
+              gidNumber: 30001
+              homeDirectory: /home/admin
+              loginShell: /bin/bash
+              userPassword: {{ldap_password_hash}}
+          no_log: true
+
+        - name: "{{ docker_path }}/ldap-config/config.ldif"
+          blockinfile:
+            path: "{{ docker_path }}/ldap-config/config.ldif"
+            mode: "0440"
+            owner: 10001
+            group: 10001
+            create: yes
+            marker: "# {mark} ANSIBLE MANAGED BLOCK"
+            block: |
+              dn: cn=config
+              objectClass: olcGlobal
+              cn: config
+              olcDisallows: bind_anon
+              olcRequires: authc
+
+              dn: cn=module,cn=config
+              objectClass: olcModuleList
+              cn: module
+              olcModulePath: /usr/lib/ldap
+              olcModuleLoad: back_mdb
+
+              dn: olcDatabase={0}config,cn=config
+              objectClass: olcDatabaseConfig
+              objectClass: olcConfig
+              olcDatabase: config
+
+              dn: olcDatabase={1}mdb,cn=config
+              objectClass: olcDatabaseConfig
+              objectClass: olcMdbConfig
+              olcDatabase: mdb
+              olcSuffix: {{ldap_basedn}}
+              olcRootDN: cn=head-of-ldap,{{ldap_basedn}}
+              olcRootPW: {{ldap_password_hash}}
+              olcDbDirectory: /var/lib/ldap
+              olcDbIndex: objectClass eq
+              olcAccess: {0}to dn.base="" by * read
+              olcAccess: {1}to dn.base="cn=Subschema" by * read
+              olcAccess: {2}to attrs=userPassword
+                by self write
+                by anonymous auth
+                by dn="cn=readuser,{{ldap_basedn}}" auth
+                by * none
+              olcAccess: {3}to *
+                by dn="cn=readuser,{{ldap_basedn}}" read
+                by * none
+          no_log: true
+
+    - name: "{{ docker_path }}/Dockerfile"
+      blockinfile:
+        path: "{{ docker_path }}/Dockerfile"
+        mode: "0440"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          FROM ghcr.io/egabosh/debian:latest
+          RUN apt-get update && \
+            addgroup --system --gid 10001 openldap && \
+            adduser --system --disabled-password --disabled-login --gid 10001 --uid 10001 --home /var/lib/ldap openldap && \
+            apt-get install -y slapd ldap-utils && \
+            apt-get clean && \
+            rm -rf /var/lib/apt/lists/*
+          COPY ./docker-entrypoint.sh /
+          ENTRYPOINT ["/docker-entrypoint.sh"]
+        backup: yes
+      notify:
+      - Restart ldap
+
+    - name: "{{ docker_path }}/docker-entrypoint.sh"
+      blockinfile:
+        path: "{{ docker_path }}/docker-entrypoint.sh"
+        mode: "0555"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          set -x
+          mkdir -p /var/run/slapd
+          chown openldap:openldap /var/run/slapd
+          if ! [[ -s /ldap-config/slapd.conf.ldif.done ]]
+          then
+            rm -rf /etc/ldap/slapd.d/*
+            mkdir /ldap-config/slapd.d
+            chown -R openldap:openldap /var/lib/ldap /ldap-config/slapd.d
+            slapadd -F /ldap-config/slapd.d -n 0 -l /ldap-config/config.ldif
+            slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/core.ldif
+            slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/cosine.ldif
+            slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/inetorgperson.ldif
+            slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/nis.ldif
+            slapadd -F /ldap-config/slapd.d -l /ldap-config/base.ldif
+            chown -R openldap:openldap /var/lib/ldap /ldap-config/slapd.d
+            date >>/ldap-config/slapd.conf.ldif.done
+          fi
+          exec /usr/sbin/slapd -h "ldap:/// ldapi:///" -d 0 -u openldap -g openldap -F /ldap-config/slapd.d
+        backup: yes
+        validate: /bin/bash -n %s
+      notify:
+      - Restart ldap
+
+    - name: "{{ docker_path }}/docker-entrypoint.sh shebang"
+      lineinfile:
+        path: "{{ docker_path }}/docker-entrypoint.sh"
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    - name: "{{ docker_path }}/docker-compose.yml Container Configuration"
+      blockinfile:
+        path: "{{ docker_path }}/docker-compose.yml"
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          services:
+
+            openldap.{{ service_domain }}:
+              build:
+                context: .
+                dockerfile: Dockerfile
+              volumes:
+                - ./ldap-db:/var/lib/ldap:rw
+                - ./ldap-config:/ldap-config:rw
+                - /etc/localtime:/etc/localtime:ro
+              restart: unless-stopped
+              labels:
+                - traefik.enable=true
+                # HTTPS
+                - traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.rule=HostSNI(`openldap.{{ ansible_facts['nodename'] }}`)
+                - traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.entrypoints=ldaps
+                - traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.tls=true
+                # Proxy to service-port
+                - traefik.tcp.services.ldap-openldap-{{ ansible_facts['hostname'] }}.loadbalancer.server.port=389
+                - traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.service=ldap-openldap-{{ ansible_facts['hostname'] }}
+                # cert via letsencrypt
+                - traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.tls.certresolver=letsencrypt
+                # Traefik network
+                - traefik.docker.network=traefik
+                # auth
+                #- traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.middlewares=secHeaders@file
+              networks:
+                - ldap.{{service_domain}}--network
+                - traefik
+
+            ldap.{{service_domain}}:
+              image: ghcr.io/ldapaccountmanager/lam:stable 
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - /etc/hosts:/etc/hosts:ro
+                - ./lam-data/config:/var/lib/ldap-account-manager/config:rw
+                - ./lam-data/etc-ldap-account-manager:/etc/ldap-account-manager:rw
+              env_file:
+                - env.ldap
+                - env.openldap
+              environment:
+                LDAP_SERVER: "ldaps://openldap.{{service_domain}}"
+                LDAP_BASE_DN: "{{ldap_basedn}}"
+                LDAP_USER: "cn=head-of-ldap,{{ldap_basedn}}"
+                LDAP_GROUPS_DN: "ou=groups,{{ldap_basedn}}"
+                LDAP_USERS_DN: "ou=users,{{ldap_basedn}}"
+                LDAP_ORGANISATION: "{{service_domain}}"
+                LAM_CONFIGURATION_DATABASE: "files"
+                LAM_SKIP_PRECONFIGURE: false
+              depends_on:
+                - openldap.{{service_domain}}
+              restart: unless-stopped
+              networks:
+                - ldap.{{service_domain}}--network
+                - traefik
+              labels:
+                - traefik.enable=true
+                # HTTPS
+                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.rule=Host(`ldap.{{ ansible_facts['nodename'] }}`)
+                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.entrypoints=https
+                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.tls=true
+                # Proxy to service-port
+                - traefik.http.services.ldap-{{ ansible_facts['hostname'] }}.loadbalancer.server.port=80
+                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.service=ldap-{{ ansible_facts['hostname'] }}
+                # cert via letsencrypt
+                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.tls.certresolver=letsencrypt
+                # Traefik network
+                - traefik.docker.network=traefik
+                # auth
+                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.middlewares=secHeaders@file
+
+
+          networks:
+            ldap.{{service_domain}}--network:
+              driver: bridge
+              driver_opts:
+                com.docker.network.bridge.name: br-ldap
+            traefik:
+              external: true
+
+        backup: yes        
+      notify: Restart ldap
+
+    - name: /usr/local/sbin/backup.d/ldap-docker.backup
+      blockinfile:
+        path: /usr/local/sbin/backup.d/ldap-docker.backup
+        create: yes
+        mode: 0550 
+        owner: root
+        group: root 
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          DAYS=7
+          TIMESTAMP=$(date +"%Y%m%d%H%M")
+
+          cd {{ docker_path }}
+          if docker compose exec -ti openldap.{{service_domain}} slapcat -F /ldap-config/slapd.d >$BACKUPDIR/openldap.{{service_domain}}-$TIMESTAMP.ldif 2>"${g_tmp}/ldaperr"
+          then
+            gzip $BACKUPDIR/openldap.{{service_domain}}-$TIMESTAMP.ldif
+          else
+            g_echo_error "LDAP Backup failed $(cat ${g_tmp}/ldaperr)"
+          fi
+          cd -
+
+          # dont delete last old backups!
+          OLD_BACKUPS=$(ls -1 $BACKUPDIR/openldap.{{service_domain}}-*.gz 2>/dev/null | wc -l)
+          if [ -n "$OLD_BACKUPS" ] && [ $OLD_BACKUPS -gt $DAYS ]
+          then
+            find $BACKUPDIR -name "$BACKUPDIR/openldap.{{service_domain}}-*.gz" -daystart -mtime +$DAYS -delete
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: Get LDAP readuser password from file
+      shell: "grep ^LDAP_READUSER_PASSWORD= {{ docker_path }}/env.openldap | cut -d= -f2-"
+      register: ldap_readuser_password
+      changed_when: false
+      no_log: true
+
+    - name: /etc/nslcd.conf
+      ansible.builtin.copy:
+        dest: /etc/nslcd.conf
+        mode: 0640 
+        owner: root
+        group: nslcd
+        content: |
+          uid nslcd
+          gid nslcd
+           
+          uri ldaps://openldap.{{service_domain}}:636
+          base {{ldap_basedn}}
+          base passwd ou=users,{{ldap_basedn}}
+          base group ou=groups,{{ldap_basedn}}
+          base shadow ou=users,{{ldap_basedn}}
+          ldap_version 3
+          
+          bind_timelimit 3
+          timelimit 3
+          reconnect_retrytime 1
+ 
+          binddn cn=readuser,{{ldap_basedn}}
+          bindpw {{ ldap_readuser_password.stdout }}
+
+          tls_reqcert demand
+          tls_cacert /etc/ssl/certs/ca-certificates.crt
+        backup: yes
+        force: yes
+      no_log: true
+
+    - name: /etc/ldapscripts/ldapscripts.conf
+      blockinfile:
+        path: /etc/ldapscripts/ldapscripts.conf
+        create: yes
+        mode: 0644
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          BINDDN="cn=head-of-ldap,{{ldap_basedn}}"
+        backup: yes
+
+    - name: Get LDAP admin password from file
+      shell: "grep ^LDAP_ADMIN_PASSWORD= {{ docker_path }}/env.openldap | cut -d= -f2-"
+      register: ldap_admin_password
+      changed_when: false
+      no_log: true
+
+    - name: Write /etc/ldapscripts/ldapscripts.passwd without newline
+      shell: "printf '%s' '{{ ldap_admin_password.stdout }}' > /etc/ldapscripts/ldapscripts.passwd"
+      changed_when: false
+      no_log: true
+
+    - name: Set ownership and permissions for /etc/ldapscripts/ldapscripts.passwd
+      ansible.builtin.file:
+        path: /etc/ldapscripts/ldapscripts.passwd
+        owner: root
+        group: root
+        mode: '0400'
+        state: file
+      become: true
+
+    - name: LDAP-Konfigurationsdatei erstellen
+      copy:
+        dest: /etc/ldap/ldap.conf
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          BASE {{ldap_basedn}}
+          URI ldaps://openldap.{{service_domain}}:636
+          TLS_REQCERT demand
+          TLS_CACERT /etc/ssl/certs/ca-certificates.crt
+          NETWORK_TIMEOUT 3
+          timeout 3
+          timelimit 3
+          bind_timelimit 3
+          nss_reconnect_tries 1
+          nss_reconnect_sleeptime 1
+          nss_reconnect_maxsleeptime 2
+          nss_reconnect_maxconntries 1
+
+    - name: "/usr/local/bin/ldapsearch-{{ ansible_facts['hostname'] }}"
+      ansible.builtin.copy:
+        dest: "/usr/local/bin/ldapsearch-{{ ansible_facts['hostname'] }}"
+        mode: 0750
+        owner: root
+        group: root
+        content: |
+          #!/bin/bash
+          . {{ docker_path }}/env.openldap
+          LDAPTLS_CACERT=/etc/ssl/certs/ca-certificates.crt ldapsearch -D cn=readuser,{{ldap_basedn}} -w $LDAP_READUSER_PASSWORD -H ldaps://openldap.{{service_domain}}:636 -b {{ldap_basedn}} $@
+          rc=$?
+          unset LDAP_ADMIN_PASSWORD LDAP_READUSER_PASSWORD LDAPTLS_CACERT 
+          exit $rc
+        backup: yes
+
+
+  handlers:
+
+    - name: Restart ldap
+      ansible.builtin.shell: docker-compose build --pull --no-cache --force-rm && docker compose down && docker-compose up -d
+      args:
+        chdir: "{{ docker_path }}"
+
+

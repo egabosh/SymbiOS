@@ -1,0 +1,65 @@
+---
+- name: Basic Debian Linux Hardening
+  hosts: all
+  tasks:
+
+    - name: check if we are in an container env by existing systemd
+      stat:
+        path: /lib/systemd/systemd
+      register: nocontainer
+
+    - name: SSHD hardening
+      blockinfile:
+        path: /etc/ssh/sshd_config.d/hardening.conf
+        mode: "0444"
+        owner: root
+        group: root
+        create: yes
+        insertbefore: BOF # Beginning of the file
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          Port 22
+          Port 33
+          PermitRootLogin prohibit-password
+          PermitUserRC no
+          PermitUserEnvironment no
+          PubkeyAuthentication yes
+          X11Forwarding no
+          AllowAgentForwarding no
+          AllowTcpForwarding yes
+          Subsystem sftp internal-sftp -f AUTH -l INFO -u 0007
+          ## Ciphers Check https://sshcheck.com/server/{{ default_domain }}/
+          # nmap -p22 -n -sV --script ssh2-enum-algos localhost
+          KexAlgorithms curve25519-sha256@libssh.org
+          HostKeyAlgorithms ssh-ed25519
+          Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
+          MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com
+          IgnoreRhosts yes
+          LogLevel VERBOSE
+          AddressFamily any
+        backup: yes
+        validate: /usr/sbin/sshd -T -f %s
+      notify:
+      - Restart sshd
+      when: nocontainer.stat.exists == true
+
+    - name: Disable external sftp-Subsystem
+      replace:
+        path: /etc/ssh/sshd_config
+        regexp: '(^Subsystem.*sftp.*)'
+        replace: '#\1'
+        validate: /usr/sbin/sshd -T -f %s
+        backup: yes
+      notify:
+      - Restart sshd
+      when: nocontainer.stat.exists == true
+
+
+  handlers:
+
+    - name: Restart sshd
+      service:
+        name: ssh
+        state: restarted
+
+
