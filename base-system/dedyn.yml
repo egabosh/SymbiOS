@@ -1,0 +1,163 @@
+---
+- name: desec dyndns
+  hosts: all
+  tasks:
+    - name: Needed software
+      apt:
+        name:
+          - curl
+        update_cache: no
+        install_recommends: no
+
+    - name: /usr/local/sbin/dedyn.sh
+      blockinfile:
+        path: /usr/local/sbin/dedyn.sh
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          . /etc/bash/gaboshlib.include
+          g_lockfile
+
+          # deDyn/deSEC-Settings
+          [ -f /usr/local/etc/dedyn.conf ] || exit 0
+          . /usr/local/etc/dedyn.conf
+
+          dedyndns="ns2.desec.org. ns1.desec.io."
+
+
+          # Get IP(s)
+          if ! [ -z $doipv6 ]
+          then
+            # IPv6 (and maybe IPv4)
+            ipv6=$(curl https://checkipv6.dedyn.io/ 2>/dev/null)
+            if ! g_valid_ipv6 "$ipv6"
+            then
+              g_echo_error "Didn't receive a vaild IPv6-address: $ipv6"
+              unset doipv6
+            fi
+          fi
+          if ! echo $doipv6 | grep -q "only"
+          then
+            # IPv4 and IPv6
+            ipv4=$(curl https://checkipv4.dedyn.io/ 2>/dev/null)
+            if ! g_valid_ipv4 "$ipv4"
+            then
+              g_echo_error_exit "Didn't receive a vaild IPv4-address: $ipv4"
+            fi
+          fi
+
+          # Get Updateserver and string
+          updatesrv=update.dedyn.io
+          if echo $doipv6 | grep -q "only"
+          then
+            # Only IPv6
+            updatesrv=update6.dedyn.io
+            updatestring="myipv6=${ipv6}"
+          elif ! [ -z $doipv6 ]
+          then
+            # IPv4 and IPv6
+            updatestring="myipv4=${ipv4}&myipv6=${ipv6}"
+          else
+            updatestring="myipv4=${ipv4}"
+          fi
+
+          for dynaddr in ${dedynhosts}
+          do
+            changed=""
+            dynaddr=$(echo $dynaddr | perl -pe 's/.dedyn.io$//')
+            dynaddr="${dynaddr}.dedyn.io"
+            host ${dynaddr} ${dedyndns} >"$g_tmp/${dynaddr}"
+            for ip in ${ipv4} ${ipv6}
+            do
+              if egrep -q "${ip}" $g_tmp/${dynaddr}
+              then
+                g_echo_ok "DynDNS IP ${ip} for ${dynaddr} up2date"
+              else
+                g_echo_ok "Renewing DynDNS IP ${ip} for ${dynaddr}"
+                if curl -i "https://${updatesrv}/?hostname=${dynaddr}&${updatestring}" --header "Authorization: Token ${dedynpw}"
+                then
+                  g_echo_ok "DynDNS IP ${ip} for ${dynaddr} renewed"
+                  changed=1
+                  # restart traefik on Problems with ACME/letsencrypt
+                  if [ -f /home/docker/traefik/docker-compose.yml ]
+                  then
+                    if docker compose -f /home/docker/traefik/docker-compose.yml logs | egrep -q "error.+acme-challenge"
+                    then
+                      docker compose -f /home/docker/traefik/docker-compose.yml up -d --force-recreate
+                    fi
+                  fi
+                  # get new ip for turn
+                  [ -x /home/docker/turn/newip.sh ] && /home/docker/turn/newip.sh
+                else
+                  g_echo_error "DynDNS IP ${ip} for ${dynaddr}"
+                fi
+              fi
+              if [[ $changed = 1 ]]
+              then
+                # check for * CNAME
+                curl -s -X GET https://desec.io/api/v1/domains/${dynaddr}/rrsets/ --header "Authorization: Token ${dedynpw}" > "${g_tmp}/current_dns"
+                # check for wildcard CNAME
+                if ! cat "${g_tmp}/current_dns" | jq -r ".[] | select(.subname==\"*\" and .type==\"CNAME\") | .records[]" | egrep -q "^${dynaddr}\.$"
+                then
+                  g_echo_ok "Creating DynDNS * CNAME for ${dynaddr} subdomains"
+                  curl -s -X POST https://desec.io/api/v1/domains/${dynaddr}/rrsets/ --header "Authorization: Token ${dedynpw}" --header "Content-Type: application/json" --data "{\"subname\": \"*\",\"type\": \"CNAME\",\"ttl\": 3600,\"records\": [\"${dynaddr}.\"]}" >/dev/null
+                fi
+                # check for letsencrypt CAA
+                if ! cat "${g_tmp}/current_dns" | jq -r ".[] | select(.subname==\"\" and .type==\"CAA\") | .records[]" | egrep -q '128 issue "letsencrypt.org"'
+                then
+                  g_echo_ok "Creating DynDNS CAA for letsencrypt for ${dynaddr}"
+                  curl -s -X POST https://desec.io/api/v1/domains/${dynaddr}/rrsets/ --header "Authorization: Token ${dedynpw}" --header "Content-Type: application/json" --data "{\"subname\": \"\",\"type\": \"CAA\",\"ttl\": 3600,\"records\": [\"128 issue \\\"letsencrypt.org\\\"\"]}" >/dev/null
+                fi
+                # wait time for api blocks
+                g_echo_note "wait time for api blocks"
+                sleep $(shuf -i 61-120 -n 1)
+              fi
+            done
+          done
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: run dedyn.sh
+
+    - name: /usr/local/sbin/dedyn.sh shebang
+      lineinfile:
+        path: /usr/local/sbin/dedyn.sh
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    - name: /etc/cron.d/dedyn_local
+      blockinfile:
+        path: /etc/cron.d/dedyn_local
+        create: yes
+        mode: 0644
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          */30 * * * * root /usr/local/sbin/dedyn.sh >/dev/null 2>&1
+        backup: yes
+  
+    - name: /usr/local/etc/dedyn.conf
+      blockinfile:
+        path: /usr/local/etc/dedyn.conf
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          dedynpw="{{ ddns_apikey }}"
+          dedynhosts="{{ ddns_host }}"
+          doipv6="{{ ddns_ipv6 }}"
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: run dedyn.sh
+
+
+  
+  handlers:
+  
+    - name: run dedyn.sh
+      ansible.builtin.shell: bash /usr/local/sbin/dedyn.sh

@@ -1,0 +1,36 @@
+---
+
+- name: Firewall with ufw
+  hosts: all
+  tasks:
+
+    - name: Install Basic Packages
+      apt:
+        name: 
+          - ufw
+        update_cache: no
+        install_recommends: no
+
+    - name: Allow all access to tcp port 33 (ssh)
+      community.general.ufw:
+        rule: allow
+        port: '33'
+        proto: tcp
+
+    - name: Allow chromecats port 8010 from all IPv4/IPv6 private networks
+      community.general.ufw:
+        rule: allow
+        port: '8010'
+        proto: tcp
+        src: "{{ item }}"
+      loop:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - fc00::/7
+
+    - name: Deny everything per policy and enable UFW
+      community.general.ufw:
+        state: enabled
+        policy: deny
+

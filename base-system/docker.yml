@@ -1,0 +1,378 @@
+---
+
+- name: docker
+  hosts: all
+  tasks:
+
+### Docker ###
+
+    - name: Create docker Group
+      ansible.builtin.group:
+        name: docker
+        state: present
+        gid: 1003
+
+    - name: Create docker User
+      ansible.builtin.user:
+        name: docker
+        comment: docker User
+        uid: 1003
+        group: docker
+
+    - name: Hide docker user from login screen
+      blockinfile:
+        path: /var/lib/AccountsService/users/docker
+        mode: "0444"
+        owner: root
+        group: root
+        create: yes
+        block: |
+          [User]
+          SystemAccount=true          
+        backup: no
+
+    - name: Create docker dir
+      ansible.builtin.file:
+        path: /home/docker
+        owner: docker
+        group: docker
+        state: directory
+        mode: '0750'
+
+    - name: Create docker-data dir
+      ansible.builtin.file:
+        path: /home/docker/var-lib-docker
+        owner: root
+        group: root
+        state: directory
+        mode: '0710'
+
+    - name: Create dir for container defaults
+      ansible.builtin.file:
+        path: /home/docker/_defaults
+        owner: root
+        group: docker
+        state: directory
+        mode: '0750'
+
+    - name: Create /var/lib/docker -> /home/docker/var-lib-docker symlink
+      ansible.builtin.file:
+        src: /home/docker/var-lib-docker
+        dest: /var/lib/docker
+        owner: root
+        group: root
+        state: link
+
+    - name: Set Docker distro to Ubuntu for Linux Mint
+      ansible.builtin.set_fact:
+        docker_distribution: "ubuntu"
+        docker_release: "noble"
+      when: ansible_distribution == "Linux Mint"
+
+    - name: Set Docker distro facts for non-Mint systems
+      ansible.builtin.set_fact:
+        docker_distribution: "{{ ansible_distribution | lower }}"
+        docker_release: "{{ ansible_distribution_release }}"
+      when: ansible_distribution != "Linux Mint"
+
+    - name: Ensure keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download Docker GPG key
+      ansible.builtin.get_url:
+        url: "https://download.docker.com/linux/ubuntu/gpg"
+        dest: /tmp/docker.asc
+        mode: "0644"
+     changed_when: false
+
+    - name: Dearmor Docker GPG key
+      ansible.builtin.command:
+        cmd: "gpg --dearmor -o /etc/apt/keyrings/docker.gpg /tmp/docker.asc"
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Remove temporary Docker key file
+      ansible.builtin.file:
+        path: /tmp/docker.asc
+        state: absent
+     changed_when: false
+
+    - name: Get DEB architecture
+      ansible.builtin.command:
+        cmd: dpkg --print-architecture
+      register: deb_architecture
+      changed_when: false
+
+    - name: Add Docker repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch={{ deb_architecture.stdout }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/{{ docker_distribution }} {{ docker_release }} stable"
+        state: present
+        filename: docker
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+
+    - name: Remove packages for docker from default repo if installed
+      apt:
+        name:
+          - docker.io
+          - docker-compose
+          - containerd
+          - runc
+        state: absent
+        update_cache: no
+        install_recommends: no
+
+    - name: Packages for docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli 
+          - containerd.io 
+          - docker-buildx-plugin 
+          - docker-compose-plugin
+          - bridge-utils
+          - apache2-utils
+          - python3-docker
+          - mariadb-client
+        update_cache: yes
+        install_recommends: no
+      notify:
+      - Restart docker
+    
+    # https://github.com/nextcloud/docker/issues/1103
+    - name: writing daemon.json (ipv6 settings) 
+      copy:
+        dest: "/etc/docker/daemon.json"
+        content: |
+          {
+            "ipv6": true,
+            "fixed-cidr-v6": "fdab::/64",
+            "experimental": true, 
+            "ip6tables": true
+          }
+      notify:
+      - Restart docker
+
+    - name: /home/docker/_defaults/mariadb/genrootpw
+      blockinfile:
+        path: /home/docker/_defaults/mariadb/genrootpw
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd /home/docker/_defaults/mariadb
+
+          mysqlpassword=$(pwgen -s 32 1)
+
+          [ -f env.db ] || echo "MARIADB_ROOT_PASSWORD=!MYSQLPASSWORD!
+          " >envroot.db
+
+          [ -f env.phpmyadmin ] || echo "PMA_USER=root
+          PMA_PASSWORD=!MYSQLPASSWORD!
+          " >env.rootphpmyadmin
+
+          chmod 440 envroot.db env.rootphpmyadmin
+          chown root:docker envroot.db env.rootphpmyadmin
+          sed -i "s/\!MYSQLPASSWORD\!/$mysqlpassword/g" envroot.db env.rootphpmyadmin          
+
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /home/docker/_defaults/mariadb/genrootpw shebang
+      lineinfile:
+        path: /home/docker/_defaults/mariadb/genrootpw
+        insertbefore: BOF
+        line: "#!/bin/bash -e"
+
+    - name: Gen initial passwords if not exists
+      ansible.builtin.shell: ./genrootpw
+      args:
+        chdir: /home/docker/_defaults/mariadb
+        creates: /home/docker/_defaults/mariadb/envroot.db
+
+    - name: mariadb env defaults
+      blockinfile:
+        path: /home/docker/_defaults/mariadb/mariadb.env
+        mode: "0444"
+        owner: root
+        group: root
+        create: yes
+        block: |
+          MARIADB_AUTO_UPGRADE=1
+          MARIADB_INITDB_SKIP_TZINFO=1
+          # from here: save memory https://techroads.org/reducing-memory-use-on-my-mariadb-mysql-wordpress-docker-stack/
+          MARIADB_KEY_BUFFER_SIZE=1M
+          MARIADB_MYISAMCHK_KEY_BUFFER_SIZE=1M
+          MARIADB_INNODB_BUFFER_POOL_SIZE=10M
+          MARIADB_INNODB_LOG_BUFFER_SIZE=512K
+          MARIADB_MYISAM_SORT_BUFFER_SIZE=64K
+          MARIADB_MYISAMCHK_SORT_BUFFER_SIZE=64K
+          MARIADB_READ_BUFFER_SIZE=8K
+          MARIADB_READ_RND_BUFFER_SIZE=8K
+          MARIADB_SORT_BUFFER_SIZE=64K
+        backup: yes
+
+    - name: mariadb server config defaults
+      blockinfile:
+        path: /home/docker/_defaults/mariadb/99-server.cnf
+        mode: "0444"
+        owner: root
+        group: root
+        create: yes
+        block: |
+          [mariadbd]
+          max_connections=300
+          query_cache_size=512K
+          thread_cache_size=0
+          sort_buffer_size=64K
+          bulk_insert_buffer_size=0
+          tmp_table_size=1K
+          max_heap_table_size=16K
+          key_buffer_size=1M
+          read_buffer_size=8K
+          read_rnd_buffer_size=8K
+          #innodb_buffer_pool_size=10K
+          #innodb_log_buffer_size=512K
+        backup: yes
+
+    - name: /usr/local/sbin/autoupdate.d/docker.update
+      blockinfile:
+        path: /usr/local/sbin/autoupdate.d/docker.update
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # fix for creating notify.sh directory by docker (volume) if not exists
+          [ -d /usr/local/bin/notify.sh ] && rmdir /usr/local/bin/notify.sh
+
+          g_echo_ok "check for updates"
+          # Clean up docker images
+          docker system prune -af
+          find /home/docker -maxdepth 1 -mindepth 1 -type d | egrep -v "mailcow-dockerized$|.del$|.bak$|.old$|var-lib-docker$" | while read docker
+          do
+            [ -f "$docker/docker-compose.yml" ] || continue
+            g_echo_ok "$docker"
+            cd "${docker}"
+            if docker -l warn compose --ansi never pull --include-deps 2>&1 | grep " Pulled"
+            then
+              #g_echo_warn "Installiere $docker Update"
+              #docker -l warn compose --ansi never up -d --force-recreate >$g_tmp/up 2>&1   || g_echo_error "$docker: docker compose up fehlgeschlagen: $(cat $g_tmp/up)"
+              echo $$ >/tmp/$(basename $docker)
+              docker -l warn compose --ansi never up -d --remove-orphans >$g_tmp/up 2>&1 || g_echo_error "$docker: docker compose up fehlgeschlagen: $(cat $g_tmp/up)"
+              egrep -v -- "-wpcli" $g_tmp/up | grep "Started" >${g_tmp}/started && g_echo_warn "$docker Update installed: $(cat ${g_tmp}/started)"
+            fi
+            if [ -f Dockerfile ]
+            then
+              if docker -l warn compose --ansi never build --progress=plain --pull --no-cache --force-rm >$g_tmp/build 2>&1
+              then
+                docker -l warn compose --ansi never up -d --force-recreate --remove-orphans >$g_tmp/up 2>&1   || g_echo_error "$docker: docker compose up fehlgeschlagen: $(cat $g_tmp/up)"
+              else
+                g_echo_error "$docker: docker compose build fehlgeschlagen: $(cat $g_tmp/build)"
+              fi
+            fi
+          done                    
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /usr/local/sbin/backup.d/docker.backup
+      blockinfile:
+        path: /usr/local/sbin/backup.d/docker.backup
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          ### DB Backup
+          g_echo_ok "Starte Backup von MySQL und PostgreSQL Datenbanken (Docker)"
+           
+          DAYS=7
+           
+          TIMESTAMP=$(date +"%Y%m%d%H%M")
+          CONTAINER=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\} | egrep -v '^mysql|^mariadb' | egrep 'mysql|mariadb' | cut -d":" -f1 | grep -v mailcow)
+           
+          mkdir -p $BACKUPDIR
+
+
+          ### MYSQL ###
+          for i in $CONTAINER
+          do
+            # get credentials
+            MARIADB_DATABASE=$(docker exec $i env | egrep "MARIADB_DATABASE|MYSQL_DATABASE" | tail -n1 |cut -d"=" -f2)
+            MARIADB_PWD=$(docker exec $i env | egrep "MARIADB_PASSWORD|MYSQL_PASSWORD" | tail -n1 |cut -d"=" -f2)
+            MARIADB_USR=$(docker exec $i env | egrep "MARIADB_USER|MYSQL_USER" | tail -n1 |cut -d"=" -f2)
+            # get dump path
+            docker exec $i /usr/bin/test -x /usr/bin/mariadb-dump && DBDUMPCMD=/usr/bin/mariadb-dump
+            docker exec $i /usr/bin/test -x /usr/bin/mysqldump && DBDUMPCMD=/usr/bin/mysqldump
+            if [ -z "$DBDUMPCMD" ]
+            then
+              g_echo_error "No dbdumpcmd found in container $i! No backup created!"
+              continue
+            fi
+            g_echo "Sichere MySQL/MariaDB Datenbank $MARIADB_DATABASE DB aus $i";
+            docker exec $i $DBDUMPCMD --no-tablespaces -u $MARIADB_USR -p$MARIADB_PWD $MARIADB_DATABASE 2>${g_tmp}/dberr | gzip > $BACKUPDIR/$i-$MARIADB_DATABASE-$TIMESTAMP.sql.gz || g_echo_error "DB-Backup von $MARIADB_DATABASE war nicht erfolgreich $(cat ${g_tmp}/dberr)"
+            # dont delete last old backups!
+            OLD_BACKUPS=$(ls -1 $BACKUPDIR/$i*.gz |wc -l)
+            if [ $OLD_BACKUPS -gt $DAYS ]; then
+              find $BACKUPDIR -name "$i*.gz" -daystart -mtime +$DAYS -delete
+            fi
+          done
+
+          ### POSTGRESQL ##
+          CONTAINER=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\}| grep 'postgres' | cut -d":" -f1 | grep -v mailcow)
+          mkdir -p $BACKUPDIR
+          for i in $CONTAINER
+          do
+            # get credentials
+            POSTGRES_DATABASE=$(docker exec $i env | egrep "POSTGRES_DB" | tail -n1 |cut -d"=" -f2)
+            POSTGRES_PWD=$(docker exec $i env | egrep "POSTGRES_PASSWORD" | tail -n1 |cut -d"=" -f2)
+            POSTGRES_USR=$(docker exec $i env | egrep "POSTGRES_USER" | tail -n1 |cut -d"=" -f2)
+            # get dump path
+            g_echo "Sichere Datenbank $POSTGRES_DATABASE aus $i";
+            docker exec -e PGPASSWORD=$POSTGRES_PWD $i /usr/bin/pg_dump -U $POSTGRES_USR $POSTGRES_DATABASE 2>${g_tmp}/dberr | gzip > $BACKUPDIR/$i-$POSTGRES_DATABASE-$TIMESTAMP.sql.gz || g_echo_error "DB-Backup von $POSTGRES_DATABASE war nicht erfolgreich $(cat ${g_tmp}/dberr)"
+            # dont delete last old backups!
+            OLD_BACKUPS=$(ls -1 $BACKUPDIR/$i*.gz |wc -l)
+            if [ $OLD_BACKUPS -gt $DAYS ]; then
+              find $BACKUPDIR -name "$i*.gz" -daystart -mtime +$DAYS -delete
+            fi
+          done          
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: docker-compose command/alias for backward compatibility - now docker compose
+      blockinfile:
+        path: /usr/local/sbin/docker-compose
+        mode: "0755"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          docker compose $@          
+        backup: yes
+        validate: /bin/bash -n %s 
+
+    - name: /usr/local/sbin/docker-compose shebang
+      lineinfile:
+        path: /usr/local/sbin/docker-compose
+        insertbefore: BOF
+        line: "#!/bin/bash -e"
+
+  handlers:
+
+    - name: Restart docker
+      service:
+        name: docker
+        state: restarted
+
+

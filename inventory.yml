@@ -1,0 +1,24 @@
+all:
+  vars:
+    # SymbiOS defaults
+    default_domain: "local"
+    instance: "default"
+    ldap_basedn: "{{ 'dc=openldap,' ~ default_domain | split('.') | map('regex_replace', '^(.*)$', 'dc=\\1') | join(',') }}"
+    # ddns (desec.io)
+    ddns_apikey: ''
+    ddns_host: ''
+    ddns_ipv6: ''
+    # smtp client
+    smtp_user: ''
+    smtp_password: ''
+    smtp_server: ''
+    smtp_from: ''
+    smtp_tls: ''
+    smtp_port: ''
+    # ansible defaults
+    ansible_user: "root"
+    ansible_python_interpreter: "/usr/bin/python3"
+  hosts:
+    # SymbiOS server
+    localhost:
+      ansible_connection: local
