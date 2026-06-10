@@ -8,12 +8,22 @@
         path: /lib/systemd/systemd
       register: nocontainer
 
+    - name: apt update
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: apt dist-upgrade
+      apt:
+        upgrade: dist
+        autoremove: yes
+        clean: yes
+
     - name: Install Basic Packages
       apt:
         name:
           - file
           - bc
-          - psutils
           - psmisc
           - procps
           - htop
@@ -46,12 +56,13 @@
           - html-xml-utils
           - wget
           - bind9-host
-          - dnsutils
+          - bind9-dnsutils
           - python3-pip
           - python3-venv
           - python3-html2text
-        update_cache: yes
         install_recommends: no
+        update_cache: yes
+        cache_valid_time: 3600
 
     - name: Install Basic Packages if not running in container
       apt:
@@ -97,16 +108,21 @@
           - mailutils
           - rsyslog
           - postgresql-client
-          - ntpsec-ntpdatea
+          - ntpsec-ntpdate
           - systemd-resolved
-        update_cache: yes
         install_recommends: no
+        update_cache: yes
+        cache_valid_time: 3600
       when: nocontainer.stat.exists == true
 
-    - name: Restart systemd-resolved
+    - name: Start/enable systemd-resolved
       service:
         name: systemd-resolved
-        state: restarted
+        state: started
+        enabled: yes
+      ignore_errors: yes
+      when: nocontainer.stat.exists == true
+
 
     # Gather facts about the system, including virtualization type
     - name: Gather system facts
