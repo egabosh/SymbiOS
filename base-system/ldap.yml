@@ -92,8 +92,8 @@
           ldap_rdn: uid
           inetOrgPerson_description:
           inetOrgPerson_mail:
-          posixAccount_primaryGroup: {{ ansible_facts['hostname'] }}-users
-          posixAccount_additionalGroup: {{ ansible_facts['hostname'] }}-users
+          posixAccount_primaryGroup: {{ service_name }}-users
+          posixAccount_additionalGroup: {{ service_name }}-users
           posixAccount_cn:
           posixAccount_gecos: $firstname $lastname
           posixAccount_homeDirectory: /home/$user
@@ -259,17 +259,17 @@
               objectClass: organizationalUnit
               ou: groups
 
-              dn: cn={{ ansible_facts['hostname'] }}-admins,ou=groups,{{ldap_basedn}}
+              dn: cn={{ service_name }}-admins,ou=groups,{{ldap_basedn}}
               objectClass: top
               objectClass: posixGroup
-              cn: {{ ansible_facts['hostname'] }}-admins
+              cn: {{ service_name }}-admins
               gidNumber: 30000
               memberUid: admin
 
-              dn: cn={{ ansible_facts['hostname'] }}-users,ou=groups,{{ldap_basedn}}
+              dn: cn={{ service_name }}-users,ou=groups,{{ldap_basedn}}
               objectClass: top
               objectClass: posixGroup
-              cn: {{ ansible_facts['hostname'] }}-users
+              cn: {{ service_name }}-users
               gidNumber: 30001
               memberUid: admin
 
@@ -418,18 +418,16 @@
               labels:
                 - traefik.enable=true
                 # HTTPS
-                - traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.rule=HostSNI(`openldap.{{ ansible_facts['nodename'] }}`)
-                - traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.entrypoints=ldaps
-                - traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.tls=true
+                - traefik.tcp.routers.ldap-openldap-{{ service_name }}.rule=HostSNI(`openldap.{{ default_domain }}`)
+                - traefik.tcp.routers.ldap-openldap-{{ service_name }}.entrypoints=ldaps
+                - traefik.tcp.routers.ldap-openldap-{{ service_name }}.tls=true
                 # Proxy to service-port
-                - traefik.tcp.services.ldap-openldap-{{ ansible_facts['hostname'] }}.loadbalancer.server.port=389
-                - traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.service=ldap-openldap-{{ ansible_facts['hostname'] }}
+                - traefik.tcp.services.ldap-openldap-{{ service_name }}.loadbalancer.server.port=389
+                - traefik.tcp.routers.ldap-openldap-{{ service_name }}.service=ldap-openldap-{{ service_name }}
                 # cert via letsencrypt
-                - traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.tls.certresolver=letsencrypt
+                - traefik.tcp.routers.ldap-openldap-{{ service_name }}.tls.certresolver=letsencrypt
                 # Traefik network
                 - traefik.docker.network=traefik
-                # auth
-                #- traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.middlewares=secHeaders@file
               networks:
                 - ldap
                 - traefik
@@ -459,18 +457,18 @@
               labels:
                 - traefik.enable=true
                 # HTTPS
-                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.rule=Host(`ldap.{{ ansible_facts['nodename'] }}`)
-                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.entrypoints=https
-                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.tls=true
+                - traefik.http.routers.ldap-{{ service_name }}.rule=Host(`ldap.{{ default_domain }}`)
+                - traefik.http.routers.ldap-{{ service_name }}.entrypoints=https
+                - traefik.http.routers.ldap-{{ service_name }}.tls=true
                 # Proxy to service-port
-                - traefik.http.services.ldap-{{ ansible_facts['hostname'] }}.loadbalancer.server.port=80
-                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.service=ldap-{{ ansible_facts['hostname'] }}
+                - traefik.http.services.ldap-{{ service_name }}.loadbalancer.server.port=80
+                - traefik.http.routers.ldap-{{ service_name }}.service=ldap-{{ service_name }}
                 # cert via letsencrypt
-                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.tls.certresolver=letsencrypt
+                - traefik.http.routers.ldap-{{ service_name }}.tls.certresolver=letsencrypt
                 # Traefik network
                 - traefik.docker.network=traefik
                 # auth
-                - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.middlewares=secHeaders@file
+                - traefik.http.routers.ldap-{{ service_name }}.middlewares=secHeaders@file
               networks:
                 - ldap
                 - traefik
@@ -532,7 +530,7 @@
           uid nslcd
           gid nslcd
            
-          uri ldaps://openldap.{{service_domain}}:636
+          uri ldaps://openldap.{{default_domain}}:389
           base {{ldap_basedn}}
           base passwd ou=users,{{ldap_basedn}}
           base group ou=groups,{{ldap_basedn}}
@@ -546,8 +544,8 @@
           binddn cn=readuser,{{ldap_basedn}}
           bindpw {{ ldap_readuser_password.stdout }}
 
-          tls_reqcert demand
-          tls_cacert /etc/ssl/certs/ca-certificates.crt
+          #tls_reqcert demand
+          #tls_cacert /etc/ssl/certs/ca-certificates.crt
         backup: yes
         force: yes
       no_log: true
@@ -592,9 +590,9 @@
         mode: '0644'
         content: |
           BASE {{ldap_basedn}}
-          URI ldaps://openldap.{{service_domain}}:636
-          TLS_REQCERT demand
-          TLS_CACERT /etc/ssl/certs/ca-certificates.crt
+          URI ldaps://openldap.{{ default_domain }}:389
+          #TLS_REQCERT demand
+          #TLS_CACERT /etc/ssl/certs/ca-certificates.crt
           NETWORK_TIMEOUT 3
           timeout 3
           timelimit 3
@@ -604,16 +602,17 @@
           nss_reconnect_maxsleeptime 2
           nss_reconnect_maxconntries 1
 
-    - name: "/usr/local/bin/ldapsearch-{{ ansible_facts['hostname'] }}"
+    - name: "/usr/local/bin/symbios-ldapsearch"
       ansible.builtin.copy:
-        dest: "/usr/local/bin/ldapsearch-{{ ansible_facts['hostname'] }}"
+        dest: "/usr/local/bin/symbios-ldapsearch"
         mode: 0750
         owner: root
         group: root
         content: |
           #!/bin/bash
           . {{ docker_path }}/env.openldap
-          LDAPTLS_CACERT=/etc/ssl/certs/ca-certificates.crt ldapsearch -D cn=readuser,{{ldap_basedn}} -w $LDAP_READUSER_PASSWORD -H ldaps://openldap.{{service_domain}}:636 -b {{ldap_basedn}} $@
+          #LDAPTLS_CACERT=/etc/ssl/certs/ca-certificates.crt ldapsearch -D cn=readuser,{{ldap_basedn}} -w $LDAP_READUSER_PASSWORD -H ldaps://openldap.{{ default_domain }}:636 -b {{ldap_basedn}} $@
+          ldapsearch -D cn=readuser,{{ldap_basedn}} -w $LDAP_READUSER_PASSWORD -H ldap://openldap.{{ default_domain }}:389 -b {{ldap_basedn}} $@
           rc=$?
           unset LDAP_ADMIN_PASSWORD LDAP_READUSER_PASSWORD LDAPTLS_CACERT 
           exit $rc
