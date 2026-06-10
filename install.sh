@@ -15,7 +15,11 @@ fi
 cd /home
 [[ -d SymbiOS ]] || git clone https://github.com/egabosh/SymbiOS.git
 cd SymbiOS
-git pull -f
+if ! git pull
+then
+  git stash
+  git pull
+fi
 
 # initial inventory
 if ! [[ -s /home/ansible/inventory.yml ]]
