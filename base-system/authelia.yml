@@ -1,11 +1,10 @@
----
 - name: authelia
   hosts: all
 
   vars:
     service_name: "authelia"
     service_domain: "auth.{{ default_domain }}"
-    service_path: "'/home/docker/{{ service_name }}"
+    service_path: "/home/docker/{{ service_name }}"
     ldap_service_path: "/home/docker/ldap"
 
   tasks:
@@ -71,14 +70,14 @@
         block: |
           session:
             secret: "{{ session_secret.stdout }}"
-            name: {{ service_domain }}_session
+            name: auth.local_session
             same_site: lax
             expiration: 16h
             inactivity: 4h
             remember_me: 1M
             cookies:
-              - domain: "{{ default_domain }}"
-                authelia_url: https://{{ service_domain }}
+              - domain: "auth.local"
+                authelia_url: https://auth.local
 
           storage:
             local:
@@ -90,8 +89,7 @@
               disable: true
             ldap:
               implementation: custom
-              permit_feature_detection_failure: true
-              address: ldaps://openldap.{{ default_domain }}:636
+              address: ldap://openldap:389
               base_dn: "{{ldap_basedn}}"
               additional_users_dn: "ou=users"
               additional_groups_dn: "ou=groups"
@@ -106,7 +104,7 @@
 
           totp:
             disable: false
-            issuer: {{ service_domain }}
+            issuer: auth.local
             algorithm: sha1
             digits: 6
             period: 30
@@ -169,7 +167,7 @@
                  password: {{ smtp_password }}
                  address: {{ smtp_server }}:{{ smtp_port }}
                  sender: {{ smtp_from }}
-                 subject: "[{{ service_domain }}] Notification"
+                 subject: "[auth.local] Notification"
                  startup_check_address: {{ smtp_from }}
                  identifier: "authelia"
                  timeout: 15s
@@ -180,7 +178,7 @@
        - name: create check file for default authorization_policy
          ansible.builtin.copy:
            dest: "{{ service_path }}/authorization_policy"
-           content: "two_factor"
+           content: "one_factor"
            mode: "0644"
 
 
@@ -194,13 +192,13 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         block: |
           access_control:
-            default_policy: deny
+            default_policy: two_factor
             rules:
-              - domain: "{{ default_domain }}"
+              - domain: "auth.local"
                 policy: one_factor
 
         backup: yes
-        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
+        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest /app/authelia config validate --config %s
       notify: Restart authelia
 
     - name: "{{ service_path }}/docker-compose.yml Container Configuration"
@@ -214,12 +212,13 @@
         block: |
           services:
 
-            {{ service_name }}.{{ default_domain }}:
+            authelia.local:
               image: authelia/authelia:latest
               restart: unless-stopped
               networks:
                 - authelia
                 - traefik
+                - ldap
               volumes:
                 - ./authelia-data:/config
                 - /etc/localtime:/etc/localtime:ro
@@ -227,24 +226,26 @@
               labels:
                 - traefik.enable=true
                 # HTTPS
-                - traefik.http.routers.authelia-{{ instance }}.rule=Host(`{{ service_domain }}`)
-                - traefik.http.routers.authelia-{{ instance }}.entrypoints=https
-                - traefik.http.routers.authelia-{{ instance }}.tls=true
+                - traefik.http.routers.authelia-default.rule=Host(`auth.local`)
+                - traefik.http.routers.authelia-default.entrypoints=https
+                - traefik.http.routers.authelia-default.tls=true
                 # Proxy to service-port
-                - traefik.http.services.authelia-{{ instance }}.loadbalancer.server.port=9091
-                - traefik.http.routers.authelia-{{ instance }}.service=authelia-{{ instance }}
+                - traefik.http.services.authelia-default.loadbalancer.server.port=9091
+                - traefik.http.routers.authelia-default.service=authelia-default
                 # cert via letsencrypt
-                - traefik.http.routers.authelia-{{ instance }}.tls.certresolver=letsencrypt
+                - traefik.http.routers.authelia-default.tls.certresolver=letsencrypt
                 # Traefik network
                 - traefik.docker.network=traefik
                 # auth
-                - traefik.http.routers.authelia-{{ instance }}.middlewares=secHeaders@file
+                - traefik.http.routers.authelia-default.middlewares=secHeaders@file
 
           networks:
             authelia:
               driver: bridge
               driver_opts:
                 com.docker.network.bridge.name: br-authelia
+            ldap:
+              external: false
             traefik:
               external: true
 
@@ -291,7 +292,7 @@
                   client_secret: '$pbkdf2-sha512$310000$EXkvBmRZx/6476FyviXRZw$OpkrwApe5yPfrXJadOM8VUwQBjmo4rDD1SonNsuQ.6WgevPNKYQJrob404o1yHYbybQPJTRXuwnyKVLqtIhN.A' # random dummy pw
         insertbefore: "^# BEGIN ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         backup: yes
-        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
+        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest /app/authelia config validate --config %s
       notify: Restart authelia
 
     - name: "Script for generating oidc client secrets"
