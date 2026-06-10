@@ -88,7 +88,7 @@
         url: "https://download.docker.com/linux/ubuntu/gpg"
         dest: /tmp/docker.asc
         mode: "0644"
-     changed_when: false
+      changed_when: false
 
     - name: Dearmor Docker GPG key
       ansible.builtin.command:
@@ -99,7 +99,7 @@
       ansible.builtin.file:
         path: /tmp/docker.asc
         state: absent
-     changed_when: false
+      changed_when: false
 
     - name: Get DEB architecture
       ansible.builtin.command:

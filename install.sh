@@ -4,9 +4,12 @@ set -e
 set -x
 
 # install ansible and git
-DEBIAN_FRONTEND=noninteractive apt-get -y update --allow-releaseinfo-change
-which ansible >/dev/null 2>&1 || DEBIAN_FRONTEND=noninteractive apt-get -y install ansible git
-ansible-galaxy collection install community.general
+if ! which ansible >/dev/null 2>&1
+then
+  DEBIAN_FRONTEND=noninteractive apt-get -y update --allow-releaseinfo-change
+  DEBIAN_FRONTEND=noninteractive apt-get -y install ansible git
+  ansible-galaxy collection install community.general
+fi
 
 # clone SymbiOS
 cd /home
@@ -35,4 +38,9 @@ ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /hom
 ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/traefik.yml
 ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/ldap.yml
 ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/authelia.yml
+if [ -f /proc/device-tree/model ] && grep -qi "raspberry" /proc/device-tree/model
+then
+  # on raspi
+  ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/raspberry.yml
+fi
 

@@ -406,7 +406,7 @@
         block: |
           services:
 
-            openldap.{{ service_domain }}:
+            openldap:
               build:
                 context: .
                 dockerfile: Dockerfile
@@ -431,7 +431,7 @@
                 # auth
                 #- traefik.tcp.routers.ldap-openldap-{{ ansible_facts['hostname'] }}.middlewares=secHeaders@file
               networks:
-                - ldap.{{service_domain}}--network
+                - ldap
                 - traefik
 
             ldap.{{service_domain}}:
@@ -445,7 +445,7 @@
                 - env.ldap
                 - env.openldap
               environment:
-                LDAP_SERVER: "ldaps://openldap.{{service_domain}}"
+                LDAP_SERVER: "ldap://openldap"
                 LDAP_BASE_DN: "{{ldap_basedn}}"
                 LDAP_USER: "cn=head-of-ldap,{{ldap_basedn}}"
                 LDAP_GROUPS_DN: "ou=groups,{{ldap_basedn}}"
@@ -454,11 +454,8 @@
                 LAM_CONFIGURATION_DATABASE: "files"
                 LAM_SKIP_PRECONFIGURE: false
               depends_on:
-                - openldap.{{service_domain}}
+                - openldap
               restart: unless-stopped
-              networks:
-                - ldap.{{service_domain}}--network
-                - traefik
               labels:
                 - traefik.enable=true
                 # HTTPS
@@ -474,10 +471,12 @@
                 - traefik.docker.network=traefik
                 # auth
                 - traefik.http.routers.ldap-{{ ansible_facts['hostname'] }}.middlewares=secHeaders@file
-
+              networks:
+                - ldap
+                - traefik
 
           networks:
-            ldap.{{service_domain}}--network:
+            ldap:
               driver: bridge
               driver_opts:
                 com.docker.network.bridge.name: br-ldap

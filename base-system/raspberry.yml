@@ -1,0 +1,296 @@
+---
+- name: Raspberry Debian Linux Setup
+  hosts: all
+
+  vars:
+    default_user: "{{ lookup('pipe', 'getent passwd 1000 | cut -d: -f1') }}"
+    default_user_home: "{{ lookup('pipe', 'getent passwd 1000 | cut -d: -f6') }}"
+
+  tasks:
+
+    - name: Install packages for cinnamon, desktop-stuff and tools
+      apt:
+        name:
+          # share desk
+          - x11vnc
+          # desktop specific
+          - cinnamon-desktop-environment
+          - cinnamon-l10n
+          - gnome-terminal
+          - dconf-cli
+          - dphys-swapfile
+          - tsdecrypt
+          - x264
+          - x265
+          - flatpak
+          - ttf-mscorefonts-installer
+          - fonts-terminus
+          - mint-y-icons
+          # useful other stuff
+          - pwgen
+          - arj
+          - p7zip
+          - unace
+          - unadf
+          - bvi
+          - fdupes
+          - debootstrap
+          - geoip-bin
+          - sshfs
+          - speedtest-cli
+          - gnome-characters
+          - blueman
+          # dconf-gui
+          - dconf-editor
+          # Media
+          - vlc
+          - gthumb
+          - mediainfo-gui
+          - easytag
+          - audacity
+          - asunder
+          - audacious
+          - guvcview
+          - easyeffects
+          - calf-plugins
+          # misc
+          - gpodder
+          - wireguard
+          - wireguard-tools
+          - tinyproxy
+          - rpi-imager
+          - hardinfo
+          - redshift-gtk
+          # tools for android-smartphones/LineageOS
+          - heimdall-flash
+          - adb
+          - fastboot
+          - mkbootimg
+          # burning
+          - brasero
+
+    - name: Set raspi-config options
+      ansible.builtin.command: >
+        raspi-config nonint do_{{ item.action }} {{ item.value }}
+      loop:
+        - { action: ssh, value: "0" }
+        - { action: vnc, value: "0" }
+        - { action: boot_splash, value: "1" }
+        - { action: boot_behaviour, value: "B4" }
+        - { action: blanking, value: "1" }
+        - { action: serial_hw, value: "1" }
+        - { action: onewire, value: "0" }
+        - { action: wayland, value: "W1" }
+      changed_when: false
+   
+#    - name: Remove the grpup pi
+#      ansible.builtin.user:
+#        name: pi
+#        state: absent
+#        remove: yes
+#
+#    - name: Remove the user pi
+#      ansible.builtin.user:
+#        name: pi
+#        state: absent
+#        remove: yes
+
+    - name: lightdm config dir
+      file:
+        path: /etc/lightdm
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: lightdm config
+      copy:
+        dest: /etc/lightdm/lightdm.conf
+        content: |
+          [Seat:*]
+          autologin-user=user
+          autologin-user-timeout=0
+          user-session=cinnamon
+          greeter-session=lightdm-gtk-greeter
+          greeter-hide-users=false
+          greeter-show-manual-login=true
+          allow-guest=false
+        backup: yes
+
+    - name: check if kodi is present/used
+      stat:
+        path: /usr/local/sbin/switch-kodi-desk.sh
+      register: kodisetup
+
+    - name: Disable lightdm
+      ansible.builtin.systemd:
+        name: lightdm.service
+        enabled: false
+      when: kodisetup.stat.exists == true
+
+    - name: Add default user to docker group
+      ansible.builtin.user:
+        name: "{{ default_user }}"
+        groups: docker
+        append: true
+
+    - name: Create .xsessionrc
+      ansible.builtin.copy:
+        dest: "{{ default_user_home }}/.xsessionrc"
+        owner: "{{ default_user }}"
+        group: "{{ default_user }}"
+        mode: '0700'
+        content: |
+          #!/bin/bash
+
+          # Clean GPU Cache of Element
+          rm -rf ~/.var/app/im.riot.Riot/config/Element/GPUCache
+
+          # Run backup if script exists
+          if [ -f ~/Nextcloud/scripts/backup-this-device.sh ]
+          then
+            gnome-terminal --hide-menubar --title=BACKUP --geometry=120x35 -- bash ~/Nextcloud/scripts/backup-this-device.sh
+          elif [ -f ~/scripts/backup-this-device.sh ]
+          then
+            gnome-terminal --hide-menubar --title=BACKUP --geometry=120x35 -- bash ~/scripts/backup-this-device.sh
+          elif [ -f ~/.scripts/backup-this-device.sh ]
+          then
+            gnome-terminal --hide-menubar --title=BACKUP --geometry=120x35 -- bash ~/.scripts/backup-this-device.sh
+          fi
+
+          # Autoupdate flatpak and cinnamon
+          dconf write /com/linuxmint/updates/auto-update-flatpaks true
+          dconf write /com/linuxmint/updates/auto-update-cinnamon-spices true
+
+          # First-run initial config
+          if ! [ -s ~/.initial-mint-config-by-xsessionrc ]
+          then
+            dconf write /org/cinnamon/desktop/privacy/remember-recent-files false
+
+            dconf write /org/cinnamon/desktop/peripherals/touchpad/edge-scrolling-enabled true
+            dconf write /org/cinnamon/desktop/peripherals/touchpad/two-finger-scrolling-enabled false
+
+            termprofile=$(dconf dump /org/gnome/terminal/legacy/profiles:/ | grep '^\\[:' | cut -d : -f2 | cut -d] -f1)
+            dconf write "/org/gnome/terminal/legacy/profiles:/\${termprofile}/font" "'Terminus (TTF) Medium 12'"
+
+            dconf write /org/cinnamon/desktop/keybindings/custom-keybindings/custom8/command '"cinnamon-screensaver-command --lock"'
+            dconf write /org/cinnamon/desktop/keybindings/custom-keybindings/custom8/binding "['<Mod4>l']"
+            dconf write /org/cinnamon/desktop/keybindings/custom-keybindings/custom8/name '"Lockscreen"'
+            dconf write /org/cinnamon/desktop/keybindings/custom-list "['__dummy__']"
+
+            dconf write /org/cinnamon/desktop/interface/gtk-theme "'Mint-Y-Dark'"
+            dconf write /org/cinnamon/desktop/interface/icon-theme "'Mint-Y'"
+            dconf write /org/cinnamon/theme/name "'Mint-Y-Dark'"
+            dconf write /org/gnome/desktop/interface/icon-theme "'Mint-Y-Dark'"
+            dconf write /org/gnome/desktop/interface/gtk-theme "'Mint-Y-Dark'"
+            dconf write /org/gnome/desktop/interface/color-scheme "'prefer-dark'"
+
+            dconf write /org/nemo/preferences/default-folder-viewer "'list-view'"
+            dconf write /org/nemo/preferences/show-location-entry true
+            dconf write /org/nemo/preferences/show-directory-item-counts "'never'"
+            dconf write /org/nemo/preferences/show-image-thumbnails "'never'"
+
+            dconf write /org/cinnamon/panels-enabled "['1:0:bottom']"
+            dconf write /org/cinnamon/panels-height "['1:27']"
+            dconf write /org/cinnamon/panel-zone-icon-sizes '[{"left":0,"center":0,"right":0,"panelId":1}]'
+            dconf write /org/cinnamon/enabled-applets "['panel1:left:0:menu@cinnamon.org','panel1:left:1:show-desktop@cinnamon.org','panel1:left:2:panel-launchers@cinnamon.org','panel1:left:3:window-list@cinnamon.org','panel1:right:0:systray@cinnamon.org','panel1:right:1:xapp-status@cinnamon.org','panel1:right:2:keyboard@cinnamon.org','panel1:right:3:notifications@cinnamon.org','panel1:right:4:printers@cinnamon.org','panel1:right:5:removable-drives@cinnamon.org','panel1:right:6:user@cinnamon.org','panel1:right:7:network@cinnamon.org','panel1:right:8:sound@cinnamon.org','panel1:right:9:power@cinnamon.org','panel1:right:10:calendar@cinnamon.org']"
+
+            date >> ~/.initial-mint-config-by-xsessionrc
+          fi
+
+          [ -x ~/.xsessionrc.followup ] && ~/.xsessionrc.followup
+
+
+    - name: Check source authorized_keys exists
+      ansible.builtin.stat:
+        path: "{{ default_user_home }}/.ssh/authorized_keys"
+      register: source_keys
+
+    - name: Copy authorized_keys to root (only if source exists and dest not exists)
+      ansible.builtin.copy:
+        src: "{{ default_user_home }}/.ssh/authorized_keys"
+        dest: /root/.ssh/authorized_keys
+        mode: '0600'
+        owner: root
+        group: root
+        force: false
+      when: source_keys.stat.exists
+
+#    - name: /usr/local/sbin/raspi-wifi-country.sh
+#      blockinfile:
+#        path: /usr/local/sbin/raspi-wifi-country.sh
+#        create: yes
+#        mode: 0500
+#        owner: root
+#        group: root
+#        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+#        block: |
+#          [ -e /var/log/raspi-wifi-country.log ] && exit 0
+#          raspi-config nonint do_wifi_country DE
+#          echo "$(date) $$" >> /var/log/raspi-wifi-country.log
+#        backup: yes
+#        validate: /bin/bash -n %s
+#
+#    - name: /usr/local/sbin/raspi-wifi-country.sh shebang
+#      lineinfile:
+#        path: /usr/local/sbin/raspi-wifi-country.sh
+#        insertbefore: BOF
+#        line: "#!/bin/bash -e"
+#
+#    - name: run /usr/local/sbin/raspi-wifi-country.sh
+#      ansible.builtin.shell: ./raspi-wifi-country.sh
+#      args:
+#        chdir: /usr/local/sbin
+#        creates: /var/log/raspi-wifi-country.log
+#        
+    - name: Prepare new cmdline with required parameters (Raspberry Pi)
+      set_fact:
+        new_cmdline: >-
+          {{
+            (
+              (lookup('file', '/boot/firmware/cmdline.txt') | trim).split()
+              | difference(['cgroup_enable=memory','cgroup_memory=1','cgroup_enable=cpuset','swapaccount=1'])
+              + ['cgroup_enable=memory','cgroup_memory=1','cgroup_enable=cpuset','swapaccount=1']
+            ) | join(' ')
+          }}
+
+    # Write back only if changed (Raspberry Pi)
+    - name: Update /boot/firmware/cmdline.txt if necessary (Raspberry Pi)
+      copy:
+        dest: /boot/firmware/cmdline.txt
+        content: "{{ new_cmdline }}\n"
+        owner: root
+        group: root
+        mode: '0644'
+      changed_when: false
+
+    - name: Replace /boot/firmware/config.txt with optimized config
+      copy:
+        dest: /boot/firmware/config.txt
+        content: |
+          # /boot/firmware/config.txt - Optimal Kodi KMS Configuration
+
+          # ARM Configuration
+          arm_64bit=1
+          arm_boost=1
+
+          # Display Configuration
+          disable_overscan=1
+
+          # KMS with sufficient GPU memory for HEVC
+          dtoverlay=vc4-kms-v3d,cma-256
+          max_framebuffers=2
+              
+          # Fixed 720p@60Hz (comment out if display issues occur)
+          hdmi_group=1
+          hdmi_mode=16
+          hdmi_force_hotplug=1
+          
+          # Audio
+          dtparam=audio=on
+              
+          # Kodi Optimizations (reduces latency)
+          gpu_mem=256
+          disable_fw_kms_setup=1
+
+
