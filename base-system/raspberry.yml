@@ -82,18 +82,6 @@
         - { action: onewire, value: "0" }
         - { action: wayland, value: "W1" }
       changed_when: false
-   
-#    - name: Remove the grpup pi
-#      ansible.builtin.user:
-#        name: pi
-#        state: absent
-#        remove: yes
-#
-#    - name: Remove the user pi
-#      ansible.builtin.user:
-#        name: pi
-#        state: absent
-#        remove: yes
 
     - name: lightdm config dir
       file:
@@ -115,7 +103,7 @@
           greeter-hide-users=false
           greeter-show-manual-login=true
           allow-guest=false
-        backup: yes
+      changed_when: false
 
     - name: check if kodi is present/used
       stat:
@@ -135,7 +123,7 @@
         append: true
 
     - name: Create .xsessionrc
-      ansible.builtin.copy:
+      copy:
         dest: "{{ default_user_home }}/.xsessionrc"
         owner: "{{ default_user }}"
         group: "{{ default_user }}"
@@ -202,12 +190,12 @@
 
 
     - name: Check source authorized_keys exists
-      ansible.builtin.stat:
+      stat:
         path: "{{ default_user_home }}/.ssh/authorized_keys"
       register: source_keys
 
     - name: Copy authorized_keys to root (only if source exists and dest not exists)
-      ansible.builtin.copy:
+      copy:
         src: "{{ default_user_home }}/.ssh/authorized_keys"
         dest: /root/.ssh/authorized_keys
         mode: '0600'
@@ -216,33 +204,6 @@
         force: false
       when: source_keys.stat.exists
 
-#    - name: /usr/local/sbin/raspi-wifi-country.sh
-#      blockinfile:
-#        path: /usr/local/sbin/raspi-wifi-country.sh
-#        create: yes
-#        mode: 0500
-#        owner: root
-#        group: root
-#        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-#        block: |
-#          [ -e /var/log/raspi-wifi-country.log ] && exit 0
-#          raspi-config nonint do_wifi_country DE
-#          echo "$(date) $$" >> /var/log/raspi-wifi-country.log
-#        backup: yes
-#        validate: /bin/bash -n %s
-#
-#    - name: /usr/local/sbin/raspi-wifi-country.sh shebang
-#      lineinfile:
-#        path: /usr/local/sbin/raspi-wifi-country.sh
-#        insertbefore: BOF
-#        line: "#!/bin/bash -e"
-#
-#    - name: run /usr/local/sbin/raspi-wifi-country.sh
-#      ansible.builtin.shell: ./raspi-wifi-country.sh
-#      args:
-#        chdir: /usr/local/sbin
-#        creates: /var/log/raspi-wifi-country.log
-#        
     - name: Prepare new cmdline with required parameters (Raspberry Pi)
       set_fact:
         new_cmdline: >-
@@ -292,5 +253,6 @@
           # Kodi Optimizations (reduces latency)
           gpu_mem=256
           disable_fw_kms_setup=1
-
+          
+          dtoverlay=w1-gpio
 
