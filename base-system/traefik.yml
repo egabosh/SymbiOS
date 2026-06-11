@@ -59,16 +59,15 @@
             gateway: fdaa:a192:b168:cd41::1
       notify: Restart traefik
 
+    - name: Set ACME resolver based on domain
+      ansible.builtin.set_fact:
+        acme_resolver: "{{ 'symbios-pki' if default_domain == 'local' else 'letsencrypt' }}"
+
     - name: /home/docker/traefik/docker-compose.yml Traefik Container Configuration
-      blockinfile:
-        path: /home/docker/traefik/docker-compose.yml
-        create: yes
-        mode: 0440
-        owner: root
-        group: docker
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          
+      ansible.builtin.copy:
+        content: |
+          # BEGIN ANSIBLE MANAGED BLOCK
+
           services:
             traefik:
               image: traefik:latest
@@ -134,13 +133,16 @@
                 - traefik.http.routers.traefik.middlewares=secHeaders@file,default-basic-auth@file
                 - traefik.http.routers.traefik.service=api@internal
                 - traefik.http.routers.traefik.tls=true
-                - traefik.http.routers.traefik.tls.certresolver=letsencrypt
+                - traefik.http.routers.traefik.tls.certresolver={{ acme_resolver }}
                 - traefik.http.middlewares.to-https.redirectscheme.scheme=https
           networks:
             traefik:
               external: true
-
-        backup: yes
+          # END ANSIBLE MANAGED BLOCK
+        dest: /home/docker/traefik/docker-compose.yml
+        mode: '0440'
+        owner: root
+        group: docker
       notify: Restart traefik
 
     - name: Create traefik dir
@@ -412,6 +414,4 @@
 
     - name: Restart traefik
       ansible.builtin.shell: docker-compose up -d --force-recreate
-      args:
-        chdir: /home/docker/traefik
-
+      args: { chdir: /home/docker/traefik }

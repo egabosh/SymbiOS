@@ -39,6 +39,7 @@ ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /hom
 ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/runchecks.yml
 ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/docker.yml
 ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/dedyn.yml
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/acme-pki.yml
 ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/traefik.yml
 ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/ldap.yml
 ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/authelia.yml
