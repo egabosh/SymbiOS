@@ -116,6 +116,7 @@
           subjectAltName = @alt_names
           [alt_names]
           DNS.1 = localhost
+          DNS.2 = acme-pki-pebble
         dest: "{{ pki_dir }}/pebble-ext.cnf"
         mode: "0644"
 
@@ -170,7 +171,7 @@
               acme:
                 # Local ACME server - fallback when Let's Encrypt is not available
                 # Uses Docker container name "acme-pki-pebble" - no IP needed
-                caServer: "https://{{ pebble_container }}:{{ pebble_port }}/.well-known/acme/directory"
+                caServer: "https://{{ pebble_container }}:{{ pebble_port }}/dir"
                 email: "admin@{{ inventory_hostname }}"
                 storage: "/acme-pki/acme.json"
                 httpChallenge:
