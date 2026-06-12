@@ -1,0 +1,6 @@
+/docker-compose.override.yml*
+__pycache__/
+*.del
+*.tmp
+*local.conf
+*.swp
