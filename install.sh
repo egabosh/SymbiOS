@@ -16,7 +16,7 @@ then
 # use dev-dir
   rm -rf /home/SymbiOS
   cp -rp /root/SymbiOS /home
-  rm -f /home/ansible/inventory.yml
+  rm -f ${inventory}
 else
 # clone SymbiOS
   cd /home
@@ -31,33 +31,34 @@ fi
 
 # initial inventory
 inventory_path="/home/docker/symbios-ui/config"
-if ! [[ -s ${inventory_path}/inventory.yml ]]
+inventory="${inventory_path}/inventory.yml"
+if ! [[ -s ${inventory} ]]
 then
   mkdir -p ${inventory_path}
   chmod 700 ${inventory_path}
-  cp /home/SymbiOS/inventory.yml ${inventory_path}/inventory.yml
-  chmod 600 ${inventory_path}/inventory.yml
+  cp /home/SymbiOS/inventory.yml ${inventory}
+  chmod 600 ${inventory}
 fi
 
 # install base-system
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/basics.yml
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/hardening.yml
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/firewall.yml
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/backup.yml
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/autoupdate.yml
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/runchecks.yml
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/docker.yml
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/dedyn.yml
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/traefik.yml
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/acme-pki.yml
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/ldap.yml
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/authelia.yml
+#ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/basics.yml
+#ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/hardening.yml
+#ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/firewall.yml
+#ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/backup.yml
+#ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/autoupdate.yml
+#ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/runchecks.yml
+#ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/docker.yml
+#ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/dedyn.yml
+#ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/traefik.yml
+#ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/acme-pki.yml
+ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/ldap.yml
+ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/authelia.yml
 if [ -f /proc/device-tree/model ] && grep -qi "raspberry" /proc/device-tree/model
 then
   # on raspi
-  ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/raspberry.yml
-  ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/desktop/firefox.yml
+  ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/raspberry.yml
+  ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/desktop/firefox.yml
 fi
-ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/symbios-ui.yml
+ansible-playbook --limit localhost  --inventory ${inventory} /home/SymbiOS/base-system/symbios-ui.yml
 
 
