@@ -5,26 +5,10 @@
   vars:
     service_name: "ldap"
     service_domain: "{{ service_name }}.{{ default_domain }}"
+    docker_path: "/home/docher/{{ service_name }}"
+
 
   tasks:
-
-
-## PREP
-
-    - name: check existing ldap service paths (compatibility to old installs)
-      block:
-        - name: check existing service path
-          stat:
-            path: "/home/docker/ldap.{{ default_domain }}"
-          register: ldap_host_stat
-
-        - name: Set service_path
-          set_fact: 
-            docker_path: "{{ '/home/docker/ldap.' + default_domain if ldap_host_stat.stat.exists else '/home/docker/ldap' }}"
-      when: ldap_path is not defined
-
-
-### BEGIN
 
     - name: Install ldap tools
       apt:
