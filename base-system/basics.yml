@@ -342,7 +342,7 @@
           # USV
           if $programname == 'apcupsd' and $syslogseverity <= '6' then /var/log/usv-apcupsd.log
           if $programname == 'apcupsd' then stop
-          # SMART HDD Überwachung
+          # SMART HDD monitoring
           if $programname == 'smartd' and $syslogseverity <= '6' then /var/log/smartd.log
           if $programname == 'smartd' then stop
           # firewall                                                                                        

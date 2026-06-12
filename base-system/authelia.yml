@@ -9,6 +9,7 @@
 
   tasks:
 
+
     - name: "Create {{ service_path }} dir"
       ansible.builtin.file:
         path: "{{ service_path }}"
@@ -233,7 +234,7 @@
                 - traefik.http.services.authelia-default.loadbalancer.server.port=9091
                 - traefik.http.routers.authelia-default.service=authelia-default
                 # cert via letsencrypt
-                - traefik.http.routers.authelia-default.tls.certresolver=letsencrypt
+                - traefik.http.routers.authelia-default.tls.certresolver={{ acme_resolver }}
                 # Traefik network
                 - traefik.docker.network=traefik
                 # auth

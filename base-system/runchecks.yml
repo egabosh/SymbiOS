@@ -182,7 +182,7 @@
         block: |
           # process check
           mkdir -p ${g_tmp}/proc-check
-          # Ggf wieder OK-Prozesse löschen
+          # Remove OK processes if needed
           ls ${g_tmp}/proc-check | while read odzpid
           do
             if ! egrep -q "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/$odzpid/status 2>/dev/null
@@ -190,7 +190,7 @@
               rm ${g_tmp}/proc-check/$odzpid
             fi
           done
-          # Neue oder alte Finden und bei Status älter als 30 Minuten melden
+          # Find new or old and report if older than 30 minutes
           egrep "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read dzpid
           do
             if [ -f ${g_tmp}/proc-check/$dzpid ]

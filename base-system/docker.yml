@@ -129,6 +129,25 @@
         update_cache: no
         install_recommends: no
 
+    - name: Check if Docker data dir has containers
+      ansible.builtin.stat:
+        path: /home/docker/var-lib-docker/containers
+      register: data_dir_stat
+
+    # https://github.com/nextcloud/docker/issues/1103
+    - name: writing daemon.json (ipv6 settings + data-root) 
+      copy:
+        dest: "/etc/docker/daemon.json"
+        content: |
+          {
+            "data-root": "/home/docker/var-lib-docker",
+            "ipv6": true,
+            "fixed-cidr-v6": "fdab::/64",
+            "experimental": true, 
+            "ip6tables": true
+          }
+      register: daemon_json
+
     - name: Packages for docker
       apt:
         name:
@@ -143,22 +162,20 @@
           - mariadb-client
         update_cache: yes
         install_recommends: no
-      notify:
-      - Restart docker
-    
-    # https://github.com/nextcloud/docker/issues/1103
-    - name: writing daemon.json (ipv6 settings) 
-      copy:
-        dest: "/etc/docker/daemon.json"
-        content: |
-          {
-            "ipv6": true,
-            "fixed-cidr-v6": "fdab::/64",
-            "experimental": true, 
-            "ip6tables": true
-          }
-      notify:
-      - Restart docker
+
+    - name: Restart Docker if daemon.json changed or data dir missing
+      block:
+        - name: Restart Docker
+          ansible.builtin.service:
+            name: docker
+            state: restarted
+      when: daemon_json.changed or not data_dir_stat.stat.exists
+
+    - name: Ensure Docker is running
+      ansible.builtin.service:
+        name: docker
+        state: started
+
 
     - name: /home/docker/_defaults/mariadb/genrootpw
       blockinfile:

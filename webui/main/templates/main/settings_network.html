@@ -1,0 +1,101 @@
+i{% extends "main/base.html" %}
+{% block sidebar %}
+    {% include "main/sidebar_settings.html" %}
+{% endblock %}
+{% block content %}
+<h2>Network Settings</h2>
+
+<div class="card">
+    <div class="card-header">
+        <h5>Network Configuration</h5>
+    </div>
+    <div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+            
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="form-check">
+                        {{ form.use_dhcp }}
+                        <label class="form-check-label" for="{{ form.use_dhcp.id_for_label }}">
+                            Use DHCP (automatic configuration)
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mb-3 {% if form.use_dhcp.value %}d-none{% endif %}" id="static-fields-row1">
+                <div class="col-md-6">
+                    <label class="form-label">{{ form.ip_address.label }}</label>
+                    {{ form.ip_address }}
+                    {% if form.ip_address.errors %}
+                        <div class="text-danger">{{ form.ip_address.errors }}</div>
+                    {% endif %}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">{{ form.subnet_mask.label }}</label>
+                    {{ form.subnet_mask }}
+                    {% if form.subnet_mask.errors %}
+                        <div class="text-danger">{{ form.subnet_mask.errors }}</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="row mb-3 {% if form.use_dhcp.value %}d-none{% endif %}" id="static-fields-row2">
+                <div class="col-md-6">
+                    <label class="form-label">{{ form.gateway.label }}</label>
+                    {{ form.gateway }}
+                    {% if form.gateway.errors %}
+                        <div class="text-danger">{{ form.gateway.errors }}</div>
+                    {% endif %}
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">{{ form.dns1.label }}</label>
+                    {{ form.dns1 }}
+                    {% if form.dns1.errors %}
+                        <div class="text-danger">{{ form.dns1.errors }}</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if form.non_field_errors %}
+                <div class="alert alert-danger">
+                    {{ form.non_field_errors }}
+                </div>
+            {% endif %}
+
+            <button type="submit" class="btn btn-primary">Save Configuration</button>
+            <a href="{% url 'settings_network' %}" class="btn btn-secondary">Reset</a>
+        </form>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const dhcpCheckbox = document.getElementById('id_use_dhcp');
+    const staticFieldRows = document.querySelectorAll('[id^="static-fields-row"]');
+    const staticFields = document.querySelectorAll('input[name="ip_address"], input[name="subnet_mask"], input[name="gateway"], input[name="dns1"]');
+
+    function toggleStaticFields() {
+        if (dhcpCheckbox.checked) {
+            // Hide fields AND clear their values
+            staticFieldRows.forEach(row => row.classList.add('d-none'));
+            staticFields.forEach(field => {
+                field.value = '';  // **NEU: Felder leeren**
+            });
+        } else {
+            // Show fields (values stay empty)
+            staticFieldRows.forEach(row => row.classList.remove('d-none'));
+        }
+    }
+
+    // Initial state on page load
+    toggleStaticFields();
+    
+    // Listen for changes
+    dhcpCheckbox.addEventListener('change', toggleStaticFields);
+});
+</script>
+
+{% endblock %}
+
