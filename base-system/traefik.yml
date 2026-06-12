@@ -59,9 +59,6 @@
             gateway: fdaa:a192:b168:cd41::1
       notify: Restart traefik
 
-    - name: Set ACME resolver based on domain
-      ansible.builtin.set_fact:
-        acme_resolver: "{{ 'symbios-pki' if default_domain == 'local' else 'letsencrypt' }}"
 
     - name: /home/docker/traefik/docker-compose.yml Traefik Container Configuration
       ansible.builtin.copy:
@@ -102,6 +99,11 @@
                 - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http
                 - --certificatesresolvers.letsencrypt.acme.email=ssl@{{ default_domain }}
                 - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+                # ACME PKI (SymbiOS local CA)
+                - --certificatesresolvers.symbios-pki.acme.caServer=https://acme-pki-stepca:9000/acme/acme/directory
+                - --certificatesresolvers.symbios-pki.acme.httpChallenge.entryPoint=http
+                - --certificatesresolvers.symbios-pki.acme.email=admin@local
+                - --certificatesresolvers.symbios-pki.acme.storage=/acme-pki/acme.json
                 # non-docker services
                 - --providers.file=true
                 - --providers.file.directory=/etc/traefik/providers.local
@@ -126,6 +128,8 @@
                 - ./letsencrypt:/letsencrypt
                 - ./providers:/etc/traefik/providers.local
                 - ./log:/log
+                - /home/docker/acme-pki/data/acme:/acme-pki
+                - ./ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
               labels:
                 - traefik.enable=true
                 - traefik.http.routers.traefik.rule=Host(`traefik.{{ default_domain }}`)
@@ -144,6 +148,16 @@
         owner: root
         group: docker
       notify: Restart traefik
+
+
+    - name: Create empty ca-bundle for Traefik
+      ansible.builtin.copy:
+        content: ""
+        dest: /home/docker/traefik/ca-bundle.crt
+        force: no
+        owner: root
+        group: docker
+        mode: "0644"
 
     - name: Create traefik dir
       ansible.builtin.file:
