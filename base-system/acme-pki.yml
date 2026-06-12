@@ -2,59 +2,50 @@
 # ============================================================================
 # ACME PKI - Local Fallback CA for Certificate Management
 # ============================================================================
-# This component sets up a local ACME server (Pebble) that serves as a
-# fallback for Let's Encrypt.
+# Uses step-ca (Smallstep) as ACME server - production-ready alternative
+# to Pebble with static CA that persists across restarts.
 #
-# Use cases for this Fallback PKI:
-#   1. Fallback-CA: When Let's Encrypt is unreachable (no internet)
-#   2. Local operation: Internal certificate service without external DNS
-#   3. Dev/Test: ACME-compliant server for local development
-#
-# Simple flat PKI: single Root CA, no Intermediate CA.
-# Pebble uses its own CA internally for ACME operations.
-# The SymbiOS Root CA signs Traefik certs directly.
+# Architecture:
+#   - SymbiOS Root CA (self-signed, 10 years)
+#   - step-ca serves ACME v2 - compatible with Traefik, certbot, etc.
 # ============================================================================
 
-- name: ACME PKI - Set up local Fallback CA
+- name: ACME PKI - Set up local Fallback CA (step-ca)
   hosts: all
   gather_facts: true
   vars:
     acme_dir: "/home/docker/acme-pki"
     pki_dir: "{{ acme_dir }}/pki"
+    data_dir: "{{ acme_dir }}/data"
     ca_cert: "{{ pki_dir }}/ca/root-ca.pem"
     ca_key: "{{ pki_dir }}/ca/root-ca-key.pem"
-    trust_bundle: "{{ pki_dir }}/ca-trust-bundle.pem"
     pki_cn: "SymbiOS Local CA"
     pki_org: "SymbiOS"
     traefik_dir: "/home/docker/traefik"
-    pebble_port: "14000"
-    pebble_mgmt_port: "15000"
-    pebble_container: "acme-pki-pebble"
-    pebble_ca_dir: "{{ acme_dir }}/pebble-ca"
-    pebble_ca_cert: "{{ pebble_ca_dir }}/ca.pem"
+    stepca_port: "9000"
+    stepca_container: "acme-pki-stepca"
 
   tasks:
     - name: Create directories
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
-        mode: "0750"
-        owner: root
-        group: docker
+        mode: "0755"
       loop:
         - "{{ pki_dir }}/ca"
         - "{{ pki_dir }}/certs"
-        - "{{ acme_dir }}/data/acme"
-        - "{{ acme_dir }}"
-        - "{{ pebble_ca_dir }}"
-        - "{{ acme_dir }}/http-challenge"
+        - "{{ data_dir }}"
+        - "{{ data_dir }}/config"
+        - "{{ data_dir }}/certs"
+        - "{{ data_dir }}/secrets"
+        - "{{ data_dir }}/db"
 
-    # ===== Root CA (flat PKI, no intermediate) =====
+    # ===== Root CA (10 years, self-signed) =====
     - name: Generate Root CA Key
       ansible.builtin.shell: openssl genrsa -out {{ ca_key }} 4096
       args: { creates: "{{ ca_key }}" }
 
-    - name: Self-sign Root CA Certificate
+    - name: Self-sign Root CA Certificate (10 years)
       ansible.builtin.shell: |
         openssl req -x509 -new -nodes -key "{{ ca_key }}" -sha256 -days 3650 \
           -out "{{ ca_cert }}" \
@@ -64,99 +55,125 @@
           -addext "subjectKeyIdentifier=hash"
       args: { creates: "{{ ca_cert }}" }
 
-    - name: Create Trust Bundle (single Root CA)
+    # ===== Prepare step-ca data directory =====
+    - name: Copy CA files to step-ca data directory
       ansible.builtin.copy:
-        src: "{{ ca_cert }}"
-        dest: "{{ trust_bundle }}"
-        mode: "0444"
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        remote_src: yes
+        mode: "{{ item.mode }}"
+        owner: "1000"
+        group: "1000"
+      loop:
+        - { src: "{{ ca_cert }}", dest: "{{ data_dir }}/certs/ca.crt", mode: "0644" }
+        - { src: "{{ ca_key }}", dest: "{{ data_dir }}/secrets/ca_key", mode: "0600" }
+
+    # ===== step-ca expects a password file (even for unencrypted keys) =====
+    - name: Create password file for step-ca
+      ansible.builtin.copy:
+        content: ""
+        dest: "{{ data_dir }}/secrets/password"
+        owner: "1000"
+        group: "1000"
+        mode: "0600"
+
+    # ===== step-ca Configuration =====
+    - name: Write step-ca config (ca.json)
+      ansible.builtin.copy:
+        content: |
+          {
+            "root": "/home/step/certs/ca.crt",
+            "crt": "/home/step/certs/ca.crt",
+            "key": "/home/step/secrets/ca_key",
+            "address": ":{{ stepca_port }}",
+            "dnsNames": ["{{ stepca_container }}", "localhost"],
+            "logger": {"level": "info"},
+            "db": {
+              "type": "badgerv2",
+              "dataSource": "/home/step/db"
+            },
+            "authority": {
+              "claims": {
+                "maxTLSCertDuration": "2160h",
+                "defaultTLSCertDuration": "2160h",
+                "minTLSCertDuration": "5m"
+              },
+              "provisioners": [
+                {
+                  "type": "ACME",
+                  "name": "acme",
+                  "forceCN": true
+                }
+              ]
+            },
+            "tls": {
+              "cipherSuites": [
+                "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+                "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+                "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+                "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+              ],
+              "minVersion": 1.2,
+              "maxVersion": 1.3
+            }
+          }
+        dest: "{{ data_dir }}/config/ca.json"
+        mode: "0640"
+        owner: "1000"
+        group: "1000"
+
+    - name: Ensure step-ca contexts.json exists
+      ansible.builtin.copy:
+        content: "{}"
+        dest: "{{ data_dir }}/contexts.json"
+        mode: "0644"
+        owner: "1000"
+        group: "1000"
+
+    - name: Fix ownership of step-ca data directory
+      ansible.builtin.shell: chown -R 1000:1000 {{ data_dir }}
+      changed_when: false
+
+    - name: Write step-ca Docker Compose
+      ansible.builtin.copy:
+        content: |
+          services:
+            stepca:
+              image: smallstep/step-ca:latest
+              container_name: {{ stepca_container }}
+              restart: unless-stopped
+              security_opt:
+                - no-new-privileges:true
+              networks:
+                traefik: null
+              ports:
+                - "{{ stepca_port }}:{{ stepca_port }}"
+              volumes:
+                - ./data:/home/step
+                - /etc/localtime:/etc/localtime:ro
+          networks:
+            traefik:
+              external: true
+        dest: "{{ acme_dir }}/docker-compose.yml"
+        mode: "0440"
         owner: root
         group: docker
-        remote_src: yes
-
-    # ===== Demo-Zertifikat (signiert direkt von Root CA) =====
-    - name: Generate Demo Certificate Key + CSR
-      ansible.builtin.shell: |
-        openssl genrsa -out "{{ pki_dir }}/ca/demo-key.pem" 2048
-        openssl req -new -sha256 \
-          -key "{{ pki_dir }}/ca/demo-key.pem" \
-          -out "{{ pki_dir }}/ca/demo.csr" \
-          -subj "/C=DE/ST=Local/L=Local/O={{ pki_org }}/CN=traefik.{{ inventory_hostname }}"
-      args: { creates: "{{ pki_dir }}/ca/demo.csr" }
-
-    - name: Demo Certificate Extensions Config
-      ansible.builtin.copy:
-        content: |
-          basicConstraints = CA:FALSE
-          keyUsage = digitalSignature, keyEncipherment
-          extendedKeyUsage = serverAuth
-          subjectAltName = DNS:traefik.{{ inventory_hostname }},DNS:*.{{ inventory_hostname }}
-        dest: "{{ pki_dir }}/ca/demo-ext.cnf"
-        mode: "0644"
-
-    - name: Sign Demo Certificate with Root CA
-      ansible.builtin.shell: |
-        openssl x509 -req -sha256 \
-          -in "{{ pki_dir }}/ca/demo.csr" \
-          -CA "{{ ca_cert }}" -CAkey "{{ ca_key }}" -CAcreateserial \
-          -out "{{ pki_dir }}/certs/traefik-{{ inventory_hostname }}.pem" \
-          -days 365 -extfile "{{ pki_dir }}/ca/demo-ext.cnf"
-      args: { creates: "{{ pki_dir }}/certs/traefik-{{ inventory_hostname }}.pem" }
-
-    # ===== Pebble ACME Server TLS =====
-    - name: Generate Pebble Certificate Key
-      ansible.builtin.shell: openssl genrsa -out "{{ pki_dir }}/pebble-key.pem" 2048
-      args: { creates: "{{ pki_dir }}/pebble-key.pem" }
-
-    - name: Pebble Certificate Extensions Config
-      ansible.builtin.copy:
-        content: |
-          basicConstraints = CA:FALSE
-          keyUsage = digitalSignature, keyEncipherment
-          extendedKeyUsage = serverAuth
-          subjectAltName = @alt_names
-          [alt_names]
-          DNS.1 = localhost
-          DNS.2 = acme-pki-pebble
-        dest: "{{ pki_dir }}/pebble-ext.cnf"
-        mode: "0644"
-
-    - name: Create Pebble CSR and Sign It
-      ansible.builtin.shell: |
-        openssl req -new -sha256 \
-          -key "{{ pki_dir }}/pebble-key.pem" \
-          -out "{{ pki_dir }}/pebble.csr" \
-          -subj "/C=DE/ST=Local/L=Local/O={{ pki_org }}/CN=acme.{{ inventory_hostname }}" \
-          -config "{{ pki_dir }}/pebble-ext.cnf"
-        openssl x509 -req -sha256 \
-          -in "{{ pki_dir }}/pebble.csr" \
-          -CA "{{ ca_cert }}" -CAkey "{{ ca_key }}" -CAcreateserial \
-          -out "{{ pki_dir }}/pebble-cert.pem" \
-          -days 365 -extfile "{{ pki_dir }}/pebble-ext.cnf"
-      args: { creates: "{{ pki_dir }}/pebble-cert.pem" }
+        backup: yes
+      notify: Restart stepca
 
     # ===== Traefik Integration =====
-    - name: Copy Trust Bundle to Traefik
+    - name: Ensure traefik providers directory exists
+      ansible.builtin.file:
+        path: "{{ traefik_dir }}/providers"
+        state: directory
+        mode: "0755"
+        owner: root
+        group: docker
+
+    - name: Copy Root CA to Traefik providers
       ansible.builtin.copy:
-        src: "{{ trust_bundle }}"
+        src: "{{ ca_cert }}"
         dest: "{{ traefik_dir }}/providers/symbios-pki-ca.pem"
-        mode: "0444"
-        owner: root
-        group: docker
-        backup: yes
-
-    - name: Copy Pebble Cert to Traefik
-      ansible.builtin.copy:
-        src: "{{ pki_dir }}/pebble-cert.pem"
-        dest: "{{ traefik_dir }}/providers/acme-pki-cert.pem"
-        mode: "0444"
-        owner: root
-        group: docker
-        backup: yes
-
-    - name: Copy Pebble Key to Traefik
-      ansible.builtin.copy:
-        src: "{{ pki_dir }}/pebble-key.pem"
-        dest: "{{ traefik_dir }}/providers/acme-pki-key.pem"
         mode: "0444"
         owner: root
         group: docker
@@ -169,17 +186,11 @@
           certificatesResolvers:
             symbios-pki:
               acme:
-                # Local ACME server - fallback when Let's Encrypt is not available
-                # Uses Docker container name "acme-pki-pebble" - no IP needed
-                caServer: "https://{{ pebble_container }}:{{ pebble_port }}/dir"
+                caServer: "https://{{ stepca_container }}:{{ stepca_port }}/acme/acme/directory"
                 email: "admin@{{ inventory_hostname }}"
                 storage: "/acme-pki/acme.json"
                 httpChallenge:
                   entryPoint: http
-                tlsChallenge: {}
-          networks:
-            traefik:
-              external: true
         dest: "{{ traefik_dir }}/providers/acme-pki-resolver.yml"
         mode: "0444"
         owner: root
@@ -187,107 +198,45 @@
         backup: yes
       notify: Restart traefik
 
-    - name: Write Pebble Config
+    # ===== Host System CA Trust =====
+    - name: Install SymbiOS Root CA in host trust store
       ansible.builtin.copy:
-        content: |
-          {
-            "pebble": {
-              "listenAddress": "0.0.0.0:{{ pebble_port }}",
-              "managementListenAddress": "0.0.0.0:{{ pebble_mgmt_port }}",
-              "certificate": "/test/pebble-cert.pem",
-              "privateKey": "/test/pebble-key.pem",
-              "httpPort": 8000, "tlsPort": 443,
-              "eabAdminEmail": "admin@symbios-dev",
-              "eabHmacKey": "acme-pki-eab-hmac-key",
-              "eabKeyId": "acme-pki-eab-key-id",
-              "policyFile": "/etc/pebble/policy.json"
-            }
-          }
-        dest: "{{ acme_dir }}/pebble-config.json"
+        src: "{{ ca_cert }}"
+        dest: /usr/share/ca-certificates/symbios-pki-ca.crt
         mode: "0644"
+      notify: Update CA certificates
 
-    - name: Write Pebble Docker Compose
-      ansible.builtin.copy:
-        content: |
-          # ============================================================================
-          # ACME PKI - Pebble ACME Server
-          # Fallback for Let's Encrypt during local operation without internet
-          # ============================================================================
-          services:
-            pebble:
-              image: ghcr.io/letsencrypt/pebble:latest
-              container_name: {{ pebble_container }}
-              restart: unless-stopped
-              security_opt:
-                - no-new-privileges:true
-              networks:
-                traefik: null
-              ports:
-                - "{{ pebble_port }}:{{ pebble_port }}"
-                - "{{ pebble_mgmt_port }}:{{ pebble_mgmt_port }}"
-              command:
-                - "-config=/etc/pebble/config.json"
-              volumes:
-                - ./pki:/test
-                - ./data/acme:/acme-data
-                - ./pebble-config.json:/etc/pebble/config.json:ro
-                - ./pebble-policy.json:/etc/pebble/policy.json:ro
-                - /etc/localtime:/etc/localtime:ro
-          networks:
-            traefik:
-              external: true
-        dest: "{{ acme_dir }}/docker-compose.yml"
-        mode: "0440"
-        owner: root
-        group: docker
-        backup: yes
-      notify: Restart pebble
+    - name: Register SymbiOS Root CA in ca-certificates.conf
+      ansible.builtin.lineinfile:
+        path: /etc/ca-certificates.conf
+        line: symbios-pki-ca.crt
+        state: present
+      notify: Update CA certificates
 
-    - name: Export Pebble CA Certificate
-      ansible.builtin.uri:
-        url: "https://localhost:{{ pebble_mgmt_port }}/roots/0"
-        method: GET
-        dest: "{{ pebble_ca_cert }}"
-        validate_certs: no
-        mode: "0644"
-      register: pebble_ca_result
-      ignore_errors: yes
-
+    - name: Rebuild CA bundle for Traefik container
+      ansible.builtin.shell: |
+        cat /etc/ssl/certs/ca-certificates.crt > {{ traefik_dir }}/ca-bundle.crt
+        echo "" >> {{ traefik_dir }}/ca-bundle.crt
+        cat {{ ca_cert }} >> {{ traefik_dir }}/ca-bundle.crt
+      changed_when: false
     - name: Display PKI Summary
       ansible.builtin.debug:
         msg:
           - "============================================================"
-          - "ACME PKI - Local Fallback CA deployed successfully!"
+          - "ACME PKI - step-ca deployed successfully!"
           - "============================================================"
-          - ""
-          - "SymbiOS PKI (flat, single Root CA):"
-          - "  Root CA:         {{ ca_cert }}"
-          - "  Trust Bundle:    {{ trust_bundle }}"
-          - ""
-          - "Pebble ACME Server:"
-          - "  Container:       {{ pebble_container }}"
-          - "  ACME URL:        https://{{ pebble_container }}:{{ pebble_port }}"
-          - "  CA Cert Export:  {{ pebble_ca_cert }}"
-          - ""
-          - "PKI Certificates:"
-          - "  Demo Cert:       {{ pki_dir }}/certs/traefik-{{ inventory_hostname }}.pem"
-          - "  Pebble TLS:      {{ pki_dir }}/pebble-cert.pem"
-          - ""
-          - "Traefik Resolver:  {{ traefik_dir }}/providers/acme-pki-resolver.yml"
-          - ""
-          - "FALLBACK PKI USAGE:"
-          - "============================================================"
-          - "certresolver=symbios-pki -> Uses local ACME server"
-          - ""
-          - "Note: The symbios-pki CA is a fallback when"
-          - "Let's Encrypt is not available (no internet access)."
+          - "  Root CA:   {{ ca_cert }} (10 years)"
+          - "  ACME URL:  https://{{ stepca_container }}:{{ stepca_port }}/acme/acme/directory"
+          - "  Traefik:   {{ traefik_dir }}/providers/acme-pki-resolver.yml"
           - "============================================================"
       changed_when: false
 
   handlers:
-    - name: Restart pebble
+    - name: Restart stepca
       ansible.builtin.shell: cd {{ acme_dir }} && docker compose up -d --force-recreate
       args: { chdir: "{{ acme_dir }}" }
     - name: Restart traefik
-      ansible.builtin.shell: docker-compose up -d --force-recreate
+      ansible.builtin.shell: cd {{ traefik_dir }} && docker compose up -d --force-recreate
       args: { chdir: "{{ traefik_dir }}" }
+    - name: Update CA certificates
+      ansible.builtin.command: update-ca-certificates
