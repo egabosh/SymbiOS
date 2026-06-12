@@ -4,3 +4,5 @@ __pycache__/
 *.tmp
 *local.conf
 *.swp
+/webui/main/static/css/bootstrap.min.css
+/webui/main/static/js/bootstrap.bundle.min.js
