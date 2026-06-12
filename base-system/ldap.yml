@@ -5,7 +5,7 @@
   vars:
     service_name: "ldap"
     service_domain: "{{ service_name }}.{{ default_domain }}"
-    docker_path: "/home/docher/{{ service_name }}"
+    docker_path: "/home/docker/{{ service_name }}"
 
 
   tasks:

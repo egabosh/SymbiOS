@@ -5,7 +5,7 @@
   vars:
     service_name: "symbios-ui"
     service_domain: "{{ service_name }}.{{ default_domain }}"
-    docker_path: "/home/docher/{{ service_name }}"
+    docker_path: "/home/docker/{{ service_name }}"
 
 
   tasks:
@@ -77,14 +77,14 @@
               labels:
                 - traefik.enable=true
                 # HTTPS
-                - traefik.tcp.routers.{{ service_name }}.rule=HostSNI(`symbios.{{ default_domain }}`)
-                - traefik.tcp.routers.{{ service_name }}.entrypoints=https
-                - traefik.tcp.routers.{{ service_name }}.tls=true
+                - traefik.http.routers.{{ service_name }}.rule=Host(`symbios.{{ default_domain }}`)
+                - traefik.http.routers.{{ service_name }}.entrypoints=https
+                - traefik.http.routers.{{ service_name }}.tls=true
                 # Proxy to service-port
-                - traefik.tcp.services.{{ service_name }}.loadbalancer.server.port=8080
-                - traefik.tcp.routers.{{ service_name }}.service={{ service_name }}
+                - traefik.http.services.{{ service_name }}.loadbalancer.server.port=8080
+                - traefik.http.routers.{{ service_name }}.service={{ service_name }}
                 # cert via letsencrypt
-                - traefik.tcp.routers..{{ service_name }}tls.certresolver={{ acme_resolver }}
+                - traefik.http.routers.{{ service_name }}.tls.certresolver={{ acme_resolver }}
                 # Traefik network
                 - traefik.docker.network=traefik
               environment:
@@ -108,6 +108,11 @@
         rsync_opts:
           - "--exclude=__pycache__"
       notify: Restart {{ service_name }}
+
+    - name: set rights
+      ansible.builtin.command:
+        cmd: chmod -R o+r /home/docker/symbios-ui/webui
+      changed_when: false
 
 
   handlers:
