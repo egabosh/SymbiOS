@@ -1,0 +1,120 @@
+---
+- name: symbios-ui
+  hosts: all
+
+  vars:
+    service_name: "symbios-ui"
+    service_domain: "{{ service_name }}.{{ default_domain }}"
+    docker_path: "/home/docher/{{ service_name }}"
+
+
+  tasks:
+
+    - name: Create required directories
+      ansible.builtin.file:
+        path: "{{ docker_path }}/{{ item.path }}"
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+        state: directory
+      loop:
+        - { path: '', owner: root, group: docker, mode: '0550' }
+        - { path: 'log', owner: 10000, group: 10000, mode: '0770' }
+        - { path: 'config', owner: 10000, group: 10000, mode: '0770' }
+        - { path: 'webui', owner: 10000, group: 10000, mode: '0770' }
+
+    - name: "{{ docker_path }}/Dockerfile"
+      blockinfile:
+        path: "{{ docker_path }}/Dockerfile"
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          FROM python:3-slim
+
+          RUN addgroup --system --gid 10000 symbios && \
+              adduser --system --uid 10000 --ingroup symbios symbios && \
+              usermod -a -G adm symbios
+
+          WORKDIR /app
+
+          RUN apt-get update && apt-get install -y --no-install-recommends \
+              curl \
+              procps \
+           && rm -rf /var/lib/apt/lists/*
+
+          RUN pip install --no-cache-dir django gunicorn uvicorn whitenoise ipaddress
+
+          USER symbios
+          ENTRYPOINT ["gunicorn", "webui.asgi:application", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080"]
+        backup: yes
+      notify: Restart {{ service_name }}
+
+
+    - name: "{{ docker_path }}/docker-compose.yml Container Configuration"
+      blockinfile:
+        path: "{{ docker_path }}/docker-compose.yml"
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          services:
+
+            symbios-webui:
+              build:
+                context: .
+                dockerfile: Dockerfile
+              volumes:
+                - ./webui:/app
+                - ./config:/config
+                - ./log:/log
+                - /var/log:/var/log:ro
+              restart: unless-stopped
+              labels:
+                - traefik.enable=true
+                # HTTPS
+                - traefik.tcp.routers.{{ service_name }}.rule=HostSNI(`symbios.{{ default_domain }}`)
+                - traefik.tcp.routers.{{ service_name }}.entrypoints=https
+                - traefik.tcp.routers.{{ service_name }}.tls=true
+                # Proxy to service-port
+                - traefik.tcp.services.{{ service_name }}.loadbalancer.server.port=8080
+                - traefik.tcp.routers.{{ service_name }}.service={{ service_name }}
+                # cert via letsencrypt
+                - traefik.tcp.routers..{{ service_name }}tls.certresolver={{ acme_resolver }}
+                # Traefik network
+                - traefik.docker.network=traefik
+              environment:
+                - PYTHONUNBUFFERED=1
+              networks:
+                - traefik
+
+          networks:
+            traefik:
+              external: true
+
+        backup: yes        
+      notify: Restart {{ service_name }}
+
+    - name: Sync webui to symbios-ui
+      ansible.builtin.synchronize:
+        src: /home/SymbiOS/webui/
+        dest: /home/docker/symbios-ui/webui/
+        delete: yes
+        recursive: yes
+        rsync_opts:
+          - "--exclude=__pycache__"
+      notify: Restart {{ service_name }}
+
+
+  handlers:
+
+    - name: Restart {{ service_name }}
+      ansible.builtin.shell: docker-compose build --pull --no-cache --force-rm && docker compose down && docker-compose up -d
+      args:
+        chdir: "{{ docker_path }}"
+
+

@@ -30,12 +30,13 @@ else
 fi
 
 # initial inventory
-if ! [[ -s /home/ansible/inventory.yml ]]
+inventory_path="/home/docker/symbios-ui/config"
+if ! [[ -s ${inventory_path}/inventory.yml ]]
 then
-  mkdir -p /home/ansible
-  chmod 700 /home/ansible
-  cp /home/SymbiOS/inventory.yml /home/ansible/inventory.yml
-  chmod 600 /home/ansible/inventory.yml
+  mkdir -p ${inventory_path}
+  chmod 700 ${inventory_path}
+  cp /home/SymbiOS/inventory.yml ${inventory_path}/inventory.yml
+  chmod 600 ${inventory_path}/inventory.yml
 fi
 
 # install base-system
@@ -57,4 +58,6 @@ then
   ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/raspberry.yml
   ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/desktop/firefox.yml
 fi
+ansible-playbook --limit localhost  --inventory /home/ansible/inventory.yml /home/SymbiOS/base-system/symbios-ui.yml
+
 
