@@ -1,0 +1,91 @@
+- name: Firefox setup
+  hosts: all
+  tasks:
+
+    - name: Install Firefox
+      apt:
+        name:
+          - firefox
+
+    - name: create LibreWolf /etc/librewolf/policies dir structure
+      file:
+        path: /etc/librewolf/policies
+        state: directory
+
+    - name: Ensure Firefox policy directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      with_items:
+        - "/etc/firefox/policies"
+        - "/etc/librewolf/policies"
+
+    - name: Ensure SymbiOS CA directory exists
+      ansible.builtin.file:
+        path: /usr/local/share/symbios-ca
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install SymbiOS Root CA for Firefox policy trust
+      ansible.builtin.copy:
+        src: /home/docker/acme-pki/pki/ca/root-ca.pem
+        dest: /usr/local/share/symbios-ca/root-ca.pem
+        remote_src: yes
+        owner: root
+        group: root
+        mode: '0444'
+
+    - name: Firefox/LibreWolf policy (local)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/firefox-policies.json"
+        dest: "{{ item }}"
+        owner: root
+        group: root
+        mode: '0444'
+        backup: yes
+      with_items:
+        - "/etc/firefox/policies/policies.json"
+        - "/etc/librewolf/policies/policies.json"
+
+    - name: Get sha256
+      shell: wget -q https://gitlab.com/api/v4/projects/24386000/packages/generic/librewolf/latest/LibreWolf.{{ ansible_architecture }}.AppImage.sha256 -O - | cut -d" " -f1
+      register: command_output
+      changed_when: false
+
+    - set_fact:
+        librewolf_sha256: "{{ command_output.stdout }}"
+
+    - name: Download LibreWolf as Appimage (flatpak ignores policies.json)
+      ansible.builtin.get_url:
+        url: https://gitlab.com/api/v4/projects/24386000/packages/generic/librewolf/latest/LibreWolf.{{ ansible_architecture }}.AppImage
+        dest: /usr/local/bin/librewolf
+        checksum: sha256:{{ librewolf_sha256 }}
+        mode: "0555"
+      changed_when: false
+
+    - name: /usr/local/sbin/autoupdate.d/video-download-helper.update
+      blockinfile:
+        path: /usr/local/sbin/autoupdate.d/video-download-helper.update
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          wget -q $(curl -s https://api.github.com/repositories/108186071/releases/latest | jq -r '.assets[].browser_download_url' | grep linux-{{ ansible_architecture }}.deb | head -n1) -O /tmp/vdh.deb
+          dpkg -i /tmp/vdh.deb
+          rm /tmp/vdh.deb
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: Install video-download-helper
+      command: bash -e /usr/local/sbin/autoupdate.d/video-download-helper.update
+      args:
+        creates: /opt/net.downloadhelper.coapp
+      changed_when: false
+
