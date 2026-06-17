@@ -26,9 +26,9 @@ def _save_inventory_config(config):
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
 
 
-def _ldap_run(cmd):
+def _ldap_run(cmd, input=None):
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        proc = subprocess.run(cmd, input=input, capture_output=True, text=True, timeout=30)
         return proc.stdout, proc.stderr, proc.returncode
     except Exception as e:
         return '', str(e), 1
@@ -50,7 +50,7 @@ def _ldap_search(base_dn, admin_pw, search_base, filter_expr, attrs=None):
 
 def _ldap_modify(ldif, base_dn, admin_pw):
     cmd = ['ldapmodify', '-x', '-H', LDAP_URI, '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw]
-    stdout, stderr, rc = _ldap_run(cmd)
+    stdout, stderr, rc = _ldap_run(cmd, input=ldif)
     return rc, stderr
 
 
