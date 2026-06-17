@@ -55,7 +55,7 @@ DATABASES = {
     }
 }
 
-LANGUAGE_CODE = 'de'
+LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Europe/Berlin'
 USE_I18N = True
 USE_TZ = True
@@ -68,14 +68,19 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_PASSWORD_VALIDATORS = []
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://symbios.local",
-    "https://symbios.",
+AUTHENTICATION_BACKENDS = [
+    'main.backends.LDAPBackend',
+    'django.contrib.auth.backends.ModelBackend',
 ]
 
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+CSRF_TRUSTED_ORIGINS = [
+    'https://symbios.local',
+    'https://symbios.',
+]
 
-MESSAGE_TAGS = {"error": "danger"}
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+MESSAGE_TAGS = {'error': 'danger'}
 
 
 LOGIN_URL = '/login/'
