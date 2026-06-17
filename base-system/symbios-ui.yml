@@ -97,14 +97,14 @@
     - name: Copy symbios-configd.sh
       ansible.builtin.copy:
         src: /home/SymbiOS/symbios-configd.sh
-        dest: /home/SymbiOS/symbios-configd.sh
+        dest: /usr/local/sbin/symbios-configd.sh
         owner: root
         group: root
         mode: "0755"
 
     - name: Install symbios-configd systemd service
       ansible.builtin.copy:
-        content: "[Unit]\nDescription=SymbiOS Config Daemon\nAfter=network.target docker.service\n\n[Service]\nType=simple\nExecStart=/home/SymbiOS/symbios-configd.sh\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n"
+        content: "[Unit]\nDescription=SymbiOS Config Daemon\nAfter=network.target docker.service\n\n[Service]\nType=simple\nExecStart=/usr/local/sbin/symbios-configd.sh\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n"
         dest: /etc/systemd/system/symbios-configd.service
         mode: "0644"
       notify:

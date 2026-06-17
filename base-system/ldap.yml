@@ -604,6 +604,26 @@
         backup: yes
 
 
+# ADMIN_PASSWORD_TASKS_MARKER
+    - name: Wait for LDAP to be ready
+      ansible.builtin.command:
+        cmd: docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn}} -w {{ ldap_admin_password.stdout }}
+      register: ldap_ready
+      until: ldap_ready.rc == 0
+      retries: 10
+      delay: 2
+      changed_when: false
+      no_log: true
+
+    - name: Ensure admin user exists in LDAP with password admin
+      ansible.builtin.shell: |
+        docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D "uid=admin,ou=users,{{ldap_basedn}}" -w admin >/dev/null 2>&1 || \
+        printf 'dn: uid=admin,ou=users,{{ldap_basedn}}\nobjectClass: inetOrgPerson\nobjectClass: posixAccount\nobjectClass: shadowAccount\ncn: admin\nsn: Administrator\nuid: admin\nuidNumber: 30000\ngidNumber: 30001\nhomeDirectory: /home/admin\nloginShell: /bin/bash\nuserPassword: admin\n' | \
+        docker compose exec -T -i openldap ldapadd -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}" -w "{{ ldap_admin_password.stdout }}"
+      args:
+        chdir: "{{ docker_path }}"
+      no_log: true
+
   handlers:
 
     - name: Restart ldap

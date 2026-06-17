@@ -25,7 +25,10 @@
                 </ul>
                 {% if user.is_authenticated %}
                 <span class="navbar-text me-3 text-light"><i class="bi bi-person-circle"></i> {{ user.username }}</span>
-                <a href="/logout/" class="btn btn-outline-light btn-sm">Logout</a>
+                <form method="post" action="/logout/" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-outline-light btn-sm">Logout</button>
+                </form>
                 {% endif %}
             </div>
         </div>
