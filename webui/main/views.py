@@ -10,7 +10,7 @@ from .forms import NetworkConfigForm
 from .utils.log_utils import logs_stream
 
 CONFIG_PATH = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
-LDAP_URI = os.environ.get('LDAP_URI', 'ldap://host.docker.internal')
+LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')
 
 
 def _get_inventory_config():
@@ -26,46 +26,44 @@ def _save_inventory_config(config):
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
 
 
-def _ldap_search(base_dn, admin_pw, search_base, filter_expr, *attrs):
+def _ldap_run(cmd):
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        return proc.stdout, proc.stderr, proc.returncode
+    except Exception as e:
+        return '', str(e), 1
+
+
+def _ldap_search(base_dn, admin_pw, search_base, filter_expr, attrs=None):
     cmd = [
         'ldapsearch', '-x', '-H', LDAP_URI,
         '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw,
-        '-b', search_base
-    ] + list(attrs)
+        '-b', search_base,
+    ]
     if filter_expr:
-        cmd.insert(-len(list(attrs)) if attrs else len(cmd), filter_expr)
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        return result.stdout, result.returncode
-    except Exception:
-        return '', 1
+        cmd.append(filter_expr)
+    if attrs:
+        cmd.extend(attrs)
+    stdout, stderr, rc = _ldap_run(cmd)
+    return stdout, rc
 
 
 def _ldap_modify(ldif, base_dn, admin_pw):
     cmd = ['ldapmodify', '-x', '-H', LDAP_URI, '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw]
-    try:
-        proc = subprocess.run(cmd, input=ldif, capture_output=True, text=True, timeout=30)
-        return proc.returncode, proc.stderr
-    except Exception as e:
-        return 1, str(e)
+    stdout, stderr, rc = _ldap_run(cmd)
+    return rc, stderr
 
 
 def _ldap_add(ldif, base_dn, admin_pw):
     cmd = ['ldapadd', '-x', '-H', LDAP_URI, '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw]
-    try:
-        proc = subprocess.run(cmd, input=ldif, capture_output=True, text=True, timeout=30)
-        return proc.returncode, proc.stderr
-    except Exception as e:
-        return 1, str(e)
+    proc = subprocess.run(cmd, input=ldif, capture_output=True, text=True, timeout=30)
+    return proc.returncode, proc.stderr
 
 
 def _ldap_delete(dn, base_dn, admin_pw):
     cmd = ['ldapdelete', '-x', '-H', LDAP_URI, '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw, dn]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        return proc.returncode, proc.stderr
-    except Exception as e:
-        return 1, str(e)
+    stdout, stderr, rc = _ldap_run(cmd)
+    return rc, stderr
 
 
 def _get_ldap_vars():
@@ -77,17 +75,38 @@ def _get_ldap_vars():
     }
 
 
+def _get_next_uid_number():
+    ldap = _get_ldap_vars()
+    stdout, rc = _ldap_search(
+        ldap['base_dn'], ldap['admin_pw'],
+        f"ou=users,{ldap['base_dn']}", "(objectClass=posixAccount)", ["uidNumber"]
+    )
+    max_uid = 19999
+    if rc == 0:
+        for line in stdout.split('\n'):
+            if line.startswith('uidNumber:'):
+                try:
+                    uid = int(line.split(':', 1)[1].strip())
+                    if uid > max_uid:
+                        max_uid = uid
+                except ValueError:
+                    pass
+    return max_uid + 1
+
+
 def _get_ldap_groups():
     ldap = _get_ldap_vars()
     stdout, rc = _ldap_search(
         ldap['base_dn'], ldap['admin_pw'],
-        f"ou=groups,{ldap['base_dn']}", "(objectClass=posixGroup)", "cn"
+        f"ou=groups,{ldap['base_dn']}", "(objectClass=posixGroup)", ["cn"]
     )
     groups = []
     if rc == 0:
         for line in stdout.split('\n'):
             if line.startswith('cn:'):
-                groups.append(line.split(':', 1)[1].strip())
+                val = line.split(':', 1)[1].strip()
+                if val:
+                    groups.append(val)
     return groups if groups else ['users']
 
 
@@ -95,25 +114,33 @@ def _get_ldap_users():
     ldap = _get_ldap_vars()
     stdout, rc = _ldap_search(
         ldap['base_dn'], ldap['admin_pw'],
-        f"ou=users,{ldap['base_dn']}", "(objectClass=posixAccount)", "uid", "cn", "memberOf"
+        f"ou=users,{ldap['base_dn']}", "(objectClass=posixAccount)", ["uid", "cn"]
     )
     users = []
     if rc == 0:
         current_user = {}
         for line in stdout.split('\n'):
             if line.startswith('uid:'):
-                if current_user:
+                if current_user and current_user.get('uid'):
                     users.append(current_user)
                 current_user = {'uid': line.split(':', 1)[1].strip(), 'cn': '', 'groups': []}
             elif line.startswith('cn:') and current_user:
                 current_user['cn'] = line.split(':', 1)[1].strip()
-            elif line.startswith('memberOf:') and current_user:
-                dn = line.split(':', 1)[1].strip()
-                for part in dn.split(','):
-                    if part.startswith('cn='):
-                        current_user['groups'].append(part[3:])
-        if current_user:
+        if current_user and current_user.get('uid'):
             users.append(current_user)
+
+    for user in users:
+        stdout2, rc2 = _ldap_search(
+            ldap['base_dn'], ldap['admin_pw'],
+            f"ou=groups,{ldap['base_dn']}",
+            f"(&(objectClass=posixGroup)(memberUid={user['uid']}))", ["cn"]
+        )
+        if rc2 == 0:
+            for line in stdout2.split('\n'):
+                if line.startswith('cn:'):
+                    val = line.split(':', 1)[1].strip()
+                    if val:
+                        user['groups'].append(val)
     return users
 
 
@@ -223,16 +250,16 @@ def user_create(request):
             return redirect('users_groups')
 
         ldap = _get_ldap_vars()
+        uid_number = _get_next_uid_number()
         ldif = f"""dn: uid={uid},ou=users,{ldap['base_dn']}
 objectClass: inetOrgPerson
 objectClass: posixAccount
-objectClass: shadowAccount
 uid: {uid}
 sn: {cn.split()[-1] if cn.split() else cn}
 givenName: {cn.split()[0] if cn.split() else cn}
 cn: {cn}
 displayName: {cn}
-uidNumber: 10000
+uidNumber: {uid_number}
 gidNumber: 10000
 homeDirectory: /home/{uid}
 userPassword: {password}
@@ -276,7 +303,7 @@ userPassword: {password}
 """
         rc, err = _ldap_modify(ldif, ldap['base_dn'], ldap['admin_pw'])
         if rc == 0:
-            messages.success(request, f'Passwort für "{uid}" geändert.')
+            messages.success(request, f'Passwort fuer "{uid}" geaendert.')
         else:
             messages.error(request, f'Fehler: {err}')
     return redirect('users_groups')
@@ -319,7 +346,7 @@ memberUid: {uid}
 """
             rc, err = _ldap_modify(ldif, ldap['base_dn'], ldap['admin_pw'])
             if rc == 0:
-                messages.success(request, f'"{uid}" zu "{group}" hinzugefügt.')
+                messages.success(request, f'"{uid}" zu "{group}" hinzugefuegt.')
             else:
                 messages.error(request, f'Fehler: {err}')
     return redirect('users_groups')
