@@ -1,4 +1,5 @@
 from django.contrib.auth import login, get_user_model
+from django.shortcuts import redirect
 
 
 class AutheliaMiddleware:
@@ -25,6 +26,12 @@ class AutheliaMiddleware:
                 request.session.cycle_key()
                 request.backend = 'django.contrib.auth.backends.ModelBackend'
                 login(request, user)
+
+        # Force password change if admin still uses default password
+        if (request.user.is_authenticated
+                and request.session.get('force_password_change')
+                and request.path not in ('/change-password/', '/logout/')):
+            return redirect('/change-password/')
 
         response = self.get_response(request)
         return response
