@@ -70,7 +70,6 @@ AUTH_PASSWORD_VALIDATORS = []
 
 AUTHENTICATION_BACKENDS = [
     'main.backends.LDAPBackend',
-    'django.contrib.auth.backends.ModelBackend',
 ]
 
 CSRF_TRUSTED_ORIGINS = [
