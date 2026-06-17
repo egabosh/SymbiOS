@@ -75,9 +75,12 @@ CSRF_TRUSTED_ORIGINS = [
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+MESSAGE_TAGS = {"error": "danger"}
+
+
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
 
 CONFIG_PATH = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
-LDAP_URI = os.environ.get('LDAP_URI', 'ldap://host.docker.internal')
+LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')
