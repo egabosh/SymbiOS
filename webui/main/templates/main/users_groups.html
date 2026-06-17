@@ -77,8 +77,8 @@
             </div>
         </div>
 
-        <div class="card">
-            <div class="card-header">Benutzer zu Gruppe</div>
+        <div class="card mb-4">
+            <div class="card-header">Benutzer zu Gruppe hinzufügen</div>
             <div class="card-body">
                 <form method="post" action="/users_groups/group/add-user/">
                     {% csrf_token %}
@@ -89,6 +89,22 @@
                         {% for group in groups %}<option value="{{ group }}">{{ group }}</option>{% endfor %}
                     </select>
                     <button type="submit" class="btn btn-outline-primary btn-sm w-100">Hinzufügen</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Benutzer aus Gruppe entfernen</div>
+            <div class="card-body">
+                <form method="post" action="/users_groups/group/remove-user/">
+                    {% csrf_token %}
+                    <select class="form-select form-select-sm mb-2" name="uid">
+                        {% for user in users %}<option value="{{ user.uid }}">{{ user.uid }}</option>{% endfor %}
+                    </select>
+                    <select class="form-select form-select-sm mb-2" name="group">
+                        {% for group in groups %}<option value="{{ group }}">{{ group }}</option>{% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-outline-danger btn-sm w-100">Entfernen</button>
                 </form>
             </div>
         </div>
