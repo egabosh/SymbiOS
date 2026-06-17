@@ -1,0 +1,441 @@
+---
+- name: nextcloud
+  hosts: all
+  tasks:
+
+    - name: Create /home/docker/nextcloud.{{inventory_hostname}} dir
+      ansible.builtin.file:
+        path: /home/docker/nextcloud.{{inventory_hostname}}
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: /home/docker/nextcloud.{{inventory_hostname}}/genpw.sh (generate Random PW for Nextcloud and DB)
+      blockinfile:
+        path: /home/docker/nextcloud.{{inventory_hostname}}/genpw.sh
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd /home/docker/nextcloud.{{inventory_hostname}}
+
+          ncadminpassword=$(pwgen -s 32 1)
+          mysqluser=$(pwgen -s 32 1)
+          mysqlpassword=$(pwgen -s 32 1)
+          
+          [ -f env ] || echo "MYSQL_USER=!MYSQLUSER!
+          MYSQL_PASSWORD=!MYSQLPASSWORD!
+          NEXTCLOUD_ADMIN_PASSWORD=!NCADMINPASSWORD!
+          " >env
+          
+          [ -f env.db ] || echo "MARIADB_USER=!MYSQLUSER!
+          MARIADB_PASSWORD=!MYSQLPASSWORD!
+          " >env.db
+          
+          [ -f env.phpmyadmin ] || echo "PMA_USER=!MYSQLUSER!
+          PMA_PASSWORD=!MYSQLPASSWORD!
+          " >env.phpmyadmin
+          
+          chmod 440 env env.db env.phpmyadmin
+          chown root:docker env env.db env.phpmyadmin
+          sed -i "s/\!MYSQLUSER\!/$mysqluser/g" env env.db env.phpmyadmin
+          sed -i "s/\!MYSQLPASSWORD\!/$mysqlpassword/g" env env.db env.phpmyadmin
+          sed -i "s/\!NCADMINPASSWORD\!/$ncadminpassword/g" env
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: run genpw.sh
+
+    - name: /home/docker/nextcloud.{{inventory_hostname}}/genpw.sh shebang
+      lineinfile:
+        path: /home/docker/nextcloud.{{inventory_hostname}}/genpw.sh
+        insertbefore: BOF
+        line: "#!/bin/bash -e"
+
+    - name: Gen initial passwords if not exists
+      ansible.builtin.shell: ./genpw.sh
+      args:
+        chdir: /home/docker/nextcloud.{{inventory_hostname}}
+        creates: /home/docker/nextcloud.{{inventory_hostname}}/env
+
+    - name: /home/docker/nextcloud.{{inventory_hostname}}/fulldockerfile.sh (Download full Dockerfile)
+      blockinfile:
+        path: /home/docker/nextcloud.{{inventory_hostname}}/fulldockerfile.sh
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd /home/docker/nextcloud.{{inventory_hostname}}
+
+          #wget -q https://github.com/nextcloud/docker/raw/master/.examples/dockerfiles/full/apache/Dockerfile -O Dockerfile
+          #sed -i 's/^FROM nextcloud:apache/FROM nextcloud:stable-apache/' Dockerfile
+          #sed -i 's/^#       libreoffice/        libreoffice/' Dockerfile
+          wget -q https://raw.githubusercontent.com/nextcloud/docker/refs/heads/master/Dockerfile-debian.template -O Dockerfile
+          wget -q https://github.com/nextcloud/docker/raw/master/.examples/dockerfiles/full/apache/supervisord.conf -O supervisord.conf
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: run fulldockerfile.sh
+
+    - name: /home/docker/nextcloud.{{inventory_hostname}}/fulldockerfile.sh shebang
+      lineinfile:
+        path: /home/docker/nextcloud.{{inventory_hostname}}/fulldockerfile.sh
+        insertbefore: BOF
+        line: "#!/bin/bash -e"
+
+    - name: Gen initial passwords if not exists
+      ansible.builtin.shell: ./fulldockerfile.sh
+      args:
+        chdir: /home/docker/nextcloud.{{inventory_hostname}}
+        creates: /home/docker/nextcloud.{{inventory_hostname}}/Dockerfile
+
+    - name: /home/docker/nextcloud.{{inventory_hostname}}/remoteip.conf (real IP logging and no Proxy IP)
+      blockinfile:
+        path: /home/docker/nextcloud.{{inventory_hostname}}/remoteip.conf
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          RemoteIPHeader X-Forwarded-For
+          RemoteIPInternalProxy 10.0.0.0/8
+          RemoteIPInternalProxy 172.16.0.0/12
+          RemoteIPInternalProxy 192.168.0.0/16
+        backup: yes
+      notify: Restart nextcloud
+
+    - name: /home/docker/nextcloud.{{inventory_hostname}}/turnserver.conf
+      blockinfile:
+        path: /home/docker/nextcloud.{{inventory_hostname}}/turnserver.conf
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          syslog
+          listening-port=3478
+          fingerprint
+          use-auth-secret
+          static-auth-secret=
+          realm=nextcloud.{{inventory_hostname}}
+          total-quota=100
+          bps-capacity=0
+          stale-nonce
+          no-multicast-peers
+        backup: yes
+
+    - name: /home/docker/nextcloud.{{inventory_hostname}}/docker-compose.yml Container Configuration
+      blockinfile:
+        path: /home/docker/nextcloud.{{inventory_hostname}}/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+        
+          services:
+            nextcloud.{{inventory_hostname}}:
+              image: nextcloud:stable-apache
+              #build: 
+              #  context: .
+              #  dockerfile: Dockerfile
+              security_opt:
+                - no-new-privileges:true
+              restart: unless-stopped
+              volumes:
+                - ./nextcloud-data:/var/www/html
+                - ./remoteip.conf:/etc/apache2/conf-enabled/remoteip.conf:ro
+                - /etc/localtime:/etc/localtime:ro
+              depends_on:
+                - nextcloud.{{inventory_hostname}}--db
+                - nextcloud.{{inventory_hostname}}--redis
+              env_file: env
+              environment:
+                - MYSQL_HOST=nextcloud.{{inventory_hostname}}--db
+                - MYSQL_DATABASE=nextcloud-db
+                - NEXTCLOUD_TRUSTED_DOMAINS=nextcloud.{{inventory_hostname}}
+                - TRUSTED_PROXIES=192.168.41.200/24
+                - REDIS_HOST=nextcloud.{{inventory_hostname}}--redis
+                - SMTP_HOST=mail.{{inventory_hostname}}
+                - SMTP_PORT=25
+                - MAIL_FROM_ADDRESS=nextcloud
+                - MAIL_DOMAIN={{inventory_hostname}}
+                - OVERWRITEPROTOCOL=https
+                - NEXTCLOUD_ADMIN_USER=ncadmin
+                - PHP_MEMORY_LIMIT=1024M
+                - PHP_UPLOAD_LIMIT=1024M
+              networks:
+                - nextcloud.{{inventory_hostname}}--network
+                - traefik
+              labels:
+                - traefik.enable=true
+                # HTTPS
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.rule=Host(`nextcloud.{{ ansible_facts['nodename'] }}`)
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.entrypoints=https
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.tls=true
+                # Proxy to service-port
+                - traefik.http.services.nextcloud-{{ ansible_facts['hostname'] }}.loadbalancer.server.port=80
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.service=nextcloud-{{ ansible_facts['hostname'] }}
+                # cert via letsencrypt
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.tls.certresolver=letsencrypt
+                # Traefik network
+                - traefik.docker.network=traefik
+                # Nextcloud specific
+                # .well-known for dav
+                - traefik.http.middlewares.nextcloud-{{ ansible_facts['hostname'] }}-dav.redirectRegex.permanent=true
+                - traefik.http.middlewares.nextcloud-{{ ansible_facts['hostname'] }}-dav.redirectRegex.regex=https://(.*)/.well-known/(card|cal)dav
+                - traefik.http.middlewares.nextcloud-{{ ansible_facts['hostname'] }}-dav.redirectRegex.replacement=https://$${1}/remote.php/dav/
+                # activate secHeaders@file and .well.known
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.middlewares=secHeaders@file,nextcloud-{{ ansible_facts['hostname'] }}-dav
+            
+            nextcloud.{{inventory_hostname}}--db:
+              image: mariadb:lts
+              cap_add:
+                - SYS_NICE
+              restart: unless-stopped
+              volumes:
+                - ./nextclouddb-data:/var/lib/mysql
+                - /etc/localtime:/etc/localtime:ro
+              env_file: env.db
+              environment:
+                - MARIADB_RANDOM_ROOT_PASSWORD=1
+                - MARIADB_DATABASE=nextcloud-db
+                - MARIADB_AUTO_UPGRADE=1
+                - MARIADB_INITDB_SKIP_TZINFO=1
+              networks:
+                - nextcloud.{{inventory_hostname}}--network
+
+            nextcloud.{{inventory_hostname}}--redis:
+              image: redis:latest
+              restart: unless-stopped
+              networks:
+                - nextcloud.{{inventory_hostname}}--network
+
+            nextcloud.{{inventory_hostname}}--cron:
+              image: nextcloud:stable-apache
+              restart: unless-stopped
+              volumes:
+                - ./nextcloud-data:/var/www/html
+                - /etc/localtime:/etc/localtime:ro
+              entrypoint: /cron.sh
+              environment:
+                - PHP_MEMORY_LIMIT=1024M
+                - PHP_UPLOAD_LIMIT=1024M
+              depends_on:
+                - nextcloud.{{inventory_hostname}}--db
+              networks:
+                - nextcloud.{{inventory_hostname}}--network
+
+            nextcloud.{{inventory_hostname}}--phpmyadmin:
+              image: phpmyadmin:latest
+              restart: unless-stopped
+              env_file: env.phpmyadmin
+              environment:
+                - PMA_ARBITRARY=0
+                - PMA_HOST=nextcloud.{{inventory_hostname}}--db
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+              networks:
+                - nextcloud.{{inventory_hostname}}--network
+                - traefik
+              labels:
+                - traefik.enable=true
+                # HTTPS
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.rule=Host(`nextcloud-phpmyadmin.{{ ansible_facts['nodename'] }}`)
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.entrypoints=https
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.tls=true
+                # Proxy to service-port
+                - traefik.http.services.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.loadbalancer.server.port=80
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.service=nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin
+                # cert via letsencrypt
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.tls.certresolver=letsencrypt
+                # Auth
+                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.middlewares=secHeaders@file,default-basic-auth@file
+                # Traefik network
+                - traefik.docker.network=traefik
+
+          networks:
+            nextcloud.{{inventory_hostname}}--network:
+              driver: bridge
+              driver_opts:
+                com.docker.network.bridge.name: br-nextcloud
+            traefik:
+              external: true
+
+        backup: yes
+      notify: Restart nextcloud
+
+    - name: Start nextcloud
+      ansible.builtin.shell: docker-compose up -d
+      args:
+        chdir: /home/docker/nextcloud.{{inventory_hostname}}
+        creates: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/config.php
+
+    - name: Wait until nextcloud install is finished
+      wait_for:
+        path: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/config.php
+
+    - name: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/local.config.php (local nextcloud config)
+      blockinfile:
+        path: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/local.config.php
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "// {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          $CONFIG = array (
+            'loglevel' => 1,
+            'logtimezone' => 'Europe/Berlin',
+            'log_rotate_size' => 10485760,
+            'default_phone_region' => 'DE',
+            'session_lifetime' => 28800,
+            'session_keepalive' => true,
+            'skeletondirectory' => '',
+          );
+        backup: yes
+
+    - name: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/local.config.php shebang
+      lineinfile:
+        path: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/local.config.php
+        insertbefore: BOF
+        line: "<?php"
+
+    - name: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud.init.sh
+      blockinfile:
+        path: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud.init.sh
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # waiting for started Nextcloud (Login-Screen)
+          until wget nextcloud.{{inventory_hostname}} -O - | grep -q Login
+          do
+            echo "Waiting for Login screen..."
+            # restart traefik on Problems with ACME/letsencrypt
+            if [ -f /home/docker/traefik/docker-compose.yml ]
+            then
+              if docker compose -f /home/docker/traefik/docker-compose.yml logs | egrep -q "nextcloud.{{inventory_hostname}}.+error.+acme-challenge"
+              then
+                docker compose -f /home/docker/traefik/docker-compose.yml up -d --force-recreate
+              fi
+            fi
+            sleep 10
+          done
+
+          # nextcloud
+          cd /home/docker/nextcloud.{{inventory_hostname}} || exit 1
+
+          # install/enable apps
+          for app in admin_audit bookmarks calendar contacts files_external gpoddersync impersonate maps news notes oauth2 passwords phonetrack photos spreed tasks twofactor_backupcodes twofactor_totp
+          do
+            [ -f app.${app}.installed ] || docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:install ${app} | tee -a nextcloud.init.log >app.${app}.installed 2>&1
+            [ -f app.${app}.installed ] || docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:enable ${app} | tee -a nextcloud.init.log >app.${app}.installed 2>&1
+          done
+
+          # disable apps
+          for app in dashboard nextcloud_announcements serverinfo support updatenotification weather_status
+          do
+            [ -f app.${app}.installed ] || docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:disable ${app} | tee -a nextcloud.update.log >app.${app}.disabled 2>&1
+          done
+          
+          # stun/turn server
+          if [ -s /home/docker/turn.{{inventory_hostname}}/env ]
+          then
+            source /home/docker/turn.{{inventory_hostname}}/env
+            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:turn:add --secret $TURN_SECRET turns turn.{{inventory_hostname}}:5349 udp,tcp
+            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:add turn.{{inventory_hostname}}:5349
+            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:delete stun.nextcloud.com:443
+          fi
+
+          exit 0
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: run nextcloud.init
+
+    - name: Run nextcloud.init after install
+      ansible.builtin.shell: bash /home/docker/nextcloud.{{inventory_hostname}}/nextcloud.init.sh
+      args:
+        chdir: /home/docker/nextcloud.{{inventory_hostname}}
+        creates: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud.init.log
+
+    - name: /usr/local/sbin/autoupdate.d/nextcloud.update
+      blockinfile:
+        path: /usr/local/sbin/autoupdate.d/nextcloud.update
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd /home/docker/nextcloud.{{inventory_hostname}} || continue
+          # Update full Dockerfile
+          /home/docker/nextcloud.{{inventory_hostname}}/fulldockerfile.sh
+          # Nextcloud maintenance and app-update
+          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ db:add-missing-columns
+          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ db:add-missing-indices
+          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ db:add-missing-primary-keys
+          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:update --all
+          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ dav:sync-birthday-calendar
+          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ trashbin:cleanup --all-users
+          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ files:cleanup
+          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ files:scan --all --generate-metadata --home-only --no-interaction -q
+          # maps:scan-photos replaced by "occ files:scan --generate-metadata"
+          #docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ maps:scan-photos --now
+          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ db:convert-filecache-bigint -n
+          # define stun/turn server maybe new password
+          if [ -s /home/docker/turn.{{inventory_hostname}}/env ]
+          then
+             # turn
+             source /home/docker/turn.{{inventory_hostname}}/env
+             docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:turn:delete turns turn.{{inventory_hostname}}:5349 udp,tcp
+             docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:turn:add --secret $TURN_SECRET turns turn.{{inventory_hostname}}:5349 udp,tcp
+             # stun
+             docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:delete turn.{{inventory_hostname}}:5349
+             docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:add turn.{{inventory_hostname}}:5349
+             docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:delete stun.nextcloud.com:443
+          fi
+          if [ -s /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/data/nextcloud.log ]
+          then
+            docker compose -f /home/docker/nextcloud.{{inventory_hostname}}/docker-compose.yml exec -ti -u www-data nextcloud.{{inventory_hostname}} ./occ log:tail 1000 | grep " Error " | grep -v "Can't get app storage," | dd bs=1M count=1 2>/dev/null >"${g_tmp}/nextcloud-error.log"
+            if [ -s "${g_tmp}/nextcloud-error.log" ]
+            then
+              g_echo_error "Errors in Nextcloud Log: $(cat "${g_tmp}/nextcloud-error.log")"
+            fi
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: run nextcloud.update
+
+
+  handlers:
+    - name: run genpw.sh
+      ansible.builtin.shell: ./genpw.sh
+      args:
+        chdir: /home/docker/nextcloud.{{inventory_hostname}}
+      notify: Restart nextcloud
+
+    - name: run fulldockerfile.sh
+      ansible.builtin.shell: ./fulldockerfile.sh
+      args:
+        chdir: /home/docker/nextcloud.{{inventory_hostname}}
+
+    - name: run nextcloud.update
+      ansible.builtin.shell: bash /usr/local/sbin/autoupdate.d/nextcloud.update
+
+    - name: run nextcloud.init
+      ansible.builtin.shell: bash /home/docker/nextcloud.{{inventory_hostname}}/nextcloud.init.sh
+
+    - name: Restart nextcloud
+      ansible.builtin.shell: docker-compose up -d --force-recreate
+      args:
+        chdir: /home/docker/nextcloud.{{inventory_hostname}}
+

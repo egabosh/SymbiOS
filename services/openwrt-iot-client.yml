@@ -1,0 +1,96 @@
+---
+- name: OpenVPN config auf OpenWRT setzen
+  hosts: all
+  gather_facts: no
+
+  vars:
+    openwrt_packages:
+      - openvpn
+      - luci-app-openvpn
+      - luci-i18n-openvpn-de
+    openvpn_uci_vars:
+      # openvpn
+      - { key: "openvpn.iotvpn", value: "openvpn" }
+      - { key: "openvpn.iotvpn.enabled", value: "1" }
+      - { key: "openvpn.iotvpn.config", value: "/etc/openvpn/{{ inventory_hostname }}iot.ovpn" }
+      - { key: "openvpn.iotvpn.verb", value: "3" }
+      # bridge
+      - { key: "network.iot0_dev", value: "device" }
+      - { key: "network.iot0_dev.name", value: "iot0" }
+      - { key: "network.iot0_dev.type", value: "bridge" }
+      - { key: "network.iot0_dev.bridge_empty", value: "1" }
+      - { key: "network.iot0_dev.ports", value: "wlan1-1" }
+      - { key: "network.iot0", value: "interface" }
+      - { key: "network.iot0.device", value: "iot0" }
+      - { key: "network.iot0.ipv6", value: "0" }
+      - { key: "network.iot0.proto", value: "none" }
+      - { key: "network.iot0.defaultroute", value: "0" }
+      - { key: "network.iot0.delegate", value: "0" }
+
+  tasks:
+
+    - name: update opkg db
+      raw: opkg update
+
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: copy .ovpn
+      local_action: >
+        shell scp -B -O /etc/openvpn/iot-easy-rsa/{{ inventory_hostname }}iot.ovpn root@{{ inventory_hostname }}:/etc/openvpn/{{ inventory_hostname }}iot.ovpn
+      changed_when: false
+
+    - name: copy iot-dev2bridge.sh
+      local_action: >
+        shell scp -B -O /etc/openvpn/iot-dev2bridge.sh root@{{ inventory_hostname }}:/etc/openvpn/iot-dev2bridge.sh
+      changed_when: false
+
+    - name: hotplug skript if iot0 is restarted
+      raw: |
+        echo '[ "$ACTION" = "ifup" -a "$INTERFACE" = "iot0" ] && {
+          echo 1 >/proc/sys/net/ipv6/conf/iot0/disable_ipv6
+          /sbin/ip link set dev tap1 master iot0
+        }' >/etc/hotplug.d/iface/99-openvpn
+        chmod 644 /etc/hotplug.d/iface/99-openvpn
+      changed_when: false
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          if echo "{{ item.key }}" | grep -q ".ports"
+          then
+            uci add_list {{ item.key }}="{{ item.value }}"
+          else
+            uci set {{ item.key }}="{{ item.value }}"
+          fi
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ openvpn_uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit network"
+            - "/etc/init.d/network restart"
+            - "chmod 400 /etc/openvpn/{{ inventory_hostname }}iot.ovpn"
+            - "chmod 500 /etc/openvpn/iot-dev2bridge.sh"
+            - "uci commit openvpn"
+            - "/etc/init.d/openvpn enable"
+            - "/etc/init.d/openvpn restart"
+          when: uci_set_result.changed

@@ -7,7 +7,6 @@
     service_domain: "{{ service_name }}.{{ default_domain }}"
     docker_path: "/home/docker/{{ service_name }}"
 
-
   tasks:
 
     - name: Create required directories
@@ -18,46 +17,25 @@
         mode: "{{ item.mode }}"
         state: directory
       loop:
-        - { path: '', owner: root, group: docker, mode: '0550' }
-        - { path: 'log', owner: 10000, group: 10000, mode: '0770' }
-        - { path: 'config', owner: 10000, group: 10000, mode: '0770' }
-        - { path: 'webui', owner: 10000, group: 10000, mode: '0770' }
+        - { path: "", owner: root, group: docker, mode: "0550" }
+        - { path: "log", owner: "10000", group: "10000", mode: "0770" }
+        - { path: "config", owner: "10000", group: "10000", mode: "0770" }
+        - { path: "webui", owner: "10000", group: "10000", mode: "0770" }
 
-    - name: "{{ docker_path }}/Dockerfile"
-      blockinfile:
-        path: "{{ docker_path }}/Dockerfile"
-        create: yes
-        mode: 0440
+    - name: Dockerfile
+      ansible.builtin.copy:
+        src: /root/SymbiOS/webui/Dockerfile
+        dest: "{{ docker_path }}/Dockerfile"
         owner: root
         group: docker
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          FROM python:3-slim
-
-          RUN addgroup --system --gid 10000 symbios && \
-              adduser --system --uid 10000 --ingroup symbios symbios && \
-              usermod -a -G adm symbios
-
-          WORKDIR /app
-
-          RUN apt-get update && apt-get install -y --no-install-recommends \
-              curl \
-              procps \
-           && rm -rf /var/lib/apt/lists/*
-
-          RUN pip install --no-cache-dir django gunicorn uvicorn whitenoise ipaddress
-
-          USER symbios
-          ENTRYPOINT ["gunicorn", "webui.asgi:application", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080"]
-        backup: yes
+        mode: "0440"
       notify: Restart {{ service_name }}
 
-
-    - name: "{{ docker_path }}/docker-compose.yml Container Configuration"
-      blockinfile:
+    - name: docker-compose.yml
+      ansible.builtin.blockinfile:
         path: "{{ docker_path }}/docker-compose.yml"
         create: yes
-        mode: 0440
+        mode: "0440"
         owner: root
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
@@ -74,52 +52,77 @@
                 - ./log:/log
                 - /var/log:/var/log:ro
               restart: unless-stopped
-              labels:
-                - traefik.enable=true
-                # HTTPS
-                - traefik.http.routers.{{ service_name }}.rule=Host(`symbios.{{ default_domain }}`)
-                - traefik.http.routers.{{ service_name }}.entrypoints=https
-                - traefik.http.routers.{{ service_name }}.tls=true
-                # Proxy to service-port
-                - traefik.http.services.{{ service_name }}.loadbalancer.server.port=8080
-                - traefik.http.routers.{{ service_name }}.service={{ service_name }}
-                # cert via letsencrypt
-                - traefik.http.routers.{{ service_name }}.tls.certresolver={{ acme_resolver }}
-                # Traefik network
-                - traefik.docker.network=traefik
               environment:
                 - PYTHONUNBUFFERED=1
+                - CONFIG_PATH=/config/inventory.yml
+                - LDAP_URI=ldap://host.docker.internal
+              extra_hosts:
+                - "host.docker.internal:host-gateway"
+              labels:
+                - traefik.enable=true
+                - traefik.http.routers.{{ service_name }}.rule=Host(`{{ service_domain }}`)
+                - traefik.http.routers.{{ service_name }}.entrypoints=https
+                - traefik.http.routers.{{ service_name }}.tls=true
+                - traefik.http.services.{{ service_name }}.loadbalancer.server.port=8080
+                - traefik.http.routers.{{ service_name }}.service={{ service_name }}
+                - traefik.http.routers.{{ service_name }}.tls.certresolver={{ acme_resolver }}
+                - traefik.docker.network=traefik
               networks:
                 - traefik
 
           networks:
             traefik:
               external: true
-
-        backup: yes        
+        backup: yes
       notify: Restart {{ service_name }}
 
-    - name: Sync webui to symbios-ui
+    - name: Sync webui source
       ansible.builtin.synchronize:
-        src: /home/SymbiOS/webui/
-        dest: /home/docker/symbios-ui/webui/
+        src: /root/SymbiOS/webui/
+        dest: "{{ docker_path }}/webui/"
         delete: yes
         recursive: yes
         rsync_opts:
           - "--exclude=__pycache__"
+          - "--exclude=db.sqlite3"
+          - "--exclude=*.pyc"
       notify: Restart {{ service_name }}
 
-    - name: set rights
+    - name: Set permissions
       ansible.builtin.command:
-        cmd: chmod -R o+r /home/docker/symbios-ui/webui
+        cmd: "chmod -R o+r {{ docker_path }}/webui"
       changed_when: false
 
+    - name: Copy symbios-configd.sh
+      ansible.builtin.copy:
+        src: /root/SymbiOS/symbios-configd.sh
+        dest: /home/SymbiOS/symbios-configd.sh
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install symbios-configd systemd service
+      ansible.builtin.copy:
+        content: "[Unit]\nDescription=SymbiOS Config Daemon\nAfter=network.target docker.service\n\n[Service]\nType=simple\nExecStart=/home/SymbiOS/symbios-configd.sh\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n"
+        dest: /etc/systemd/system/symbios-configd.service
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Enable configd
 
   handlers:
 
     - name: Restart {{ service_name }}
-      ansible.builtin.shell: docker-compose build --pull --no-cache --force-rm && docker compose down && docker-compose up -d
+      ansible.builtin.shell: docker compose build --no-cache && docker compose down && docker compose up -d
       args:
         chdir: "{{ docker_path }}"
 
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: yes
 
+    - name: Enable configd
+      ansible.builtin.systemd:
+        name: symbios-configd
+        enabled: yes
+        state: started

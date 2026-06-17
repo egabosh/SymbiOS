@@ -1,0 +1,193 @@
+---
+- name: sftp-share
+  hosts: all
+  tasks:
+
+  - name: Allow all access to tcp port 28
+    community.general.ufw:
+      rule: allow
+      port: '28'
+      proto: tcp
+
+  - name: Create /home/docker/sftp-share dir
+    ansible.builtin.file:
+      path: /home/docker/sftp-share
+      owner: root
+      group: docker
+      state: directory
+      mode: '0550'
+
+  - name: Create Data-Directory /home/docker/sftp-share/data
+    ansible.builtin.file:
+      path: /home/docker/sftp-share/data
+      owner: root
+      group: 28
+      state: directory
+      mode: '0755'
+
+  - name: Gen sshd ed25519 host-keys
+    ansible.builtin.shell: ssh-keygen -q -N "" -t ed25519 -f ssh_host_ed25519_key
+    args:
+      chdir: /home/docker/sftp-share
+      creates: /home/docker/sftp-share/ssh_host_ed25519_key
+
+  - name: /home/docker/sftp-share/docker-compose.yml
+    blockinfile:
+      path: /home/docker/sftp-share/docker-compose.yml
+      mode: "0440"
+      owner: root
+      group: root
+      create: yes
+      marker: "# {mark} ANSIBLE MANAGED BLOCK"
+      block: |
+        services:
+          sftp-share:
+            build:
+              context: .
+              dockerfile: Dockerfile
+            restart: unless-stopped
+            env_file: env
+            ports: 
+              - "28:28"
+            volumes:
+              - /etc/localtime:/etc/localtime:ro
+              - ./ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key
+              - ./ssh_host_ed25519_key.pub:/etc/ssh/ssh_host_ed25519_key.pub
+              - ./sftp-share.conf:/etc/sftp-share.conf:ro
+              - ./sftp-share-user.conf:/etc/sftp-share-user.conf
+              - ./data:/sftp-share:rw
+            networks:
+              - sftp-share--network
+        
+        networks:
+          sftp-share--network:
+            driver: bridge
+            driver_opts:
+              com.docker.network.bridge.name: br-sftp-share
+      backup: yes
+    notify:
+    - Restart sftp-share
+
+  - name: /home/docker/sftp-share/Dockerfile
+    blockinfile:
+      path: /home/docker/sftp-share/Dockerfile
+      mode: "0440"
+      owner: root
+      group: root
+      create: yes
+      marker: "# {mark} ANSIBLE MANAGED BLOCK"
+      block: |
+        FROM debian:latest
+        RUN apt-get update \
+            && apt-get install -y openssh-server strace \
+            && groupadd -g 28 sftp-share \
+            && mkdir -p -m0755 /run/sshd
+        ENV LANG en_US.utf8
+        COPY ./docker-entrypoint.sh /
+        ENTRYPOINT ["/docker-entrypoint.sh"]
+      backup: yes
+    notify:
+    - Restart sftp-share
+
+  - name: Create env file
+    copy:
+      content: ""
+      dest: /home/docker/sftp-share/env
+      force: no
+      group: root
+      owner: root
+      mode: 0600
+
+  - name: Create additional Config sftp-share-user.conf
+    copy:
+      content: ""
+      dest: /home/docker/sftp-share/sftp-share-user.conf
+      force: no
+      group: root
+      owner: root
+      mode: 0600
+
+  - name: /home/docker/sftp-share/docker-entrypoint.sh
+    blockinfile:
+      path: /home/docker/sftp-share/docker-entrypoint.sh
+      mode: "0555"
+      owner: root
+      group: root
+      create: yes
+      marker: "# {mark} ANSIBLE MANAGED BLOCK"
+      block: |
+        ### create Users by ENV
+        # ToDo: LDAP-Integration
+        for SFTPUSERPW in $SFTPUSERS
+        do
+          SFTPUSER=$(echo ${SFTPUSERPW} | cut -d ":" -f1)
+          useradd -g sftp-share -G 33,101 -m -s /usr/sbin/nologin $SFTPUSER
+          echo ${SFTPUSERPW} | chpasswd
+          unset $SFTPUSERPW
+        done
+        unset $SFTPUSERS
+        ### Start SSHD/SFTP-Server
+        /usr/sbin/sshd -D -f /etc/sftp-share.conf -E /proc/1/fd/1
+      backup: yes
+      validate: /bin/bash -n %s
+    notify:
+    - Restart sftp-share
+
+  - name: /home/docker/sftp-share/docker-entrypoint.sh shebang
+    lineinfile:
+      path: /home/docker/sftp-share/docker-entrypoint.sh
+      insertbefore: BOF
+      line: "#!/bin/bash"
+
+  - name: /home/docker/sftp-share/sftp-share.conf
+    blockinfile:
+      path: /home/docker/sftp-share/sftp-share.conf
+      mode: "0500"
+      owner: root
+      group: root
+      create: yes
+      marker: "# {mark} ANSIBLE MANAGED BLOCK"
+      block: |
+        Port 28
+        Protocol 2
+        PasswordAuthentication no
+        PubkeyAuthentication yes
+        UsePAM yes
+        PrintMotd no
+        PrintLastLog no
+        AcceptEnv LANG LC_*
+        AllowTcpForwarding no
+        AllowAgentForwarding no
+        AllowGroups sftp-share
+        IgnoreRhosts yes
+        PermitRootLogin no
+        PermitTunnel no
+        X11Forwarding no
+        Subsystem sftp internal-sftp -f AUTH -l INFO -u 0007
+        ForceCommand internal-sftp -f AUTH -l INFO -u 0007
+        LogLevel VERBOSE
+        TCPKeepAlive no
+        ClientAliveCountMax 30
+        ClientAliveInterval 60
+        ## Ciphers Check https://sshcheck.com/server/gabosh.net/28
+        #KexAlgorithms curve25519-sha256@libssh.org
+        #HostKeyAlgorithms ssh-ed25519
+        #Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
+        #MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com
+        #AuthenticationMethods publickey,keyboard-interactive
+        ChrootDirectory /sftp-share
+
+        Include /etc/sftp-share-user.conf
+      backup: yes
+      validate: /usr/sbin/sshd -T -f %s
+    notify:
+    - Restart sftp-share
+
+  
+  handlers:
+
+  - name: Restart sftp-share
+    ansible.builtin.shell: docker-compose build --pull --no-cache --force-rm && docker-compose up -d
+    args:
+      chdir: /home/docker/sftp-share
+

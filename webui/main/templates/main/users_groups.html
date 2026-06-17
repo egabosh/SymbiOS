@@ -1,6 +1,136 @@
 {% extends "main/base.html" %}
-{% block content %}
-<h2>Users and Groups</h2>
-<p>BLA</p>
+{% block sidebar %}
+    {% include "main/sidebar_settings.html" %}
 {% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Benutzer & Gruppen (LDAP)</h2>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createUserModal">
+        <i class="bi bi-person-plus"></i> Neuer Benutzer
+    </button>
+</div>
 
+{% if messages %}
+{% for message in messages %}
+<div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+    {{ message }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endfor %}
+{% endif %}
+
+<div class="row">
+    <div class="col-md-9">
+        <div class="card mb-4">
+            <div class="card-header">Benutzer</div>
+            <div class="card-body">
+                {% if users %}
+                <table class="table table-hover table-sm">
+                    <thead>
+                        <tr><th>Benutzername</th><th>Name</th><th>Gruppen</th><th style="width:300px">Aktionen</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for user in users %}
+                        <tr>
+                            <td><strong>{{ user.uid }}</strong></td>
+                            <td>{{ user.cn }}</td>
+                            <td>{% for g in user.groups %}<span class="badge bg-secondary">{{ g }}</span> {% endfor %}</td>
+                            <td>
+                                <form method="post" action="/users_groups/{{ user.uid }}/password/" class="d-inline">
+                                    {% csrf_token %}
+                                    <div class="input-group input-group-sm" style="width:180px;display:inline-flex">
+                                        <input type="password" class="form-control form-control-sm" name="password" placeholder="Neues PW">
+                                        <button type="submit" class="btn btn-outline-warning btn-sm" title="Passwort ändern">&#128273;</button>
+                                    </div>
+                                </form>
+                                <form method="post" action="/users_groups/{{ user.uid }}/delete/" class="d-inline" onsubmit="return confirm('Benutzer wirklich löschen?')">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Löschen">&#128465;</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-muted">Keine LDAP-Benutzer gefunden.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card mb-4">
+            <div class="card-header">Gruppen</div>
+            <div class="card-body">
+                {% for group in groups %}
+                <span class="badge bg-secondary mb-1">{{ group }}</span>
+                {% endfor %}
+                <hr>
+                <form method="post" action="/users_groups/group/create/">
+                    {% csrf_token %}
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control" name="name" placeholder="Neue Gruppe" required>
+                        <button type="submit" class="btn btn-outline-success btn-sm">+</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Benutzer zu Gruppe</div>
+            <div class="card-body">
+                <form method="post" action="/users_groups/group/add-user/">
+                    {% csrf_token %}
+                    <select class="form-select form-select-sm mb-2" name="uid">
+                        {% for user in users %}<option value="{{ user.uid }}">{{ user.uid }}</option>{% endfor %}
+                    </select>
+                    <select class="form-select form-select-sm mb-2" name="group">
+                        {% for group in groups %}<option value="{{ group }}">{{ group }}</option>{% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-outline-primary btn-sm w-100">Hinzufügen</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Neuer Benutzer -->
+<div class="modal fade" id="createUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="/users_groups/create/">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title">Neuen Benutzer erstellen</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Benutzername (UID)</label>
+                        <input type="text" class="form-control" name="uid" required pattern="[a-z0-9._-]+" placeholder="max.mustermann">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Vollständiger Name</label>
+                        <input type="text" class="form-control" name="cn" required placeholder="Max Mustermann">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Passwort</label>
+                        <input type="password" class="form-control" name="password" required minlength="6">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Gruppe</label>
+                        <select class="form-select" name="group">
+                            {% for group in groups %}<option value="{{ group }}">{{ group }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                    <button type="submit" class="btn btn-primary">Erstellen</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

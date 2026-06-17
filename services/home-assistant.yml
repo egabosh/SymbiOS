@@ -1,0 +1,496 @@
+---
+- name: home-assistant
+  hosts: all
+  tasks:
+
+    - name: Create /home/docker/home-assistant.{{inventory_hostname}} dir
+      ansible.builtin.file:
+        path: /home/docker/home-assistant.{{inventory_hostname}}
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: Create /home/docker/home-assistant.{{inventory_hostname}}/config dir
+      ansible.builtin.file:
+        path: /home/docker/home-assistant.{{inventory_hostname}}/config
+        owner: 3000
+        group: 3000
+        state: directory
+        mode: '0750'
+
+    - name: Create /home/docker/home-assistant.{{inventory_hostname}}/ha_pingcheck_data dir
+      ansible.builtin.file:
+        path: /home/docker/home-assistant.{{inventory_hostname}}/ha_pingcheck_data
+        state: directory
+        owner: root
+        group: docker
+        mode: '0755'
+
+    - name: Create oidc client secret
+      ansible.builtin.shell: |
+        /home/docker/authelia.{{inventory_hostname}}/gen-oidc-client-secret.sh /home/docker/home-assistant.{{inventory_hostname}}
+      changed_when: false
+      failed_when: false
+
+    - name: Edit Home Assistant config
+      blockinfile:
+        path: /home/docker/home-assistant.{{inventory_hostname}}/config/configuration.yaml
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Loads default set of integrations. Do not remove.
+          #default_config:
+          homeassistant:
+            name: Home
+            latitude: 51.1657
+            longitude: 10.4515
+            elevation: 100
+            unit_system: metric
+            currency: EUR
+            time_zone: Europe/Berlin
+            external_url: "https://home-assistant.{{inventory_hostname}}"
+
+          api:
+          history:
+          logbook:
+          system_health:
+          ssdp:
+          zeroconf:
+          sun:
+          sensor:
+          weather:
+          person:
+          mobile_app:
+          light:
+          mqtt:
+          tts:
+          stream:
+          media_source:
+                    
+          # Load frontend themes from the themes folder
+          frontend:
+            themes: !include_dir_merge_named themes
+          automation: !include automations.yaml
+          script: !include scripts.yaml
+          scene: !include scenes.yaml
+          
+          http:
+            use_x_forwarded_for: true
+            trusted_proxies:
+              - 192.168.41.200 # traefik
+          
+          auth_oidc:
+            client_id: 'home-assistant'
+            client_secret: '{{ lookup('file', '/home/docker/home-assistant.' + inventory_hostname + '/oidc_password') }}'
+            discovery_url: 'https://auth.{{inventory_hostname}}/.well-known/openid-configuration'
+            display_name: 'Authelia'
+            claims:
+              groups: 'groups'
+            roles:
+              admin: 'home-assistant-admin'
+              user: 'home-assistant'
+
+        backup: yes
+      notify: Restart home-assistant
+
+    - name: Touch HA config files
+      ansible.builtin.file:
+        path: "/home/docker/home-assistant.{{ inventory_hostname }}/config/{{ item }}"
+        state: touch
+        access_time: preserve
+        modification_time: preserve
+      loop:
+        - scenes.yaml
+        - scripts.yaml
+        - automations.yaml
+
+    - name: /home/docker/home-assistant.{{inventory_hostname}}/genpw.sh (generate Random PW for Home Assistant)
+      blockinfile:
+        path: /home/docker/home-assistant.{{inventory_hostname}}/genpw.sh
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd /home/docker/home-assistant.{{inventory_hostname}}
+          homeassistantadminpassword=$(pwgen -s 32 1)
+
+          [ -f env ] || echo "HA_ADMIN_PASSWORD=!HA_ADMIN_PASSWORD!
+          " >env
+
+          chmod 440 env
+          chown root:docker env
+          sed -i "s/\!HA_ADMIN_PASSWORD\!/$homeassistantadminpassword/g" env
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: run genpw.sh
+
+    - name: /home/docker/home-assistant.{{inventory_hostname}}/genpw.sh shebang
+      lineinfile:
+        path: /home/docker/home-assistant.{{inventory_hostname}}/genpw.sh
+        insertbefore: BOF
+        line: "#!/bin/bash -e"
+
+    - name: Gen initial passwords if not exists
+      ansible.builtin.shell: ./genpw.sh
+      args:
+        chdir: /home/docker/home-assistant.{{inventory_hostname}}
+        creates: /home/docker/home-assistant.{{inventory_hostname}}/env
+
+    - name: /home/docker/home-assistant.{{inventory_hostname}}/docker-compose.yml Container Configuration
+      blockinfile:
+        path: /home/docker/home-assistant.{{inventory_hostname}}/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          services:
+            home-assistant.{{inventory_hostname}}:
+              image: ghcr.io/home-assistant/home-assistant
+              restart: unless-stopped
+              volumes:
+                - ./config:/config
+                - ./media:/media
+                - /etc/localtime:/etc/localtime:ro
+                - /run/dbus:/run/dbus:ro
+              network_mode: host
+              privileged: true
+
+            matter.{{inventory_hostname}}:
+              image: ghcr.io/home-assistant-libs/python-matter-server:stable
+              restart: unless-stopped
+              network_mode: host
+              volumes:
+                - ./matter-server:/data
+                - /run/dbus:/run/dbus:ro
+              command: >
+                  --storage-path /data
+                  --primary-interface iot0
+                  --log-level info
+                  --log-level-sdk none
+                  --bluetooth-adapter 0
+              #privileged: true
+            
+            ha_pingcheck.{{inventory_hostname}}:
+              image: nginx:latest
+              restart: unless-stopped
+              ports:
+                - "8889:80"
+              volumes:
+                - /home/docker/home-assistant.{{inventory_hostname}}/ha_pingcheck_data:/usr/share/nginx/html/pingcheck:ro
+                - /etc/localtime:/etc/localtime:ro
+              networks:
+                - traefik
+              labels:
+                - traefik.enable=true
+                - traefik.http.routers.ha_pingcheck.rule=Host(`ha-health.defiant.dedyn.io`)
+                - traefik.http.routers.ha_pingcheck.entrypoints=https
+                - traefik.http.routers.ha_pingcheck.tls=true
+                - traefik.http.routers.ha_pingcheck.tls.certresolver=letsencrypt
+                - traefik.http.routers.ha_pingcheck.middlewares=secHeaders@file
+                - traefik.http.services.ha_pingcheck.loadbalancer.server.port=80
+                - traefik.docker.network=traefik
+
+          networks:
+            traefik:
+              external: true
+        backup: yes
+      notify: Restart home-assistant
+
+    - name: /home/docker/traefik/providers/home-assistant.yml Home-Assistant<->Traefik provider
+      blockinfile:
+        path: /home/docker/traefik/providers/home-assistant.yml
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              home-assistant:
+                rule: "Host(`home-assistant.{{inventory_hostname}}`)"
+                service: home-assistant
+                entryPoints:
+                  - "https"
+                tls:
+                  certresolver: letsencrypt
+                middlewares: 
+                  - "secHeaders@file"
+
+              matter:
+                rule: "Host(`matter.{{inventory_hostname}}`)"
+                service: matter
+                entryPoints:
+                  - "https"
+                tls:
+                  certresolver: letsencrypt
+                middlewares: 
+                  - "secHeaders@file"
+                  - "allowlocalipsonly"
+
+            services:
+              home-assistant:
+                loadBalancer:
+                  servers:
+                    - url: "http://192.168.41.1:8123"
+              matter:
+                loadBalancer:
+                  servers:
+                    - url: "http://192.168.41.1:5580"
+
+    - name: Create group and add user if not exists
+      ansible.builtin.shell: |
+        ldapaddgroup home-assistant
+        ldapaddgroup home-assistant-admin
+        ldapaddusertogroup admin home-assistant-admin
+      changed_when: false
+      failed_when: false
+
+    - name: Clone hass-oidc-auth repo
+      git:
+        repo: "https://github.com/christiaangoossens/hass-oidc-auth.git"
+        dest: "/tmp/hass-oidc-auth"
+        version: "main"
+
+    - name: Create custom_components dir
+      file:
+        path: "/home/docker/home-assistant.{{inventory_hostname}}/config/custom_components"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy hass_oidc_auth component
+      copy:
+        src: "/tmp/hass-oidc-auth/custom_components/auth_oidc"
+        dest: "/home/docker/home-assistant.{{inventory_hostname}}/config/custom_components"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart home-assistant
+
+    - name: write OIDC config in authelias configuration.yml
+      ansible.builtin.blockinfile:
+        path: /home/docker/authelia.{{inventory_hostname}}/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC home-assistant.{{inventory_hostname}}"
+        block: |2
+                # home-assistant
+                - client_id: 'home-assistant'
+                  client_name: 'Home Assistant'
+                  client_secret: '{{ lookup('file', '/home/docker/home-assistant.' + inventory_hostname + '/oidc_digest') }}'
+                  public: false
+                  require_pkce: true
+                  pkce_challenge_method: 'S256'
+                  authorization_policy: '{{ lookup('file', '/home/docker/authelia.' + inventory_hostname + '/authorization_policy') }}'
+                  consent_mode: 'implicit'
+                  redirect_uris:
+                    - 'https://home-assistant.{{inventory_hostname}}/auth/oidc/callback'
+                  scopes:
+                    - 'openid'
+                    - 'profile'
+                    - 'groups'
+                  response_types:
+                    - 'code'
+                  grant_types:
+                    - 'authorization_code'
+                  access_token_signed_response_alg: 'none'
+                  userinfo_signed_response_alg: 'none'
+                  token_endpoint_auth_method: 'client_secret_post'
+        insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
+        backup: yes
+        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
+      notify: Restart authelia
+
+    - name: Start home-assistant
+      ansible.builtin.shell: docker-compose up -d
+      args:
+        chdir: /home/docker/home-assistant.{{inventory_hostname}}
+        creates: /home/docker/home-assistant.{{inventory_hostname}}/config/home-assistant_v2.db
+     
+    - name: Wait until home-assistant install is finished
+      wait_for:
+        path: /home/docker/home-assistant.{{inventory_hostname}}/config/home-assistant_v2.db
+     
+    - name: /home/docker/home-assistant.{{inventory_hostname}}/home-assistant.init.sh
+      blockinfile:
+        path: /home/docker/home-assistant.{{inventory_hostname}}/home-assistant.init.sh
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # home-assistant
+          sleep 30
+          cd /home/docker/home-assistant.{{inventory_hostname}} || exit 1
+          . ./env
+          curl --location --request POST 'http://192.168.41.1:8123/api/onboarding/users' --header 'Content-Type: application/json' --data-raw "{
+            \"client_id\": \"http://192.168.41.1:8123/\",
+           \"name\": \"admin\",
+            \"username\": \"haadmin\",
+            \"password\": \"${HA_ADMIN_PASSWORD}\",
+            \"language\": \"de\"
+          }" >>/home/docker/home-assistant.{{inventory_hostname}}/home-assistant.init.log 2>&1
+          # install home assistant community store (hacs)
+          docker compose exec -ti home-assistant.{{inventory_hostname}} wget -O - https://get.hacs.xyz | bash - >>/home/docker/home-assistant.{{inventory_hostname}}/home-assistant.init.log 2>&1
+        backup: yes
+        validate: /bin/bash -n %s
+      #notify: run home-assistant.init
+    
+    - name: Run home-assistant.init after install
+      ansible.builtin.shell: bash /home/docker/home-assistant.{{inventory_hostname}}/home-assistant.init.sh
+      args:
+        chdir: /home/docker/home-assistant.{{inventory_hostname}}
+        creates: /home/docker/home-assistant.{{inventory_hostname}}/home-assistant.init.log
+
+    - name: Allow port 8123/tcp on iot0 interface for healthchecks for example for shelly switches
+      community.general.ufw:
+        rule: allow
+        port: '8123'
+        proto: tcp
+        interface: iot0
+        direction: in
+
+    - name: Matter UDP ports
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: udp
+      loop:
+        - 5353  # mDNS
+    
+
+    ### Pingcheck for IOT Hosts
+    - name: Deploy ha_pingcheck ping loop script
+      ansible.builtin.copy:
+        content: |
+          #!/bin/bash
+          #set -o pipefail
+          HOME=/tmp
+          . /etc/bash/gaboshlib.include
+          DIR="/home/docker/home-assistant.{{inventory_hostname}}/ha_pingcheck_data"
+          ROUTER="router"
+          INTERVAL=2
+
+          g_echo "ha_pingcheck started"
+
+          while true
+          do
+            g_echo "Fetching host list"
+            hosts=$(ssh -o StrictHostKeyChecking=no \
+                        -o BatchMode=yes \
+                        -o ConnectTimeout=5 \
+                        root@"$ROUTER" \
+                        "uci show dhcp | grep 'name=' | cut -d\"'\" -f2" 2>/dev/null) || true
+
+            [ -n "$hosts" ] || {
+              g_echo "No hosts"
+              sleep "$INTERVAL"
+              continue
+            }
+
+            mkdir -p "$DIR"
+
+            for host in $hosts
+            do
+              [ -z "$host" ] && continue
+
+              start=$(date +%s%N)
+              if ping -c3 -W3 $host >/dev/null 2>&1 || ping -c3 -W3 $host >/dev/null 2>&1
+              then
+                rtt=$(( ( $(date +%s%N) - start ) / 1000000 ))
+                printf '{"hostname":"%s","status":"up","last_check":"%s","rtt":%d}\n' \
+                  "$host" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rtt" \
+                  > "$DIR/${host}.json"
+                g_logger "host $host up"
+              else
+                printf '{"hostname":"%s","status":"down","last_check":"%s"}\n' \
+                  "$host" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                  > "$DIR/${host}.json"
+                g_logger "host $host down"
+              fi
+            done
+
+            sleep "$INTERVAL"
+          done
+        dest: /usr/local/bin/ha_pingcheck
+        owner: root
+        group: root
+        mode: '0755'
+      notify: Restart ha_pingcheck
+
+    - name: Deploy systemd service for ha_pingcheck
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=HA Ping Check Host Loop
+          After=network.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/ha_pingcheck
+          Restart=always
+          RestartSec=10
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/ha_pingcheck.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart ha_pingcheck
+
+    - name: Enable and start ha_pingcheck service
+      ansible.builtin.systemd:
+        name: ha_pingcheck
+        state: started
+        enabled: true
+        daemon_reload: true
+      notify: Restart ha_pingcheck
+
+    - name: Allow port 8889/tcp on iot0 interface for ping healthchecks for example for shelly scripts
+      community.general.ufw:
+        rule: allow
+        port: '8889'
+        proto: tcp
+        interface: iot0
+        direction: in
+
+
+  handlers:
+    - name: run genpw.sh
+      ansible.builtin.shell: ./genpw.sh
+      args:
+        chdir: /home/docker/home-assistant.{{inventory_hostname}}
+      notify: Restart home-assistant
+
+    #- name: run home-assistant.init
+    #  ansible.builtin.shell: bash /home/docker/home-assistant.{{inventory_hostname}}/home-assistant.init.sh
+
+    - name: Restart home-assistant
+      ansible.builtin.shell: docker-compose up -d --force-recreate
+      args:
+        chdir: /home/docker/home-assistant.{{inventory_hostname}}
+
+    - name: Restart authelia
+      ansible.builtin.shell: docker-compose down && docker-compose up -d
+      args:
+        chdir: /home/docker/authelia.{{inventory_hostname}}
+
+    - name: Restart ha_pingcheck
+      ansible.builtin.systemd:
+        name: ha_pingcheck
+        state: restarted
+        daemon_reload: true
+
+

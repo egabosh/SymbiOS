@@ -1,0 +1,16 @@
+all:
+  vars:
+    default_domain: "defiant.dedyn.io"
+    instance: "default"
+    ldap_basedn: "{{ 'dc=openldap,' ~ default_domain | split('.') | map('regex_replace', '^(.*)$', 'dc=\\1') | join(',') }}"
+    smtp_user: "admin@ds9.dedyn.io"
+    smtp_password: 'L+ib-k:F-XoQOEdV6%=fd:,VxHMtO!,U'
+    smtp_server: 'mail.ds9.dedyn.io'
+    smtp_from: 'admin@ds9.dedyn.io'
+    smtp_tls: "force"
+    smtp_port: 587
+    ansible_user: "root"
+    ansible_python_interpreter: "/usr/bin/python3"
+  hosts:
+    localhost:
+      ansible_connection: local
