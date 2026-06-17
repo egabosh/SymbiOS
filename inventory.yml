@@ -4,7 +4,7 @@ all:
     default_domain: "local"
     acme_resolver: "{{ 'symbios-pki' if default_domain == 'local' else 'letsencrypt' }}"
     instance: "default"
-    ldap_basedn: "{{ 'dc=openldap,' ~ default_domain | split('.') | map('regex_replace', '^(.*)$', 'dc=\\1') | join(',') }}"
+    ldap_basedn: "dc=openldap,dc=local"
     # ddns (desec.io)
     ddns_apikey: ''
     ddns_host: ''
