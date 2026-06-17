@@ -321,6 +321,36 @@ userPassword: {password}
 
 
 @login_required
+def user_update_email(request, uid):
+    if request.method == 'POST':
+        email = request.POST.get('email', '').strip()
+        ldap = _get_ldap_vars()
+        user_dn = f"uid={uid},ou=users,{ldap['base_dn']}"
+
+        # Remove existing mail attribute first
+        _ldap_modify(f"""dn: {user_dn}
+changetype: modify
+delete: mail
+""", ldap['base_dn'], ldap['admin_pw'])
+
+        # Add new email if provided
+        if email:
+            rc, err = _ldap_modify(f"""dn: {user_dn}
+changetype: modify
+add: mail
+mail: {email}
+""", ldap['base_dn'], ldap['admin_pw'])
+        else:
+            rc = 0
+
+        if rc == 0:
+            messages.success(request, f'Email for "{uid}" updated.')
+        else:
+            messages.error(request, f'Error: {err}')
+    return redirect('users')
+
+
+@login_required
 def group_create(request):
     if request.method == 'POST':
         name = request.POST.get('name', '').strip()

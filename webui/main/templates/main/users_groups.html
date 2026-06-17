@@ -30,7 +30,15 @@
                 {% for user in users %}
                 <tr>
                     <td><strong>{{ user.uid }}</strong></td>
-                    <td>{{ user.email|default:"-" }}</td>
+                    <td>
+                        <form method="post" action="/users/{{ user.uid }}/email/" class="d-inline">
+                            {% csrf_token %}
+                            <div class="input-group input-group-sm" style="width:220px;display:inline-flex">
+                                <input type="email" class="form-control form-control-sm" name="email" value="{{ user.email|default:'' }}" placeholder="email">
+                                <button type="submit" class="btn btn-outline-info btn-sm" title="Save email">&#128190;</button>
+                            </div>
+                        </form>
+                    </td>
                     <td>
                         {% for g in user.groups %}
                         <span class="badge bg-secondary">
@@ -105,7 +113,7 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Password</label>
-                        <input type="password" class="form-control" name="password" required minlength="6">
+                        <input type="password" class="form-control" name="password" required>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Group</label>
