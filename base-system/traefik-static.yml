@@ -1,0 +1,52 @@
+log:
+  level: ERROR
+
+entryPoints:
+  http:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: https
+          scheme: https
+          permanent: true
+  https:
+    address: ":443"
+    http:
+      encodedCharacters:
+        allowEncodedSemicolon: true
+        allowEncodedPercent: true
+        allowEncodedQuestionMark: true
+        allowEncodedHash: true
+  ldaps:
+    address: ":636"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+  file:
+    directory: "/etc/traefik/providers.local"
+    watch: true
+
+api:
+  dashboard: true
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      httpChallenge:
+        entryPoint: http
+      email: "ssl@SymbiOS"
+      storage: "/letsencrypt/acme.json"
+  symbios-pki:
+    acme:
+      caServer: "https://acme-pki-stepca:9000/acme/acme/directory"
+      email: "admin@localhost"
+      storage: "/letsencrypt/symbios-pki-acme.json"
+      httpChallenge:
+        entryPoint: http
+
+accessLog:
+  filePath: "/log/access.log"
+  format: json
