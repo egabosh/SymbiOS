@@ -29,7 +29,7 @@ def _save_inventory_config(config):
 def _ldap_search(base_dn, admin_pw, search_base, filter_expr, *attrs):
     cmd = [
         'ldapsearch', '-x', '-H', LDAP_URI,
-        '-D', f'cn=admin,{base_dn}', '-w', admin_pw,
+        '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw,
         '-b', search_base
     ] + list(attrs)
     if filter_expr:
@@ -42,7 +42,7 @@ def _ldap_search(base_dn, admin_pw, search_base, filter_expr, *attrs):
 
 
 def _ldap_modify(ldif, base_dn, admin_pw):
-    cmd = ['ldapmodify', '-x', '-H', LDAP_URI, '-D', f'cn=admin,{base_dn}', '-w', admin_pw]
+    cmd = ['ldapmodify', '-x', '-H', LDAP_URI, '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw]
     try:
         proc = subprocess.run(cmd, input=ldif, capture_output=True, text=True, timeout=30)
         return proc.returncode, proc.stderr
@@ -51,7 +51,7 @@ def _ldap_modify(ldif, base_dn, admin_pw):
 
 
 def _ldap_add(ldif, base_dn, admin_pw):
-    cmd = ['ldapadd', '-x', '-H', LDAP_URI, '-D', f'cn=admin,{base_dn}', '-w', admin_pw]
+    cmd = ['ldapadd', '-x', '-H', LDAP_URI, '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw]
     try:
         proc = subprocess.run(cmd, input=ldif, capture_output=True, text=True, timeout=30)
         return proc.returncode, proc.stderr
@@ -60,7 +60,7 @@ def _ldap_add(ldif, base_dn, admin_pw):
 
 
 def _ldap_delete(dn, base_dn, admin_pw):
-    cmd = ['ldapdelete', '-x', '-H', LDAP_URI, '-D', f'cn=admin,{base_dn}', '-w', admin_pw, dn]
+    cmd = ['ldapdelete', '-x', '-H', LDAP_URI, '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw, dn]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         return proc.returncode, proc.stderr
@@ -95,7 +95,7 @@ def _get_ldap_users():
     ldap = _get_ldap_vars()
     stdout, rc = _ldap_search(
         ldap['base_dn'], ldap['admin_pw'],
-        f"ou=people,{ldap['base_dn']}", "(objectClass=posixAccount)", "uid", "cn", "memberOf"
+        f"ou=users,{ldap['base_dn']}", "(objectClass=posixAccount)", "uid", "cn", "memberOf"
     )
     users = []
     if rc == 0:
@@ -223,7 +223,7 @@ def user_create(request):
             return redirect('users_groups')
 
         ldap = _get_ldap_vars()
-        ldif = f"""dn: uid={uid},ou=people,{ldap['base_dn']}
+        ldif = f"""dn: uid={uid},ou=users,{ldap['base_dn']}
 objectClass: inetOrgPerson
 objectClass: posixAccount
 objectClass: shadowAccount
@@ -252,7 +252,7 @@ userPassword: {password}
 def user_delete(request, uid):
     if request.method == 'POST':
         ldap = _get_ldap_vars()
-        rc, err = _ldap_delete(f"uid={uid},ou=people,{ldap['base_dn']}", ldap['base_dn'], ldap['admin_pw'])
+        rc, err = _ldap_delete(f"uid={uid},ou=users,{ldap['base_dn']}", ldap['base_dn'], ldap['admin_pw'])
         if rc == 0:
             messages.success(request, f'Benutzer "{uid}" gelöscht.')
         else:
@@ -269,7 +269,7 @@ def user_set_password(request, uid):
             return redirect('users_groups')
 
         ldap = _get_ldap_vars()
-        ldif = f"""dn: uid={uid},ou=people,{ldap['base_dn']}
+        ldif = f"""dn: uid={uid},ou=users,{ldap['base_dn']}
 changetype: modify
 replace: userPassword
 userPassword: {password}

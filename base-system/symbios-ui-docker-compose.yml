@@ -15,7 +15,7 @@ services:
       - PYTHONUNBUFFERED=1
       - DJANGO_SECRET_KEY=symbios-change-this-in-production
       - CONFIG_PATH=/config/inventory.yml
-      - LDAP_URI=ldap://host.docker.internal
+      - LDAP_URI=ldap://openldap
     extra_hosts:
       - "host.docker.internal:host-gateway"
     labels:
