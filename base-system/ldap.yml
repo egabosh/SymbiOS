@@ -615,11 +615,9 @@
       changed_when: false
       no_log: true
 
-    - name: Ensure admin user exists in LDAP with password admin
+    - name: Ensure admin user password is admin in LDAP
       ansible.builtin.shell: |
-        docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D "uid=admin,ou=users,{{ldap_basedn}}" -w admin >/dev/null 2>&1 || \
-        printf 'dn: uid=admin,ou=users,{{ldap_basedn}}\nobjectClass: inetOrgPerson\nobjectClass: posixAccount\nobjectClass: shadowAccount\ncn: admin\nsn: Administrator\nuid: admin\nuidNumber: 30000\ngidNumber: 30001\nhomeDirectory: /home/admin\nloginShell: /bin/bash\nuserPassword: admin\n' | \
-        docker compose exec -T -i openldap ldapadd -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}" -w "{{ ldap_admin_password.stdout }}"
+        docker compose exec -T openldap ldappasswd -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}" -w "{{ ldap_admin_password.stdout }}" -s admin "uid=admin,ou=users,{{ldap_basedn}}"
       args:
         chdir: "{{ docker_path }}"
       no_log: true
