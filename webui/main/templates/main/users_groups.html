@@ -34,7 +34,19 @@
                         <tr>
                             <td><strong>{{ user.uid }}</strong></td>
                             <td>{{ user.cn }}</td>
-                            <td>{% for g in user.groups %}<span class="badge bg-secondary">{{ g }}</span> {% endfor %}</td>
+                            <td>
+                                {% for g in user.groups %}
+                                <span class="badge bg-secondary">
+                                    {{ g }}
+                                    <form method="post" action="/users_groups/group/remove-user/" class="d-inline">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="uid" value="{{ user.uid }}">
+                                        <input type="hidden" name="group" value="{{ g }}">
+                                        <button type="submit" class="btn-close btn-close-white ms-1" style="font-size:0.55rem;vertical-align:middle;" title="Remove from {{ g }}" aria-label="Remove from {{ g }}"></button>
+                                    </form>
+                                </span>
+                                {% endfor %}
+                            </td>
                             <td>
                                 <form method="post" action="/users_groups/{{ user.uid }}/password/" class="d-inline">
                                     {% csrf_token %}
@@ -77,7 +89,7 @@
             </div>
         </div>
 
-        <div class="card mb-4">
+        <div class="card">
             <div class="card-header">Add User to Group</div>
             <div class="card-body">
                 <form method="post" action="/users_groups/group/add-user/">
@@ -89,22 +101,6 @@
                         {% for group in groups %}<option value="{{ group }}">{{ group }}</option>{% endfor %}
                     </select>
                     <button type="submit" class="btn btn-outline-primary btn-sm w-100">Add</button>
-                </form>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-header">Remove User from Group</div>
-            <div class="card-body">
-                <form method="post" action="/users_groups/group/remove-user/">
-                    {% csrf_token %}
-                    <select class="form-select form-select-sm mb-2" name="uid">
-                        {% for user in users %}<option value="{{ user.uid }}">{{ user.uid }}</option>{% endfor %}
-                    </select>
-                    <select class="form-select form-select-sm mb-2" name="group">
-                        {% for group in groups %}<option value="{{ group }}">{{ group }}</option>{% endfor %}
-                    </select>
-                    <button type="submit" class="btn btn-outline-danger btn-sm w-100">Remove</button>
                 </form>
             </div>
         </div>
