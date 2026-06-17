@@ -4,9 +4,9 @@
 {% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2>Benutzer & Gruppen (LDAP)</h2>
+    <h2>Users & Groups (LDAP)</h2>
     <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createUserModal">
-        <i class="bi bi-person-plus"></i> Neuer Benutzer
+        <i class="bi bi-person-plus"></i> New User
     </button>
 </div>
 
@@ -22,12 +22,12 @@
 <div class="row">
     <div class="col-md-9">
         <div class="card mb-4">
-            <div class="card-header">Benutzer</div>
+            <div class="card-header">Users</div>
             <div class="card-body">
                 {% if users %}
                 <table class="table table-hover table-sm">
                     <thead>
-                        <tr><th>Benutzername</th><th>Name</th><th>Gruppen</th><th style="width:300px">Aktionen</th></tr>
+                        <tr><th>Username</th><th>Name</th><th>Groups</th><th style="width:300px">Actions</th></tr>
                     </thead>
                     <tbody>
                         {% for user in users %}
@@ -39,13 +39,13 @@
                                 <form method="post" action="/users_groups/{{ user.uid }}/password/" class="d-inline">
                                     {% csrf_token %}
                                     <div class="input-group input-group-sm" style="width:180px;display:inline-flex">
-                                        <input type="password" class="form-control form-control-sm" name="password" placeholder="Neues PW">
-                                        <button type="submit" class="btn btn-outline-warning btn-sm" title="Passwort ändern">&#128273;</button>
+                                        <input type="password" class="form-control form-control-sm" name="password" placeholder="New password">
+                                        <button type="submit" class="btn btn-outline-warning btn-sm" title="Change password">&#128273;</button>
                                     </div>
                                 </form>
-                                <form method="post" action="/users_groups/{{ user.uid }}/delete/" class="d-inline" onsubmit="return confirm('Benutzer wirklich löschen?')">
+                                <form method="post" action="/users_groups/{{ user.uid }}/delete/" class="d-inline" onsubmit="return confirm('Really delete user?')">
                                     {% csrf_token %}
-                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Löschen">&#128465;</button>
+                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">&#128465;</button>
                                 </form>
                             </td>
                         </tr>
@@ -53,7 +53,7 @@
                     </tbody>
                 </table>
                 {% else %}
-                <p class="text-muted">Keine LDAP-Benutzer gefunden.</p>
+                <p class="text-muted">No LDAP users found.</p>
                 {% endif %}
             </div>
         </div>
@@ -61,7 +61,7 @@
 
     <div class="col-md-3">
         <div class="card mb-4">
-            <div class="card-header">Gruppen</div>
+            <div class="card-header">Groups</div>
             <div class="card-body">
                 {% for group in groups %}
                 <span class="badge bg-secondary mb-1">{{ group }}</span>
@@ -70,7 +70,7 @@
                 <form method="post" action="/users_groups/group/create/">
                     {% csrf_token %}
                     <div class="input-group input-group-sm">
-                        <input type="text" class="form-control" name="name" placeholder="Neue Gruppe" required>
+                        <input type="text" class="form-control" name="name" placeholder="New group" required>
                         <button type="submit" class="btn btn-outline-success btn-sm">+</button>
                     </div>
                 </form>
@@ -78,7 +78,7 @@
         </div>
 
         <div class="card mb-4">
-            <div class="card-header">Benutzer zu Gruppe hinzufügen</div>
+            <div class="card-header">Add User to Group</div>
             <div class="card-body">
                 <form method="post" action="/users_groups/group/add-user/">
                     {% csrf_token %}
@@ -88,13 +88,13 @@
                     <select class="form-select form-select-sm mb-2" name="group">
                         {% for group in groups %}<option value="{{ group }}">{{ group }}</option>{% endfor %}
                     </select>
-                    <button type="submit" class="btn btn-outline-primary btn-sm w-100">Hinzufügen</button>
+                    <button type="submit" class="btn btn-outline-primary btn-sm w-100">Add</button>
                 </form>
             </div>
         </div>
 
         <div class="card">
-            <div class="card-header">Benutzer aus Gruppe entfernen</div>
+            <div class="card-header">Remove User from Group</div>
             <div class="card-body">
                 <form method="post" action="/users_groups/group/remove-user/">
                     {% csrf_token %}
@@ -104,46 +104,46 @@
                     <select class="form-select form-select-sm mb-2" name="group">
                         {% for group in groups %}<option value="{{ group }}">{{ group }}</option>{% endfor %}
                     </select>
-                    <button type="submit" class="btn btn-outline-danger btn-sm w-100">Entfernen</button>
+                    <button type="submit" class="btn btn-outline-danger btn-sm w-100">Remove</button>
                 </form>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Modal: Neuer Benutzer -->
+<!-- Modal: New User -->
 <div class="modal fade" id="createUserModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="post" action="/users_groups/create/">
                 {% csrf_token %}
                 <div class="modal-header">
-                    <h5 class="modal-title">Neuen Benutzer erstellen</h5>
+                    <h5 class="modal-title">Create New User</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label class="form-label">Benutzername (UID)</label>
+                        <label class="form-label">Username (UID)</label>
                         <input type="text" class="form-control" name="uid" required pattern="[a-z0-9._-]+" placeholder="max.mustermann">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Vollständiger Name</label>
+                        <label class="form-label">Full Name</label>
                         <input type="text" class="form-control" name="cn" required placeholder="Max Mustermann">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Passwort</label>
+                        <label class="form-label">Password</label>
                         <input type="password" class="form-control" name="password" required minlength="6">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Gruppe</label>
+                        <label class="form-label">Group</label>
                         <select class="form-select" name="group">
                             {% for group in groups %}<option value="{{ group }}">{{ group }}</option>{% endfor %}
                         </select>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
-                    <button type="submit" class="btn btn-primary">Erstellen</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create</button>
                 </div>
             </form>
         </div>

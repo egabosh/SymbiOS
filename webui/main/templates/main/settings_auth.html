@@ -3,7 +3,7 @@
     {% include "main/sidebar_settings.html" %}
 {% endblock %}
 {% block content %}
-<h2>Auth-Einstellungen</h2>
+<h2>Auth Settings</h2>
 
 {% if messages %}
 {% for message in messages %}
@@ -21,21 +21,21 @@
             {% csrf_token %}
             <div class="row">
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">LDAP Admin Passwort</label>
+                    <label class="form-label">LDAP Admin Password</label>
                     <input type="password" class="form-control" name="ldap_admin_password" value="{{ vars.ldap_admin_password|default:'' }}">
                 </div>
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">SMTP Benutzer</label>
+                    <label class="form-label">SMTP User</label>
                     <input type="text" class="form-control" name="smtp_user" value="{{ vars.smtp_user|default:'' }}">
                 </div>
             </div>
             <div class="row">
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">SMTP Passwort</label>
+                    <label class="form-label">SMTP Password</label>
                     <input type="password" class="form-control" name="smtp_password" value="{{ vars.smtp_password|default:'' }}">
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary">Speichern</button>
+            <button type="submit" class="btn btn-primary">Save</button>
         </form>
     </div>
 </div>

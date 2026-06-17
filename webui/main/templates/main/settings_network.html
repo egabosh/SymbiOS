@@ -81,7 +81,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Hide fields AND clear their values
             staticFieldRows.forEach(row => row.classList.add('d-none'));
             staticFields.forEach(field => {
-                field.value = '';  // **NEU: Felder leeren**
+                field.value = '';  // Clear fields
             });
         } else {
             // Show fields (values stay empty)

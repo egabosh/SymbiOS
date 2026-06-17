@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>{% block title %}SymbiOS WebUI{% endblock %}</title>
@@ -24,7 +24,7 @@
                 </ul>
                 {% if user.is_authenticated %}
                 <span class="navbar-text me-3 text-light"><i class="bi bi-person-circle"></i> {{ user.username }}</span>
-                <a href="/logout/" class="btn btn-outline-light btn-sm">Abmelden</a>
+                <a href="/logout/" class="btn btn-outline-light btn-sm">Logout</a>
                 {% endif %}
             </div>
         </div>

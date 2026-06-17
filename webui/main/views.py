@@ -156,9 +156,9 @@ def settings_network(request):
         if form.is_valid():
             try:
                 form.save()
-                messages.success(request, 'Netzwerk-Konfiguration gespeichert.')
+                messages.success(request, 'Network configuration saved.')
             except Exception as e:
-                messages.error(request, f'Fehler: {e}')
+                messages.error(request, f'Error: {e}')
     else:
         form = NetworkConfigForm()
     return render(request, 'main/settings_network.html', {'form': form})
@@ -179,9 +179,9 @@ def settings_inventory(request):
             vars_['smtp_from'] = request.POST.get('smtp_from', vars_.get('smtp_from', ''))
             vars_['ldap_admin_password'] = request.POST.get('ldap_admin_password', vars_.get('ldap_admin_password', ''))
             _save_inventory_config(config)
-            messages.success(request, 'Konfiguration gespeichert.')
+            messages.success(request, 'Configuration saved.')
         except Exception as e:
-            messages.error(request, f'Fehler beim Speichern: {e}')
+            messages.error(request, f'Error saving configuration: {e}')
         return redirect('settings_inventory')
 
     return render(request, 'main/settings_inventory.html', {'config': config, 'vars': vars_})
@@ -198,9 +198,9 @@ def settings_ddns(request):
             config['all']['vars']['ddns_host'] = request.POST.get('ddns_host', '')
             config['all']['vars']['ddns_ipv6'] = request.POST.get('ddns_ipv6', '')
             _save_inventory_config(config)
-            messages.success(request, 'dDNS-Einstellungen gespeichert.')
+            messages.success(request, 'Dynamic DNS settings saved.')
         except Exception as e:
-            messages.error(request, f'Fehler: {e}')
+            messages.error(request, f'Error: {e}')
         return redirect('settings_ddns')
 
     return render(request, 'main/settings_ddns.html', {'vars': vars_})
@@ -217,9 +217,9 @@ def settings_auth(request):
             config['all']['vars']['smtp_user'] = request.POST.get('smtp_user', '')
             config['all']['vars']['smtp_password'] = request.POST.get('smtp_password', '')
             _save_inventory_config(config)
-            messages.success(request, 'Auth-Einstellungen gespeichert.')
+            messages.success(request, 'Auth settings saved.')
         except Exception as e:
-            messages.error(request, f'Fehler: {e}')
+            messages.error(request, f'Error: {e}')
         return redirect('settings_auth')
 
     return render(request, 'main/settings_auth.html', {'vars': vars_})
@@ -246,7 +246,7 @@ def user_create(request):
         group = request.POST.get('group', 'users')
 
         if not uid or not cn or not password:
-            messages.error(request, 'Alle Felder sind erforderlich.')
+            messages.error(request, 'All fields are required.')
             return redirect('users_groups')
 
         ldap = _get_ldap_vars()
@@ -266,10 +266,10 @@ userPassword: {password}
 """
         rc, err = _ldap_add(ldif, ldap['base_dn'], ldap['admin_pw'])
         if rc == 0:
-            messages.success(request, f'Benutzer "{uid}" erstellt.')
+            messages.success(request, f'User "{uid}" created.')
             _add_user_to_group(uid, group)
         else:
-            messages.error(request, f'Fehler: {err}')
+            messages.error(request, f'Error: {err}')
         return redirect('users_groups')
 
     return redirect('users_groups')
@@ -281,9 +281,9 @@ def user_delete(request, uid):
         ldap = _get_ldap_vars()
         rc, err = _ldap_delete(f"uid={uid},ou=users,{ldap['base_dn']}", ldap['base_dn'], ldap['admin_pw'])
         if rc == 0:
-            messages.success(request, f'Benutzer "{uid}" gelöscht.')
+            messages.success(request, f'User "{uid}" deleted.')
         else:
-            messages.error(request, f'Fehler: {err}')
+            messages.error(request, f'Error: {err}')
     return redirect('users_groups')
 
 
@@ -292,7 +292,7 @@ def user_set_password(request, uid):
     if request.method == 'POST':
         password = request.POST.get('password', '')
         if not password:
-            messages.error(request, 'Passwort ist erforderlich.')
+            messages.error(request, 'Password is required.')
             return redirect('users_groups')
 
         ldap = _get_ldap_vars()
@@ -303,9 +303,9 @@ userPassword: {password}
 """
         rc, err = _ldap_modify(ldif, ldap['base_dn'], ldap['admin_pw'])
         if rc == 0:
-            messages.success(request, f'Passwort fuer "{uid}" geaendert.')
+            messages.success(request, f'Password for "{uid}" changed.')
         else:
-            messages.error(request, f'Fehler: {err}')
+            messages.error(request, f'Error: {err}')
     return redirect('users_groups')
 
 
@@ -314,7 +314,7 @@ def group_create(request):
     if request.method == 'POST':
         name = request.POST.get('name', '').strip()
         if not name:
-            messages.error(request, 'Name ist erforderlich.')
+            messages.error(request, 'Name is required.')
             return redirect('users_groups')
 
         ldap = _get_ldap_vars()
@@ -326,9 +326,9 @@ gidNumber: {gid}
 """
         rc, err = _ldap_add(ldif, ldap['base_dn'], ldap['admin_pw'])
         if rc == 0:
-            messages.success(request, f'Gruppe "{name}" erstellt.')
+            messages.success(request, f'Group "{name}" created.')
         else:
-            messages.error(request, f'Fehler: {err}')
+            messages.error(request, f'Error: {err}')
     return redirect('users_groups')
 
 
@@ -346,9 +346,9 @@ memberUid: {uid}
 """
             rc, err = _ldap_modify(ldif, ldap['base_dn'], ldap['admin_pw'])
             if rc == 0:
-                messages.success(request, f'"{uid}" zu "{group}" hinzugefuegt.')
+                messages.success(request, f'"{uid}" added to "{group}".')
             else:
-                messages.error(request, f'Fehler: {err}')
+                messages.error(request, f'Error: {err}')
     return redirect('users_groups')
 
 
@@ -366,9 +366,9 @@ memberUid: {uid}
 """
             rc, err = _ldap_modify(ldif, ldap['base_dn'], ldap['admin_pw'])
             if rc == 0:
-                messages.success(request, f'"{uid}" aus "{group}" entfernt.')
+                messages.success(request, f'"{uid}" removed from "{group}".')
             else:
-                messages.error(request, f'Fehler: {err}')
+                messages.error(request, f'Error: {err}')
     return redirect('users_groups')
 
 

@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 
 
 class Command(BaseCommand):
-    help = 'Erstellt initialen Admin-Benutzer beim ersten Start'
+    help = 'Creates initial admin user on first start'
 
     def handle(self, *args, **options):
         if User.objects.filter(is_superuser=True).exists():
@@ -15,6 +15,6 @@ class Command(BaseCommand):
 
         if not User.objects.filter(username=admin_user).exists():
             User.objects.create_superuser(admin_user, f'{admin_user}@symbios.local', admin_password)
-            self.stdout.write(self.style.SUCCESS(f'Admin "{admin_user}" erstellt.'))
+            self.stdout.write(self.style.SUCCESS(f'Admin "{admin_user}" created.'))
         else:
-            self.stdout.write(self.style.WARNING(f'Admin "{admin_user}" existiert bereits.'))
+            self.stdout.write(self.style.WARNING(f'Admin "{admin_user}" already exists.'))
