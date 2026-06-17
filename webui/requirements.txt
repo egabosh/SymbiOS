@@ -1,4 +1,8 @@
-Django==5.*
+Django>=4.2,<6.0
 gunicorn
-uvicorna
+uvicorn
 whitenoise
+pyyaml>=6.0
+python-ldap>=3.4
+ansible-core>=2.15
+paramiko>=3.3

@@ -3,7 +3,40 @@
     {% include "main/sidebar_settings.html" %}
 {% endblock %}
 {% block content %}
-<h2>Auth settings</h2>
-<p>BLA</p>
-{% endblock %}
+<h2>Auth-Einstellungen</h2>
 
+{% if messages %}
+{% for message in messages %}
+<div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+    {{ message }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endfor %}
+{% endif %}
+
+<div class="card">
+    <div class="card-header">LDAP / Auth</div>
+    <div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">LDAP Admin Passwort</label>
+                    <input type="password" class="form-control" name="ldap_admin_password" value="{{ vars.ldap_admin_password|default:'' }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">SMTP Benutzer</label>
+                    <input type="text" class="form-control" name="smtp_user" value="{{ vars.smtp_user|default:'' }}">
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">SMTP Passwort</label>
+                    <input type="password" class="form-control" name="smtp_password" value="{{ vars.smtp_password|default:'' }}">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Speichern</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

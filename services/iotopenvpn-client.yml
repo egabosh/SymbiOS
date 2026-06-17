@@ -1,0 +1,140 @@
+---
+- name: Deploy OpenVPN Bridge Mode Client
+  hosts: all
+
+  vars:
+    bridge_name: iot0
+    bridge_ip: 192.168.143.2
+    bridge_ip6: fd12:3456:143::2
+
+  tasks:
+    # Install required packages
+    - name: Install OpenVPN, easy-rsa, and bridge-utils
+      apt:
+        name:
+          - openvpn
+          - bridge-utils
+        state: present
+        update_cache: yes
+        install_recommends: no
+
+    # Configure bridge interface
+    - name: Configure bridge interface in /etc/network/interfaces
+      blockinfile:
+        path: /etc/network/interfaces.d/{{ bridge_name }}
+        block: |
+          auto {{ bridge_name }}
+          iface {{ bridge_name }} inet static
+              bridge_ports none
+              address {{ bridge_ip }}
+              netmask 255.255.255.0
+              bridge_fd 0
+              bridge_maxwait 0
+
+          iface iot0 inet6 static
+              address {{ bridge_ip6 }}
+              netmask 64
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        create: yes
+      notify: restart networking to apply bridge
+
+    - name: bridge script for openvpn
+      blockinfile:
+        path: /etc/openvpn/iot-dev2bridge.sh
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # OpenVPN Up Script to add tap to bridge
+          # get dynamically added tap device
+          tap=$dev
+          
+          # disable ipv6
+          echo 1 >/proc/sys/net/ipv6/conf/${dev}/disable_ipv6
+
+          # set tap interface up without IP
+          /sbin/ip link set dev $tap up
+          /sbin/ip addr flush dev $tap
+
+          # add tap interface to bridge {{ bridge_name }}
+          /sbin/ip link set dev $tap master {{ bridge_name }}
+
+          # set promisc mode for tap
+          /sbin/ip link set dev $tap promisc on
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: restart openvpn
+
+    - name: /etc/openvpn/iot-dev2bridge.sh shebang
+      lineinfile:
+        path: /etc/openvpn/iot-dev2bridge.sh
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    - name: job for new openvpn config and certs /etc/openvpn/get-openvpn-homeassistant.sh
+      blockinfile:
+        path: /etc/openvpn/get-openvpn-homeassistant.sh
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          . /etc/bash/gaboshlib.include
+          g_lockfile
+
+          [ -s /etc/openvpn/homeassistant.iot.ovpn ] || touch /etc/openvpn/homeassistant.iot.ovpn
+
+          # get possible new file from router
+          scp -B -O -q root@router:/etc/openvpn/iot-easy-rsa/homeassistant.iot.ovpn /etc/openvpn/homeassistant-iot.conf.new || g_echo_error_exit "Cold not get root@openwrt-og:/etc/openvpn/iot-easy-rsa/homeassistant.iot.ovpn"
+
+          sed -i 's/^[[:space:]]*-----/-----/' /etc/openvpn/homeassistant-iot.conf.new
+          # if file is new
+          if ! cmp -s /etc/openvpn/homeassistant-iot.conf.new /etc/openvpn/homeassistant-iot.conf
+          then
+            g_echo "New /etc/openvpn/homeassistant-iot.conf"
+            cat /etc/openvpn/homeassistant-iot.conf.new >/etc/openvpn/homeassistant-iot.conf
+            systemctl restart openvpn@homeassistant-iot
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: run script
+
+    - name: /etc/openvpn/get-openvpn-homeassistant.sh shebang
+      lineinfile:
+        path: /etc/openvpn/get-openvpn-homeassistant.sh
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    # Enable and start OpenVPN service
+    - name: Enable and start OpenVPN service
+      systemd:
+        name: openvpn@homeassistant-iot
+        enabled: yes
+        state: started
+
+    - name: Cronjob für OpenVPN-Skript alle 5 Minuten einrichten
+      ansible.builtin.cron:
+        name: "Sync OpenVPN HomeAssistant certs"
+        minute: "*/5"
+        job: "/etc/openvpn/get-openvpn-homeassistant.sh"
+        state: present
+
+  handlers:
+    # restart networking to apply bridge
+    - name: restart networking to apply bridge
+      service:
+        name: networking
+        state: restarted
+      notify: restart openvpn
+
+    - name: run script
+      shell: /etc/openvpn/get-openvpn-homeassistant.sh
+
+    - name: restart openvpn
+      service:
+        name: openvpn@homeassistant-iot
+        state: restarted
+
