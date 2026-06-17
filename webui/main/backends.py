@@ -7,10 +7,14 @@ LDAP_URI = os.environ.get("LDAP_URI", "ldap://openldap")
 
 
 class LDAPBackend(ModelBackend):
-    """Authenticate against LDAP by trying a bind with user credentials."""
+    """Authenticate against LDAP — only admin user allowed."""
 
     def authenticate(self, request, username=None, password=None, **kwargs):
         if not username or not password:
+            return None
+
+        # Only allow admin user
+        if username != "admin":
             return None
 
         try:
@@ -42,6 +46,10 @@ class LDAPBackend(ModelBackend):
             user.is_superuser = True
             user.set_unusable_password()
             user.save()
+
+        # Force password change if still using default "admin" password
+        if request and password == "admin":
+            request.session["force_password_change"] = True
 
         return user
 
