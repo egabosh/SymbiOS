@@ -55,7 +55,8 @@
               environment:
                 - PYTHONUNBUFFERED=1
                 - CONFIG_PATH=/config/inventory.yml
-                - LDAP_URI=ldap://host.docker.internal
+                - LDAP_URI=ldap://openldap
+                - DJANGO_SECRET_KEY={{ lookup("password", "/dev/null length=50 chars=ascii_letters,digits") }}
               extra_hosts:
                 - "host.docker.internal:host-gateway"
               labels:
