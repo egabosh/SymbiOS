@@ -4,7 +4,7 @@
 {% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2>Users & Groups (LDAP)</h2>
+    <h2>Users (LDAP)</h2>
     <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createUserModal">
         <i class="bi bi-person-plus"></i> New User
     </button>
@@ -19,91 +19,68 @@
 {% endfor %}
 {% endif %}
 
-<div class="row">
-    <div class="col-md-9">
-        <div class="card mb-4">
-            <div class="card-header">Users</div>
-            <div class="card-body">
-                {% if users %}
-                <table class="table table-hover table-sm">
-                    <thead>
-                        <tr><th>Username</th><th>Name</th><th>Groups</th><th style="width:300px">Actions</th></tr>
-                    </thead>
-                    <tbody>
-                        {% for user in users %}
-                        <tr>
-                            <td><strong>{{ user.uid }}</strong></td>
-                            <td>{{ user.cn }}</td>
-                            <td>
-                                {% for g in user.groups %}
-                                <span class="badge bg-secondary">
-                                    {{ g }}
-                                    <form method="post" action="/users_groups/group/remove-user/" class="d-inline">
+<div class="card mb-4">
+    <div class="card-body">
+        {% if users %}
+        <table class="table table-hover table-sm">
+            <thead>
+                <tr><th>Username</th><th>Email</th><th>Groups</th><th style="width:300px">Actions</th></tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td><strong>{{ user.uid }}</strong></td>
+                    <td>{{ user.email|default:"-" }}</td>
+                    <td>
+                        {% for g in user.groups %}
+                        <span class="badge bg-secondary">
+                            {{ g }}
+                            <form method="post" action="/users/group/remove-user/" class="d-inline">
+                                {% csrf_token %}
+                                <input type="hidden" name="uid" value="{{ user.uid }}">
+                                <input type="hidden" name="group" value="{{ g }}">
+                                <button type="submit" class="btn-close btn-close-white ms-1" style="font-size:0.55rem;vertical-align:middle;" title="Remove from {{ g }}"></button>
+                            </form>
+                        </span>
+                        {% endfor %}
+                        {% if user.available_groups %}
+                        <span class="dropdown">
+                            <button class="btn btn-outline-success btn-sm" style="padding:0 5px;font-size:0.7rem;vertical-align:middle;" title="Add to group" data-bs-toggle="dropdown">+</button>
+                            <ul class="dropdown-menu">
+                                {% for g in user.available_groups %}
+                                <li>
+                                    <form method="post" action="/users/group/add-user/">
                                         {% csrf_token %}
                                         <input type="hidden" name="uid" value="{{ user.uid }}">
                                         <input type="hidden" name="group" value="{{ g }}">
-                                        <button type="submit" class="btn-close btn-close-white ms-1" style="font-size:0.55rem;vertical-align:middle;" title="Remove from {{ g }}" aria-label="Remove from {{ g }}"></button>
+                                        <button type="submit" class="dropdown-item">{{ g }}</button>
                                     </form>
-                                </span>
+                                </li>
                                 {% endfor %}
-                            </td>
-                            <td>
-                                <form method="post" action="/users_groups/{{ user.uid }}/password/" class="d-inline">
-                                    {% csrf_token %}
-                                    <div class="input-group input-group-sm" style="width:180px;display:inline-flex">
-                                        <input type="password" class="form-control form-control-sm" name="password" placeholder="New password">
-                                        <button type="submit" class="btn btn-outline-warning btn-sm" title="Change password">&#128273;</button>
-                                    </div>
-                                </form>
-                                <form method="post" action="/users_groups/{{ user.uid }}/delete/" class="d-inline" onsubmit="return confirm('Really delete user?')">
-                                    {% csrf_token %}
-                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">&#128465;</button>
-                                </form>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                {% else %}
-                <p class="text-muted">No LDAP users found.</p>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-
-    <div class="col-md-3">
-        <div class="card mb-4">
-            <div class="card-header">Groups</div>
-            <div class="card-body">
-                {% for group in groups %}
-                <span class="badge bg-secondary mb-1">{{ group }}</span>
+                            </ul>
+                        </span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="post" action="/users/{{ user.uid }}/password/" class="d-inline">
+                            {% csrf_token %}
+                            <div class="input-group input-group-sm" style="width:180px;display:inline-flex">
+                                <input type="password" class="form-control form-control-sm" name="password" placeholder="New password">
+                                <button type="submit" class="btn btn-outline-warning btn-sm" title="Change password">&#128273;</button>
+                            </div>
+                        </form>
+                        <form method="post" action="/users/{{ user.uid }}/delete/" class="d-inline" onsubmit="return confirm('Really delete user?')">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">&#128465;</button>
+                        </form>
+                    </td>
+                </tr>
                 {% endfor %}
-                <hr>
-                <form method="post" action="/users_groups/group/create/">
-                    {% csrf_token %}
-                    <div class="input-group input-group-sm">
-                        <input type="text" class="form-control" name="name" placeholder="New group" required>
-                        <button type="submit" class="btn btn-outline-success btn-sm">+</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-header">Add User to Group</div>
-            <div class="card-body">
-                <form method="post" action="/users_groups/group/add-user/">
-                    {% csrf_token %}
-                    <select class="form-select form-select-sm mb-2" name="uid">
-                        {% for user in users %}<option value="{{ user.uid }}">{{ user.uid }}</option>{% endfor %}
-                    </select>
-                    <select class="form-select form-select-sm mb-2" name="group">
-                        {% for group in groups %}<option value="{{ group }}">{{ group }}</option>{% endfor %}
-                    </select>
-                    <button type="submit" class="btn btn-outline-primary btn-sm w-100">Add</button>
-                </form>
-            </div>
-        </div>
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">No LDAP users found.</p>
+        {% endif %}
     </div>
 </div>
 
@@ -111,7 +88,7 @@
 <div class="modal fade" id="createUserModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
-            <form method="post" action="/users_groups/create/">
+            <form method="post" action="/users/create/">
                 {% csrf_token %}
                 <div class="modal-header">
                     <h5 class="modal-title">Create New User</h5>
@@ -123,8 +100,8 @@
                         <input type="text" class="form-control" name="uid" required pattern="[a-z0-9._-]+" placeholder="max.mustermann">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Full Name</label>
-                        <input type="text" class="form-control" name="cn" required placeholder="Max Mustermann">
+                        <label class="form-label">Email</label>
+                        <input type="email" class="form-control" name="email" placeholder="user@example.com">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Password</label>
