@@ -4,7 +4,7 @@
 
   vars:
     service_name: "symbios-ui"
-    service_domain: "{{ service_name }}.{{ default_domain }}"
+    service_domain: "{{ default_domain }}"
     docker_path: "/home/docker/{{ service_name }}"
 
   tasks:
@@ -24,7 +24,7 @@
 
     - name: Dockerfile
       ansible.builtin.copy:
-        src: /root/SymbiOS/webui/Dockerfile
+        src: /home/SymbiOS/webui/Dockerfile
         dest: "{{ docker_path }}/Dockerfile"
         owner: root
         group: docker
@@ -79,7 +79,7 @@
 
     - name: Sync webui source
       ansible.builtin.synchronize:
-        src: /root/SymbiOS/webui/
+        src: /home/SymbiOS/webui/
         dest: "{{ docker_path }}/webui/"
         delete: yes
         recursive: yes
@@ -96,7 +96,7 @@
 
     - name: Copy symbios-configd.sh
       ansible.builtin.copy:
-        src: /root/SymbiOS/symbios-configd.sh
+        src: /home/SymbiOS/symbios-configd.sh
         dest: /home/SymbiOS/symbios-configd.sh
         owner: root
         group: root

@@ -19,7 +19,7 @@ get_hash() {
 run_playbook() {
     local playbook=$1
     g_echo "Running playbook: ${playbook}"
-    cd /root/SymbiOS
+    cd /home/SymbiOS
     local rc=0
     ansible-playbook --connection=local --inventory localhost, \
         --limit localhost \
