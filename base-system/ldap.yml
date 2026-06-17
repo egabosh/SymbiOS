@@ -597,7 +597,7 @@
           #!/bin/bash
           . {{ docker_path }}/env.openldap
           #LDAPTLS_CACERT=/etc/ssl/certs/ca-certificates.crt ldapsearch -D cn=readuser,{{ldap_basedn}} -w $LDAP_READUSER_PASSWORD -H ldaps://openldap.{{ default_domain }}:636 -b {{ldap_basedn}} $@
-          ldapsearch -D cn=readuser,{{ldap_basedn}} -w $LDAP_READUSER_PASSWORD -H ldap://openldap.{{ default_domain }}:389 -b {{ldap_basedn}} $@
+          ldapsearch -D cn=readuser,{{ldap_basedn}} -w $LDAP_READUSER_PASSWORD -H ldaps://openldap.{{ default_domain }}:636 -b {{ldap_basedn}} $@
           rc=$?
           unset LDAP_ADMIN_PASSWORD LDAP_READUSER_PASSWORD LDAPTLS_CACERT 
           exit $rc

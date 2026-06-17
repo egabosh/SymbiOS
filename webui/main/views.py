@@ -114,7 +114,7 @@ def _get_ldap_users():
     ldap = _get_ldap_vars()
     stdout, rc = _ldap_search(
         ldap['base_dn'], ldap['admin_pw'],
-        f"ou=users,{ldap['base_dn']}", "(objectClass=posixAccount)", ["uid", "cn"]
+        f"ou=users,{ldap['base_dn']}", "(objectClass=posixAccount)", ["uid", "cn", "mail"]
     )
     users = []
     if rc == 0:
@@ -123,11 +123,15 @@ def _get_ldap_users():
             if line.startswith('uid:'):
                 if current_user and current_user.get('uid'):
                     users.append(current_user)
-                current_user = {'uid': line.split(':', 1)[1].strip(), 'cn': '', 'groups': []}
+                current_user = {'uid': line.split(':', 1)[1].strip(), 'cn': '', 'email': '', 'groups': []}
             elif line.startswith('cn:') and current_user:
                 current_user['cn'] = line.split(':', 1)[1].strip()
+            elif line.startswith('mail:') and current_user:
+                current_user['email'] = line.split(':', 1)[1].strip()
         if current_user and current_user.get('uid'):
             users.append(current_user)
+
+    all_groups = set(_get_ldap_groups())
 
     for user in users:
         stdout2, rc2 = _ldap_search(
@@ -141,6 +145,7 @@ def _get_ldap_users():
                     val = line.split(':', 1)[1].strip()
                     if val:
                         user['groups'].append(val)
+        user['available_groups'] = sorted(all_groups - set(user['groups']))
     return users
 
 
@@ -231,23 +236,30 @@ def logs(request):
 
 
 @login_required
-def users_groups(request):
+def users(request):
     users = _get_ldap_users()
     groups = _get_ldap_groups()
     return render(request, 'main/users_groups.html', {'users': users, 'groups': groups})
 
 
 @login_required
+def groups(request):
+    groups = _get_ldap_groups()
+    users = _get_ldap_users()
+    return render(request, 'main/groups.html', {'groups': groups, 'group_members': users})
+
+
+@login_required
 def user_create(request):
     if request.method == 'POST':
         uid = request.POST.get('uid', '').strip()
-        cn = request.POST.get('cn', '').strip()
+        email = request.POST.get('email', '').strip()
         password = request.POST.get('password', '')
         group = request.POST.get('group', 'users')
 
-        if not uid or not cn or not password:
+        if not uid or not password:
             messages.error(request, 'All fields are required.')
-            return redirect('users_groups')
+            return redirect('users')
 
         ldap = _get_ldap_vars()
         uid_number = _get_next_uid_number()
@@ -255,24 +267,23 @@ def user_create(request):
 objectClass: inetOrgPerson
 objectClass: posixAccount
 uid: {uid}
-sn: {cn.split()[-1] if cn.split() else cn}
-givenName: {cn.split()[0] if cn.split() else cn}
-cn: {cn}
-displayName: {cn}
+sn: {uid}
+cn: {uid}
+displayName: {uid}
 uidNumber: {uid_number}
 gidNumber: 10000
 homeDirectory: /home/{uid}
 userPassword: {password}
 """
+        if email:
+            ldif += f"mail: {email}\n"
         rc, err = _ldap_add(ldif, ldap['base_dn'], ldap['admin_pw'])
         if rc == 0:
             messages.success(request, f'User "{uid}" created.')
             _add_user_to_group(uid, group)
         else:
             messages.error(request, f'Error: {err}')
-        return redirect('users_groups')
-
-    return redirect('users_groups')
+    return redirect('users')
 
 
 @login_required
@@ -284,7 +295,7 @@ def user_delete(request, uid):
             messages.success(request, f'User "{uid}" deleted.')
         else:
             messages.error(request, f'Error: {err}')
-    return redirect('users_groups')
+    return redirect('users')
 
 
 @login_required
@@ -293,7 +304,7 @@ def user_set_password(request, uid):
         password = request.POST.get('password', '')
         if not password:
             messages.error(request, 'Password is required.')
-            return redirect('users_groups')
+            return redirect('users')
 
         ldap = _get_ldap_vars()
         ldif = f"""dn: uid={uid},ou=users,{ldap['base_dn']}
@@ -306,7 +317,7 @@ userPassword: {password}
             messages.success(request, f'Password for "{uid}" changed.')
         else:
             messages.error(request, f'Error: {err}')
-    return redirect('users_groups')
+    return redirect('users')
 
 
 @login_required
@@ -315,7 +326,7 @@ def group_create(request):
         name = request.POST.get('name', '').strip()
         if not name:
             messages.error(request, 'Name is required.')
-            return redirect('users_groups')
+            return redirect('groups')
 
         ldap = _get_ldap_vars()
         gid = abs(hash(name)) % 10000 + 20000
@@ -329,7 +340,39 @@ gidNumber: {gid}
             messages.success(request, f'Group "{name}" created.')
         else:
             messages.error(request, f'Error: {err}')
-    return redirect('users_groups')
+    return redirect('groups')
+
+
+@login_required
+def group_delete(request, name):
+    if request.method == 'POST':
+        ldap = _get_ldap_vars()
+        group_dn = f"cn={name},ou=groups,{ldap['base_dn']}"
+
+        # Remove all members from group first
+        stdout, rc = _ldap_search(
+            ldap['base_dn'], ldap['admin_pw'],
+            group_dn, "(objectClass=posixGroup)", ["memberUid"]
+        )
+        if rc == 0:
+            for line in stdout.split('\n'):
+                if line.startswith('memberUid:'):
+                    member_uid = line.split(':', 1)[1].strip()
+                    if member_uid:
+                        ldif = f"""dn: {group_dn}
+changetype: modify
+delete: memberUid
+memberUid: {member_uid}
+"""
+                        _ldap_modify(ldif, ldap['base_dn'], ldap['admin_pw'])
+
+        # Delete the group
+        rc, err = _ldap_delete(group_dn, ldap['base_dn'], ldap['admin_pw'])
+        if rc == 0:
+            messages.success(request, f'Group "{name}" deleted.')
+        else:
+            messages.error(request, f'Error: {err}')
+    return redirect('groups')
 
 
 @login_required
@@ -349,7 +392,7 @@ memberUid: {uid}
                 messages.success(request, f'"{uid}" added to "{group}".')
             else:
                 messages.error(request, f'Error: {err}')
-    return redirect('users_groups')
+    return redirect('users')
 
 
 @login_required
@@ -369,7 +412,7 @@ memberUid: {uid}
                 messages.success(request, f'"{uid}" removed from "{group}".')
             else:
                 messages.error(request, f'Error: {err}')
-    return redirect('users_groups')
+    return redirect('users')
 
 
 def _add_user_to_group(uid, group):
