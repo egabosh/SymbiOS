@@ -3,7 +3,7 @@
     {% include "main/sidebar_settings.html" %}
 {% endblock %}
 {% block content %}
-<h2>Allgemeine Einstellungen</h2>
+<h2>General Settings</h2>
 
 {% if messages %}
 {% for message in messages %}
@@ -24,7 +24,7 @@
                     <input type="text" class="form-control" name="default_domain" value="{{ vars.default_domain|default:'local' }}">
                 </div>
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">LDAP Admin Passwort</label>
+                    <label class="form-label">LDAP Admin Password</label>
                     <input type="password" class="form-control" name="ldap_admin_password" value="{{ vars.ldap_admin_password|default:'' }}">
                 </div>
             </div>
@@ -34,11 +34,11 @@
                     <input type="text" class="form-control" name="smtp_server" value="{{ vars.smtp_server|default:'' }}">
                 </div>
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">SMTP Benutzer</label>
+                    <label class="form-label">SMTP User</label>
                     <input type="text" class="form-control" name="smtp_user" value="{{ vars.smtp_user|default:'' }}">
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary">Speichern</button>
+            <button type="submit" class="btn btn-primary">Save</button>
         </form>
     </div>
 </div>

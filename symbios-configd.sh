@@ -1,6 +1,6 @@
 #!/bin/bash
 # SymbiOS Config Daemon
-# Ueberwacht Aenderungen an inventory.yml und fuehrt passende Playbooks aus
+# Monitors changes to inventory.yml and runs matching playbooks
 
 source /etc/bash/gaboshlib/g_echo.bashfunc
 source /etc/bash/gaboshlib/g_echo_ok.bashfunc
@@ -10,7 +10,7 @@ source /etc/bash/gaboshlib/g_logger.bashfunc
 CONFIG_FILE="${1:-/home/docker/symbios-ui/config/inventory.yml}"
 CHECK_INTERVAL=10
 
-g_echo "SymbiOS Config Daemon gestartet - ueberwache: ${CONFIG_FILE}"
+g_echo "SymbiOS Config Daemon started - monitoring: ${CONFIG_FILE}"
 
 get_hash() {
     md5sum "${CONFIG_FILE}" 2>/dev/null | awk '{print $1}'
@@ -18,7 +18,7 @@ get_hash() {
 
 run_playbook() {
     local playbook=$1
-    g_echo "Starte Playbook: ${playbook}"
+    g_echo "Running playbook: ${playbook}"
     cd /root/SymbiOS
     local rc=0
     ansible-playbook --connection=local --inventory localhost, \
@@ -27,9 +27,9 @@ run_playbook() {
         "${playbook}" 2>&1 | g_logger
     rc=${PIPESTATUS[0]}
     if [ $rc -eq 0 ]; then
-        g_echo_ok "Playbook ${playbook} erfolgreich"
+        g_echo_ok "Playbook ${playbook} completed successfully"
     else
-        g_echo_error "Playbook ${playbook} fehlgeschlagen"
+        g_echo_error "Playbook ${playbook} failed"
     fi
 }
 
@@ -39,7 +39,7 @@ while true; do
     CURRENT_HASH=$(get_hash)
 
     if [ -n "${LAST_HASH}" ] && [ "${CURRENT_HASH}" != "${LAST_HASH}" ]; then
-        g_echo "Aenderungen an der Konfiguration erkannt!"
+        g_echo "Configuration changes detected!"
 
         NEW_CONTENT=$(cat "${CONFIG_FILE}" 2>/dev/null)
 
