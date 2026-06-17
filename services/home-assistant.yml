@@ -190,7 +190,7 @@
                 - traefik
               labels:
                 - traefik.enable=true
-                - traefik.http.routers.ha_pingcheck.rule=Host(`ha-health.defiant.dedyn.io`)
+                - traefik.http.routers.ha_pingcheck.rule=Host(`ha-health.{{inventory_hostname}}`)
                 - traefik.http.routers.ha_pingcheck.entrypoints=https
                 - traefik.http.routers.ha_pingcheck.tls=true
                 - traefik.http.routers.ha_pingcheck.tls.certresolver=letsencrypt
