@@ -2,7 +2,8 @@ FROM python:3-slim
 
 RUN addgroup --system --gid 10000 symbios && \
     adduser --system --uid 10000 --ingroup symbios symbios && \
-    usermod -a -G adm symbios &&     usermod -d /app symbios
+    usermod -a -G adm symbios && \
+    usermod -d /app symbios
 
 WORKDIR /app
 

@@ -82,9 +82,6 @@
       ansible.builtin.copy:
         src: /home/SymbiOS/webui/
         dest: "{{ docker_path }}/webui/"
-        remote_src: yes
-        owner: root
-        group: docker
         mode: preserve
       notify: Restart {{ service_name }}
 
