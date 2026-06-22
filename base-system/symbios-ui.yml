@@ -56,6 +56,7 @@
                 - PYTHONUNBUFFERED=1
                 - CONFIG_PATH=/config/inventory.yml
                 - LDAP_URI=ldap://openldap
+                - HOME=/app
                 - DJANGO_SECRET_KEY={{ lookup("password", "/home/docker/symbios-ui/.django_secret_key length=50 chars=ascii_letters,digits") }}
               extra_hosts:
                 - "host.docker.internal:host-gateway"
@@ -78,15 +79,13 @@
       notify: Restart {{ service_name }}
 
     - name: Sync webui source
-      ansible.builtin.synchronize:
+      ansible.builtin.copy:
         src: /home/SymbiOS/webui/
         dest: "{{ docker_path }}/webui/"
-        delete: yes
-        recursive: yes
-        rsync_opts:
-          - "--exclude=__pycache__"
-          - "--exclude=db.sqlite3"
-          - "--exclude=*.pyc"
+        remote_src: yes
+        owner: root
+        group: docker
+        mode: preserve
       notify: Restart {{ service_name }}
 
     - name: Set permissions
