@@ -2,6 +2,7 @@ all:
   vars:
     # SymbiOS defaults
     default_domain: "local"
+    symbios_domain: "symbios.local"
     acme_resolver: "{{ 'symbios-pki' if default_domain == 'local' else 'letsencrypt' }}"
     instance: "default"
     ldap_basedn: "dc=openldap,dc=local"

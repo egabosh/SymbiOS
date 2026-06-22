@@ -4,7 +4,7 @@
 
   vars:
     service_name: "symbios-ui"
-    service_domain: "{{ default_domain }}"
+    service_domain: "{{ symbios_domain }}"
     docker_path: "/home/docker/{{ service_name }}"
 
   tasks:
@@ -56,7 +56,7 @@
                 - PYTHONUNBUFFERED=1
                 - CONFIG_PATH=/config/inventory.yml
                 - LDAP_URI=ldap://openldap
-                - DJANGO_SECRET_KEY={{ lookup("password", "/dev/null length=50 chars=ascii_letters,digits") }}
+                - DJANGO_SECRET_KEY={{ lookup("password", "/home/docker/symbios-ui/.django_secret_key length=50 chars=ascii_letters,digits") }}
               extra_hosts:
                 - "host.docker.internal:host-gateway"
               labels:
