@@ -69,10 +69,16 @@ def _ldap_delete(dn, base_dn, admin_pw):
 def _get_ldap_vars():
     config = _get_inventory_config()
     vars_ = config.get('all', {}).get('vars', {})
-    return {
-        'base_dn': vars_.get('ldap_basedn', 'dc=openldap,dc=local'),
-        'admin_pw': vars_.get('ldap_admin_password', 'changeme'),
-    }
+    base_dn = vars_.get('ldap_basedn', 'dc=openldap,dc=local')
+    admin_pw = vars_.get('ldap_admin_password', 'changeme')
+    try:
+        with open('/config/.ldap_admin_pw') as f:
+            pw = f.read().strip()
+            if pw:
+                admin_pw = pw
+    except Exception:
+        pass
+    return {'base_dn': base_dn, 'admin_pw': admin_pw}
 
 
 def _get_next_uid_number():

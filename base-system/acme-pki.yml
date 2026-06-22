@@ -39,6 +39,7 @@
         - "{{ data_dir }}/certs"
         - "{{ data_dir }}/secrets"
         - "{{ data_dir }}/db"
+        - "{{ data_dir }}/acme"
 
     # ===== Root CA (10 years, self-signed) =====
     - name: Generate Root CA Key
@@ -162,14 +163,6 @@
       notify: Restart stepca
 
     # ===== Traefik Integration =====
-    - name: Ensure traefik providers directory exists
-      ansible.builtin.file:
-        path: "{{ traefik_dir }}/providers"
-        state: directory
-        mode: "0755"
-        owner: root
-        group: docker
-
     - name: Copy Root CA to Traefik providers
       ansible.builtin.copy:
         src: "{{ ca_cert }}"
@@ -178,25 +171,6 @@
         owner: root
         group: docker
         backup: yes
-
-    - name: Create Traefik ACME Resolver for Local PKI
-      ansible.builtin.copy:
-        content: |
-          ---
-          certificatesResolvers:
-            symbios-pki:
-              acme:
-                caServer: "https://{{ stepca_container }}:{{ stepca_port }}/acme/acme/directory"
-                email: "admin@{{ inventory_hostname }}"
-                storage: "/acme-pki/acme.json"
-                httpChallenge:
-                  entryPoint: http
-        dest: "{{ traefik_dir }}/providers/acme-pki-resolver.yml"
-        mode: "0444"
-        owner: root
-        group: docker
-        backup: yes
-      notify: Restart traefik
 
     # ===== Host System CA Trust =====
     - name: Install SymbiOS Root CA in host trust store
@@ -227,7 +201,7 @@
           - "============================================================"
           - "  Root CA:   {{ ca_cert }} (10 years)"
           - "  ACME URL:  https://{{ stepca_container }}:{{ stepca_port }}/acme/acme/directory"
-          - "  Traefik:   {{ traefik_dir }}/providers/acme-pki-resolver.yml"
+          - "  Traefik:   symbios-pki resolver in static config (traefik.yml)"
           - "============================================================"
       changed_when: false
 

@@ -606,8 +606,10 @@
 
 # ADMIN_PASSWORD_TASKS_MARKER
     - name: Wait for LDAP to be ready
-      ansible.builtin.command:
+      ansible.builtin.shell:
         cmd: docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn}} -w {{ ldap_admin_password.stdout }}
+      args:
+        chdir: "{{ docker_path }}"
       register: ldap_ready
       until: ldap_ready.rc == 0
       retries: 10
@@ -621,6 +623,16 @@
       args:
         chdir: "{{ docker_path }}"
       no_log: true
+    - name: Write ldap_admin_password to .ldap_admin_pw for webui
+      ansible.builtin.copy:
+        dest: /home/docker/symbios-ui/config/.ldap_admin_pw
+        content: "{{ ldap_admin_password.stdout }}"
+        mode: "0400"
+        owner: root
+        group: root
+      no_log: true
+      when: ldap_admin_password.stdout is defined
+
 
   handlers:
 
