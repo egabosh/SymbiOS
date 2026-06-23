@@ -13,7 +13,6 @@
     - name: Install ldap tools
       apt:
         name:
-          - slapd
           - ldap-utils
           - ldapscripts
           - libnss-ldapd
@@ -604,6 +603,9 @@
         backup: yes
 
 
+    - name: Flush handlers to ensure LDAP container is started
+      ansible.builtin.meta: flush_handlers
+
 # ADMIN_PASSWORD_TASKS_MARKER
     - name: Wait for LDAP to be ready
       ansible.builtin.shell:
@@ -612,8 +614,8 @@
         chdir: "{{ docker_path }}"
       register: ldap_ready
       until: ldap_ready.rc == 0
-      retries: 10
-      delay: 2
+      retries: 60
+      delay: 5
       changed_when: false
       no_log: true
 
@@ -637,7 +639,7 @@
   handlers:
 
     - name: Restart ldap
-      ansible.builtin.shell: docker-compose build --pull --no-cache --force-rm && docker compose down && docker-compose up -d
+      ansible.builtin.shell: docker compose down 2>/dev/null; docker compose up -d --build
       args:
         chdir: "{{ docker_path }}"
 
