@@ -163,6 +163,14 @@
       notify: Restart stepca
 
     # ===== Traefik Integration =====
+    - name: Ensure traefik providers directory exists
+      ansible.builtin.file:
+        path: "{{ traefik_dir }}/providers"
+        state: directory
+        mode: "0755"
+        owner: root
+        group: docker
+
     - name: Copy Root CA to Traefik providers
       ansible.builtin.copy:
         src: "{{ ca_cert }}"
@@ -171,6 +179,7 @@
         owner: root
         group: docker
         backup: yes
+
 
     # ===== Host System CA Trust =====
     - name: Install SymbiOS Root CA in host trust store
