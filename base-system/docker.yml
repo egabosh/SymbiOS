@@ -134,6 +134,21 @@
         path: /home/docker/var-lib-docker/containers
       register: data_dir_stat
 
+    - name: Packages for docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+          - bridge-utils
+          - apache2-utils
+          - python3-docker
+          - mariadb-client
+        update_cache: yes
+        install_recommends: no
+
     # https://github.com/nextcloud/docker/issues/1103
     - name: writing daemon.json (ipv6 settings + data-root) 
       copy:
@@ -147,21 +162,6 @@
             "ip6tables": true
           }
       register: daemon_json
-
-    - name: Packages for docker
-      apt:
-        name:
-          - docker-ce
-          - docker-ce-cli 
-          - containerd.io 
-          - docker-buildx-plugin 
-          - docker-compose-plugin
-          - bridge-utils
-          - apache2-utils
-          - python3-docker
-          - mariadb-client
-        update_cache: yes
-        install_recommends: no
 
     - name: Restart Docker if daemon.json changed or data dir missing
       block:
