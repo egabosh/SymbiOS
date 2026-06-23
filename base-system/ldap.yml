@@ -192,8 +192,8 @@
             group: root
           no_log: true
 
-        - name: Generate SSHA password hash using slappasswd
-          command: slappasswd -s "{{ ldap_password.stdout }}"
+        - name: Generate SSHA password hash using Python
+          shell: echo "{{ ldap_password.stdout }}" | python3 -c "import hashlib,base64,os,sys; salt=os.urandom(8); pw=sys.stdin.read().strip(); print('{SSHA}'+base64.b64encode(hashlib.sha1(pw.encode()+salt).digest()+salt).decode())"
           register: ssha_hash
           no_log: true
 
@@ -202,8 +202,8 @@
             ldap_password_hash: "{{ ssha_hash.stdout }}"
           no_log: true
  
-        - name: Generate SSHA password hash using slappasswd readuser
-          command: slappasswd -s "{{ readuser_password.stdout }}"
+        - name: Generate SSHA password hash using Python readuser
+          shell: echo "{{ readuser_password.stdout }}" | python3 -c "import hashlib,base64,os,sys; salt=os.urandom(8); pw=sys.stdin.read().strip(); print('{SSHA}'+base64.b64encode(hashlib.sha1(pw.encode()+salt).digest()+salt).decode())"
           register: ssha_hash_readuser
           no_log: true
 
