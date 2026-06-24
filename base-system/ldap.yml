@@ -329,10 +329,15 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           FROM ghcr.io/egabosh/debian:latest
-          RUN apt-get update && \
+          RUN echo "slapd slapd/internal/generated_adminpw password admin" | debconf-set-selections && \
+            echo "slapd slapd/password2 password admin" | debconf-set-selections && \
+            echo "slapd slapd/internal/adminpw password admin" | debconf-set-selections && \
+            echo "slapd slapd/password1 password admin" | debconf-set-selections && \
+            echo "slapd slapd/domain string openldap.local" | debconf-set-selections && \
+            DEBIAN_FRONTEND=noninteractive apt-get update && \
             addgroup --system --gid 10001 openldap && \
             adduser --system --disabled-password --disabled-login --gid 10001 --uid 10001 --home /var/lib/ldap openldap && \
-            apt-get install -y slapd ldap-utils && \
+            DEBIAN_FRONTEND=noninteractive apt-get install -y slapd ldap-utils && \
             apt-get clean && \
             rm -rf /var/lib/apt/lists/*
           COPY ./docker-entrypoint.sh /

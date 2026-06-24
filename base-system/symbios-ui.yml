@@ -51,6 +51,8 @@
                 - ./config:/config
                 - ./log:/log
                 - /var/log:/var/log:ro
+              tmpfs:
+                - /app/db
               restart: unless-stopped
               environment:
                 - PYTHONUNBUFFERED=1
