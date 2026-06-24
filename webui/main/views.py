@@ -9,6 +9,9 @@ from django.http import JsonResponse
 from .forms import NetworkConfigForm
 from .utils.log_utils import logs_stream
 from .health import run_all as health_run_all
+import urllib.request
+import urllib.error
+import json
 
 CONFIG_PATH = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
 LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')
@@ -215,8 +218,119 @@ def settings_ddns(request):
             messages.error(request, f'Error: {e}')
         return redirect('settings_ddns')
 
-    return render(request, 'main/settings_ddns.html', {'vars': vars_})
+    # Check config daemon status
+    daemon_running = False
+    daemon_pending = False
+    try:
+        result = subprocess.run(
+            ['systemctl', 'is-active', 'symbios-configd'],
+            capture_output=True, text=True, timeout=5
+        )
+        daemon_running = result.stdout.strip() == 'active'
+    except Exception:
+        pass
 
+    # Check if inventory.yml was modified recently (pending changes)
+    try:
+        stat = os.stat(CONFIG_PATH)
+        now = __import__('time').time()
+        daemon_pending = (now - stat.st_mtime) < 15
+    except Exception:
+        pass
+
+    return render(request, 'main/settings_ddns.html', {
+        'vars': vars_,
+        'daemon_running': daemon_running,
+        'daemon_pending': daemon_pending,
+    })
+
+
+@login_required
+def settings_ddns_test_api(request):
+    if request.method != 'POST':
+        return JsonResponse({'valid': False, 'error': 'POST required'})
+
+    api_key = request.POST.get('api_key', '')
+    hostname = request.POST.get('hostname', '')
+    if not api_key:
+        return JsonResponse({'valid': False, 'error': 'API key is required'})
+
+    try:
+        # Test token against desec.io - list domains
+        req = urllib.request.Request(
+            'https://desec.io/api/v1/domains/',
+            headers={'Authorization': f'Token {api_key}'}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status == 200:
+                domains = json.loads(resp.read().decode())
+                # If hostname given, check if domain already exists
+                domain_exists = False
+                if hostname and hostname.endswith('.dedyn.io'):
+                    domain_check = hostname.lower()
+                    for d in domains:
+                        if d.get('name', '').lower() == domain_check:
+                            domain_exists = True
+                            break
+
+                msg = 'API key is valid'
+                if domain_exists:
+                    msg += f', domain {hostname} already exists'
+                elif hostname:
+                    msg += f', domain {hostname} can be created'
+
+                return JsonResponse({
+                    'valid': True,
+                    'message': msg,
+                    'domain_exists': domain_exists,
+                    'domain_count': len(domains),
+                })
+            else:
+                return JsonResponse({
+                    'valid': False,
+                    'error': f'Unexpected response: HTTP {resp.status}'
+                })
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            return JsonResponse({'valid': False, 'error': 'Invalid API key (HTTP 401)'})
+        elif e.code == 403:
+            return JsonResponse({'valid': False, 'error': 'Access denied (HTTP 403)'})
+        else:
+            return JsonResponse({'valid': False, 'error': f'API error: HTTP {e.code}'})
+    except urllib.error.URLError as e:
+        return JsonResponse({'valid': False, 'error': f'Connection error: {e.reason}'})
+    except Exception as e:
+        return JsonResponse({'valid': False, 'error': str(e)})
+
+
+@login_required
+def settings_ddns_check_ip(request):
+    result = {'ipv4': '', 'ipv6': '', 'ipv4_available': False, 'ipv6_available': False}
+
+    try:
+        req = urllib.request.Request('https://checkipv4.dedyn.io/')
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            ipv4 = resp.read().decode().strip()
+            # Basic validation
+            parts = ipv4.split('.')
+            if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+                result['ipv4'] = ipv4
+                result['ipv4_available'] = True
+    except Exception:
+        pass
+
+    try:
+        req = urllib.request.Request('https://checkipv6.dedyn.io/')
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            ipv6 = resp.read().decode().strip()
+            # Basic IPv6 validation (has colons)
+            if ':' in ipv6:
+                result['ipv6'] = ipv6
+                result['ipv6_available'] = True
+    except Exception:
+        pass
+
+    return JsonResponse(result)
 
 @login_required
 def settings_auth(request):
