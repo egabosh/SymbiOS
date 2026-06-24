@@ -141,9 +141,16 @@
           #!/bin/bash
           INDEX_FILE=/home/docker/symbios-ui/log/docker-containers.tsv
           TEMP_FILE="${INDEX_FILE}.tmp"
-          docker ps --format '{% raw %}{{.ID}}\t{{.Names}}{% endraw %}' > "$TEMP_FILE" 2>/dev/null
+          docker ps --no-trunc --format '{% raw %}{{.ID}}\t{{.Names}}{% endraw %}' > "$TEMP_FILE" 2>/dev/null
           mv "$TEMP_FILE" "$INDEX_FILE"
           chmod 644 "$INDEX_FILE"
+          setfacl -m u:10000:rx /var/lib/docker/containers/ 2>/dev/null
+          for d in /var/lib/docker/containers/*/; do
+            setfacl -m u:10000:rx "$d" 2>/dev/null
+          done
+          for f in /var/lib/docker/containers/*/*-json.log; do
+            setfacl -m u:10000:r "$f" 2>/dev/null
+          done
         mode: "0755"
         owner: root
         group: root
