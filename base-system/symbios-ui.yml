@@ -53,7 +53,7 @@
                 - /var/log:/var/log:ro
                 - /var/lib/docker/containers:/docker/containers:ro
               tmpfs:
-                - /app/db
+                - /app/db:uid=10000,gid=10000
               restart: unless-stopped
               environment:
                 - PYTHONUNBUFFERED=1
