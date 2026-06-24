@@ -1,0 +1,76 @@
+{% extends "main/base_fullwidth.html" %}
+{% load static %}
+{% block title %}System Health - SymbiOS WebUI{% endblock %}
+{% block content %}
+<h2><i class="bi bi-heart-pulse"></i> System Health</h2>
+
+<div id="health-container" class="row g-3 mt-2">
+  <div class="col-12 text-center">
+    <div class="spinner-border" role="status">
+      <span class="visually-hidden">Loading...</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  const HEALTH_INTERVAL_MS = 10000;
+
+  function statusIcon(status) {
+    if (status === 'ok') return '<i class="bi bi-check-circle-fill text-success"></i>';
+    if (status === 'warn') return '<i class="bi bi-exclamation-triangle-fill text-warning"></i>';
+    if (status === 'error') return '<i class="bi bi-x-circle-fill text-danger"></i>';
+    return '<i class="bi bi-question-circle-fill text-secondary"></i>';
+  }
+
+  function healthCard(key, label, data) {
+    const status = data.status || 'unknown';
+    const msg = data.message || '';
+    return '<div class="col-md-6 col-lg-4">' +
+      '<div class="card h-100 border-' + (status === 'ok' ? 'success' : status === 'warn' ? 'warning' : 'danger') + '">' +
+      '<div class="card-body">' +
+      '<h5 class="card-title">' + statusIcon(status) + ' ' + label + '</h5>' +
+      '<p class="card-text text-muted small mb-0">' + escapeHtml(msg) + '</p>' +
+      '</div></div></div>';
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  async function fetchHealth() {
+    try {
+      const resp = await fetch('/health/data/');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+
+      const labels = {
+        ldap: 'LDAP',
+        authelia: 'Authelia',
+        traefik: 'Traefik',
+        stepca: 'Step-CA',
+        config_daemon: 'Config Daemon',
+        containers: 'Docker Containers',
+        disk: 'Disk Usage',
+        certs: 'TLS Certificates',
+        root_ca: 'Root-CA Certificate',
+      };
+
+      let html = '';
+      for (const [key, label] of Object.entries(labels)) {
+        if (data[key]) {
+          html += healthCard(key, label, data[key]);
+        }
+      }
+      document.getElementById('health-container').innerHTML = html;
+    } catch (e) {
+      document.getElementById('health-container').innerHTML =
+        '<div class="col-12"><div class="alert alert-danger">Error fetching health data: ' + e.message + '</div></div>';
+    }
+  }
+
+  fetchHealth();
+  setInterval(fetchHealth, HEALTH_INTERVAL_MS);
+</script>
+{% endblock %}

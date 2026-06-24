@@ -51,6 +51,7 @@
                 - ./config:/config
                 - ./log:/log
                 - /var/log:/var/log:ro
+                - /var/lib/docker/containers:/docker/containers:ro
               tmpfs:
                 - /app/db
               restart: unless-stopped
@@ -123,5 +124,109 @@
     - name: Enable configd
       ansible.builtin.systemd:
         name: symbios-configd
+        enabled: yes
+        state: started
+
+    - name: Copy container-index.sh
+      ansible.builtin.copy:
+        dest: /usr/local/bin/symbios-container-index.sh
+        content: |
+          #!/bin/bash
+          INDEX_FILE=/var/run/docker-containers.tsv
+          TEMP_FILE="${INDEX_FILE}.tmp"
+          docker ps --format '{{.ID}}\t{{.Names}}' > "$TEMP_FILE" 2>/dev/null
+          mv "$TEMP_FILE" "$INDEX_FILE"
+          chmod 644 "$INDEX_FILE"
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Copy service-status.sh
+      ansible.builtin.copy:
+        dest: /usr/local/bin/symbios-service-status.sh
+        content: |
+          #!/bin/bash
+          FILE=/var/run/symbios-services.tsv
+          TMP="${FILE}.tmp"
+          for svc in symbios-configd; do
+              status=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
+              echo -e "${svc}\t${status}"
+          done > "$TMP"
+          chmod 644 "$TMP"
+          mv "$TMP" "$FILE"
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Install container-index systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-container-index.service
+        content: |
+          [Unit]
+          Description=Write Docker container index to /var/run
+          After=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/symbios-container-index.sh
+          User=root
+          Group=root
+
+    - name: Install container-index systemd timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-container-index.timer
+        content: |
+          [Unit]
+          Description=Update Docker container index every 60s
+
+          [Timer]
+          OnBootSec=30
+          OnUnitActiveSec=60
+          Unit=symbios-container-index.service
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Install service-status systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-service-status.service
+        content: |
+          [Unit]
+          Description=Write system service statuses to /var/run
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/symbios-service-status.sh
+          User=root
+          Group=root
+
+    - name: Install service-status systemd timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-service-status.timer
+        content: |
+          [Unit]
+          Description=Update service statuses every 60s
+
+          [Timer]
+          OnBootSec=35
+          OnUnitActiveSec=60
+          Unit=symbios-service-status.service
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: Enable container-index timer
+      ansible.builtin.systemd:
+        name: symbios-container-index.timer
+        enabled: yes
+        state: started
+
+    - name: Enable service-status timer
+      ansible.builtin.systemd:
+        name: symbios-service-status.timer
         enabled: yes
         state: started

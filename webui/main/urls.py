@@ -4,6 +4,8 @@ from . import views
 from . import views_change_password
 
 urlpatterns = [
+    path('health/', views.health, name='health'),
+    path('health/data/', views.health_data, name='health_data'),
     path('', views.settings, name='settings'),
     path('settings/', views.settings, name='settings'),
     path('settings/network/', views.settings_network, name='settings_network'),
@@ -12,6 +14,7 @@ urlpatterns = [
     path('settings/auth/', views.settings_auth, name='settings_auth'),
     path('logs/', views.logs, name='logs'),
     path('logs/stream/', views.logs_stream, name='logs_stream'),
+    path('logs/containers/', views.container_list, name='logs_containers'),
     path('users/', views.users, name='users'),
     path('users/create/', views.user_create, name='user_create'),
     path('users/<str:uid>/delete/', views.user_delete, name='user_delete'),
