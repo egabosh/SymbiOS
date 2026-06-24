@@ -124,6 +124,20 @@
       ignore_errors: yes
       when: nocontainer.stat.exists == true
 
+    - name: Restart systemd-resolved to pick up DNS config
+      service:
+        name: systemd-resolved
+        state: restarted
+      when: nocontainer.stat.exists == true
+
+    - name: Ensure /etc/resolv.conf points to systemd-resolved stub
+      ansible.builtin.file:
+        src: /run/systemd/resolve/stub-resolv.conf
+        dest: /etc/resolv.conf
+        state: link
+        force: yes
+      when: nocontainer.stat.exists == true
+
 
     # Gather facts about the system, including virtualization type
     - name: Gather system facts
