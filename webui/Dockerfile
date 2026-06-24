@@ -10,12 +10,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     procps \
-    gcc \
     libldap2-dev \
     libsasl2-dev \
     ldap-utils \
     openssl \
-    ansible \
     sshpass \
     && rm -rf /var/lib/apt/lists/*
 
