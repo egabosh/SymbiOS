@@ -122,7 +122,14 @@
   handlers:
 
     - name: Restart {{ service_name }}
-      ansible.builtin.shell: docker compose build --no-cache && docker compose down && docker compose up -d
+      ansible.builtin.shell: |
+        if docker compose build --no-cache
+        then
+          if docker compose down
+          then
+            docker compose up -d
+          fi
+        fi
       args:
         chdir: "{{ docker_path }}"
 
@@ -146,16 +153,32 @@
         dest: /usr/local/bin/symbios-container-index.sh
         content: |
           #!/bin/bash
-          INDEX_FILE=/home/docker/symbios-ui/log/docker-containers.tsv
-          TEMP_FILE="${INDEX_FILE}.tmp"
-          docker ps --no-trunc --format '{% raw %}{{.ID}}\t{{.Names}}{% endraw %}' > "$TEMP_FILE" 2>/dev/null
-          mv "$TEMP_FILE" "$INDEX_FILE"
-          chmod 644 "$INDEX_FILE"
+
+          # Index file storing Docker container information
+          g_index_file=/home/docker/symbios-ui/log/docker-containers.tsv
+          g_temp_file="${g_index_file}.tmp"
+
+          # Write current container list to temp file
+          docker ps --no-trunc --format '{% raw %}{{.ID}}\t{{.Names}}{% endraw %}' > "$g_temp_file" 2>/dev/null
+
+          # Atomically replace index file
+          mv "$g_temp_file" "$g_index_file"
+
+          # Set permissions on index file
+          chmod 644 "$g_index_file"
+
+          # Grant read and execute on containers directory
           setfacl -m u:10000:rx /var/lib/docker/containers/ 2>/dev/null
-          for d in /var/lib/docker/containers/*/; do
+
+          # Grant read and execute on each container subdirectory
+          for d in /var/lib/docker/containers/*/
+          do
             setfacl -m u:10000:rx "$d" 2>/dev/null
           done
-          for f in /var/lib/docker/containers/*/*-json.log; do
+
+          # Grant read permission on each JSON log file
+          for f in /var/lib/docker/containers/*/*-json.log
+          do
             setfacl -m u:10000:r "$f" 2>/dev/null
           done
         mode: "0755"
@@ -167,14 +190,27 @@
         dest: /usr/local/bin/symbios-service-status.sh
         content: |
           #!/bin/bash
-          FILE=/home/docker/symbios-ui/log/symbios-services.tsv
-          TMP="${FILE}.tmp"
-          for svc in symbios-configd; do
-              status=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
-              echo -e "${svc}\t${status}"
-          done > "$TMP"
-          chmod 644 "$TMP"
-          mv "$TMP" "$FILE"
+
+          # File storing system service statuses
+          g_file=/home/docker/symbios-ui/log/symbios-services.tsv
+          g_tmp="${g_file}.tmp"
+
+          # Write status for each service to temp file
+          for svc in symbios-configd
+          do
+            # Get service status, fall back to "unknown" on failure
+            if ! g_status=$(systemctl is-active "$svc" 2>/dev/null)
+            then
+              g_status="unknown"
+            fi
+            echo -e "${svc}\t${g_status}"
+          done > "$g_tmp"
+
+          # Set permissions on temp file
+          chmod 644 "$g_tmp"
+
+          # Atomically replace status file
+          mv "$g_tmp" "$g_file"
         mode: "0755"
         owner: root
         group: root

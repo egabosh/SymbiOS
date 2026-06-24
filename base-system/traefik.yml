@@ -1,5 +1,4 @@
 ---
-
 - name: traefik
   hosts: all
   tasks:
@@ -13,22 +12,32 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          # Change to traefik configuration directory
           cd /home/docker/traefik
-          user=admin
-          password=$(pwgen -s 32 1)
+          # Set default admin username
+          f_user=admin
+          # Generate a random 32-character password
+          f_password=$(pwgen -s 32 1)
 
-          [ -f default-basic-auth-env ] || echo "USER=!USER!
+          # Create env file with placeholders if it does not exist yet
+          if ! [ -f default-basic-auth-env ]
+          then
+            echo "USER=!USER!
           PASSWORD=!PASSWORD!
-          " >default-basic-auth-env          
-         
+          " >default-basic-auth-env
+          fi
+
+          # Restrict access to the env file
           chmod 440 default-basic-auth-env
           chown root:docker default-basic-auth-env
-          sed -i "s/\!USER\!/$user/g" default-basic-auth-env
-          sed -i "s/\!PASSWORD\!/$password/g" default-basic-auth-env
-          
+          # Substitute placeholders with actual credentials
+          sed -i "s/\!USER\!/$f_user/g" default-basic-auth-env
+          sed -i "s/\!PASSWORD\!/$f_password/g" default-basic-auth-env
+
+          # Load credentials and generate htpasswd entry for basic auth
           . default-basic-auth-env
           mkdir -p providers
-          echo $(htpasswd -nb $USER $PASSWORD) >providers/default-basic-auth.usersfile
+          htpasswd -nb "$USER" "$PASSWORD" >providers/default-basic-auth.usersfile
 
         backup: yes
         validate: /bin/bash -n %s
@@ -39,6 +48,7 @@
         insertbefore: BOF
         line: "#!/bin/bash -e"
 
+    # Generate initial htpasswd if the users file does not exist yet
     - name: Gen initial password if not exists
       ansible.builtin.shell: ./default-basic-auth-genpw.sh
       args:
@@ -218,6 +228,7 @@
                     ipv6Subnet: 64
       notify: Restart traefik
 
+    # Script to run Qualys SSL Labs scan against all Traefik-hosted services
     - name: /usr/local/sbin/traefik-qualys-ssl-labs-check.sh
       blockinfile:
         path: /usr/local/sbin/traefik-qualys-ssl-labs-check.sh
@@ -233,71 +244,95 @@
           g_all-to-syslog
           g_echo_ok "Starting $0"
 
-
-          # Using official API-CLI-Tool 
+          # Using official ssllabs-scan API client
           # https://www.ssllabs.com/projects/ssllabs-apis/
           # https://github.com/ssllabs/ssllabs-scan/
-          
-          # Download and install if unavailable
+
+          # Download and build ssllabs-scan if not already installed
           if ! [ -f /usr/local/bin/ssllabs-scan ]
           then
             cd /tmp
             rm -rf ssllabs-scan
-            git clone https://github.com/ssllabs/ssllabs-scan/ || g_echo_error "Could not download ssllabs-scan"
-            cd ssllabs-scan
-            make >${g_tmp}/ssllabs-scan-make.out
-            if [ -f ssllabs-scan-v3 ]
+            # Clone the ssllabs-scan repository
+            if ! git clone https://github.com/ssllabs/ssllabs-scan/
             then
-              cp ssllabs-scan-v3 /usr/local/bin/ssllabs-scan
-              chmod 755 /usr/local/bin/ssllabs-scan
-              chown root. /usr/local/bin/ssllabs-scan
+              g_echo_error "Could not download ssllabs-scan"
             else
-              g_echo_error "Could not build ssllabs-scan $(cat ${g_tmp}/ssllabs-scan-make.out)"
+              cd ssllabs-scan
+              make >"${g_tmp}/ssllabs-scan-make.out"
+              if [ -f ssllabs-scan-v3 ]
+              then
+                cp ssllabs-scan-v3 /usr/local/bin/ssllabs-scan
+                chmod 755 /usr/local/bin/ssllabs-scan
+                chown root. /usr/local/bin/ssllabs-scan
+              else
+                g_echo_error "Could not build ssllabs-scan $(cat ${g_tmp}/ssllabs-scan-make.out)"
+              fi
             fi
           fi
-          
-          # Check every Traefik Host
+
+          # Scan every Traefik-hosted service
           if [ -f /usr/local/bin/ssllabs-scan ]
           then
-            find /home/docker -maxdepth 1 -mindepth 1 -type d | egrep -v ".del$|.bak$|.old$|var-lib-docker$" | while read dir
+            # Collect all hostnames from docker-compose files
+            find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "\.del$|\.bak$|\.old$|var-lib-docker$" | while read f_dir
             do
-              if grep -q Host "$dir"/docker-compose.override.yml >/dev/null 2>&1
+              if grep -q Host "$f_dir"/docker-compose.override.yml >/dev/null 2>&1
               then
-                grep Host "$dir"/docker-compose.override.yml >>$g_tmp/hosts
+                grep Host "$f_dir"/docker-compose.override.yml >>"$g_tmp/hosts"
               else
-                [ -f "$dir"/docker-compose.yml ] && grep Host "$dir"/docker-compose.yml >>$g_tmp/hosts
+                if [ -f "$f_dir"/docker-compose.yml ]
+                then
+                  grep Host "$f_dir"/docker-compose.yml >>"$g_tmp/hosts"
+                fi
               fi
             done
-            grep Host /home/docker/traefik/providers/*.yml >>$g_tmp/hosts
-            cat $g_tmp/hosts | cut -d '`' -f2 | sort -u | while read host
+            grep Host /home/docker/traefik/providers/*.yml >>"$g_tmp/hosts"
+
+            # Iterate over unique hostnames and run ssllabs-scan
+            cat "$g_tmp/hosts" | cut -d '`' -f2 | sort -u | while read f_host
             do
-              resultfile="/tmp/ssllabs-scan-result-$$-$host"
-              host ${host} >/dev/null 2>&1 || continue
-              curl -s https://${host} >/dev/null 2>&1 || continue
-              echo '[]' >$resultfile
-              while cat $resultfile | jq -r | egrep -q '^\[\]$'
+              f_resultfile="/tmp/ssllabs-scan-result-$$-$f_host"
+
+              # Skip if host is not resolvable
+              if ! host "${f_host}" >/dev/null 2>&1
+              then
+                continue
+              fi
+              # Skip if host does not respond to HTTPS
+              if ! curl -s "https://${f_host}" >/dev/null 2>&1
+              then
+                continue
+              fi
+
+              # Initialize result file with empty JSON array
+              echo '[]' >"$f_resultfile"
+
+              # Poll until ssllabs-scan returns a non-empty result
+              while cat "$f_resultfile" | jq -r | grep -E -q '^\[\]$'
               do
-                until ssllabs-scan --quiet ${host} >$resultfile
+                until ssllabs-scan --quiet "${f_host}" >"$f_resultfile"
                 do
                   sleep 60
                 done
                 sleep 60
               done
-              cat $resultfile | jq '.[] | .endpoints | .[] | .grade' >${g_tmp}/ssllabs-scan-result 2>&1 >${g_tmp}/ssllabs-scan-result
-              if ! egrep -q 'A+|null' ${g_tmp}/ssllabs-scan-result
-              then
-                #if ! grep -q T ${g_tmp}/ssllabs-scan-result
-                #then
-                  g_echo_error "Qualys SSL Labs scan-result for ${host} not A+: $(cat ${g_tmp}/ssllabs-scan-result)
 
-          https://www.ssllabs.com/ssltest/analyze.html?d=${host}&hideResults=on
+              # Extract grade for each endpoint
+              cat "$f_resultfile" | jq '.[] | .endpoints | .[] | .grade' >"${g_tmp}/ssllabs-scan-result" 2>&1 >"${g_tmp}/ssllabs-scan-result"
+
+              # Report grade; warn if not A+
+              if ! grep -E -q 'A+|null' "${g_tmp}/ssllabs-scan-result"
+              then
+                g_echo_error "Qualys SSL Labs scan-result for ${f_host} not A+: $(cat ${g_tmp}/ssllabs-scan-result)
+
+          https://www.ssllabs.com/ssltest/analyze.html?d=${f_host}&hideResults=on
 
           Result: $(cat ${g_tmp}/ssllabs-scan-result)"
-                #fi
               else
-                g_echo_ok "Qualys SSL Labs scan-result for ${host}: $(cat ${g_tmp}/ssllabs-scan-result)"
+                g_echo_ok "Qualys SSL Labs scan-result for ${f_host}: $(cat ${g_tmp}/ssllabs-scan-result)"
               fi
-              rm $resultfile
+              rm "$f_resultfile"
             done
           fi
         backup: yes
@@ -309,6 +344,7 @@
         insertbefore: BOF
         line: "#!/bin/bash"
 
+    # Check script run by runchecks framework to verify Traefik hosts are reachable
     - name: /usr/local/sbin/runchecks.d/traefik.check
       blockinfile:
         path: /usr/local/sbin/runchecks.d/traefik.check
@@ -318,45 +354,77 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          >$g_tmp/hosts
-          find /home/docker -maxdepth 1 -mindepth 1 -type d  | egrep -v ".del$|.bak$|.old$|var-lib-docker$" | while read dir
+          . /etc/bash/gaboshlib.include
+
+          # Truncate hosts file and collect all hostnames from docker-compose
+          >"$g_tmp/hosts"
+          find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "\.del$|\.bak$|\.old$|var-lib-docker$" | while read f_dir
           do
-            [ -s "$dir"/.downok ] && continue
-            if grep -q Host "$dir"/docker-compose.override.yml >/dev/null 2>&1
+            # Skip directories marked as down
+            if [ -s "$f_dir/.downok" ]
             then
-              grep Host "$dir"/docker-compose.override.yml >>$g_tmp/hosts
+              continue
+            fi
+            # Extract Host labels from docker-compose files
+            if grep -q Host "$f_dir/docker-compose.override.yml" >/dev/null 2>&1
+            then
+              grep Host "$f_dir/docker-compose.override.yml" >>"$g_tmp/hosts"
             else
-              [ -f "$dir"/docker-compose.yml ] && grep Host "$dir"/docker-compose.yml >>$g_tmp/hosts
+              if [ -f "$f_dir/docker-compose.yml" ]
+              then
+                grep Host "$f_dir/docker-compose.yml" >>"$g_tmp/hosts"
+              fi
             fi
           done
-          grep Host /home/docker/traefik/providers/*.yml >>$g_tmp/hosts
+          grep Host /home/docker/traefik/providers/*.yml >>"$g_tmp/hosts"
 
-          cat $g_tmp/hosts | cut -d '`' -f2 | sort -u | while read host
+          # Ensure each host has a local /etc/hosts entry
+          cat "$g_tmp/hosts" | cut -d '`' -f2 | sort -u | while read f_host
           do
-            find -mmin -5 /tmp/$host >/dev/null 2>&1 | grep -q $host && continue
-            egrep -q "192.168.41.1  $host" /etc/hosts || echo "192.168.41.1  $host" >>/etc/hosts
-          done
-          cat $g_tmp/hosts | grep -v tcp | cut -d '`' -f2 | sort -u | while read host
-          do
-            find -mmin -5 /tmp/$host >/dev/null 2>&1 | grep -q $host && continue
-            if ! wget --dns-timeout=120 -t5 --waitretry=120 --connect-timeout=300 --read-timeout=15 http://${host} >${g_tmp}/traefik-wget-check -O /dev/null 2>&1 
+            # Skip hosts checked within the last 5 minutes
+            if find -mmin -5 "/tmp/$f_host" >/dev/null 2>&1 | grep -q "$f_host"
             then
-              if ! egrep -q "401 Unauthorized|403 Forbidden" ${g_tmp}/traefik-wget-check
+              continue
+            fi
+            # Add host to /etc/hosts if not already present
+            if ! grep -E -q "192.168.41.1  $f_host" /etc/hosts
+            then
+              echo "192.168.41.1  $f_host" >>/etc/hosts
+            fi
+          done
+
+          # Verify each host is reachable via HTTP
+          cat "$g_tmp/hosts" | grep -v tcp | cut -d '`' -f2 | sort -u | while read f_host
+          do
+            # Skip hosts checked within the last 5 minutes
+            if find -mmin -5 "/tmp/$f_host" >/dev/null 2>&1 | grep -q "$f_host"
+            then
+              continue
+            fi
+            # Attempt HTTP connection with wget
+            if ! wget --dns-timeout=120 -t5 --waitretry=120 --connect-timeout=300 --read-timeout=15 "http://${f_host}" >"${g_tmp}/traefik-wget-check" -O /dev/null 2>&1
+            then
+              # Report error only if it is not a known-auth response
+              if ! grep -E -q "401 Unauthorized|403 Forbidden" "${g_tmp}/traefik-wget-check"
               then
-                g_echo_error "Error while connecting ${host} with wget:
-          
+                g_echo_error "Error while connecting ${f_host} with wget:
+
           $(cat ${g_tmp}/traefik-wget-check)"
               else
-                [ -f "${g_tmp}/$host-502" ] && rm "${g_tmp}/$host-502"
-              fi
-              if egrep -q "502 Bad Gateway" ${g_tmp}/traefik-wget-check
-              then
-                if [ -s "${g_tmp}/$host-502" ] && find "${g_tmp}/$host-502" | grep "$host-502" -mmin +15
+                if [ -f "${g_tmp}/$f_host-502" ]
                 then
-                  g_echo_error "Error while connecting ${host} with wget:
+                  rm "${g_tmp}/$f_host-502"
+                fi
+              fi
+              # Track persistent 502 errors
+              if grep -E -q "502 Bad Gateway" "${g_tmp}/traefik-wget-check"
+              then
+                if [ -s "${g_tmp}/$f_host-502" ] && find "${g_tmp}/$f_host-502" | grep "$f_host-502" -mmin +15
+                then
+                  g_echo_error "Error while connecting ${f_host} with wget:
           $(cat ${g_tmp}/traefik-wget-check)"
                 else
-                  date >"${g_tmp}/$host-502"
+                  date >"${g_tmp}/$f_host-502"
                 fi
               fi
             fi

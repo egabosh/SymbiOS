@@ -1,5 +1,5 @@
 ---
-- name: OpenVPN config auf OpenWRT setzen
+- name: Deploy OpenVPN configuration on OpenWRT
   hosts: all
   gather_facts: no
 
@@ -52,7 +52,7 @@
         shell scp -B -O /etc/openvpn/iot-dev2bridge.sh root@{{ inventory_hostname }}:/etc/openvpn/iot-dev2bridge.sh
       changed_when: false
 
-    - name: hotplug skript if iot0 is restarted
+    - name: hotplug script when iot0 interface restarts
       raw: |
         echo '[ "$ACTION" = "ifup" -a "$INTERFACE" = "iot0" ] && {
           echo 1 >/proc/sys/net/ipv6/conf/iot0/disable_ipv6
@@ -63,7 +63,12 @@
 
     - name: set uci values if needed
       raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        if g_uci_current=$(uci get {{ item.key }} 2>/dev/null)
+        then
+          current="$g_uci_current"
+        else
+          current="NOT_SET"
+        fi
         desired="{{ item.value }}"
         if [ "$current" != "$desired" ]
         then

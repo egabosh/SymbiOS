@@ -200,7 +200,7 @@
         owner: root
         group: root
         create: yes
-        insertbefore: BOF # Beginning of the file
+        insertbefore: BOF
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           Host *
@@ -246,35 +246,40 @@
         group: root
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          # Set colored PS1 prompt for root vs regular user
           if [ "${USER}" = root ]
           then
             PS1='\[\033[01;31m\]\h\[\033[01;34m\] \w \$\[\033[00m\] '
           else
             PS1='\[\033[01;32m\]\u@\h\[\033[01;34m\] \w \$\[\033[00m\] '
           fi
+
+          # Export editor and shell history settings
           export EDITOR="/usr/bin/vim"
           export HISTSIZE=
           export HISTFILESIZE=
           export HISTTIMEFORMAT="[%F %T] "
+
+          # Configure Debian/Ubuntu environment and colored aliases
           if [ -f /etc/debian_version ]
           then
             export DEBIAN_FRONTEND='noninteractive'
             export LANG="en_US.UTF-8"
             alias ls='ls --color=auto'
             alias grep='grep --colour=auto'
-            alias egrep='egrep --colour=auto'
-            alias fgrep='fgrep --colour=auto'
+            alias egrep='grep -E --colour=auto'
+            alias fgrep='grep -F --colour=auto'
           fi
-          # execute for linuxmint
+
+          # Source profile in bashrc and set German locale for LinuxMint
           if [ -d /etc/linuxmint ] 
           then
-            grep -q /etc/profile.d/settings-from-ansible.sh ~/.bashrc || echo '. /etc/profile.d/settings-from-ansible.sh' >> ~/.bashrc
+            if ! grep -q /etc/profile.d/settings-from-ansible.sh ~/.bashrc
+            then
+              echo '. /etc/profile.d/settings-from-ansible.sh' >> ~/.bashrc
+            fi
             export LANG="de_DE.UTF-8"
-            #for rc in ~/.bashrc /etc/skel/.bashrc
-            #do
-            #  grep -q /etc/profile.d/settings-from-ansible.sh $rc || echo '. /etc/profile.d/settings-from-ansible.sh' >> $rc
-            #done
-          fi          
+          fi
         backup: yes
         validate: /bin/bash -n %s
 
@@ -617,4 +622,3 @@
     - name: reload systemd
       systemd:
         daemon_reload: yes
-

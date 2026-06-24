@@ -77,8 +77,14 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          wget -q $(curl -s https://api.github.com/repositories/108186071/releases/latest | jq -r '.assets[].browser_download_url' | grep linux-{{ ansible_architecture }}.deb | head -n1) -O /tmp/vdh.deb
+          # Fetch latest video-download-helper .deb package from GitHub releases
+          g_vdh_url=$(curl -s https://api.github.com/repositories/108186071/releases/latest | jq -r '.assets[].browser_download_url' | grep "linux-{{ ansible_architecture }}\.deb" | head -n1)
+          wget -q "$g_vdh_url" -O /tmp/vdh.deb
+
+          # Install the downloaded package
           dpkg -i /tmp/vdh.deb
+
+          # Clean up temporary file
           rm /tmp/vdh.deb
         backup: yes
         validate: /bin/bash -n %s

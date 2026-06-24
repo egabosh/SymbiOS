@@ -85,10 +85,17 @@
           . /etc/bash/gaboshlib.include
           g_lockfile
 
-          [ -s /etc/openvpn/homeassistant.iot.ovpn ] || touch /etc/openvpn/homeassistant.iot.ovpn
+          # Ensure target file exists before comparing
+          if [ ! -s /etc/openvpn/homeassistant.iot.ovpn ]
+          then
+            touch /etc/openvpn/homeassistant.iot.ovpn
+          fi
 
-          # get possible new file from router
-          scp -B -O -q root@router:/etc/openvpn/iot-easy-rsa/homeassistant.iot.ovpn /etc/openvpn/homeassistant-iot.conf.new || g_echo_error_exit "Cold not get root@openwrt-og:/etc/openvpn/iot-easy-rsa/homeassistant.iot.ovpn"
+          # Fetch updated VPN configuration from router via SCP
+          if ! scp -B -O -q root@router:/etc/openvpn/iot-easy-rsa/homeassistant.iot.ovpn /etc/openvpn/homeassistant-iot.conf.new
+          then
+            g_echo_error_exit "Could not get root@openwrt-og:/etc/openvpn/iot-easy-rsa/homeassistant.iot.ovpn"
+          fi
 
           sed -i 's/^[[:space:]]*-----/-----/' /etc/openvpn/homeassistant-iot.conf.new
           # if file is new
@@ -115,7 +122,7 @@
         enabled: yes
         state: started
 
-    - name: Cronjob für OpenVPN-Skript alle 5 Minuten einrichten
+    - name: Setup cron job for OpenVPN script every 5 minutes
       ansible.builtin.cron:
         name: "Sync OpenVPN HomeAssistant certs"
         minute: "*/5"

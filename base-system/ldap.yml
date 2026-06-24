@@ -142,6 +142,7 @@
       when: not env_ldap.stat.exists
       block:
 
+        # Generate a random password for LDAP Account Manager
         - name: Generate lam_password
           command: pwgen -s 32 1
           register: lam_password
@@ -171,11 +172,13 @@
       when: not slapd_conf_status.stat.exists
       block:
 
+        # Generate random password for LDAP admin user
         - name: Generate a secure password using pwgen
           command: pwgen -s 32 1
           register: ldap_password
           no_log: true
 
+        # Generate random password for LDAP read-only user
         - name: Generate a secure password using pwgen readuser
           command: pwgen -s 32 1
           register: readuser_password
@@ -192,6 +195,7 @@
             group: root
           no_log: true
 
+        # Generate SSHA hash of admin password for LDIF
         - name: Generate SSHA password hash using Python
           shell: echo "{{ ldap_password.stdout }}" | python3 -c "import hashlib,base64,os,sys; salt=os.urandom(8); pw=sys.stdin.read().strip(); print('{SSHA}'+base64.b64encode(hashlib.sha1(pw.encode()+salt).digest()+salt).decode())"
           register: ssha_hash
@@ -202,6 +206,7 @@
             ldap_password_hash: "{{ ssha_hash.stdout }}"
           no_log: true
  
+        # Generate SSHA hash of readuser password for LDIF
         - name: Generate SSHA password hash using Python readuser
           shell: echo "{{ readuser_password.stdout }}" | python3 -c "import hashlib,base64,os,sys; salt=os.urandom(8); pw=sys.stdin.read().strip(); print('{SSHA}'+base64.b64encode(hashlib.sha1(pw.encode()+salt).digest()+salt).decode())"
           register: ssha_hash_readuser
@@ -356,22 +361,39 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           set -x
+
+          # Create slapd runtime directory with correct ownership
           mkdir -p /var/run/slapd
           chown openldap:openldap /var/run/slapd
+
+          # Initialize LDAP configuration if not already done
           if ! [[ -s /ldap-config/slapd.conf.ldif.done ]]
           then
+            # Clean existing configuration
             rm -rf /etc/ldap/slapd.d/*
             mkdir /ldap-config/slapd.d
             chown -R openldap:openldap /var/lib/ldap /ldap-config/slapd.d
+
+            # Load configuration LDIF
             slapadd -F /ldap-config/slapd.d -n 0 -l /ldap-config/config.ldif
+
+            # Load standard LDAP schemas
             slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/core.ldif
             slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/cosine.ldif
             slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/inetorgperson.ldif
             slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/nis.ldif
+
+            # Load base directory structure
             slapadd -F /ldap-config/slapd.d -l /ldap-config/base.ldif
+
+            # Fix ownership after slapadd operations
             chown -R openldap:openldap /var/lib/ldap /ldap-config/slapd.d
+
+            # Mark initialization as complete
             date >>/ldap-config/slapd.conf.ldif.done
           fi
+
+          # Start slapd in foreground
           exec /usr/sbin/slapd -h "ldap:/// ldapi:///" -d 0 -u openldap -g openldap -F /ldap-config/slapd.d
         backup: yes
         validate: /bin/bash -n %s
@@ -482,27 +504,37 @@
         group: root 
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          DAYS=7
-          TIMESTAMP=$(date +"%Y%m%d%H%M")
+          # Configure backup retention period in days
+          f_days=7
+          f_timestamp=$(date +"%Y%m%d%H%M")
 
           cd {{ docker_path }}
-          if docker compose exec -ti openldap.{{service_domain}} slapcat -F /ldap-config/slapd.d >$BACKUPDIR/openldap.{{service_domain}}-$TIMESTAMP.ldif 2>"${g_tmp}/ldaperr"
+
+          # Export LDAP database using slapcat
+          if docker compose exec -ti openldap.{{service_domain}} slapcat -F /ldap-config/slapd.d >$BACKUPDIR/openldap.{{service_domain}}-$f_timestamp.ldif 2>"${g_tmp}/ldaperr"
           then
-            gzip $BACKUPDIR/openldap.{{service_domain}}-$TIMESTAMP.ldif
+            # Compress the LDIF backup
+            gzip $BACKUPDIR/openldap.{{service_domain}}-$f_timestamp.ldif
           else
-            g_echo_error "LDAP Backup failed $(cat ${g_tmp}/ldaperr)"
+            g_echo_error "LDAP backup failed: $(cat ${g_tmp}/ldaperr)"
           fi
           cd -
 
-          # dont delete last old backups!
-          OLD_BACKUPS=$(ls -1 $BACKUPDIR/openldap.{{service_domain}}-*.gz 2>/dev/null | wc -l)
-          if [ -n "$OLD_BACKUPS" ] && [ $OLD_BACKUPS -gt $DAYS ]
+          # Count existing backups
+          f_old_backups=$(ls -1 $BACKUPDIR/openldap.{{service_domain}}-*.gz 2>/dev/null | wc -l)
+
+          # Remove old backups if more than retention period
+          if [ -n "$f_old_backups" ]
           then
-            find $BACKUPDIR -name "$BACKUPDIR/openldap.{{service_domain}}-*.gz" -daystart -mtime +$DAYS -delete
+            if [ $f_old_backups -gt $f_days ]
+            then
+              find $BACKUPDIR -name "openldap.{{service_domain}}-*.gz" -daystart -mtime +$f_days -delete
+            fi
           fi
         backup: yes
         validate: /bin/bash -n %s
 
+    # Extract LDAP readuser password from env.openldap for nslcd config
     - name: Get LDAP readuser password from file
       shell: "grep ^LDAP_READUSER_PASSWORD= {{ docker_path }}/env.openldap | cut -d= -f2-"
       register: ldap_readuser_password
@@ -551,12 +583,14 @@
           BINDDN="cn=head-of-ldap,{{ldap_basedn}}"
         backup: yes
 
+    # Extract LDAP admin password from env.openldap for ldapscripts
     - name: Get LDAP admin password from file
       shell: "grep ^LDAP_ADMIN_PASSWORD= {{ docker_path }}/env.openldap | cut -d= -f2-"
       register: ldap_admin_password
       changed_when: false
       no_log: true
 
+    # Write admin password to ldapscripts without trailing newline
     - name: Write /etc/ldapscripts/ldapscripts.passwd without newline
       shell: "printf '%s' '{{ ldap_admin_password.stdout }}' > /etc/ldapscripts/ldapscripts.passwd"
       changed_when: false
@@ -599,13 +633,19 @@
         group: root
         content: |
           #!/bin/bash
-          # Use docker exec to bypass Traefik TLS (Step-CA may be unhealthy)
+
+          # Source LDAP credentials from environment file
           . /home/docker/ldap/env.openldap
+
+          # Use docker exec to bypass Traefik TLS (Step-CA may be unhealthy)
           docker compose -f /home/docker/ldap/docker-compose.yml exec -T openldap \
             ldapsearch -x -H ldap://localhost -D "cn=readuser,{{ldap_basedn}}" -w "$LDAP_READUSER_PASSWORD" -b "{{ldap_basedn}}" "$@"
-          rc=$?
+          f_rc=$?
+
+          # Clear credentials from environment
           unset LDAP_ADMIN_PASSWORD LDAP_READUSER_PASSWORD
-          exit $rc
+
+          exit $f_rc
         backup: yes
 
 
@@ -613,6 +653,7 @@
       ansible.builtin.meta: flush_handlers
 
 # ADMIN_PASSWORD_TASKS_MARKER
+    # Wait for LDAP container to respond to authentication queries
     - name: Wait for LDAP to be ready
       ansible.builtin.shell:
         cmd: docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn}} -w {{ ldap_admin_password.stdout }}
@@ -625,6 +666,7 @@
       changed_when: false
       no_log: true
 
+    # Set initial admin user password in LDAP directory
     - name: Ensure admin user password is admin in LDAP
       ansible.builtin.shell: |
         docker compose exec -T openldap ldappasswd -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}" -w "{{ ldap_admin_password.stdout }}" -s admin "uid=admin,ou=users,{{ldap_basedn}}"
@@ -652,6 +694,7 @@
 
   handlers:
 
+    # Rebuild and restart LDAP container
     - name: Restart ldap
       ansible.builtin.shell: docker compose down 2>/dev/null; docker compose up -d --build
       args:
