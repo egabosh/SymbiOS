@@ -23,7 +23,7 @@
           g_lockfile
 
           # Log to shared log file
-          DEDYN_LOG="/log/dedyn.log"
+          DEDYN_LOG="/home/docker/symbios-ui/log/dedyn.log"
           exec > >(tee -a "$DEDYN_LOG") 2>&1
 
           # deDyn/deSEC-Settings
