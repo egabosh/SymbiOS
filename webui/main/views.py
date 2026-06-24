@@ -468,18 +468,14 @@ def health(request):
 
 @login_required
 def health_data(request):
-@login_required
-def container_list(request):
-    from .utils.log_utils import _get_container_list
-    containers = _get_container_list()
+    from .health import run_all
     from django.http import JsonResponse
-    return JsonResponse({"containers": containers})
+    return JsonResponse(run_all_checks())
 
-    return JsonResponse(health_run_all())
 @login_required
 def container_list(request):
     from .utils.log_utils import _get_container_list
-    containers = _get_container_list()
     from django.http import JsonResponse
+    containers = _get_container_list()
     return JsonResponse({"containers": containers})
 
