@@ -127,14 +127,19 @@
         enabled: yes
         state: started
 
+
+- name: setup-infrastructure
+  hosts: all
+  become: yes
+  tasks:
     - name: Copy container-index.sh
       ansible.builtin.copy:
         dest: /usr/local/bin/symbios-container-index.sh
         content: |
           #!/bin/bash
-          INDEX_FILE=/var/run/docker-containers.tsv
+          INDEX_FILE=/home/docker/symbios-ui/log/docker-containers.tsv
           TEMP_FILE="${INDEX_FILE}.tmp"
-          docker ps --format '{{.ID}}\t{{.Names}}' > "$TEMP_FILE" 2>/dev/null
+          docker ps --format '{% raw %}{{.ID}}\t{{.Names}}{% endraw %}' > "$TEMP_FILE" 2>/dev/null
           mv "$TEMP_FILE" "$INDEX_FILE"
           chmod 644 "$INDEX_FILE"
         mode: "0755"
@@ -146,7 +151,7 @@
         dest: /usr/local/bin/symbios-service-status.sh
         content: |
           #!/bin/bash
-          FILE=/var/run/symbios-services.tsv
+          FILE=/home/docker/symbios-ui/log/symbios-services.tsv
           TMP="${FILE}.tmp"
           for svc in symbios-configd; do
               status=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")

@@ -4,8 +4,8 @@ import json
 from datetime import datetime, timezone
 
 DOCKER_LOG_DIR = "/docker/containers"
-CONTAINER_INDEX = "/var/run/docker-containers.tsv"
-SERVICE_STATUS_FILE = "/var/run/symbios-services.tsv"
+CONTAINER_INDEX = "/log/docker-containers.tsv"
+SERVICE_STATUS_FILE = "/log/symbios-services.tsv"
 LDAP_URI = os.environ.get("LDAP_URI", "ldap://openldap")
 STEPCA_HOST = "acme-pki-stepca"
 STEPCA_PORT = 9000
@@ -61,7 +61,7 @@ def check_ldap():
 def check_authelia():
     stdout, stderr, rc = _run([
         "curl", "-sf", "-o", "/dev/null",
-        "http://authelia:9091/api/health",
+        "http://authelia-authelia.local-1:9091/api/health",
     ], timeout=5)
     if rc == 0:
         return {"status": "ok", "message": "Healthy"}
@@ -69,19 +69,19 @@ def check_authelia():
 
 def check_traefik():
     stdout, stderr, rc = _run([
-        "curl", "-sf", "http://traefik:8080/api/version",
+        "curl", "-sk", "-o", "/dev/null", "-w", "%{http_code}",
+        "https://traefik.local/",
     ], timeout=5)
     if rc == 0:
-        try:
-            data = json.loads(stdout)
-            return {"status": "ok", "message": f"Version {data.get('Version', '?')}"}
-        except Exception:
-            return {"status": "ok", "message": "API reachable"}
+        code = stdout.strip()
+        if code in ("401", "200", "301", "302", "307", "308"):
+            return {"status": "ok", "message": f"Responds HTTP {code}"}
+        return {"status": "warn", "message": f"Unexpected HTTP {code}"}
     return {"status": "error", "message": stderr.strip() or f"exit code {rc}"}
 
 def check_stepca():
     stdout, stderr, rc = _run([
-        "curl", "-sf",
+        "curl", "-sfk",
         f"https://{STEPCA_HOST}:{STEPCA_PORT}/acme/acme/directory",
     ], timeout=5)
     if rc == 0:
@@ -145,12 +145,13 @@ def check_cert(host, port):
     if rc != 0:
         return {"status": "error", "message": stderr.strip() or "Connection failed"}
     for line in stdout.split("\n"):
-        if "notAfter=" in line:
-            date_str = line.split("notAfter=", 1)[1].strip()
+        if "NotAfter:" in line:
+            date_str = line.split("NotAfter:")[1].strip()
             return _eval_cert_date(date_str, host)
     return {"status": "warn", "message": f"{host}: Could not parse cert expiry"}
 
 def _eval_cert_date(date_str, label):
+    date_str = date_str.strip().rstrip(";")
     try:
         not_after = datetime.strptime(date_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
     except ValueError:
@@ -184,10 +185,12 @@ def check_root_ca():
     ], timeout=10)
     if rc != 0:
         return {"status": "error", "message": f"Step-CA unreachable: {stderr.strip()}"}
+    last_date = None
     for line in stdout.split("\n"):
-        if "notAfter=" in line:
-            date_str = line.split("notAfter=", 1)[1].strip()
-            return _eval_cert_date(date_str, f"{STEPCA_HOST} Root-CA")
+        if "NotAfter:" in line:
+            last_date = line.split("NotAfter:")[1].strip()
+    if last_date:
+        return _eval_cert_date(last_date, f"{STEPCA_HOST} Root-CA")
     return {"status": "warn", "message": "Could not parse Root-CA cert expiry"}
 
 def run_all():
