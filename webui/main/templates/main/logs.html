@@ -51,7 +51,7 @@
                 data.containers.forEach(c => {
                     const opt = document.createElement('option');
                     opt.value = 'docker:' + c.id;
-                    opt.textContent = c.name + ' (' + c.id + ')';
+                    opt.textContent = c.name + ' (' + c.short_id + ')';
                     dockerGroup.appendChild(opt);
                 });
             } else {

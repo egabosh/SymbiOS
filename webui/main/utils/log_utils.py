@@ -34,7 +34,7 @@ def _get_container_list():
             for line in f:
                 parts = line.strip().split("\t")
                 if len(parts) >= 2:
-                    containers.append({"id": parts[0][:12], "name": parts[1]})
+                    containers.append({"id": parts[0], "name": parts[1], "short_id": parts[0][:12]})
     except FileNotFoundError:
         pass
     return containers
