@@ -10,6 +10,7 @@
         <optgroup label="System Logs">
           <option value="symbios" {% if default_log_name == "symbios" %}selected{% endif %}>symbios.log</option>
           <option value="dedyn" {% if default_log_name == "dedyn" %}selected{% endif %}>dedyn.log (DDNS)</option>
+          <option value="configd" {% if default_log_name == "configd" %}selected{% endif %}>configd.log (Config Daemon)</option>
           <option value="messages" {% if default_log_name == "messages" %}selected{% endif %}>/var/log/messages</option>
           <option value="syslog" {% if default_log_name == "syslog" %}selected{% endif %}>/var/log/syslog</option>
         </optgroup>

@@ -7,18 +7,26 @@ source /etc/bash/gaboshlib.include
 # Global configuration
 g_config_file="${1:-/home/docker/symbios-ui/config/inventory.yml}"
 g_check_interval=10
+g_configd_log="/home/docker/symbios-ui/log/configd.log"
+g_status_file="/home/docker/symbios-ui/log/configd-status"
 
+# Initial log entry
+echo "$(date '+%Y-%m-%d %H:%M:%S') [START] SymbiOS Config Daemon started - monitoring: ${g_config_file}" >> "${g_configd_log}"
 g_echo "SymbiOS Config Daemon started - monitoring: ${g_config_file}"
+echo "idle" > "${g_status_file}"
 
 # Get current config file MD5 hash
 function f_get_hash {
     md5sum "${g_config_file}" 2>/dev/null | awk '{print $1}'
 }
 
-# Run an Ansible playbook with output logging
+# Run an Ansible playbook with output logging and status tracking
 function f_run_playbook {
     local f_playbook=$1
     local f_logfile="/home/docker/symbios-ui/log/playbook-$(basename ${f_playbook} .yml).log"
+    local f_ts=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "${f_ts} [RUNNING] ${f_playbook}" >> "${g_configd_log}"
+    echo "running: $(basename ${f_playbook} .yml)" > "${g_status_file}"
     g_echo "Running playbook: ${f_playbook} (log: ${f_logfile})"
     cd /home/SymbiOS
     local f_rc=0
@@ -27,12 +35,16 @@ function f_run_playbook {
         -e "ansible_python_interpreter=/usr/bin/python3" \
         "${f_playbook}" > "${f_logfile}" 2>&1
     f_rc=$?
+    local f_ts=$(date '+%Y-%m-%d %H:%M:%S')
     if [ $f_rc -eq 0 ]
     then
+        echo "${f_ts} [OK] ${f_playbook} completed successfully" >> "${g_configd_log}"
         g_echo_ok "Playbook ${f_playbook} completed successfully"
     else
+        echo "${f_ts} [FAIL] ${f_playbook} failed (exit ${f_rc})" >> "${g_configd_log}"
         g_echo_error "Playbook ${f_playbook} failed (exit ${f_rc}, log: ${f_logfile})"
     fi
+    echo "idle" > "${g_status_file}"
 }
 
 # Initial hash

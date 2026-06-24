@@ -16,6 +16,7 @@ ALLOWED_LOG_FILES = {
     "syslog": "/var/log/syslog",
     "symbios": "/log/symbios.log",
     "dedyn": "/log/dedyn.log",
+    "configd": "/log/configd.log",
 }
 
 
