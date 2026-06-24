@@ -233,11 +233,12 @@ def settings_ddns(request):
     daemon_running = False
     daemon_pending = False
     try:
-        result = subprocess.run(
-            ['systemctl', 'is-active', 'symbios-configd'],
-            capture_output=True, text=True, timeout=5
-        )
-        daemon_running = result.stdout.strip() == 'active'
+        with open('/log/symbios-services.tsv') as f:
+            for line in f:
+                parts = line.strip().split('\t')
+                if len(parts) >= 2 and parts[0] == 'symbios-configd':
+                    daemon_running = parts[1] == 'active'
+                    break
     except Exception:
         pass
 
