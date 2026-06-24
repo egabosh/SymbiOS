@@ -205,10 +205,14 @@ function setupHostValidation() {
 
   hostInput.addEventListener('input', function() {
     let val = this.value.trim().toLowerCase();
-    if (val && !val.endsWith('.dedyn.io')) {
-      hostStatus.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> Should end with .dedyn.io</span>';
+    if (val) {
+      if (/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(val) || /^[a-z0-9]$/.test(val)) {
+        hostStatus.innerHTML = '<span class="text-success"><i class="bi bi-check"></i> Will become <code>' + val + '.dedyn.io</code></span>';
+      } else {
+        hostStatus.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> Invalid hostname (letters, digits, hyphens only)</span>';
+      }
     } else {
-      hostStatus.innerHTML = '<span class="text-success"><i class="bi bi-check"></i> Valid domain</span>';
+      hostStatus.innerHTML = '';
     }
   });
   // Trigger on load
