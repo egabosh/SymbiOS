@@ -386,6 +386,20 @@
         insertbefore: BOF
         line: "#!/bin/bash -e"
 
+    - name: Create traefik network
+      community.docker.docker_network:
+        name: traefik
+        enable_ipv6: yes
+        driver_options:
+          com.docker.network.bridge.name: br-traefik
+        ipam_config:
+          - subnet: 192.168.41.0/24
+            gateway: 192.168.41.1
+          # Local v6 IP  
+          - subnet: fdaa:a192:b168:cd41::/64
+            gateway: fdaa:a192:b168:cd41::1
+
+
   handlers:
 
     - name: Restart docker
