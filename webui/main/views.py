@@ -276,6 +276,7 @@ def settings_ddns_host_status(request):
     api_key = request.GET.get('api_key', '')
     current_ipv4 = request.GET.get('current_ipv4', '')
     current_ipv6 = request.GET.get('current_ipv6', '')
+    ipv6_mode = request.GET.get('ipv6_mode', '')
 
     # Append .dedyn.io suffix if not present
     if hostname and not hostname.endswith('.dedyn.io'):
@@ -289,6 +290,7 @@ def settings_ddns_host_status(request):
         'dns_ipv6': [],
         'ipv4_match': False,
         'ipv6_match': False,
+        'ipv4_check_skipped': False,
         'error': None,
     }
 
@@ -319,6 +321,10 @@ def settings_ddns_host_status(request):
     else:
         result['domain_exists_check'] = 'no_api_key'
 
+    # Mark whether IPv4 check should be skipped
+    if ipv6_mode == 'only':
+        result['ipv4_check_skipped'] = True
+
     # Fetch DNS records from authoritative deSEC API
     if api_key:
         try:
@@ -329,6 +335,8 @@ def settings_ddns_host_status(request):
             with urllib.request.urlopen(req, timeout=10) as resp:
                 rrsets = json.loads(resp.read().decode())
                 for rr in rrsets:
+                    if result['ipv4_check_skipped'] and rr['type'] == 'A':
+                        continue
                     if rr['type'] == 'A':
                         for rec in rr['records']:
                             if rec not in result['dns_ipv4']:
@@ -346,6 +354,8 @@ def settings_ddns_host_status(request):
             addrs = socket.getaddrinfo(hostname, None)
             for addr in addrs:
                 ip = addr[4][0]
+                if result['ipv4_check_skipped'] and ':' not in ip:
+                    continue
                 if ':' in ip:
                     if ip not in result['dns_ipv6']:
                         result['dns_ipv6'].append(ip)
@@ -356,7 +366,7 @@ def settings_ddns_host_status(request):
             pass
 
     # Compare with current IPs
-    if current_ipv4 and current_ipv4 in result['dns_ipv4']:
+    if current_ipv4 and not result.get('ipv4_check_skipped') and current_ipv4 in result['dns_ipv4']:
         result['ipv4_match'] = True
     if current_ipv6 and current_ipv6 in result['dns_ipv6']:
         result['ipv6_match'] = True

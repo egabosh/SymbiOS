@@ -193,6 +193,49 @@ def check_root_ca():
         return _eval_cert_date(last_date, f"{STEPCA_HOST} Root-CA")
     return {"status": "warn", "message": "Could not parse Root-CA cert expiry"}
 
+def check_ddns():
+    try:
+        import yaml
+        config_path = os.environ.get("CONFIG_PATH", "/config/inventory.yml")
+        with open(config_path) as f:
+            config = yaml.safe_load(f) or {}
+        vars_ = config.get("all", {}).get("vars", {})
+        ddns_host = vars_.get("ddns_host", "")
+        ddns_apikey = vars_.get("ddns_apikey", "")
+    except Exception:
+        return {"status": "warn", "message": "Cannot read config"}
+
+    if not ddns_host:
+        return {"status": "warn", "message": "DDNS not configured"}
+
+    # Append .dedyn.io if needed
+    if not ddns_host.endswith(".dedyn.io"):
+        ddns_host = ddns_host + ".dedyn.io"
+
+    # Check domain existence on deSEC
+    if ddns_apikey:
+        try:
+            import urllib.request, urllib.error
+            req = urllib.request.Request(
+                f"https://desec.io/api/v1/domains/{ddns_host}/",
+                headers={"Authorization": f"Token {ddns_apikey}"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    return {"status": "ok", "message": f"{ddns_host} active on deSEC"}
+                return {"status": "warn", "message": f"{ddns_host}: unexpected HTTP {resp.status}"}
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return {"status": "warn", "message": f"{ddns_host} not found on deSEC"}
+            if e.code == 401:
+                return {"status": "error", "message": "Invalid deSEC API key"}
+            return {"status": "warn", "message": f"deSEC API error HTTP {e.code}"}
+        except Exception as e:
+            return {"status": "warn", "message": f"deSEC API error: {e}"}
+    else:
+        return {"status": "warn", "message": "DDNS configured, no API key"}
+
+
 def run_all():
     return {
         "ldap": check_ldap(),
@@ -200,6 +243,7 @@ def run_all():
         "traefik": check_traefik(),
         "stepca": check_stepca(),
         "config_daemon": check_config_daemon(),
+        "ddns": check_ddns(),
         "containers": check_containers(),
         "disk": check_disk(),
         "certs": check_certs(),

@@ -251,11 +251,13 @@ function checkHostStatus() {
   if (ipv4Match) currentIpv4 = ipv4Match[1];
   if (ipv6Match) currentIpv6 = ipv6Match[1];
 
+  var ipv6Mode = document.getElementById('ddns_ipv6').value;
   var params = new URLSearchParams({
     hostname: hostname,
     api_key: apiKey,
     current_ipv4: currentIpv4,
     current_ipv6: currentIpv6,
+    ipv6_mode: ipv6Mode,
   });
 
   fetch('{% url "settings_ddns_host_status" %}?' + params.toString())
@@ -275,7 +277,9 @@ function checkHostStatus() {
       }
 
       // DNS records
-      if (data.dns_ipv4.length > 0) {
+      if (data.ipv4_check_skipped) {
+        html += '<div><i class="bi bi-info-circle-fill text-secondary"></i> IPv4 check skipped (IPv6-only mode)</div>';
+      } else if (data.dns_ipv4.length > 0) {
         html += '<div><i class="bi bi-check-circle-fill text-success"></i> DNS A: <code>' + data.dns_ipv4.join(', ') + '</code></div>';
       } else {
         html += '<div><i class="bi bi-info-circle-fill text-secondary"></i> DNS A: no IPv4 record</div>';
@@ -287,7 +291,7 @@ function checkHostStatus() {
       }
 
       // IP match
-      if (currentIpv4) {
+      if (!data.ipv4_check_skipped && currentIpv4) {
         html += '<div>' + (data.ipv4_match ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-x-circle-fill text-warning"></i>') + ' IPv4 ' + (data.ipv4_match ? 'matches' : 'mismatch — update needed') + '</div>';
       }
       if (currentIpv6) {
