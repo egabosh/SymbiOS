@@ -52,8 +52,10 @@
                 - ./log:/log
                 - /var/log:/var/log:ro
                 - /var/lib/docker/containers:/docker/containers:ro
-              tmpfs:
-                - /app/db:uid=10000,gid=10000
+                - type: tmpfs
+                  target: /app/db
+                  tmpfs:
+                    mode: 511
               restart: unless-stopped
               environment:
                 - PYTHONUNBUFFERED=1
