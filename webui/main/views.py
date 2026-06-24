@@ -470,7 +470,7 @@ def health(request):
 def health_data(request):
     from .health import run_all
     from django.http import JsonResponse
-    return JsonResponse(run_all_checks())
+    return JsonResponse(run_all())
 
 @login_required
 def container_list(request):

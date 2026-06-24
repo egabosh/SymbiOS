@@ -9,7 +9,7 @@ from .ansi_to_html import ansi_to_html
 
 LOG_BASE_DIR = "/var/log"
 DOCKER_LOG_BASE = "/docker/containers"
-CONTAINER_INDEX = "/var/run/docker-containers.tsv"
+CONTAINER_INDEX = "/log/docker-containers.tsv"
 
 ALLOWED_LOG_FILES = {
     "messages": "/var/log/messages",
