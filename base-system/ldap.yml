@@ -599,11 +599,12 @@
         group: root
         content: |
           #!/bin/bash
-          . {{ docker_path }}/env.openldap
-          #LDAPTLS_CACERT=/etc/ssl/certs/ca-certificates.crt ldapsearch -D cn=readuser,{{ldap_basedn}} -w $LDAP_READUSER_PASSWORD -H ldaps://openldap.{{ default_domain }}:636 -b {{ldap_basedn}} $@
-          ldapsearch -D cn=readuser,{{ldap_basedn}} -w $LDAP_READUSER_PASSWORD -H ldaps://openldap.{{ default_domain }}:636 -b {{ldap_basedn}} $@
+          # Use docker exec to bypass Traefik TLS (Step-CA may be unhealthy)
+          . /home/docker/ldap/env.openldap
+          docker compose -f /home/docker/ldap/docker-compose.yml exec -T openldap \
+            ldapsearch -x -H ldap://localhost -D "cn=readuser,{{ldap_basedn}}" -w "$LDAP_READUSER_PASSWORD" -b "{{ldap_basedn}}" "$@"
           rc=$?
-          unset LDAP_ADMIN_PASSWORD LDAP_READUSER_PASSWORD LDAPTLS_CACERT 
+          unset LDAP_ADMIN_PASSWORD LDAP_READUSER_PASSWORD
           exit $rc
         backup: yes
 
