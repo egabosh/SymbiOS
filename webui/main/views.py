@@ -277,6 +277,10 @@ def settings_ddns_host_status(request):
     current_ipv4 = request.GET.get('current_ipv4', '')
     current_ipv6 = request.GET.get('current_ipv6', '')
 
+    # Append .dedyn.io suffix if not present
+    if hostname and not hostname.endswith('.dedyn.io'):
+        hostname = hostname + '.dedyn.io'
+
     result = {
         'hostname': hostname,
         'domain_exists': False,
@@ -315,21 +319,41 @@ def settings_ddns_host_status(request):
     else:
         result['domain_exists_check'] = 'no_api_key'
 
-    # DNS resolution
-    try:
-        import socket
+    # Fetch DNS records from authoritative deSEC API
+    if api_key:
         try:
+            req = urllib.request.Request(
+                f'https://desec.io/api/v1/domains/{hostname}/rrsets/',
+                headers={'Authorization': f'Token {api_key}'}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                rrsets = json.loads(resp.read().decode())
+                for rr in rrsets:
+                    if rr['type'] == 'A':
+                        for rec in rr['records']:
+                            if rec not in result['dns_ipv4']:
+                                result['dns_ipv4'].append(rec)
+                    elif rr['type'] == 'AAAA':
+                        for rec in rr['records']:
+                            if rec not in result['dns_ipv6']:
+                                result['dns_ipv6'].append(rec)
+        except Exception:
+            pass
+    else:
+        # Fallback: local DNS resolution when no API key is available
+        try:
+            import socket
             addrs = socket.getaddrinfo(hostname, None)
             for addr in addrs:
                 ip = addr[4][0]
                 if ':' in ip:
-                    result['dns_ipv6'].append(ip)
+                    if ip not in result['dns_ipv6']:
+                        result['dns_ipv6'].append(ip)
                 else:
-                    result['dns_ipv4'].append(ip)
-        except socket.gaierror:
+                    if ip not in result['dns_ipv4']:
+                        result['dns_ipv4'].append(ip)
+        except Exception:
             pass
-    except Exception:
-        pass
 
     # Compare with current IPs
     if current_ipv4 and current_ipv4 in result['dns_ipv4']:
