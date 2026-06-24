@@ -52,8 +52,8 @@
             <label class="form-label">Host</label>
             <div class="input-group">
               <input type="text" class="form-control" name="ddns_host" id="ddns_host"
-                     value="{{ vars.ddns_host|default:'' }}"
-                     placeholder="myserver.dedyn.io">
+                     value="{{ vars.ddns_host|default:''|cut:'.dedyn.io' }}"
+                     placeholder="myserver">
               <span class="input-group-text">.dedyn.io</span>
             </div>
             <div id="host-status" class="form-text"></div>
@@ -84,6 +84,15 @@
             </button>
           </div>
         </form>
+        <script>
+        document.getElementById('ddns-form').addEventListener('submit', function(e) {
+          var hostInput = document.getElementById('ddns_host');
+          var val = hostInput.value.trim();
+          if (val && !val.endsWith('.dedyn.io')) {
+            hostInput.value = val + '.dedyn.io';
+          }
+        });
+        </script>
       </div>
     </div>
   </div>
