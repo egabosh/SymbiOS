@@ -258,6 +258,75 @@ def settings_ddns(request):
 
 
 @login_required
+def settings_ddns_host_status(request):
+    hostname = request.GET.get('hostname', '')
+    api_key = request.GET.get('api_key', '')
+    current_ipv4 = request.GET.get('current_ipv4', '')
+    current_ipv6 = request.GET.get('current_ipv6', '')
+
+    result = {
+        'hostname': hostname,
+        'domain_exists': False,
+        'domain_exists_check': None,
+        'dns_ipv4': [],
+        'dns_ipv6': [],
+        'ipv4_match': False,
+        'ipv6_match': False,
+        'error': None,
+    }
+
+    if not hostname:
+        result['error'] = 'No hostname provided'
+        return JsonResponse(result)
+
+    # Check domain existence via desec API
+    if api_key:
+        try:
+            req = urllib.request.Request(
+                f'https://desec.io/api/v1/domains/{hostname}/',
+                headers={'Authorization': f'Token {api_key}'}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result['domain_exists'] = resp.status == 200
+                result['domain_exists_check'] = 'exists' if resp.status == 200 else 'error'
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                result['domain_exists'] = False
+                result['domain_exists_check'] = 'not_found'
+            elif e.code == 401:
+                result['domain_exists_check'] = 'invalid_api_key'
+            else:
+                result['domain_exists_check'] = f'http_{e.code}'
+        except Exception as e:
+            result['domain_exists_check'] = str(e)
+    else:
+        result['domain_exists_check'] = 'no_api_key'
+
+    # DNS resolution
+    try:
+        import socket
+        try:
+            addrs = socket.getaddrinfo(hostname, None)
+            for addr in addrs:
+                ip = addr[4][0]
+                if ':' in ip:
+                    result['dns_ipv6'].append(ip)
+                else:
+                    result['dns_ipv4'].append(ip)
+        except socket.gaierror:
+            pass
+    except Exception:
+        pass
+
+    # Compare with current IPs
+    if current_ipv4 and current_ipv4 in result['dns_ipv4']:
+        result['ipv4_match'] = True
+    if current_ipv6 and current_ipv6 in result['dns_ipv6']:
+        result['ipv6_match'] = True
+
+    return JsonResponse(result)
+
+@login_required
 def settings_ddns_test_api(request):
     if request.method != 'POST':
         return JsonResponse({'valid': False, 'error': 'POST required'})

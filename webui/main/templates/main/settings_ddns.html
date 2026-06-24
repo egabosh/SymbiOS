@@ -139,6 +139,14 @@
         Detecting...
       </div>
     </div>
+
+    <div class="card mt-3" id="host-status-card" style="display:none">
+      <div class="card-header">
+        <i class="bi bi-globe"></i> Host Status
+      </div>
+      <div class="card-body" id="host-status-info">
+      </div>
+    </div>
   </div>
 </div>
 
@@ -208,6 +216,82 @@ function detectIPs() {
     .catch(err => {
       ipInfo.innerHTML = '<div class="text-danger">Failed to detect IPs</div>';
       ipDetect.innerHTML = '<span class="text-warning">Could not determine recommendation</span>';
+    })
+    .then(() => {
+      checkHostStatus();
+    });
+}
+
+function checkHostStatus() {
+  var hostname = document.getElementById('ddns_host').value;
+  var apiKey = document.getElementById('ddns_apikey').value;
+  var card = document.getElementById('host-status-card');
+  var info = document.getElementById('host-status-info');
+
+  if (!hostname) {
+    card.style.display = 'none';
+    return;
+  }
+
+  card.style.display = 'block';
+  info.innerHTML = '<div class="spinner-border spinner-border-sm"></div> Checking...';
+
+  // Get current IPs from the IP info card
+  var currentIpv4 = '';
+  var currentIpv6 = '';
+  var ipInfoText = document.getElementById('ip-info').innerText;
+  var ipv4Match = ipInfoText.match(/IPv4:\s*(\S+)/);
+  var ipv6Match = ipInfoText.match(/IPv6:\s*(\S+)/);
+  if (ipv4Match) currentIpv4 = ipv4Match[1];
+  if (ipv6Match) currentIpv6 = ipv6Match[1];
+
+  var params = new URLSearchParams({
+    hostname: hostname,
+    api_key: apiKey,
+    current_ipv4: currentIpv4,
+    current_ipv6: currentIpv6,
+  });
+
+  fetch('{% url "settings_ddns_host_status" %}?' + params.toString())
+    .then(r => r.json())
+    .then(data => {
+      var html = '';
+
+      // Domain existence
+      if (data.domain_exists_check === 'exists') {
+        html += '<div><i class="bi bi-check-circle-fill text-success"></i> Domain <code>' + data.hostname + '</code> exists</div>';
+      } else if (data.domain_exists_check === 'not_found') {
+        html += '<div><i class="bi bi-exclamation-triangle-fill text-warning"></i> Domain <code>' + data.hostname + '</code> not found on desec.io (will be auto-created)</div>';
+      } else if (data.domain_exists_check === 'no_api_key') {
+        html += '<div><i class="bi bi-question-circle-fill text-secondary"></i> Domain status unknown (no API key set)</div>';
+      } else if (data.domain_exists_check === 'invalid_api_key') {
+        html += '<div><i class="bi bi-x-circle-fill text-danger"></i> Invalid API key — cannot check domain</div>';
+      }
+
+      // DNS records
+      if (data.dns_ipv4.length > 0) {
+        html += '<div><i class="bi bi-check-circle-fill text-success"></i> DNS A: <code>' + data.dns_ipv4.join(', ') + '</code></div>';
+      } else {
+        html += '<div><i class="bi bi-info-circle-fill text-secondary"></i> DNS A: no IPv4 record</div>';
+      }
+      if (data.dns_ipv6.length > 0) {
+        html += '<div><i class="bi bi-check-circle-fill text-success"></i> DNS AAAA: <code>' + data.dns_ipv6.join(', ') + '</code></div>';
+      } else {
+        html += '<div><i class="bi bi-info-circle-fill text-secondary"></i> DNS AAAA: no IPv6 record</div>';
+      }
+
+      // IP match
+      if (currentIpv4) {
+        html += '<div>' + (data.ipv4_match ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-x-circle-fill text-warning"></i>') + ' IPv4 ' + (data.ipv4_match ? 'matches' : 'mismatch — update needed') + '</div>';
+      }
+      if (currentIpv6) {
+        html += '<div>' + (data.ipv6_match ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-x-circle-fill text-warning"></i>') + ' IPv6 ' + (data.ipv6_match ? 'matches' : 'mismatch — update needed') + '</div>';
+      }
+
+      info.innerHTML = html;
+    })
+    .catch(err => {
+      info.innerHTML = '<div class="text-danger">Error checking host status</div>';
     });
 }
 
