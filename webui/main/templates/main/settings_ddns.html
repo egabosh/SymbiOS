@@ -140,6 +140,8 @@ document.addEventListener('DOMContentLoaded', function() {
 function detectIPs() {
   const ipInfo = document.getElementById('ip-info');
   const ipDetect = document.getElementById('ip-detection');
+  const ipv6Select = document.getElementById('ddns_ipv6');
+  const currentVal = ipv6Select.value;
 
   fetch('{% url "settings_ddns_check_ip" %}')
     .then(r => r.json())
@@ -158,15 +160,29 @@ function detectIPs() {
       ipInfo.innerHTML = html;
 
       // Recommendation for ddns_ipv6
-      let recHtml = '<i class="bi bi-lightbulb"></i> Recommendation: ';
+      let recommended = '';
       if (data.ipv6_available && data.ipv4_available) {
-        recHtml += '<strong>Dual-Stack</strong> (IPv4 + IPv6) — <code>yes</code>';
+        recommended = 'yes';
       } else if (data.ipv6_available && !data.ipv4_available) {
+        recommended = 'only';
+      } else {
+        recommended = '';
+      }
+
+      let recHtml = '<i class="bi bi-lightbulb"></i> Recommendation: ';
+      if (recommended === 'yes') {
+        recHtml += '<strong>Dual-Stack</strong> (IPv4 + IPv6) — <code>yes</code>';
+      } else if (recommended === 'only') {
         recHtml += '<strong>IPv6 only</strong> — <code>only</code>';
       } else {
         recHtml += '<strong>IPv4 only</strong> (no public IPv6 detected)';
       }
       ipDetect.innerHTML = recHtml;
+
+      // Auto-select if nothing currently set
+      if (!currentVal && recommended !== undefined) {
+        ipv6Select.value = recommended;
+      }
     })
     .catch(err => {
       ipInfo.innerHTML = '<div class="text-danger">Failed to detect IPs</div>';

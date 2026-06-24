@@ -205,12 +205,23 @@ def settings_inventory(request):
 @login_required
 def settings_ddns(request):
     config = _get_inventory_config()
-    vars_ = config.get('all', {}).get('vars', {})
+    if 'all' not in config:
+        config['all'] = {}
+    if 'vars' not in config['all']:
+        config['all']['vars'] = {}
+    vars_ = config['all']['vars']
 
     if request.method == 'POST':
         try:
+            ddns_host = request.POST.get('ddns_host', '')
+            # Strip .dedyn.io if user typed it
+            ddns_host = ddns_host.lower().strip()
+            if ddns_host.endswith('.dedyn.io'):
+                ddns_host = ddns_host[:-len('.dedyn.io')]
+            ddns_host = ddns_host + '.dedyn.io'
+
             config['all']['vars']['ddns_apikey'] = request.POST.get('ddns_apikey', '')
-            config['all']['vars']['ddns_host'] = request.POST.get('ddns_host', '')
+            config['all']['vars']['ddns_host'] = ddns_host
             config['all']['vars']['ddns_ipv6'] = request.POST.get('ddns_ipv6', '')
             _save_inventory_config(config)
             messages.success(request, 'Dynamic DNS settings saved.')

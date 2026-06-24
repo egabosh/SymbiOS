@@ -641,6 +641,14 @@
       no_log: true
       when: ldap_admin_password.stdout is defined
 
+    - name: inventory.yml file permissions
+      ansible.builtin.file:
+        path: "{{ docker_path }}/config/inventory.yml"
+        owner: "10000"
+        group: "10000"
+        mode: "0640"
+      when: ldap_admin_password.stdout is defined
+
 
   handlers:
 
