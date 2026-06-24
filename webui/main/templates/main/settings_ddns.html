@@ -115,12 +115,19 @@
           <li>DDNS update runs every 30 minutes via cron</li>
           <li>Logs visible in <a href="/logs/">System Logs</a></li>
         </ul>
+        <p class="small text-muted mt-2 mb-0">
+          <i class="bi bi-info-circle"></i>
+          Dynamic DNS is required to make your server reachable over the internet
+          when your ISP does not provide a static IP address. It maps a fixed
+          hostname to your changing public IP, so you can always access your
+          server via <code>myserver.dedyn.io</code>.
+        </p>
       </div>
     </div>
 
     <div class="card mt-3" id="current-ip-card">
       <div class="card-header">
-        <i class="bi bi-wifi"></i> Current IPs
+        <i class="bi bi-ethernet"></i> Current IPs
       </div>
       <div class="card-body" id="ip-info">
         <div class="spinner-border spinner-border-sm" role="status"></div>
