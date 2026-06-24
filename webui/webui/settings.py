@@ -51,7 +51,7 @@ WSGI_APPLICATION = 'webui.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': '/config/db.sqlite3',
+        'NAME': '/app/db/db.sqlite3',
         'OPTIONS': {'timeout': 20},
     }
 }
