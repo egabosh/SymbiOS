@@ -121,6 +121,11 @@
           when your ISP does not provide a static IP address. It maps a fixed
           hostname to your changing public IP, so you can always access your
           server via <code>myserver.dedyn.io</code>.
+          With private consumer internet connections, IPv4 is often behind
+          Carrier-Grade NAT (CG-NAT) which makes incoming connections impossible
+          without a tunnel/VPN — in that case IPv6 is the only way to reach your
+          server directly. With IPv6, each device typically has a public,
+          globally routable address natively.
         </p>
       </div>
     </div>
