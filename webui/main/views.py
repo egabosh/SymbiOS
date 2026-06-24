@@ -239,7 +239,7 @@ def settings_auth(request):
 
 @login_required
 def logs(request):
-    return render(request, 'main/logs.html', {'default_log_name': 'symbios'})
+    return render(request, 'main/logs.html', {'default_log_name': 'messages'})
 
 
 @login_required

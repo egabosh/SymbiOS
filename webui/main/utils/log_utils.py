@@ -63,7 +63,6 @@ def logs_stream(request):
     if not os.path.exists(real_path):
         return JsonResponse(
             {"log_name": log_name, "path": real_path, "lines": [], "total_lines": 0, "error": "Log file does not exist"},
-            status=404,
         )
 
     with open(real_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -95,7 +94,6 @@ def _docker_logs_stream(container_id, offset=0):
     if not os.path.exists(log_path):
         return JsonResponse(
             {"log_name": container_id, "lines": [], "total_lines": 0, "error": "Container log not found"},
-            status=404,
         )
 
     container_name = container_id
