@@ -82,6 +82,12 @@
             <button type="submit" class="btn btn-primary">
               <i class="bi bi-save"></i> Save
             </button>
+            {% if vars.ddns_host %}
+            <button type="submit" name="action" value="remove" class="btn btn-outline-danger"
+                    onclick="return confirm('Remove DDNS configuration? This will reset default_domain to local.')">
+              <i class="bi bi-trash"></i> Remove
+            </button>
+            {% endif %}
           </div>
         </form>
         <script>

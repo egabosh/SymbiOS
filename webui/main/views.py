@@ -212,19 +212,32 @@ def settings_ddns(request):
     vars_ = config['all']['vars']
 
     if request.method == 'POST':
+        action = request.POST.get('action', 'save')
         try:
-            ddns_host = request.POST.get('ddns_host', '')
-            # Strip .dedyn.io if user typed it
-            ddns_host = ddns_host.lower().strip()
-            if ddns_host.endswith('.dedyn.io'):
-                ddns_host = ddns_host[:-len('.dedyn.io')]
-            ddns_host = ddns_host + '.dedyn.io'
+            if action == 'remove':
+                config['all']['vars']['ddns_apikey'] = ''
+                config['all']['vars']['ddns_host'] = ''
+                config['all']['vars']['ddns_ipv6'] = ''
+                # Reset default_domain to local
+                config['all']['vars']['default_domain'] = 'local'
+                config['all']['vars']['symbios_domain'] = 'symbios.local'
+                _save_inventory_config(config)
+                messages.success(request, 'Dynamic DNS configuration removed.')
+            else:
+                ddns_host = request.POST.get('ddns_host', '')
+                ddns_host = ddns_host.lower().strip()
+                if ddns_host.endswith('.dedyn.io'):
+                    ddns_host = ddns_host[:-len('.dedyn.io')]
+                ddns_host = ddns_host + '.dedyn.io'
 
-            config['all']['vars']['ddns_apikey'] = request.POST.get('ddns_apikey', '')
-            config['all']['vars']['ddns_host'] = ddns_host
-            config['all']['vars']['ddns_ipv6'] = request.POST.get('ddns_ipv6', '')
-            _save_inventory_config(config)
-            messages.success(request, 'Dynamic DNS settings saved.')
+                config['all']['vars']['ddns_apikey'] = request.POST.get('ddns_apikey', '')
+                config['all']['vars']['ddns_host'] = ddns_host
+                config['all']['vars']['ddns_ipv6'] = request.POST.get('ddns_ipv6', '')
+                # Set default_domain to the public DDNS host
+                config['all']['vars']['default_domain'] = ddns_host
+                config['all']['vars']['symbios_domain'] = 'symbios.' + ddns_host
+                _save_inventory_config(config)
+                messages.success(request, 'Dynamic DNS settings saved.')
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_ddns')
