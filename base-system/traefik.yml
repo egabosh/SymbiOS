@@ -45,21 +45,6 @@
         chdir: /home/docker/traefik
         creates: /home/docker/traefik/providers/default-basic-auth.usersfile
 
-    - name: Create a network
-      community.docker.docker_network:
-        name: traefik
-        enable_ipv6: yes
-        driver_options:
-          com.docker.network.bridge.name: br-traefik
-        ipam_config:
-          - subnet: 192.168.41.0/24
-            gateway: 192.168.41.1
-          # Local v6 IP  
-          - subnet: fdaa:a192:b168:cd41::/64
-            gateway: fdaa:a192:b168:cd41::1
-      notify: Restart traefik
-
-
     - name: /home/docker/traefik/docker-compose.yml Traefik Container Configuration
       ansible.builtin.copy:
         content: |
