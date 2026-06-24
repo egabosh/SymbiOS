@@ -635,8 +635,8 @@
         dest: /home/docker/symbios-ui/config/.ldap_admin_pw
         content: "{{ ldap_admin_password.stdout }}"
         mode: "0400"
-        owner: root
-        group: root
+        owner: "10000"
+        group: "10000"
       no_log: true
       when: ldap_admin_password.stdout is defined
 
