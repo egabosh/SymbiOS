@@ -18,18 +18,19 @@ get_hash() {
 
 run_playbook() {
     local playbook=$1
-    g_echo "Running playbook: ${playbook}"
+    local logfile="/home/docker/symbios-ui/log/playbook-$(basename ${playbook} .yml).log"
+    g_echo "Running playbook: ${playbook} (log: ${logfile})"
     cd /home/SymbiOS
     local rc=0
-    ansible-playbook --connection=local --inventory localhost, \
+    ansible-playbook --inventory /home/docker/symbios-ui/config/inventory.yml --connection=local \
         --limit localhost \
         -e "ansible_python_interpreter=/usr/bin/python3" \
-        "${playbook}" 2>&1 | g_logger
-    rc=${PIPESTATUS[0]}
+        "${playbook}" > "${logfile}" 2>&1
+    rc=$?
     if [ $rc -eq 0 ]; then
         g_echo_ok "Playbook ${playbook} completed successfully"
     else
-        g_echo_error "Playbook ${playbook} failed"
+        g_echo_error "Playbook ${playbook} failed (exit ${rc}, log: ${logfile})"
     fi
 }
 
