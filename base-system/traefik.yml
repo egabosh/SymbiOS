@@ -106,7 +106,7 @@
                 # log
                 - --accesslog.filepath=/log/access.log
                 - --accesslog.format=json
-              container_name: traefik
+            container_name: traefik
               restart: unless-stopped
               security_opt:
                 - no-new-privileges:true
