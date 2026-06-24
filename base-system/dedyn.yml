@@ -22,6 +22,10 @@
           . /etc/bash/gaboshlib.include
           g_lockfile
 
+          # Log to shared log file
+          DEDYN_LOG="/log/dedyn.log"
+          exec > >(tee -a "$DEDYN_LOG") 2>&1
+
           # deDyn/deSEC-Settings
           [ -f /usr/local/etc/dedyn.conf ] || exit 0
           . /usr/local/etc/dedyn.conf
