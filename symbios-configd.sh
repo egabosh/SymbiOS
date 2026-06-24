@@ -50,8 +50,25 @@ do
 
         g_new_content=$(cat "${g_config_file}" 2>/dev/null)
 
-        # Run basics playbook on domain/timezone/locale changes
-        if echo "${g_new_content}" | grep -q "default_domain\|timezone\|locale"
+        # default_domain affects acme_resolver and all services using it
+        if echo "${g_new_content}" | grep -q "default_domain"
+        then
+            g_echo_note "default_domain changed - running all domain-dependent playbooks"
+            f_run_playbook "base-system/basics.yml"
+            f_run_playbook "base-system/ldap.yml"
+            f_run_playbook "base-system/traefik.yml"
+            f_run_playbook "base-system/authelia.yml"
+            f_run_playbook "base-system/symbios-ui.yml"
+        fi
+
+        # symbios_domain change requires web UI restart
+        if echo "${g_new_content}" | grep -q "symbios_domain"
+        then
+            f_run_playbook "base-system/symbios-ui.yml"
+        fi
+
+        # Run basics playbook on timezone/locale changes (not domain - handled above)
+        if echo "${g_new_content}" | grep -q "timezone\|locale"
         then
             f_run_playbook "base-system/basics.yml"
         fi
