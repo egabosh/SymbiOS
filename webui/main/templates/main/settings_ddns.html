@@ -1,9 +1,10 @@
 {% extends "main/base.html" %}
+{% load static %}
 {% block sidebar %}
     {% include "main/sidebar_settings.html" %}
 {% endblock %}
 {% block content %}
-<h2>Dynamic DNS Settings (deSEC)</h2>
+<h2><i class="bi bi-globe"></i> Dynamic DNS (deSEC)</h2>
 
 {% if messages %}
 {% for message in messages %}
@@ -14,28 +15,228 @@
 {% endfor %}
 {% endif %}
 
-<div class="card">
-    <div class="card-body">
-        <form method="post">
-            {% csrf_token %}
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">API Key</label>
-                    <input type="password" class="form-control" name="ddns_apikey" value="{{ vars.ddns_apikey|default:'' }}">
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Host</label>
-                    <input type="text" class="form-control" name="ddns_host" value="{{ vars.ddns_host|default:'' }}" placeholder="myserver.dedyn.io">
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">IPv6 Address</label>
-                    <input type="text" class="form-control" name="ddns_ipv6" value="{{ vars.ddns_ipv6|default:'' }}">
-                </div>
-            </div>
-            <button type="submit" class="btn btn-primary">Save</button>
-        </form>
-    </div>
+<!-- Config Daemon Status -->
+<div class="alert alert-info d-flex align-items-center gap-2" role="alert" id="daemon-status">
+  {% if daemon_running %}
+    <i class="bi bi-check-circle-fill text-success"></i>
+    <span>Config Daemon active — changes applied within 10s</span>
+  {% else %}
+    <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+    <span>Config Daemon inactive — changes will not trigger playbooks</span>
+  {% endif %}
 </div>
+
+<div class="row">
+  <!-- Main form -->
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-body">
+        <form method="post" id="ddns-form">
+          {% csrf_token %}
+
+          <div class="mb-3">
+            <label class="form-label">API Key</label>
+            <div class="input-group">
+              <input type="password" class="form-control" name="ddns_apikey" id="ddns_apikey"
+                     value="{{ vars.ddns_apikey|default:'' }}"
+                     placeholder="deSEC API token">
+              <button type="button" class="btn btn-outline-secondary" id="test-api-btn"
+                      onclick="testApiKey()">
+                <i class="bi bi-shield-check"></i> Test
+              </button>
+            </div>
+            <div id="api-key-status" class="form-text"></div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Host</label>
+            <div class="input-group">
+              <input type="text" class="form-control" name="ddns_host" id="ddns_host"
+                     value="{{ vars.ddns_host|default:'' }}"
+                     placeholder="myserver.dedyn.io">
+              <span class="input-group-text">.dedyn.io</span>
+            </div>
+            <div id="host-status" class="form-text"></div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">IPv6 mode</label>
+            <div id="ip-detection" class="mb-2">
+              <span class="spinner-border spinner-border-sm" role="status"></span>
+              Detecting IP connectivity...
+            </div>
+            <select class="form-select" name="ddns_ipv6" id="ddns_ipv6">
+              <option value="" {% if vars.ddns_ipv6 == '' %}selected{% endif %}>
+                IPv4 only (recommended if no public IPv6)
+              </option>
+              <option value="yes" {% if vars.ddns_ipv6 == 'yes' %}selected{% endif %}>
+                IPv4 + IPv6 (Dual-Stack)
+              </option>
+              <option value="only" {% if vars.ddns_ipv6 == 'only' %}selected{% endif %}>
+                IPv6 only (IPv6-only connection)
+              </option>
+            </select>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-save"></i> Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Info card -->
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-info-circle"></i> About
+      </div>
+      <div class="card-body">
+        <p class="card-text">
+          This configures <strong>deSEC</strong> Dynamic DNS for your server.
+          Changes are applied automatically via the Config Daemon.
+        </p>
+        <ul class="small">
+          <li>API Key from <a href="https://desec.io" target="_blank">desec.io</a></li>
+          <li>Host must be your subdomain (e.g. <code>myserver.dedyn.io</code>)</li>
+          <li>Domain will be auto-created if it doesn't exist</li>
+          <li>DDNS update runs every 30 minutes via cron</li>
+          <li>Logs visible in <a href="/logs/">System Logs</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card mt-3" id="current-ip-card">
+      <div class="card-header">
+        <i class="bi bi-wifi"></i> Current IPs
+      </div>
+      <div class="card-body" id="ip-info">
+        <div class="spinner-border spinner-border-sm" role="status"></div>
+        Detecting...
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+#host-status, #api-key-status {
+  min-height: 1.5em;
+}
+</style>
+
+<script>
+let apiKeyTested = false;
+let apiKeyValid = false;
+
+// Auto-detect IPs on load
+document.addEventListener('DOMContentLoaded', function() {
+  detectIPs();
+  setupHostValidation();
+});
+
+function detectIPs() {
+  const ipInfo = document.getElementById('ip-info');
+  const ipDetect = document.getElementById('ip-detection');
+
+  fetch('{% url "settings_ddns_check_ip" %}')
+    .then(r => r.json())
+    .then(data => {
+      let html = '';
+      if (data.ipv4_available) {
+        html += '<div><i class="bi bi-check-circle-fill text-success"></i> IPv4: <code>' + data.ipv4 + '</code></div>';
+      } else {
+        html += '<div><i class="bi bi-x-circle-fill text-danger"></i> IPv4: not detected</div>';
+      }
+      if (data.ipv6_available) {
+        html += '<div><i class="bi bi-check-circle-fill text-success"></i> IPv6: <code>' + data.ipv6 + '</code></div>';
+      } else {
+        html += '<div><i class="bi bi-x-circle-fill text-secondary"></i> IPv6: not detected</div>';
+      }
+      ipInfo.innerHTML = html;
+
+      // Recommendation for ddns_ipv6
+      let recHtml = '<i class="bi bi-lightbulb"></i> Recommendation: ';
+      if (data.ipv6_available && data.ipv4_available) {
+        recHtml += '<strong>Dual-Stack</strong> (IPv4 + IPv6) — <code>yes</code>';
+      } else if (data.ipv6_available && !data.ipv4_available) {
+        recHtml += '<strong>IPv6 only</strong> — <code>only</code>';
+      } else {
+        recHtml += '<strong>IPv4 only</strong> (no public IPv6 detected)';
+      }
+      ipDetect.innerHTML = recHtml;
+    })
+    .catch(err => {
+      ipInfo.innerHTML = '<div class="text-danger">Failed to detect IPs</div>';
+      ipDetect.innerHTML = '<span class="text-warning">Could not determine recommendation</span>';
+    });
+}
+
+function setupHostValidation() {
+  const hostInput = document.getElementById('ddns_host');
+  const hostStatus = document.getElementById('host-status');
+
+  hostInput.addEventListener('input', function() {
+    let val = this.value.trim().toLowerCase();
+    if (val && !val.endsWith('.dedyn.io')) {
+      hostStatus.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> Should end with .dedyn.io</span>';
+    } else {
+      hostStatus.innerHTML = '<span class="text-success"><i class="bi bi-check"></i> Valid domain</span>';
+    }
+  });
+  // Trigger on load
+  if (hostInput.value) {
+    hostInput.dispatchEvent(new Event('input'));
+  }
+}
+
+function testApiKey() {
+  const apiKey = document.getElementById('ddns_apikey').value;
+  const hostname = document.getElementById('ddns_host').value;
+  const status = document.getElementById('api-key-status');
+  const btn = document.getElementById('test-api-btn');
+
+  if (!apiKey) {
+    status.innerHTML = '<span class="text-danger">Please enter an API key</span>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Testing...';
+  status.innerHTML = '';
+
+  const formData = new FormData();
+  formData.append('api_key', apiKey);
+  formData.append('hostname', hostname);
+  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+
+  fetch('{% url "settings_ddns_test_api" %}', {
+    method: 'POST',
+    body: formData
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.valid) {
+        status.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + data.message + '</span>';
+        apiKeyTested = true;
+        apiKeyValid = true;
+      } else {
+        status.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + data.error + '</span>';
+        apiKeyTested = true;
+        apiKeyValid = false;
+      }
+    })
+    .catch(err => {
+      status.innerHTML = '<span class="text-danger">Connection error: ' + err.message + '</span>';
+      apiKeyTested = true;
+      apiKeyValid = false;
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-shield-check"></i> Test';
+    });
+}
+</script>
 {% endblock %}

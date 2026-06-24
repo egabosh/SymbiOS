@@ -19,6 +19,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           . /etc/bash/gaboshlib.include
+          . /etc/bash/gaboshlib.include
           g_lockfile
 
           # deDyn/deSEC-Settings
@@ -27,95 +28,142 @@
 
           dedyndns="ns2.desec.org. ns1.desec.io."
 
+          # Validate config
+          if [ -z "${dedynpw}" ]; then
+              g_echo_error "dedynpw not set in /usr/local/etc/dedyn.conf"
+              exit 1
+          fi
+          if [ -z "${dedynhosts}" ]; then
+              g_echo_error "dedynhosts not set in /usr/local/etc/dedyn.conf"
+              exit 1
+          fi
+
+          # Ensure domain exists on desec.io (create if not)
+          ensure_domain() {
+              local domain="$1"
+              local exists
+              exists=$(curl -s -o /dev/null -w "%{http_code}" \
+                  "https://desec.io/api/v1/domains/${domain}/" \
+                  --header "Authorization: Token ${dedynpw}")
+              if [ "${exists}" = "404" ]; then
+                  g_echo_ok "Creating domain ${domain} on desec.io..."
+                  local create
+                  create=$(curl -s -o /dev/null -w "%{http_code}" \
+                      -X POST "https://desec.io/api/v1/domains/" \
+                      --header "Authorization: Token ${dedynpw}" \
+                      --header "Content-Type: application/json" \
+                      --data "{\"name\": \"${domain}\"}")
+                  if [ "${create}" = "201" ]; then
+                      g_echo_ok "Domain ${domain} created successfully"
+                  else
+                      g_echo_error "Failed to create domain ${domain} (HTTP ${create})"
+                      return 1
+                  fi
+              elif [ "${exists}" = "200" ]; then
+                  g_echo_ok "Domain ${domain} already exists"
+              else
+                  g_echo_error "Cannot check domain ${domain} (HTTP ${exists})"
+                  return 1
+              fi
+          }
 
           # Get IP(s)
-          if ! [ -z $doipv6 ]
-          then
-            # IPv6 (and maybe IPv4)
-            ipv6=$(curl https://checkipv6.dedyn.io/ 2>/dev/null)
-            if ! g_valid_ipv6 "$ipv6"
-            then
-              g_echo_error "Didn't receive a vaild IPv6-address: $ipv6"
-              unset doipv6
-            fi
-          fi
-          if ! echo $doipv6 | grep -q "only"
-          then
-            # IPv4 and IPv6
-            ipv4=$(curl https://checkipv4.dedyn.io/ 2>/dev/null)
-            if ! g_valid_ipv4 "$ipv4"
-            then
-              g_echo_error_exit "Didn't receive a vaild IPv4-address: $ipv4"
-            fi
-          fi
+          ipv4=""
+          ipv6=""
 
-          # Get Updateserver and string
-          updatesrv=update.dedyn.io
-          if echo $doipv6 | grep -q "only"
-          then
-            # Only IPv6
-            updatesrv=update6.dedyn.io
-            updatestring="myipv6=${ipv6}"
-          elif ! [ -z $doipv6 ]
-          then
-            # IPv4 and IPv6
-            updatestring="myipv4=${ipv4}&myipv6=${ipv6}"
-          else
-            updatestring="myipv4=${ipv4}"
-          fi
-
-          for dynaddr in ${dedynhosts}
-          do
-            changed=""
-            dynaddr=$(echo $dynaddr | perl -pe 's/.dedyn.io$//')
-            dynaddr="${dynaddr}.dedyn.io"
-            host ${dynaddr} ${dedyndns} >"$g_tmp/${dynaddr}"
-            for ip in ${ipv4} ${ipv6}
-            do
-              if egrep -q "${ip}" $g_tmp/${dynaddr}
-              then
-                g_echo_ok "DynDNS IP ${ip} for ${dynaddr} up2date"
+          if [ -n "${doipv6}" ]; then
+              g_echo_note "Fetching IPv6 address..."
+              ipv6=$(curl -s https://checkipv6.dedyn.io/ 2>/dev/null)
+              if ! g_valid_ipv6 "${ipv6}"; then
+                  g_echo_error "Did not receive a valid IPv6 address: ${ipv6}"
+                  doipv6=""
               else
-                g_echo_ok "Renewing DynDNS IP ${ip} for ${dynaddr}"
-                if curl -i "https://${updatesrv}/?hostname=${dynaddr}&${updatestring}" --header "Authorization: Token ${dedynpw}"
-                then
-                  g_echo_ok "DynDNS IP ${ip} for ${dynaddr} renewed"
-                  changed=1
-                  # restart traefik on Problems with ACME/letsencrypt
-                  if [ -f /home/docker/traefik/docker-compose.yml ]
-                  then
-                    if docker compose -f /home/docker/traefik/docker-compose.yml logs | egrep -q "error.+acme-challenge"
-                    then
-                      docker compose -f /home/docker/traefik/docker-compose.yml up -d --force-recreate
-                    fi
+                  g_echo_ok "IPv6: ${ipv6}"
+              fi
+          fi
+
+          if ! echo "${doipv6}" | grep -q "only"; then
+              g_echo_note "Fetching IPv4 address..."
+              ipv4=$(curl -s https://checkipv4.dedyn.io/ 2>/dev/null)
+              if ! g_valid_ipv4 "${ipv4}"; then
+                  g_echo_error_exit "Did not receive a valid IPv4 address: ${ipv4}"
+              fi
+              g_echo_ok "IPv4: ${ipv4}"
+          fi
+
+          # Determine update server and string
+          updatesrv="update.dedyn.io"
+          if echo "${doipv6}" | grep -q "only"; then
+              updatesrv="update6.dedyn.io"
+              updatestring="myipv6=${ipv6}"
+          elif [ -n "${doipv6}" ]; then
+              updatestring="myipv4=${ipv4}&myipv6=${ipv6}"
+          else
+              updatestring="myipv4=${ipv4}"
+          fi
+
+          for dynaddr in ${dedynhosts}; do
+              changed=""
+              dynaddr="${dynaddr%.dedyn.io}"
+              dynaddr="${dynaddr}.dedyn.io"
+
+              # Ensure domain exists
+              ensure_domain "${dynaddr}" || continue
+
+              # Resolve current IPs
+              host "${dynaddr}" ${dedyndns} >"${g_tmp}/${dynaddr}" 2>/dev/null
+              for ip in ${ipv4} ${ipv6}; do
+                  if [ -z "${ip}" ]; then
+                      continue
                   fi
-                  # get new ip for turn
-                  [ -x /home/docker/turn/newip.sh ] && /home/docker/turn/newip.sh
-                else
-                  g_echo_error "DynDNS IP ${ip} for ${dynaddr}"
-                fi
+                  if grep -q "${ip}" "${g_tmp}/${dynaddr}" 2>/dev/null; then
+                      g_echo_ok "DynDNS IP ${ip} for ${dynaddr} up to date"
+                  else
+                      g_echo_note "Updating DynDNS IP ${ip} for ${dynaddr}..."
+                      response=$(curl -s -o /dev/null -w "%{http_code}" \
+                          "https://${updatesrv}/?hostname=${dynaddr}&${updatestring}" \
+                          --header "Authorization: Token ${dedynpw}")
+                      if [ "${response}" = "200" ] || [ "${response}" = "204" ]; then
+                          g_echo_ok "DynDNS IP ${ip} for ${dynaddr} renewed"
+                          changed=1
+                          # restart traefik on ACME problems
+                          if [ -f /home/docker/traefik/docker-compose.yml ]; then
+                              if docker compose -f /home/docker/traefik/docker-compose.yml logs 2>/dev/null | grep -q "error.*acme-challenge"; then
+                                  docker compose -f /home/docker/traefik/docker-compose.yml up -d --force-recreate
+                              fi
+                          fi
+                          # update turn IP
+                          [ -x /home/docker/turn/newip.sh ] && /home/docker/turn/newip.sh
+                      else
+                          g_echo_error "Failed to update DynDNS IP ${ip} for ${dynaddr} (HTTP ${response})"
+                      fi
+                  fi
+              done
+
+              if [ "${changed}" = "1" ]; then
+                  # Ensure wildcard CNAME
+                  current_dns=$(curl -s -X GET \
+                      "https://desec.io/api/v1/domains/${dynaddr}/rrsets/" \
+                      --header "Authorization: Token ${dedynpw}")
+                  if ! echo "${current_dns}" | jq -r '.[] | select(.subname=="*" and .type=="CNAME") | .records[]' 2>/dev/null | grep -q "^${dynaddr}\.$"; then
+                      g_echo_ok "Creating wildcard CNAME for ${dynaddr}"
+                      curl -s -X POST "https://desec.io/api/v1/domains/${dynaddr}/rrsets/" \
+                          --header "Authorization: Token ${dedynpw}" \
+                          --header "Content-Type: application/json" \
+                          --data "{\"subname\": \"*\", \"type\": \"CNAME\", \"ttl\": 3600, \"records\": [\"${dynaddr}.\"]}" >/dev/null
+                  fi
+                  # Ensure Let's Encrypt CAA
+                  if ! echo "${current_dns}" | jq -r '.[] | select(.subname=="" and .type=="CAA") | .records[]' 2>/dev/null | grep -q '128 issue "letsencrypt.org"'; then
+                      g_echo_ok "Creating CAA record for Let's Encrypt"
+                      curl -s -X POST "https://desec.io/api/v1/domains/${dynaddr}/rrsets/" \
+                          --header "Authorization: Token ${dedynpw}" \
+                          --header "Content-Type: application/json" \
+                          --data "{\"subname\": \"\", \"type\": \"CAA\", \"ttl\": 3600, \"records\": [\"128 issue \\\"letsencrypt.org\\\"\"]}" >/dev/null
+                  fi
+                  # wait for API rate limiting
+                  g_echo_note "Waiting for API rate limit..."
+                  sleep "$(shuf -i 61-120 -n 1)"
               fi
-              if [[ $changed = 1 ]]
-              then
-                # check for * CNAME
-                curl -s -X GET https://desec.io/api/v1/domains/${dynaddr}/rrsets/ --header "Authorization: Token ${dedynpw}" > "${g_tmp}/current_dns"
-                # check for wildcard CNAME
-                if ! cat "${g_tmp}/current_dns" | jq -r ".[] | select(.subname==\"*\" and .type==\"CNAME\") | .records[]" | egrep -q "^${dynaddr}\.$"
-                then
-                  g_echo_ok "Creating DynDNS * CNAME for ${dynaddr} subdomains"
-                  curl -s -X POST https://desec.io/api/v1/domains/${dynaddr}/rrsets/ --header "Authorization: Token ${dedynpw}" --header "Content-Type: application/json" --data "{\"subname\": \"*\",\"type\": \"CNAME\",\"ttl\": 3600,\"records\": [\"${dynaddr}.\"]}" >/dev/null
-                fi
-                # check for letsencrypt CAA
-                if ! cat "${g_tmp}/current_dns" | jq -r ".[] | select(.subname==\"\" and .type==\"CAA\") | .records[]" | egrep -q '128 issue "letsencrypt.org"'
-                then
-                  g_echo_ok "Creating DynDNS CAA for letsencrypt for ${dynaddr}"
-                  curl -s -X POST https://desec.io/api/v1/domains/${dynaddr}/rrsets/ --header "Authorization: Token ${dedynpw}" --header "Content-Type: application/json" --data "{\"subname\": \"\",\"type\": \"CAA\",\"ttl\": 3600,\"records\": [\"128 issue \\\"letsencrypt.org\\\"\"]}" >/dev/null
-                fi
-                # wait time for api blocks
-                g_echo_note "wait time for api blocks"
-                sleep $(shuf -i 61-120 -n 1)
-              fi
-            done
           done
         backup: yes
         validate: /bin/bash -n %s
