@@ -13,6 +13,7 @@ urlpatterns = [
     path('settings/ddns/', views.settings_ddns, name='settings_ddns'),
     path('settings/ddns/test-api/', views.settings_ddns_test_api, name='settings_ddns_test_api'),
     path('settings/ddns/check-ip/', views.settings_ddns_check_ip, name='settings_ddns_check_ip'),
+    path('settings/ddns/host-status/', views.settings_ddns_host_status, name='settings_ddns_host_status'),
     path('settings/auth/', views.settings_auth, name='settings_auth'),
     path('logs/', views.logs, name='logs'),
     path('logs/stream/', views.logs_stream, name='logs_stream'),
