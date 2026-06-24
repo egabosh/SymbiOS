@@ -714,6 +714,17 @@ def health_data(request):
     from django.http import JsonResponse
     return JsonResponse(run_all())
 
+
+def configd_status(request):
+    status_file = "/log/configd-status"
+    try:
+        with open(status_file) as f:
+            status = f.read().strip()
+    except FileNotFoundError:
+        status = "idle"
+    return JsonResponse({"status": status})
+
+
 @login_required
 def container_list(request):
     from .utils.log_utils import _get_container_list

@@ -18,6 +18,7 @@ urlpatterns = [
     path('logs/', views.logs, name='logs'),
     path('logs/stream/', views.logs_stream, name='logs_stream'),
     path('logs/containers/', views.container_list, name='logs_containers'),
+    path('configd-status/', views.configd_status, name='configd_status'),
     path('users/', views.users, name='users'),
     path('users/create/', views.user_create, name='user_create'),
     path('users/<str:uid>/delete/', views.user_delete, name='user_delete'),
