@@ -77,14 +77,14 @@
         block: |
           session:
             secret: "{{ session_secret.stdout }}"
-            name: auth.local_session
+            name: auth.{{ default_domain }}_session
             same_site: lax
             expiration: 16h
             inactivity: 4h
             remember_me: 1M
             cookies:
-              - domain: "auth.local"
-                authelia_url: https://auth.local
+              - domain: "{{ default_domain }}"
+                authelia_url: https://auth.{{ default_domain }}
 
           storage:
             local:
@@ -111,7 +111,7 @@
 
           totp:
             disable: false
-            issuer: auth.local
+            issuer: auth.{{ default_domain }}
             algorithm: sha1
             digits: 6
             period: 30
@@ -174,7 +174,7 @@
                  password: {{ smtp_password }}
                  address: {{ smtp_server }}:{{ smtp_port }}
                  sender: {{ smtp_from }}
-                 subject: "[auth.local] Notification"
+                 subject: "[auth.{{ default_domain }}] Notification"
                  startup_check_address: {{ smtp_from }}
                  identifier: "authelia"
                  timeout: 15s
@@ -201,7 +201,7 @@
           access_control:
             default_policy: two_factor
             rules:
-              - domain: "auth.local"
+              - domain: "auth.{{ default_domain }}"
                 policy: one_factor
 
         backup: yes
@@ -233,7 +233,7 @@
               labels:
                 - traefik.enable=true
                 # HTTPS
-                - traefik.http.routers.authelia-default.rule=Host(`auth.local`)
+                - traefik.http.routers.authelia-default.rule=Host(`auth.{{ default_domain }}`)
                 - traefik.http.routers.authelia-default.entrypoints=https
                 - traefik.http.routers.authelia-default.tls=true
                 # Proxy to service-port
