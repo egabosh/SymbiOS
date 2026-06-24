@@ -146,15 +146,23 @@
           CLIENT_NAME="${1}.iot"
           CERT_DAYS=30
 
-          if [ -z "$CLIENT_NAME" ]; then
+          if [ -z "$CLIENT_NAME" ]
+          then
             echo "Usage: $0 <client-name>"
             exit 1
           fi
 
-          cd "$EASYRSA_DIR" || exit 1
+          # Change to easy-rsa directory
+          if ! cd "$EASYRSA_DIR"
+          then
+            exit 1
+          fi
 
-          # create client cert and key
-          /usr/share/easy-rsa/easyrsa --batch --days="$CERT_DAYS" build-client-full "$CLIENT_NAME" nopass || exit 2
+          # Create client certificate and key using easy-rsa
+          if ! /usr/share/easy-rsa/easyrsa --batch --days="$CERT_DAYS" build-client-full "$CLIENT_NAME" nopass
+          then
+            exit 2
+          fi
 
           # needed files
           CA_CRT="$EASYRSA_DIR/pki/ca.crt"

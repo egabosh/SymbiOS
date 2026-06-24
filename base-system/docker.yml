@@ -188,18 +188,28 @@
         block: |
           cd /home/docker/_defaults/mariadb
 
-          mysqlpassword=$(pwgen -s 32 1)
+          # Generate a random MySQL root password
+          f_mysqlpassword=$(pwgen -s 32 1)
 
-          [ -f env.db ] || echo "MARIADB_ROOT_PASSWORD=!MYSQLPASSWORD!
-          " >envroot.db
+          # Create envroot.db with root password if it does not exist
+          if [ ! -f env.db ]
+          then
+            echo "MARIADB_ROOT_PASSWORD=!MYSQLPASSWORD!" >envroot.db
+          fi
 
-          [ -f env.phpmyadmin ] || echo "PMA_USER=root
-          PMA_PASSWORD=!MYSQLPASSWORD!
-          " >env.rootphpmyadmin
+          # Create env.rootphpmyadmin with root credentials if it does not exist
+          if [ ! -f env.phpmyadmin ]
+          then
+            echo "PMA_USER=root" >env.rootphpmyadmin
+            echo "PMA_PASSWORD=!MYSQLPASSWORD!" >>env.rootphpmyadmin
+          fi
 
+          # Restrict permissions on credential files
           chmod 440 envroot.db env.rootphpmyadmin
           chown root:docker envroot.db env.rootphpmyadmin
-          sed -i "s/\!MYSQLPASSWORD\!/$mysqlpassword/g" envroot.db env.rootphpmyadmin          
+
+          # Replace placeholder with actual generated password
+          sed -i "s/\!MYSQLPASSWORD\!/$f_mysqlpassword/g" envroot.db env.rootphpmyadmin
 
         backup: yes
         validate: /bin/bash -n %s
@@ -210,6 +220,7 @@
         insertbefore: BOF
         line: "#!/bin/bash -e"
 
+    # Generate initial passwords for MariaDB if envroot.db does not exist
     - name: Gen initial passwords if not exists
       ansible.builtin.shell: ./genrootpw
       args:
@@ -270,35 +281,54 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          # fix for creating notify.sh directory by docker (volume) if not exists
-          [ -d /usr/local/bin/notify.sh ] && rmdir /usr/local/bin/notify.sh
+          # Remove notify.sh directory if created as a directory by Docker volume
+          if [ -d /usr/local/bin/notify.sh ]
+          then
+            rmdir /usr/local/bin/notify.sh
+          fi
 
           g_echo_ok "check for updates"
-          # Clean up docker images
+
+          # Clean up Docker images
           docker system prune -af
-          find /home/docker -maxdepth 1 -mindepth 1 -type d | egrep -v "mailcow-dockerized$|.del$|.bak$|.old$|var-lib-docker$" | while read docker
+
+          # Find all Docker compose directories excluding special ones
+          find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "mailcow-dockerized$|.del$|.bak$|.old$|var-lib-docker$" | while read f_docker_dir
           do
-            [ -f "$docker/docker-compose.yml" ] || continue
-            g_echo_ok "$docker"
-            cd "${docker}"
+            # Skip directories without a compose file
+            if [ ! -f "$f_docker_dir/docker-compose.yml" ]
+            then
+              continue
+            fi
+            g_echo_ok "$f_docker_dir"
+            cd "${f_docker_dir}"
             if docker -l warn compose --ansi never pull --include-deps 2>&1 | grep " Pulled"
             then
-              #g_echo_warn "Installiere $docker Update"
-              #docker -l warn compose --ansi never up -d --force-recreate >$g_tmp/up 2>&1   || g_echo_error "$docker: docker compose up fehlgeschlagen: $(cat $g_tmp/up)"
-              echo $$ >/tmp/$(basename $docker)
-              docker -l warn compose --ansi never up -d --remove-orphans >$g_tmp/up 2>&1 || g_echo_error "$docker: docker compose up fehlgeschlagen: $(cat $g_tmp/up)"
-              egrep -v -- "-wpcli" $g_tmp/up | grep "Started" >${g_tmp}/started && g_echo_warn "$docker Update installed: $(cat ${g_tmp}/started)"
+              # Write PID file for this service
+              echo $$ >/tmp/$(basename $f_docker_dir)
+              if ! docker -l warn compose --ansi never up -d --remove-orphans >$g_tmp/up 2>&1
+              then
+                g_echo_error "$f_docker_dir: docker compose up failed: $(cat $g_tmp/up)"
+              fi
+              # Check for started containers
+              if grep -E -v -- "-wpcli" $g_tmp/up | grep "Started" >${g_tmp}/started
+              then
+                g_echo_warn "$f_docker_dir Update installed: $(cat ${g_tmp}/started)"
+              fi
             fi
             if [ -f Dockerfile ]
             then
               if docker -l warn compose --ansi never build --progress=plain --pull --no-cache --force-rm >$g_tmp/build 2>&1
               then
-                docker -l warn compose --ansi never up -d --force-recreate --remove-orphans >$g_tmp/up 2>&1   || g_echo_error "$docker: docker compose up fehlgeschlagen: $(cat $g_tmp/up)"
+                if ! docker -l warn compose --ansi never up -d --force-recreate --remove-orphans >$g_tmp/up 2>&1
+                then
+                  g_echo_error "$f_docker_dir: docker compose up failed: $(cat $g_tmp/up)"
+                fi
               else
-                g_echo_error "$docker: docker compose build fehlgeschlagen: $(cat $g_tmp/build)"
+                g_echo_error "$f_docker_dir: docker compose build failed: $(cat $g_tmp/build)"
               fi
             fi
-          done                    
+          done
         backup: yes
         validate: /bin/bash -n %s
 
@@ -311,59 +341,84 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          ### DB Backup
-          g_echo_ok "Starte Backup von MySQL und PostgreSQL Datenbanken (Docker)"
-           
-          DAYS=7
-           
-          TIMESTAMP=$(date +"%Y%m%d%H%M")
-          CONTAINER=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\} | egrep -v '^mysql|^mariadb' | egrep 'mysql|mariadb' | cut -d":" -f1 | grep -v mailcow)
-           
+          ### DB Backup ###
+          g_echo_ok "Start MySQL and PostgreSQL database backup (Docker)"
+
+          f_days=7
+
+          f_timestamp=$(date +"%Y%m%d%H%M")
+          f_container=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\} | grep -E -v '^mysql|^mariadb' | grep -E 'mysql|mariadb' | cut -d":" -f1 | grep -v mailcow)
+
           mkdir -p $BACKUPDIR
 
-
           ### MYSQL ###
-          for i in $CONTAINER
+          for f_container_id in $f_container
           do
-            # get credentials
-            MARIADB_DATABASE=$(docker exec $i env | egrep "MARIADB_DATABASE|MYSQL_DATABASE" | tail -n1 |cut -d"=" -f2)
-            MARIADB_PWD=$(docker exec $i env | egrep "MARIADB_PASSWORD|MYSQL_PASSWORD" | tail -n1 |cut -d"=" -f2)
-            MARIADB_USR=$(docker exec $i env | egrep "MARIADB_USER|MYSQL_USER" | tail -n1 |cut -d"=" -f2)
-            # get dump path
-            docker exec $i /usr/bin/test -x /usr/bin/mariadb-dump && DBDUMPCMD=/usr/bin/mariadb-dump
-            docker exec $i /usr/bin/test -x /usr/bin/mysqldump && DBDUMPCMD=/usr/bin/mysqldump
-            if [ -z "$DBDUMPCMD" ]
+            # Get database credentials from container environment
+            f_db=$(docker exec $f_container_id env | grep -E "MARIADB_DATABASE|MYSQL_DATABASE" | tail -n1 | cut -d"=" -f2)
+            f_pwd=$(docker exec $f_container_id env | grep -E "MARIADB_PASSWORD|MYSQL_PASSWORD" | tail -n1 | cut -d"=" -f2)
+            f_usr=$(docker exec $f_container_id env | grep -E "MARIADB_USER|MYSQL_USER" | tail -n1 | cut -d"=" -f2)
+
+            # Determine the dump command available in the container
+            f_dumpcmd=""
+            if docker exec $f_container_id /usr/bin/test -x /usr/bin/mariadb-dump
             then
-              g_echo_error "No dbdumpcmd found in container $i! No backup created!"
+              f_dumpcmd=/usr/bin/mariadb-dump
+            fi
+            if docker exec $f_container_id /usr/bin/test -x /usr/bin/mysqldump
+            then
+              f_dumpcmd=/usr/bin/mysqldump
+            fi
+
+            # Skip if no dump command is found
+            if [ -z "$f_dumpcmd" ]
+            then
+              g_echo_error "No dump command found in container $f_container_id! No backup created!"
               continue
             fi
-            g_echo "Sichere MySQL/MariaDB Datenbank $MARIADB_DATABASE DB aus $i";
-            docker exec $i $DBDUMPCMD --no-tablespaces -u $MARIADB_USR -p$MARIADB_PWD $MARIADB_DATABASE 2>${g_tmp}/dberr | gzip > $BACKUPDIR/$i-$MARIADB_DATABASE-$TIMESTAMP.sql.gz || g_echo_error "DB-Backup von $MARIADB_DATABASE war nicht erfolgreich $(cat ${g_tmp}/dberr)"
-            # dont delete last old backups!
-            OLD_BACKUPS=$(ls -1 $BACKUPDIR/$i*.gz |wc -l)
-            if [ $OLD_BACKUPS -gt $DAYS ]; then
-              find $BACKUPDIR -name "$i*.gz" -daystart -mtime +$DAYS -delete
+
+            g_echo "Backup MySQL/MariaDB database $f_db from $f_container_id"
+
+            # Perform the database dump and compress it
+            if ! docker exec $f_container_id $f_dumpcmd --no-tablespaces -u $f_usr -p$f_pwd $f_db 2>${g_tmp}/dberr | gzip > $BACKUPDIR/$f_container_id-$f_db-$f_timestamp.sql.gz
+            then
+              g_echo_error "DB backup of $f_db failed: $(cat ${g_tmp}/dberr)"
+            fi
+
+            # Remove old backups but keep at least the last f_days
+            f_old_backups=$(ls -1 $BACKUPDIR/$f_container_id*.gz | wc -l)
+            if [ $f_old_backups -gt $f_days ]
+            then
+              find $BACKUPDIR -name "$f_container_id*.gz" -daystart -mtime +$f_days -delete
             fi
           done
 
-          ### POSTGRESQL ##
-          CONTAINER=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\}| grep 'postgres' | cut -d":" -f1 | grep -v mailcow)
+          ### POSTGRESQL ###
+          f_container=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\} | grep 'postgres' | cut -d":" -f1 | grep -v mailcow)
           mkdir -p $BACKUPDIR
-          for i in $CONTAINER
+
+          for f_container_id in $f_container
           do
-            # get credentials
-            POSTGRES_DATABASE=$(docker exec $i env | egrep "POSTGRES_DB" | tail -n1 |cut -d"=" -f2)
-            POSTGRES_PWD=$(docker exec $i env | egrep "POSTGRES_PASSWORD" | tail -n1 |cut -d"=" -f2)
-            POSTGRES_USR=$(docker exec $i env | egrep "POSTGRES_USER" | tail -n1 |cut -d"=" -f2)
-            # get dump path
-            g_echo "Sichere Datenbank $POSTGRES_DATABASE aus $i";
-            docker exec -e PGPASSWORD=$POSTGRES_PWD $i /usr/bin/pg_dump -U $POSTGRES_USR $POSTGRES_DATABASE 2>${g_tmp}/dberr | gzip > $BACKUPDIR/$i-$POSTGRES_DATABASE-$TIMESTAMP.sql.gz || g_echo_error "DB-Backup von $POSTGRES_DATABASE war nicht erfolgreich $(cat ${g_tmp}/dberr)"
-            # dont delete last old backups!
-            OLD_BACKUPS=$(ls -1 $BACKUPDIR/$i*.gz |wc -l)
-            if [ $OLD_BACKUPS -gt $DAYS ]; then
-              find $BACKUPDIR -name "$i*.gz" -daystart -mtime +$DAYS -delete
+            # Get PostgreSQL credentials from container environment
+            f_db=$(docker exec $f_container_id env | grep -E "POSTGRES_DB" | tail -n1 | cut -d"=" -f2)
+            f_pwd=$(docker exec $f_container_id env | grep -E "POSTGRES_PASSWORD" | tail -n1 | cut -d"=" -f2)
+            f_usr=$(docker exec $f_container_id env | grep -E "POSTGRES_USER" | tail -n1 | cut -d"=" -f2)
+
+            g_echo "Backup database $f_db from $f_container_id"
+
+            # Perform the PostgreSQL dump and compress it
+            if ! docker exec -e PGPASSWORD=$f_pwd $f_container_id /usr/bin/pg_dump -U $f_usr $f_db 2>${g_tmp}/dberr | gzip > $BACKUPDIR/$f_container_id-$f_db-$f_timestamp.sql.gz
+            then
+              g_echo_error "DB backup of $f_db failed: $(cat ${g_tmp}/dberr)"
             fi
-          done          
+
+            # Remove old backups but keep at least the last f_days
+            f_old_backups=$(ls -1 $BACKUPDIR/$f_container_id*.gz | wc -l)
+            if [ $f_old_backups -gt $f_days ]
+            then
+              find $BACKUPDIR -name "$f_container_id*.gz" -daystart -mtime +$f_days -delete
+            fi
+          done
         backup: yes
         validate: /bin/bash -n %s
 

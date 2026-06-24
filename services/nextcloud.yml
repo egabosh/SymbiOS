@@ -25,30 +25,44 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          # Change to service directory
           cd /home/docker/nextcloud.{{inventory_hostname}}
 
-          ncadminpassword=$(pwgen -s 32 1)
-          mysqluser=$(pwgen -s 32 1)
-          mysqlpassword=$(pwgen -s 32 1)
-          
-          [ -f env ] || echo "MYSQL_USER=!MYSQLUSER!
+          # Generate random passwords for Nextcloud admin and database
+          g_ncadminpassword=$(pwgen -s 32 1)
+          g_mysqluser=$(pwgen -s 32 1)
+          g_mysqlpassword=$(pwgen -s 32 1)
+
+          # Create env file for Nextcloud if not exists
+          if [ ! -f env ]
+          then
+            echo "MYSQL_USER=!MYSQLUSER!
           MYSQL_PASSWORD=!MYSQLPASSWORD!
-          NEXTCLOUD_ADMIN_PASSWORD=!NCADMINPASSWORD!
-          " >env
-          
-          [ -f env.db ] || echo "MARIADB_USER=!MYSQLUSER!
-          MARIADB_PASSWORD=!MYSQLPASSWORD!
-          " >env.db
-          
-          [ -f env.phpmyadmin ] || echo "PMA_USER=!MYSQLUSER!
-          PMA_PASSWORD=!MYSQLPASSWORD!
-          " >env.phpmyadmin
-          
+          NEXTCLOUD_ADMIN_PASSWORD=!NCADMINPASSWORD!" >env
+          fi
+
+          # Create env file for MariaDB if not exists
+          if [ ! -f env.db ]
+          then
+            echo "MARIADB_USER=!MYSQLUSER!
+          MARIADB_PASSWORD=!MYSQLPASSWORD!" >env.db
+          fi
+
+          # Create env file for phpMyAdmin if not exists
+          if [ ! -f env.phpmyadmin ]
+          then
+            echo "PMA_USER=!MYSQLUSER!
+          PMA_PASSWORD=!MYSQLPASSWORD!" >env.phpmyadmin
+          fi
+
+          # Set secure permissions on env files
           chmod 440 env env.db env.phpmyadmin
           chown root:docker env env.db env.phpmyadmin
-          sed -i "s/\!MYSQLUSER\!/$mysqluser/g" env env.db env.phpmyadmin
-          sed -i "s/\!MYSQLPASSWORD\!/$mysqlpassword/g" env env.db env.phpmyadmin
-          sed -i "s/\!NCADMINPASSWORD\!/$ncadminpassword/g" env
+
+          # Replace placeholders with generated passwords
+          sed -i "s/\!MYSQLUSER\!/$g_mysqluser/g" env env.db env.phpmyadmin
+          sed -i "s/\!MYSQLPASSWORD\!/$g_mysqlpassword/g" env env.db env.phpmyadmin
+          sed -i "s/\!NCADMINPASSWORD\!/$g_ncadminpassword/g" env
         backup: yes
         validate: /bin/bash -n %s
       notify: run genpw.sh
@@ -74,12 +88,13 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          # Change to service directory
           cd /home/docker/nextcloud.{{inventory_hostname}}
 
-          #wget -q https://github.com/nextcloud/docker/raw/master/.examples/dockerfiles/full/apache/Dockerfile -O Dockerfile
-          #sed -i 's/^FROM nextcloud:apache/FROM nextcloud:stable-apache/' Dockerfile
-          #sed -i 's/^#       libreoffice/        libreoffice/' Dockerfile
+          # Download current Dockerfile template from Nextcloud repository
           wget -q https://raw.githubusercontent.com/nextcloud/docker/refs/heads/master/Dockerfile-debian.template -O Dockerfile
+
+          # Download supervisor configuration for full Apache image
           wget -q https://github.com/nextcloud/docker/raw/master/.examples/dockerfiles/full/apache/supervisord.conf -O supervisord.conf
         backup: yes
         validate: /bin/bash -n %s
@@ -107,12 +122,24 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          # Change to service directory
           cd /home/docker/nextcloud.{{inventory_hostname}}
-          collabora_password=$(pwgen -s 32 1)
-          [ -f env.collabora ] || echo "password=!COLLABORA_PASSWORD!" > env.collabora
+
+          # Generate random password for Collabora
+          g_collabora_password=$(pwgen -s 32 1)
+
+          # Create environment file for Collabora if not exists
+          if [ ! -f env.collabora ]
+          then
+            echo "password=!COLLABORA_PASSWORD!" > env.collabora
+          fi
+
+          # Set secure permissions on Collabora env file
           chmod 440 env.collabora
           chown root:docker env.collabora
-          sed -i "s/!COLLABORA_PASSWORD!/$collabora_password/g" env.collabora
+
+          # Replace placeholder with actual password
+          sed -i "s/!COLLABORA_PASSWORD!/$g_collabora_password/g" env.collabora
         backup: yes
         validate: /bin/bash -n %s
       notify: run collabora.genpw.sh
@@ -436,7 +463,7 @@
             # restart traefik on Problems with ACME/letsencrypt
             if [ -f /home/docker/traefik/docker-compose.yml ]
             then
-              if docker compose -f /home/docker/traefik/docker-compose.yml logs | egrep -q "nextcloud.{{inventory_hostname}}.+error.+acme-challenge"
+              if docker compose -f /home/docker/traefik/docker-compose.yml logs | grep -E -q "nextcloud.{{inventory_hostname}}.+error.+acme-challenge"
               then
                 docker compose -f /home/docker/traefik/docker-compose.yml up -d --force-recreate
               fi
@@ -444,20 +471,32 @@
             sleep 10
           done
 
-          # nextcloud
-          cd /home/docker/nextcloud.{{inventory_hostname}} || exit 1
+          # Change to service directory
+          if ! cd /home/docker/nextcloud.{{inventory_hostname}}
+          then
+            exit 1
+          fi
 
-          # install/enable apps
+          # Install and enable Nextcloud apps
           for app in admin_audit bookmarks calendar contacts files_external gpoddersync impersonate maps news notes oauth2 passwords phonetrack photos spreed tasks twofactor_backupcodes twofactor_totp richdocuments user_oidc user_ldap
           do
-            [ -f app.${app}.installed ] || docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:install ${app} | tee -a nextcloud.init.log >app.${app}.installed 2>&1
-            [ -f app.${app}.installed ] || docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:enable ${app} | tee -a nextcloud.init.log >>app.${app}.installed 2>&1
+            if [ ! -f "app.${app}.installed" ]
+            then
+              docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:install "${app}" | tee -a nextcloud.init.log >"app.${app}.installed" 2>&1
+            fi
+            if [ ! -f "app.${app}.installed" ]
+            then
+              docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:enable "${app}" | tee -a nextcloud.init.log >>"app.${app}.installed" 2>&1
+            fi
           done
 
-          # disable apps
+          # Disable unnecessary apps
           for app in dashboard nextcloud_announcements serverinfo support updatenotification weather_status
           do
-            [ -f app.${app}.installed ] || docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:disable ${app} | tee -a nextcloud.update.log >app.${app}.disabled 2>&1
+            if [ ! -f "app.${app}.installed" ]
+            then
+              docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:disable "${app}" | tee -a nextcloud.update.log >"app.${app}.disabled" 2>&1
+            fi
           done
           
           # stun/turn server
@@ -531,7 +570,10 @@
             docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapBaseUsers "ou=users,${LDAP_BASE_DN}" >>app.user_ldap.configured
             docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapBaseGroups "ou=groups,${LDAP_BASE_DN}" >>app.user_ldap.configured
             docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapAgentName "${LDAP_BIND_DN}" >>app.user_ldap.configured
-            [ -n "${LDAP_PASSWORD}" ] && docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapAgentPassword "${LDAP_PASSWORD}" >>app.user_ldap.configured
+            if [ -n "${LDAP_PASSWORD}" ]
+            then
+              docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapAgentPassword "${LDAP_PASSWORD}" >>app.user_ldap.configured
+            fi
             docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapLoginFilter "(&(|(objectclass=posixAccount))(uid=%uid))" >>app.user_ldap.configured
             docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapGroupFilter "(&(objectClass=posixGroup)(memberUid=%uid))" >>app.user_ldap.configured
             docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapUserDisplayName "cn" >>app.user_ldap.configured
@@ -562,7 +604,12 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          cd /home/docker/nextcloud.{{inventory_hostname}} || continue
+          # Change to service directory or skip update
+          if ! cd /home/docker/nextcloud.{{inventory_hostname}}
+          then
+            continue
+          fi
+
           # Update full Dockerfile
           /home/docker/nextcloud.{{inventory_hostname}}/fulldockerfile.sh
           # Nextcloud maintenance and app-update
@@ -632,7 +679,11 @@
       notify: Restart nextcloud
 
     - name: Restart authelia
-      ansible.builtin.shell: docker-compose down && docker-compose up -d
+      ansible.builtin.shell: |
+        if docker-compose down
+        then
+          docker-compose up -d
+        fi
       args:
         chdir: /home/docker/authelia.{{inventory_hostname}}
 

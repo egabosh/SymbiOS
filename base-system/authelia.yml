@@ -27,14 +27,17 @@
       when: not authelia_conf_status.stat.exists
       block:
 
+        # Generate session secret via pwgen
         - name: Generate a secure password using pwgen
           command: pwgen -s 32 1
           register: session_secret
 
+        # Generate encryption key via pwgen
         - name: Generate a secure password using pwgen
           command: pwgen -s 32 1
           register: encryption_key
 
+        # Save plaintext secrets to env file
         - name: Save plaintext password to env file
           copy:
             content: |
@@ -45,16 +48,19 @@
             owner: docker
             group: root
 
+    # Read session secret from env file
     - name: Get session_secret from file
       shell: "grep ^session_secret= {{ service_path }}/env | cut -d= -f2-"
       register: session_secret
       changed_when: false
 
+    # Read encryption key from env file
     - name: Get encryption_key from file
       shell: "grep ^encryption_key= {{ service_path }}/env | cut -d= -f2-"
       register: encryption_key
       changed_when: false
 
+    # Read LDAP admin password from the OpenLDAP env file
     - name: Get LDAP admin password from file
       shell: "grep ^LDAP_ADMIN_PASSWORD= {{ ldap_service_path }}/env.openldap | cut -d= -f2-"
       register: ldap_admin_password
@@ -256,12 +262,14 @@
 
     #### OIDC (Open ID Connect)
  
+    # Generate RSA key pair for OIDC signing
     - name: generate RSA key pair for OIDC
       ansible.builtin.command: >
         docker run --rm -v "{{ service_path }}/authelia-data:/config" authelia/authelia:latest authelia crypto pair rsa generate --directory /config --file.private-key oidc.key --file.public-key oidc.pub
       args:
         creates: "{{ service_path }}/authelia-data/oidc.key"
 
+    # Read OIDC private key and indent for YAML embedding
     - name: OIDC Key aus Datei lesen
       ansible.builtin.command: >
         sed 's/^/          /'  {{ service_path }}/authelia-data/oidc.key
@@ -296,6 +304,7 @@
         validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest /app/authelia config validate --config %s
       notify: Restart authelia
 
+    # Script to generate OIDC client secrets using Authelia's crypto tool
     - name: "Script for generating oidc client secrets"
       blockinfile:
         path: "{{ service_path }}/gen-oidc-client-secret.sh"
@@ -307,20 +316,35 @@
         block: |
           . /etc/bash/gaboshlib.include
 
-          secret_path=$1
-          client_secret_file=$secret_path/oidc_password
-          client_digest_file=$secret_path/oidc_digest
+          # Path argument: directory to store secrets
+          f_secret_path=$1
+          f_client_secret_file=$f_secret_path/oidc_password
+          f_client_digest_file=$f_secret_path/oidc_digest
 
-          [[ -s $client_secret_file ]] && exit 0
-          [[ -d $secret_path ]] || mkdir -p "$secret_path"
+          # Exit early if secret already exists
+          if [ -s "$f_client_secret_file" ]
+          then
+            exit 0
+          fi
 
-          touch $g_tmp/output $client_secret_file $client_digest_file
-          chmod 400 $g_tmp/output $client_secret_file $client_digest_file
+          # Create target directory if it does not exist yet
+          if ! [ -d "$f_secret_path" ]
+          then
+            mkdir -p "$f_secret_path"
+          fi
 
-          docker run --rm authelia/authelia:latest authelia crypto hash generate pbkdf2 --random --random.length 72 --random.charset alphanumeric >$g_tmp/output
+          # Create empty output files with restricted permissions
+          touch "$g_tmp/output" "$f_client_secret_file" "$f_client_digest_file"
+          chmod 400 "$g_tmp/output" "$f_client_secret_file" "$f_client_digest_file"
 
-          grep "^Random Password:" $g_tmp/output | cut -d" " -f3 >$client_secret_file
-          grep "^Digest:" $g_tmp/output | cut -d" " -f2 >$client_digest_file
+          # Generate a pbkdf2 hash via Authelia's crypto tool
+          docker run --rm authelia/authelia:latest authelia crypto hash generate pbkdf2 --random --random.length 72 --random.charset alphanumeric >"$g_tmp/output"
+
+          # Extract random password from output
+          grep "^Random Password:" "$g_tmp/output" | cut -d" " -f3 >"$f_client_secret_file"
+
+          # Extract digest hash from output
+          grep "^Digest:" "$g_tmp/output" | cut -d" " -f2 >"$f_client_digest_file"
         backup: yes
         validate: /bin/bash -n %s
       notify: 
@@ -334,9 +358,12 @@
 
   handlers:
 
+    # Stop and restart the Authelia container after config changes
     - name: Restart authelia
-      ansible.builtin.shell: docker-compose down && docker-compose up -d
+      ansible.builtin.shell: |
+        if docker-compose down
+        then
+          docker-compose up -d
+        fi
       args:
         chdir: "{{ service_path }}"
-
-

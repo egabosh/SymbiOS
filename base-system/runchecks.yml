@@ -27,27 +27,31 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          # Source gaboshlib and set up environment
           . /etc/bash/gaboshlib.include
           g_lockfile
           g_nice
           g_all-to-syslog
           g_echo_ok "Starting $0"
           g_staleumount
+          # Main loop - runs forever with 5min intervals
           while true
           do
             g_echo "Waiting 5min"
             sleep 300
             g_echo "Next Loop"
-            for check in $(find /usr/local/sbin/runchecks.d -name "*.check" -type f | sort)
+            # Iterate over all .check scripts sorted alphabetically
+            for g_check in $(find /usr/local/sbin/runchecks.d -name "*.check" -type f | sort)
             do
-              if bash -n "$check" >$g_tmp/check_error 2>&1
+              # Validate syntax then source each check script
+              if bash -n "$g_check" >$g_tmp/check_error 2>&1
               then
-                g_echo "Running: $check"
-                . "$check"
+                g_echo "Running: $g_check"
+                . "$g_check"
               else
-                g_echo_error "Error in $check $(cat $g_tmp/check_error)"
+                g_echo_error "Error in $g_check $(cat $g_tmp/check_error)"
                 continue
-             fi
+              fi
             done
           done
         backup: yes
@@ -102,27 +106,29 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          for disk in $(find /dev/ \( -name "nvme?" -o -name "sd?" \) \( -type b -o -type c \))
+          # Check each block device for SMART health and temperature
+          for g_disk in $(find /dev/ \( -name "nvme?" -o -name "sd?" \) \( -type b -o -type c \))
           do
-            # check if the disk is used and not suspended
-            dev=$(basename $disk)
-            [ -f /tmp/${dev}-stat ] || cat /sys/block/${dev}/stat | perl -pe 's/ +/ /g' | cut -d" " -f1,2,3,4,5,6,7,8 > /tmp/${dev}-stat
-            cat /sys/block/${dev}/stat | perl -pe 's/ +/ /g' | cut -d" " -f1,2,3,4,5,6,7,8 > /tmp/${dev}-stat-now
-            if diff /tmp/${dev}-stat-now /tmp/${dev}-stat >/dev/null 2>&1
+            # Determine if the disk is active (not suspended) by comparing IO stats
+            g_dev=$(basename $g_disk)
+            [ -f /tmp/${g_dev}-stat ] || cat /sys/block/${g_dev}/stat | perl -pe 's/ +/ /g' | cut -d" " -f1,2,3,4,5,6,7,8 > /tmp/${g_dev}-stat
+            cat /sys/block/${g_dev}/stat | perl -pe 's/ +/ /g' | cut -d" " -f1,2,3,4,5,6,7,8 > /tmp/${g_dev}-stat-now
+            # If stats are unchanged, disk might be suspended - skip SMART checks
+            if diff /tmp/${g_dev}-stat-now /tmp/${g_dev}-stat >/dev/null 2>&1
             then
-              cat /tmp/${dev}-stat-now >/tmp/${dev}-stat
-              # Check disk SMART
-              OPT=""
-              udevadm info --query=all -n $disk  | grep -q usb- && OPT="-d sat"
-              smartctl -H $OPT $disk >${g_tmp}/smartctl
-              if ! cat ${g_tmp}/smartctl | egrep -iq "SMART overall-health self-assessment test result: PASSED|SMART Health Status: OK|Read Device Identity failed: scsi error no medium present"
+              cat /tmp/${g_dev}-stat-now >/tmp/${g_dev}-stat
+              # Run SMART health check on the disk
+              g_opt=""
+              udevadm info --query=all -n $g_disk | grep -q usb- && g_opt="-d sat"
+              smartctl -H $g_opt $g_disk >${g_tmp}/smartctl
+              if ! cat ${g_tmp}/smartctl | grep -E -iq "SMART overall-health self-assessment test result: PASSED|SMART Health Status: OK|Read Device Identity failed: scsi error no medium present"
               then
-                g_echo_error "SMART of $disk unhealthy: smartctl -H $OPT $disk $(cat ${g_tmp}/smartctl)"
+                g_echo_error "SMART of $g_disk unhealthy: smartctl -H $g_opt $g_disk $(cat ${g_tmp}/smartctl)"
               fi
-              # temperature check
-              temperature=$(smartctl -x $OPT $disk | perl -pe 's/ +/ /g; s/^ //' | egrep "^194 Temperature_Celsius " | cut -d" " -f 8)
-              [ -z "$temperature" ] && continue
-              [ $temperature -gt 55 ] && g_echo_error "SMART temperature of disk $disk high ($temperature Celsius)"
+              # Check disk temperature
+              g_temperature=$(smartctl -x $g_opt $g_disk | perl -pe 's/ +/ /g; s/^ //' | grep -E "^194 Temperature_Celsius " | cut -d" " -f 8)
+              [ -z "$g_temperature" ] && continue
+              [ $g_temperature -gt 55 ] && g_echo_error "SMART temperature of disk $g_disk high ($g_temperature Celsius)"
             fi
           done
         validate: /bin/bash -n %s
@@ -139,12 +145,14 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          mdadm -D --scan | egrep "^ARRAY" | cut -d" " -f2 | while read array
-          do 
-            mdadm -D $array >$g_tmp/raiddetails
-            if ! cat $g_tmp/raiddetails | egrep "^ +State : " | egrep -q "^ +State : clean $|^ +State : active $|^ +State : active, checking $|^ +State : clean, checking $"
-            then 
-               g_echo_error "RAID $array state unhealthy - mdadm -D $array: $(cat $g_tmp/raiddetails)"
+          # Check each mdadm RAID array for healthy state
+          mdadm -D --scan | grep -E "^ARRAY" | cut -d" " -f2 | while read g_array
+          do
+            mdadm -D $g_array >$g_tmp/raiddetails
+            # Verify array state is clean, active or checking
+            if ! cat $g_tmp/raiddetails | grep -E "^ +State : " | grep -E -q "^ +State : clean $|^ +State : active $|^ +State : active, checking $|^ +State : clean, checking $"
+            then
+              g_echo_error "RAID $g_array state unhealthy - mdadm -D $g_array: $(cat $g_tmp/raiddetails)"
             fi
           done
         validate: /bin/bash -n %s
@@ -161,10 +169,11 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          testip=dns3.digitalcourage.de
-          if ! ping -c3 ${testip} >/dev/null 2>&1
+          # Ping a known external host to verify internet connectivity
+          g_testip=dns3.digitalcourage.de
+          if ! ping -c3 ${g_testip} >/dev/null 2>&1
           then
-            g_echo_error "No Internet connection? ping $testip failed!"
+            g_echo_error "No Internet connection? ping $g_testip failed!"
           fi
         validate: /bin/bash -n %s
         backup: yes
@@ -180,33 +189,33 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          # process check
+          # Monitor processes in D (uninterruptible), Z (zombie) or R (running) state
           mkdir -p ${g_tmp}/proc-check
-          # Remove OK processes if needed
-          ls ${g_tmp}/proc-check | while read odzpid
+          # Clean up processes that are no longer in a monitored state
+          ls ${g_tmp}/proc-check | while read g_odzpid
           do
-            if ! egrep -q "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/$odzpid/status 2>/dev/null
+            if ! grep -E -q "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/$g_odzpid/status 2>/dev/null
             then
-              rm ${g_tmp}/proc-check/$odzpid
+              rm ${g_tmp}/proc-check/$g_odzpid
             fi
           done
-          # Find new or old and report if older than 30 minutes
-          egrep "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read dzpid
+          # Report processes stuck in monitored state for more than 30 minutes
+          grep -E "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read g_dzpid
           do
-            if [ -f ${g_tmp}/proc-check/$dzpid ]
+            if [ -f ${g_tmp}/proc-check/$g_dzpid ]
             then
-              timestamp=$(ls --full-time ${g_tmp}/proc-check/$dzpid | sed 's/  */ /g' | cut -d" " -f6,7)
-              date >>${g_tmp}/proc-check/$dzpid
-              touch -d "$timestamp" ${g_tmp}/proc-check/$dzpid
-              if find ${g_tmp}/proc-check/$dzpid -mmin +30 | grep -q $dzpid
+              g_timestamp=$(ls --full-time ${g_tmp}/proc-check/$g_dzpid | sed 's/  */ /g' | cut -d" " -f6,7)
+              date >>${g_tmp}/proc-check/$g_dzpid
+              touch -d "$g_timestamp" ${g_tmp}/proc-check/$g_dzpid
+              if find ${g_tmp}/proc-check/$g_dzpid -mmin +30 | grep -q $g_dzpid
               then
-                ps aufx | grep $dzpid | grep -v grep >${g_tmp}/proc-check-$dzpid.notify
-                pstree $dzpid >>${g_tmp}/proc-check-$dzpid.notify
-                cat ${g_tmp}/proc-check/$dzpid >>${g_tmp}/proc-check-$dzpid.notify
-                egrep -q "usb-storage|md[0-9]*_" ${g_tmp}/proc-check-$dzpid.notify || g_echo_error "$(cat ${g_tmp}/proc-check-$dzpid.notify)"
+                ps aufx | grep $g_dzpid | grep -v grep >${g_tmp}/proc-check-$g_dzpid.notify
+                pstree $g_dzpid >>${g_tmp}/proc-check-$g_dzpid.notify
+                cat ${g_tmp}/proc-check/$g_dzpid >>${g_tmp}/proc-check-$g_dzpid.notify
+                grep -E -q "usb-storage|md[0-9]*_" ${g_tmp}/proc-check-$g_dzpid.notify || g_echo_error "$(cat ${g_tmp}/proc-check-$g_dzpid.notify)"
               fi
             else
-              date >${g_tmp}/proc-check/$dzpid
+              date >${g_tmp}/proc-check/$g_dzpid
             fi
           done
         backup: yes
@@ -223,12 +232,13 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          # Check CPU temperature from thermal sysfs interface
           if [ -f /sys/class/thermal/thermal_zone0/temp ]
           then
-            let temp=`cat /sys/class/thermal/thermal_zone0/temp`/1000
-            if [ $temp -gt 65 ]
+            let g_temp=`cat /sys/class/thermal/thermal_zone0/temp`/1000
+            if [ $g_temp -gt 65 ]
             then
-              g_echo_error "Server temperature high $temp°C"
+              g_echo_error "Server temperature high $g_temp°C"
             fi
           fi
         backup: yes
@@ -245,12 +255,13 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          # Check CPU temperature via vcgencmd on Raspberry Pi
           if which vcgencmd >/dev/null 2>&1
           then
-            temp=$(vcgencmd measure_temp | grep ^temp= | cut -d"=" -f2 | cut -d. -f1)
-            if [ $temp -gt 65 ]
+            g_temp=$(vcgencmd measure_temp | grep ^temp= | cut -d"=" -f2 | cut -d. -f1)
+            if [ $g_temp -gt 65 ]
             then
-              g_echo_error "Server temperature high $temp°C"
+              g_echo_error "Server temperature high $g_temp°C"
             fi
           fi
         backup: yes
@@ -267,12 +278,13 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          let maxload=$(cat /proc/cpuinfo | grep ^processor | wc -l)+10
-          load=`cat /proc/loadavg | cut -d" " -f1`
-          intload=`echo $load | cut -d'.' -f1`
-          if [ $intload -gt $maxload ]
+          # Alert if system load average exceeds (number of CPUs + 10)
+          let g_maxload=$(cat /proc/cpuinfo | grep ^processor | wc -l)+10
+          g_load=`cat /proc/loadavg | cut -d" " -f1`
+          g_intload=`echo $g_load | cut -d'.' -f1`
+          if [ $g_intload -gt $g_maxload ]
           then
-            g_echo_error "System Load high at $load"
+            g_echo_error "System Load high at $g_load"
           fi
         backup: yes
         validate: /bin/bash -n %s
@@ -288,11 +300,12 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          for service in $(cat /usr/local/sbin/runchecks.d/services | sort)
+          # Verify required system services are running
+          for g_service in $(cat /usr/local/sbin/runchecks.d/services | sort)
           do
-            if ! ps aux | grep -v grep | grep -q "$service"
+            if ! ps aux | grep -v grep | grep -q "$g_service"
             then
-              g_echo_error "$service down"
+              g_echo_error "$g_service down"
             fi
           done
         backup: yes
@@ -309,13 +322,14 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          df -al | egrep -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read i
+          # Alert when any filesystem exceeds 98% disk usage
+          df -al | grep -E -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read g_i
           do
-            disk=`echo $i | cut -d" " -f1`
-            usa=`echo $i | cut -d" " -f2`
-            if [ $usa -gt 98 ]
+            g_disk=`echo $g_i | cut -d" " -f1`
+            g_usa=`echo $g_i | cut -d" " -f2`
+            if [ $g_usa -gt 98 ]
             then
-              g_echo_error "Space of $disk full: $usa%"
+              g_echo_error "Space of $g_disk full: $g_usa%"
             fi
           done
         backup: yes
@@ -332,13 +346,14 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          df -ali | egrep -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read i
+          # Alert when any filesystem exceeds 98% inode usage
+          df -ali | grep -E -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read g_i
           do
-            disk=`echo $i | cut -d" " -f1`
-            usa=`echo $i | cut -d" " -f2`
-            if [ $usa -gt 98 ]
+            g_disk=`echo $g_i | cut -d" " -f1`
+            g_usa=`echo $g_i | cut -d" " -f2`
+            if [ $g_usa -gt 98 ]
             then
-              g_echo_error "Inodes if $disk full: $usa%"
+              g_echo_error "Inodes if $g_disk full: $g_usa%"
             fi
           done
         backup: yes
@@ -355,10 +370,11 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          mem=`free | grep "^Mem:" | sed 's/  */ /g' | cut -d" " -f 4`
-          if [ $mem -lt 20480 ]
+          # Alert when free memory drops below 20MB
+          g_mem=`free | grep "^Mem:" | sed 's/  */ /g' | cut -d" " -f 4`
+          if [ $g_mem -lt 20480 ]
           then
-            g_echo_error "Memory full! Free: ${mem}kB"
+            g_echo_error "Memory full! Free: ${g_mem}kB"
           fi
         backup: yes
         validate: /bin/bash -n %s
@@ -374,12 +390,13 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          # Alert when swap is active and free space drops below 50MB
           if ! [ $(free | grep "^Swap:" | sed 's/  */ /g' | cut -d" " -f 2) == 0 ]
           then
-            mem=`free | grep "^Swap:" | sed 's/  */ /g' | cut -d" " -f 4`
-            if [ $mem -lt 50000 ]
+            g_mem=`free | grep "^Swap:" | sed 's/  */ /g' | cut -d" " -f 4`
+            if [ $g_mem -lt 50000 ]
             then
-              g_echo_error "Swap full! Free: ${mem}kB"
+              g_echo_error "Swap full! Free: ${g_mem}kB"
             fi
           fi
         backup: yes
@@ -403,4 +420,3 @@
       service:
         name: runchecks
         state: restarted
-

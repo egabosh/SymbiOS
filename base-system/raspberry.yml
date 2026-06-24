@@ -186,7 +186,10 @@
             date >> ~/.initial-mint-config-by-xsessionrc
           fi
 
-          [ -x ~/.xsessionrc.followup ] && ~/.xsessionrc.followup
+          if [ -x ~/.xsessionrc.followup ]
+          then
+            ~/.xsessionrc.followup
+          fi
 
 
     - name: Check source authorized_keys exists

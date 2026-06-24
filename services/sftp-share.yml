@@ -116,17 +116,27 @@
       create: yes
       marker: "# {mark} ANSIBLE MANAGED BLOCK"
       block: |
-        ### create Users by ENV
-        # ToDo: LDAP-Integration
-        for SFTPUSERPW in $SFTPUSERS
+        # Create users from environment variable SFTPUSERS (format: user:pass)
+        # TODO: Replace with LDAP integration
+        for g_sftpuserpw in $SFTPUSERS
         do
-          SFTPUSER=$(echo ${SFTPUSERPW} | cut -d ":" -f1)
-          useradd -g sftp-share -G 33,101 -m -s /usr/sbin/nologin $SFTPUSER
-          echo ${SFTPUSERPW} | chpasswd
-          unset $SFTPUSERPW
+          # Extract username from user:password pair
+          g_sftpuser=$(echo "${g_sftpuserpw}" | cut -d ":" -f1)
+
+          # Create system user with sftp-share group and supplementary groups
+          useradd -g sftp-share -G 33,101 -m -s /usr/sbin/nologin "$g_sftpuser"
+
+          # Set password for the user
+          echo "${g_sftpuserpw}" | chpasswd
+
+          # Clean up variable to avoid leaking passwords
+          unset g_sftpuserpw
         done
-        unset $SFTPUSERS
-        ### Start SSHD/SFTP-Server
+
+        # Remove SFTPUSERS from environment after processing
+        unset SFTPUSERS
+
+        # Start SSH daemon in foreground with sftp-share configuration
         /usr/sbin/sshd -D -f /etc/sftp-share.conf -E /proc/1/fd/1
       backup: yes
       validate: /bin/bash -n %s
@@ -187,7 +197,11 @@
   handlers:
 
   - name: Restart sftp-share
-    ansible.builtin.shell: docker-compose build --pull --no-cache --force-rm && docker-compose up -d
+    ansible.builtin.shell: |
+      if docker-compose build --pull --no-cache --force-rm
+      then
+        docker-compose up -d
+      fi
     args:
       chdir: /home/docker/sftp-share
 

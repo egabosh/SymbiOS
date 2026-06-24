@@ -1,4 +1,3 @@
----
 # ============================================================================
 # ACME PKI - Local Fallback CA for Certificate Management
 # ============================================================================
@@ -41,11 +40,12 @@
         - "{{ data_dir }}/db"
         - "{{ data_dir }}/acme"
 
-    # ===== Root CA (10 years, self-signed) =====
+    # Generate 4096-bit RSA private key for the local Root CA
     - name: Generate Root CA Key
       ansible.builtin.shell: openssl genrsa -out {{ ca_key }} 4096
       args: { creates: "{{ ca_key }}" }
 
+    # Self-sign Root CA certificate with 10-year validity
     - name: Self-sign Root CA Certificate (10 years)
       ansible.builtin.shell: |
         openssl req -x509 -new -nodes -key "{{ ca_key }}" -sha256 -days 3650 \
@@ -131,6 +131,7 @@
         owner: "1000"
         group: "1000"
 
+    # Fix ownership of step-ca data directory to container UID 1000
     - name: Fix ownership of step-ca data directory
       ansible.builtin.shell: chown -R 1000:1000 {{ data_dir }}
       changed_when: false
@@ -182,6 +183,7 @@
 
 
     # ===== Host System CA Trust =====
+    # Install the SymbiOS Root CA into the system-wide CA trust store
     - name: Install SymbiOS Root CA in host trust store
       ansible.builtin.copy:
         src: "{{ ca_cert }}"
@@ -189,6 +191,7 @@
         mode: "0644"
       notify: Update CA certificates
 
+    # Register the SymbiOS CA certificate in the ca-certificates configuration
     - name: Register SymbiOS Root CA in ca-certificates.conf
       ansible.builtin.lineinfile:
         path: /etc/ca-certificates.conf
@@ -196,6 +199,7 @@
         state: present
       notify: Update CA certificates
 
+    # Rebuild the combined CA bundle so the Traefik container trusts the local CA
     - name: Rebuild CA bundle for Traefik container
       ansible.builtin.shell: |
         cat /etc/ssl/certs/ca-certificates.crt > {{ traefik_dir }}/ca-bundle.crt
@@ -215,11 +219,14 @@
       changed_when: false
 
   handlers:
+    # Restart step-ca container after config changes
     - name: Restart stepca
-      ansible.builtin.shell: cd {{ acme_dir }} && docker compose up -d --force-recreate
+      ansible.builtin.shell: docker compose up -d --force-recreate
       args: { chdir: "{{ acme_dir }}" }
+    # Restart Traefik to pick up new certificate bundle
     - name: Restart traefik
-      ansible.builtin.shell: cd {{ traefik_dir }} && docker compose up -d --force-recreate
+      ansible.builtin.shell: docker compose up -d --force-recreate
       args: { chdir: "{{ traefik_dir }}" }
+    # Update system CA certificate store
     - name: Update CA certificates
       ansible.builtin.command: update-ca-certificates

@@ -117,15 +117,22 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          # Change to service directory
           cd /home/docker/home-assistant.{{inventory_hostname}}
-          homeassistantadminpassword=$(pwgen -s 32 1)
 
-          [ -f env ] || echo "HA_ADMIN_PASSWORD=!HA_ADMIN_PASSWORD!
-          " >env
+          # Generate random admin password
+          g_homeassistantadminpassword=$(pwgen -s 32 1)
+
+          # Create env file if it does not exist
+          if [ ! -f env ]
+          then
+            echo "HA_ADMIN_PASSWORD=!HA_ADMIN_PASSWORD!" >env
+          fi
 
           chmod 440 env
           chown root:docker env
-          sed -i "s/\!HA_ADMIN_PASSWORD\!/$homeassistantadminpassword/g" env
+          # Replace placeholder with actual password in env file
+          sed -i "s/\!HA_ADMIN_PASSWORD\!/$g_homeassistantadminpassword/g" env
         backup: yes
         validate: /bin/bash -n %s
       notify: run genpw.sh
@@ -328,9 +335,16 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          # home-assistant
+          # Wait for home-assistant container startup
           sleep 30
-          cd /home/docker/home-assistant.{{inventory_hostname}} || exit 1
+
+          # Change to service directory
+          if ! cd /home/docker/home-assistant.{{inventory_hostname}}
+          then
+            exit 1
+          fi
+
+          # Load environment variables
           . ./env
           curl --location --request POST 'http://192.168.41.1:8123/api/onboarding/users' --header 'Content-Type: application/json' --data-raw "{
             \"client_id\": \"http://192.168.41.1:8123/\",
@@ -391,19 +405,27 @@
                         root@"$ROUTER" \
                         "uci show dhcp | grep 'name=' | cut -d\"'\" -f2" 2>/dev/null) || true
 
-            [ -n "$hosts" ] || {
+            # Skip ping loop if no hosts returned
+            if [ -z "$hosts" ]
+            then
               g_echo "No hosts"
               sleep "$INTERVAL"
               continue
-            }
+            fi
 
             mkdir -p "$DIR"
 
+            # Iterate over each discovered host
             for host in $hosts
             do
-              [ -z "$host" ] && continue
+              # Skip empty hostnames
+              if [ -z "$host" ]
+              then
+                continue
+              fi
 
-              start=$(date +%s%N)
+              # Measure round-trip time
+              g_start=$(date +%s%N)
               if ping -c3 -W3 $host >/dev/null 2>&1 || ping -c3 -W3 $host >/dev/null 2>&1
               then
                 rtt=$(( ( $(date +%s%N) - start ) / 1000000 ))
@@ -483,7 +505,11 @@
         chdir: /home/docker/home-assistant.{{inventory_hostname}}
 
     - name: Restart authelia
-      ansible.builtin.shell: docker-compose down && docker-compose up -d
+      ansible.builtin.shell: |
+        if docker-compose down
+        then
+          docker-compose up -d
+        fi
       args:
         chdir: /home/docker/authelia.{{inventory_hostname}}
 
