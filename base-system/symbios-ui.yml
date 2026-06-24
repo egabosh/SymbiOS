@@ -112,6 +112,13 @@
         - Reload systemd
         - Enable configd
 
+    - name: Ensure symbios-configd is enabled and running
+      ansible.builtin.systemd:
+        name: symbios-configd
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
   handlers:
 
     - name: Restart {{ service_name }}
