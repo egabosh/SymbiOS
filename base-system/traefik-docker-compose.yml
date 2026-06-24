@@ -25,12 +25,12 @@ services:
       - ./log:/log
     labels:
       - traefik.enable=true
-      - traefik.http.routers.traefik.rule=Host(`traefik.SymbiOS`)
+      - traefik.http.routers.traefik.rule=Host(`traefik.{{ default_domain }}`)
       - traefik.http.routers.traefik.entrypoints=https
       - traefik.http.routers.traefik.middlewares=secHeaders@file,default-basic-auth@file
       - traefik.http.routers.traefik.service=api@internal
       - traefik.http.routers.traefik.tls=true
-      - traefik.http.routers.traefik.tls.certresolver=letsencrypt
+      - traefik.http.routers.traefik.tls.certresolver={{ acme_resolver }}
       - traefik.http.middlewares.to-https.redirectscheme.scheme=https
 networks:
   traefik:
