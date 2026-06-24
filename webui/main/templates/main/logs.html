@@ -2,15 +2,22 @@
 {% block content %}
 <h2>Logs</h2>
 
-<div class="mb-3">
+<div class="row mb-3">
+  <div class="col-md-6">
     <label for="log-select" class="form-label">Select log file</label>
     <div class="input-group">
-        <select id="log-select" class="form-select">
-            <option value="symbios" {% if default_log_name == "symbios" %}selected{% endif %}>/log/symbios.log</option>
-            <option value="messages" {% if default_log_name == "messages" %}selected{% endif %}>/var/log/messages</option>
-            <option value="syslog" {% if default_log_name == "syslog" %}selected{% endif %}>/var/log/syslog</option>
-        </select>
+      <select id="log-select" class="form-select">
+        <optgroup label="System Logs">
+          <option value="symbios" {% if default_log_name == "symbios" %}selected{% endif %}>symbios.log</option>
+          <option value="messages" {% if default_log_name == "messages" %}selected{% endif %}>/var/log/messages</option>
+          <option value="syslog" {% if default_log_name == "syslog" %}selected{% endif %}>/var/log/syslog</option>
+        </optgroup>
+        <optgroup label="Docker Containers" id="docker-optgroup">
+          <option value="" disabled>Loading containers...</option>
+        </optgroup>
+      </select>
     </div>
+  </div>
 </div>
 
 <div id="log-meta" class="mb-2 text-muted" style="font-size: 0.9rem;">
@@ -19,7 +26,6 @@
 <div id="log-container"></div>
 
 <script>
-    // Current logical log name sent to the backend.
     let currentLogName = "{{ default_log_name|default:'symbios' }}";
     let currentOffset = 0;
     let autoScroll = true;
@@ -27,15 +33,39 @@
     const logContainer = document.getElementById('log-container');
     const logMeta = document.getElementById('log-meta');
     const logSelect = document.getElementById('log-select');
+    const dockerGroup = document.getElementById('docker-optgroup');
 
-    // Track user scrolling to avoid forcing scroll when user scrolls up.
     logContainer.addEventListener('scroll', () => {
         const nearBottom = logContainer.scrollHeight - logContainer.scrollTop - logContainer.clientHeight < 20;
         autoScroll = nearBottom;
     });
 
+    // Fetch Docker container list
+    async function loadDockerContainers() {
+        try {
+            const resp = await fetch('/logs/containers/');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            dockerGroup.innerHTML = '';
+            if (data.containers && data.containers.length > 0) {
+                data.containers.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = 'docker:' + c.id;
+                    opt.textContent = c.name + ' (' + c.id + ')';
+                    dockerGroup.appendChild(opt);
+                });
+            } else {
+                const opt = document.createElement('option');
+                opt.disabled = true;
+                opt.textContent = 'No containers found';
+                dockerGroup.appendChild(opt);
+            }
+        } catch (e) {
+            dockerGroup.innerHTML = '<option value="" disabled>Error loading containers</option>';
+        }
+    }
+
     function setLogName(newName) {
-        // Change current log and reset state.
         currentLogName = newName;
         currentOffset = 0;
         logContainer.innerHTML = '';
@@ -44,12 +74,10 @@
     }
 
     logSelect.addEventListener('change', () => {
-        const selected = logSelect.value;
-        setLogName(selected);
+        setLogName(logSelect.value);
     });
 
     async function fetchLogs() {
-        // Build query parameters for the stream endpoint.
         const params = new URLSearchParams();
         params.set('log', currentLogName);
         params.set('offset', String(currentOffset));
@@ -67,21 +95,17 @@
                 return;
             }
 
-            // Update meta info about current log.
-            logMeta.textContent = 'Showing log "' + data.log_name + '" at ' + data.path +
+            logMeta.textContent = 'Showing log "' + (data.log_name || currentLogName) + '" at ' + (data.path || '') +
                 ' | total lines: ' + data.total_lines;
 
-            // Initial load: replace content.
             if (currentOffset === 0) {
                 logContainer.innerHTML = data.lines.join('');
             } else {
-                // Subsequent loads: append only new lines.
                 if (data.lines && data.lines.length > 0) {
                     logContainer.innerHTML += data.lines.join('');
                 }
             }
 
-            // Update offset marker.
             currentOffset = data.total_lines;
 
             if (autoScroll) {
@@ -93,7 +117,7 @@
         }
     }
 
-    // Initial fetch and polling.
+    loadDockerContainers();
     fetchLogs();
     const POLL_INTERVAL_MS = 2000;
     setInterval(fetchLogs, POLL_INTERVAL_MS);
@@ -103,7 +127,7 @@
         const logContainer = document.getElementById('log-container');
         if (!logContainer) return;
         const rect = logContainer.getBoundingClientRect();
-        const available = window.innerHeight - rect.top - 20; // etwas Abstand nach unten
+        const available = window.innerHeight - rect.top - 20;
         logContainer.style.height = available + 'px';
     }
 
@@ -111,4 +135,3 @@
     window.addEventListener('resize', resizeLogContainer);
 </script>
 {% endblock %}
-

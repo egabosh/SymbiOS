@@ -8,6 +8,7 @@ from django.contrib import messages
 from django.http import JsonResponse
 from .forms import NetworkConfigForm
 from .utils.log_utils import logs_stream
+from .health import run_all as health_run_all
 
 CONFIG_PATH = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
 LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')
@@ -459,3 +460,26 @@ add: memberUid
 memberUid: {uid}
 """
     _ldap_modify(ldif, ldap['base_dn'], ldap['admin_pw'])
+
+
+@login_required
+def health(request):
+    return render(request, 'main/health.html')
+
+@login_required
+def health_data(request):
+@login_required
+def container_list(request):
+    from .utils.log_utils import _get_container_list
+    containers = _get_container_list()
+    from django.http import JsonResponse
+    return JsonResponse({"containers": containers})
+
+    return JsonResponse(health_run_all())
+@login_required
+def container_list(request):
+    from .utils.log_utils import _get_container_list
+    containers = _get_container_list()
+    from django.http import JsonResponse
+    return JsonResponse({"containers": containers})
+
