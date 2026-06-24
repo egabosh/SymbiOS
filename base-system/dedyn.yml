@@ -168,6 +168,19 @@
                   g_echo_note "Waiting for API rate limit..."
                   sleep "$(shuf -i 61-120 -n 1)"
               fi
+
+            # IPv6-only mode: delete A record if present
+            if echo "${doipv6}" | grep -q "only"; then
+                current_dns_check=$(curl -s -X GET \
+                    "https://desec.io/api/v1/domains/${dynaddr}/rrsets/" \
+                    --header "Authorization: Token ${dedynpw}")
+                if echo "${current_dns_check}" | jq -r '.[] | select(.subname=="" and .type=="A") | .records[]' 2>/dev/null | grep -q .; then
+                    g_echo_note "Deleting A record (IPv6-only mode)..."
+                    curl -s -X DELETE "https://desec.io/api/v1/domains/${dynaddr}/rrsets/%40/A/" --header "Authorization: Token ${dedynpw}"
+                    g_echo_ok "A record deleted"
+                    changed=1
+                fi
+            fi
           done
         backup: yes
         validate: /bin/bash -n %s
