@@ -225,6 +225,9 @@ def settings_ddns_host_status(request):
         result['ipv6_match'] = True
     elif not current_ipv6 and not result['dns_ipv6']:
         result['ipv6_match'] = True
+    elif not current_ipv6:
+        result['ipv6_match'] = True
+        result['ipv6_skip'] = True
 
     return JsonResponse(result)
 
