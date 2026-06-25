@@ -79,7 +79,7 @@
     <h6 class="fw-bold mt-3 mb-1"><i class="bi bi-globe2"></i> IPv4</h6>
     <ol class="ps-3 mb-1">
       <li>Assign your Symbios server a <strong>static local IP</strong>
-          (e.g. <code>192.168.1.100</code>) via your router's DHCP reservation.</li>
+          (e.g. <code id="settings-local-ip">192.168.1.100</code>) via your router's DHCP reservation.</li>
       <li>In your router's <em>Port Forwarding</em> / <em>Virtual Server</em>
           section, create two rules:
         <ul>
@@ -157,6 +157,16 @@ document.addEventListener('DOMContentLoaded', function() {
     .catch(() => {
       document.getElementById('settings-host-status').innerHTML = '<div class="text-danger">Failed to detect IPs</div>';
     });
+
+  // Detect local (LAN) IPv4 address
+  fetch('/settings/local-ip/')
+    .then(r => r.json())
+    .then(data => {
+      if (data.local_ipv4) {
+        document.getElementById('settings-local-ip').textContent = data.local_ipv4;
+      }
+    })
+    .catch(() => {});
 });
 </script>
 {% endblock %}

@@ -25,6 +25,7 @@ urlpatterns = [
     path('settings/mailserver/test-email/', views_mailserver.settings_mailserver_test_email, name='settings_mailserver_test_email'),
     path('settings/mailserver/autoconfig.xml', views_mailserver.autoconfig_xml, name='autoconfig_xml'),
     path('settings/auth/', views_settings.settings_auth, name='settings_auth'),
+    path('settings/local-ip/', views_settings.settings_local_ip, name='settings_local_ip'),
     path('logs/', views_logs.logs, name='logs'),
     path('logs/stream/', views.logs_stream, name='logs_stream'),
     path('logs/containers/', views.container_list, name='logs_containers'),

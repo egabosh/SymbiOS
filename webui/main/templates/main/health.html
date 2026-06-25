@@ -100,6 +100,12 @@
   }
 
   async function fetchHealth() {
+    // Remember which detail sections are currently expanded
+    const expanded = new Set();
+    document.querySelectorAll('.collapse.show').forEach(el => {
+      if (el.id) expanded.add(el.id);
+    });
+
     try {
       const resp = await fetch('/health/data/');
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
@@ -147,6 +153,14 @@
         '</div></div>' +
         cardsHtml +
         '<div class="col-12 mt-2">' + detailsHtml + '</div>';
+
+      // Re-expand previously expanded sections
+      expanded.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.classList.add('show');
+        }
+      });
     } catch (e) {
       document.getElementById('health-container').innerHTML =
         '<div class="col-12"><div class="alert alert-danger">Error fetching health data: ' + e.message + '</div></div>';
