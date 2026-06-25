@@ -141,6 +141,7 @@
            block: |
 
              notifier:
+               disable_startup_check: true
                filesystem:
                  filename: /config/notifications.txt
 
@@ -169,6 +170,7 @@
            marker: "# {mark} ANSIBLE MANAGED BLOCK NOTIFICATION"
            block: |
              notifier:
+               disable_startup_check: true
                smtp:
                  username: "{{ smtp_from if smtp_user == '%EMAILADDRESS%' else smtp_user }}"
                  password: {{ smtp_password }}
