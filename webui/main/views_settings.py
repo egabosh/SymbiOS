@@ -214,9 +214,16 @@ def settings_ddns_host_status(request):
             pass
 
     # Compare with current IPs
-    if current_ipv4 and not result.get('ipv4_check_skipped') and current_ipv4 in result['dns_ipv4']:
+    if not result.get('ipv4_check_skipped'):
+        if current_ipv4 and current_ipv4 in result['dns_ipv4']:
+            result['ipv4_match'] = True
+        elif not current_ipv4 and not result['dns_ipv4']:
+            result['ipv4_match'] = True
+    else:
         result['ipv4_match'] = True
     if current_ipv6 and current_ipv6 in result['dns_ipv6']:
+        result['ipv6_match'] = True
+    elif not current_ipv6 and not result['dns_ipv6']:
         result['ipv6_match'] = True
 
     return JsonResponse(result)
