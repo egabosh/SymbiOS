@@ -221,6 +221,8 @@ def settings_ddns_host_status(request):
             result['ipv4_match'] = True
     else:
         result['ipv4_match'] = True
+    if current_ipv6 and ':' not in current_ipv6:
+        current_ipv6 = ''
     if current_ipv6 and current_ipv6 in result['dns_ipv6']:
         result['ipv6_match'] = True
     elif not current_ipv6 and not result['dns_ipv6']:
