@@ -41,7 +41,7 @@
 
     <div class="container-fluid">
         <div class="row flex-nowrap">
-            <div class="col-auto col-md-3 col-lg-2 px-sm-2 bg-light sidebar">
+            <div class="{% block sidebar_col_class %}col-auto col-md-3 col-lg-2 px-sm-2 bg-light sidebar{% endblock %}">
                 {% block sidebar %}
                 <ul class="nav flex-column mt-2">
                     <li class="nav-item"><a class="nav-link" href="/settings/mailserver/"><i class="bi bi-envelope"></i> Mailserver</a></li>
