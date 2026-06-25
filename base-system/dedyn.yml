@@ -237,6 +237,25 @@
           */5 * * * * root /usr/local/sbin/dedyn.sh >/dev/null 2>&1
         backup: yes
 
+    - name: /etc/cron.d/host-ip
+      blockinfile:
+        path: /etc/cron.d/host-ip
+        create: yes
+        mode: 0644
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          */5 * * * * root /usr/local/sbin/update_host_ip.sh
+        backup: yes
+
+    - name: /usr/local/sbin/update_host_ip.sh
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/update_host_ip.sh
+        content: |
+          #!/bin/bash
+          # Write host primary LAN IP for webui container
+          ip route get 1.1.1.1 2>/dev/null | grep -oP "src \K[0-9.]+" > /home/docker/symbios-ui/config/.host-ip
     - name: /usr/local/etc/dedyn.conf
       blockinfile:
         path: /usr/local/etc/dedyn.conf
