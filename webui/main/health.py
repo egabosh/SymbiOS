@@ -2,12 +2,15 @@ import subprocess
 import os
 import json
 import glob
+import time
 from datetime import datetime, timezone
 
 DOCKER_LOG_DIR = "/docker/containers"
 CONTAINER_INDEX = "/log/docker-containers.tsv"
 SERVICE_STATUS_FILE = "/log/symbios-services.tsv"
 HEALTH_FILE = "/log/system-health.json"
+PUBLIC_IP_CACHE = "/config/.public-ips.json"
+PUBLIC_IP_CACHE_TTL = 300
 LDAP_URI = os.environ.get("LDAP_URI", "ldap://openldap")
 STEPCA_HOST = "acme-pki-stepca"
 STEPCA_PORT = 9000
@@ -222,6 +225,25 @@ def _get_container_state(name):
     return None
 
 
+def _read_public_ip_cache():
+    try:
+        with open(PUBLIC_IP_CACHE) as f:
+            data = json.load(f)
+        if time.time() - data.get("ts", 0) < PUBLIC_IP_CACHE_TTL:
+            return data
+    except Exception:
+        pass
+    return None
+
+
+def _write_public_ip_cache(ipv4, ipv6):
+    try:
+        with open(PUBLIC_IP_CACHE, "w") as f:
+            json.dump({"ipv4": ipv4, "ipv6": ipv6, "ts": time.time()}, f)
+    except Exception:
+        pass
+
+
 def _is_valid_ip(s):
     # Reject HTML, whitespace, empty strings
     if not s or '<' in s or '>' in s or ' ' in s or '\n' in s:
@@ -349,23 +371,30 @@ def check_ddns():
     else:
         return {"status": "warn", "message": "DDNS configured, no API key"}
 
-    # Fetch current public IPs
+    # Fetch current public IPs (with caching)
     current_ipv4 = ""
     current_ipv6 = ""
-    try:
-        stdout, _, _ = _run(["curl", "-s", "https://checkipv4.dedyn.io/"], timeout=5)
-        candidate = stdout.strip()
-        if _is_valid_ip(candidate):
-            current_ipv4 = candidate
-    except Exception:
-        pass
-    try:
-        stdout, _, _ = _run(["curl", "-s", "https://checkipv6.dedyn.io/"], timeout=5)
-        candidate = stdout.strip()
-        if _is_valid_ip(candidate) and ":" in candidate:
-            current_ipv6 = candidate
-    except Exception:
-        pass
+    cache = _read_public_ip_cache()
+    if cache:
+        current_ipv4 = cache.get("ipv4", "")
+        current_ipv6 = cache.get("ipv6", "")
+    else:
+        try:
+            stdout, _, _ = _run(["curl", "-s", "https://checkipv4.dedyn.io/"], timeout=5)
+            candidate = stdout.strip()
+            if _is_valid_ip(candidate):
+                current_ipv4 = candidate
+        except Exception:
+            pass
+        try:
+            stdout, _, _ = _run(["curl", "-s", "https://checkipv6.dedyn.io/"], timeout=5)
+            candidate = stdout.strip()
+            if _is_valid_ip(candidate) and ":" in candidate:
+                current_ipv6 = candidate
+        except Exception:
+            pass
+        if current_ipv4 or current_ipv6:
+            _write_public_ip_cache(current_ipv4, current_ipv6)
 
     # Fetch DNS records from deSEC API
     dns_ipv4 = []
@@ -398,7 +427,7 @@ def check_ddns():
         elif current_ipv4:
             details["ipv4"] = {"status": "warn", "message": f"IPv4 mismatch: got {current_ipv4}, DNS has {dns_ipv4}"}
         elif dns_ipv4:
-            details["ipv4"] = {"status": "warn", "message": f"No public IPv4 detected, but DNS has A record {dns_ipv4}"}
+            details["ipv4"] = {"status": "ok", "message": f"DNS has A record {dns_ipv4}"}
         else:
             details["ipv4"] = {"status": "ok", "message": "No IPv4 (OK)"}
 
@@ -407,7 +436,7 @@ def check_ddns():
         elif current_ipv6:
             details["ipv6"] = {"status": "warn", "message": f"IPv6 mismatch: got {current_ipv6}, DNS has {dns_ipv6}"}
         elif dns_ipv6:
-            details["ipv6"] = {"status": "warn", "message": f"No public IPv6 detected, but DNS has AAAA record {dns_ipv6}"}
+            details["ipv6"] = {"status": "ok", "message": f"DNS has AAAA record {dns_ipv6}"}
         else:
             details["ipv6"] = {"status": "ok", "message": "No IPv6 (OK)"}
     else:
