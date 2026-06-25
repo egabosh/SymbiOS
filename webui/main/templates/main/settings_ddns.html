@@ -106,7 +106,7 @@
       <div class="card-body small">
         <p class="card-text">
           <strong>deSEC</strong> is a free Dynamic DNS provider. Your server
-          periodically (<em>cron, every 30 min</em>) updates the DNS A/AAAA
+          periodically (<em>cron, every 5 min</em>) updates the DNS A/AAAA
           records for your hostname so it always points to your current public
           IP — even when your ISP changes it.
         </p>
@@ -117,68 +117,11 @@
           <li>DDNS update runs every <strong>5 minutes</strong> via cron</li>
           <li>Updates are logged in <a href="/logs/">System Logs</a></li>
         </ul>
-      </div>
-    </div>
-
-    <!-- Port Forwarding Guide -->
-    <div class="card mt-3">
-      <div class="card-header">
-        <i class="bi bi-diagram-3"></i> Port Forwarding
-      </div>
-      <div class="card-body small">
-        <p>
-          For the web interface and Authelia to work from the internet, your
-          router must forward <strong>ports 80 (HTTP) and 443 (HTTPS)</strong>
-          to the internal IP of the Symbios host.
+        <p class="mb-0 small text-muted">
+          <i class="bi bi-info-circle"></i>
+          Need help with port forwarding? See the guide at
+          <a href="/settings/">Settings &rarr; Port Forwarding Guide</a>.
         </p>
-        <h6 class="fw-bold mt-3 mb-1">IPv4</h6>
-        <ol class="ps-3 mb-1">
-          <li>Assign your Symbios server a <strong>static local IP</strong>
-              (e.g. 192.168.1.100) via your router's DHCP reservation.</li>
-          <li>In your router's <em>Port Forwarding</em> / <em>Virtual Server</em>
-              section, create two rules:
-            <ul>
-              <li><code>TCP 80</code> → <em>192.168.1.100:80</em></li>
-              <li><code>TCP 443</code> → <em>192.168.1.100:443</em></li>
-            </ul>
-          </li>
-        </ol>
-        <div class="alert alert-warning py-1 px-2 mb-2 small">
-          <i class="bi bi-exclamation-triangle-fill"></i>
-          <strong>Important:</strong> Many consumer ISPs use
-          <strong>Carrier-Grade NAT (CG-NAT)</strong> or
-          <strong>DS-Lite</strong>, which makes IPv4 port forwarding
-          <em>impossible</em>. In that case you <strong>must use IPv6</strong>
-          (see below). If you have a public IPv4 and forwarding still doesn't
-          work, your ISP may block ports 80/443 — a business plan or VPN tunnel
-          may be required.
-        </div>
-
-        <h6 class="fw-bold mt-3 mb-1">IPv6</h6>
-        <p class="mb-1">
-          With IPv6, every device typically has a <strong>global,
-          publicly routable address</strong> — no NAT involved. No port
-          forwarding is needed if your firewall allows incoming connections.
-        </p>
-        <ol class="ps-3 mb-1">
-          <li>Enable IPv6 on your router and confirm your server has a
-              <code>2001:</code> / <code>2a0:</code> / <code>2a01:</code>…
-              address (check Current IPs box on this page).</li>
-          <li>In your router's <em>Firewall</em> / <em>Traffic Rules</em>
-              section, allow incoming TCP traffic on ports 80 and 443 to your
-              server's IPv6 address or use a firewall rule that permits
-              established/related traffic.</li>
-          <li>Select <strong>"IPv6 only"</strong> (or <strong>"Dual-Stack"</strong>
-              if you also have working public IPv4) in the IPv6 mode dropdown
-              above.</li>
-        </ol>
-        <div class="alert alert-info py-1 px-2 mb-0 small">
-          <i class="bi bi-info-circle-fill"></i>
-          <strong>Pro tip:</strong> If you have both IPv4 behind CG-NAT
-          <em>and</em> working IPv6, choose <strong>IPv6 only</strong> — the
-          server will be reachable via IPv6 while the IPv4 A record is
-          automatically removed from deSEC.
-        </div>
       </div>
     </div>
 
