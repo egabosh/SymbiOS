@@ -85,25 +85,12 @@
 </div>
 
 {% if vars.smtp_server or vars.smtp_port or vars.smtp_user or vars.smtp_from %}
-<div class="card mt-4 border-danger">
-    <div class="card-header text-danger">Danger Zone</div>
-    <div class="card-body">
-        {% if twofa_enabled %}
-        <div class="alert alert-warning mb-0">
-            <i class="bi bi-info-circle-fill me-1"></i>
-            2-Factor Authentication (2FA) is enabled. Disable it under
-            <a href="/settings/auth/">Settings &rarr; Auth</a> before deleting the SMTP configuration.
-        </div>
-        {% else %}
-        <form method="post" onsubmit="return confirm('Delete the entire SMTP configuration? This cannot be undone.')">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="delete">
-            <p class="text-muted">Delete all SMTP settings (server, port, credentials).</p>
-            <button type="submit" class="btn btn-outline-danger">Delete Configuration</button>
-        </form>
-        {% endif %}
-    </div>
-</div>
+<hr class="mt-4">
+<form method="post" onsubmit="return confirm('Delete the entire SMTP configuration? This cannot be undone.')" class="d-inline">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="delete">
+    <button type="submit" class="btn btn-outline-danger btn-sm">Delete SMTP Configuration</button>
+</form>
 {% endif %}
 
 <script>

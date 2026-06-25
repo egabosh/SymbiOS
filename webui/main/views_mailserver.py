@@ -71,10 +71,7 @@ def settings_mailserver(request):
             messages.error(request, f'Error: {e}')
         return redirect('settings_mailserver')
 
-    return render(request, 'main/settings_mailserver.html', {
-        'vars': vars_,
-        'twofa_enabled': vars_.get('twofa_enabled', False),
-    })
+    return render(request, 'main/settings_mailserver.html', {'vars': vars_})
 
 
 def _test_smtp(server, port, user, password, sender, tls_mode):
