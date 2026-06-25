@@ -491,6 +491,17 @@ def settings_mailserver(request):
 
     if request.method == 'POST':
         try:
+            if request.POST.get('action') == 'delete':
+                if vars_.get('twofa_enabled'):
+                    messages.error(request, 'Cannot delete SMTP configuration while 2-Factor Authentication (2FA) is enabled. Disable 2FA under Settings → Auth first.')
+                else:
+                    for key in list(vars_):
+                        if key.startswith('smtp_'):
+                            del vars_[key]
+                    _save_inventory_config(config)
+                    messages.success(request, 'SMTP configuration deleted.')
+                return redirect('settings_mailserver')
+
             smtp_server = request.POST.get('smtp_server', '').strip()
             smtp_port = request.POST.get('smtp_port', '').strip()
             smtp_user = request.POST.get('smtp_user', '').strip()
@@ -531,7 +542,10 @@ def settings_mailserver(request):
             messages.error(request, f'Error: {e}')
         return redirect('settings_mailserver')
 
-    return render(request, 'main/settings_mailserver.html', {'vars': vars_})
+    return render(request, 'main/settings_mailserver.html', {
+        'vars': vars_,
+        'twofa_enabled': vars_.get('twofa_enabled', False),
+    })
 
 
 def _test_smtp(server, port, user, password, sender, tls_mode):
