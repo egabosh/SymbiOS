@@ -206,11 +206,11 @@
                   address: "http://authelia.local:9091/api/authz/forward-auth?authelia_url=https://auth.{{ default_domain }}"
                   trustForwardHeader: true
                   authResponseHeaders:
-                    - "X-Forwarded-Remote-User"
-                    - "X-Forwarded-Remote-Groups"
-                    - "X-Forwarded-Remote-Name"
-                    - "X-Forwarded-Remote-Email"
-                    - "X-Forwarded-Method"
+                    - "Remote-User"
+                    - "Remote-Groups"
+                    - "Remote-Name"
+                    - "Remote-Email"
+                    - "Remote-Method"
               default-basic-auth:
                 basicAuth:
                   usersFile: "/etc/traefik/providers.local/default-basic-auth.usersfile"
