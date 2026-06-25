@@ -83,8 +83,8 @@
       <li>In your router's <em>Port Forwarding</em> / <em>Virtual Server</em>
           section, create two rules:
         <ul>
-          <li><code>TCP 80</code> → <em>192.168.1.100:80</em></li>
-          <li><code>TCP 443</code> → <em>192.168.1.100:443</em></li>
+          <li><code>TCP 80</code> → <em><code id="settings-local-ip-80">192.168.1.100</code>:80</em></li>
+          <li><code>TCP 443</code> → <em><code id="settings-local-ip-443">192.168.1.100</code>:443</em></li>
         </ul>
       </li>
     </ol>
@@ -133,6 +133,8 @@ document.addEventListener('DOMContentLoaded', function() {
     .then(data => {
       if (data.local_ipv4) {
         document.getElementById('settings-local-ip').textContent = data.local_ipv4;
+        document.getElementById('settings-local-ip-80').textContent = data.local_ipv4;
+        document.getElementById('settings-local-ip-443').textContent = data.local_ipv4;
       }
     })
     .catch(() => {});
