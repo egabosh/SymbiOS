@@ -74,12 +74,24 @@ def check_ldap():
 
 def check_authelia():
     stdout, stderr, rc = _run([
-        "curl", "-sf", "-o", "/dev/null",
+        "curl", "-sf", "-o", "/dev/null", "-w", "%{http_code}",
         "http://authelia-authelia.local-1:9091/api/health",
     ], timeout=5)
     if rc == 0:
-        return {"status": "ok", "message": "Healthy"}
-    return {"status": "error", "message": stderr.strip() or f"exit code {rc}"}
+        code = stdout.strip()
+        if code == "200":
+            return {"status": "ok", "message": "Healthy"}
+        return {"status": "warn", "message": f"Unexpected HTTP {code}"}
+
+    container_info = _get_container_state("authelia-authelia.local-1")
+    if container_info:
+        return {"status": "error", "message": f"{container_info}"}
+
+    smtp_server, smtp_port = _get_smtp_config()
+    hint = ""
+    if smtp_server:
+        hint = f"; check SMTP ({smtp_server}:{smtp_port})"
+    return {"status": "error", "message": f"Unreachable{hint}"}
 
 
 def check_traefik():
@@ -194,6 +206,31 @@ def _fmt_bytes(num):
             return f"{num:.1f} {unit}"
         num /= 1024
     return f"{num:.1f} PB"
+
+
+def _get_container_state(name):
+    stdout, stderr, rc = _run([
+        "docker", "ps", "--filter", f"name={name}", "--format", "{{.Status}}",
+    ], timeout=5)
+    if rc == 0 and stdout.strip():
+        return stdout.strip()
+    stdout, stderr, rc = _run([
+        "docker", "ps", "-a", "--filter", f"name={name}", "--format", "{{.Status}}",
+    ], timeout=5)
+    if rc == 0 and stdout.strip():
+        return stdout.strip()
+    return None
+
+
+def _get_smtp_config():
+    try:
+        import yaml
+        with open("/config/inventory.yml") as f:
+            cfg = yaml.safe_load(f) or {}
+        vars_ = cfg.get("all", {}).get("vars", {})
+        return vars_.get("smtp_server", ""), vars_.get("smtp_port", "")
+    except Exception:
+        return "", ""
 
 
 def check_cert(sni_hostname, connect_host, port):
