@@ -13,8 +13,11 @@
 
 {% if messages %}
 {% for message in messages %}
-<div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-    {{ message }}
+<div class="alert alert-{{ message.tags }} alert-dismissible fade show{% if message.tags == 'error' %} alert-danger border-2 border-danger{% endif %}" role="alert">
+    {% if message.tags == 'error' %}<i class="bi bi-exclamation-triangle-fill me-2"></i>{% endif %}
+    {% if message.tags == 'warning' %}<i class="bi bi-info-circle-fill me-2"></i>{% endif %}
+    {% if message.tags == 'success' %}<i class="bi bi-check-circle-fill me-2"></i>{% endif %}
+    <span{% if message.tags == 'error' %} class="fw-bold"{% endif %}>{{ message|safe }}</span>
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endfor %}
@@ -31,6 +34,7 @@
                     <div class="input-group">
                         <input type="email" class="form-control" name="smtp_from" id="smtp_from" value="{{ vars.smtp_from|default:'' }}" placeholder="user@example.com" onblur="autoDetect()">
                         <button type="button" class="btn btn-outline-secondary" id="btn_discover" onclick="autoDetect()">Detect</button>
+                        <span id="detect_status" class="ms-2"></span>
                     </div>
                 </div>
                 <div class="col-md-6 mb-3">
@@ -96,6 +100,7 @@ function autoDetect() {
     btn.disabled = true;
     btn.textContent = 'Detecting...';
 
+    const statusEl = document.getElementById('detect_status');
     fetch('/settings/mailserver/discover/?email=' + encodeURIComponent(email))
         .then(r => r.json())
         .then(data => {
@@ -108,11 +113,13 @@ function autoDetect() {
                 let user = data.user || '%EMAILADDRESS%';
                 user = user.replace(/%EMAILADDRESS%/g, email).replace(/%EMAILLOCALPART%/g, localPart);
                 userField.value = user;
+                statusEl.innerHTML = '<i class="bi bi-check-circle-fill text-success"></i>';
             } else {
                 document.getElementById('smtp_server').value = '';
                 document.getElementById('smtp_port').value = '';
                 document.getElementById('smtp_tls').value = '';
                 document.getElementById('smtp_user').value = '';
+                statusEl.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-warning" title="No autoconfig found, fill in manually"></i>';
                 new bootstrap.Collapse('#advancedSettings').show();
             }
         })
@@ -121,6 +128,7 @@ function autoDetect() {
             document.getElementById('smtp_port').value = '';
             document.getElementById('smtp_tls').value = '';
             document.getElementById('smtp_user').value = '';
+            statusEl.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-warning" title="Auto-detection failed, fill in manually"></i>';
             new bootstrap.Collapse('#advancedSettings').show();
         })
         .finally(() => {
