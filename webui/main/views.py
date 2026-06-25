@@ -502,8 +502,7 @@ def settings_mailserver(request):
                 messages.error(request, 'All fields are required (Server, Port, Password, Email).')
                 return redirect('settings_mailserver')
 
-            if smtp_user == '%EMAILADDRESS%':
-                smtp_user = smtp_from
+            smtp_user = smtp_user.replace('%EMAILADDRESS%', smtp_from).replace('%EMAILLOCALPART%', smtp_from.split('@')[0])
 
             ok, err = _test_smtp(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls)
             if not ok:

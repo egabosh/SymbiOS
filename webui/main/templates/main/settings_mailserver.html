@@ -96,8 +96,11 @@ function autoDetect() {
             if (data.port) document.getElementById('smtp_port').value = data.port;
             if (data.tls !== undefined) document.getElementById('smtp_tls').value = data.tls;
             const userField = document.getElementById('smtp_user');
-            const user = data.user || '%EMAILADDRESS%';
-            userField.value = user.includes('%EMAILADDRESS%') ? '%EMAILADDRESS%' : user;
+            const email = document.getElementById('smtp_from').value.trim();
+            const localPart = email.split('@')[0];
+            let user = data.user || '%EMAILADDRESS%';
+            user = user.replace(/%EMAILADDRESS%/g, email).replace(/%EMAILLOCALPART%/g, localPart);
+            userField.value = user;
         })
         .catch(() => {})
         .finally(() => {
