@@ -498,20 +498,26 @@ def settings_mailserver(request):
             smtp_from = request.POST.get('smtp_from', '').strip()
             smtp_tls = request.POST.get('smtp_tls', '').strip()
 
-            if not smtp_server or not smtp_port or not smtp_password or not smtp_from:
-                messages.error(request, 'All fields are required (Server, Port, Password, Email).')
+            missing = []
+            if not smtp_server: missing.append('SMTP Server')
+            if not smtp_port: missing.append('SMTP Port')
+            if not smtp_password: missing.append('Password')
+            if not smtp_from: missing.append('Email Address')
+            if missing:
+                messages.error(request, f'Required fields missing: {", ".join(missing)}.')
                 return redirect('settings_mailserver')
 
             import re
             if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', smtp_from):
-                messages.error(request, 'Invalid email address format.')
+                messages.error(request, 'Invalid email address format. Must be like <strong>user@domain.tld</strong>.')
                 return redirect('settings_mailserver')
 
             smtp_user = smtp_user.replace('%EMAILADDRESS%', smtp_from).replace('%EMAILLOCALPART%', smtp_from.split('@')[0])
 
             ok, err = _test_smtp(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls)
             if not ok:
-                messages.error(request, f'SMTP authentication failed: {err}')
+                messages.error(request, f'{err}')
+                messages.warning(request, 'SMTP connection or authentication failed. Check your settings and try again.')
                 return redirect('settings_mailserver')
 
             vars_['smtp_server'] = smtp_server
