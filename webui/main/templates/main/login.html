@@ -31,7 +31,20 @@
                 </div>
                 <button type="submit" class="btn btn-primary w-100">Login</button>
             </form>
+            <hr>
+            <p class="text-center text-muted small mb-0">
+                <i class="bi bi-shield-check"></i>
+                Single Sign-On via <a href="#" id="authelia-link">Authelia</a>
+            </p>
         </div>
     </div>
+    <script>
+        (function() {
+            var host = window.location.hostname;
+            var authDomain = host.replace(/^[^.]+\./, 'auth.');
+            if (authDomain === host) authDomain = 'auth.' + host;
+            document.getElementById('authelia-link').href = 'https://' + authDomain + '/';
+        })();
+    </script>
 </body>
 </html>

@@ -201,3 +201,23 @@ def container_list(request):
     from django.http import JsonResponse
     containers = _get_container_list()
     return JsonResponse({"containers": containers})
+
+
+from django.contrib.auth import logout as django_logout
+
+
+def logout_view(request):
+    config = _get_inventory_config()
+    vars_ = config.get("all", {}).get("vars", {})
+    default_domain = vars_.get("default_domain", "")
+    django_logout(request)
+    if default_domain:
+        from django.shortcuts import redirect
+        return redirect(f"https://auth.{default_domain}/logout")
+    from django.shortcuts import redirect
+    return redirect("/login/")
+
+
+def authelia_logout(request):
+    from django.shortcuts import render
+    return render(request, "main/authelia_logout.html")
