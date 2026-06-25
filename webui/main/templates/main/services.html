@@ -1,0 +1,50 @@
+{% extends "main/base.html" %}
+{% block sidebar %}
+    {% include "main/sidebar_settings.html" %}
+{% endblock %}
+{% block content %}
+<h2><i class="bi bi-hdd-stack"></i> Services</h2>
+<p class="text-muted">External services running on this SymbiOS instance.</p>
+
+{% if default_domain == 'local' %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle-fill"></i> No public domain configured.
+    External services are only reachable via internal Docker hostnames.
+    Configure <a href="/settings/ddns/" class="alert-link">Dynamic DNS</a> to enable public HTTPS access.
+</div>
+{% endif %}
+
+<div class="row g-3">
+{% for svc in services %}
+<div class="col-lg-4 col-md-6">
+    <div class="card h-100 border-{% if svc.internal %}secondary{% else %}primary{% endif %}">
+        <div class="card-body">
+            <div class="d-flex align-items-start gap-3">
+                <div class="fs-2 text-{% if svc.internal %}secondary{% else %}primary{% endif %}">
+                    <i class="{{ svc.icon }}"></i>
+                </div>
+                <div class="min-width-0">
+                    <h5 class="card-title mb-1">{{ svc.name }}</h5>
+                    <p class="card-text small text-muted mb-2">{{ svc.description }}</p>
+                    {% if svc.internal %}
+                    <span class="badge bg-secondary">Internal</span>
+                    {% else %}
+                    <a href="{{ svc.url }}" target="_blank" rel="noopener" class="text-break small stretched-link">
+                        {{ svc.url }}
+                        <i class="bi bi-box-arrow-up-right ms-1"></i>
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+</div>
+
+<style>
+.min-width-0 { min-width: 0; }
+.card { transition: transform .15s, box-shadow .15s; }
+.card:hover { transform: translateY(-2px); box-shadow: 0 .25rem .5rem rgba(0,0,0,.1); }
+</style>
+{% endblock %}

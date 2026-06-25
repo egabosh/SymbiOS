@@ -18,11 +18,12 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarTop">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item"><a class="nav-link" href="/health/"><i class="bi bi-heart-pulse"></i> Health</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/services/"><i class="bi bi-hdd-stack"></i> Services</a></li>
                     <li class="nav-item"><a class="nav-link" href="/settings/"><i class="bi bi-gear"></i> Settings</a></li>
                     <li class="nav-item"><a class="nav-link" href="/users/"><i class="bi bi-people"></i> Users</a></li>
                     <li class="nav-item"><a class="nav-link" href="/groups/"><i class="bi bi-collection"></i> Groups</a></li>
                     <li class="nav-item"><a class="nav-link" href="/logs/"><i class="bi bi-file-text"></i> Logs</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/health/"><i class="bi bi-heart-pulse"></i> Health</a></li>
                 </ul>
                 {% if user.is_authenticated %}
                 <span class="navbar-text me-3 text-light"><i class="bi bi-person-circle"></i> {{ user.username }}</span>
@@ -43,35 +44,7 @@
         <div class="row flex-nowrap">
             <div class="{% block sidebar_col_class %}col-auto col-md-3 col-lg-2 px-sm-2 bg-light sidebar{% endblock %}">
                 {% block sidebar %}
-                <ul class="nav flex-column mt-2">
-                    <li class="nav-item mb-2">
-                        <a class="nav-link d-flex align-items-center gap-2" href="/settings/ddns/">
-                            <i class="bi bi-globe fs-5"></i>
-                            <div>
-                                <strong>Dynamic DNS</strong>
-                                <div class="small text-muted fw-normal">deSEC DDNS</div>
-                            </div>
-                        </a>
-                    </li>
-                    <li class="nav-item mb-2">
-                        <a class="nav-link d-flex align-items-center gap-2" href="/settings/mailserver/">
-                            <i class="bi bi-envelope fs-5"></i>
-                            <div>
-                                <strong>Mailserver (SMTP)</strong>
-                                <div class="small text-muted fw-normal">Outgoing email</div>
-                            </div>
-                        </a>
-                    </li>
-                    <li class="nav-item mb-2">
-                        <a class="nav-link d-flex align-items-center gap-2" href="/settings/auth/">
-                            <i class="bi bi-shield-lock fs-5"></i>
-                            <div>
-                                <strong>Auth</strong>
-                                <div class="small text-muted fw-normal">2FA / Authelia</div>
-                            </div>
-                        </a>
-                    </li>
-                </ul>
+                {% include "main/sidebar_settings.html" %}
                 {% endblock %}
             </div>
             <div class="col py-3">
