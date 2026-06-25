@@ -83,7 +83,14 @@
 <script>
 function autoDetect() {
     const email = document.getElementById('smtp_from').value.trim();
-    if (!email || !email.includes('@')) return;
+    if (!email || !email.includes('@') || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        document.getElementById('smtp_server').value = '';
+        document.getElementById('smtp_port').value = '';
+        document.getElementById('smtp_tls').value = '';
+        document.getElementById('smtp_user').value = '';
+        new bootstrap.Collapse('#advancedSettings').show();
+        return;
+    }
 
     const btn = document.getElementById('btn_discover');
     btn.disabled = true;
