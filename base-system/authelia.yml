@@ -128,12 +128,14 @@
               groups_filter: "(&(objectClass=posixGroup)(memberUid={input}))"
 
           totp:
-            disable: "{{ not (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) }}"
+            disable: {{ not (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) }}
             issuer: auth.{{ default_domain }}
             algorithm: sha1
             digits: 6
             period: 30
             skew: 1
+          webauthn:
+            disable: {{ not (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) }}
 
         backup: yes
       notify:
