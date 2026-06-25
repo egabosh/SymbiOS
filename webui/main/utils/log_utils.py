@@ -17,6 +17,38 @@ ALLOWED_LOG_FILES = {
     "symbios": "/log/symbios.log",
     "dedyn": "/log/dedyn.log",
     "configd": "/log/configd.log",
+    "playbook-basics": "/log/playbook-basics.log",
+    "playbook-symbios-ui": "/log/playbook-symbios-ui.log",
+    "playbook-traefik": "/log/playbook-traefik.log",
+    "playbook-dedyn": "/log/playbook-dedyn.log",
+    "playbook-smtp": "/log/playbook-smtp.log",
+    "playbook-authelia": "/log/playbook-authelia.log",
+    "playbook-ldap": "/log/playbook-ldap.log",
+    "health": "/log/system-health.json",
+    "docker": "/var/log/docker.log",
+    "auth": "/var/log/auth.log",
+    "cron": "/var/log/cron.log",
+    "ansible": "/var/log/ansible.log",
+}
+
+LOG_LABELS = {
+    "messages": "System Messages",
+    "syslog": "Syslog",
+    "symbios": "Symbios",
+    "dedyn": "DDNS (deSEC)",
+    "configd": "Config Daemon",
+    "playbook-basics": "Playbook: Basics",
+    "playbook-symbios-ui": "Playbook: WebUI",
+    "playbook-traefik": "Playbook: Traefik",
+    "playbook-dedyn": "Playbook: DDNS",
+    "playbook-smtp": "Playbook: SMTP",
+    "playbook-authelia": "Playbook: Authelia",
+    "playbook-ldap": "Playbook: LDAP",
+    "health": "System Health (JSON)",
+    "docker": "Docker Daemon",
+    "auth": "Authentication",
+    "cron": "Cron Jobs",
+    "ansible": "Ansible",
 }
 
 
@@ -82,8 +114,18 @@ def logs_stream(request):
 
     lines_to_send = [ansi_to_html(line) for line in raw_lines]
 
+    # Pretty-print health JSON
+    if log_name == "health" and raw_lines:
+        try:
+            parsed = json.loads("".join(raw_lines))
+            pretty = json.dumps(parsed, indent=2, default=str)
+            lines_to_send = [ansi_to_html(pretty)]
+        except json.JSONDecodeError:
+            pass
+
     return JsonResponse({
         "log_name": log_name,
+        "label": LOG_LABELS.get(log_name, log_name),
         "path": real_path,
         "lines": lines_to_send,
         "total_lines": total_lines,

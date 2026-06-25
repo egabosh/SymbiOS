@@ -2,49 +2,146 @@
 {% block sidebar %}{% endblock %}
 {% block sidebar_col_class %}d-none{% endblock %}
 {% block content %}
-<h2>Logs</h2>
+<h2><i class="bi bi-file-text"></i> Logs</h2>
 
-<div class="row mb-3">
-  <div class="col-md-6">
-    <label for="log-select" class="form-label">Select log file</label>
-    <div class="input-group">
-      <select id="log-select" class="form-select">
-        <optgroup label="System Logs">
-          <option value="symbios" {% if default_log_name == "symbios" %}selected{% endif %}>symbios.log</option>
-          <option value="dedyn" {% if default_log_name == "dedyn" %}selected{% endif %}>dedyn.log (DDNS)</option>
-          <option value="configd" {% if default_log_name == "configd" %}selected{% endif %}>configd.log (Config Daemon)</option>
-          <option value="messages" {% if default_log_name == "messages" %}selected{% endif %}>/var/log/messages</option>
-          <option value="syslog" {% if default_log_name == "syslog" %}selected{% endif %}>/var/log/syslog</option>
-        </optgroup>
-        <optgroup label="Docker Containers" id="docker-optgroup">
-          <option value="" disabled>Loading containers...</option>
-        </optgroup>
-      </select>
-    </div>
+<div class="row mb-3 align-items-end">
+  <div class="col-md-5">
+    <label for="log-select" class="form-label fw-semibold">Log file</label>
+    <select id="log-select" class="form-select">
+      <optgroup label="System">
+        <option value="messages">System Messages</option>
+        <option value="syslog">Syslog</option>
+        <option value="auth">Authentication</option>
+        <option value="cron">Cron Jobs</option>
+        <option value="docker" {% if default_log_name == "docker" %}selected{% endif %}>Docker Daemon</option>
+        <option value="ansible">Ansible</option>
+      </optgroup>
+      <optgroup label="Symbios">
+        <option value="configd" {% if default_log_name == "configd" %}selected{% endif %}>Config Daemon</option>
+        <option value="dedyn" {% if default_log_name == "dedyn" %}selected{% endif %}>DDNS (deSEC)</option>
+        <option value="health" {% if default_log_name == "health" %}selected{% endif %}>System Health (JSON)</option>
+        <option value="symbios" {% if default_log_name == "symbios" %}selected{% endif %}>Symbios</option>
+      </optgroup>
+      <optgroup label="Playbooks">
+        <option value="playbook-basics">Playbook: Basics</option>
+        <option value="playbook-symbios-ui">Playbook: WebUI</option>
+        <option value="playbook-traefik">Playbook: Traefik</option>
+        <option value="playbook-dedyn">Playbook: DDNS</option>
+        <option value="playbook-smtp">Playbook: SMTP</option>
+        <option value="playbook-authelia">Playbook: Authelia</option>
+        <option value="playbook-ldap">Playbook: LDAP</option>
+      </optgroup>
+      <optgroup label="Docker Containers" id="docker-optgroup">
+        <option value="" disabled>Loading containers...</option>
+      </optgroup>
+    </select>
+  </div>
+  <div class="col-md-4">
+    <div id="log-meta" class="text-muted small"></div>
+  </div>
+  <div class="col-md-3 text-end">
+    <button class="btn btn-outline-secondary btn-sm" id="btn-pause" onclick="togglePause()">
+      <i class="bi bi-pause-fill"></i> Pause
+    </button>
+    <button class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('log-container').scrollTop = document.getElementById('log-container').scrollHeight">
+      <i class="bi bi-arrow-down"></i> Bottom
+    </button>
   </div>
 </div>
 
-<div id="log-meta" class="mb-2 text-muted" style="font-size: 0.9rem;">
-</div>
+<div id="log-container" class="border rounded bg-dark"></div>
 
-<div id="log-container"></div>
+<style>
+  #log-container {
+    font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas", monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    padding: 0.75rem;
+    color: #e0e0e0;
+  }
+  #log-container .log-line {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0 0.25rem;
+    border-radius: 2px;
+    min-height: 1.35em;
+  }
+  #log-container .log-line:nth-child(even) {
+    background: rgba(255,255,255,0.03);
+  }
+  #log-container .log-line:hover {
+    background: rgba(255,255,255,0.08);
+  }
+  #log-container .log-line .line-num {
+    color: #6c757d;
+    user-select: none;
+    min-width: 3.5rem;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  #log-container .log-line .line-content {
+    flex: 1;
+  }
+  #log-container .log-line .line-content .timestamp {
+    color: #6ea8fe;
+  }
+  #log-container .log-line .line-content .level-error {
+    color: #f87171;
+    font-weight: bold;
+  }
+  #log-container .log-line .line-content .level-warning {
+    color: #fbbf24;
+  }
+  #log-container .log-line .line-content .level-info {
+    color: #60a5fa;
+  }
+  #log-container .log-line .line-content .ansi-escape {
+    color: transparent;
+    display: none;
+  }
+  #log-container .empty-state {
+    color: #6c757d;
+    text-align: center;
+    padding: 3rem 1rem;
+    font-family: system-ui, sans-serif;
+  }
+  #log-container .empty-state i {
+    font-size: 2rem;
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+  #log-meta { min-height: 1.5em; }
+</style>
 
 <script>
-    let currentLogName = "{{ default_log_name|default:'symbios' }}";
+    let currentLogName = "{{ default_log_name|default:'messages' }}";
     let currentOffset = 0;
     let autoScroll = true;
+    let paused = false;
+    let startLineNum = 0;
 
     const logContainer = document.getElementById('log-container');
     const logMeta = document.getElementById('log-meta');
     const logSelect = document.getElementById('log-select');
     const dockerGroup = document.getElementById('docker-optgroup');
+    const pauseBtn = document.getElementById('btn-pause');
 
     logContainer.addEventListener('scroll', () => {
-        const nearBottom = logContainer.scrollHeight - logContainer.scrollTop - logContainer.clientHeight < 20;
+        const nearBottom = logContainer.scrollHeight - logContainer.scrollTop - logContainer.clientHeight < 30;
         autoScroll = nearBottom;
     });
 
-    // Fetch Docker container list
+    function togglePause() {
+        paused = !paused;
+        pauseBtn.innerHTML = paused
+            ? '<i class="bi bi-play-fill"></i> Resume'
+            : '<i class="bi bi-pause-fill"></i> Pause';
+        if (!paused) fetchLogs();
+    }
+
     async function loadDockerContainers() {
         try {
             const resp = await fetch('/logs/containers/');
@@ -59,10 +156,7 @@
                     dockerGroup.appendChild(opt);
                 });
             } else {
-                const opt = document.createElement('option');
-                opt.disabled = true;
-                opt.textContent = 'No containers found';
-                dockerGroup.appendChild(opt);
+                dockerGroup.innerHTML = '<option value="" disabled>No containers</option>';
             }
         } catch (e) {
             dockerGroup.innerHTML = '<option value="" disabled>Error loading containers</option>';
@@ -70,10 +164,13 @@
     }
 
     function setLogName(newName) {
+        if (newName === currentLogName) return;
         currentLogName = newName;
         currentOffset = 0;
+        startLineNum = 0;
         logContainer.innerHTML = '';
-        logMeta.textContent = 'Loading log "' + currentLogName + '" ...';
+        logMeta.textContent = 'Loading…';
+        if (paused) { paused = false; pauseBtn.innerHTML = '<i class="bi bi-pause-fill"></i> Pause'; }
         fetchLogs();
     }
 
@@ -81,7 +178,45 @@
         setLogName(logSelect.value);
     });
 
+    function formatLine(lineNum, text) {
+        let className = 'log-line';
+        let displayText = text;
+
+        // Highlight timestamps like "2024-01-01 12:00:00" or "Jan  1 12:00:00"
+        let ts = '';
+        const tsMatch = text.match(/^\d{4}[-\s]\d{2}[-\s]\d{2}[\sT]\d{2}:\d{2}:\d{2}/)
+            || text.match(/^[A-Z][a-z]{2}\s+\d{1,2}\s\d{2}:\d{2}:\d{2}/);
+        if (tsMatch) {
+            ts = '<span class="timestamp">' + escapeHtml(tsMatch[0]) + '</span>';
+            displayText = displayText.substring(tsMatch[0].length);
+        }
+
+        // Highlight Python tracebacks / Ansible PLAY RECAP
+        if (/^[A-Z]+:/.test(displayText.trim())) {
+            const level = displayText.trim().split(':')[0];
+            const lc = level.toLowerCase();
+            if (lc.includes('error') || lc.includes('fatal') || lc.includes('fail'))
+                className += ' level-error';
+            else if (lc.includes('warn') || lc.includes('notice'))
+                className += ' level-warning';
+            else if (lc.includes('info') || lc.includes('ok'))
+                className += ' level-info';
+        }
+
+        return '<div class="' + className + '">' +
+            '<span class="line-num">' + lineNum + '</span>' +
+            '<span class="line-content">' + ts + escapeHtml(displayText) + '</span>' +
+            '</div>';
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
     async function fetchLogs() {
+        if (paused) return;
         const params = new URLSearchParams();
         params.set('log', currentLogName);
         params.set('offset', String(currentOffset));
@@ -89,24 +224,33 @@
         try {
             const response = await fetch('/logs/stream/?' + params.toString());
             if (!response.ok) {
-                logMeta.textContent = 'Error loading log "' + currentLogName + '": HTTP ' + response.status;
+                logMeta.textContent = 'Error: HTTP ' + response.status;
                 return;
             }
             const data = await response.json();
 
             if (data.error) {
-                logMeta.textContent = 'Error: ' + data.error + ' (' + (data.path || '') + ')';
+                logContainer.innerHTML = '<div class="empty-state"><i class="bi bi-file-earmark-x"></i><div>' + escapeHtml(data.error) + '</div></div>';
+                logMeta.textContent = data.error + ' (' + (data.path || '') + ')';
                 return;
             }
 
-            logMeta.textContent = 'Showing log "' + (data.log_name || currentLogName) + '" at ' + (data.path || '') +
-                ' | total lines: ' + data.total_lines;
+            logMeta.textContent = (data.label || currentLogName) + ' — ' + data.total_lines + ' lines';
 
             if (currentOffset === 0) {
-                logContainer.innerHTML = data.lines.join('');
+                startLineNum = Math.max(1, data.total_lines - 499);
+                let html = '';
+                for (let i = 0; i < data.lines.length; i++) {
+                    html += formatLine(startLineNum + i, data.lines[i]);
+                }
+                logContainer.innerHTML = html;
             } else {
                 if (data.lines && data.lines.length > 0) {
-                    logContainer.innerHTML += data.lines.join('');
+                    let html = '';
+                    for (let i = 0; i < data.lines.length; i++) {
+                        html += formatLine(startLineNum + (data.total_lines - data.lines.length + (currentOffset === 0 ? 0 : 0)), data.lines[i]);
+                    }
+                    logContainer.innerHTML += data.lines.map((line, i) => formatLine(startLineNum + i, line)).join('');
                 }
             }
 
@@ -116,26 +260,20 @@
                 logContainer.scrollTop = logContainer.scrollHeight;
             }
         } catch (e) {
-            console.error('Error fetching logs', e);
-            logMeta.textContent = 'Error fetching logs: ' + e;
+            logMeta.textContent = 'Error: ' + e;
         }
+    }
+
+    function resizeLogContainer() {
+        const rect = logContainer.getBoundingClientRect();
+        const available = window.innerHeight - rect.top - 20;
+        logContainer.style.height = Math.max(200, available) + 'px';
     }
 
     loadDockerContainers();
     fetchLogs();
-    const POLL_INTERVAL_MS = 2000;
-    setInterval(fetchLogs, POLL_INTERVAL_MS);
-</script>
-<script>
-    function resizeLogContainer() {
-        const logContainer = document.getElementById('log-container');
-        if (!logContainer) return;
-        const rect = logContainer.getBoundingClientRect();
-        const available = window.innerHeight - rect.top - 20;
-        logContainer.style.height = available + 'px';
-    }
-
     window.addEventListener('load', resizeLogContainer);
     window.addEventListener('resize', resizeLogContainer);
+    setInterval(fetchLogs, 2000);
 </script>
 {% endblock %}
