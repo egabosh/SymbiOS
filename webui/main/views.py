@@ -5,7 +5,7 @@ from pathlib import Path
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from .forms import NetworkConfigForm
 from .utils.log_utils import logs_stream
 from .health import run_all as health_run_all
@@ -504,6 +504,102 @@ def settings_mailserver(request):
         return redirect('settings_mailserver')
 
     return render(request, 'main/settings_mailserver.html', {'vars': vars_})
+
+
+@login_required
+def settings_mailserver_discover(request):
+    import urllib.request, urllib.error, xml.etree.ElementTree as ET
+
+    server = request.GET.get('server', '').strip().lower()
+    if not server:
+        return JsonResponse({'error': 'No server provided'})
+
+    result = {'server': server, 'port': '587', 'tls': 'starttls', 'user': ''}
+
+    try:
+        domain = server
+        if server.startswith('smtp.'):
+            domain = server[5:]
+
+        url = f'https://autoconfig.thunderbird.net/v1.1/{domain}'
+        req = urllib.request.Request(url, headers={'User-Agent': 'SymbiOS'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            xml = resp.read()
+            root = ET.fromstring(xml)
+            for server_elem in root.findall('.//outgoingServer'):
+                if server_elem.find('hostname') is not None:
+                    host = server_elem.find('hostname').text
+                    if host == server:
+                        if server_elem.find('port') is not None:
+                            result['port'] = server_elem.find('port').text
+                        for auth in server_elem.findall('authentication'):
+                            if auth.text == 'password-cleartext':
+                                result['tls'] = 'starttls'
+                            elif auth.text == 'SSL/TLS':
+                                result['tls'] = 'tls'
+                        if server_elem.find('username') is not None:
+                            result['user'] = '%EMAILADDRESS%'
+                        break
+    except Exception:
+        port_guess = {'587': 'starttls', '465': 'tls', '25': ''}
+        for p, t in port_guess.items():
+            try:
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(3)
+                if s.connect_ex((server, int(p))) == 0:
+                    result['port'] = p
+                    result['tls'] = t
+                    result['user'] = '%EMAILADDRESS%'
+                    s.close()
+                    break
+                s.close()
+            except Exception:
+                pass
+
+    return JsonResponse(result)
+
+
+def autoconfig_xml(request):
+    config = _get_inventory_config()
+    vars_ = config.get('all', {}).get('vars', {})
+    smtp_server = vars_.get('smtp_server', '')
+    smtp_port = vars_.get('smtp_port', '587')
+    smtp_tls = vars_.get('smtp_tls', 'starttls')
+    smtp_user = vars_.get('smtp_user', '%EMAILADDRESS%')
+    smtp_from = vars_.get('smtp_from', '')
+
+    domain = smtp_from.split('@')[-1] if '@' in smtp_from else ''
+
+    if not smtp_server or not domain:
+        return HttpResponse('<clientConfig version="1.1"/>',
+                            content_type='text/xml')
+
+    socket_type = 'SSL' if smtp_tls == 'tls' else 'STARTTLS' if smtp_tls == 'starttls' else 'plain'
+
+    xml = f'''<?xml version="1.0"?>
+<clientConfig version="1.1">
+  <emailProvider id="{smtp_server}">
+    <domain>{domain}</domain>
+    <displayName>{domain}</displayName>
+    <displayShortName>{domain}</displayShortName>
+    <incomingServer type="imap">
+      <hostname>{smtp_server}</hostname>
+      <port>{smtp_port}</port>
+      <socketType>{socket_type}</socketType>
+      <username>{smtp_user}</username>
+      <authentication>password-cleartext</authentication>
+    </incomingServer>
+    <outgoingServer type="smtp">
+      <hostname>{smtp_server}</hostname>
+      <port>{smtp_port}</port>
+      <socketType>{socket_type}</socketType>
+      <username>{smtp_user}</username>
+      <authentication>password-cleartext</authentication>
+    </outgoingServer>
+  </emailProvider>
+</clientConfig>'''
+    return HttpResponse(xml, content_type='text/xml')
 
 
 @login_required

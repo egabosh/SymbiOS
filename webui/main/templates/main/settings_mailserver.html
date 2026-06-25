@@ -60,7 +60,7 @@
             <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label">SMTP From Address</label>
-                    <input type="email" class="form-control" name="smtp_from" id="smtp_from" value="{{ vars.smtp_from|default:'' }}" placeholder="noreply@example.com">
+                    <input type="email" class="form-control" name="smtp_from" id="smtp_from" value="{{ vars.smtp_from|default:'' }}" placeholder="noreply@example.com" onblur="autoDetectFrom()">
                 </div>
             </div>
             <button type="submit" class="btn btn-primary">Save</button>
@@ -69,6 +69,58 @@
 </div>
 
 <script>
+function autoDetectFrom() {
+    const email = document.getElementById('smtp_from').value.trim();
+    if (!email || !email.includes('@')) return;
+    const domain = email.split('@')[1];
+    if (!domain) return;
+
+    const btn = document.getElementById('btn_discover');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Auto...';
+
+    const urls = [
+        'https://autoconfig.' + domain + '/mail/config-v1.1.xml',
+        'https://' + domain + '/.well-known/autoconfig/mail/config-v1.1.xml',
+    ];
+
+    function tryUrl(idx) {
+        if (idx >= urls.length) {
+            btn.disabled = false;
+            btn.textContent = origText;
+            return;
+        }
+        fetch(urls[idx])
+            .then(r => r.ok ? r.text() : Promise.reject())
+            .then(xml => {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(xml, 'text/xml');
+                const smtp = doc.querySelector('outgoingServer[type="smtp"]');
+                if (smtp) {
+                    const host = smtp.querySelector('hostname')?.textContent;
+                    const port = smtp.querySelector('port')?.textContent;
+                    const socket = smtp.querySelector('socketType')?.textContent;
+                    const user = smtp.querySelector('username')?.textContent;
+
+                    if (host) document.getElementById('smtp_server').value = host;
+                    if (port) document.getElementById('smtp_port').value = port;
+                    if (socket) {
+                        const tls = socket === 'SSL' ? 'tls' : socket === 'STARTTLS' ? 'starttls' : '';
+                        document.getElementById('smtp_tls').value = tls;
+                    }
+                    if (user && !document.getElementById('smtp_user').value) {
+                        document.getElementById('smtp_user').value = user;
+                    }
+                }
+                btn.disabled = false;
+                btn.textContent = origText;
+            })
+            .catch(() => tryUrl(idx + 1));
+    }
+    tryUrl(0);
+}
+
 function discover() {
     const server = document.getElementById('smtp_server').value.trim();
     if (!server) return;
@@ -80,7 +132,6 @@ function discover() {
         .then(data => {
             if (data.port) document.getElementById('smtp_port').value = data.port;
             if (data.tls) document.getElementById('smtp_tls').value = data.tls;
-            if (data.user) document.getElementById('smtp_user').placeholder = data.user;
             if (data.user && !document.getElementById('smtp_user').value) {
                 document.getElementById('smtp_user').value = data.user;
             }
