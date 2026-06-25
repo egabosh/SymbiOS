@@ -98,9 +98,16 @@ do
         fi
 
         # Run SMTP playbook on mail config changes
-        if echo "${g_new_content}" | grep -q "smtp_server\|smtp_user\|smtp_password"
+        if echo "${g_new_content}" | grep -q "smtp_server\|smtp_user\|smtp_password\|smtp_port\|smtp_from\|smtp_tls"
         then
             f_run_playbook "base-system/smtp.yml"
+            f_run_playbook "base-system/authelia.yml"
+        fi
+
+        # Run Authelia playbook on 2FA toggle changes
+        if echo "${g_new_content}" | grep -q "twofa_enabled"
+        then
+            f_run_playbook "base-system/authelia.yml"
         fi
 
         g_last_hash="${g_current_hash}"
