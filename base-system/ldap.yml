@@ -270,6 +270,7 @@
               cn: admin
               sn: Administrator
               uid: admin
+              mail: {{ smtp_from }}
               uidNumber: 30000
               gidNumber: 30001
               homeDirectory: /home/admin
