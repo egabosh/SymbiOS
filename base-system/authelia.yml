@@ -205,7 +205,7 @@
                 policy: one_factor
 
         backup: yes
-        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest /app/authelia config validate --config %s
+        validate: docker run --rm -v "{{ lookup('env', 'HOME') }}/.ansible:{{ lookup('env', 'HOME') }}/.ansible" authelia/authelia:latest /app/authelia config validate --config %s
       notify: Restart authelia
 
     - name: "{{ service_path }}/docker-compose.yml Container Configuration"
@@ -301,7 +301,7 @@
                   client_secret: '$pbkdf2-sha512$310000$EXkvBmRZx/6476FyviXRZw$OpkrwApe5yPfrXJadOM8VUwQBjmo4rDD1SonNsuQ.6WgevPNKYQJrob404o1yHYbybQPJTRXuwnyKVLqtIhN.A' # random dummy pw
         insertbefore: "^# BEGIN ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         backup: yes
-        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest /app/authelia config validate --config %s
+        validate: docker run --rm -v "{{ lookup('env', 'HOME') }}/.ansible:{{ lookup('env', 'HOME') }}/.ansible" authelia/authelia:latest /app/authelia config validate --config %s
       notify: Restart authelia
 
     # Script to generate OIDC client secrets using Authelia's crypto tool

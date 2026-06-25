@@ -1,6 +1,7 @@
 import subprocess
 import os
 import json
+import glob
 from datetime import datetime, timezone
 
 DOCKER_LOG_DIR = "/docker/containers"
@@ -116,6 +117,22 @@ def check_config_daemon():
         return {"status": "warn", "message": "Not found in status file"}
     except FileNotFoundError:
         return {"status": "warn", "message": "Status file not available"}
+
+
+def check_playbooks():
+    log_dir = "/log"
+    failures = []
+    for f in glob.glob(os.path.join(log_dir, "playbook-*.log")):
+        name = os.path.basename(f).replace("playbook-", "").replace(".log", "")
+        with open(f) as fh:
+            content = fh.read()
+        sections = content.split("PLAY RECAP")
+        last = sections[-1] if sections else ""
+        if "failed=1" in last or "FAILED" in last:
+            failures.append(name)
+    if failures:
+        return {"status": "warn", "message": "Failed: " + ", ".join(failures)}
+    return {"status": "ok", "message": "All playbooks passed"}
 
 
 def check_containers():
@@ -267,6 +284,7 @@ def run_all():
         "traefik": check_traefik(),
         "stepca": check_stepca(),
         "config_daemon": check_config_daemon(),
+        "playbooks": check_playbooks(),
         "ddns": check_ddns(),
         "containers": check_containers(),
         "disk": check_disk(),

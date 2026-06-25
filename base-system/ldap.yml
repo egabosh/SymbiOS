@@ -683,12 +683,22 @@
       no_log: true
       when: ldap_admin_password.stdout is defined
 
+    - name: ensure ldap config directory exists
+      ansible.builtin.file:
+        path: "{{ docker_path }}/config"
+        state: directory
+        owner: "10000"
+        group: "10000"
+        mode: "0750"
+      when: ldap_admin_password.stdout is defined
+
     - name: inventory.yml file permissions
       ansible.builtin.file:
         path: "{{ docker_path }}/config/inventory.yml"
         owner: "10000"
         group: "10000"
         mode: "0640"
+        state: touch
       when: ldap_admin_password.stdout is defined
 
 
