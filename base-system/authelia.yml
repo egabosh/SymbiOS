@@ -110,7 +110,7 @@
               groups_filter: "(&(objectClass=posixGroup)(memberUid={input}))"
 
           totp:
-            disable: false
+            disable: "{{ not twofa_enabled | default(false) | bool }}"
             issuer: auth.{{ default_domain }}
             algorithm: sha1
             digits: 6
@@ -199,7 +199,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         block: |
           access_control:
-            default_policy: two_factor
+            default_policy: "{{ 'two_factor' if twofa_enabled else 'one_factor' }}"
             rules:
               - domain: "auth.{{ default_domain }}"
                 policy: one_factor

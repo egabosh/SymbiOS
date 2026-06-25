@@ -467,9 +467,7 @@ def settings_auth(request):
 
     if request.method == 'POST':
         try:
-            config['all']['vars']['ldap_admin_password'] = request.POST.get('ldap_admin_password', '')
-            config['all']['vars']['smtp_user'] = request.POST.get('smtp_user', '')
-            config['all']['vars']['smtp_password'] = request.POST.get('smtp_password', '')
+            config['all']['vars']['twofa_enabled'] = request.POST.get('twofa_enabled', 'false') == 'true'
             _save_inventory_config(config)
             messages.success(request, 'Auth settings saved.')
         except Exception as e:
@@ -477,6 +475,28 @@ def settings_auth(request):
         return redirect('settings_auth')
 
     return render(request, 'main/settings_auth.html', {'vars': vars_})
+
+
+@login_required
+def settings_mailserver(request):
+    config = _get_inventory_config()
+    vars_ = config.get('all', {}).get('vars', {})
+
+    if request.method == 'POST':
+        try:
+            vars_['smtp_server'] = request.POST.get('smtp_server', '')
+            vars_['smtp_port'] = request.POST.get('smtp_port', '')
+            vars_['smtp_user'] = request.POST.get('smtp_user', '')
+            vars_['smtp_password'] = request.POST.get('smtp_password', '')
+            vars_['smtp_from'] = request.POST.get('smtp_from', '')
+            vars_['smtp_tls'] = request.POST.get('smtp_tls', '')
+            _save_inventory_config(config)
+            messages.success(request, 'Mailserver settings saved.')
+        except Exception as e:
+            messages.error(request, f'Error: {e}')
+        return redirect('settings_mailserver')
+
+    return render(request, 'main/settings_mailserver.html', {'vars': vars_})
 
 
 @login_required
