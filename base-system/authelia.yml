@@ -205,6 +205,10 @@
             rules:
               - domain: "auth.{{ default_domain }}"
                 policy: one_factor
+              - domain: "traefik.{{ default_domain }}"
+                policy: one_factor
+                subject:
+                  - ["user:admin"]
 
         backup: yes
         validate: docker run --rm -v "{{ lookup('env', 'HOME') }}/.ansible:{{ lookup('env', 'HOME') }}/.ansible" authelia/authelia:latest /app/authelia config validate --config %s
