@@ -44,8 +44,33 @@
             <div class="{% block sidebar_col_class %}col-auto col-md-3 col-lg-2 px-sm-2 bg-light sidebar{% endblock %}">
                 {% block sidebar %}
                 <ul class="nav flex-column mt-2">
-                    <li class="nav-item"><a class="nav-link" href="/settings/mailserver/"><i class="bi bi-envelope"></i> Mailserver</a></li>
-                    <li class="nav-item"><a class="nav-link" href="/settings/auth/"><i class="bi bi-shield-lock"></i> Auth</a></li>
+                    <li class="nav-item mb-2">
+                        <a class="nav-link d-flex align-items-center gap-2" href="/settings/ddns/">
+                            <i class="bi bi-globe fs-5"></i>
+                            <div>
+                                <strong>Dynamic DNS</strong>
+                                <div class="small text-muted fw-normal">deSEC DDNS</div>
+                            </div>
+                        </a>
+                    </li>
+                    <li class="nav-item mb-2">
+                        <a class="nav-link d-flex align-items-center gap-2" href="/settings/mailserver/">
+                            <i class="bi bi-envelope fs-5"></i>
+                            <div>
+                                <strong>Mailserver (SMTP)</strong>
+                                <div class="small text-muted fw-normal">Outgoing email</div>
+                            </div>
+                        </a>
+                    </li>
+                    <li class="nav-item mb-2">
+                        <a class="nav-link d-flex align-items-center gap-2" href="/settings/auth/">
+                            <i class="bi bi-shield-lock fs-5"></i>
+                            <div>
+                                <strong>Auth</strong>
+                                <div class="small text-muted fw-normal">2FA / Authelia</div>
+                            </div>
+                        </a>
+                    </li>
                 </ul>
                 {% endblock %}
             </div>

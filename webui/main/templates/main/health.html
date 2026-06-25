@@ -75,6 +75,16 @@
       detailsHtml += '</ul></div>';
     }
 
+    if (data.ddns_host_status) {
+      detailsHtml += '<div class="mt-2"><strong>DNS Match</strong><ul class="list-unstyled small mb-0">';
+      for (const [key, val] of Object.entries(data.ddns_host_status)) {
+        if (val && val.message) {
+          detailsHtml += '<li>' + statusIcon(val.status) + ' ' + escapeHtml(val.message) + '</li>';
+        }
+      }
+      detailsHtml += '</ul></div>';
+    }
+
     if (data.disk) {
       detailsHtml += '<div class="mt-2"><div class="progress" style="height:20px">' +
         '<div class="progress-bar ' + (data.disk.pct > 90 ? 'bg-danger' : data.disk.pct > 75 ? 'bg-warning' : 'bg-success') +

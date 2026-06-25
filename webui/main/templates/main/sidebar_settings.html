@@ -1,5 +1,29 @@
 <ul class="nav flex-column">
-    <li class="nav-item"><a class="nav-link" href="/settings/ddns/">Dynamic DNS</a></li>
-    <li class="nav-item"><a class="nav-link" href="/settings/mailserver/">Mailserver (SMTP)</a></li>
-    <li class="nav-item"><a class="nav-link" href="/settings/auth/">Auth</a></li>
+    <li class="nav-item mb-2">
+        <a class="nav-link d-flex align-items-center gap-2" href="/settings/ddns/">
+            <i class="bi bi-globe fs-5"></i>
+            <div>
+                <strong>Dynamic DNS</strong>
+                <div class="small text-muted fw-normal">Public reachability via deSEC</div>
+            </div>
+        </a>
+    </li>
+    <li class="nav-item mb-2">
+        <a class="nav-link d-flex align-items-center gap-2" href="/settings/mailserver/">
+            <i class="bi bi-envelope fs-5"></i>
+            <div>
+                <strong>Mailserver (SMTP)</strong>
+                <div class="small text-muted fw-normal">Outgoing email for 2FA notifications</div>
+            </div>
+        </a>
+    </li>
+    <li class="nav-item mb-2">
+        <a class="nav-link d-flex align-items-center gap-2" href="/settings/auth/">
+            <i class="bi bi-shield-lock fs-5"></i>
+            <div>
+                <strong>Auth</strong>
+                <div class="small text-muted fw-normal">2FA / Authelia authentication</div>
+            </div>
+        </a>
+    </li>
 </ul>
