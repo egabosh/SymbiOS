@@ -284,10 +284,10 @@ function checkHostStatus() {
 
       // IP match
       if (!data.ipv4_check_skipped && currentIpv4) {
-        html += '<div>' + (data.ipv4_match ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-x-circle-fill text-warning"></i>') + ' IPv4 ' + (data.ipv4_match ? 'matches' : 'mismatch — update needed') + '</div>';
+        html += '<div>' + (data.ipv4_match ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-x-circle-fill text-warning"></i>') + ' IPv4 ' + (data.ipv4_match ? 'matches' : 'mismatch - update needed') + '</div>';
       }
-      if (currentIpv6) {
-        html += '<div>' + (data.ipv6_match ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-x-circle-fill text-warning"></i>') + ' IPv6 ' + (data.ipv6_match ? 'matches' : 'mismatch — update needed') + '</div>';
+      if (currentIpv6 && data.dns_ipv6 && data.dns_ipv6.length > 0) {
+        html += '<div>' + (data.ipv6_match ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-x-circle-fill text-warning"></i>') + ' IPv6 ' + (data.ipv6_match ? 'matches' : 'mismatch - update needed') + '</div>';
       }
 
       info.innerHTML = html;
