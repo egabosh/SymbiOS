@@ -92,17 +92,30 @@ function autoDetect() {
     fetch('/settings/mailserver/discover/?email=' + encodeURIComponent(email))
         .then(r => r.json())
         .then(data => {
-            if (data.server) document.getElementById('smtp_server').value = data.server;
-            if (data.port) document.getElementById('smtp_port').value = data.port;
-            if (data.tls !== undefined) document.getElementById('smtp_tls').value = data.tls;
-            const userField = document.getElementById('smtp_user');
-            const email = document.getElementById('smtp_from').value.trim();
-            const localPart = email.split('@')[0];
-            let user = data.user || '%EMAILADDRESS%';
-            user = user.replace(/%EMAILADDRESS%/g, email).replace(/%EMAILLOCALPART%/g, localPart);
-            userField.value = user;
+            if (data.server) {
+                document.getElementById('smtp_server').value = data.server;
+                if (data.port) document.getElementById('smtp_port').value = data.port;
+                if (data.tls !== undefined) document.getElementById('smtp_tls').value = data.tls;
+                const userField = document.getElementById('smtp_user');
+                const localPart = email.split('@')[0];
+                let user = data.user || '%EMAILADDRESS%';
+                user = user.replace(/%EMAILADDRESS%/g, email).replace(/%EMAILLOCALPART%/g, localPart);
+                userField.value = user;
+            } else {
+                document.getElementById('smtp_server').value = '';
+                document.getElementById('smtp_port').value = '';
+                document.getElementById('smtp_tls').value = '';
+                document.getElementById('smtp_user').value = '';
+                new bootstrap.Collapse('#advancedSettings').show();
+            }
         })
-        .catch(() => {})
+        .catch(() => {
+            document.getElementById('smtp_server').value = '';
+            document.getElementById('smtp_port').value = '';
+            document.getElementById('smtp_tls').value = '';
+            document.getElementById('smtp_user').value = '';
+            new bootstrap.Collapse('#advancedSettings').show();
+        })
         .finally(() => {
             btn.disabled = false;
             btn.textContent = 'Detect';
