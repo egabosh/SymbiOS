@@ -517,7 +517,6 @@ def settings_mailserver(request):
             ok, err = _test_smtp(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls)
             if not ok:
                 messages.error(request, f'{err}')
-                messages.warning(request, 'SMTP connection or authentication failed. Check your settings and try again.')
                 return redirect('settings_mailserver')
 
             vars_['smtp_server'] = smtp_server
