@@ -125,39 +125,8 @@
   </div>
 </div>
 
-<!-- Host Status on this server -->
-<div class="card mt-3" id="settings-host-status-card">
-  <div class="card-header">
-    <i class="bi bi-info-circle"></i> Current Host Status
-  </div>
-  <div class="card-body small" id="settings-host-status">
-    <div class="spinner-border spinner-border-sm" role="status"></div>
-    Loading...
-  </div>
-</div>
-
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-  fetch('/settings/ddns/check-ip/')
-    .then(r => r.json())
-    .then(data => {
-      let html = '';
-      if (data.ipv4_available) {
-        html += '<div><i class="bi bi-check-circle-fill text-success"></i> IPv4: <code>' + data.ipv4 + '</code></div>';
-      } else {
-        html += '<div><i class="bi bi-x-circle-fill text-danger"></i> IPv4: not detected</div>';
-      }
-      if (data.ipv6_available) {
-        html += '<div><i class="bi bi-check-circle-fill text-success"></i> IPv6: <code>' + data.ipv6 + '</code></div>';
-      } else {
-        html += '<div><i class="bi bi-x-circle-fill text-secondary"></i> IPv6: not detected</div>';
-      }
-      document.getElementById('settings-host-status').innerHTML = html;
-    })
-    .catch(() => {
-      document.getElementById('settings-host-status').innerHTML = '<div class="text-danger">Failed to detect IPs</div>';
-    });
-
   // Detect local (LAN) IPv4 address
   fetch('/settings/local-ip/')
     .then(r => r.json())
