@@ -1,0 +1,66 @@
+{% extends "main/base.html" %}
+{% block sidebar %}
+    {% include "main/sidebar_settings.html" %}
+{% endblock %}
+{% block content %}
+<h2>Mailserver (SMTP)</h2>
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    SMTP is required for Authelia 2-Factor Authentication (2FA) email-based verification.
+    Configure your mailserver here if you plan to enable 2FA.
+</div>
+
+{% if messages %}
+{% for message in messages %}
+<div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+    {{ message }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endfor %}
+{% endif %}
+
+<div class="card">
+    <div class="card-header">SMTP Configuration</div>
+    <div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">SMTP Server</label>
+                    <input type="text" class="form-control" name="smtp_server" value="{{ vars.smtp_server|default:'' }}" placeholder="smtp.example.com">
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">SMTP Port</label>
+                    <input type="number" class="form-control" name="smtp_port" value="{{ vars.smtp_port|default:'' }}" placeholder="587">
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">SMTP TLS</label>
+                    <select class="form-select" name="smtp_tls">
+                        <option value="" {% if not vars.smtp_tls %}selected{% endif %}>None</option>
+                        <option value="starttls" {% if vars.smtp_tls == "starttls" %}selected{% endif %}>STARTTLS</option>
+                        <option value="tls" {% if vars.smtp_tls == "tls" %}selected{% endif %}>TLS</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">SMTP User</label>
+                    <input type="text" class="form-control" name="smtp_user" value="{{ vars.smtp_user|default:'' }}" placeholder="user@example.com">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">SMTP Password</label>
+                    <input type="password" class="form-control" name="smtp_password" value="{{ vars.smtp_password|default:'' }}">
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">SMTP From Address</label>
+                    <input type="email" class="form-control" name="smtp_from" value="{{ vars.smtp_from|default:'' }}" placeholder="noreply@example.com">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Save</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -5,6 +5,12 @@
 {% block content %}
 <h2>Auth Settings</h2>
 
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    For 2-Factor Authentication (2FA) via Authelia, a mailserver must be configured
+    under <a href="/settings/mailserver/">Settings &rarr; Mailserver (SMTP)</a>.
+</div>
+
 {% if messages %}
 {% for message in messages %}
 <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
@@ -15,24 +21,22 @@
 {% endif %}
 
 <div class="card">
-    <div class="card-header">LDAP / Auth</div>
+    <div class="card-header">Authentication (Authelia)</div>
     <div class="card-body">
         <form method="post">
             {% csrf_token %}
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">LDAP Admin Password</label>
-                    <input type="password" class="form-control" name="ldap_admin_password" value="{{ vars.ldap_admin_password|default:'' }}">
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">SMTP User</label>
-                    <input type="text" class="form-control" name="smtp_user" value="{{ vars.smtp_user|default:'' }}">
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">SMTP Password</label>
-                    <input type="password" class="form-control" name="smtp_password" value="{{ vars.smtp_password|default:'' }}">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               name="twofa_enabled" value="true"
+                               id="twofa_enabled"
+                               {% if vars.twofa_enabled %}checked{% endif %}>
+                        <label class="form-check-label" for="twofa_enabled">
+                            <strong>2-Factor Authentication (2FA)</strong>
+                        </label>
+                    </div>
+                    <small class="text-muted">Requires a configured mailserver. Users will need TOTP or email verification on login.</small>
                 </div>
             </div>
             <button type="submit" class="btn btn-primary">Save</button>

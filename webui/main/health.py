@@ -6,17 +6,27 @@ from datetime import datetime, timezone
 DOCKER_LOG_DIR = "/docker/containers"
 CONTAINER_INDEX = "/log/docker-containers.tsv"
 SERVICE_STATUS_FILE = "/log/symbios-services.tsv"
+HEALTH_FILE = "/log/system-health.json"
 LDAP_URI = os.environ.get("LDAP_URI", "ldap://openldap")
 STEPCA_HOST = "acme-pki-stepca"
 STEPCA_PORT = 9000
+TRAEFIK_HOST = "traefik"
 
 CHECK_HOSTS = [
-    ("symbios.local", 443),
-    ("auth.local", 443),
-    ("openldap.local", 636),
-    ("ldap.local", 443),
-    ("traefik.local", 443),
+    ("symbios.symbios-dev.dedyn.io", TRAEFIK_HOST, 443),
+    ("auth.symbios-dev.dedyn.io", TRAEFIK_HOST, 443),
+    ("ldap.symbios-dev.dedyn.io", TRAEFIK_HOST, 443),
+    ("traefik.symbios-dev.dedyn.io", TRAEFIK_HOST, 443),
 ]
+
+
+def _write_health_file(data):
+    try:
+        with open(HEALTH_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
 
 def _run(cmd, timeout=10):
     try:
@@ -26,6 +36,7 @@ def _run(cmd, timeout=10):
         return "", "timeout", 1
     except Exception as e:
         return "", str(e), 1
+
 
 def _get_ldap_vars():
     try:
@@ -48,6 +59,7 @@ def _get_ldap_vars():
         pass
     return base_dn, admin_pw
 
+
 def check_ldap():
     base_dn, admin_pw = _get_ldap_vars()
     stdout, stderr, rc = _run([
@@ -58,6 +70,7 @@ def check_ldap():
         return {"status": "ok", "message": "Bind successful"}
     return {"status": "error", "message": stderr.strip() or f"exit code {rc}"}
 
+
 def check_authelia():
     stdout, stderr, rc = _run([
         "curl", "-sf", "-o", "/dev/null",
@@ -67,10 +80,11 @@ def check_authelia():
         return {"status": "ok", "message": "Healthy"}
     return {"status": "error", "message": stderr.strip() or f"exit code {rc}"}
 
+
 def check_traefik():
     stdout, stderr, rc = _run([
-        "curl", "-sk", "-o", "/dev/null", "-w", "%{http_code}",
-        "https://traefik.local/",
+        "curl", "-sf", "-o", "/dev/null", "-w", "%{http_code}",
+        f"http://{TRAEFIK_HOST}/",
     ], timeout=5)
     if rc == 0:
         code = stdout.strip()
@@ -78,6 +92,7 @@ def check_traefik():
             return {"status": "ok", "message": f"Responds HTTP {code}"}
         return {"status": "warn", "message": f"Unexpected HTTP {code}"}
     return {"status": "error", "message": stderr.strip() or f"exit code {rc}"}
+
 
 def check_stepca():
     stdout, stderr, rc = _run([
@@ -87,6 +102,7 @@ def check_stepca():
     if rc == 0:
         return {"status": "ok", "message": "ACME directory reachable"}
     return {"status": "error", "message": stderr.strip() or f"exit code {rc}"}
+
 
 def check_config_daemon():
     try:
@@ -101,12 +117,13 @@ def check_config_daemon():
     except FileNotFoundError:
         return {"status": "warn", "message": "Status file not available"}
 
+
 def check_containers():
     expected = [
         "traefik",
         "symbios-ui-symbios-webui-1",
         "ldap-openldap-1",
-        "ldap-ldap.ldap.local-1",
+        "ldap-ldap.ldap.symbios-dev.dedyn.io-1",
         "acme-pki-stepca",
     ]
     running = set()
@@ -124,6 +141,7 @@ def check_containers():
         return {"status": "ok", "message": f"{len(running)} containers running"}
     return {"status": "warn", "message": f"Missing: {', '.join(missing)}"}
 
+
 def check_disk():
     checks = []
     for path in ["/", "/config"]:
@@ -137,18 +155,23 @@ def check_disk():
             checks.append(f"{path}: unknown")
     return {"status": "ok", "message": "; ".join(checks)}
 
-def check_cert(host, port):
+
+def check_cert(sni_hostname, connect_host, port):
     stdout, stderr, rc = _run([
-        "openssl", "s_client", "-connect", f"{host}:{port}",
-        "-servername", host, "-showcerts",
+        "openssl", "s_client", "-connect", f"{connect_host}:{port}",
+        "-servername", sni_hostname, "-showcerts",
     ], timeout=10)
     if rc != 0:
-        return {"status": "error", "message": stderr.strip() or "Connection failed"}
+        msg = stderr.strip() or "Connection failed"
+        if "Temporary failure in name resolution" in msg or "Name or service not known" in msg:
+            return {"status": "warn", "message": f"{sni_hostname}: Unreachable (DNS)"}
+        return {"status": "warn", "message": f"{sni_hostname}: {msg}"}
     for line in stdout.split("\n"):
         if "NotAfter:" in line:
             date_str = line.split("NotAfter:")[1].strip()
-            return _eval_cert_date(date_str, host)
-    return {"status": "warn", "message": f"{host}: Could not parse cert expiry"}
+            return _eval_cert_date(date_str, sni_hostname)
+    return {"status": "warn", "message": f"{sni_hostname}: Could not parse cert expiry"}
+
 
 def _eval_cert_date(date_str, label):
     date_str = date_str.strip().rstrip(";")
@@ -167,8 +190,9 @@ def _eval_cert_date(date_str, label):
         return {"status": "warn", "message": f"{label}: Expires in {remaining}d ({not_after.date()})"}
     return {"status": "ok", "message": f"{label}: {remaining}d ({not_after.date()})"}
 
+
 def check_certs():
-    results = [check_cert(host, port) for host, port in CHECK_HOSTS]
+    results = [check_cert(sni, host, port) for sni, host, port in CHECK_HOSTS]
     errors = [r for r in results if r["status"] == "error"]
     warns = [r for r in results if r["status"] == "warn"]
     if errors:
@@ -176,6 +200,7 @@ def check_certs():
     if warns:
         return {"status": "warn", "message": "; ".join(r["message"] for r in results)}
     return {"status": "ok", "message": "; ".join(r["message"] for r in results)}
+
 
 def check_root_ca():
     stdout, stderr, rc = _run([
@@ -193,6 +218,7 @@ def check_root_ca():
         return _eval_cert_date(last_date, f"{STEPCA_HOST} Root-CA")
     return {"status": "warn", "message": "Could not parse Root-CA cert expiry"}
 
+
 def check_ddns():
     try:
         import yaml
@@ -208,11 +234,9 @@ def check_ddns():
     if not ddns_host:
         return {"status": "warn", "message": "DDNS not configured"}
 
-    # Append .dedyn.io if needed
     if not ddns_host.endswith(".dedyn.io"):
         ddns_host = ddns_host + ".dedyn.io"
 
-    # Check domain existence on deSEC
     if ddns_apikey:
         try:
             import urllib.request, urllib.error
@@ -237,7 +261,7 @@ def check_ddns():
 
 
 def run_all():
-    return {
+    data = {
         "ldap": check_ldap(),
         "authelia": check_authelia(),
         "traefik": check_traefik(),
@@ -249,3 +273,5 @@ def run_all():
         "certs": check_certs(),
         "root_ca": check_root_ca(),
     }
+    _write_health_file(data)
+    return data

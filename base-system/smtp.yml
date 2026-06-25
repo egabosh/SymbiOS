@@ -1,0 +1,19 @@
+- name: smtp
+  hosts: all
+
+  tasks:
+    - name: Create mailclient marker file if SMTP is configured
+      ansible.builtin.copy:
+        dest: /home/docker/_defaults/mailclient
+        content: |
+          smtp_server={{ smtp_server }}
+          smtp_user={{ smtp_user }}
+          smtp_from={{ smtp_from }}
+        mode: '0644'
+      when: smtp_server is defined and smtp_server | length > 0
+
+    - name: Remove mailclient marker file if SMTP is not configured
+      ansible.builtin.file:
+        path: /home/docker/_defaults/mailclient
+        state: absent
+      when: smtp_server is not defined or smtp_server | length == 0
