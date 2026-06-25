@@ -106,7 +106,7 @@
                 # log
                 - --accesslog.filepath=/log/access.log
                 - --accesslog.format=json
-            container_name: traefik
+              container_name: traefik
               restart: unless-stopped
               security_opt:
                 - no-new-privileges:true
@@ -129,7 +129,7 @@
                 - traefik.enable=true
                 - traefik.http.routers.traefik.rule=Host(`traefik.{{ default_domain }}`)
                 - traefik.http.routers.traefik.entrypoints=https
-                - traefik.http.routers.traefik.middlewares=secHeaders@file,default-basic-auth@file
+                - traefik.http.routers.traefik.middlewares=secHeaders@file,authelia@file
                 - traefik.http.routers.traefik.service=api@internal
                 - traefik.http.routers.traefik.tls=true
                 - traefik.http.routers.traefik.tls.certresolver={{ acme_resolver }}
@@ -203,7 +203,7 @@
                     X-Forwarded-Proto: "https"
               authelia:
                 forwardAuth:
-                  address: "http://authelia.{{ default_domain }}:9091/api/authz/forward-auth?authelia_url=https://auth.{{inventory_hostname}}"
+                  address: "http://authelia.local:9091/api/authz/forward-auth?authelia_url=https://auth.{{ default_domain }}"
                   trustForwardHeader: true
                   authResponseHeaders:
                     - "X-Forwarded-Remote-User"
