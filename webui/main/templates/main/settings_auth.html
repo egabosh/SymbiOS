@@ -5,12 +5,18 @@
 {% block content %}
 <h2>Auth Settings</h2>
 
-<div class="alert alert-info">
-    <i class="bi bi-info-circle"></i>
-    For 2-Factor Authentication (2FA) via Authelia, a mailserver must be configured
-    under <a href="/settings/mailserver/">Settings &rarr; Mailserver (SMTP)</a>.
+<div class="row">
+  <div class="col-md-8">
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i>
+        For 2-Factor Authentication (2FA) via Authelia, a mailserver must be configured
+        under <a href="/settings/mailserver/">Settings &rarr; Mailserver (SMTP)</a>.
+    </div>
+  </div>
 </div>
 
+<div class="row">
+  <div class="col-md-8">
 
 <div class="card">
     <div class="card-header">Authentication (Authelia)</div>
@@ -34,5 +40,29 @@
             <button type="submit" class="btn btn-primary">Save</button>
         </form>
     </div>
+</div>
+
+  </div>
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-info-circle"></i> About</div>
+      <div class="card-body small">
+        <p>
+          <strong>Authelia</strong> is an open-source authentication server that
+          integrates with Traefik as a forward-auth middleware. Once enabled:
+        </p>
+        <ul class="ps-3 mb-2">
+          <li>All web services behind Traefik require login</li>
+          <li>Users authenticate against the local LDAP directory</li>
+          <li>Optional 2FA (email or TOTP) adds a second factor</li>
+        </ul>
+        <p class="mb-0 text-muted">
+          Manage users in <a href="/users/">Users</a> and groups in
+          <a href="/groups/">Groups</a>. Without 2FA, only a
+          username/password is required.
+        </p>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

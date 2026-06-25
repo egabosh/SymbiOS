@@ -298,8 +298,8 @@ def check_root_ca():
 
 
 def check_ddns():
+    import yaml, urllib.request, urllib.error
     try:
-        import yaml
         config_path = os.environ.get("CONFIG_PATH", "/config/inventory.yml")
         with open(config_path) as f:
             config = yaml.safe_load(f) or {}
@@ -317,15 +317,13 @@ def check_ddns():
 
     if ddns_apikey:
         try:
-            import urllib.request, urllib.error
             req = urllib.request.Request(
                 f"https://desec.io/api/v1/domains/{ddns_host}/",
                 headers={"Authorization": f"Token {ddns_apikey}"}
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
-                if resp.status == 200:
-                    return {"status": "ok", "message": f"{ddns_host} active on deSEC"}
-                return {"status": "warn", "message": f"{ddns_host}: unexpected HTTP {resp.status}"}
+                if resp.status != 200:
+                    return {"status": "warn", "message": f"{ddns_host}: HTTP {resp.status}"}
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return {"status": "warn", "message": f"{ddns_host} not found on deSEC"}
@@ -336,6 +334,73 @@ def check_ddns():
             return {"status": "warn", "message": f"deSEC API error: {e}"}
     else:
         return {"status": "warn", "message": "DDNS configured, no API key"}
+
+    # Fetch current public IPs
+    current_ipv4 = ""
+    current_ipv6 = ""
+    try:
+        stdout, _, _ = _run(["curl", "-s", "https://checkipv4.dedyn.io/"], timeout=5)
+        if stdout.strip():
+            current_ipv4 = stdout.strip()
+    except Exception:
+        pass
+    try:
+        stdout, _, _ = _run(["curl", "-s", "https://checkipv6.dedyn.io/"], timeout=5)
+        if stdout.strip() and ":" in stdout.strip():
+            current_ipv6 = stdout.strip()
+    except Exception:
+        pass
+
+    # Fetch DNS records from deSEC API
+    dns_ipv4 = []
+    dns_ipv6 = []
+    if ddns_apikey:
+        try:
+            req = urllib.request.Request(
+                f"https://desec.io/api/v1/domains/{ddns_host}/rrsets/",
+                headers={"Authorization": f"Token {ddns_apikey}"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                rrsets = json.loads(resp.read().decode())
+                for rr in rrsets:
+                    if rr["type"] == "A":
+                        dns_ipv4.extend(rr["records"])
+                    elif rr["type"] == "AAAA":
+                        dns_ipv6.extend(rr["records"])
+        except Exception:
+            pass
+
+    host_msg = f"{ddns_host}"
+    details = {}
+
+    if ddns_apikey:
+        ipv6_mode = vars_.get("ddns_ipv6", "")
+        skip_ipv4 = ipv6_mode == "only"
+
+        if skip_ipv4 or (current_ipv4 and current_ipv4 in dns_ipv4):
+            details["ipv4"] = {"status": "ok", "message": "IPv4 match" if not skip_ipv4 else "Skipped (IPv6-only)"}
+        elif current_ipv4:
+            details["ipv4"] = {"status": "warn", "message": f"IPv4 mismatch: got {current_ipv4}, DNS has {dns_ipv4}"}
+        elif dns_ipv4:
+            details["ipv4"] = {"status": "warn", "message": f"No public IPv4 detected, but DNS has A record {dns_ipv4}"}
+        else:
+            details["ipv4"] = {"status": "ok", "message": "No IPv4 (OK)"}
+
+        if current_ipv6 and current_ipv6 in dns_ipv6:
+            details["ipv6"] = {"status": "ok", "message": f"IPv6: {current_ipv6} (matches DNS)"}
+        elif current_ipv6:
+            details["ipv6"] = {"status": "warn", "message": f"IPv6 mismatch: got {current_ipv6}, DNS has {dns_ipv6}"}
+        elif dns_ipv6:
+            details["ipv6"] = {"status": "warn", "message": f"No public IPv6 detected, but DNS has AAAA record {dns_ipv6}"}
+        else:
+            details["ipv6"] = {"status": "ok", "message": "No IPv6 (OK)"}
+    else:
+        details["ipv4"] = {"status": "warn", "message": "No API key — cannot check DNS"}
+        details["ipv6"] = {"status": "warn", "message": "No API key — cannot check DNS"}
+
+    statuses = [v["status"] for v in details.values()]
+    overall = "error" if "error" in statuses else "warn" if "warn" in statuses else "ok"
+    return {"status": overall, "message": host_msg, "ddns_host_status": details}
 
 
 def run_all():
