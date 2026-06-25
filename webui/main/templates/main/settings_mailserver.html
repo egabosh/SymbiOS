@@ -28,15 +28,18 @@
             <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label">SMTP Server</label>
-                    <input type="text" class="form-control" name="smtp_server" value="{{ vars.smtp_server|default:'' }}" placeholder="smtp.example.com">
+                    <div class="input-group">
+                        <input type="text" class="form-control" name="smtp_server" id="smtp_server" value="{{ vars.smtp_server|default:'' }}" placeholder="smtp.example.com">
+                        <button type="button" class="btn btn-outline-secondary" id="btn_discover" onclick="discover()">Discover</button>
+                    </div>
                 </div>
                 <div class="col-md-3 mb-3">
                     <label class="form-label">SMTP Port</label>
-                    <input type="number" class="form-control" name="smtp_port" value="{{ vars.smtp_port|default:'' }}" placeholder="587">
+                    <input type="number" class="form-control" name="smtp_port" id="smtp_port" value="{{ vars.smtp_port|default:'' }}" placeholder="587">
                 </div>
                 <div class="col-md-3 mb-3">
                     <label class="form-label">SMTP TLS</label>
-                    <select class="form-select" name="smtp_tls">
+                    <select class="form-select" name="smtp_tls" id="smtp_tls">
                         <option value="" {% if not vars.smtp_tls %}selected{% endif %}>None</option>
                         <option value="starttls" {% if vars.smtp_tls == "starttls" %}selected{% endif %}>STARTTLS</option>
                         <option value="tls" {% if vars.smtp_tls == "tls" %}selected{% endif %}>TLS</option>
@@ -46,7 +49,8 @@
             <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label">SMTP User</label>
-                    <input type="text" class="form-control" name="smtp_user" value="{{ vars.smtp_user|default:'' }}" placeholder="user@example.com">
+                    <input type="text" class="form-control" name="smtp_user" id="smtp_user" value="{{ vars.smtp_user|default:'' }}" placeholder="user@example.com">
+                    <small class="text-muted">Use <code>%EMAILADDRESS%</code> to use the sender address as username.</small>
                 </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label">SMTP Password</label>
@@ -56,11 +60,36 @@
             <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label">SMTP From Address</label>
-                    <input type="email" class="form-control" name="smtp_from" value="{{ vars.smtp_from|default:'' }}" placeholder="noreply@example.com">
+                    <input type="email" class="form-control" name="smtp_from" id="smtp_from" value="{{ vars.smtp_from|default:'' }}" placeholder="noreply@example.com">
                 </div>
             </div>
             <button type="submit" class="btn btn-primary">Save</button>
         </form>
     </div>
 </div>
+
+<script>
+function discover() {
+    const server = document.getElementById('smtp_server').value.trim();
+    if (!server) return;
+    const btn = document.getElementById('btn_discover');
+    btn.disabled = true;
+    btn.textContent = 'Searching...';
+    fetch('/settings/mailserver/discover/?server=' + encodeURIComponent(server))
+        .then(r => r.json())
+        .then(data => {
+            if (data.port) document.getElementById('smtp_port').value = data.port;
+            if (data.tls) document.getElementById('smtp_tls').value = data.tls;
+            if (data.user) document.getElementById('smtp_user').placeholder = data.user;
+            if (data.user && !document.getElementById('smtp_user').value) {
+                document.getElementById('smtp_user').value = data.user;
+            }
+        })
+        .catch(() => {})
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = 'Discover';
+        });
+}
+</script>
 {% endblock %}
