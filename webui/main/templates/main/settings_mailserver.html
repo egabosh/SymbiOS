@@ -96,9 +96,8 @@ function autoDetect() {
             if (data.port) document.getElementById('smtp_port').value = data.port;
             if (data.tls !== undefined) document.getElementById('smtp_tls').value = data.tls;
             const userField = document.getElementById('smtp_user');
-            if (data.user && !userField.value) {
-                userField.value = data.user;
-            }
+            const user = data.user || '%EMAILADDRESS%';
+            userField.value = user.includes('%EMAILADDRESS%') ? '%EMAILADDRESS%' : user;
         })
         .catch(() => {})
         .finally(() => {

@@ -491,12 +491,31 @@ def settings_mailserver(request):
 
     if request.method == 'POST':
         try:
-            vars_['smtp_server'] = request.POST.get('smtp_server', '')
-            vars_['smtp_port'] = request.POST.get('smtp_port', '')
-            vars_['smtp_user'] = request.POST.get('smtp_user', '')
-            vars_['smtp_password'] = request.POST.get('smtp_password', '')
-            vars_['smtp_from'] = request.POST.get('smtp_from', '')
-            vars_['smtp_tls'] = request.POST.get('smtp_tls', '')
+            smtp_server = request.POST.get('smtp_server', '').strip()
+            smtp_port = request.POST.get('smtp_port', '').strip()
+            smtp_user = request.POST.get('smtp_user', '').strip()
+            smtp_password = request.POST.get('smtp_password', '').strip()
+            smtp_from = request.POST.get('smtp_from', '').strip()
+            smtp_tls = request.POST.get('smtp_tls', '').strip()
+
+            if not smtp_server or not smtp_port or not smtp_password or not smtp_from:
+                messages.error(request, 'All fields are required (Server, Port, Password, Email).')
+                return redirect('settings_mailserver')
+
+            if smtp_user == '%EMAILADDRESS%':
+                smtp_user = smtp_from
+
+            ok, err = _test_smtp(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls)
+            if not ok:
+                messages.error(request, f'SMTP authentication failed: {err}')
+                return redirect('settings_mailserver')
+
+            vars_['smtp_server'] = smtp_server
+            vars_['smtp_port'] = smtp_port
+            vars_['smtp_user'] = smtp_user
+            vars_['smtp_password'] = smtp_password
+            vars_['smtp_from'] = smtp_from
+            vars_['smtp_tls'] = smtp_tls
             _save_inventory_config(config)
             messages.success(request, 'Mailserver settings saved.')
         except Exception as e:
@@ -504,6 +523,32 @@ def settings_mailserver(request):
         return redirect('settings_mailserver')
 
     return render(request, 'main/settings_mailserver.html', {'vars': vars_})
+
+
+def _test_smtp(server, port, user, password, sender, tls_mode):
+    import smtplib, ssl
+    try:
+        port = int(port)
+        if tls_mode == 'tls':
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with smtplib.SMTP_SSL(server, port, context=ctx, timeout=10) as smtp:
+                smtp.login(user, password)
+        elif tls_mode == 'starttls':
+            with smtplib.SMTP(server, port, timeout=10) as smtp:
+                smtp.starttls()
+                smtp.login(user, password)
+        else:
+            with smtplib.SMTP(server, port, timeout=10) as smtp:
+                smtp.login(user, password)
+        return True, ''
+    except smtplib.SMTPAuthenticationError as e:
+        return False, f'Authentication rejected ({e.smtp_code})'
+    except smtplib.SMTPException as e:
+        return False, str(e)
+    except Exception as e:
+        return False, str(e)
 
 
 @login_required
