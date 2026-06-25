@@ -6,9 +6,11 @@ from . import views_mailserver
 from . import views_users
 from . import views_logs
 from . import views_change_password
+from . import views_services
 
 urlpatterns = [
     path('health/', views.health, name='health'),
+    path('services/', views_services.services, name='services'),
     path('health/data/', views.health_data, name='health_data'),
     path('', views.health, name='home'),
     path('health/', views.health, name='health'),
