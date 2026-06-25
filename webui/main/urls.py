@@ -10,7 +10,9 @@ from . import views_change_password
 urlpatterns = [
     path('health/', views.health, name='health'),
     path('health/data/', views.health_data, name='health_data'),
-    path('', views.settings, name='settings'),
+    path('', views.health, name='home'),
+    path('health/', views.health, name='health'),
+    path('settings/', views.settings, name='settings'),
     path('settings/', views.settings, name='settings'),
     path('settings/network/', views_settings.settings_network, name='settings_network'),
     path('settings/inventory/', views_settings.settings_inventory, name='settings_inventory'),

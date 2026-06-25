@@ -1,6 +1,7 @@
 {% extends "main/base.html" %}
 {% load static %}
 {% block title %}System Health - SymbiOS WebUI{% endblock %}
+{% block sidebar %}{% endblock %}
 {% block content %}
 <h2><i class="bi bi-heart-pulse"></i> System Health</h2>
 
@@ -13,7 +14,7 @@
 </div>
 
 <script>
-  const HEALTH_INTERVAL_MS = 10000;
+  const HEALTH_INTERVAL_MS = 15000;
 
   function statusIcon(status) {
     if (status === 'ok') return '<i class="bi bi-check-circle-fill text-success"></i>';
@@ -22,21 +23,69 @@
     return '<i class="bi bi-question-circle-fill text-secondary"></i>';
   }
 
-  function healthCard(key, label, data) {
-    const status = data.status || 'unknown';
-    const msg = data.message || '';
-    return '<div class="col-md-6 col-lg-4">' +
-      '<div class="card h-100 border-' + (status === 'ok' ? 'success' : status === 'warn' ? 'warning' : 'danger') + '">' +
-      '<div class="card-body">' +
-      '<h5 class="card-title">' + statusIcon(status) + ' ' + label + '</h5>' +
-      '<p class="card-text text-muted small mb-0">' + escapeHtml(msg) + '</p>' +
-      '</div></div></div>';
+  function statusBadge(status) {
+    if (status === 'ok') return '<span class="badge bg-success">OK</span>';
+    if (status === 'warn') return '<span class="badge bg-warning text-dark">Warning</span>';
+    if (status === 'error') return '<span class="badge bg-danger">Error</span>';
+    return '<span class="badge bg-secondary">Unknown</span>';
   }
 
   function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  function healthCardSmall(key, label, data) {
+    const status = data.status || 'unknown';
+    const border = status === 'ok' ? 'success' : status === 'warn' ? 'warning' : 'danger';
+    return '<div class="col-lg-3 col-md-4 col-sm-6">' +
+      '<div class="card h-100 border-' + border + ' health-card" data-bs-toggle="collapse" data-bs-target="#detail-' + key + '" role="button">' +
+      '<div class="card-body text-center py-3">' +
+      '<div class="fs-3 mb-1">' + statusIcon(status) + '</div>' +
+      '<div class="fw-semibold small">' + label + '</div>' +
+      '</div></div></div>';
+  }
+
+  function detailCard(key, label, data) {
+    const status = data.status || 'unknown';
+    const border = status === 'ok' ? 'success' : status === 'warn' ? 'warning' : 'danger';
+    let detailsHtml = '';
+
+    if (data.playbooks) {
+      detailsHtml += '<p class="mb-1"><strong>Playbooks:</strong> ' + escapeHtml(data.message || '') + '</p>';
+    } else {
+      detailsHtml += '<p class="mb-1">' + escapeHtml(data.message || '') + '</p>';
+    }
+
+    if (data.containers) {
+      detailsHtml += '<div class="mt-2"><strong>Containers</strong><ul class="list-unstyled small mb-0">';
+      for (const [cname, cstatus] of Object.entries(data.containers)) {
+        detailsHtml += '<li>' + statusIcon(cstatus) + ' ' + escapeHtml(cname) + '</li>';
+      }
+      detailsHtml += '</ul></div>';
+    }
+
+    if (data.certs && Array.isArray(data.certs)) {
+      detailsHtml += '<div class="mt-2"><strong>Certificates</strong><ul class="list-unstyled small mb-0">';
+      for (const cert of data.certs) {
+        detailsHtml += '<li>' + statusIcon(cert.status) + ' ' + escapeHtml(cert.message) + '</li>';
+      }
+      detailsHtml += '</ul></div>';
+    }
+
+    if (data.disk) {
+      detailsHtml += '<div class="mt-2"><div class="progress" style="height:20px">' +
+        '<div class="progress-bar ' + (data.disk.pct > 90 ? 'bg-danger' : data.disk.pct > 75 ? 'bg-warning' : 'bg-success') +
+        '" style="width:' + data.disk.pct + '%">' + data.disk.pct + '%</div></div>' +
+        '<small class="text-muted">' + escapeHtml(data.disk.used || '') + ' / ' + escapeHtml(data.disk.total || '') + '</small></div>';
+    }
+
+    return '<div class="collapse" id="detail-' + key + '">' +
+      '<div class="card card-body bg-light mt-1 mb-3 border-' + border + '">' +
+      '<h6 class="card-subtitle mb-2 text-muted">' + label + ' ' + statusBadge(status) + '</h6>' +
+      detailsHtml +
+      '</div></div>';
   }
 
   async function fetchHealth() {
@@ -51,20 +100,42 @@
         traefik: 'Traefik',
         stepca: 'Step-CA',
         config_daemon: 'Config Daemon',
+        playbooks: 'Playbooks',
         ddns: 'Dynamic DNS',
-        containers: 'Docker Containers',
-        disk: 'Disk Usage',
-        certs: 'TLS Certificates',
-        root_ca: 'Root-CA Certificate',
+        containers: 'Docker',
+        disk: 'Disk',
+        certs: 'Certificates',
+        root_ca: 'Root CA',
       };
 
-      let html = '';
+      let cardsHtml = '';
+      let detailsHtml = '';
+      let okCount = 0, warnCount = 0, errorCount = 0;
       for (const [key, label] of Object.entries(labels)) {
         if (data[key]) {
-          html += healthCard(key, label, data[key]);
+          const s = data[key].status || 'unknown';
+          if (s === 'ok') okCount++;
+          else if (s === 'warn') warnCount++;
+          else if (s === 'error') errorCount++;
+          cardsHtml += healthCardSmall(key, label, data[key]);
+          detailsHtml += detailCard(key, label, data[key]);
         }
       }
-      document.getElementById('health-container').innerHTML = html;
+
+      const overall = errorCount > 0 ? 'error' : warnCount > 0 ? 'warn' : 'ok';
+      const overallBadge = errorCount > 0
+        ? '<span class="badge bg-danger fs-5 me-2"><i class="bi bi-x-circle-fill"></i> ' + errorCount + ' Error' + (errorCount > 1 ? 's' : '') + '</span>'
+        : warnCount > 0
+        ? '<span class="badge bg-warning text-dark fs-5 me-2"><i class="bi bi-exclamation-triangle-fill"></i> ' + warnCount + ' Warning' + (warnCount > 1 ? 's' : '') + '</span>'
+        : '<span class="badge bg-success fs-5"><i class="bi bi-check-circle-fill"></i> All OK</span>';
+
+      document.getElementById('health-container').innerHTML =
+        '<div class="col-12 mb-3">' +
+        '<div class="d-flex align-items-center gap-3">' + overallBadge +
+        '<span class="text-muted small">' + Object.keys(labels).length + ' checks</span>' +
+        '</div></div>' +
+        cardsHtml +
+        '<div class="col-12 mt-2">' + detailsHtml + '</div>';
     } catch (e) {
       document.getElementById('health-container').innerHTML =
         '<div class="col-12"><div class="alert alert-danger">Error fetching health data: ' + e.message + '</div></div>';
@@ -74,4 +145,9 @@
   fetchHealth();
   setInterval(fetchHealth, HEALTH_INTERVAL_MS);
 </script>
+
+<style>
+  .health-card { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+  .health-card:hover { transform: translateY(-2px); box-shadow: 0 .25rem .5rem rgba(0,0,0,.1); }
+</style>
 {% endblock %}
