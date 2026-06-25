@@ -136,13 +136,13 @@ def check_playbooks():
 
 
 def check_containers():
-    expected = [
-        "traefik",
-        "symbios-ui-symbios-webui-1",
-        "ldap-openldap-1",
-        "ldap-ldap.ldap.symbios-dev.dedyn.io-1",
-        "acme-pki-stepca",
-    ]
+    expected = {
+        "traefik": "Traefik (Reverse Proxy)",
+        "symbios-ui-symbios-webui-1": "WebUI",
+        "ldap-openldap-1": "OpenLDAP",
+        "ldap-ldap.ldap.symbios-dev.dedyn.io-1": "LDAP Domain",
+        "acme-pki-stepca": "Step-CA (ACME-PKI)",
+    }
     running = set()
     try:
         with open(CONTAINER_INDEX) as f:
@@ -153,24 +153,47 @@ def check_containers():
     except FileNotFoundError:
         return {"status": "warn", "message": "Container index not available"}
 
+    containers = {}
+    for name, label in expected.items():
+        if name in running:
+            containers[label] = "ok"
+        else:
+            containers[label] = "warn"
+
     missing = [name for name in expected if name not in running]
     if not missing:
-        return {"status": "ok", "message": f"{len(running)} containers running"}
-    return {"status": "warn", "message": f"Missing: {', '.join(missing)}"}
+        return {"status": "ok", "message": f"{len(running)} containers running", "containers": containers}
+    return {"status": "warn", "message": f"Missing: {', '.join(missing)}", "containers": containers}
 
 
 def check_disk():
-    checks = []
-    for path in ["/", "/config"]:
+    paths = {"/": "System", "/config": "Config"}
+    results = []
+    for path in paths:
         try:
             stat = os.statvfs(path)
             total = stat.f_frsize * stat.f_blocks
             free = stat.f_frsize * stat.f_bfree
-            used_pct = 100 - (free / total * 100)
-            checks.append(f"{path}: {used_pct:.0f}% used")
+            used = total - free
+            pct = round(used / total * 100) if total else 0
+            results.append({"path": path, "total": _fmt_bytes(total), "used": _fmt_bytes(used), "pct": pct})
         except Exception:
-            checks.append(f"{path}: unknown")
-    return {"status": "ok", "message": "; ".join(checks)}
+            results.append({"path": path, "total": "?", "used": "?", "pct": 0})
+
+    pcts = [r["pct"] for r in results if r["pct"]]
+    max_pct = max(pcts) if pcts else 0
+    status = "error" if max_pct > 90 else "warn" if max_pct > 75 else "ok"
+    msg = "; ".join(f"{r['path']}: {r['pct']}%" for r in results)
+    disk_data = results[0] if results else {}
+    return {"status": status, "message": msg, "disk": disk_data}
+
+
+def _fmt_bytes(num):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if num < 1024:
+            return f"{num:.1f} {unit}"
+        num /= 1024
+    return f"{num:.1f} PB"
 
 
 def check_cert(sni_hostname, connect_host, port):
@@ -212,11 +235,12 @@ def check_certs():
     results = [check_cert(sni, host, port) for sni, host, port in CHECK_HOSTS]
     errors = [r for r in results if r["status"] == "error"]
     warns = [r for r in results if r["status"] == "warn"]
+    msg = "; ".join(r["message"] for r in results)
     if errors:
-        return {"status": "error", "message": "; ".join(r["message"] for r in results)}
+        return {"status": "error", "message": msg, "certs": results}
     if warns:
-        return {"status": "warn", "message": "; ".join(r["message"] for r in results)}
-    return {"status": "ok", "message": "; ".join(r["message"] for r in results)}
+        return {"status": "warn", "message": msg, "certs": results}
+    return {"status": "ok", "message": msg, "certs": results}
 
 
 def check_root_ca():
