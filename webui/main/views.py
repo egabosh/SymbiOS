@@ -560,6 +560,38 @@ def _test_smtp(server, port, user, password, sender, tls_mode):
         return False, str(e)
 
 
+def _send_test_email(server, port, user, password, sender, to_address, tls_mode):
+    import smtplib, ssl
+    from email.message import EmailMessage
+    try:
+        port = int(port)
+        msg = EmailMessage()
+        msg['Subject'] = 'SymbiOS SMTP Test'
+        msg['From'] = sender
+        msg['To'] = to_address
+        msg.set_content('This is a test email from your SymbiOS server.\n\nSMTP configuration is working correctly.')
+
+        if tls_mode == 'tls':
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with smtplib.SMTP_SSL(server, port, context=ctx, timeout=10) as smtp:
+                smtp.login(user, password)
+                smtp.send_message(msg)
+        elif tls_mode == 'starttls':
+            with smtplib.SMTP(server, port, timeout=10) as smtp:
+                smtp.starttls()
+                smtp.login(user, password)
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(server, port, timeout=10) as smtp:
+                smtp.login(user, password)
+                smtp.send_message(msg)
+        return True, ''
+    except Exception as e:
+        return False, str(e)
+
+
 @login_required
 def settings_mailserver_discover(request):
     import urllib.request, urllib.error, xml.etree.ElementTree as ET
@@ -682,6 +714,40 @@ def autoconfig_xml(request):
   </emailProvider>
 </clientConfig>'''
     return HttpResponse(xml, content_type='text/xml')
+
+
+@login_required
+def settings_mailserver_test_email(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'})
+
+    to_address = request.POST.get('to_address', '').strip()
+    if not to_address or '@' not in to_address or '.' not in to_address.split('@')[-1]:
+        return JsonResponse({'error': 'Invalid recipient email address.'})
+
+    config = _get_inventory_config()
+    vars_ = config.get('all', {}).get('vars', {})
+    smtp_server = request.POST.get('smtp_server', '').strip() or vars_.get('smtp_server', '')
+    smtp_port = request.POST.get('smtp_port', '').strip() or vars_.get('smtp_port', '')
+    smtp_user = request.POST.get('smtp_user', '').strip() or vars_.get('smtp_user', '%EMAILADDRESS%')
+    smtp_password = request.POST.get('smtp_password', '').strip() or vars_.get('smtp_password', '')
+    smtp_from = request.POST.get('smtp_from', '').strip() or vars_.get('smtp_from', '')
+    smtp_tls = request.POST.get('smtp_tls', '').strip() or vars_.get('smtp_tls', '')
+
+    if not smtp_server or not smtp_port or not smtp_password or not smtp_from:
+        return JsonResponse({'error': 'SMTP not fully configured. Save settings first.'})
+
+    smtp_user = smtp_user.replace('%EMAILADDRESS%', smtp_from).replace('%EMAILLOCALPART%', smtp_from.split('@')[0])
+
+    ok, err = _test_smtp(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls)
+    if not ok:
+        return JsonResponse({'error': f'SMTP auth failed: {err}'})
+
+    ok, err = _send_test_email(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, to_address, smtp_tls)
+    if ok:
+        return JsonResponse({'success': f'Test email sent to {to_address}.'})
+    else:
+        return JsonResponse({'error': f'Failed to send: {err}'})
 
 
 @login_required

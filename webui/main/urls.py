@@ -16,6 +16,7 @@ urlpatterns = [
     path('settings/ddns/host-status/', views.settings_ddns_host_status, name='settings_ddns_host_status'),
     path('settings/mailserver/', views.settings_mailserver, name='settings_mailserver'),
     path('settings/mailserver/discover/', views.settings_mailserver_discover, name='settings_mailserver_discover'),
+    path('settings/mailserver/test-email/', views.settings_mailserver_test_email, name='settings_mailserver_test_email'),
     path('settings/mailserver/autoconfig.xml', views.autoconfig_xml, name='autoconfig_xml'),
     path('settings/auth/', views.settings_auth, name='settings_auth'),
     path('logs/', views.logs, name='logs'),

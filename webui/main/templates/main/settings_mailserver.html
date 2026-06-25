@@ -72,6 +72,18 @@
     </div>
 </div>
 
+<div class="card mt-4">
+    <div class="card-header">Test Email</div>
+    <div class="card-body">
+        <label class="form-label">Send a test email to verify the current SMTP configuration</label>
+        <div class="input-group">
+            <input type="email" class="form-control" id="test_recipient" placeholder="recipient@example.com">
+            <button type="button" class="btn btn-outline-primary" id="btn_test" onclick="sendTestEmail()">Send Test</button>
+        </div>
+        <div id="test_result" class="mt-2"></div>
+    </div>
+</div>
+
 <script>
 function autoDetect() {
     const email = document.getElementById('smtp_from').value.trim();
@@ -123,6 +135,44 @@ function autoDetect() {
             btn.disabled = false;
             btn.textContent = 'Detect';
         });
+}
+
+function sendTestEmail() {
+    const recipient = document.getElementById('test_recipient').value.trim();
+    const resultEl = document.getElementById('test_result');
+    const btn = document.getElementById('btn_test');
+
+    if (!recipient || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recipient)) {
+        resultEl.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Enter a valid recipient email address.</div>';
+        return;
+    }
+
+    resultEl.innerHTML = '<div class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Sending...</div>';
+    btn.disabled = true;
+
+    const form = document.querySelector('form');
+    const data = new URLSearchParams(new FormData(form));
+    data.set('to_address', recipient);
+
+    fetch('/settings/mailserver/test-email/', {
+        method: 'POST',
+        headers: {'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value},
+        body: data
+    })
+    .then(r => r.json())
+    .then(resp => {
+        if (resp.success) {
+            resultEl.innerHTML = '<div class="alert alert-success py-2 mb-0"><i class="bi bi-check-circle-fill me-1"></i>' + resp.success + '</div>';
+        } else {
+            resultEl.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>' + resp.error + '</div>';
+        }
+    })
+    .catch(() => {
+        resultEl.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Request failed.</div>';
+    })
+    .finally(() => {
+        btn.disabled = false;
+    });
 }
 </script>
 {% endblock %}
