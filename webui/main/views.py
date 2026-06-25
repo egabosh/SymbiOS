@@ -467,7 +467,14 @@ def settings_auth(request):
 
     if request.method == 'POST':
         try:
-            config['all']['vars']['twofa_enabled'] = request.POST.get('twofa_enabled', 'false') == 'true'
+            twofa_wanted = request.POST.get('twofa_enabled', 'false') == 'true'
+            if twofa_wanted:
+                smtp_server = vars_.get('smtp_server', '')
+                smtp_from = vars_.get('smtp_from', '')
+                if not smtp_server or not smtp_from:
+                    messages.error(request, 'Cannot enable 2FA: No SMTP server configured. Configure a mailserver first under Settings → Mailserver (SMTP).')
+                    return redirect('settings_auth')
+            config['all']['vars']['twofa_enabled'] = twofa_wanted
             _save_inventory_config(config)
             messages.success(request, 'Auth settings saved.')
         except Exception as e:
