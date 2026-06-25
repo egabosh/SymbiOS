@@ -22,6 +22,7 @@ services:
       - traefik.enable=true
       - traefik.http.routers.symbios-ui.rule=Host(`{{ symbios_domain }}`)
       - traefik.http.routers.symbios-ui.entrypoints=https
+      - traefik.http.routers.symbios-ui.middlewares=secHeaders@file,authelia@file
       - traefik.http.routers.symbios-ui.tls=true
       - traefik.http.services.symbios-ui.loadbalancer.server.port=8080
       - traefik.http.routers.symbios-ui.service=symbios-ui

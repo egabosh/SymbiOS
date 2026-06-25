@@ -205,6 +205,8 @@
             rules:
               - domain: "auth.{{ default_domain }}"
                 policy: one_factor
+              - domain: "{{ symbios_domain }}"
+                policy: one_factor
               - domain: "traefik.{{ default_domain }}"
                 policy: one_factor
                 subject:

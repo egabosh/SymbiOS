@@ -77,6 +77,18 @@ CSRF_TRUSTED_ORIGINS = [
     'https://symbios.local',
     'https://symbios.',
 ]
+try:
+    import yaml
+    _config_path = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
+    with open(_config_path) as _f:
+        _cfg = yaml.safe_load(_f) or {}
+    _vars = _cfg.get('all', {}).get('vars', {})
+    if _vars.get('symbios_domain'):
+        CSRF_TRUSTED_ORIGINS.append('https://' + _vars['symbios_domain'])
+    if _vars.get('default_domain'):
+        CSRF_TRUSTED_ORIGINS.append('https://auth.' + _vars['default_domain'])
+except Exception:
+    pass
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 

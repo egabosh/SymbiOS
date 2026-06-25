@@ -69,6 +69,7 @@
                 - traefik.enable=true
                 - traefik.http.routers.{{ service_name }}.rule=Host(`{{ service_domain }}`)
                 - traefik.http.routers.{{ service_name }}.entrypoints=https
+                - traefik.http.routers.{{ service_name }}.middlewares=secHeaders@file,authelia@file
                 - traefik.http.routers.{{ service_name }}.tls=true
                 - traefik.http.services.{{ service_name }}.loadbalancer.server.port=8080
                 - traefik.http.routers.{{ service_name }}.service={{ service_name }}
