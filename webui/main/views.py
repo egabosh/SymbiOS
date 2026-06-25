@@ -511,46 +511,74 @@ def settings_mailserver_discover(request):
     import urllib.request, urllib.error, xml.etree.ElementTree as ET
 
     server = request.GET.get('server', '').strip().lower()
-    if not server:
-        return JsonResponse({'error': 'No server provided'})
+    email = request.GET.get('email', '').strip().lower()
 
-    result = {'server': server, 'port': '587', 'tls': 'starttls', 'user': ''}
+    if not server and not email:
+        return JsonResponse({'error': 'No server or email provided'})
 
-    try:
+    result = {'server': server, 'port': '587', 'tls': 'starttls', 'user': '%EMAILADDRESS%'}
+
+    # Extract domain from email if provided
+    domain = ''
+    if email and '@' in email:
+        domain = email.split('@')[1]
+    if not domain and server:
         domain = server
-        if server.startswith('smtp.'):
-            domain = server[5:]
 
-        url = f'https://autoconfig.thunderbird.net/v1.1/{domain}'
-        req = urllib.request.Request(url, headers={'User-Agent': 'SymbiOS'})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            xml = resp.read()
-            root = ET.fromstring(xml)
-            for server_elem in root.findall('.//outgoingServer'):
-                if server_elem.find('hostname') is not None:
-                    host = server_elem.find('hostname').text
-                    if host == server:
+    if not domain:
+        return JsonResponse({'error': 'Could not determine domain'})
+
+    found = False
+
+    # Try autoconfig sources in order
+    autoconfig_urls = [
+        f'https://autoconfig.thunderbird.net/v1.1/{domain}',
+        f'https://autoconfig.{domain}/mail/config-v1.1.xml',
+        f'https://{domain}/.well-known/autoconfig/mail/config-v1.1.xml',
+    ]
+
+    for url in autoconfig_urls:
+        if found:
+            break
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'SymbiOS'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                xml = resp.read()
+                root = ET.fromstring(xml)
+                for server_elem in root.findall('.//outgoingServer'):
+                    if server_elem.find('hostname') is not None:
+                        host = server_elem.find('hostname').text
+                        result['server'] = host
                         if server_elem.find('port') is not None:
                             result['port'] = server_elem.find('port').text
-                        for auth in server_elem.findall('authentication'):
-                            if auth.text == 'password-cleartext':
-                                result['tls'] = 'starttls'
-                            elif auth.text == 'SSL/TLS':
+                        socket_elem = server_elem.find('socketType')
+                        if socket_elem is not None:
+                            st = socket_elem.text.upper()
+                            if st == 'SSL':
                                 result['tls'] = 'tls'
-                        if server_elem.find('username') is not None:
-                            result['user'] = '%EMAILADDRESS%'
+                            elif st == 'STARTTLS':
+                                result['tls'] = 'starttls'
+                            else:
+                                result['tls'] = ''
+                        user_elem = server_elem.find('username')
+                        if user_elem is not None:
+                            result['user'] = user_elem.text
+                        found = True
                         break
-    except Exception:
+        except Exception:
+            pass
+
+    if not found:
         port_guess = {'587': 'starttls', '465': 'tls', '25': ''}
         for p, t in port_guess.items():
             try:
                 import socket
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(3)
-                if s.connect_ex((server, int(p))) == 0:
+                if s.connect_ex((domain, int(p))) == 0:
+                    result['server'] = domain
                     result['port'] = p
                     result['tls'] = t
-                    result['user'] = '%EMAILADDRESS%'
                     s.close()
                     break
                 s.close()
