@@ -311,8 +311,8 @@ def settings_ddns_check_ip(request):
         req = urllib.request.Request('https://checkipv6.dedyn.io/')
         with urllib.request.urlopen(req, timeout=10) as resp:
             ipv6 = resp.read().decode().strip()
-            # Basic IPv6 validation (has colons)
-            if ':' in ipv6:
+            # Validate: must be a real IPv6 address
+            if ':' in ipv6 and '<' not in ipv6 and '>' not in ipv6 and ' ' not in ipv6:
                 result['ipv6'] = ipv6
                 result['ipv6_available'] = True
     except Exception:

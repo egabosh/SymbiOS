@@ -222,6 +222,20 @@ def _get_container_state(name):
     return None
 
 
+def _is_valid_ip(s):
+    # Reject HTML, whitespace, empty strings
+    if not s or '<' in s or '>' in s or ' ' in s or '\n' in s:
+        return False
+    parts = s.split('.')
+    # IPv4: exactly 4 dot-separated digit groups
+    if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+        return True
+    # IPv6: must contain colon
+    if ':' in s:
+        return True
+    return False
+
+
 def _get_smtp_config():
     try:
         import yaml
@@ -340,14 +354,16 @@ def check_ddns():
     current_ipv6 = ""
     try:
         stdout, _, _ = _run(["curl", "-s", "https://checkipv4.dedyn.io/"], timeout=5)
-        if stdout.strip():
-            current_ipv4 = stdout.strip()
+        candidate = stdout.strip()
+        if _is_valid_ip(candidate):
+            current_ipv4 = candidate
     except Exception:
         pass
     try:
         stdout, _, _ = _run(["curl", "-s", "https://checkipv6.dedyn.io/"], timeout=5)
-        if stdout.strip() and ":" in stdout.strip():
-            current_ipv6 = stdout.strip()
+        candidate = stdout.strip()
+        if _is_valid_ip(candidate) and ":" in candidate:
+            current_ipv6 = candidate
     except Exception:
         pass
 
