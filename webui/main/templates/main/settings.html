@@ -3,7 +3,160 @@
     {% include "main/sidebar_settings.html" %}
 {% endblock %}
 {% block content %}
-<h2>Settings</h2>
-<p>Settings here</p>
-{% endblock %}
+<h2><i class="bi bi-gear"></i> Settings</h2>
 
+<div class="row mt-3">
+  <!-- Dynamic DNS -->
+  <div class="col-md-6 col-lg-4 mb-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><i class="bi bi-globe text-primary"></i> Dynamic DNS</h5>
+        <p class="card-text small">
+          Makes your server reachable under a fixed hostname via
+          <strong>deSEC</strong>, even if your ISP changes your public IP.
+          The DDNS update runs every <strong>5 minutes</strong> via cron.
+        </p>
+        <p class="card-text small text-muted">
+          Required for any service that needs to be accessed from the internet
+          (web interface, Authelia, etc.).
+        </p>
+        <a href="/settings/ddns/" class="btn btn-outline-primary btn-sm">Configure</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mailserver (SMTP) -->
+  <div class="col-md-6 col-lg-4 mb-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><i class="bi bi-envelope text-primary"></i> Mailserver (SMTP)</h5>
+        <p class="card-text small">
+          Configures an outgoing SMTP relay for <strong>Authelia</strong>
+          email-based verification (2FA codes, password resets, login
+          notifications).
+        </p>
+        <p class="card-text small text-muted">
+          SMTP settings are auto-detected from your email domain (MX records
+          / autoconfig). Falls back to manual entry if needed.
+        </p>
+        <a href="/settings/mailserver/" class="btn btn-outline-primary btn-sm">Configure</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auth -->
+  <div class="col-md-6 col-lg-4 mb-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><i class="bi bi-shield-lock text-primary"></i> Auth</h5>
+        <p class="card-text small">
+          Enables <strong>Authelia</strong> as a forward-auth middleware behind
+          Traefik. All web services then require login against the local LDAP
+          directory, with optional 2-Factor Authentication.
+        </p>
+        <p class="card-text small text-muted">
+          Users and groups are managed under the respective menu items.
+        </p>
+        <a href="/settings/auth/" class="btn btn-outline-primary btn-sm">Configure</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Port Forwarding Guide -->
+<div class="card mt-2">
+  <div class="card-header">
+    <i class="bi bi-diagram-3"></i> Port Forwarding Guide
+  </div>
+  <div class="card-body small">
+    <p>
+      For the web interface, Authelia, and all other services behind Traefik
+      to be reachable from the internet, your router must forward
+      <strong>TCP ports 80 (HTTP) and 443 (HTTPS)</strong> to the internal
+      IP of the Symbios server.
+    </p>
+
+    <h6 class="fw-bold mt-3 mb-1"><i class="bi bi-globe2"></i> IPv4</h6>
+    <ol class="ps-3 mb-1">
+      <li>Assign your Symbios server a <strong>static local IP</strong>
+          (e.g. <code>192.168.1.100</code>) via your router's DHCP reservation.</li>
+      <li>In your router's <em>Port Forwarding</em> / <em>Virtual Server</em>
+          section, create two rules:
+        <ul>
+          <li><code>TCP 80</code> → <em>192.168.1.100:80</em></li>
+          <li><code>TCP 443</code> → <em>192.168.1.100:443</em></li>
+        </ul>
+      </li>
+    </ol>
+    <div class="alert alert-warning py-2 px-3 mb-2">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      <strong>IPv4 limitation:</strong> Many consumer ISPs use
+      <strong>Carrier-Grade NAT (CG-NAT)</strong> or
+      <strong>DS-Lite</strong>, making IPv4 port forwarding
+      <em>impossible from the internet</em>. If you have a public IPv4
+      but forwarding still fails, your ISP may block ports 80/443
+      — a business plan or VPN tunnel might be required.
+    </div>
+
+    <h6 class="fw-bold mt-3 mb-1"><i class="bi bi-globe"></i> IPv6</h6>
+    <p class="mb-1">
+      With IPv6, every device typically gets a <strong>global,
+      publicly routable address</strong> — no NAT involved. No port
+      forwarding is needed if your firewall permits incoming TCP 80/443.
+    </p>
+    <ol class="ps-3 mb-1">
+      <li>Enable IPv6 on your router. Verify on the
+          <a href="/settings/ddns/">DDNS page</a> that your server has
+          a global IPv6 address (starts with <code>2001:</code> /
+          <code>2a0:</code> / <code>2a01:</code>…).</li>
+      <li>In your router's <em>Firewall</em> / <em>Traffic Rules</em>
+          section, allow incoming TCP traffic on ports 80 and 443 to your
+          server's IPv6 address.</li>
+      <li>On the <a href="/settings/ddns/">DDNS page</a>, select
+          <strong>"IPv6 only"</strong> (or <strong>"Dual-Stack"</strong>
+          if you also have working public IPv4).</li>
+    </ol>
+    <div class="alert alert-info py-2 px-3 mb-0">
+      <i class="bi bi-info-circle-fill"></i>
+      <strong>Pro tip:</strong> If you have only IPv6 (CG-NAT for IPv4),
+      choose <strong>IPv6 only</strong> — the server stays reachable via
+      IPv6 while the IPv4 A record is automatically removed from deSEC.
+    </div>
+  </div>
+</div>
+
+<!-- Host Status on this server -->
+<div class="card mt-3" id="settings-host-status-card">
+  <div class="card-header">
+    <i class="bi bi-info-circle"></i> Current Host Status
+  </div>
+  <div class="card-body small" id="settings-host-status">
+    <div class="spinner-border spinner-border-sm" role="status"></div>
+    Loading...
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  fetch('/settings/ddns/check-ip/')
+    .then(r => r.json())
+    .then(data => {
+      let html = '';
+      if (data.ipv4_available) {
+        html += '<div><i class="bi bi-check-circle-fill text-success"></i> IPv4: <code>' + data.ipv4 + '</code></div>';
+      } else {
+        html += '<div><i class="bi bi-x-circle-fill text-danger"></i> IPv4: not detected</div>';
+      }
+      if (data.ipv6_available) {
+        html += '<div><i class="bi bi-check-circle-fill text-success"></i> IPv6: <code>' + data.ipv6 + '</code></div>';
+      } else {
+        html += '<div><i class="bi bi-x-circle-fill text-secondary"></i> IPv6: not detected</div>';
+      }
+      document.getElementById('settings-host-status').innerHTML = html;
+    })
+    .catch(() => {
+      document.getElementById('settings-host-status').innerHTML = '<div class="text-danger">Failed to detect IPs</div>';
+    });
+});
+</script>
+{% endblock %}

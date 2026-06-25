@@ -234,7 +234,7 @@
         group: root
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          */30 * * * * root /usr/local/sbin/dedyn.sh >/dev/null 2>&1
+          */5 * * * * root /usr/local/sbin/dedyn.sh >/dev/null 2>&1
         backup: yes
 
     - name: /usr/local/etc/dedyn.conf
