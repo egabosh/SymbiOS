@@ -170,7 +170,7 @@
            block: |
              notifier:
                smtp:
-                 username: {{ smtp_user }}
+                 username: "{{ smtp_from if smtp_user == '%EMAILADDRESS%' else smtp_user }}"
                  password: {{ smtp_password }}
                  address: {{ smtp_server }}:{{ smtp_port }}
                  sender: {{ smtp_from }}
