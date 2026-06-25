@@ -66,6 +66,24 @@
       register: ldap_admin_password
       changed_when: false
 
+    - name: Check if admin user has mail attribute in LDAP
+      shell: >
+        docker compose exec -T openldap
+        ldapsearch -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}"
+        -w "{{ ldap_admin_password.stdout }}"
+        -b "uid=admin,ou=users,{{ldap_basedn}}" mail 2>/dev/null
+        | grep -q "^mail:"
+      args:
+        chdir: "{{ ldap_service_path }}"
+      register: admin_mail_check
+      changed_when: false
+      failed_when: false
+
+    - name: Set admin_has_mail fact
+      set_fact:
+        admin_has_mail: "{{ admin_mail_check.rc == 0 }}"
+      changed_when: false
+
     - name: "{{ service_path }}/authelia-data/configuration.yml"
       blockinfile:
         path: "{{ service_path }}/authelia-data/configuration.yml"
@@ -110,7 +128,7 @@
               groups_filter: "(&(objectClass=posixGroup)(memberUid={input}))"
 
           totp:
-            disable: "{{ not twofa_enabled | default(false) | bool }}"
+            disable: "{{ not (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) }}"
             issuer: auth.{{ default_domain }}
             algorithm: sha1
             digits: 6
@@ -201,7 +219,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         block: |
           access_control:
-            default_policy: "{{ 'two_factor' if twofa_enabled else 'one_factor' }}"
+            default_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
             rules:
               - domain: "auth.{{ default_domain }}"
                 policy: one_factor
