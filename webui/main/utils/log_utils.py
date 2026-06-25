@@ -5,7 +5,6 @@ Supports system logs and Docker container logs.
 import os
 import json
 from django.http import JsonResponse, HttpResponseBadRequest
-from .ansi_to_html import ansi_to_html
 
 LOG_BASE_DIR = "/var/log"
 DOCKER_LOG_BASE = "/docker/containers"
@@ -14,7 +13,6 @@ CONTAINER_INDEX = "/log/docker-containers.tsv"
 ALLOWED_LOG_FILES = {
     "messages": "/var/log/messages",
     "syslog": "/var/log/syslog",
-    "symbios": "/log/symbios.log",
     "dedyn": "/log/dedyn.log",
     "configd": "/log/configd.log",
     "playbook-basics": "/log/playbook-basics.log",
@@ -34,7 +32,6 @@ ALLOWED_LOG_FILES = {
 LOG_LABELS = {
     "messages": "System Messages",
     "syslog": "Syslog",
-    "symbios": "Symbios",
     "dedyn": "DDNS (deSEC)",
     "configd": "Config Daemon",
     "playbook-basics": "Playbook: Basics",
@@ -112,14 +109,14 @@ def logs_stream(request):
         else:
             raw_lines = all_lines[offset:]
 
-    lines_to_send = [ansi_to_html(line) for line in raw_lines]
+    lines_to_send = [line.rstrip('\n') for line in raw_lines]
 
     # Pretty-print health JSON
     if log_name == "health" and raw_lines:
         try:
             parsed = json.loads("".join(raw_lines))
             pretty = json.dumps(parsed, indent=2, default=str)
-            lines_to_send = [ansi_to_html(pretty)]
+            lines_to_send = [pretty]
         except json.JSONDecodeError:
             pass
 
@@ -178,7 +175,7 @@ def _docker_logs_stream(container_id, offset=0):
                 except json.JSONDecodeError:
                     msg = line
                     ts = ""
-                lines_to_send.append(ansi_to_html(msg))
+                lines_to_send.append(msg)
             else:
                 lines_to_send.append("")
     except FileNotFoundError:

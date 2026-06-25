@@ -20,7 +20,6 @@
         <option value="configd" {% if default_log_name == "configd" %}selected{% endif %}>Config Daemon</option>
         <option value="dedyn" {% if default_log_name == "dedyn" %}selected{% endif %}>DDNS (deSEC)</option>
         <option value="health" {% if default_log_name == "health" %}selected{% endif %}>System Health (JSON)</option>
-        <option value="symbios" {% if default_log_name == "symbios" %}selected{% endif %}>Symbios</option>
       </optgroup>
       <optgroup label="Playbooks">
         <option value="playbook-basics">Playbook: Basics</option>
@@ -98,10 +97,6 @@
   #log-container .log-line .line-content .level-info {
     color: #60a5fa;
   }
-  #log-container .log-line .line-content .ansi-escape {
-    color: transparent;
-    display: none;
-  }
   #log-container .empty-state {
     color: #6c757d;
     text-align: center;
@@ -178,22 +173,27 @@
         setLogName(logSelect.value);
     });
 
+    function stripAnsi(text) {
+        return text.replace(/\x1B\[[0-9;]*m/g, '');
+    }
+
     function formatLine(lineNum, text) {
+        let raw = stripAnsi(text);
         let className = 'log-line';
-        let displayText = text;
 
         // Highlight timestamps like "2024-01-01 12:00:00" or "Jan  1 12:00:00"
         let ts = '';
-        const tsMatch = text.match(/^\d{4}[-\s]\d{2}[-\s]\d{2}[\sT]\d{2}:\d{2}:\d{2}/)
-            || text.match(/^[A-Z][a-z]{2}\s+\d{1,2}\s\d{2}:\d{2}:\d{2}/);
+        const tsMatch = raw.match(/^\d{4}[-\s]\d{2}[-\s]\d{2}[\sT]\d{2}:\d{2}:\d{2}/)
+            || raw.match(/^[A-Z][a-z]{2}\s+\d{1,2}\s\d{2}:\d{2}:\d{2}/);
         if (tsMatch) {
             ts = '<span class="timestamp">' + escapeHtml(tsMatch[0]) + '</span>';
-            displayText = displayText.substring(tsMatch[0].length);
+            raw = raw.substring(tsMatch[0].length);
         }
 
         // Highlight Python tracebacks / Ansible PLAY RECAP
-        if (/^[A-Z]+:/.test(displayText.trim())) {
-            const level = displayText.trim().split(':')[0];
+        const trimmed = raw.trim();
+        if (/^[A-Z]+:/.test(trimmed)) {
+            const level = trimmed.split(':')[0];
             const lc = level.toLowerCase();
             if (lc.includes('error') || lc.includes('fatal') || lc.includes('fail'))
                 className += ' level-error';
@@ -205,7 +205,7 @@
 
         return '<div class="' + className + '">' +
             '<span class="line-num">' + lineNum + '</span>' +
-            '<span class="line-content">' + ts + escapeHtml(displayText) + '</span>' +
+            '<span class="line-content">' + ts + escapeHtml(raw) + '</span>' +
             '</div>';
     }
 
