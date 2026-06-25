@@ -238,8 +238,8 @@ function checkHostStatus() {
   var currentIpv4 = '';
   var currentIpv6 = '';
   var ipInfoText = document.getElementById('ip-info').innerText;
-  var ipv4Match = ipInfoText.match(/IPv4:\s*(\S+)/);
-  var ipv6Match = ipInfoText.match(/IPv6:\s*(\S+)/);
+  var ipv4Match = ipInfoText.match(/IPv4:\s*(\d+\.\d+\.\d+\.\d+)/);
+  var ipv6Match = ipInfoText.match(/IPv6:\s*(\S+:\S+)/);
   if (ipv4Match) currentIpv4 = ipv4Match[1];
   if (ipv6Match) currentIpv6 = ipv6Match[1];
 
