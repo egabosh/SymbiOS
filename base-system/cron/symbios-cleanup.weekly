@@ -1,0 +1,7 @@
+#!/bin/bash
+# SymbiOS weekly cleanup: prune Docker build cache and old apt packages
+# Prevents disk-full issues from container build cache accumulation
+
+/usr/bin/docker builder prune -a -f >/dev/null 2>&1
+/usr/bin/docker image prune -a -f >/dev/null 2>&1
+/usr/bin/apt-get autoclean -y >/dev/null 2>&1
