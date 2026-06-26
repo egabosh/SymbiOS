@@ -86,6 +86,8 @@ def services_detail(request, service_name):
 def services_action(request, service_name):
     if request.method == 'POST':
         action = request.POST.get('action')
+        if action == 'reinstall':
+            action = 'playbook'
         TRIGGER_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = int(time.time())
         trigger_file = TRIGGER_DIR / f'{timestamp}-{action}-{service_name}.trigger'
