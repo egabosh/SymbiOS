@@ -6,7 +6,6 @@ from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
-from .forms import NetworkConfigForm
 from .utils.log_utils import logs_stream
 from .health import run_all as health_run_all
 import urllib.request

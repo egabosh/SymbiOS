@@ -3,51 +3,14 @@ import json
 import urllib.request
 import urllib.error
 from pathlib import Path
+TRIGGER_DIR = Path('/config/triggers')
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
-from .forms import NetworkConfigForm
 from .views import _get_inventory_config, _save_inventory_config, CONFIG_PATH
 from .utils.log_utils import logs_stream
 
-
-@login_required
-def settings_network(request):
-    if request.method == 'POST':
-        form = NetworkConfigForm(request.POST)
-        if form.is_valid():
-            try:
-                form.save()
-                messages.success(request, 'Network configuration saved.')
-            except Exception as e:
-                messages.error(request, f'Error: {e}')
-    else:
-        form = NetworkConfigForm()
-    return render(request, 'main/settings_network.html', {'form': form})
-
-
-@login_required
-def settings_inventory(request):
-    config = _get_inventory_config()
-    vars_ = config.get('all', {}).get('vars', {})
-
-    if request.method == 'POST':
-        try:
-            vars_['default_domain'] = request.POST.get('default_domain', vars_.get('default_domain', 'local'))
-            vars_['ddns_apikey'] = request.POST.get('ddns_apikey', vars_.get('ddns_apikey', ''))
-            vars_['ddns_host'] = request.POST.get('ddns_host', vars_.get('ddns_host', ''))
-            vars_['smtp_server'] = request.POST.get('smtp_server', vars_.get('smtp_server', ''))
-            vars_['smtp_user'] = request.POST.get('smtp_user', vars_.get('smtp_user', ''))
-            vars_['smtp_from'] = request.POST.get('smtp_from', vars_.get('smtp_from', ''))
-            vars_['ldap_admin_password'] = request.POST.get('ldap_admin_password', vars_.get('ldap_admin_password', ''))
-            _save_inventory_config(config)
-            messages.success(request, 'Configuration saved.')
-        except Exception as e:
-            messages.error(request, f'Error saving configuration: {e}')
-        return redirect('settings_inventory')
-
-    return render(request, 'main/settings_inventory.html', {'config': config, 'vars': vars_})
 
 
 @login_required
@@ -373,3 +336,118 @@ def settings_local_ip(request):
         return JsonResponse({"local_ipv4": local_ipv4})
     except Exception as e:
         return JsonResponse({"local_ipv4": "", "error": str(e)})
+
+
+@login_required
+def _is_valid_ssh_pubkey(key):
+    parts = key.strip().split(None, 2)
+    if len(parts) < 2:
+        return False
+    valid_types = {"ssh-rsa", "ssh-ed25519", "ssh-dss",
+                   "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521"}
+    if parts[0] not in valid_types:
+        return False
+    try:
+        import base64
+        base64.b64decode(parts[1])
+        return True
+    except Exception:
+        return False
+
+
+def settings_ssh_keys(request):
+    SSH_KEYS_FILE = "/config/ssh-authorized-keys"
+    config = _get_inventory_config()
+    if "all" not in config:
+        config["all"] = {}
+    if "vars" not in config["all"]:
+        config["all"]["vars"] = {}
+    vars_ = config["all"]["vars"]
+
+    if "ssh_authorized_keys" not in vars_ or not isinstance(vars_["ssh_authorized_keys"], list):
+        keys = []
+        for src in ("/root-host-keys", SSH_KEYS_FILE):
+            try:
+                with open(src) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#"):
+                            keys.append(line)
+                if keys:
+                    break
+            except Exception:
+                pass
+        vars_["ssh_authorized_keys"] = keys
+        _save_inventory_config(config)
+    elif len(vars_["ssh_authorized_keys"]) == 0:
+        keys = []
+        try:
+            with open("/root-host-keys") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        keys.append(line)
+        except Exception:
+            pass
+        if keys:
+            vars_["ssh_authorized_keys"] = keys
+            _save_inventory_config(config)
+
+    if request.method == "POST":
+        action = request.POST.get("action", "save")
+        try:
+            if action == "add":
+                new_key = request.POST.get("new_key", "").strip()
+                if new_key:
+                    if not _is_valid_ssh_pubkey(new_key):
+                        raise ValueError("Invalid SSH public key format")
+                    vars_["ssh_authorized_keys"].append(new_key)
+            elif action == "remove":
+                remove_idx = request.POST.get("index", "")
+                if remove_idx.isdigit():
+                    idx = int(remove_idx)
+                    if 0 <= idx < len(vars_["ssh_authorized_keys"]):
+                        vars_["ssh_authorized_keys"].pop(idx)
+            elif action == "save":
+                keys_text = request.POST.get("keys", "").strip()
+                new_keys = [k.strip() for k in keys_text.split("\n") if k.strip() and not k.strip().startswith("#")]
+                invalid = [k for k in new_keys if not _is_valid_ssh_pubkey(k)]
+                if invalid:
+                    raise ValueError(f"{len(invalid)} invalid SSH key(s) found")
+                vars_["ssh_authorized_keys"] = new_keys
+
+            _save_inventory_config(config)
+
+            with open(SSH_KEYS_FILE, "w") as f:
+                for k in vars_["ssh_authorized_keys"]:
+                    f.write(k + "\n")
+
+            import time
+            TRIGGER_DIR.mkdir(parents=True, exist_ok=True)
+            timestamp = int(time.time())
+            trigger_file = TRIGGER_DIR / f"{timestamp}-playbook-ssh-keys.trigger"
+            trigger_file.touch()
+
+            messages.success(request, "SSH keys saved and deployment triggered.")
+        except Exception as e:
+            messages.error(request, f"Error: {e}")
+        return redirect("settings_ssh_keys")
+
+    # Enrich keys with parsed type+comment
+    raw_keys = vars_.get("ssh_authorized_keys", [])
+    key_info = []
+    for k in raw_keys:
+        parts = k.split(None, 2)
+        ktype = parts[0] if len(parts) > 0 else ""
+        kdata = parts[1] if len(parts) > 1 else ""
+        kcomment = parts[2] if len(parts) > 2 else ""
+        key_info.append({
+            "line": k,
+            "type": ktype,
+            "data": kdata,
+            "comment": kcomment,
+        })
+    return render(request, "main/settings_ssh_keys.html", {
+        "keys": raw_keys,
+        "key_info": key_info,
+    })
