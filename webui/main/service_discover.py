@@ -21,6 +21,7 @@ def discover_services():
         status_result = get_service_status(sname)
         services.append({
             "name": sname,
+            "slug": sname,
             "playbook": str(pf),
             "service_dirs": sdirs,
             "installed": len(sdirs) > 0,

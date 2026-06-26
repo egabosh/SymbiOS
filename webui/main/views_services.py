@@ -28,11 +28,11 @@ def _get_domain():
 def _get_basic_services():
     domain = _get_domain()
     return [
-        {'name': 'SymbiOS WebUI', 'icon': 'bi-globe', 'url': 'https://symbios.' + domain, 'description': 'Configuration and management interface', 'internal': False, 'basic': True},
-        {'name': 'Traefik Dashboard', 'icon': 'bi-hdd-network', 'url': 'https://traefik.' + domain, 'description': 'Reverse proxy status and routing', 'internal': False, 'basic': True},
-        {'name': 'Authelia', 'icon': 'bi-shield-lock', 'url': 'https://auth.' + domain, 'description': 'Authentication and single sign-on', 'internal': False, 'basic': True},
-        {'name': 'OpenLDAP', 'icon': 'bi-database', 'url': 'ldaps://ldap.' + domain, 'description': 'Directory service for users and groups', 'internal': True, 'basic': True},
-        {'name': 'Step-CA', 'icon': 'bi-key', 'url': 'https://pki.' + domain, 'description': 'PKI and certificate authority', 'internal': False, 'basic': True}
+        {'name': 'SymbiOS WebUI', 'slug': 'symbios-webui', 'icon': 'bi-globe', 'url': 'https://symbios.' + domain, 'description': 'Configuration and management interface', 'internal': False, 'basic': True},
+        {'name': 'Traefik Dashboard', 'slug': 'traefik-dashboard', 'icon': 'bi-hdd-network', 'url': 'https://traefik.' + domain, 'description': 'Reverse proxy status and routing', 'internal': False, 'basic': True},
+        {'name': 'Authelia', 'slug': 'authelia', 'icon': 'bi-shield-lock', 'url': 'https://auth.' + domain, 'description': 'Authentication and single sign-on', 'internal': False, 'basic': True},
+        {'name': 'OpenLDAP', 'slug': 'openldap', 'icon': 'bi-database', 'url': 'ldaps://ldap.' + domain, 'description': 'Directory service for users and groups', 'internal': True, 'basic': True},
+        {'name': 'Step-CA', 'slug': 'step-ca', 'icon': 'bi-key', 'url': 'https://pki.' + domain, 'description': 'PKI and certificate authority', 'internal': False, 'basic': True}
     ]
 
 
@@ -49,14 +49,14 @@ def services(request):
     managed = service_discover.discover_services()
     basic = _get_basic_services()
     domain = _get_domain()
-    return render(request, 'main/services.html', {'services': basic + managed, 'managed_services': managed, 'default_domain': domain})
+    return render(request, 'main/services.html', {'services': basic + managed, 'managed_services': managed, 'default_domain': domain, 'all_services': basic + managed})
 
 
 @login_required
 def services_manage(request):
     managed = service_discover.discover_services()
     domain = _get_domain()
-    return render(request, 'main/services_manage.html', {'services': managed, 'default_domain': domain})
+    return render(request, 'main/services_manage.html', {'services': managed, 'default_domain': domain, 'all_services': _get_basic_services() + managed})
 
 
 @login_required
@@ -66,7 +66,7 @@ def services_detail(request, service_name):
     all_services = basic + managed
     svc = None
     for s in all_services:
-        key = s.get('name', '').lower().replace(' ', '-').replace('/', '-')
+        key = s.get('slug', s.get('name', '').lower().replace(' ', '-').replace('/', '-'))
         if key == service_name.lower():
             svc = s
             break
