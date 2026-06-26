@@ -594,6 +594,19 @@
       notify: reload systemd
 
 
+    - name: /etc/cron.weekly/symbios-cleanup
+      ansible.builtin.copy:
+        dest: /etc/cron.weekly/symbios-cleanup
+        mode: 0755
+        owner: root
+        group: root
+        content: |
+          #!/bin/bash
+          # SymbiOS weekly cleanup: prune Docker build cache and old apt packages
+          /usr/bin/docker builder prune -a -f >/dev/null 2>&1
+          /usr/bin/docker image prune -a -f >/dev/null 2>&1
+          /usr/bin/apt-get autoclean -y >/dev/null 2>&1
+
   handlers:
 
     - name: update-grub
