@@ -160,6 +160,12 @@ do
             f_run_playbook "base-system/authelia.yml"
         fi
 
+        # Run SSH keys playbook on ssh_authorized_keys changes
+        if echo "${g_new_content}" | grep -q "ssh_authorized_keys"
+        then
+            f_run_playbook "base-system/ssh-keys.yml"
+        fi
+
         g_last_hash="${g_current_hash}"
     fi
 
