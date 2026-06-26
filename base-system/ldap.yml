@@ -666,13 +666,28 @@
       changed_when: false
       no_log: true
 
-    # Set initial admin user password in LDAP directory
+    # Set initial admin user password in LDAP directory (only on first run)
+    - name: Check if admin password was already initialized
+      ansible.builtin.stat:
+        path: /home/docker/symbios-ui/config/.admin_initialized
+      register: admin_init_flag
+
     - name: Ensure admin user password is admin in LDAP
       ansible.builtin.shell: |
         docker compose exec -T openldap ldappasswd -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}" -w "{{ ldap_admin_password.stdout }}" -s admin "uid=admin,ou=users,{{ldap_basedn}}"
       args:
         chdir: "{{ docker_path }}"
       no_log: true
+      when: not admin_init_flag.stat.exists
+
+    - name: Create admin initialization flag
+      ansible.builtin.file:
+        path: /home/docker/symbios-ui/config/.admin_initialized
+        state: touch
+        mode: "0640"
+        owner: "10000"
+        group: "10000"
+      when: not admin_init_flag.stat.exists
     - name: Write ldap_admin_password to .ldap_admin_pw for webui
       ansible.builtin.copy:
         dest: /home/docker/symbios-ui/config/.ldap_admin_pw
