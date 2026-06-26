@@ -1,0 +1,25 @@
+- name: Deploy SSH authorized keys
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+    - name: Ensure .ssh directory exists
+      file:
+        path: /root/.ssh
+        state: directory
+        mode: "0700"
+        owner: root
+        group: root
+      become: yes
+
+    - name: Write authorized_keys from inventory
+      copy:
+        dest: /root/.ssh/authorized_keys
+        content: |
+          {% for key in ssh_authorized_keys | default([]) %}
+          {{ key }}
+          {% endfor %}
+        mode: "0600"
+        owner: root
+        group: root
+      become: yes

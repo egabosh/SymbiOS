@@ -1,6 +1,7 @@
 #!/bin/bash
 # SymbiOS Config Daemon
 # Monitors changes to inventory.yml and runs matching playbooks
+# Also watches trigger files for service management
 
 source /etc/bash/gaboshlib.include
 
@@ -9,9 +10,13 @@ g_config_file="${1:-/home/docker/symbios-ui/config/inventory.yml}"
 g_check_interval=10
 g_configd_log="/home/docker/symbios-ui/log/configd.log"
 g_status_file="/home/docker/symbios-ui/log/configd-status"
+G_TRIGGER_DIR="/config/triggers"
+
+# Create trigger directory
+mkdir -p "${G_TRIGGER_DIR}"
 
 # Initial log entry
-echo "$(date '+%Y-%m-%d %H:%M:%S') [START] SymbiOS Config Daemon started - monitoring: ${g_config_file}" >> "${g_configd_log}"
+echo "$(date +%Y-%m-%d %H:%M:%S) [START] SymbiOS Config Daemon started - monitoring: ${g_config_file}" >> "${g_configd_log}"
 g_echo "SymbiOS Config Daemon started - monitoring: ${g_config_file}"
 echo "idle" > "${g_status_file}"
 
@@ -47,8 +52,53 @@ function f_run_playbook {
     echo "idle" > "${g_status_file}"
 }
 
+# Handle trigger files from the WebUI
+function f_handle_trigger {
+    local f_trigger_file=$1
+    local f_filename
+    f_filename=$(basename "${f_trigger_file}")
+    local f_action_name
+    f_action_name=$(echo "${f_filename}" | cut -d- -f2)
+    local f_service_name
+    f_service_name=$(echo "${f_filename}" | cut -d- -f3- | sed 's/_.*//; s/\.trigger$//')
+
+    local f_handler="/home/SymbiOS/services/service-handler.sh"
+
+    case "${f_action_name}" in
+        playbook)
+            echo "$(date +%Y-%m-%d %H:%M:%S) [TRIGGER] Running playbook for ${f_service_name}" >> "/home/docker/symbios-ui/log/configd.log"
+            bash "${f_handler}" playbook "${f_service_name}" &
+            ;;
+        start|stop)
+            # Find service dir
+            local f_sdir
+            f_sdir=$(ls -d /home/docker/${f_service_name}.* 2>/dev/null | head -1)
+            if [ -n "${f_sdir}" ]; then
+                echo "$(date +%Y-%m-%d %H:%M:%S) [TRIGGER] Docker ${f_action_name} for ${f_service_name}" >> "/home/docker/symbios-ui/log/configd.log"
+                bash "${f_handler}" "${f_action_name}" "${f_service_name}" "${f_sdir}" &
+            fi
+            ;;
+    esac
+
+    rm -f "${f_trigger_file}"
+}
+
 # Initial hash
 g_last_hash=$(f_get_hash)
+
+# Watch service files directory for new playbooks
+inotifywait -m -e create -e delete /home/SymbiOS/services/ 2>/dev/null | while read path action file; do
+    if echo "${file}" | grep -q "\.yml$"; then
+        echo "$(date +%Y-%m-%d %H:%M:%S) [DISCOVERY] Service file change: ${path}${file}" >> "/home/docker/symbios-ui/log/configd.log"
+    fi
+done &
+
+# Watch trigger directory for trigger files
+inotifywait -m -e create -e delete "${G_TRIGGER_DIR}" 2>/dev/null | while read path action file; do
+    if echo "${file}" | grep -q "\.trigger$"; then
+        f_handle_trigger "${path}${file}"
+    fi
+done &
 
 # Main monitoring loop
 while true
@@ -112,6 +162,11 @@ do
 
         g_last_hash="${g_current_hash}"
     fi
+
+    # Check for trigger files (every 5 seconds, fallback for inotify)
+    find "${G_TRIGGER_DIR}" -name "*.trigger" -mmin -1 -type f 2>/dev/null | while read f_trigger_file; do
+        f_handle_trigger "${f_trigger_file}"
+    done
 
     # Wait before next check
     sleep "${g_check_interval}"

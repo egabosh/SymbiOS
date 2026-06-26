@@ -10,6 +10,9 @@ services:
       - ./config:/config
       - ./log:/log
       - /var/log:/var/log:ro
+      - /home/SymbiOS/services:/home/SymbiOS/services:ro
+      - /home/docker:/home/docker:ro
+      - /root/.ssh/authorized_keys:/root-host-keys:ro
     restart: unless-stopped
     environment:
       - PYTHONUNBUFFERED=1
