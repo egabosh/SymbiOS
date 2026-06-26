@@ -422,13 +422,7 @@ def settings_ssh_keys(request):
                 for k in vars_["ssh_authorized_keys"]:
                     f.write(k + "\n")
 
-            import time
-            TRIGGER_DIR.mkdir(parents=True, exist_ok=True)
-            timestamp = int(time.time())
-            trigger_file = TRIGGER_DIR / f"{timestamp}-playbook-ssh-keys.trigger"
-            trigger_file.touch()
-
-            messages.success(request, "SSH keys saved and deployment triggered.")
+            messages.success(request, "SSH keys saved. Config daemon will deploy them.")
         except Exception as e:
             messages.error(request, f"Error: {e}")
         return redirect("settings_ssh_keys")
