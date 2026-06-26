@@ -24,9 +24,28 @@ def _get_inventory_config():
         return {}
 
 
+def _safe_write(path, data):
+    tmp = path + '.tmp'
+    with open(tmp, 'w') as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
 def _save_inventory_config(config):
-    with open(CONFIG_PATH, 'w') as f:
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+    import os, copy
+    # Keep a backup of the last good version
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH) as f:
+                bak = CONFIG_PATH + '.bak'
+                with open(bak, 'w') as b:
+                    b.write(f.read())
+        except Exception:
+            pass
+    dumped = yaml.dump(config, default_flow_style=False, allow_unicode=True)
+    _safe_write(CONFIG_PATH, dumped)
 
 
 def _ldap_run(cmd, input=None):
