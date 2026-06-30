@@ -1,15 +1,13 @@
-import os
-import json
-import urllib.request
-import urllib.error
-from pathlib import Path
-TRIGGER_DIR = Path('/config/triggers')
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from .views import _get_inventory_config, _save_inventory_config, CONFIG_PATH
-from .utils.log_utils import logs_stream
+from .utils.ssh_exec import run_playbook
+
+import urllib.request
+import urllib.error
+import json
 
 
 
@@ -34,6 +32,14 @@ def settings_ddns(request):
                 config['all']['vars']['symbios_domain'] = 'symbios.local'
                 _save_inventory_config(config)
                 messages.success(request, 'Dynamic DNS configuration removed.')
+                try:
+                    ok, out = run_playbook('base-system/dedyn.yml', timeout=120)
+                    if ok:
+                        messages.success(request, 'DDNS playbook completed successfully.')
+                    else:
+                        messages.warning(request, 'DDNS playbook completed with issues.')
+                except Exception as e:
+                    messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
             else:
                 ddns_host = request.POST.get('ddns_host', '')
                 ddns_host = ddns_host.lower().strip()
@@ -49,35 +55,19 @@ def settings_ddns(request):
                 config['all']['vars']['symbios_domain'] = 'symbios.' + ddns_host
                 _save_inventory_config(config)
                 messages.success(request, 'Dynamic DNS settings saved.')
+                try:
+                    ok, out = run_playbook('base-system/dedyn.yml', timeout=120)
+                    if ok:
+                        messages.success(request, 'DDNS playbook completed successfully.')
+                    else:
+                        messages.warning(request, 'DDNS playbook completed with issues.')
+                except Exception as e:
+                    messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_ddns')
-
-    # Check config daemon status
-    daemon_running = False
-    daemon_pending = False
-    try:
-        with open('/log/symbios-services.tsv') as f:
-            for line in f:
-                parts = line.strip().split('\t')
-                if len(parts) >= 2 and parts[0] == 'symbios-configd':
-                    daemon_running = parts[1] == 'active'
-                    break
-    except Exception:
-        pass
-
-    # Check if inventory.yml was modified recently (pending changes)
-    try:
-        stat = os.stat(CONFIG_PATH)
-        now = __import__('time').time()
-        daemon_pending = (now - stat.st_mtime) < 15
-    except Exception:
-        pass
-
     return render(request, 'main/settings_ddns.html', {
         'vars': vars_,
-        'daemon_running': daemon_running,
-        'daemon_pending': daemon_pending,
     })
 
 
@@ -300,6 +290,14 @@ def settings_auth(request):
             config['all']['vars']['twofa_enabled'] = twofa_wanted
             _save_inventory_config(config)
             messages.success(request, 'Auth settings saved.')
+            try:
+                ok, out = run_playbook('base-system/authelia.yml', timeout=180)
+                if ok:
+                    messages.success(request, 'Authelia playbook completed successfully.')
+                else:
+                    messages.warning(request, 'Authelia playbook completed with issues.')
+            except Exception as e:
+                messages.warning(request, 'Could not run Authelia playbook: ' + str(e))
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_auth')
@@ -422,7 +420,15 @@ def settings_ssh_keys(request):
                 for k in vars_["ssh_authorized_keys"]:
                     f.write(k + "\n")
 
-            messages.success(request, "SSH keys saved. Config daemon will deploy them.")
+            messages.success(request, "SSH keys saved.")
+            try:
+                ok, out = run_playbook('base-system/ssh-keys.yml', timeout=120)
+                if ok:
+                    messages.success(request, "SSH keys playbook completed successfully.")
+                else:
+                    messages.warning(request, "SSH keys playbook completed with issues.")
+            except Exception as e:
+                messages.warning(request, "Could not run SSH keys playbook: " + str(e))
         except Exception as e:
             messages.error(request, f"Error: {e}")
         return redirect("settings_ssh_keys")
