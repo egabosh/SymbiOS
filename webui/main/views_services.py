@@ -1,16 +1,14 @@
-import os
-import json
-import time
-from pathlib import Path
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from . import service_discover
+from pathlib import Path
+import os
+from .utils.ssh_exec import run_playbook, run_docker
 
 SERVICES_DIR = Path('/home/SymbiOS/services')
 DOCKER_BASE = Path('/home/docker')
-TRIGGER_DIR = Path('/config/triggers')
 LOG_DIR = Path('/log')
 CONFIG_PATH = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
 
@@ -88,28 +86,29 @@ def services_action(request, service_name):
         action = request.POST.get('action')
         if action == 'reinstall':
             action = 'playbook'
-        TRIGGER_DIR.mkdir(parents=True, exist_ok=True)
-        timestamp = int(time.time())
-        trigger_file = TRIGGER_DIR / f'{timestamp}-{action}-{service_name}.trigger'
-        trigger_file.touch()
-        return JsonResponse({'status': 'queued', 'trigger': str(trigger_file)})
+        try:
+            if action == 'playbook':
+                ok, output = run_playbook('/home/SymbiOS/services/' + service_name + '.yml', timeout=600)
+            elif action == 'start':
+                ok, output = run_docker(service_name, 'up', timeout=120)
+            elif action == 'stop':
+                ok, output = run_docker(service_name, 'down', timeout=120)
+            else:
+                return JsonResponse({'error': 'Unknown action: ' + action}, status=400)
+            return JsonResponse({
+                'status': 'completed' if ok else 'failed',
+                'success': ok,
+                'output': output[-3000:] if len(output) > 3000 else output,
+            })
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
     return JsonResponse({'error': 'Invalid action'}, status=400)
 
 
 @login_required
 def services_playbook_log(request, service_name):
     log_file = LOG_DIR / f'service-{service_name}.log'
-    status_file = LOG_DIR / 'configd-status'
     result = {'running': False, 'status': 'idle', 'output': '', 'success': None}
-    
-    try:
-        with open(status_file, 'r') as f:
-            result['status'] = f.read().strip()
-    except:
-        pass
-    
-    if 'running' in result.get('status', '') and service_name in result.get('status', ''):
-        result['running'] = True
     
     if log_file.exists():
         with open(log_file, 'r') as f:

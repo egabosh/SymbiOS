@@ -96,29 +96,45 @@
         cmd: "chmod -R o+r {{ docker_path }}/webui"
       changed_when: false
 
-    - name: Copy symbios-configd.sh
+    - name: Copy symbios-exec.sh wrapper
       ansible.builtin.copy:
-        src: /home/SymbiOS/symbios-configd.sh
-        dest: /usr/local/sbin/symbios-configd.sh
+        src: /home/SymbiOS/symbios-exec.sh
+        dest: /usr/local/sbin/symbios-exec.sh
         owner: root
         group: root
         mode: "0755"
 
-    - name: Install symbios-configd systemd service
-      ansible.builtin.copy:
-        content: "[Unit]\nDescription=SymbiOS Config Daemon\nAfter=network.target docker.service\n\n[Service]\nType=simple\nExecStart=/usr/local/sbin/symbios-configd.sh\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n"
-        dest: /etc/systemd/system/symbios-configd.service
-        mode: "0644"
-      notify:
-        - Reload systemd
-        - Enable configd
+    - name: Generate SSH key for webui remote execution
+      ansible.builtin.command:
+        cmd: ssh-keygen -t ed25519 -f /home/docker/symbios-ui/config/.ssh/id_symbios -N "" -C "symbios-webui"
+        creates: /home/docker/symbios-ui/config/.ssh/id_symbios
 
-    - name: Ensure symbios-configd is enabled and running
-      ansible.builtin.systemd:
-        name: symbios-configd
-        enabled: yes
-        state: started
-        daemon_reload: yes
+    - name: Fix permissions on SSH key
+      ansible.builtin.file:
+        path: /home/docker/symbios-ui/config/.ssh/{{ item.path }}
+        owner: root
+        group: "10000"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: id_symbios, mode: "640" }
+        - { path: id_symbios.pub, mode: "644" }
+
+    - name: Read SSH public key
+      ansible.builtin.slurp:
+        src: /home/docker/symbios-ui/config/.ssh/id_symbios.pub
+      register: symbios_ssh_pubkey_raw
+
+    - name: Set webserver SSH pubkey fact
+      ansible.builtin.set_fact:
+        symbios_ssh_pubkey: "{{ symbios_ssh_pubkey_raw.content | b64decode | trim }}"
+
+    - name: Add webui SSH key to root authorized_keys
+      ansible.builtin.lineinfile:
+        path: /root/.ssh/authorized_keys
+        regexp: ".*symbios-webui$"
+        line: 'command="/usr/local/sbin/symbios-exec.sh",restrict,no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding {{ symbios_ssh_pubkey }}'
+        mode: "0600"
+        create: yes
 
   handlers:
 
@@ -138,11 +154,6 @@
       ansible.builtin.systemd:
         daemon_reload: yes
 
-    - name: Enable configd
-      ansible.builtin.systemd:
-        name: symbios-configd
-        enabled: yes
-        state: started
 
 
 - name: setup-infrastructure
@@ -197,15 +208,8 @@
           g_tmp="${g_file}.tmp"
 
           # Write status for each service to temp file
-          for svc in symbios-configd
-          do
-            # Get service status, fall back to "unknown" on failure
-            if ! g_status=$(systemctl is-active "$svc" 2>/dev/null)
-            then
-              g_status="unknown"
-            fi
-            echo -e "${svc}\t${g_status}"
-          done > "$g_tmp"
+          # No system services to track currently
+          echo -e "" > "$g_tmp"
 
           # Set permissions on temp file
           chmod 644 "$g_tmp"

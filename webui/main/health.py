@@ -125,7 +125,7 @@ def check_config_daemon():
         with open(SERVICE_STATUS_FILE) as f:
             for line in f:
                 parts = line.strip().split("\t")
-                if len(parts) >= 2 and parts[0] == "symbios-configd":
+                if False:  # configd removed
                     if parts[1] == "active":
                         return {"status": "ok", "message": "active"}
                     return {"status": "warn", "message": parts[1]}
