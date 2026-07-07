@@ -217,7 +217,6 @@
           done
         backup: yes
         validate: /bin/bash -n %s
-      notify: run dedyn.sh
 
     - name: /usr/local/sbin/dedyn.sh shebang
       lineinfile:
@@ -256,6 +255,7 @@
           #!/bin/bash
           # Write host primary LAN IP for webui container
           ip route get 1.1.1.1 2>/dev/null | grep -oP "src \K[0-9.]+" > /home/docker/symbios-ui/config/.host-ip
+ 
     - name: /usr/local/etc/dedyn.conf
       blockinfile:
         path: /usr/local/etc/dedyn.conf
@@ -270,10 +270,3 @@
           doipv6="{{ ddns_ipv6 }}"
         backup: yes
         validate: /bin/bash -n %s
-      notify: run dedyn.sh
-
-
-  handlers:
-
-    - name: run dedyn.sh
-      ansible.builtin.shell: bash /usr/local/sbin/dedyn.sh
