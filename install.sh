@@ -11,23 +11,14 @@ then
   ansible-galaxy collection install community.general
 fi
 
-# Detect dev environment by IP and use appropriate source
-if ip a | grep -q 172.23.0.226
+# Clone or update SymbiOS from GitHub
+cd /home
+[[ -d SymbiOS ]] || git clone https://github.com/egabosh/SymbiOS.git
+cd SymbiOS
+if ! git pull
 then
-  # Use local dev directory
-  rm -rf /home/SymbiOS
-  cp -rp /root/SymbiOS /home
-  rm -f ${g_inventory}
-else
-  # Clone or update SymbiOS from GitHub
-  cd /home
-  [[ -d SymbiOS ]] || git clone https://github.com/egabosh/SymbiOS.git
-  cd SymbiOS
-  if ! git pull
-  then
-    git stash
-    git pull
-  fi
+  git stash
+  git pull
 fi
 
 # Create initial inventory if it does not exist
