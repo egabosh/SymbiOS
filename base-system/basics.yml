@@ -129,6 +129,7 @@
         name: systemd-resolved
         state: restarted
       when: nocontainer.stat.exists == true
+      changed_when: false
 
     - name: Ensure /etc/resolv.conf points to systemd-resolved stub
       ansible.builtin.file:
