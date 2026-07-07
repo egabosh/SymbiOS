@@ -293,3 +293,10 @@
         name: symbios-service-status.timer
         enabled: yes
         state: started
+
+    - name: Ensure symbios-ui container is running
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: "{{ docker_path }}"
+      changed_when: false
+
