@@ -313,7 +313,7 @@
             oidc:
               jwks:
                 - key: |
-                  {{ oidc_key.stdout | indent(1, first=True) }}
+                   {{ oidc_key.stdout | indent(9, first=False) }}
               cors:
                 endpoints:
                   - "authorization"
