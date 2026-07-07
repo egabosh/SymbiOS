@@ -160,6 +160,10 @@
 - name: setup-infrastructure
   hosts: all
   become: yes
+
+  vars:
+    docker_path: "/home/docker/symbios-ui"
+
   tasks:
     - name: Copy container-index.sh
       ansible.builtin.copy:
