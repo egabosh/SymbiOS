@@ -20,6 +20,7 @@
         - { path: "", owner: root, group: docker, mode: "0550" }
         - { path: "log", owner: "10000", group: "10000", mode: "0770" }
         - { path: "config", owner: "10000", group: "10000", mode: "0770" }
+        - { path: "config/.ssh", owner: "10000", group: "10000", mode: "0770" }
         - { path: "webui", owner: "10000", group: "10000", mode: "0770" }
 
     - name: Dockerfile
