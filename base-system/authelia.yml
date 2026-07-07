@@ -297,10 +297,10 @@
       args:
         creates: "{{ service_path }}/authelia-data/oidc.key"
 
-    # Read OIDC private key and indent for YAML embedding
+    # Read OIDC private key (raw, no indent — handled by Jinja2 filter)
     - name: OIDC Key aus Datei lesen
       ansible.builtin.command: >
-        sed 's/^/          /'  {{ service_path }}/authelia-data/oidc.key
+        cat {{ service_path }}/authelia-data/oidc.key
       register: oidc_key
       changed_when: false
 
@@ -313,7 +313,7 @@
             oidc:
               jwks:
                 - key: |
-          {{ oidc_key.stdout }}
+                  {{ oidc_key.stdout | indent(18, first=False) }}
               cors:
                 endpoints:
                   - "authorization"
