@@ -101,7 +101,7 @@
             inactivity: 4h
             remember_me: 1M
             cookies:
-              - domain: "{{ default_domain }}"
+              - domain: "auth.{{ default_domain }}"
                 authelia_url: https://auth.{{ default_domain }}
 
           storage:
@@ -313,7 +313,7 @@
             oidc:
               jwks:
                 - key: |
-                  {{ oidc_key.stdout | indent(18, first=False) }}
+                  {{ oidc_key.stdout | indent(1, first=True) }}
               cors:
                 endpoints:
                   - "authorization"
