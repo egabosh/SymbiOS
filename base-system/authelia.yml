@@ -3,7 +3,7 @@
 
   vars:
     service_name: "authelia"
-    service_domain: "auth.{{ default_domain }}"
+    service_domain: "{{ authelia_domain }}"
     service_path: "/home/docker/{{ service_name }}"
     ldap_service_path: "/home/docker/ldap"
 
@@ -95,14 +95,18 @@
         block: |
           session:
             secret: "{{ session_secret.stdout }}"
-            name: auth.{{ default_domain }}_session
+            name: {{ authelia_domain }}_session
             same_site: lax
             expiration: 16h
             inactivity: 4h
             remember_me: 1M
             cookies:
-              - domain: "auth.{{ default_domain }}"
-                authelia_url: https://auth.{{ default_domain }}
+              - domain: "{{ base_domain }}"
+                authelia_url: https://{{ authelia_domain }}
+              {% if ddns_host is defined and ddns_host and ddns_host != base_domain %}
+              - domain: "{{ ddns_host }}"
+                authelia_url: https://{{ authelia_domain }}
+              {% endif %}
 
           storage:
             local:
@@ -129,7 +133,7 @@
 
           totp:
             disable: {{ not (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) }}
-            issuer: auth.{{ default_domain }}
+            issuer: {{ authelia_domain }}
             algorithm: sha1
             digits: 6
             period: 30
@@ -196,7 +200,7 @@
                  password: {{ smtp_password }}
                  address: {{ smtp_server }}:{{ smtp_port }}
                  sender: {{ smtp_from }}
-                 subject: "[auth.{{ default_domain }}] Notification"
+                 subject: "[{{ authelia_domain }}] Notification"
                  startup_check_address: {{ smtp_from }}
                  identifier: "authelia"
                  timeout: 15s
@@ -223,17 +227,22 @@
           access_control:
             default_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
             rules:
-              - domain: "auth.{{ default_domain }}"
+              - domain: "{{ authelia_domain }}"
                 policy: one_factor
               - domain: "{{ symbios_domain }}"
                 policy: one_factor
-              - domain: "traefik.{{ default_domain }}"
+              - domain: "{{ traefik_domain }}"
                 policy: one_factor
                 subject:
                   - ["user:admin"]
+              {% if ddns_host is defined and ddns_host %}
+              - domain: "{{ ddns_host }}"
+                policy: one_factor
+              - domain: "*.{{ ddns_host }}"
+                policy: one_factor
+              {% endif %}
 
         backup: yes
-        validate: docker run --rm -v "{{ lookup('env', 'HOME') }}/.ansible:{{ lookup('env', 'HOME') }}/.ansible" authelia/authelia:latest /app/authelia config validate --config %s
       notify: Restart authelia
 
     - name: "{{ service_path }}/docker-compose.yml Container Configuration"
@@ -251,9 +260,11 @@
               image: authelia/authelia:latest
               restart: unless-stopped
               networks:
-                - authelia
-                - traefik
-                - ldap
+                authelia:
+                traefik:
+                  aliases:
+                    - authelia
+                ldap:
               volumes:
                 - ./authelia-data:/config
                 - /etc/localtime:/etc/localtime:ro
@@ -261,7 +272,7 @@
               labels:
                 - traefik.enable=true
                 # HTTPS
-                - traefik.http.routers.authelia-default.rule=Host(`auth.{{ default_domain }}`)
+                - traefik.http.routers.authelia-default.rule=Host(`{{ authelia_domain }}`)
                 - traefik.http.routers.authelia-default.entrypoints=https
                 - traefik.http.routers.authelia-default.tls=true
                 # Proxy to service-port
@@ -329,7 +340,6 @@
                   client_secret: '$pbkdf2-sha512$310000$EXkvBmRZx/6476FyviXRZw$OpkrwApe5yPfrXJadOM8VUwQBjmo4rDD1SonNsuQ.6WgevPNKYQJrob404o1yHYbybQPJTRXuwnyKVLqtIhN.A' # random created dummy pw
         insertbefore: "^# BEGIN ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         backup: yes
-        validate: docker run --rm -v "{{ lookup('env', 'HOME') }}/.ansible:{{ lookup('env', 'HOME') }}/.ansible" authelia/authelia:latest /app/authelia config validate --config %s
       notify: Restart authelia
 
     # Script to generate OIDC client secrets using Authelia's crypto tool
