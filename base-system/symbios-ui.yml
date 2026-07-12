@@ -72,7 +72,9 @@
               extra_hosts:
                 - "host.docker.internal:host-gateway"
               networks:
-                - traefik
+                traefik:
+                  aliases:
+                    - symbios-ui
 
           networks:
             traefik:
