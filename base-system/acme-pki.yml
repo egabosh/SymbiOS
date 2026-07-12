@@ -1,8 +1,7 @@
 # ============================================================================
 # ACME PKI - Local Fallback CA for Certificate Management
 # ============================================================================
-# Uses step-ca (Smallstep) as ACME server - production-ready alternative
-# to Pebble with static CA that persists across restarts.
+# Uses step-ca (Smallstep) as ACME server for local symbios setups
 #
 # Architecture:
 #   - SymbiOS Root CA (self-signed, 10 years)
@@ -206,27 +205,20 @@
         echo "" >> {{ traefik_dir }}/ca-bundle.crt
         cat {{ ca_cert }} >> {{ traefik_dir }}/ca-bundle.crt
       changed_when: false
-    - name: Display PKI Summary
-      ansible.builtin.debug:
-        msg:
-          - "============================================================"
-          - "ACME PKI - step-ca deployed successfully!"
-          - "============================================================"
-          - "  Root CA:   {{ ca_cert }} (10 years)"
-          - "  ACME URL:  https://{{ stepca_container }}:{{ stepca_port }}/acme/acme/directory"
-          - "  Traefik:   symbios-pki resolver in static config (traefik.yml)"
-          - "============================================================"
-      changed_when: false
+
 
   handlers:
+
     # Restart step-ca container after config changes
     - name: Restart stepca
       ansible.builtin.shell: docker compose up -d --force-recreate
       args: { chdir: "{{ acme_dir }}" }
+
     # Restart Traefik to pick up new certificate bundle
     - name: Restart traefik
       ansible.builtin.shell: docker compose up -d --force-recreate
       args: { chdir: "{{ traefik_dir }}" }
+
     # Update system CA certificate store
     - name: Update CA certificates
       ansible.builtin.command: update-ca-certificates

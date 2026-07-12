@@ -326,7 +326,7 @@
                 # dummy client because authelia forces at least one client to work
                 - client_id: 'dummy'
                   client_name: 'dummy'
-                  client_secret: '$pbkdf2-sha512$310000$EXkvBmRZx/6476FyviXRZw$OpkrwApe5yPfrXJadOM8VUwQBjmo4rDD1SonNsuQ.6WgevPNKYQJrob404o1yHYbybQPJTRXuwnyKVLqtIhN.A' # random dummy pw
+                  client_secret: '$pbkdf2-sha512$310000$EXkvBmRZx/6476FyviXRZw$OpkrwApe5yPfrXJadOM8VUwQBjmo4rDD1SonNsuQ.6WgevPNKYQJrob404o1yHYbybQPJTRXuwnyKVLqtIhN.A' # random created dummy pw
         insertbefore: "^# BEGIN ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         backup: yes
         validate: docker run --rm -v "{{ lookup('env', 'HOME') }}/.ansible:{{ lookup('env', 'HOME') }}/.ansible" authelia/authelia:latest /app/authelia config validate --config %s
@@ -386,12 +386,7 @@
 
   handlers:
 
-    # Stop and restart the Authelia container after config changes
     - name: Restart authelia
-      ansible.builtin.shell: |
-        if docker-compose down
-        then
-          docker-compose up -d
-        fi
-      args:
-        chdir: "{{ service_path }}"
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args: { chdir: "{{ service_path }}" }
+
