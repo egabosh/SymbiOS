@@ -127,7 +127,7 @@
                 - ./ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
               labels:
                 - traefik.enable=true
-                - traefik.http.routers.traefik.rule=Host(`traefik.{{ default_domain }}`)
+                - traefik.http.routers.traefik.rule=Host(`{{ traefik_domain }}`)
                 - traefik.http.routers.traefik.entrypoints=https
                 - traefik.http.routers.traefik.middlewares=secHeaders@file,authelia@file
                 - traefik.http.routers.traefik.service=api@internal
@@ -203,7 +203,7 @@
                     X-Forwarded-Proto: "https"
               authelia:
                 forwardAuth:
-                  address: "http://authelia.local:9091/api/authz/forward-auth?authelia_url=https://auth.{{ default_domain }}"
+                  address: "http://authelia:9091/api/authz/forward-auth?authelia_url=https://{{ authelia_domain }}"
                   trustForwardHeader: true
                   authResponseHeaders:
                     - "Remote-User"
