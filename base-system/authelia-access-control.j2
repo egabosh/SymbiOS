@@ -1,0 +1,17 @@
+access_control:
+  default_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
+  rules:
+    - domain: "{{ authelia_domain }}"
+      policy: one_factor
+    - domain: "{{ symbios_domain }}"
+      policy: one_factor
+    - domain: "{{ traefik_domain }}"
+      policy: one_factor
+      subject:
+        - ["user:admin"]
+{% if ddns_host is defined and ddns_host %}
+    - domain: "{{ ddns_host }}"
+      policy: one_factor
+    - domain: "*.{{ ddns_host }}"
+      policy: one_factor
+{% endif %}
