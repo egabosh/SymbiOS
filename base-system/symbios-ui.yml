@@ -267,6 +267,66 @@
         enabled: yes
         state: started
 
+    - name: Ensure inotify-tools is installed (used by config daemon)
+      ansible.builtin.apt:
+        name: inotify-tools
+        state: present
+        update_cache: no
+
+    - name: Install symbios-configd.sh to /usr/local/bin
+      ansible.builtin.copy:
+        src: /home/SymbiOS/symbios-configd.sh
+        dest: /usr/local/bin/symbios-configd.sh
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create config trigger directory (written by the WebUI)
+      ansible.builtin.file:
+        path: "{{ docker_path }}/config/triggers"
+        owner: "10000"
+        group: "10000"
+        mode: "0770"
+        state: directory
+
+    - name: Inventory must be owned by the WebUI user so the UI can read/write it
+      ansible.builtin.file:
+        path: "{{ docker_path }}/config/inventory.yml"
+        owner: "10000"
+        group: "10000"
+        mode: "0640"
+
+    - name: Install symbios-configd systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-configd.service
+        content: |
+          [Unit]
+          Description=SymbiOS Config Daemon
+          After=docker.service network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/symbios-configd.sh
+          User=root
+          Group=root
+          Restart=on-failure
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload systemd
+
+    - name: Enable and start symbios-configd service
+      ansible.builtin.systemd:
+        name: symbios-configd.service
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
     - name: Ensure symbios-ui container is running
       ansible.builtin.shell: docker compose up -d
       args:

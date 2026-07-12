@@ -10,7 +10,10 @@ g_config_file="${1:-/home/docker/symbios-ui/config/inventory.yml}"
 g_check_interval=10
 g_configd_log="/home/docker/symbios-ui/log/configd.log"
 g_status_file="/home/docker/symbios-ui/log/configd-status"
-G_TRIGGER_DIR="/config/triggers"
+g_heartbeat_file="/home/docker/symbios-ui/log/configd-heartbeat"
+# Trigger files are written by the WebUI into ./config/triggers (mounted as
+# /config/triggers inside the container); on the host that is this path.
+G_TRIGGER_DIR="/home/docker/symbios-ui/config/triggers"
 
 # Create trigger directory
 mkdir -p "${G_TRIGGER_DIR}"
@@ -103,6 +106,9 @@ done &
 # Main monitoring loop
 while true
 do
+    # Liveness heartbeat consumed by the WebUI health check
+    touch "${g_heartbeat_file}"
+
     g_current_hash=$(f_get_hash)
 
     # Detect config changes

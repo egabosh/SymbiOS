@@ -3,6 +3,7 @@ import os
 import json
 import glob
 import time
+import yaml
 from datetime import datetime, timezone
 
 DOCKER_LOG_DIR = "/docker/containers"
@@ -16,12 +17,34 @@ STEPCA_HOST = "acme-pki-stepca"
 STEPCA_PORT = 9000
 TRAEFIK_HOST = "traefik"
 
-CHECK_HOSTS = [
-    ("symbios.symbios-dev.dedyn.io", TRAEFIK_HOST, 443),
-    ("auth.symbios-dev.dedyn.io", TRAEFIK_HOST, 443),
-    ("ldap.symbios-dev.dedyn.io", TRAEFIK_HOST, 443),
-    ("traefik.symbios-dev.dedyn.io", TRAEFIK_HOST, 443),
-]
+def _load_config_vars():
+    """Read the SymbiOS inventory (same file the WebUI uses) and return its vars."""
+    try:
+        config_path = os.environ.get("CONFIG_PATH", "/config/inventory.yml")
+        with open(config_path) as f:
+            config = yaml.safe_load(f) or {}
+        return config.get("all", {}).get("vars", {})
+    except Exception:
+        return {}
+
+
+def _get_check_hosts():
+    """Build the list of (sni, connect_host, port) tuples to cert-check.
+
+    LDAP is only exposed through Traefik in local mode, so it is only
+    included there. All other hosts are derived from base_domain.
+    """
+    vars_ = _load_config_vars()
+    base = vars_.get("base_domain", "symbios.local")
+    default_domain = vars_.get("default_domain", "local")
+    hosts = [
+        (base, TRAEFIK_HOST, 443),
+        (f"auth.{base}", TRAEFIK_HOST, 443),
+        (f"traefik.{base}", TRAEFIK_HOST, 443),
+    ]
+    if default_domain == "local":
+        hosts.append(("ldap.local", TRAEFIK_HOST, 443))
+    return hosts
 
 
 def _write_health_file(data):
@@ -121,17 +144,23 @@ def check_stepca():
 
 
 def check_config_daemon():
+    import time
+    heartbeat = "/log/configd-heartbeat"
+    status_file = "/log/configd-status"
+    # Primary liveness signal: configd touches the heartbeat every loop.
     try:
-        with open(SERVICE_STATUS_FILE) as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                if False:  # configd removed
-                    if parts[1] == "active":
-                        return {"status": "ok", "message": "active"}
-                    return {"status": "warn", "message": parts[1]}
-        return {"status": "warn", "message": "Not found in status file"}
-    except FileNotFoundError:
-        return {"status": "warn", "message": "Status file not available"}
+        mtime = os.path.getmtime(heartbeat)
+        if time.time() - mtime < 120:
+            return {"status": "ok", "message": "active"}
+    except OSError:
+        pass
+    # Fallback: a non-empty status file means configd at least started.
+    try:
+        if os.path.getsize(status_file) > 0:
+            return {"status": "warn", "message": "started, but no recent heartbeat"}
+    except OSError:
+        pass
+    return {"status": "warn", "message": "Config daemon not running"}
 
 
 def check_playbooks():
@@ -151,11 +180,13 @@ def check_playbooks():
 
 
 def check_containers():
+    vars_ = _load_config_vars()
+    default_domain = vars_.get("default_domain", "local")
     expected = {
         "traefik": "Traefik (Reverse Proxy)",
         "symbios-ui-symbios-webui-1": "WebUI",
         "ldap-openldap-1": "OpenLDAP",
-        "ldap-ldap.ldap.symbios-dev.dedyn.io-1": "LDAP Domain",
+        f"ldap-ldap.ldap.{default_domain}-1": "LDAP Domain",
         "acme-pki-stepca": "Step-CA (ACME-PKI)",
     }
     running = set()
@@ -305,7 +336,7 @@ def _eval_cert_date(date_str, label):
 
 
 def check_certs():
-    results = [check_cert(sni, host, port) for sni, host, port in CHECK_HOSTS]
+    results = [check_cert(sni, host, port) for sni, host, port in _get_check_hosts()]
     errors = [r for r in results if r["status"] == "error"]
     warns = [r for r in results if r["status"] == "warn"]
     msg = "; ".join(r["message"] for r in results)
@@ -346,6 +377,8 @@ def check_ddns():
         return {"status": "warn", "message": "Cannot read config"}
 
     if not ddns_host:
+        if vars_.get("default_domain", "local") == "local":
+            return {"status": "ok", "message": "not configured (local mode)"}
         return {"status": "warn", "message": "DDNS not configured"}
 
     if not ddns_host.endswith(".dedyn.io"):
