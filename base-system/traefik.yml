@@ -1,6 +1,12 @@
 ---
 - name: traefik
   hosts: all
+
+  vars:
+    symbios_domain: "{{ base_domain }}"
+    authelia_domain: "auth.{{ base_domain }}"
+    traefik_domain: "traefik.{{ base_domain }}"
+
   tasks:
 
     - name: /home/docker/traefik/default-basic-auth-genpw.sh (generate Random PW for default-basic-auth)
