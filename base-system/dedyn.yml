@@ -266,7 +266,8 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           dedynpw="{{ ddns_apikey }}"
-          dedynhosts="{{ ddns_host }}"
-          doipv6="{{ ddns_ipv6 }}"
+          dedynhosts="{{ ddns_host | default('') }}"
+          doipv6="{{ ddns_ipv6 | default('') }}"
         backup: yes
         validate: /bin/bash -n %s
+      when: ddns_host is defined and ddns_host | length > 0
