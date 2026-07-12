@@ -27,9 +27,13 @@ def settings_ddns(request):
                 config['all']['vars']['ddns_apikey'] = ''
                 config['all']['vars']['ddns_host'] = ''
                 config['all']['vars']['ddns_ipv6'] = ''
-                # Reset default_domain to local
+                # Reset domains to the local fallback (shared base_domain so the
+                # Authelia session cookie can span all service subdomains)
                 config['all']['vars']['default_domain'] = 'local'
+                config['all']['vars']['base_domain'] = 'symbios.local'
                 config['all']['vars']['symbios_domain'] = 'symbios.local'
+                config['all']['vars']['authelia_domain'] = 'auth.symbios.local'
+                config['all']['vars']['traefik_domain'] = 'traefik.symbios.local'
                 _save_inventory_config(config)
                 messages.success(request, 'Dynamic DNS configuration removed.')
                 try:
@@ -50,9 +54,13 @@ def settings_ddns(request):
                 config['all']['vars']['ddns_apikey'] = request.POST.get('ddns_apikey', '')
                 config['all']['vars']['ddns_host'] = ddns_host
                 config['all']['vars']['ddns_ipv6'] = request.POST.get('ddns_ipv6', '')
-                # Set default_domain to the public DDNS host
+                # The DDNS host becomes the shared parent domain (base_domain) so
+                # the Authelia session cookie can span all service subdomains.
                 config['all']['vars']['default_domain'] = ddns_host
+                config['all']['vars']['base_domain'] = ddns_host
                 config['all']['vars']['symbios_domain'] = 'symbios.' + ddns_host
+                config['all']['vars']['authelia_domain'] = 'auth.' + ddns_host
+                config['all']['vars']['traefik_domain'] = 'traefik.' + ddns_host
                 _save_inventory_config(config)
                 messages.success(request, 'Dynamic DNS settings saved.')
                 try:
