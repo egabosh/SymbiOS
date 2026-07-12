@@ -426,19 +426,6 @@
                 - ./ldap-config:/ldap-config:rw
                 - /etc/localtime:/etc/localtime:ro
               restart: unless-stopped
-              labels:
-                - traefik.enable=true
-                # HTTPS
-                - traefik.tcp.routers.ldap-openldap-{{ service_name }}.rule=HostSNI(`openldap.{{ default_domain }}`)
-                - traefik.tcp.routers.ldap-openldap-{{ service_name }}.entrypoints=ldaps
-                - traefik.tcp.routers.ldap-openldap-{{ service_name }}.tls=true
-                # Proxy to service-port
-                - traefik.tcp.services.ldap-openldap-{{ service_name }}.loadbalancer.server.port=389
-                - traefik.tcp.routers.ldap-openldap-{{ service_name }}.service=ldap-openldap-{{ service_name }}
-                # cert via letsencrypt
-                - traefik.tcp.routers.ldap-openldap-{{ service_name }}.tls.certresolver={{ acme_resolver }}
-                # Traefik network
-                - traefik.docker.network=traefik
               networks:
                 - ldap
                 - traefik
@@ -465,21 +452,6 @@
               depends_on:
                 - openldap
               restart: unless-stopped
-              labels:
-                - traefik.enable=true
-                # HTTPS
-                - traefik.http.routers.ldap-{{ service_name }}.rule=Host(`ldap.{{ default_domain }}`)
-                - traefik.http.routers.ldap-{{ service_name }}.entrypoints=https
-                - traefik.http.routers.ldap-{{ service_name }}.tls=true
-                # Proxy to service-port
-                - traefik.http.services.ldap-{{ service_name }}.loadbalancer.server.port=80
-                - traefik.http.routers.ldap-{{ service_name }}.service=ldap-{{ service_name }}
-                # cert via letsencrypt
-                - traefik.http.routers.ldap-{{ service_name }}.tls.certresolver={{ acme_resolver }}
-                # Traefik network
-                - traefik.docker.network=traefik
-                # auth
-                - traefik.http.routers.ldap-{{ service_name }}.middlewares=secHeaders@file
               networks:
                 - ldap
                 - traefik

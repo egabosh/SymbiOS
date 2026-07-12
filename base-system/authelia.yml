@@ -255,21 +255,6 @@
                 - ./authelia-data:/config
                 - /etc/localtime:/etc/localtime:ro
                 - /etc/hosts:/etc/hosts:ro
-              labels:
-                - traefik.enable=true
-                # HTTPS
-                - traefik.http.routers.authelia-default.rule=Host(`{{ authelia_domain }}`)
-                - traefik.http.routers.authelia-default.entrypoints=https
-                - traefik.http.routers.authelia-default.tls=true
-                # Proxy to service-port
-                - traefik.http.services.authelia-default.loadbalancer.server.port=9091
-                - traefik.http.routers.authelia-default.service=authelia-default
-                # cert via letsencrypt
-                - traefik.http.routers.authelia-default.tls.certresolver={{ acme_resolver }}
-                # Traefik network
-                - traefik.docker.network=traefik
-                # auth
-                - traefik.http.routers.authelia-default.middlewares=secHeaders@file
 
           networks:
             authelia:

@@ -71,16 +71,6 @@
                 - DJANGO_SECRET_KEY={{ lookup("password", "/home/docker/symbios-ui/.django_secret_key length=50 chars=ascii_letters,digits") }}
               extra_hosts:
                 - "host.docker.internal:host-gateway"
-              labels:
-                - traefik.enable=true
-                - traefik.http.routers.{{ service_name }}.rule=Host(`{{ service_domain }}`)
-                - traefik.http.routers.{{ service_name }}.entrypoints=https
-                - traefik.http.routers.{{ service_name }}.middlewares=secHeaders@file,authelia@file
-                - traefik.http.routers.{{ service_name }}.tls=true
-                - traefik.http.services.{{ service_name }}.loadbalancer.server.port=8080
-                - traefik.http.routers.{{ service_name }}.service={{ service_name }}
-                - traefik.http.routers.{{ service_name }}.tls.certresolver={{ acme_resolver }}
-                - traefik.docker.network=traefik
               networks:
                 - traefik
 
@@ -142,34 +132,6 @@
         mode: "0600"
         create: yes
 
-  handlers:
-
-    - name: Restart {{ service_name }}
-      ansible.builtin.shell: |
-        if docker compose build --no-cache
-        then
-          if docker compose down
-          then
-            docker compose up -d
-          fi
-        fi
-      args:
-        chdir: "{{ docker_path }}"
-
-    - name: Reload systemd
-      ansible.builtin.systemd:
-        daemon_reload: yes
-
-
-
-- name: setup-infrastructure
-  hosts: all
-  become: yes
-
-  vars:
-    docker_path: "/home/docker/symbios-ui"
-
-  tasks:
     - name: Copy container-index.sh
       ansible.builtin.copy:
         dest: /usr/local/bin/symbios-container-index.sh
@@ -308,4 +270,22 @@
       args:
         chdir: "{{ docker_path }}"
       changed_when: false
+
+  handlers:
+
+    - name: Restart {{ service_name }}
+      ansible.builtin.shell: |
+        if docker compose build --no-cache
+        then
+          if docker compose down
+          then
+            docker compose up -d
+          fi
+        fi
+      args:
+        chdir: "{{ docker_path }}"
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: yes
 
