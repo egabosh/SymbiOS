@@ -1,0 +1,74 @@
+---
+http:
+  routers:
+    authelia:
+      rule: "Host(`{{ authelia_domain }}`)"
+      entryPoints:
+        - https
+      middlewares:
+        - secHeaders@file
+      service: authelia
+      tls:
+        certResolver: "{{ acme_resolver }}"
+    symbios-ui:
+      rule: "Host(`{{ symbios_domain }}`)"
+      entryPoints:
+        - https
+      middlewares:
+        - secHeaders@file
+        - authelia@file
+      service: symbios-ui
+      tls:
+        certResolver: "{{ acme_resolver }}"
+    traefik-dashboard:
+      rule: "Host(`{{ traefik_domain }}`)"
+      entryPoints:
+        - https
+      middlewares:
+        - secHeaders@file
+        - authelia@file
+      service: api@internal
+      tls:
+        certResolver: "{{ acme_resolver }}"
+{% if default_domain == 'local' %}
+    ldap-lam:
+      rule: "Host(`ldap.local`)"
+      entryPoints:
+        - https
+      middlewares:
+        - secHeaders@file
+      service: ldap-lam
+      tls:
+        certResolver: "symbios-pki"
+{% endif %}
+  services:
+    authelia:
+      loadBalancer:
+        servers:
+          - url: "http://authelia:9091"
+    symbios-ui:
+      loadBalancer:
+        servers:
+          - url: "http://symbios-ui:8080"
+{% if default_domain == 'local' %}
+    ldap-lam:
+      loadBalancer:
+        servers:
+          - url: "http://ldap.ldap.local:80"
+{% endif %}
+{% if default_domain == 'local' %}
+tcp:
+  routers:
+    ldap-ldaps:
+      rule: "HostSNI(`openldap.local`)"
+      entryPoints:
+        - ldaps
+      service: ldap-ldaps
+      tls:
+        certResolver: "symbios-pki"
+  services:
+    ldap-ldaps:
+      loadBalancer:
+        servers:
+          - address: "openldap:389"
+{% endif %}

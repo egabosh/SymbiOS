@@ -85,10 +85,6 @@
                 - --entrypoints.https.http.encodedcharacters.allowencodedhash=true
                 # ldaps
                 - --entrypoints.ldaps.address=:636
-                # Docker
-                - --providers.docker=true
-                - --providers.docker.endpoint=unix:///var/run/docker.sock
-                - --providers.docker.exposedByDefault=false
                 # Traefik
                 - --api=true
                 - --api.dashboard=true
@@ -124,7 +120,6 @@
                 - 636:636
               volumes:
                 - /etc/localtime:/etc/localtime:ro
-                - /var/run/docker.sock:/var/run/docker.sock:ro
                 - ./letsencrypt:/letsencrypt
                 - ./providers:/etc/traefik/providers.local
                 - ./log:/log
@@ -231,6 +226,15 @@
                     - "::1/128"
                   ipStrategy:
                     ipv6Subnet: 64
+      notify: Restart traefik
+
+    - name: /home/docker/traefik/providers/symbios-services.yml Routing Configuration
+      ansible.builtin.template:
+        src: traefik-services.j2
+        dest: /home/docker/traefik/providers/symbios-services.yml
+        mode: "0444"
+        owner: root
+        group: docker
       notify: Restart traefik
 
     # Script to run Qualys SSL Labs scan against all Traefik-hosted services
