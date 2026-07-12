@@ -9,7 +9,7 @@ access_control:
       policy: one_factor
       subject:
         - ["user:admin"]
-{% if ddns_host is defined and ddns_host %}
+{% if ddns_host is defined and ddns_host and ddns_host != base_domain %}
     - domain: "{{ ddns_host }}"
       policy: one_factor
     - domain: "*.{{ ddns_host }}"

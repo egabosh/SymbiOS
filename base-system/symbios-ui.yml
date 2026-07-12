@@ -4,6 +4,9 @@
 
   vars:
     service_name: "symbios-ui"
+    symbios_domain: "{{ base_domain }}"
+    authelia_domain: "auth.{{ base_domain }}"
+    traefik_domain: "traefik.{{ base_domain }}"
     service_domain: "{{ symbios_domain }}"
     docker_path: "/home/docker/{{ service_name }}"
 

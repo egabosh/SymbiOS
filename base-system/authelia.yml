@@ -3,6 +3,9 @@
 
   vars:
     service_name: "authelia"
+    symbios_domain: "{{ base_domain }}"
+    authelia_domain: "auth.{{ base_domain }}"
+    traefik_domain: "traefik.{{ base_domain }}"
     service_domain: "{{ authelia_domain }}"
     service_path: "/home/docker/{{ service_name }}"
     ldap_service_path: "/home/docker/ldap"
