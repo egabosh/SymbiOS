@@ -280,6 +280,58 @@
         group: "10000"
         mode: "0640"
 
+    - name: Restrict published port 8080 to LAN (script)
+      # Docker publishes 8080 on all host interfaces; ufw cannot override the
+      # Docker-generated FORWARD accept, so we enforce the LAN scope in the
+      # DOCKER-USER chain, which is evaluated before Docker's own rules.
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/symbios-lan-8080.sh
+        content: |
+          #!/bin/bash
+          # Restrict the published symbios-ui port 8080 to LAN ranges.
+          # Docker publishes 8080 on every host interface; this blocks WAN
+          # access while still allowing LAN (RFC1918 / ULA / link-local) and
+          # Traefik (br-traefik). Runs at boot via symbios-lan-8080.service.
+          nft flush chain ip filter DOCKER-USER 2>/dev/null || true
+          nft flush chain ip6 filter DOCKER-USER 2>/dev/null || true
+          nft add rule ip filter DOCKER-USER iifname != "br-traefik" tcp dport 8080 ip saddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 } accept comment "symbios-lan-8080-v4" 2>/dev/null || true
+          nft add rule ip filter DOCKER-USER iifname != "br-traefik" tcp dport 8080 drop comment "symbios-deny-wan-8080-v4" 2>/dev/null || true
+          nft add rule ip6 filter DOCKER-USER iifname != "br-traefik" tcp dport 8080 ip6 saddr { ::1/128, fd00::/8, fe80::/10 } accept comment "symbios-lan-8080-v6" 2>/dev/null || true
+          nft add rule ip6 filter DOCKER-USER iifname != "br-traefik" tcp dport 8080 drop comment "symbios-deny-wan-8080-v6" 2>/dev/null || true
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Restrict published port 8080 to LAN (apply now)
+      ansible.builtin.command: /usr/local/sbin/symbios-lan-8080.sh
+      changed_when: false
+
+    - name: Restrict published port 8080 to LAN (boot persistence)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-lan-8080.service
+        content: |
+          [Unit]
+          Description=Restrict published symbios-ui port 8080 to LAN
+          After=docker.service
+          Wants=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/symbios-lan-8080.sh
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: "0644"
+        owner: root
+        group: root
+
+    - name: Enable LAN restriction service
+      ansible.builtin.systemd:
+        name: symbios-lan-8080.service
+        enabled: yes
+        daemon_reload: yes
+
     - name: Ensure symbios-ui container is running
       ansible.builtin.shell: docker compose up -d
       args:
