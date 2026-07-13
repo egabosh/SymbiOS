@@ -11,6 +11,9 @@ SSH_HOST = 'host.docker.internal'
 SSH_USER = 'root'
 SSH_PORT = 22
 SSH_CONNECT_TIMEOUT = 15
+# Pinned host keys for the exec gateway. The file is seeded by
+# base-system/symbios-ui.yml; missing/changed keys are rejected (fail-closed).
+SSH_KNOWN_HOSTS = '/config/.ssh/known_hosts'
 
 _ssh_client = None
 _client_lock = threading.Lock()
@@ -51,7 +54,15 @@ def _get_ssh_client():
         key = _load_key(SSH_KEY_PATH)
         import paramiko
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            client.load_host_keys(SSH_KNOWN_HOSTS)
+        except Exception:
+            logger.warning(
+                'No known_hosts at %s; host key verification will reject.',
+                SSH_KNOWN_HOSTS,
+            )
+        # Reject unknown/changed host keys instead of trusting on first use.
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
         client.connect(
             SSH_HOST, port=SSH_PORT, username=SSH_USER,
             pkey=key, timeout=SSH_CONNECT_TIMEOUT,
