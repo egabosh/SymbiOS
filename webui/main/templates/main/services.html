@@ -1,81 +1,63 @@
-{% extends 'main/base.html' %}
-{% block sidebar %}
-    {% include 'main/sidebar_services.html' %}
-{% endblock %}
+{% extends "main/base.html" %}
+{% block sidebar %}{% include "main/sidebar_services.html" %}{% endblock %}
 {% block content %}
-<h2><i class='bi bi-hdd-stack'></i> Services</h2>
-<p class='text-muted'>Basic infrastructure services and managed Docker services.</p>
+<h2>Services</h2>
+<p class="text-muted">All services are managed through Ansible playbooks. Base-services playbooks are built into SymbiOS; service playbooks deploy additional containers.</p>
 
-{% if default_domain == 'local' %}
-<div class='alert alert-info'>
-    <i class='bi bi-info-circle-fill'></i> No public domain configured.
-    External services are only reachable via internal Docker hostnames.
-    Configure <a href='/settings/ddns/' class='alert-link'>Dynamic DNS</a> to enable public HTTPS access.
-</div>
-{% endif %}
-
-<h4 class='mt-4 mb-3'><i class='bi bi-server'></i> Basic Services</h4>
-<div class='row g-3 mb-4'>
-{% for svc in services %}
-{% if svc.basic %}
-<div class='col-lg-4 col-md-6'>
-    <div class='card h-100 border-{% if svc.internal %}secondary{% else %}primary{% endif %}'>
-        <div class='card-body'>
-            <div class='d-flex align-items-start gap-3'>
-                <div class='fs-2 text-{% if svc.internal %}secondary{% else %}primary{% endif %}'>
-                    <i class='{{ svc.icon }}'></i>
-                </div>
-                <div class='min-width-0'>
-                    <h5 class='card-title mb-1'>{{ svc.name }}</h5>
-                    <p class='card-text small text-muted mb-2'>{{ svc.description }}</p>
-                    {% if svc.internal %}
-                    <span class='badge bg-secondary'>Internal</span>
-                    {% else %}
-                    <a href='{{ svc.url }}' target='_blank' rel='noopener' class='text-break small stretched-link'>
-                        {{ svc.url }}
-                        <i class='bi bi-box-arrow-up-right ms-1'></i>
-                    </a>
-                    {% endif %}
-                </div>
+{% regroup catalog by group as groups %}
+{% for g in groups %}
+  <h4 class="mt-4 mb-3">{{ g.grouper }}</h4>
+  <div class="row">
+    {% for svc in g.list %}
+      <div class="col-md-4 mb-3">
+        <div class="card h-100">
+          <div class="card-body d-flex flex-column">
+            <h5 class="card-title d-flex align-items-center gap-2 flex-wrap">
+              {{ svc.title }}
+              {% if svc.group == 'base-services' %}
+                <span class="badge bg-info" style="font-size:0.55rem;">built-in</span>
+              {% endif %}
+              <span class="card-status badge bg-secondary" data-playbook="{{ svc.playbook }}">…</span>
+            </h5>
+            <p class="card-text small flex-grow-1">{{ svc.docs.description|truncatewords:30 }}</p>
+            <div class="mb-2">
+              {% for t in svc.docs.tags %}<span class="badge bg-light text-dark border me-1">{{ t }}</span>{% endfor %}
             </div>
+            <a href="/services/{{ svc.playbook }}/" class="btn btn-sm btn-outline-primary mt-auto">Details</a>
+          </div>
         </div>
-    </div>
-</div>
-{% endif %}
+      </div>
+    {% endfor %}
+  </div>
 {% endfor %}
-</div>
+{% endblock %}
 
-{% if managed_services %}
-<h4 class='mb-3'><i class='bi bi-hdd-rack'></i> Managed Services</h4>
-<div class='row g-3'>
-{% for svc in managed_services %}
-<div class='col-lg-4 col-md-6'>
-    <div class='card h-100 border-{% if svc.installed %}success{% else %}secondary{% endif %}'>
-        <div class='card-body'>
-            <div class='d-flex align-items-start gap-3'>
-                <div class='fs-2 text-{% if svc.installed %}success{% else %}secondary{% endif %}'>
-                    <i class='bi bi-box'></i>
-                </div>
-                <div class='min-width-0'>
-                    <h5 class='card-title mb-1'>{{ svc.name }}</h5>
-                    <p class='card-text small text-muted mb-2'>Playbook: {{ svc.playbook }}</p>
-                    {% if svc.installed %}
-                    <span class='badge bg-success'><i class='bi bi-check-circle'></i> Installed</span>
-                    {% else %}
-                    <span class='badge bg-warning text-dark'><i class='bi bi-x-circle'></i> Not installed</span>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-{% endfor %}
-</div>
-{% endif %}
-
-<style>
-.min-width-0 { min-width: 0; }
-.card { transition: transform .15s, box-shadow .15s; }
-.card:hover { transform: translateY(-2px); box-shadow: 0 .25rem .5rem rgba(0,0,0,.1); }
-</style>
+{% block scripts %}
+<script>
+const STATE_META = {
+  running: {cls: 'bg-success', label: 'Running'},
+  stopped: {cls: 'bg-danger', label: 'Stopped'},
+  'not-installed': {cls: 'bg-secondary', label: 'Not installed'},
+  error: {cls: 'bg-warning text-dark', label: 'Error'},
+};
+function applyBadge(el, state) {
+  const m = STATE_META[state] || STATE_META['not-installed'];
+  el.className = 'card-status badge ' + m.cls;
+  el.textContent = m.label;
+}
+function aggregateState(services) {
+  if (!services.length) return 'not-installed';
+  const st = services.map(s => s.state);
+  if (st.every(s => s === 'not-installed')) return 'not-installed';
+  if (st.some(s => s === 'running')) return 'running';
+  return 'stopped';
+}
+document.querySelectorAll('.card-status[data-playbook]').forEach(el => {
+  const pb = el.dataset.playbook;
+  fetch('/services/' + pb + '/status/')
+    .then(r => r.json())
+    .then(d => applyBadge(el, aggregateState(d.services || [])))
+    .catch(() => applyBadge(el, 'error'));
+});
+</script>
 {% endblock %}

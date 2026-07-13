@@ -12,7 +12,7 @@ SSH_USER = 'root'
 SSH_PORT = 22
 SSH_CONNECT_TIMEOUT = 15
 # Pinned host keys for the exec gateway. The file is seeded by
-# base-system/symbios-ui.yml; missing/changed keys are rejected (fail-closed).
+# base-services/symbios-ui.yml; missing/changed keys are rejected (fail-closed).
 SSH_KNOWN_HOSTS = '/config/.ssh/known_hosts'
 
 _ssh_client = None
@@ -117,3 +117,91 @@ def run_docker(service_name, action, timeout=120):
     if stderr and not ok:
         output = output + '\n--- STDERR ---\n' + stderr
     return ok, output
+
+
+def run_systemctl(subcommand, unit, timeout=120):
+    cmd = 'exec systemctl ' + subcommand + ' ' + unit
+    ok, stdout, stderr = run_command(cmd, timeout=timeout)
+    output = stdout
+    if stderr and not ok:
+        output = output + '\n--- STDERR ---\n' + stderr
+    return ok, output
+
+
+def run_cron(subcommand, file, timeout=120):
+    cmd = 'cron ' + subcommand + ' ' + file
+    ok, stdout, stderr = run_command(cmd, timeout=timeout)
+    output = stdout
+    if stderr and not ok:
+        output = output + '\n--- STDERR ---\n' + stderr
+    return ok, output
+
+
+def run_ufw(subcommand, timeout=120):
+    cmd = 'ufw ' + subcommand
+    ok, stdout, stderr = run_command(cmd, timeout=timeout)
+    output = stdout
+    if stderr and not ok:
+        output = output + '\n--- STDERR ---\n' + stderr
+    return ok, output
+
+
+def run_service_logs(playbook, lines=200, timeout=120):
+    cmd = 'service logs ' + playbook + ' ' + str(lines)
+    ok, stdout, stderr = run_command(cmd, timeout=timeout)
+    # Prefer stdout (the JSON payload); only fall back to stderr if empty,
+    # so a stray warning on stderr can never corrupt the JSON we parse.
+    if stdout and stdout.strip():
+        return ok, stdout
+    output = stdout
+    if stderr:
+        output = output + '\n--- STDERR ---\n' + stderr
+    return ok, output
+
+
+def stream_command(cmd, timeout=600):
+    """Run a gateway command and yield ('out'|'err'|'rc', text) incrementally.
+
+    Used by the WebUI SSE endpoint to show live output (e.g. ansible tasks as
+    they execute). Blocks reading the SSH channel until the remote process ends.
+    """
+    import time
+    global _ssh_client
+    client = _get_ssh_client()
+    try:
+        transport = client.get_transport()
+        if not transport or not transport.is_active():
+            raise RuntimeError('SSH transport not active')
+        channel = transport.open_session(timeout=SSH_CONNECT_TIMEOUT)
+        channel.settimeout(timeout)
+        channel.exec_command(cmd)
+        while True:
+            if channel.recv_ready():
+                data = channel.recv(4096)
+                if data:
+                    yield ('out', data.decode('utf-8', errors='replace'))
+            if channel.recv_stderr_ready():
+                data = channel.recv_stderr(4096)
+                if data:
+                    yield ('err', data.decode('utf-8', errors='replace'))
+            if channel.exit_status_ready():
+                while channel.recv_ready():
+                    data = channel.recv(4096)
+                    if data:
+                        yield ('out', data.decode('utf-8', errors='replace'))
+                while channel.recv_stderr_ready():
+                    data = channel.recv_stderr(4096)
+                    if data:
+                        yield ('err', data.decode('utf-8', errors='replace'))
+                break
+            time.sleep(0.02)
+        yield ('rc', channel.recv_exit_status())
+    except Exception as e:
+        logger.exception('SSH stream failed: ' + cmd)
+        yield ('err', str(e))
+        yield ('rc', 1)
+        try:
+            _ssh_client.close()
+        except Exception:
+            pass
+        _ssh_client = None
