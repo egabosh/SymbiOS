@@ -17,7 +17,7 @@ subdirectory.
 1. [What SymbiOS does](#1-what-symbios-does)
 2. [Architecture overview](#2-architecture-overview)
 3. [Repository layout](#3-repository-layout)
-4. [The base system](#4-the-base-system)
+4. [The base services](#4-the-base-services)
 5. [Domains, TLS and certificates](#5-domains-tls-and-certificates)
 6. [Networking and Traefik routing](#6-networking-and-traefik-routing)
 7. [Installation](#7-installation)
@@ -75,7 +75,7 @@ key). No extra daemon is required.
     +---------------------------------------------------------------+
         |
    +----v----------------------------+
-   |  base-system/*.yml (Ansible)    |
+   |  base-services/*.yml (Ansible)    |
    |  services/*.yml    (Ansible)    |
    +---------------------------------+
 ```
@@ -93,11 +93,11 @@ container's IP/port.
 
 ```
 SymbiOS/
-├── install.sh            # Bootstrap: install ansible, clone repo, run base-system
+├── install.sh            # Bootstrap: install ansible, clone repo, run base-services
 ├── inventory.yml         # Template inventory (copied to the host on first install)
 ├── cleanup.sh            # Helper to tear down / reset
 ├── symbios-exec.sh       # Restricted SSH exec gateway used by the WebUI
-├── base-system/          # Core Ansible playbooks (the "Basissystem")
+├── base-services/          # Core Ansible playbooks (the "Basisservices")
 │   ├── *.yml             # One playbook per concern (see section 4)
 │   ├── traefik-services.j2   # Template -> /home/docker/traefik/providers/symbios-services.yml
 │   ├── authelia-access-control.j2  # Template -> Authelia access_control block
@@ -121,7 +121,7 @@ state lives under `/home/docker/<service>/`. The live inventory is at
 
 ## 4. The base system
 
-The `base-system/` directory contains the Ansible playbooks that build the
+The `base-services/` directory contains the Ansible playbooks that build the
 platform. `install.sh` runs them in dependency order. Each playbook manages one
 concern and is idempotent, so it is safe to re-run any of them.
 
@@ -276,7 +276,7 @@ sudo bash install.sh
 2. Clone this repo to `/home/SymbiOS` (or pull updates).
 3. Create `/home/docker/symbios-ui/config/inventory.yml` from the bundled
    template on first run.
-4. Run the base-system playbooks in order (basics -> hardening -> firewall ->
+4. Run the base-services playbooks in order (basics -> hardening -> firewall ->
    backup -> autoupdate -> runchecks -> docker -> dedyn -> acme-pki -> traefik
    -> ldap -> authelia -> symbios-ui).
 5. On a Raspberry Pi, also apply `raspberry.yml` and the desktop playbook.
@@ -293,22 +293,22 @@ matching playbook over SSH, see section 8).
   inventory and lets you change settings, add/remove services, and start/stop
   containers.
 - **No daemon is involved.** Every settings change is applied immediately: the
-  WebUI runs the matching base-system playbook over SSH (e.g. saving DDNS runs
+  WebUI runs the matching base-services playbook over SSH (e.g. saving DDNS runs
   `dedyn.yml`, saving Auth runs `authelia.yml`, saving the mailserver runs
   `smtp.yml`). Inventory edits made directly on the host can be applied the
   same way by running the relevant playbook via SSH.
 - **symbios-exec.sh** is the restricted command that the WebUI invokes over SSH
   (`command=` restriction in `authorized_keys`). It only permits
   `playbook`, `docker-compose`, and a narrow `exec` set, and only for paths
-  under `base-system/` or `services/`.
+  under `base-services/` or `services/`.
 
 Manual equivalents:
 
 ```bash
-# re-apply a base-system playbook
+# re-apply a base-services playbook
 ansible-playbook --limit localhost \
   --inventory /home/docker/symbios-ui/config/inventory.yml \
-  /home/SymbiOS/base-system/traefik.yml
+  /home/SymbiOS/base-services/traefik.yml
 
 # run a service playbook
 /home/SymbiOS/services/service-handler.sh playbook home-assistant

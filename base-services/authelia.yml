@@ -262,7 +262,7 @@
         group: root
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK ACCESS CONTROL"
-        block: "{{ lookup('template', '/home/SymbiOS/base-system/authelia-access-control.j2') }}"
+        block: "{{ lookup('template', '/home/SymbiOS/base-services/authelia-access-control.j2') }}"
 
         backup: yes
       notify: Restart authelia

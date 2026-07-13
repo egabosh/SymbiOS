@@ -10,11 +10,11 @@
 #   - name: Debian
 #     versions:
 #     - '13'
-#   category: Base system
+#   category: Base services
 #   tags:
 #   - basics
 #   - setup
-#   - base-system
+#   - base-services
 #   - postfix
 #   - rsyslog
 #   - ssh

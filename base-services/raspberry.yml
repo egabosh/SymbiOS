@@ -10,7 +10,7 @@
 #   - name: Debian
 #     versions:
 #     - '13'
-#   category: Base system / Hardware
+#   category: Base services / Hardware
 #   tags:
 #   - raspberry
 #   - pi

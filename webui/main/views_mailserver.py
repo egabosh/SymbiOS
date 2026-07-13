@@ -29,7 +29,7 @@ def settings_mailserver(request):
                         if key.startswith('smtp_'):
                             del vars_[key]
                     _save_inventory_config(config)
-                    ok, out = run_playbook('base-system/smtp.yml', timeout=180)
+                    ok, out = run_playbook('base-services/smtp.yml', timeout=180)
                     if ok:
                         messages.success(request, 'SMTP configuration deleted.')
                     else:
@@ -71,9 +71,9 @@ def settings_mailserver(request):
             vars_['smtp_from'] = smtp_from
             vars_['smtp_tls'] = smtp_tls
             _save_inventory_config(config)
-            ok, out = run_playbook('base-system/smtp.yml', timeout=180)
+            ok, out = run_playbook('base-services/smtp.yml', timeout=180)
             if ok and vars_.get('twofa_enabled'):
-                ok, out = run_playbook('base-system/authelia.yml', timeout=180)
+                ok, out = run_playbook('base-services/authelia.yml', timeout=180)
             if ok:
                 messages.success(request, 'Mailserver settings saved and applied.')
             else:
