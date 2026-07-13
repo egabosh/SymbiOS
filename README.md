@@ -21,7 +21,7 @@ subdirectory.
 5. [Domains, TLS and certificates](#5-domains-tls-and-certificates)
 6. [Networking and Traefik routing](#6-networking-and-traefik-routing)
 7. [Installation](#7-installation)
-8. [Managing the system (WebUI / config daemon)](#8-managing-the-system-webui--config-daemon)
+8. [Managing the system (WebUI / SSH)](#8-managing-the-system-webui--ssh)
 9. [Adding your own service](#9-adding-your-own-service)
 
 ---
@@ -38,12 +38,13 @@ new web app is mostly "write one playbook and drop it in `services/`":
 | User directory     | OpenLDAP + LDAP Account Manager (LAM)               |
 | Certificates       | Let's Encrypt (public) + step-ca local CA (offline)|
 | Dynamic DNS        | deSEC (dedyn.io) client                             |
-| Management UI      | symbios-ui (Django web interface + config daemon)  |
+| Management UI      | symbios-ui (Django web interface)                 |
 | App isolation      | Docker, one compose stack per service               |
 
-Everything is driven by Ansible playbooks. There is no custom agent beyond a
-small shell daemon (`symbios-configd.sh`) and a restricted SSH exec gateway
-(`symbios-exec.sh`) that the web UI uses to run playbooks on the host.
+Everything is driven by Ansible playbooks. There is no long-running agent: the
+web UI runs playbooks on the host **directly over SSH** through a restricted
+exec gateway (`symbios-exec.sh`, invoked via a forced command + a scoped SSH
+key). No extra daemon is required.
 
 ---
 
@@ -68,11 +69,10 @@ small shell daemon (`symbios-configd.sh`) and a restricted SSH exec gateway
    +---------+   +------------+   +-----------+    +-----------+
         |              |                |
         |              |                |
-   +----v--------------v----------------v-----------------------------+
-   |  symbios-configd.sh  (watches inventory + service triggers)      |
-   |  service-handler.sh  (runs a service playbook / docker compose)  |
-   |  symbios-exec.sh     (restricted SSH exec used by the WebUI)     |
-   +---------------------------------------------------------------+
+    +----v--------------v----------------v-----------------------------+
+    |  service-handler.sh  (runs a service playbook / docker compose)  |
+    |  symbios-exec.sh     (restricted SSH exec used by the WebUI)     |
+    +---------------------------------------------------------------+
         |
    +----v----------------------------+
    |  base-system/*.yml (Ansible)    |
@@ -96,7 +96,6 @@ SymbiOS/
 ├── install.sh            # Bootstrap: install ansible, clone repo, run base-system
 ├── inventory.yml         # Template inventory (copied to the host on first install)
 ├── cleanup.sh            # Helper to tear down / reset
-├── symbios-configd.sh    # Config daemon: reacts to inventory changes + triggers
 ├── symbios-exec.sh       # Restricted SSH exec gateway used by the WebUI
 ├── base-system/          # Core Ansible playbooks (the "Basissystem")
 │   ├── *.yml             # One playbook per concern (see section 4)
@@ -283,21 +282,21 @@ sudo bash install.sh
 5. On a Raspberry Pi, also apply `raspberry.yml` and the desktop playbook.
 
 After install, edit the inventory to set `base_domain` / `default_domain` and
-(optionally) deSEC credentials, then let the config daemon apply the changes
-(see section 8).
+(optionally) deSEC credentials, then apply them via the WebUI (which runs the
+matching playbook over SSH, see section 8).
 
 ---
 
-## 8. Managing the system (WebUI / config daemon)
+## 8. Managing the system (WebUI / SSH)
 
 - **symbios-ui** is a Django web app (container `symbios-webui`) that reads the
   inventory and lets you change settings, add/remove services, and start/stop
   containers.
-- **symbios-configd.sh** runs on the host and watches:
-  - the inventory file — on relevant changes it re-runs the matching
-    base-system playbooks (e.g. domain change -> traefik/authelia/ldap), and
-  - a trigger directory — files like `<action>-<service>.trigger` tell it to
-    run a service playbook or `docker compose up|down`.
+- **No daemon is involved.** Every settings change is applied immediately: the
+  WebUI runs the matching base-system playbook over SSH (e.g. saving DDNS runs
+  `dedyn.yml`, saving Auth runs `authelia.yml`, saving the mailserver runs
+  `smtp.yml`). Inventory edits made directly on the host can be applied the
+  same way by running the relevant playbook via SSH.
 - **symbios-exec.sh** is the restricted command that the WebUI invokes over SSH
   (`command=` restriction in `authorized_keys`). It only permits
   `playbook`, `docker-compose`, and a narrow `exec` set, and only for paths
@@ -424,10 +423,9 @@ daemon / `service-handler.sh` runs it.
 
 ### Discovery and lifecycle
 
-- `symbios-configd.sh` watches `services/` for changes and the trigger
-  directory for `<action>-<service>.trigger` files created by the WebUI.
-- `service-handler.sh` supports `playbook`, `start` (`docker compose up -d`),
-  and `stop` (`docker compose down`).
+- Service lifecycle (`playbook`, `start` = `docker compose up -d`, `stop` =
+  `docker compose down`) is handled by `service-handler.sh`, invoked by the
+  WebUI through `symbios-exec.sh` over SSH.
 - The WebUI's service-discovery reads the same directory
   (`webui/main/service_discover.py`).
 

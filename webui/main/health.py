@@ -143,24 +143,21 @@ def check_stepca():
     return {"status": "error", "message": stderr.strip() or f"exit code {rc}"}
 
 
-def check_config_daemon():
-    import time
-    heartbeat = "/log/configd-heartbeat"
-    status_file = "/log/configd-status"
-    # Primary liveness signal: configd touches the heartbeat every loop.
+def check_remote_exec():
+    import socket
+    # The WebUI applies config changes by running playbooks directly via SSH
+    # (paramiko -> host root + forced command symbios-exec.sh). No daemon is
+    # involved, so we verify the on-demand exec path is ready: the SSH key must
+    # be present and the host SSH gateway reachable.
+    key = "/config/.ssh/id_symbios"
+    if not os.path.exists(key):
+        return {"status": "warn", "message": "SSH exec key missing"}
     try:
-        mtime = os.path.getmtime(heartbeat)
-        if time.time() - mtime < 120:
-            return {"status": "ok", "message": "active"}
+        with socket.create_connection(("host.docker.internal", 22), timeout=3):
+            pass
     except OSError:
-        pass
-    # Fallback: a non-empty status file means configd at least started.
-    try:
-        if os.path.getsize(status_file) > 0:
-            return {"status": "warn", "message": "started, but no recent heartbeat"}
-    except OSError:
-        pass
-    return {"status": "warn", "message": "Config daemon not running"}
+        return {"status": "warn", "message": "Cannot reach host SSH (host.docker.internal:22)"}
+    return {"status": "ok", "message": "SSH exec gateway reachable"}
 
 
 def check_playbooks():
@@ -487,7 +484,7 @@ def run_all():
         "authelia": check_authelia(),
         "traefik": check_traefik(),
         "stepca": check_stepca(),
-        "config_daemon": check_config_daemon(),
+        "remote_exec": check_remote_exec(),
         "playbooks": check_playbooks(),
         "ddns": check_ddns(),
         "containers": check_containers(),
