@@ -1,3 +1,37 @@
+# docs:
+#   short_description: Deploy the SFTP file-share service
+#   description: Deploys a scoped SFTP file-sharing container for secure external file exchange.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   tags:
+#   - sftp
+#   - service
+#   - file-share
+#   - security
+#   service_control:
+#     services:
+#     - name: sftp-share
+#       type: docker
+#       compose_file: /home/docker/sftp-share/docker-compose.yml
+#       install: docker compose -f /home/docker/sftp-share/docker-compose.yml up -d
+#       uninstall: docker compose -f /home/docker/sftp-share/docker-compose.yml down -v
+#       reinstall: docker compose -f /home/docker/sftp-share/docker-compose.yml up -d --force-recreate --build
+#       start: docker compose -f /home/docker/sftp-share/docker-compose.yml up -d
+#       stop: docker compose -f /home/docker/sftp-share/docker-compose.yml down
+#       restart: docker compose -f /home/docker/sftp-share/docker-compose.yml restart
+#       reload: docker compose -f /home/docker/sftp-share/docker-compose.yml up -d
+#       status: docker compose -f /home/docker/sftp-share/docker-compose.yml ps
+#       logs: docker compose -f /home/docker/sftp-share/docker-compose.yml logs --tail=100
+#
+
 ---
 - name: sftp-share
   hosts: all

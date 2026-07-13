@@ -1,3 +1,49 @@
+# docs:
+#   short_description: Install system/service health checks
+#   description: Deploys the runchecks health-check framework (script + systemd service/timer) that periodically verifies critical services and reports their status.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Monitoring / Checks
+#   tags:
+#   - checks
+#   - health
+#   - monitoring
+#   - systemd
+#   service_control:
+#     services:
+#     - name: runchecks
+#       type: systemd
+#       unit: runchecks.service
+#       install: systemctl enable --now runchecks.service
+#       uninstall: systemctl disable --now runchecks.service
+#       reinstall: systemctl restart runchecks.service
+#       start: systemctl start runchecks.service
+#       stop: systemctl stop runchecks.service
+#       restart: systemctl restart runchecks.service
+#       reload: systemctl reload runchecks.service
+#       status: systemctl is-active runchecks.service
+#       logs: journalctl -u runchecks.service --tail=100
+#     - name: runchecks
+#       type: systemd
+#       unit: runchecks.timer
+#       install: systemctl enable --now runchecks.timer
+#       uninstall: systemctl disable --now runchecks.timer
+#       reinstall: systemctl restart runchecks.timer
+#       start: systemctl start runchecks.timer
+#       stop: systemctl stop runchecks.timer
+#       restart: systemctl restart runchecks.timer
+#       reload: systemctl reload runchecks.timer
+#       status: systemctl is-active runchecks.timer
+#       logs: journalctl -u runchecks.timer --tail=100
+#
+
 ---
 - name: Checks
   hosts: all

@@ -1,3 +1,38 @@
+# docs:
+#   short_description: Deploy the SymbiOS WebUI
+#   description: Builds and runs the SymbiOS web interface (Django/gunicorn), wires it to Traefik/Authelia, and configures the loopback break-glass and the hardened SSH exec gateway.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: WebUI
+#   tags:
+#   - webui
+#   - django
+#   - traefik
+#   - authelia
+#   - symbios
+#   service_control:
+#     services:
+#     - name: symbios-ui
+#       type: docker
+#       compose_file: /home/docker/symbios-ui/docker-compose.yml
+#       install: docker compose -f /home/docker/symbios-ui/docker-compose.yml up -d
+#       uninstall: docker compose -f /home/docker/symbios-ui/docker-compose.yml down -v
+#       reinstall: docker compose -f /home/docker/symbios-ui/docker-compose.yml up -d --force-recreate --build
+#       start: docker compose -f /home/docker/symbios-ui/docker-compose.yml up -d
+#       stop: docker compose -f /home/docker/symbios-ui/docker-compose.yml down
+#       restart: docker compose -f /home/docker/symbios-ui/docker-compose.yml restart
+#       reload: docker compose -f /home/docker/symbios-ui/docker-compose.yml up -d
+#       status: docker compose -f /home/docker/symbios-ui/docker-compose.yml ps
+#       logs: docker compose -f /home/docker/symbios-ui/docker-compose.yml logs --tail=100
+#
+
 ---
 - name: symbios-ui
   hosts: all

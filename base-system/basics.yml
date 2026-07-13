@@ -1,3 +1,63 @@
+# docs:
+#   short_description: Basic SymbiOS host setup
+#   description: 'Performs base system configuration: packages, users, locale/timezone, SSH, logging (rsyslog), mail relay (postfix) and other foundational settings used by all other roles.'
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Base system
+#   tags:
+#   - basics
+#   - setup
+#   - base-system
+#   - postfix
+#   - rsyslog
+#   - ssh
+#   service_control:
+#     services:
+#     - name: ssh
+#       type: systemd
+#       unit: ssh.service
+#       install: systemctl enable --now ssh.service
+#       uninstall: systemctl disable --now ssh.service
+#       reinstall: systemctl restart ssh.service
+#       start: systemctl start ssh.service
+#       stop: systemctl stop ssh.service
+#       restart: systemctl restart ssh.service
+#       reload: systemctl reload ssh.service
+#       status: systemctl is-active ssh.service
+#       logs: journalctl -u ssh.service --tail=100
+#     - name: rsyslog
+#       type: systemd
+#       unit: rsyslog.service
+#       install: systemctl enable --now rsyslog.service
+#       uninstall: systemctl disable --now rsyslog.service
+#       reinstall: systemctl restart rsyslog.service
+#       start: systemctl start rsyslog.service
+#       stop: systemctl stop rsyslog.service
+#       restart: systemctl restart rsyslog.service
+#       reload: systemctl reload rsyslog.service
+#       status: systemctl is-active rsyslog.service
+#       logs: journalctl -u rsyslog.service --tail=100
+#     - name: postfix
+#       type: systemd
+#       unit: postfix.service
+#       install: systemctl enable --now postfix.service
+#       uninstall: systemctl disable --now postfix.service
+#       reinstall: systemctl restart postfix.service
+#       start: systemctl start postfix.service
+#       stop: systemctl stop postfix.service
+#       restart: systemctl restart postfix.service
+#       reload: systemctl reload postfix.service
+#       status: systemctl is-active postfix.service
+#       logs: journalctl -u postfix.service --tail=100
+#
+
 ---
 - name: Basic SymbiOS Setup
   hosts: all

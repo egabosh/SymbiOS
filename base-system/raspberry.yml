@@ -1,3 +1,25 @@
+# docs:
+#   short_description: Raspberry Pi specific Debian setup
+#   description: Applies Raspberry-Pi-specific tweaks (boot/firmware, hardware enablement and onboarding) for running SymbiOS on Pi hardware. Manages no persistent service of its own.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Base system / Hardware
+#   tags:
+#   - raspberry
+#   - pi
+#   - hardware
+#   - setup
+#   service_control:
+#     services: []
+#
+
 ---
 - name: Raspberry Debian Linux Setup
   hosts: all

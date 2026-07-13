@@ -1,3 +1,37 @@
+# docs:
+#   short_description: Configure automated system updates
+#   description: Sets up periodic automatic updates of the host OS packages via a cron job, keeping the system patched without manual intervention.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Maintenance
+#   tags:
+#   - updates
+#   - autoupdate
+#   - maintenance
+#   - security
+#   - cron
+#   service_control:
+#     services:
+#     - name: autoupdate
+#       type: cron
+#       file: /etc/cron.d/autoupdate_local
+#       install: sed -i 's/^#//' /etc/cron.d/autoupdate_local
+#       uninstall: rm -f /etc/cron.d/autoupdate_local
+#       reinstall: sed -i 's/^#//' /etc/cron.d/autoupdate_local
+#       start: sed -i 's/^#//' /etc/cron.d/autoupdate_local
+#       stop: sed -i 's/^/#/' /etc/cron.d/autoupdate_local
+#       restart: sed -i 's/^#//' /etc/cron.d/autoupdate_local
+#       status: cat /etc/cron.d/autoupdate_local
+#       logs: grep autoupdate /var/log/syslog
+#
+
 ---
 - name: Autoupdate
   hosts: all
