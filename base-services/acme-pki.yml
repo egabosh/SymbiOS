@@ -11,13 +11,6 @@
 #     versions:
 #     - '13'
 #   category: PKI / Certificates
-#   tags:
-#   - pki
-#   - acme
-#   - step-ca
-#   - certificates
-#   - tls
-#   - security
 #   service_control:
 #     services:
 #     - name: acme-pki (step-ca)

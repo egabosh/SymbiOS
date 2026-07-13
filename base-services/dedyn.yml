@@ -11,12 +11,6 @@
 #     versions:
 #     - '13'
 #   category: DNS / Network
-#   tags:
-#   - dyndns
-#   - desec
-#   - dns
-#   - network
-#   - cron
 #   service_control:
 #     services:
 #     - name: dedyn

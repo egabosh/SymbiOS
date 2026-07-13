@@ -11,11 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Hardening / Security
-#   tags:
-#   - hardening
-#   - security
-#   - ssh
-#   - debian
 #   service_control:
 #     services:
 #     - name: ssh

@@ -11,10 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Container runtime
-#   tags:
-#   - docker
-#   - container
-#   - runtime
 #   service_control:
 #     services:
 #     - name: docker

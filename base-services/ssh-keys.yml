@@ -11,11 +11,6 @@
 #     versions:
 #     - '13'
 #   category: SSH / Access
-#   tags:
-#   - ssh
-#   - authorized_keys
-#   - access
-#   - security
 #   service_control:
 #     services:
 #     - name: ssh

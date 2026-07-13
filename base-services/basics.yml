@@ -11,13 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Base services
-#   tags:
-#   - basics
-#   - setup
-#   - base-services
-#   - postfix
-#   - rsyslog
-#   - ssh
 #   service_control:
 #     services:
 #     - name: ssh

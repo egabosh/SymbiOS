@@ -11,11 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Monitoring / Checks
-#   tags:
-#   - checks
-#   - health
-#   - monitoring
-#   - systemd
 #   service_control:
 #     services:
 #     - name: runchecks

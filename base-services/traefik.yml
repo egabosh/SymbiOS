@@ -11,12 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Reverse proxy
-#   tags:
-#   - traefik
-#   - reverse-proxy
-#   - tls
-#   - ingress
-#   - security
 #   service_control:
 #     services:
 #     - name: traefik
