@@ -1,25 +1,55 @@
 import subprocess
 import os
 import socket
-from django.contrib.auth import login, get_user_model
+import struct
 from django.shortcuts import redirect
+
+from .auth_user import SymbiosUser, AnonymousUser
 
 LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')
 
 
 def _trusted_proxy_addresses():
-    # Only the reverse proxy (Traefik) and localhost may assert the Authelia
-    # forward-auth Remote-User header. Any other source (e.g. a client hitting
-    # :8080 directly) must authenticate with the real OpenLDAP password instead
-    # of being able to spoof "Remote-User: admin". Traefik is resolved via
-    # Docker DNS so the allowlist tracks its (possibly changing) container IP.
-    addrs = {'127.0.0.1', '::1'}
+    # Only the reverse proxy (Traefik) may assert the Authelia forward-auth
+    # Remote-User header. Any other source (e.g. a client on the docker network
+    # hitting :8080 directly) must not be able to spoof "Remote-User: admin".
+    # Traefik is resolved via Docker DNS so the allowlist tracks its (possibly
+    # changing) container IP.
+    addrs = set()
     for family in (socket.AF_INET, socket.AF_INET6):
         try:
             for info in socket.getaddrinfo('traefik', None, family, 0, socket.SOCK_STREAM):
                 addrs.add(info[4][0])
         except Exception:
             pass
+    return addrs
+
+
+def _host_source_addresses():
+    # Addresses from which the operator may use the passwordless break-glass
+    # admin on 127.0.0.1:8080.
+    #  * 127.0.0.1/::1: reached when exec'ing into the container and hitting
+    #    its own loopback.
+    #  * host.docker.internal: the host as seen from the container.
+    #  * the default-route gateway: when the host reaches the published port via
+    #    the docker-proxy, the source IP is NAT'd to the bridge gateway address,
+    #    so we must treat that gateway as "from the host".
+    addrs = {'127.0.0.1', '::1'}
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            for info in socket.getaddrinfo('host.docker.internal', None, family, 0, socket.SOCK_STREAM):
+                addrs.add(info[4][0])
+        except Exception:
+            pass
+    try:
+        with open('/proc/net/route') as f:
+            for line in f.readlines()[1:]:
+                parts = line.split()
+                if len(parts) >= 4 and parts[1] == '00000000' and parts[2] != '00000000':
+                    gw = int(parts[2], 16)
+                    addrs.add(socket.inet_ntoa(struct.pack('<I', gw)))
+    except Exception:
+        pass
     return addrs
 
 
@@ -43,53 +73,39 @@ def _admin_password_is_default():
 class AutheliaMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
+        # Resolve proxy/host allowlists once at startup; container IPs are stable
+        # for the process lifetime and Docker DNS churn within a boot is rare.
+        self._trusted = _trusted_proxy_addresses()
+        self._host = _host_source_addresses()
 
     def __call__(self, request):
-        # Bypass auth for localhost requests (for testing/local access)
-        host = request.META.get('REMOTE_ADDR', '')
-        if host in ['127.0.0.1', '::1', 'localhost']:
-            User = get_user_model()
-            try:
-                user = User.objects.get(username='admin')
-            except User.DoesNotExist:
-                user = User(username='admin')
-                user.is_staff = True
-                user.is_superuser = True
-                user.set_unusable_password()
-                user.save()
-            if request.session.get('_auth_user_id') != str(user.pk):
-                request.session.cycle_key()
-                login(request, user, backend='main.backends.LDAPBackend')
-            return self.get_response(request)
+        remote_addr = request.META.get('REMOTE_ADDR', '')
+        user = None
 
-        remote_user = request.META.get('HTTP_REMOTE_USER')
+        # Host-local break-glass: 127.0.0.1:8080 is only reachable from the
+        # host itself (loopback, or via SSH tunnel to the host). The docker-proxy
+        # masks the source as the bridge gateway, which we also trust as "host".
+        if remote_addr in self._host:
+            user = SymbiosUser('admin', is_staff=True, is_superuser=True)
+        else:
+            remote_user = request.META.get('HTTP_REMOTE_USER')
+            # Only honor the forward-auth header when it originates from the
+            # proxy; drop it otherwise so it cannot be spoofed.
+            if remote_user and remote_addr in self._trusted:
+                user = SymbiosUser(
+                    remote_user,
+                    is_staff=remote_user in ('admin', 'root'),
+                    is_superuser=remote_user in ('admin', 'root'),
+                )
+                if remote_user == 'admin' and 'force_password_change' not in request.session:
+                    if _admin_password_is_default():
+                        request.session['force_password_change'] = True
 
-        # Only honor the forward-auth header when it originates from the proxy.
-        if remote_user and host not in _trusted_proxy_addresses():
-            remote_user = None
-
-        if remote_user:
-            User = get_user_model()
-            try:
-                user = User.objects.get(username=remote_user)
-            except User.DoesNotExist:
-                user = User(username=remote_user)
-                user.is_staff = remote_user in ['admin', 'root']
-                user.is_superuser = remote_user in ['admin', 'root']
-                user.set_unusable_password()
-                user.save()
-
-            if request.session.get('_auth_user_id') != str(user.pk):
-                request.session.cycle_key()
-                login(request, user, backend='main.backends.LDAPBackend')
-
-            if remote_user == 'admin' and 'force_password_change' not in request.session:
-                if _admin_password_is_default():
-                    request.session['force_password_change'] = True
+        request.user = user if user is not None else AnonymousUser()
 
         if (request.user.is_authenticated
                 and request.session.get('force_password_change')
-                and request.path not in ('/change-password/', '/logout/')):
+                and request.path not in ('/change-password/', '/logout/', '/authelia-logout/')):
             return redirect('/change-password/')
 
         return self.get_response(request)

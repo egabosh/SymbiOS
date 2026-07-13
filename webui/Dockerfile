@@ -23,4 +23,4 @@ RUN mkdir -p /log /config && chown -R symbios:symbios /app /log /config
 
 USER symbios
 EXPOSE 8080
-ENTRYPOINT ["sh", "-c", "python manage.py migrate --noinput && python manage.py initial_setup && exec gunicorn webui.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8080"]
+ENTRYPOINT ["sh", "-c", "exec gunicorn webui.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8080"]

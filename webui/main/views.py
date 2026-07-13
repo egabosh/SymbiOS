@@ -3,7 +3,7 @@ import yaml
 import os
 from pathlib import Path
 from django.shortcuts import render, redirect
-from django.contrib.auth.decorators import login_required
+from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
 from .utils.log_utils import logs_stream
@@ -192,11 +192,9 @@ memberUid: {uid}
     _ldap_modify(ldif, ldap['base_dn'], ldap['admin_pw'])
 
 
-@login_required
 def health(request):
     return render(request, 'main/health.html')
 
-@login_required
 def health_data(request):
     from .health import run_all
     from django.http import JsonResponse
@@ -211,19 +209,16 @@ def container_list(request):
     return JsonResponse({"containers": containers})
 
 
-from django.contrib.auth import logout as django_logout
-
-
 def logout_view(request):
     config = _get_inventory_config()
     vars_ = config.get("all", {}).get("vars", {})
     default_domain = vars_.get("default_domain", "")
-    django_logout(request)
+    request.session.flush()
     if default_domain:
         from django.shortcuts import redirect
         return redirect(f"https://auth.{default_domain}/logout")
     from django.shortcuts import redirect
-    return redirect("/login/")
+    return redirect("/authelia-logout/")
 
 
 def authelia_logout(request):
