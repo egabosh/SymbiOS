@@ -37,7 +37,7 @@ def settings_ddns(request):
                 _save_inventory_config(config)
                 messages.success(request, 'Dynamic DNS configuration removed.')
                 try:
-                    ok, out = run_playbook('base-system/dedyn.yml', timeout=120)
+                    ok, out = run_playbook('base-services/dedyn.yml', timeout=120)
                     if ok:
                         messages.success(request, 'DDNS playbook completed successfully.')
                     else:
@@ -64,7 +64,7 @@ def settings_ddns(request):
                 _save_inventory_config(config)
                 messages.success(request, 'Dynamic DNS settings saved.')
                 try:
-                    ok, out = run_playbook('base-system/dedyn.yml', timeout=120)
+                    ok, out = run_playbook('base-services/dedyn.yml', timeout=120)
                     if ok:
                         messages.success(request, 'DDNS playbook completed successfully.')
                     else:
@@ -299,7 +299,7 @@ def settings_auth(request):
             _save_inventory_config(config)
             messages.success(request, 'Auth settings saved.')
             try:
-                ok, out = run_playbook('base-system/authelia.yml', timeout=180)
+                ok, out = run_playbook('base-services/authelia.yml', timeout=180)
                 if ok:
                     messages.success(request, 'Authelia playbook completed successfully.')
                 else:
@@ -438,7 +438,7 @@ def settings_ssh_keys(request):
 
             messages.success(request, "SSH keys saved.")
             try:
-                ok, out = run_playbook('base-system/ssh-keys.yml', timeout=120)
+                ok, out = run_playbook('base-services/ssh-keys.yml', timeout=120)
                 if ok:
                     messages.success(request, "SSH keys playbook completed successfully.")
                 else:

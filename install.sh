@@ -32,25 +32,25 @@ then
   chmod 600 ${g_inventory}
 fi
 
-# Install base-system playbooks
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/basics.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/hardening.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/firewall.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/backup.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/autoupdate.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/runchecks.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/docker.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/dedyn.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/acme-pki.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/traefik.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/ldap.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/authelia.yml
+# Install base-services playbooks
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/basics.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/hardening.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/firewall.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/backup.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/autoupdate.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/runchecks.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/docker.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/dedyn.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/acme-pki.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/traefik.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/ldap.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/authelia.yml
 
 # Detect Raspberry Pi and install platform-specific playbooks
 if [ -f /proc/device-tree/model ] && grep -qi "raspberry" /proc/device-tree/model
 then
-  ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/raspberry.yml
+  ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/raspberry.yml
   ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/desktop/firefox.yml
 fi
 
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-system/symbios-ui.yml
+ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/symbios-ui.yml
