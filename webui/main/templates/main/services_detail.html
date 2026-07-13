@@ -75,11 +75,19 @@
   </div>
   <div class="tab-pane fade" id="pane-source" role="tabpanel">
     <h4>Source</h4>
-    <pre id="source-output" class="bg-dark text-light p-2 small" style="max-height:480px;overflow:auto;">Loading source…</pre>
+    <pre id="source-output" class="bg-dark text-light p-2 small" style="max-height:480px;overflow:auto;white-space:pre-wrap;word-break:break-word;">Loading source…</pre>
   </div>
 </div>
 
 {% endblock %}
+
+<style>
+  #source-output .yk-comment { color: #6a9955; font-style: italic; }
+  #source-output .yk-key     { color: #79c0ff; }
+  #source-output .yk-str     { color: #ce9178; }
+  #source-output .yk-num     { color: #b5cea8; }
+  #source-output .yk-list    { color: #c586c0; }
+</style>
 
 {% block scripts %}
 <script>
@@ -170,13 +178,39 @@ document.getElementById('tab-output').addEventListener('shown.bs.tab', stopLogs)
 
 const srcPre = document.getElementById('source-output');
 let srcLoaded = false;
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+// Lightweight YAML highlighter (comments, keys, strings, numbers/booleans,
+// list markers). Operates on HTML-escaped text and returns highlighted HTML.
+function highlightYaml(text) {
+  return escapeHtml(text).split('\n').map(line => {
+    if (line.trimStart().startsWith('#')) {
+      return '<span class="yk-comment">' + line + '</span>';
+    }
+    let out = line;
+    out = out.replace(/('[^']*'|"[^"]*")/g, '<span class="yk-str">$1</span>');
+    out = out.replace(/(:\s+)(true|false|null|yes|no|on|off|-?\d+(?:\.\d+)?)/gi,
+      (m, p, v) => p + '<span class="yk-num">' + v + '</span>');
+    out = out.replace(/^(\s*(?:-\s)?)([A-Za-z_][\w.\/-]*)(:)(\s|$)/,
+      (m, ind, key, colon, rest) => ind + '<span class="yk-key">' + key + '</span>' + colon + rest);
+    out = out.replace(/^(\s*)(-\s)/, '$1<span class="yk-list">$2</span>');
+    return out;
+  }).join('\n');
+}
+
 function loadSource() {
   if (srcLoaded) return;
   fetch('/services/' + PLAYBOOK + '/source/')
     .then(r => r.json())
     .then(d => {
       if (d.error) { srcPre.textContent = 'ERROR: ' + d.error; return; }
-      srcPre.textContent = d.source || 'empty';
+      try {
+        srcPre.innerHTML = highlightYaml(d.source || '');
+      } catch (e) {
+        srcPre.textContent = d.source || 'empty';
+      }
       srcLoaded = true;
     })
     .catch(e => { srcPre.textContent = 'error: ' + e; });
