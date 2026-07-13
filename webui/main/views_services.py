@@ -295,6 +295,19 @@ def services_logs(request, playbook):
 
 
 @login_required
+def services_source(request, playbook):
+    """Return the raw playbook source (read-only) for display in the WebUI."""
+    item = get_playbook(playbook)
+    if item is None:
+        return JsonResponse({'error': 'Playbook not found'}, status=404)
+    from .utils.ssh_exec import run_service_source
+    ok, out = run_service_source(playbook)
+    if not ok and not out.strip():
+        return JsonResponse({'error': out or 'source fetch failed'}, status=502)
+    return JsonResponse({'source': out})
+
+
+@login_required
 def services_status(request, playbook):
     item = get_playbook(playbook)
     if item is None:

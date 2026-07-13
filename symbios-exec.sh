@@ -196,6 +196,23 @@ PY
                 f_lines="${f_parts[3]:-200}"
                 python3 /home/SymbiOS/symbios-logs.py "$f_playbook" "$f_lines"
                 ;;
+            source)
+                # Usage: service source <playbook>
+                # Returns the raw playbook source (read-only) for display in the
+                # WebUI. Only playbooks under base-services/ or services/ are allowed.
+                f_playbook="${f_parts[2]}"
+                if [[ "$f_playbook" != base-services/* && "$f_playbook" != services/* ]]; then
+                    echo "ERROR: Playbook path not allowed: $f_playbook"
+                    f_audit_log "BLOCKED source path=$f_playbook"
+                    exit 1
+                fi
+                f_path="/home/SymbiOS/$f_playbook"
+                if [ ! -f "$f_path" ]; then
+                    echo "ERROR: Playbook not found: $f_playbook"
+                    exit 1
+                fi
+                cat "$f_path"
+                ;;
             *)
                 echo "ERROR: service subcommand not allowed: $f_service_sub"
                 f_audit_log "BLOCKED service sub=$f_service_sub"

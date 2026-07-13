@@ -53,6 +53,9 @@
   <li class="nav-item" role="presentation">
     <button class="nav-link" id="tab-logs" data-bs-toggle="tab" data-bs-target="#pane-logs" type="button" role="tab">Logs</button>
   </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-source" data-bs-toggle="tab" data-bs-target="#pane-source" type="button" role="tab">Source</button>
+  </li>
 </ul>
 <div class="tab-content">
   <div class="tab-pane fade show active" id="pane-output" role="tabpanel">
@@ -69,31 +72,18 @@
     </div>
 
     <h4>Output</h4>
-    <pre id="action-output" class="bg-dark text-light p-2 small" style="max-height:320px;overflow:auto;"></pre>
+    <pre id="action-output" class="bg-dark text-light p-2 small" style="max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word;"></pre>
   </div>
   <div class="tab-pane fade" id="pane-logs" role="tabpanel">
     <h4>Logs</h4>
-    <pre id="log-output" class="bg-dark text-light p-2 small" style="max-height:320px;overflow:auto;">Loading logs…</pre>
+    <pre id="log-output" class="bg-dark text-light p-2 small" style="max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word;">Loading logs…</pre>
+  </div>
+  <div class="tab-pane fade" id="pane-source" role="tabpanel">
+    <h4>Source</h4>
+    <pre id="source-output" class="bg-dark text-light p-2 small" style="max-height:480px;overflow:auto;">Loading source…</pre>
   </div>
 </div>
 
-<h4>Managed units</h4>
-<table class="table table-sm align-middle">
-  <thead><tr><th>Name</th><th>Type</th><th>Start</th><th>Stop</th><th>Uninstall</th></tr></thead>
-  <tbody>
-  {% for s in item.docs.service_control.services %}
-    <tr>
-      <td>{{ s.name }}</td>
-      <td><span class="badge bg-light text-dark border">{{ s.type }}</span></td>
-      <td><code class="small">{{ s.start }}</code></td>
-      <td><code class="small">{{ s.stop }}</code></td>
-      <td><code class="small">{{ s.uninstall }}</code></td>
-    </tr>
-  {% empty %}
-    <tr><td colspan="5" class="text-muted">This playbook manages no dedicated service (configuration only).</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
 {% endblock %}
 
 {% block scripts %}
@@ -182,5 +172,20 @@ function startLogs() { if (logTimer) return; loadLogs(); logTimer = setInterval(
 function stopLogs() { if (logTimer) { clearInterval(logTimer); logTimer = null; } }
 document.getElementById('tab-logs').addEventListener('shown.bs.tab', startLogs);
 document.getElementById('tab-output').addEventListener('shown.bs.tab', stopLogs);
+
+const srcPre = document.getElementById('source-output');
+let srcLoaded = false;
+function loadSource() {
+  if (srcLoaded) return;
+  fetch('/services/' + PLAYBOOK + '/source/')
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { srcPre.textContent = 'ERROR: ' + d.error; return; }
+      srcPre.textContent = d.source || 'empty';
+      srcLoaded = true;
+    })
+    .catch(e => { srcPre.textContent = 'error: ' + e; });
+}
+document.getElementById('tab-source').addEventListener('shown.bs.tab', loadSource);
 </script>
 {% endblock %}
