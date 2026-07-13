@@ -120,18 +120,37 @@ function loadStatus() {
     });
 }
 loadStatus();
+function setActionRunning(btn) {
+  document.querySelectorAll('[data-action]').forEach(b => { b.disabled = true; });
+  if (!btn.querySelector('.js-spinner')) {
+    const sp = document.createElement('span');
+    sp.className = 'spinner-border spinner-border-sm me-1 js-spinner';
+    sp.setAttribute('role', 'status');
+    sp.setAttribute('aria-hidden', 'true');
+    btn.prepend(sp);
+  }
+}
+function clearActionRunning() {
+  document.querySelectorAll('[data-action]').forEach(b => {
+    b.disabled = false;
+    const sp = b.querySelector('.js-spinner');
+    if (sp) sp.remove();
+  });
+}
+
 document.querySelectorAll('[data-action]').forEach(btn => {
   btn.addEventListener('click', () => {
     const action = btn.dataset.action;
     const out = document.getElementById('action-output');
     out.textContent = 'starting…';
+    setActionRunning(btn);
     const fd = new FormData();
     fd.append('action', action);
     fetch('/services/' + PLAYBOOK + '/action/', {method: 'POST', body: fd})
       .then(r => r.json())
       .then(d => {
-        if (d.error) { out.textContent = 'ERROR: ' + d.error; return; }
-        if (!d.job) { out.textContent = 'no job returned'; return; }
+        if (d.error) { out.textContent = 'ERROR: ' + d.error; clearActionRunning(); return; }
+        if (!d.job) { out.textContent = 'no job returned'; clearActionRunning(); return; }
         const poll = () => {
           fetch('/services/' + PLAYBOOK + '/output/?job=' + d.job)
             .then(r => r.json())
@@ -140,16 +159,17 @@ document.querySelectorAll('[data-action]').forEach(btn => {
               out.scrollTop = out.scrollHeight;
               if (o.done) {
                 out.textContent += '\n[done] ' + (o.success ? 'OK' : 'FAILED') + '\n';
+                clearActionRunning();
                 loadStatus();
                 return;
               }
               setTimeout(poll, 1000);
             })
-            .catch(e => { out.textContent += '\n[error] ' + e + '\n'; });
+            .catch(e => { out.textContent += '\n[error] ' + e + '\n'; clearActionRunning(); });
         };
         poll();
       })
-      .catch(e => { out.textContent = 'error: ' + e; });
+      .catch(e => { out.textContent = 'error: ' + e; clearActionRunning(); });
   });
 });
 
