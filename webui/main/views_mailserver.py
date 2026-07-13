@@ -11,6 +11,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
 from .views import _get_inventory_config, _save_inventory_config, _get_ldap_vars
+from .utils.ssh_exec import run_playbook
 
 
 @login_required
@@ -28,7 +29,11 @@ def settings_mailserver(request):
                         if key.startswith('smtp_'):
                             del vars_[key]
                     _save_inventory_config(config)
-                    messages.success(request, 'SMTP configuration deleted.')
+                    ok, out = run_playbook('base-system/smtp.yml', timeout=180)
+                    if ok:
+                        messages.success(request, 'SMTP configuration deleted.')
+                    else:
+                        messages.error(request, f'Applied with errors: {out[:500]}')
                 return redirect('settings_mailserver')
 
             smtp_server = request.POST.get('smtp_server', '').strip()
@@ -66,7 +71,13 @@ def settings_mailserver(request):
             vars_['smtp_from'] = smtp_from
             vars_['smtp_tls'] = smtp_tls
             _save_inventory_config(config)
-            messages.success(request, 'Mailserver settings saved.')
+            ok, out = run_playbook('base-system/smtp.yml', timeout=180)
+            if ok and vars_.get('twofa_enabled'):
+                ok, out = run_playbook('base-system/authelia.yml', timeout=180)
+            if ok:
+                messages.success(request, 'Mailserver settings saved and applied.')
+            else:
+                messages.error(request, f'Applied with errors: {out[:500]}')
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_mailserver')

@@ -7,15 +7,10 @@
 <h2><i class="bi bi-globe"></i> Dynamic DNS (deSEC)</h2>
 
 
-<!-- Config Daemon Status -->
+<!-- Remote execution status -->
 <div class="alert alert-info d-flex align-items-center gap-2" role="alert" id="daemon-status">
-  {% if daemon_running %}
-    <i class="bi bi-check-circle-fill text-success"></i>
-    <span>Config Daemon active — changes applied within 10s</span>
-  {% else %}
-    <i class="bi bi-exclamation-triangle-fill text-warning"></i>
-    <span>Config Daemon inactive — changes will not trigger playbooks</span>
-  {% endif %}
+  <i class="bi bi-check-circle-fill text-success"></i>
+  <span>Changes are applied immediately via SSH — no daemon required.</span>
 </div>
 
 <div class="row">
