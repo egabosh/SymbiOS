@@ -206,7 +206,9 @@ def services_action(request, playbook):
         return JsonResponse({'error': 'Playbook not found'}, status=404)
     # (Re)Install always runs the Ansible playbook; it is allowed for every
     # service. All other actions must be defined in the playbook's docs.actions.
-    if action != '__playbook__':
+    if action == '__playbook__':
+        display_cmd = 'ansible-playbook ' + playbook
+    else:
         actions = item['docs'].get('actions') or {}
         if action not in actions:
             return JsonResponse({'error': 'Unknown action: ' + str(action)}, status=400)
@@ -216,6 +218,7 @@ def services_action(request, playbook):
                 {'error': 'Uninstall is not allowed for built-in base-services.'},
                 status=403,
             )
+        display_cmd = actions.get(action, 'service run ' + playbook + ' ' + action)
     job_id = uuid.uuid4().hex
     job = {'output': '', 'done': False, 'success': False, 'lock': threading.Lock()}
     with _JOBS_LOCK:
@@ -224,7 +227,7 @@ def services_action(request, playbook):
             _JOBS.pop(old, None)
         _JOBS[job_id] = job
     threading.Thread(target=_run_job, args=(job, playbook, action), daemon=True).start()
-    return JsonResponse({'job': job_id, 'action': action})
+    return JsonResponse({'job': job_id, 'action': action, 'command': display_cmd})
 
 
 def _run_job(job, playbook, action):

@@ -22,12 +22,12 @@
 
 <h4 class="h6 mb-2">Playbook Information</h4>
 <div class="border rounded p-2 small mb-3 bg-light bg-opacity-10">
-  <div class="d-flex flex-wrap gap-3">
-    <span><b>Playbook:</b> <code>{{ item.playbook }}</code></span>
-    <span><b>Author:</b> {{ item.docs.author }} <span class="text-muted">(playbook)</span></span>
-    <span><b>Version:</b> {{ item.docs.version }}</span>
-    <span><b>License:</b> {{ item.docs.license }} <span class="text-muted">(playbook)</span></span>
-    <span><b>Copyright:</b> {{ item.docs.copyright }}</span>
+    <div class="d-flex flex-wrap gap-3">
+      <span><b>Playbook:</b> <code>{{ item.playbook }}</code></span>
+      <span><b>Author:</b> {{ item.docs.author }}</span>
+      <span><b>Version:</b> {{ item.docs.version }}</span>
+      <span><b>License:</b> {{ item.docs.license }}</span>
+      <span><b>Copyright:</b> {{ item.docs.copyright }}</span>
     <span><b>Min Ansible:</b> {{ item.docs.min_ansible_version }}</span>
     <span><b>Platforms:</b> {% for p in item.docs.platforms %}{{ p.name }} {{ p.versions|join:", " }}{% endfor %}</span>
   </div>
@@ -142,7 +142,8 @@ document.querySelectorAll('[data-action]').forEach(btn => {
   btn.addEventListener('click', () => {
     const action = btn.dataset.action;
     const out = document.getElementById('action-output');
-    out.textContent = 'starting…';
+    const cmdHeader = '$ ' + action + '\n\n';
+    out.textContent = cmdHeader + 'starting…';
     setActionRunning(btn);
     const fd = new FormData();
     fd.append('action', action);
@@ -151,11 +152,12 @@ document.querySelectorAll('[data-action]').forEach(btn => {
       .then(d => {
         if (d.error) { out.textContent = 'ERROR: ' + d.error; clearActionRunning(); return; }
         if (!d.job) { out.textContent = 'no job returned'; clearActionRunning(); return; }
+        const header = '$ ' + (d.command || action) + '\n\n';
         const poll = () => {
           fetch('/services/' + PLAYBOOK + '/output/?job=' + d.job)
             .then(r => r.json())
             .then(o => {
-              out.textContent = o.output;
+              out.textContent = header + o.output;
               out.scrollTop = out.scrollHeight;
               if (o.done) {
                 out.textContent += '\n[done] ' + (o.success ? 'OK' : 'FAILED') + '\n';
