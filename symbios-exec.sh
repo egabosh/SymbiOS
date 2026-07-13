@@ -213,6 +213,69 @@ PY
                 fi
                 cat "$f_path"
                 ;;
+            run)
+                # Usage: service run <playbook> <action>
+                # Resolves <action> from the playbook's top-level docs.actions dict
+                # and executes the associated command on the host. Arbitrary action
+                # names are allowed, but only those defined in the playbook are
+                # accepted (the action name is a dict key lookup, never executed
+                # directly), so the forced-command key cannot run arbitrary commands.
+                f_playbook="${f_parts[2]}"
+                f_action_arg="${f_parts[3]}"
+                if [[ "$f_playbook" != base-services/* && "$f_playbook" != services/* ]]; then
+                    echo "ERROR: Playbook path not allowed: $f_playbook"
+                    f_audit_log "BLOCKED run path=$f_playbook"
+                    exit 1
+                fi
+                f_path="/home/SymbiOS/$f_playbook"
+                if [ ! -f "$f_path" ]; then
+                    echo "ERROR: Playbook not found: $f_playbook"
+                    exit 1
+                fi
+                f_cmd=$(python3 - "$f_path" "$f_action_arg" <<'PY'
+import sys
+import yaml
+f_path = sys.argv[1]
+f_action = sys.argv[2]
+try:
+    lines = open(f_path).read().splitlines()
+except Exception:
+    sys.exit(0)
+if not lines or not lines[0].lstrip().startswith("# docs:"):
+    sys.exit(0)
+yl = []
+for line in lines:
+    if line.startswith("#"):
+        yl.append(line[2:] if line.startswith("# ") else line[1:])
+    else:
+        break
+try:
+    doc = yaml.safe_load("\n".join(yl))
+except Exception:
+    sys.exit(0)
+docs = doc.get("docs") if isinstance(doc, dict) else None
+if not docs:
+    sys.exit(0)
+actions = docs.get("actions") or {}
+if f_action not in actions:
+    sys.stderr.write("ERROR: action not defined in playbook: %s\n" % f_action)
+    sys.exit(2)
+print(actions[f_action])
+PY
+                )
+                f_rc=$?
+                if [ $f_rc -ne 0 ]; then
+                    echo "ERROR: could not resolve action '$f_action_arg'"
+                    exit 1
+                fi
+                if [ -z "$f_cmd" ]; then
+                    echo "ERROR: no command for action '$f_action_arg'"
+                    exit 1
+                fi
+                f_audit_log "run action=$f_action_arg cmd=$f_cmd"
+                bash -c "$f_cmd"
+                exit $?
+                ;;
             *)
                 echo "ERROR: service subcommand not allowed: $f_service_sub"
                 f_audit_log "BLOCKED service sub=$f_service_sub"

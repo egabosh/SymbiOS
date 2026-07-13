@@ -16,15 +16,18 @@
 #     - name: ssh
 #       type: systemd
 #       unit: ssh.service
-#       install: systemctl enable --now ssh.service
-#       uninstall: systemctl disable --now ssh.service
-#       reinstall: systemctl restart ssh.service
-#       start: systemctl start ssh.service
-#       stop: systemctl stop ssh.service
-#       restart: systemctl restart ssh.service
-#       reload: systemctl reload ssh.service
 #       status: systemctl is-active ssh.service
-#       logs: journalctl -u ssh.service --tail=100
+#     logs:
+#     - name: ssh.service
+#       command: journalctl -u ssh.service -n 100
+#   actions:
+#     install: systemctl enable --now ssh.service
+#     uninstall: systemctl disable --now ssh.service
+#     reinstall: systemctl restart ssh.service
+#     start: systemctl start ssh.service
+#     stop: systemctl stop ssh.service
+#     restart: systemctl restart ssh.service
+#     reload: systemctl reload ssh.service
 #
 
 ---

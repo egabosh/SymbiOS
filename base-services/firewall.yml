@@ -15,15 +15,18 @@
 #     services:
 #     - name: ufw
 #       type: ufw
-#       install: ufw enable
-#       uninstall: ufw disable
-#       reinstall: ufw reload
-#       start: ufw enable
-#       stop: ufw disable
-#       restart: ufw reload
-#       reload: ufw reload
 #       status: ufw status verbose
-#       logs: grep ufw /var/log/syslog
+#     logs:
+#     - name: ufw
+#       command: grep ufw /var/log/syslog
+#   actions:
+#     install: ufw enable
+#     uninstall: ufw disable
+#     reinstall: ufw reload
+#     start: ufw enable
+#     stop: ufw disable
+#     restart: ufw reload
+#     reload: ufw reload
 #
 
 ---

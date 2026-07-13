@@ -57,13 +57,11 @@
   <div class="tab-pane fade show active" id="pane-output" role="tabpanel">
     <h4>Actions</h4>
     <div class="btn-group mb-3 flex-wrap" role="group">
-      <button class="btn btn-outline-success" data-action="install">(Re)Install</button>
-      {% if item.group != 'base-services' %}
-      <button class="btn btn-outline-warning" data-action="uninstall">Uninstall</button>
-      {% endif %}
-      <button class="btn btn-outline-success" data-action="start">Start</button>
-      <button class="btn btn-outline-danger" data-action="stop">Stop</button>
-      <button class="btn btn-outline-info" data-action="restart">Restart</button>
+      {% for a in action_list %}
+      <button class="btn {{ a.cls }}" data-action="{{ a.name }}">{{ a.label }}</button>
+      {% empty %}
+      <span class="text-muted">No actions defined for this playbook.</span>
+      {% endfor %}
     </div>
 
     <h4>Output</h4>
