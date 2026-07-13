@@ -12,13 +12,30 @@ _JOBS_LOCK = threading.Lock()
 from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from .playbook_catalog import get_catalog, get_playbook, compose_base
-from .utils.ssh_exec import run_playbook, run_docker, run_systemctl, run_cron, run_ufw, stream_command
-
-# Mutations exposed as action buttons in the WebUI.
-ALLOWED_ACTIONS = {'install', 'reinstall', 'start', 'stop', 'restart', 'uninstall'}
+from .utils.ssh_exec import run_docker, run_systemctl, run_cron, run_ufw, stream_command
 
 # Built-in base-services can be managed but never uninstalled from the WebUI.
 PROTECTED_GROUPS = {'base-services'}
+
+# Visual class per action name when rendered as a button. Arbitrary action
+# names (e.g. "pommes") fall back to a neutral outline style.
+_ACTION_CLS = {
+    'install': 'btn-outline-success',
+    'reinstall': 'btn-outline-success',
+    'start': 'btn-outline-success',
+    'stop': 'btn-outline-danger',
+    'restart': 'btn-outline-info',
+    'reload': 'btn-outline-info',
+    'uninstall': 'btn-outline-warning',
+}
+
+
+def _action_button(name):
+    return {
+        'name': name,
+        'label': name[0].upper() + name[1:] if name else name,
+        'cls': _ACTION_CLS.get(name, 'btn-outline-secondary'),
+    }
 
 # Visual metadata per normalized state, used to render clear status badges.
 STATE_META = {
@@ -129,45 +146,6 @@ def _dispatch(svc, action):
     return None
 
 
-def _build_commands(item, action):
-    """Resolve (item, action) to a list of (target, type, gateway_cmd) tuples.
-
-    Mirrors _dispatch but returns the raw gateway command strings so the SSE
-    endpoint can stream each one's output as it runs.
-    """
-    docs = item['docs']
-    if action in ('install', 'reinstall'):
-        return [(item['playbook'], 'playbook', 'playbook ' + item['playbook'])]
-    out = []
-    for s in docs.get('service_control', {}).get('services', []):
-        t = s.get('type')
-        if t == 'docker':
-            base = compose_base(s.get('compose_file'))
-            verb = {'start': 'up', 'stop': 'down', 'restart': 'restart',
-                    'reload': 'up', 'uninstall': 'remove', 'status': 'ps'}.get(action)
-            if verb and base:
-                out.append((s.get('name'), 'docker', 'docker-compose ' + base + ' ' + verb))
-        elif t == 'systemd':
-            unit = s.get('unit')
-            sub = {'start': 'start', 'stop': 'stop', 'restart': 'restart',
-                   'reload': 'reload', 'uninstall': 'disable --now',
-                   'status': 'is-active'}.get(action)
-            if sub and unit:
-                out.append((s.get('name'), 'systemd', 'exec systemctl ' + sub + ' ' + unit))
-        elif t == 'cron':
-            file = s.get('file')
-            sub = {'start': 'enable', 'stop': 'disable', 'restart': 'enable',
-                   'uninstall': 'remove', 'status': 'status'}.get(action)
-            if sub and file:
-                out.append((s.get('name'), 'cron', 'cron ' + sub + ' ' + file))
-        elif t == 'ufw':
-            sub = {'start': 'enable', 'stop': 'disable', 'restart': 'reload',
-                   'reload': 'reload', 'uninstall': 'disable', 'status': 'status'}.get(action)
-            if sub:
-                out.append((s.get('name'), 'ufw', 'ufw ' + sub))
-    return out
-
-
 @login_required
 def services(request):
     catalog = get_catalog()
@@ -193,8 +171,17 @@ def services_detail(request, playbook):
     item = get_playbook(playbook)
     if item is None:
         raise Http404("Service not found")
+    # Build the action buttons dynamically from the playbook's docs.actions.
+    # Base-services are protected: the uninstall action is never exposed.
+    actions = item['docs'].get('actions') or {}
+    action_list = []
+    for name in actions:
+        if name == 'uninstall' and item.get('group') in PROTECTED_GROUPS:
+            continue
+        action_list.append(_action_button(name))
     return render(request, 'main/services_detail.html', {
         'item': item,
+        'action_list': action_list,
         'all_services': get_catalog(),
     })
 
@@ -204,18 +191,20 @@ def services_detail(request, playbook):
 def services_action(request, playbook):
     """Start an action as a background job and return a job id.
 
-    The command runs asynchronously through the SSH gateway (live output is
-    captured incrementally). The browser polls /output/?job=<id> to display
-    progress. This avoids response streaming, which Traefik buffers.
+    The action name is resolved against the playbook's docs.actions dict on the
+    host (via the `service run` gateway verb), which executes the associated
+    command. The browser polls /output/?job=<id> to display progress (no
+    response streaming, which Traefik buffers).
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'Invalid action'}, status=400)
     action = request.POST.get('action')
-    if action not in ALLOWED_ACTIONS:
-        return JsonResponse({'error': 'Unknown action: ' + str(action)}, status=400)
     item = get_playbook(playbook)
     if item is None:
         return JsonResponse({'error': 'Playbook not found'}, status=404)
+    actions = item['docs'].get('actions') or {}
+    if action not in actions:
+        return JsonResponse({'error': 'Unknown action: ' + str(action)}, status=400)
     # Built-in base-services are protected: uninstall is never allowed.
     if action == 'uninstall' and item.get('group') in PROTECTED_GROUPS:
         return JsonResponse(
@@ -229,26 +218,27 @@ def services_action(request, playbook):
         for old in [k for k, v in _JOBS.items() if v['done']]:
             _JOBS.pop(old, None)
         _JOBS[job_id] = job
-    threading.Thread(target=_run_job, args=(job, item, action), daemon=True).start()
+    threading.Thread(target=_run_job, args=(job, playbook, action), daemon=True).start()
     return JsonResponse({'job': job_id, 'action': action})
 
 
-def _run_job(job, item, action):
-    """Execute the action's gateway commands, appending output as it arrives."""
+def _run_job(job, playbook, action):
+    """Run the action via the gateway `service run` verb, appending output
+    as it arrives (the command itself lives in the playbook's docs.actions)."""
     overall_ok = True
-    for target, stype, cmd in _build_commands(item, action):
-        try:
-            for kind, text in stream_command(cmd, timeout=600):
-                if kind == 'rc':
-                    if text != 0:
-                        overall_ok = False
-                    continue
-                with job['lock']:
-                    job['output'] += text
-        except Exception as e:  # pragma: no cover - defensive
-            overall_ok = False
+    cmd = 'service run ' + playbook + ' ' + action
+    try:
+        for kind, text in stream_command(cmd, timeout=600):
+            if kind == 'rc':
+                if text != 0:
+                    overall_ok = False
+                continue
             with job['lock']:
-                job['output'] += '\n[ERROR] ' + str(e) + '\n'
+                job['output'] += text
+    except Exception as e:  # pragma: no cover - defensive
+        overall_ok = False
+        with job['lock']:
+            job['output'] += '\n[ERROR] ' + str(e) + '\n'
     with job['lock']:
         job['done'] = True
         job['success'] = overall_ok

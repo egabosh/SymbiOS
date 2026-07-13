@@ -16,14 +16,17 @@
 #     - name: autoupdate
 #       type: cron
 #       file: /etc/cron.d/autoupdate_local
-#       install: sed -i 's/^#//' /etc/cron.d/autoupdate_local
-#       uninstall: rm -f /etc/cron.d/autoupdate_local
-#       reinstall: sed -i 's/^#//' /etc/cron.d/autoupdate_local
-#       start: sed -i 's/^#//' /etc/cron.d/autoupdate_local
-#       stop: sed -i 's/^/#/' /etc/cron.d/autoupdate_local
-#       restart: sed -i 's/^#//' /etc/cron.d/autoupdate_local
 #       status: cat /etc/cron.d/autoupdate_local
-#       logs: grep autoupdate /var/log/syslog
+#     logs:
+#     - name: autoupdate
+#       command: grep autoupdate /var/log/syslog
+#   actions:
+#     install: sed -i 's/^#//' /etc/cron.d/autoupdate_local
+#     uninstall: rm -f /etc/cron.d/autoupdate_local
+#     reinstall: sed -i 's/^#//' /etc/cron.d/autoupdate_local
+#     start: sed -i 's/^#//' /etc/cron.d/autoupdate_local
+#     stop: sed -i 's/^/#/' /etc/cron.d/autoupdate_local
+#     restart: sed -i 's/^#//' /etc/cron.d/autoupdate_local
 #
 
 ---

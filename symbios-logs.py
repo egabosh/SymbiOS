@@ -3,12 +3,9 @@
 
 Called by symbios-exec.sh as:  symbios-logs.py <playbook> [lines]
 
-Reads the playbook's machine-readable '# docs:' block (no secrets), then tails
-the log source of each managed unit:
-  - docker:  docker compose logs --no-color --tail <n>
-  - systemd: journalctl -n <n> -u <unit> --no-pager --no-hostname
-  - cron:    tail -n <n> of the cron file
-  - ufw:     ufw status verbose
+Reads the playbook's machine-readable '# docs:' block (no secrets), then runs
+each command from the named `service_control.logs` list and captures its output
+(arbitrary commands are supported: docker compose logs, journalctl, grep, ...).
 
 Prints a single JSON object: {"units": [{"name", "type", "lines": [...]}]}.
 """
@@ -17,7 +14,6 @@ import os
 import json
 import yaml
 import subprocess
-import glob
 
 F_BASE = "/home/SymbiOS"
 F_EXCLUDE = {"traefik-static.yml", "inventory.yml"}
@@ -43,52 +39,24 @@ def parse_docs(path):
         return None
 
 
-def compose_base(compose_file):
-    directory = (compose_file or "").replace("/home/docker/", "").rstrip("/")
-    if directory.endswith("/docker-compose.yml"):
-        directory = directory[: -len("/docker-compose.yml")]
-    directory = directory.split("/")[-1]
-    return directory.replace(".{{ inventory_hostname }}", "")
-
-
-def tail_unit(svc, n):
-    t = svc.get("type")
-    name = svc.get("name")
+def tail_log(entry, n):
+    """Run one named log command and return its (capped) output lines."""
+    name = entry.get("name")
+    cmd = entry.get("command")
     out = ""
-    try:
-        if t == "docker":
-            base = compose_base(svc.get("compose_file"))
-            for d in glob.glob("/home/docker/" + base + "*"):
-                cf = os.path.join(d, "docker-compose.yml")
-                if os.path.isfile(cf):
-                    r = subprocess.run(
-                        ["docker", "compose", "-f", cf, "logs", "--no-color",
-                         "--tail", str(n)],
-                        capture_output=True, text=True, timeout=60)
-                    out += r.stdout + r.stderr
-        elif t == "systemd":
-            unit = svc.get("unit")
-            if unit:
-                r = subprocess.run(
-                    ["journalctl", "-n", str(n), "-u", unit,
-                     "--no-pager", "--no-hostname"],
-                    capture_output=True, text=True, timeout=60)
-                out += r.stdout + r.stderr
-        elif t == "cron":
-            f = svc.get("file")
-            if f and os.path.isfile(f):
-                r = subprocess.run(["tail", "-n", str(n), f],
-                                   capture_output=True, text=True, timeout=60)
-                out += r.stdout + r.stderr
-            else:
-                out = "no cron file at " + str(f)
-        elif t == "ufw":
-            r = subprocess.run(["ufw", "status", "verbose"],
-                               capture_output=True, text=True, timeout=60)
-            out += r.stdout + r.stderr
-    except Exception as e:
-        out += "\n[error] " + str(e)
-    return {"name": name, "type": t, "lines": out.splitlines()}
+    if not cmd:
+        out = "no command for log " + str(name)
+    else:
+        try:
+            r = subprocess.run(["bash", "-c", cmd],
+                                capture_output=True, text=True, timeout=60)
+            out = (r.stdout or "") + (r.stderr or "")
+        except Exception as e:
+            out = "\n[error] " + str(e)
+    lines = out.splitlines()
+    if len(lines) > n:
+        lines = lines[-n:]
+    return {"name": name, "type": entry.get("type", "log"), "lines": lines}
 
 
 def main():
@@ -104,8 +72,8 @@ def main():
     docs = parse_docs(path)
     units = []
     if docs:
-        for s in docs.get("service_control", {}).get("services", []):
-            units.append(tail_unit(s, n))
+        for entry in docs.get("service_control", {}).get("logs", []) or []:
+            units.append(tail_log(entry, n))
     print(json.dumps({"units": units}))
 
 

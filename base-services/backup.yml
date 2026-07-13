@@ -16,14 +16,17 @@
 #     - name: backup
 #       type: cron
 #       file: /etc/cron.d/backup_local
-#       install: sed -i 's/^#//' /etc/cron.d/backup_local
-#       uninstall: rm -f /etc/cron.d/backup_local
-#       reinstall: sed -i 's/^#//' /etc/cron.d/backup_local
-#       start: sed -i 's/^#//' /etc/cron.d/backup_local
-#       stop: sed -i 's/^/#/' /etc/cron.d/backup_local
-#       restart: sed -i 's/^#//' /etc/cron.d/backup_local
 #       status: cat /etc/cron.d/backup_local
-#       logs: grep backup /var/log/syslog
+#     logs:
+#     - name: backup
+#       command: grep backup /var/log/syslog
+#   actions:
+#     install: sed -i 's/^#//' /etc/cron.d/backup_local
+#     uninstall: rm -f /etc/cron.d/backup_local
+#     reinstall: sed -i 's/^#//' /etc/cron.d/backup_local
+#     start: sed -i 's/^#//' /etc/cron.d/backup_local
+#     stop: sed -i 's/^/#/' /etc/cron.d/backup_local
+#     restart: sed -i 's/^#//' /etc/cron.d/backup_local
 #
 
 ---

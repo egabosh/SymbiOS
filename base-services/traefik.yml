@@ -16,15 +16,18 @@
 #     - name: traefik
 #       type: docker
 #       compose_file: /home/docker/traefik/docker-compose.yml
-#       install: docker compose -f /home/docker/traefik/docker-compose.yml up -d
-#       uninstall: docker compose -f /home/docker/traefik/docker-compose.yml down -v
-#       reinstall: docker compose -f /home/docker/traefik/docker-compose.yml up -d --force-recreate --build
-#       start: docker compose -f /home/docker/traefik/docker-compose.yml up -d
-#       stop: docker compose -f /home/docker/traefik/docker-compose.yml down
-#       restart: docker compose -f /home/docker/traefik/docker-compose.yml restart
-#       reload: docker compose -f /home/docker/traefik/docker-compose.yml up -d
 #       status: docker compose -f /home/docker/traefik/docker-compose.yml ps
-#       logs: docker compose -f /home/docker/traefik/docker-compose.yml logs --tail=100
+#     logs:
+#     - name: traefik
+#       command: docker compose -f /home/docker/traefik/docker-compose.yml logs --tail=100
+#   actions:
+#     install: docker compose -f /home/docker/traefik/docker-compose.yml up -d
+#     uninstall: docker compose -f /home/docker/traefik/docker-compose.yml down -v
+#     reinstall: docker compose -f /home/docker/traefik/docker-compose.yml up -d --force-recreate --build
+#     start: docker compose -f /home/docker/traefik/docker-compose.yml up -d
+#     stop: docker compose -f /home/docker/traefik/docker-compose.yml down
+#     restart: docker compose -f /home/docker/traefik/docker-compose.yml restart
+#     reload: docker compose -f /home/docker/traefik/docker-compose.yml up -d
 #
 
 ---

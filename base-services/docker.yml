@@ -16,27 +16,24 @@
 #     - name: docker
 #       type: systemd
 #       unit: docker.service
-#       install: systemctl enable --now docker.service
-#       uninstall: systemctl disable --now docker.service
-#       reinstall: systemctl restart docker.service
-#       start: systemctl start docker.service
-#       stop: systemctl stop docker.service
-#       restart: systemctl restart docker.service
-#       reload: systemctl reload docker.service
 #       status: systemctl is-active docker.service
-#       logs: journalctl -u docker.service --tail=100
 #     - name: containerd
 #       type: systemd
 #       unit: containerd.service
-#       install: systemctl enable --now containerd.service
-#       uninstall: systemctl disable --now containerd.service
-#       reinstall: systemctl restart containerd.service
-#       start: systemctl start containerd.service
-#       stop: systemctl stop containerd.service
-#       restart: systemctl restart containerd.service
-#       reload: systemctl reload containerd.service
 #       status: systemctl is-active containerd.service
-#       logs: journalctl -u containerd.service --tail=100
+#     logs:
+#     - name: docker.service
+#       command: journalctl -u docker.service -n 100
+#     - name: containerd.service
+#       command: journalctl -u containerd.service -n 100
+#   actions:
+#     install: systemctl enable --now docker.service ; systemctl enable --now containerd.service
+#     uninstall: systemctl disable --now docker.service ; systemctl disable --now containerd.service
+#     reinstall: systemctl restart docker.service ; systemctl restart containerd.service
+#     start: systemctl start docker.service ; systemctl start containerd.service
+#     stop: systemctl stop docker.service ; systemctl stop containerd.service
+#     restart: systemctl restart docker.service ; systemctl restart containerd.service
+#     reload: systemctl reload docker.service ; systemctl reload containerd.service
 #
 
 ---
