@@ -8,9 +8,6 @@ DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
@@ -23,7 +20,6 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'main.middleware.AutheliaMiddleware',
 ]
@@ -39,7 +35,7 @@ TEMPLATES = [
             'context_processors': [
                 'django.template.context_processors.debug',
                 'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
+                'main.context_processors.user',
                 'django.contrib.messages.context_processors.messages',
             ],
         },
@@ -48,13 +44,10 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'webui.wsgi.application'
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': '/app/db/db.sqlite3',
-        'OPTIONS': {'timeout': 20},
-    }
-}
+# No database: the WebUI stores no local users or passwords. Sessions use
+# signed cookies; authentication is delegated to Authelia (forward-auth header)
+# or the host-local break-glass on 127.0.0.1:8080.
+DATABASES = {}
 
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Europe/Berlin'
@@ -67,11 +60,10 @@ STATICFILES_DIRS = [BASE_DIR / 'main' / 'static']
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-AUTH_PASSWORD_VALIDATORS = []
-
-AUTHENTICATION_BACKENDS = [
-    'main.backends.LDAPBackend',
-]
+SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
+# Allow cookies over the host-local http break-glass (127.0.0.1:8080).
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
 
 CSRF_TRUSTED_ORIGINS = [
     'https://symbios.local',
@@ -95,9 +87,9 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 MESSAGE_TAGS = {'error': 'danger'}
 
 
-LOGIN_URL = '/login/'
+LOGIN_URL = '/'
 LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/login/'
+LOGOUT_REDIRECT_URL = '/'
 
 CONFIG_PATH = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
 LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')

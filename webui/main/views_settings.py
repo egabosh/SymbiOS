@@ -1,5 +1,5 @@
 from django.shortcuts import render, redirect
-from django.contrib.auth.decorators import login_required
+from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from .views import _get_inventory_config, _save_inventory_config, CONFIG_PATH

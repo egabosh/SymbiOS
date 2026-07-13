@@ -7,7 +7,7 @@ import urllib.error
 import xml.etree.ElementTree as ET
 from email.message import EmailMessage
 from django.shortcuts import render, redirect
-from django.contrib.auth.decorators import login_required
+from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
 from .views import _get_inventory_config, _save_inventory_config, _get_ldap_vars

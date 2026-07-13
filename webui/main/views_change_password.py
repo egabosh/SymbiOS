@@ -1,7 +1,7 @@
 import subprocess
 import os
 from django.shortcuts import render, redirect
-from django.contrib.auth.decorators import login_required
+from .decorators import login_required
 from django.contrib import messages
 
 LDAP_URI = os.environ.get("LDAP_URI", "ldap://openldap")
