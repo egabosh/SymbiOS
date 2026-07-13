@@ -1,22 +1,22 @@
-<div class="small text-muted text-uppercase fw-semibold mt-3 mb-2 px-3">Services</div>
+{% regroup all_services by group as groups %}
 <ul class="nav flex-column">
-{% for svc in all_services %}
-    <li class="nav-item mb-1">
-        <a class="nav-link d-flex align-items-center gap-2 py-1{% if svc.basic %} text-secondary{% endif %}" href="{% if svc.basic %}{{ svc.url }}{% else %}/services/{{ svc.slug }}/{% endif %}">
-            <i class="{{ svc.icon|default:"bi-box" }} fs-5"></i>
-            <div>
-                <strong>{{ svc.name }}</strong>
-                {% if svc.basic %}
-                    <span class="badge bg-info ms-1" style="font-size:0.55rem;">built-in</span>
-                {% elif svc.installed %}
-                    <i class="bi bi-check-circle-fill text-success small ms-1" title="Installed"></i>
-                {% else %}
-                    <i class="bi bi-x-circle text-warning small ms-1" title="Not installed"></i>
-                {% endif %}
-            </div>
-        </a>
+  {% for g in groups %}
+    <li class="nav-item mt-2 mb-1">
+      <small class="text-muted text-uppercase fw-bold">{{ g.grouper }}</small>
     </li>
-{% empty %}
+    {% for svc in g.list %}
+      <li class="nav-item mb-1">
+        <a class="nav-link d-flex align-items-center gap-2 py-1 {% if svc.group == 'base-services' %}text-secondary{% endif %}"
+           href="/services/{{ svc.playbook }}/">
+          <i class="bi bi-box"></i>
+          <span>{{ svc.menu_label }}</span>
+          {% if svc.group == 'base-services' %}
+            <span class="badge bg-info ms-1" style="font-size:0.55rem;">built-in</span>
+          {% endif %}
+        </a>
+      </li>
+    {% endfor %}
+  {% empty %}
     <li class="nav-item px-3"><small class="text-muted">No services available</small></li>
-{% endfor %}
+  {% endfor %}
 </ul>
