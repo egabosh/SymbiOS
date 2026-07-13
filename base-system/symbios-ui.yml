@@ -58,6 +58,7 @@
                 - ./log:/log
                 - /var/log:/var/log:ro
                 - /var/lib/docker/containers:/docker/containers:ro
+                - /root/.ssh/authorized_keys:/root-host-keys:ro
                 - type: tmpfs
                   target: /app/db
                   tmpfs:
@@ -131,8 +132,13 @@
         path: /root/.ssh/authorized_keys
         regexp: ".*symbios-webui$"
         line: 'command="/usr/local/sbin/symbios-exec.sh",restrict,no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding {{ symbios_ssh_pubkey }}'
-        mode: "0600"
+        mode: "0644"
         create: yes
+
+    - name: Make authorized_keys readable by the WebUI container
+      ansible.builtin.file:
+        path: /root/.ssh/authorized_keys
+        mode: "0644"
 
     - name: Copy container-index.sh
       ansible.builtin.copy:

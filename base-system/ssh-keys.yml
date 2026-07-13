@@ -19,7 +19,20 @@
           {% for key in ssh_authorized_keys | default([]) %}
           {{ key }}
           {% endfor %}
-        mode: "0600"
+        mode: "0644"
         owner: root
         group: root
+      become: yes
+
+    - name: Read webui SSH public key
+      ansible.builtin.slurp:
+        src: /home/docker/symbios-ui/config/.ssh/id_symbios.pub
+      register: symbios_ssh_pubkey_raw
+
+    - name: Re-assert webui forced-command key (never removed by key edits)
+      ansible.builtin.lineinfile:
+        path: /root/.ssh/authorized_keys
+        regexp: ".*symbios-webui$"
+        line: 'command="/usr/local/sbin/symbios-exec.sh",restrict,no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding {{ symbios_ssh_pubkey_raw.content | b64decode | trim }}'
+        mode: "0644"
       become: yes
