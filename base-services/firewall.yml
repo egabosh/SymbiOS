@@ -20,9 +20,7 @@
 #     - name: ufw
 #       command: grep ufw /var/log/syslog
 #   actions:
-#     install: ufw enable
 #     uninstall: ufw disable
-#     reinstall: ufw reload
 #     start: ufw enable
 #     stop: ufw disable
 #     restart: ufw reload

@@ -33,9 +33,7 @@
 #     - name: postfix.service
 #       command: journalctl -u postfix.service -n 100
 #   actions:
-#     install: systemctl enable --now ssh.service ; systemctl enable --now rsyslog.service ; systemctl enable --now postfix.service
 #     uninstall: systemctl disable --now ssh.service ; systemctl disable --now rsyslog.service ; systemctl disable --now postfix.service
-#     reinstall: systemctl restart ssh.service ; systemctl restart rsyslog.service ; systemctl restart postfix.service
 #     start: systemctl start ssh.service ; systemctl start rsyslog.service ; systemctl start postfix.service
 #     stop: systemctl stop ssh.service ; systemctl stop rsyslog.service ; systemctl stop postfix.service
 #     restart: systemctl restart ssh.service ; systemctl restart rsyslog.service ; systemctl restart postfix.service

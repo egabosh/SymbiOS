@@ -21,9 +21,7 @@
 #     - name: ldap
 #       command: docker compose -f /home/docker/ldap/docker-compose.yml logs --tail=100
 #   actions:
-#     install: docker compose -f /home/docker/ldap/docker-compose.yml up -d
 #     uninstall: docker compose -f /home/docker/ldap/docker-compose.yml down -v
-#     reinstall: docker compose -f /home/docker/ldap/docker-compose.yml up -d --force-recreate --build
 #     start: docker compose -f /home/docker/ldap/docker-compose.yml up -d
 #     stop: docker compose -f /home/docker/ldap/docker-compose.yml down
 #     restart: docker compose -f /home/docker/ldap/docker-compose.yml restart
