@@ -1,9 +1,26 @@
 import subprocess
 import os
+import socket
 from django.contrib.auth import login, get_user_model
 from django.shortcuts import redirect
 
 LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')
+
+
+def _trusted_proxy_addresses():
+    # Only the reverse proxy (Traefik) and localhost may assert the Authelia
+    # forward-auth Remote-User header. Any other source (e.g. a client hitting
+    # :8080 directly) must authenticate with the real OpenLDAP password instead
+    # of being able to spoof "Remote-User: admin". Traefik is resolved via
+    # Docker DNS so the allowlist tracks its (possibly changing) container IP.
+    addrs = {'127.0.0.1', '::1'}
+    for family in (socket.AF_INET, socket.AF_INET6):
+        try:
+            for info in socket.getaddrinfo('traefik', None, family, 0, socket.SOCK_STREAM):
+                addrs.add(info[4][0])
+        except Exception:
+            pass
+    return addrs
 
 
 def _admin_password_is_default():
@@ -46,6 +63,10 @@ class AutheliaMiddleware:
             return self.get_response(request)
 
         remote_user = request.META.get('HTTP_REMOTE_USER')
+
+        # Only honor the forward-auth header when it originates from the proxy.
+        if remote_user and host not in _trusted_proxy_addresses():
+            remote_user = None
 
         if remote_user:
             User = get_user_model()
