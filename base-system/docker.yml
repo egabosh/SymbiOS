@@ -1,3 +1,48 @@
+# docs:
+#   short_description: Install and configure Docker
+#   description: Installs the Docker engine and compose plugin, configures storage/driver and daemon settings, and prepares the container runtime used by all SymbiOS services.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Container runtime
+#   tags:
+#   - docker
+#   - container
+#   - runtime
+#   service_control:
+#     services:
+#     - name: docker
+#       type: systemd
+#       unit: docker.service
+#       install: systemctl enable --now docker.service
+#       uninstall: systemctl disable --now docker.service
+#       reinstall: systemctl restart docker.service
+#       start: systemctl start docker.service
+#       stop: systemctl stop docker.service
+#       restart: systemctl restart docker.service
+#       reload: systemctl reload docker.service
+#       status: systemctl is-active docker.service
+#       logs: journalctl -u docker.service --tail=100
+#     - name: containerd
+#       type: systemd
+#       unit: containerd.service
+#       install: systemctl enable --now containerd.service
+#       uninstall: systemctl disable --now containerd.service
+#       reinstall: systemctl restart containerd.service
+#       start: systemctl start containerd.service
+#       stop: systemctl stop containerd.service
+#       restart: systemctl restart containerd.service
+#       reload: systemctl reload containerd.service
+#       status: systemctl is-active containerd.service
+#       logs: journalctl -u containerd.service --tail=100
+#
+
 ---
 
 - name: docker

@@ -1,3 +1,37 @@
+# docs:
+#   short_description: Apply basic Debian Linux hardening
+#   description: 'Hardens the OS: tightens SSH configuration, applies kernel/sysctl and permission hardening, and reduces the attack surface of the host.'
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Hardening / Security
+#   tags:
+#   - hardening
+#   - security
+#   - ssh
+#   - debian
+#   service_control:
+#     services:
+#     - name: ssh
+#       type: systemd
+#       unit: ssh.service
+#       install: systemctl enable --now ssh.service
+#       uninstall: systemctl disable --now ssh.service
+#       reinstall: systemctl restart ssh.service
+#       start: systemctl start ssh.service
+#       stop: systemctl stop ssh.service
+#       restart: systemctl restart ssh.service
+#       reload: systemctl reload ssh.service
+#       status: systemctl is-active ssh.service
+#       logs: journalctl -u ssh.service --tail=100
+#
+
 ---
 - name: Basic Debian Linux Hardening
   hosts: all

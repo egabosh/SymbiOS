@@ -1,3 +1,25 @@
+# docs:
+#   short_description: Configure the mail client defaults
+#   description: Deploys the shared mail-client configuration (/home/docker/_defaults/mailclient) used by containers to send mail. This is configuration only; no dedicated mail service is managed here.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Mail
+#   tags:
+#   - smtp
+#   - mail
+#   - mailclient
+#   - config
+#   service_control:
+#     services: []
+#
+
 - name: smtp
   hosts: all
 

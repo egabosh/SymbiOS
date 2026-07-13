@@ -1,3 +1,38 @@
+# docs:
+#   short_description: Deploy and configure the Traefik reverse proxy
+#   description: Installs Traefik as the central reverse proxy / ingress, sets up entrypoints, TLS (ACME) and forward-auth integration with Authelia.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Reverse proxy
+#   tags:
+#   - traefik
+#   - reverse-proxy
+#   - tls
+#   - ingress
+#   - security
+#   service_control:
+#     services:
+#     - name: traefik
+#       type: docker
+#       compose_file: /home/docker/traefik/docker-compose.yml
+#       install: docker compose -f /home/docker/traefik/docker-compose.yml up -d
+#       uninstall: docker compose -f /home/docker/traefik/docker-compose.yml down -v
+#       reinstall: docker compose -f /home/docker/traefik/docker-compose.yml up -d --force-recreate --build
+#       start: docker compose -f /home/docker/traefik/docker-compose.yml up -d
+#       stop: docker compose -f /home/docker/traefik/docker-compose.yml down
+#       restart: docker compose -f /home/docker/traefik/docker-compose.yml restart
+#       reload: docker compose -f /home/docker/traefik/docker-compose.yml up -d
+#       status: docker compose -f /home/docker/traefik/docker-compose.yml ps
+#       logs: docker compose -f /home/docker/traefik/docker-compose.yml logs --tail=100
+#
+
 ---
 - name: traefik
   hosts: all

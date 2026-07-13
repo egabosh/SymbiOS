@@ -1,3 +1,37 @@
+# docs:
+#   short_description: Deploy managed SSH authorized_keys
+#   description: Distributes managed SSH authorized_keys from the inventory to users/hosts and protects the forced-command key used by the WebUI exec gateway. Reloads sshd after changes.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: SSH / Access
+#   tags:
+#   - ssh
+#   - authorized_keys
+#   - access
+#   - security
+#   service_control:
+#     services:
+#     - name: ssh
+#       type: systemd
+#       unit: ssh.service
+#       install: systemctl enable --now ssh.service
+#       uninstall: systemctl disable --now ssh.service
+#       reinstall: systemctl restart ssh.service
+#       start: systemctl start ssh.service
+#       stop: systemctl stop ssh.service
+#       restart: systemctl restart ssh.service
+#       reload: systemctl reload ssh.service
+#       status: systemctl is-active ssh.service
+#       logs: journalctl -u ssh.service --tail=100
+#
+
 - name: Deploy SSH authorized keys
   hosts: localhost
   connection: local

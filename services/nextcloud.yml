@@ -1,3 +1,37 @@
+# docs:
+#   short_description: Deploy the Nextcloud service
+#   description: Deploys Nextcloud (file sync/collaboration) together with its database and storage, exposed via Traefik.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   tags:
+#   - nextcloud
+#   - service
+#   - files
+#   - collaboration
+#   service_control:
+#     services:
+#     - name: nextcloud
+#       type: docker
+#       compose_file: /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml
+#       install: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml up -d
+#       uninstall: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml down -v
+#       reinstall: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml up -d --force-recreate --build
+#       start: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml up -d
+#       stop: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml down
+#       restart: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml restart
+#       reload: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml up -d
+#       status: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml ps
+#       logs: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml logs --tail=100
+#
+
 ---
 - name: nextcloud
   hosts: all

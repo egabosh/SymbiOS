@@ -1,3 +1,36 @@
+# docs:
+#   short_description: Configure the host firewall with ufw
+#   description: Installs and configures ufw, sets default deny policies and allows only the required services (SSH, HTTPS, etc.).
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Firewall / Network
+#   tags:
+#   - firewall
+#   - ufw
+#   - network
+#   - security
+#   service_control:
+#     services:
+#     - name: ufw
+#       type: ufw
+#       install: ufw enable
+#       uninstall: ufw disable
+#       reinstall: ufw reload
+#       start: ufw enable
+#       stop: ufw disable
+#       restart: ufw reload
+#       reload: ufw reload
+#       status: ufw status verbose
+#       logs: grep ufw /var/log/syslog
+#
+
 ---
 
 - name: Firewall with ufw

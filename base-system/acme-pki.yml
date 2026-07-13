@@ -1,12 +1,38 @@
-# ============================================================================
-# ACME PKI - Local Fallback CA for Certificate Management
-# ============================================================================
-# Uses step-ca (Smallstep) as ACME server for local symbios setups
+# docs:
+#   short_description: Set up a local fallback Certificate Authority (step-ca)
+#   description: Installs and configures step-ca as a local, ACME-compatible Certificate Authority. It issues internal TLS certificates when the external ACME provider is unreachable, so internal services keep working during outages.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: PKI / Certificates
+#   tags:
+#   - pki
+#   - acme
+#   - step-ca
+#   - certificates
+#   - tls
+#   - security
+#   service_control:
+#     services:
+#     - name: acme-pki (step-ca)
+#       type: docker
+#       compose_file: /home/docker/acme-pki/docker-compose.yml
+#       install: docker compose -f /home/docker/acme-pki/docker-compose.yml up -d
+#       uninstall: docker compose -f /home/docker/acme-pki/docker-compose.yml down -v
+#       reinstall: docker compose -f /home/docker/acme-pki/docker-compose.yml up -d --force-recreate --build
+#       start: docker compose -f /home/docker/acme-pki/docker-compose.yml up -d
+#       stop: docker compose -f /home/docker/acme-pki/docker-compose.yml down
+#       restart: docker compose -f /home/docker/acme-pki/docker-compose.yml restart
+#       reload: docker compose -f /home/docker/acme-pki/docker-compose.yml up -d
+#       status: docker compose -f /home/docker/acme-pki/docker-compose.yml ps
+#       logs: docker compose -f /home/docker/acme-pki/docker-compose.yml logs --tail=100
 #
-# Architecture:
-#   - SymbiOS Root CA (self-signed, 10 years)
-#   - step-ca serves ACME v2 - compatible with Traefik, certbot, etc.
-# ============================================================================
 
 - name: ACME PKI - Set up local Fallback CA (step-ca)
   hosts: all
