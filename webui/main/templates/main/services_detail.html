@@ -57,12 +57,14 @@
   <div class="tab-pane fade show active" id="pane-output" role="tabpanel">
     <h4>Actions</h4>
     <div class="btn-group mb-3 flex-wrap" role="group">
+      <button class="btn btn-outline-success" data-action="__playbook__">(Re)Install</button>
       {% for a in action_list %}
       <button class="btn {{ a.cls }}" data-action="{{ a.name }}">{{ a.label }}</button>
-      {% empty %}
-      <span class="text-muted">No actions defined for this playbook.</span>
       {% endfor %}
     </div>
+    {% if not action_list %}
+    <div class="text-muted small mb-3">No service actions defined (only (Re)Install available).</div>
+    {% endif %}
 
     <h4>Output</h4>
     <pre id="action-output" class="bg-dark text-light p-2 small" style="max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word;"></pre>

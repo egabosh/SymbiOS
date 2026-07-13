@@ -27,9 +27,7 @@
 #     - name: containerd.service
 #       command: journalctl -u containerd.service -n 100
 #   actions:
-#     install: systemctl enable --now docker.service ; systemctl enable --now containerd.service
 #     uninstall: systemctl disable --now docker.service ; systemctl disable --now containerd.service
-#     reinstall: systemctl restart docker.service ; systemctl restart containerd.service
 #     start: systemctl start docker.service ; systemctl start containerd.service
 #     stop: systemctl stop docker.service ; systemctl stop containerd.service
 #     restart: systemctl restart docker.service ; systemctl restart containerd.service

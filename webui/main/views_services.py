@@ -191,10 +191,12 @@ def services_detail(request, playbook):
 def services_action(request, playbook):
     """Start an action as a background job and return a job id.
 
-    The action name is resolved against the playbook's docs.actions dict on the
-    host (via the `service run` gateway verb), which executes the associated
-    command. The browser polls /output/?job=<id> to display progress (no
-    response streaming, which Traefik buffers).
+    The special action ``__playbook__`` runs the service's Ansible playbook
+    (idempotent install/reinstall). Any other action name is resolved against
+    the playbook's docs.actions dict on the host (via the `service run` gateway
+    verb), which executes the associated command. The browser polls
+    /output/?job=<id> to display progress (no response streaming, which Traefik
+    buffers).
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'Invalid action'}, status=400)
@@ -202,15 +204,18 @@ def services_action(request, playbook):
     item = get_playbook(playbook)
     if item is None:
         return JsonResponse({'error': 'Playbook not found'}, status=404)
-    actions = item['docs'].get('actions') or {}
-    if action not in actions:
-        return JsonResponse({'error': 'Unknown action: ' + str(action)}, status=400)
-    # Built-in base-services are protected: uninstall is never allowed.
-    if action == 'uninstall' and item.get('group') in PROTECTED_GROUPS:
-        return JsonResponse(
-            {'error': 'Uninstall is not allowed for built-in base-services.'},
-            status=403,
-        )
+    # (Re)Install always runs the Ansible playbook; it is allowed for every
+    # service. All other actions must be defined in the playbook's docs.actions.
+    if action != '__playbook__':
+        actions = item['docs'].get('actions') or {}
+        if action not in actions:
+            return JsonResponse({'error': 'Unknown action: ' + str(action)}, status=400)
+        # Built-in base-services are protected: uninstall is never allowed.
+        if action == 'uninstall' and item.get('group') in PROTECTED_GROUPS:
+            return JsonResponse(
+                {'error': 'Uninstall is not allowed for built-in base-services.'},
+                status=403,
+            )
     job_id = uuid.uuid4().hex
     job = {'output': '', 'done': False, 'success': False, 'lock': threading.Lock()}
     with _JOBS_LOCK:
@@ -223,12 +228,19 @@ def services_action(request, playbook):
 
 
 def _run_job(job, playbook, action):
-    """Run the action via the gateway `service run` verb, appending output
-    as it arrives (the command itself lives in the playbook's docs.actions)."""
+    """Run the action on the host, appending output as it arrives.
+
+    ``__playbook__`` invokes the Ansible playbook directly; any other action is
+    resolved by the gateway's `service run` verb from the playbook's
+    docs.actions.
+    """
     overall_ok = True
-    cmd = 'service run ' + playbook + ' ' + action
+    if action == '__playbook__':
+        cmd = 'playbook ' + playbook
+    else:
+        cmd = 'service run ' + playbook + ' ' + action
     try:
-        for kind, text in stream_command(cmd, timeout=600):
+        for kind, text in stream_command(cmd, timeout=900):
             if kind == 'rc':
                 if text != 0:
                     overall_ok = False
