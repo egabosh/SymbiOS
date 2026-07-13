@@ -11,11 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Service
-#   tags:
-#   - nextcloud
-#   - service
-#   - files
-#   - collaboration
 #   service_control:
 #     services:
 #     - name: nextcloud

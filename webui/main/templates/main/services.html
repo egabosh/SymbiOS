@@ -20,9 +20,6 @@
               <span class="card-status badge bg-secondary" data-playbook="{{ svc.playbook }}">…</span>
             </h5>
             <p class="card-text small flex-grow-1">{{ svc.docs.description|truncatewords:30 }}</p>
-            <div class="mb-2">
-              {% for t in svc.docs.tags %}<span class="badge bg-light text-dark border me-1">{{ t }}</span>{% endfor %}
-            </div>
             <a href="/services/{{ svc.playbook }}/" class="btn btn-sm btn-outline-primary mt-auto">Details</a>
           </div>
         </div>

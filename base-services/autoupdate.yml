@@ -11,12 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Maintenance
-#   tags:
-#   - updates
-#   - autoupdate
-#   - maintenance
-#   - security
-#   - cron
 #   service_control:
 #     services:
 #     - name: autoupdate

@@ -11,11 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Service
-#   tags:
-#   - sftp
-#   - service
-#   - file-share
-#   - security
 #   service_control:
 #     services:
 #     - name: sftp-share

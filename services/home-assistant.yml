@@ -11,11 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Service
-#   tags:
-#   - home-assistant
-#   - service
-#   - iot
-#   - smart-home
 #   service_control:
 #     services:
 #     - name: home-assistant

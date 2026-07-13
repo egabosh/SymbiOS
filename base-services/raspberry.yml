@@ -11,11 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Base services / Hardware
-#   tags:
-#   - raspberry
-#   - pi
-#   - hardware
-#   - setup
 #   service_control:
 #     services: []
 #

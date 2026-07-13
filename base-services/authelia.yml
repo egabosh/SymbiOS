@@ -11,13 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Authentication
-#   tags:
-#   - authelia
-#   - sso
-#   - authentication
-#   - ldap
-#   - security
-#   - 2fa
 #   service_control:
 #     services:
 #     - name: authelia

@@ -11,12 +11,6 @@
 #     versions:
 #     - '13'
 #   category: WebUI
-#   tags:
-#   - webui
-#   - django
-#   - traefik
-#   - authelia
-#   - symbios
 #   service_control:
 #     services:
 #     - name: symbios-ui

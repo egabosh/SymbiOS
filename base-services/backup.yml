@@ -11,11 +11,6 @@
 #     versions:
 #     - '13'
 #   category: Backup
-#   tags:
-#   - backup
-#   - cron
-#   - maintenance
-#   - data-protection
 #   service_control:
 #     services:
 #     - name: backup
