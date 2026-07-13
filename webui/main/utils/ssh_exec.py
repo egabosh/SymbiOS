@@ -159,6 +159,22 @@ def run_service_logs(playbook, lines=200, timeout=120):
     return ok, output
 
 
+def run_service_source(playbook, timeout=60):
+    """Fetch the raw playbook source for display via the exec gateway.
+
+    Only playbooks under base-services/ or services/ are permitted by the
+    gateway, so this cannot be abused to read arbitrary host files.
+    """
+    cmd = 'service source ' + playbook
+    ok, stdout, stderr = run_command(cmd, timeout=timeout)
+    if stdout and stdout.strip():
+        return ok, stdout
+    output = stdout
+    if stderr:
+        output = output + '\n--- STDERR ---\n' + stderr
+    return ok, output
+
+
 def stream_command(cmd, timeout=600):
     """Run a gateway command and yield ('out'|'err'|'rc', text) incrementally.
 
