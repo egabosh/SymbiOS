@@ -361,8 +361,30 @@ def _is_valid_ssh_pubkey(key):
         return False
 
 
+SSH_KEYS_FILE = "/config/ssh-authorized-keys"
+
+
+def _read_host_authorized_keys():
+    # Live host authorized_keys is bind-mounted read-only into the container.
+    for src in ("/root-host-keys", SSH_KEYS_FILE):
+        try:
+            with open(src) as f:
+                keys = [line.strip() for line in f
+                        if line.strip() and not line.startswith("#")]
+            if keys:
+                return keys
+        except Exception:
+            pass
+    return []
+
+
+def _is_system_ssh_key(line):
+    # Forced-command keys (e.g. the WebUI's own symbios-exec gateway key) are
+    # managed automatically and must never be edited or deleted via the UI.
+    return "command=" in line
+
+
 def settings_ssh_keys(request):
-    SSH_KEYS_FILE = "/config/ssh-authorized-keys"
     config = _get_inventory_config()
     if "all" not in config:
         config["all"] = {}
@@ -370,34 +392,19 @@ def settings_ssh_keys(request):
         config["all"]["vars"] = {}
     vars_ = config["all"]["vars"]
 
-    if "ssh_authorized_keys" not in vars_ or not isinstance(vars_["ssh_authorized_keys"], list):
-        keys = []
-        for src in ("/root-host-keys", SSH_KEYS_FILE):
-            try:
-                with open(src) as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith("#"):
-                            keys.append(line)
-                if keys:
-                    break
-            except Exception:
-                pass
-        vars_["ssh_authorized_keys"] = keys
+    # Live host keys, split into user-managed and system (forced-command) keys.
+    host_keys = _read_host_authorized_keys()
+    system_keys = [k for k in host_keys if _is_system_ssh_key(k)]
+    user_keys_from_host = [k for k in host_keys if not _is_system_ssh_key(k)]
+
+    # Seed / repair the inventory-managed user key list from the live host file
+    # the first time (or when empty) so the UI reflects reality. The system
+    # forced-command key is never part of the editable list.
+    managed = vars_.get("ssh_authorized_keys")
+    if not isinstance(managed, list) or len(managed) == 0:
+        vars_["ssh_authorized_keys"] = list(user_keys_from_host)
         _save_inventory_config(config)
-    elif len(vars_["ssh_authorized_keys"]) == 0:
-        keys = []
-        try:
-            with open("/root-host-keys") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        keys.append(line)
-        except Exception:
-            pass
-        if keys:
-            vars_["ssh_authorized_keys"] = keys
-            _save_inventory_config(config)
+    user_keys = vars_.get("ssh_authorized_keys", [])
 
     if request.method == "POST":
         action = request.POST.get("action", "save")
@@ -407,21 +414,22 @@ def settings_ssh_keys(request):
                 if new_key:
                     if not _is_valid_ssh_pubkey(new_key):
                         raise ValueError("Invalid SSH public key format")
-                    vars_["ssh_authorized_keys"].append(new_key)
+                    user_keys.append(new_key)
             elif action == "remove":
                 remove_idx = request.POST.get("index", "")
                 if remove_idx.isdigit():
                     idx = int(remove_idx)
-                    if 0 <= idx < len(vars_["ssh_authorized_keys"]):
-                        vars_["ssh_authorized_keys"].pop(idx)
+                    if 0 <= idx < len(user_keys):
+                        user_keys.pop(idx)
             elif action == "save":
                 keys_text = request.POST.get("keys", "").strip()
                 new_keys = [k.strip() for k in keys_text.split("\n") if k.strip() and not k.strip().startswith("#")]
                 invalid = [k for k in new_keys if not _is_valid_ssh_pubkey(k)]
                 if invalid:
                     raise ValueError(f"{len(invalid)} invalid SSH key(s) found")
-                vars_["ssh_authorized_keys"] = new_keys
+                user_keys = new_keys
 
+            vars_["ssh_authorized_keys"] = user_keys
             _save_inventory_config(config)
 
             with open(SSH_KEYS_FILE, "w") as f:
@@ -441,21 +449,27 @@ def settings_ssh_keys(request):
             messages.error(request, f"Error: {e}")
         return redirect("settings_ssh_keys")
 
-    # Enrich keys with parsed type+comment
-    raw_keys = vars_.get("ssh_authorized_keys", [])
+    # Enrich user keys with parsed type+comment
     key_info = []
-    for k in raw_keys:
+    for k in user_keys:
         parts = k.split(None, 2)
-        ktype = parts[0] if len(parts) > 0 else ""
-        kdata = parts[1] if len(parts) > 1 else ""
-        kcomment = parts[2] if len(parts) > 2 else ""
         key_info.append({
             "line": k,
-            "type": ktype,
-            "data": kdata,
-            "comment": kcomment,
+            "type": parts[0] if len(parts) > 0 else "",
+            "data": parts[1] if len(parts) > 1 else "",
+            "comment": parts[2] if len(parts) > 2 else "",
+        })
+    system_info = []
+    for k in system_keys:
+        parts = k.split(None, 2)
+        system_info.append({
+            "line": k,
+            "type": parts[0] if len(parts) > 0 else "",
+            "data": parts[1] if len(parts) > 1 else "",
+            "comment": parts[2] if len(parts) > 2 else "",
         })
     return render(request, "main/settings_ssh_keys.html", {
-        "keys": raw_keys,
+        "keys": user_keys,
         "key_info": key_info,
+        "system_keys": system_info,
     })
