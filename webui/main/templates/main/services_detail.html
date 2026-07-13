@@ -24,12 +24,26 @@
   {% for t in item.docs.tags %}<span class="badge bg-light text-dark border me-1">{{ t }}</span>{% endfor %}
 </div>
 
+<h4 class="h6 mb-2">Playbook Information</h4>
+<div class="border rounded p-2 small mb-3 bg-light bg-opacity-10">
+  <div class="d-flex flex-wrap gap-3">
+    <span><b>Playbook:</b> <code>{{ item.playbook }}</code></span>
+    <span><b>Author:</b> {{ item.docs.author }} <span class="text-muted">(playbook)</span></span>
+    <span><b>Version:</b> {{ item.docs.version }}</span>
+    <span><b>License:</b> {{ item.docs.license }} <span class="text-muted">(playbook)</span></span>
+    <span><b>Copyright:</b> {{ item.docs.copyright }}</span>
+    <span><b>Min Ansible:</b> {{ item.docs.min_ansible_version }}</span>
+    <span><b>Platforms:</b> {% for p in item.docs.platforms %}{{ p.name }} {{ p.versions|join:", " }}{% endfor %}</span>
+  </div>
+  <div class="text-muted mt-2">Note: these metadata fields describe the SymbiOS playbook itself, not the software it installs.</div>
+</div>
+
 <div class="d-flex align-items-center gap-3 mb-2 flex-wrap">
   <h4 class="mb-0">Status</h4>
   <span id="overall-badge" class="badge bg-secondary fs-6">…</span>
 </div>
 <div id="status-area" class="mb-3">
-  <div class="text-muted small">Status wird geladen…</div>
+  <div class="text-muted small">Loading status…</div>
 </div>
 
 <ul class="nav nav-tabs mb-3" id="svcTabs" role="tablist">
@@ -59,24 +73,9 @@
   </div>
   <div class="tab-pane fade" id="pane-logs" role="tabpanel">
     <h4>Logs</h4>
-    <pre id="log-output" class="bg-dark text-light p-2 small" style="max-height:320px;overflow:auto;">Logs werden geladen…</pre>
+    <pre id="log-output" class="bg-dark text-light p-2 small" style="max-height:320px;overflow:auto;">Loading logs…</pre>
   </div>
 </div>
-
-<h4>Metadata</h4>
-<p class="text-muted small mb-2">
-  Hinweis: Diese Metadaten (Autor, Lizenz, Version usw.) beziehen sich auf das
-  SymbiOS&#8209;Playbook selbst, <b>nicht</b> auf die damit installierte Software.
-</p>
-<table class="table table-sm w-auto">
-  <tr><th>Author</th><td>{{ item.docs.author }} <span class="text-muted small">(Playbook)</span></td></tr>
-  <tr><th>Version</th><td>{{ item.docs.version }} <span class="text-muted small">(Playbook)</span></td></tr>
-  <tr><th>License</th><td>{{ item.docs.license }} <span class="text-muted small">(Playbook)</span></td></tr>
-  <tr><th>Copyright</th><td>{{ item.docs.copyright }} <span class="text-muted small">(Playbook)</span></td></tr>
-  <tr><th>Min Ansible version</th><td>{{ item.docs.min_ansible_version }}</td></tr>
-  <tr><th>Platforms</th><td>{% for p in item.docs.platforms %}{{ p.name }} {{ p.versions|join:", " }}{% endfor %}</td></tr>
-  <tr><th>Playbook</th><td><code>{{ item.playbook }}</code></td></tr>
-</table>
 
 <h4>Managed units</h4>
 <table class="table table-sm align-middle">
