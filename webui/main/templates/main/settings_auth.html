@@ -5,6 +5,24 @@
 {% block content %}
 <h2>Auth Settings</h2>
 
+{% if not vars.twofa_enabled %}
+<div class="row">
+  <div class="col-md-8">
+    <div class="alert alert-warning">
+      <i class="bi bi-shield-exclamation"></i>
+      <strong>Recommendation:</strong> 2-Factor Authentication (2FA) is currently
+      disabled. Enabling 2FA adds a second factor (TOTP or email verification) on
+      top of the LDAP password and is strongly recommended, especially since the
+      WebUI is also reachable directly on port 8080.
+      {% if not vars.smtp_server %}
+      A mailserver must be configured first under
+      <a href="/settings/mailserver/">Settings &rarr; Mailserver (SMTP)</a>.
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="row">
   <div class="col-md-8">
     <div class="alert alert-info">

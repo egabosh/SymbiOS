@@ -160,6 +160,19 @@ def check_remote_exec():
     return {"status": "ok", "message": "SSH exec gateway reachable"}
 
 
+def check_twofa():
+    vars_ = _load_config_vars()
+    twofa = vars_.get("twofa_enabled", False)
+    smtp = bool(vars_.get("smtp_server"))
+    if twofa:
+        return {"status": "ok", "message": "2-Factor Authentication enabled"}
+    if not smtp:
+        return {"status": "warn",
+                "message": "2FA disabled - configure a mailserver to enable it"}
+    return {"status": "warn",
+            "message": "2-Factor Authentication is disabled - recommended for security"}
+
+
 def check_playbooks():
     log_dir = "/log"
     failures = []
@@ -485,6 +498,7 @@ def run_all():
         "traefik": check_traefik(),
         "stepca": check_stepca(),
         "remote_exec": check_remote_exec(),
+        "twofa": check_twofa(),
         "playbooks": check_playbooks(),
         "ddns": check_ddns(),
         "containers": check_containers(),
