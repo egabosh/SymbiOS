@@ -23,9 +23,9 @@
 #       status: systemctl is-active containerd.service
 #     logs:
 #     - name: docker.service
-#       command: journalctl -u docker.service -n 100
+#       command: journalctl -fu docker.service -n 100
 #     - name: containerd.service
-#       command: journalctl -u containerd.service -n 100
+#       command: journalctl -fu containerd.service -n 100
 #   actions:
 #     uninstall: systemctl disable --now docker.service ; systemctl disable --now containerd.service
 #     start: systemctl start docker.service ; systemctl start containerd.service

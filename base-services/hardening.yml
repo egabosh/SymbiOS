@@ -19,7 +19,7 @@
 #       status: systemctl is-active ssh.service
 #     logs:
 #     - name: ssh.service
-#       command: journalctl -u ssh.service -n 100
+#       command: journalctl -fu ssh.service -n 100
 #   actions:
 #     uninstall: systemctl disable --now ssh.service
 #     start: systemctl start ssh.service

@@ -196,6 +196,27 @@ PY
                 f_lines="${f_parts[3]:-200}"
                 python3 /home/SymbiOS/symbios-logs.py "$f_playbook" "$f_lines"
                 ;;
+            logfollow)
+                # Usage: service logfollow <playbook> <name>
+                # Streams (follows) ONE named log command forever (tail -f style)
+                # for the WebUI's live log viewer. The name is resolved from the
+                # playbook's docs.service_control.logs, so only the pre-declared
+                # log commands can ever run - no arbitrary command execution.
+                f_playbook="${f_parts[2]}"
+                f_name="${f_parts[3]}"
+                if [[ "$f_playbook" != base-services/* && "$f_playbook" != services/* ]]; then
+                    echo "ERROR: Playbook path not allowed: $f_playbook"
+                    f_audit_log "BLOCKED logfollow path=$f_playbook"
+                    exit 1
+                fi
+                if [[ -z "$f_name" ]]; then
+                    echo "ERROR: missing log unit name"
+                    exit 1
+                fi
+                f_audit_log "logfollow name=$f_name"
+                python3 /home/SymbiOS/symbios-logs.py --follow "$f_playbook" "$f_name"
+                exit $?
+                ;;
             source)
                 # Usage: service source <playbook>
                 # Returns the raw playbook source (read-only) for display in the

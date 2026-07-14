@@ -27,11 +27,11 @@
 #       status: systemctl is-active postfix.service
 #     logs:
 #     - name: ssh.service
-#       command: journalctl -u ssh.service -n 100
+#       command: journalctl -fu ssh.service -n 100
 #     - name: rsyslog.service
-#       command: journalctl -u rsyslog.service -n 100
+#       command: journalctl -fu rsyslog.service -n 100
 #     - name: postfix.service
-#       command: journalctl -u postfix.service -n 100
+#       command: journalctl -fu postfix.service -n 100
 #   actions:
 #     uninstall: systemctl disable --now ssh.service ; systemctl disable --now rsyslog.service ; systemctl disable --now postfix.service
 #     start: systemctl start ssh.service ; systemctl start rsyslog.service ; systemctl start postfix.service

@@ -19,7 +19,7 @@
 #       status: docker compose -f /home/docker/acme-pki/docker-compose.yml ps
 #     logs:
 #     - name: acme-pki (step-ca)
-#       command: docker compose -f /home/docker/acme-pki/docker-compose.yml logs --tail=100
+#       command: docker compose -f /home/docker/acme-pki/docker-compose.yml logs -f --tail=100
 #   actions:
 #     uninstall: docker compose -f /home/docker/acme-pki/docker-compose.yml down -v
 #     start: docker compose -f /home/docker/acme-pki/docker-compose.yml up -d
