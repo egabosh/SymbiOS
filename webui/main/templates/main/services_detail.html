@@ -194,7 +194,7 @@ LOG_UNITS.forEach(u => {
       '<span class="badge bg-success" data-live="' + u.name + '">live</span>' +
     '</div>' +
     '<pre class="bg-dark text-light p-2 small mb-0" data-log="' + u.name + '" ' +
-    'style="max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-word;">waiting…</pre>';
+    'style="min-height:140em;max-height:90vh;overflow:auto;line-height:1.4;white-space:pre-wrap;word-break:break-word;">waiting…</pre>';
   logPanes.appendChild(wrap);
   unitPre[u.name] = wrap.querySelector('pre');
 });
