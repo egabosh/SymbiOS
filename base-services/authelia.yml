@@ -15,17 +15,17 @@
 #     services:
 #     - name: authelia
 #       type: docker
-#       compose_file: /home/docker/authelia.{{ inventory_hostname }}/docker-compose.yml
-#       status: docker compose -f /home/docker/authelia.{{ inventory_hostname }}/docker-compose.yml ps
+#       compose_file: /home/docker/authelia/docker-compose.yml
+#       status: test -d /home/docker/authelia || exit 2; docker compose -f /home/docker/authelia/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: authelia
-#       command: docker compose -f /home/docker/authelia.{{ inventory_hostname }}/docker-compose.yml logs -f --tail=100
+#       command: docker compose -f /home/docker/authelia/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/authelia.{{ inventory_hostname }}/docker-compose.yml down -v
-#     start: docker compose -f /home/docker/authelia.{{ inventory_hostname }}/docker-compose.yml up -d
-#     stop: docker compose -f /home/docker/authelia.{{ inventory_hostname }}/docker-compose.yml down
-#     restart: docker compose -f /home/docker/authelia.{{ inventory_hostname }}/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/authelia.{{ inventory_hostname }}/docker-compose.yml up -d
+#     uninstall: docker compose -f /home/docker/authelia/docker-compose.yml down
+#     start: docker compose -f /home/docker/authelia/docker-compose.yml up -d
+#     stop: docker compose -f /home/docker/authelia/docker-compose.yml down
+#     restart: docker compose -f /home/docker/authelia/docker-compose.yml restart
+#     reload: docker compose -f /home/docker/authelia/docker-compose.yml up -d
 #
 
 - name: authelia

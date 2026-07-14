@@ -15,17 +15,17 @@
 #     services:
 #     - name: nextcloud
 #       type: docker
-#       compose_file: /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml
-#       status: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml ps
+#       compose_file: /home/docker/nextcloud/docker-compose.yml
+#       status: test -d /home/docker/nextcloud || exit 2; docker compose -f /home/docker/nextcloud/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: nextcloud
-#       command: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml logs -f --tail=100
+#       command: docker compose -f /home/docker/nextcloud/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml down -v
-#     start: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml up -d
-#     stop: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml down
-#     restart: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/nextcloud.{{ inventory_hostname }}/docker-compose.yml up -d
+#     uninstall: docker compose -f /home/docker/nextcloud/docker-compose.yml down
+#     start: docker compose -f /home/docker/nextcloud/docker-compose.yml up -d
+#     stop: docker compose -f /home/docker/nextcloud/docker-compose.yml down
+#     restart: docker compose -f /home/docker/nextcloud/docker-compose.yml restart
+#     reload: docker compose -f /home/docker/nextcloud/docker-compose.yml up -d
 #
 
 ---
@@ -38,17 +38,17 @@
 
   tasks:
 
-    - name: Create /home/docker/nextcloud.{{inventory_hostname}} dir
+    - name: Create /home/docker/nextcloud dir
       ansible.builtin.file:
-        path: /home/docker/nextcloud.{{inventory_hostname}}
+        path: /home/docker/nextcloud
         owner: root
         group: docker
         state: directory
         mode: '0550'
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/genpw.sh (generate Random PW for Nextcloud and DB)
+    - name: /home/docker/nextcloud/genpw.sh (generate Random PW for Nextcloud and DB)
       blockinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/genpw.sh
+        path: /home/docker/nextcloud/genpw.sh
         create: yes
         mode: 0550
         owner: root
@@ -56,7 +56,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # Change to service directory
-          cd /home/docker/nextcloud.{{inventory_hostname}}
+          cd /home/docker/nextcloud
 
           # Generate random passwords for Nextcloud admin and database
           g_ncadminpassword=$(pwgen -s 32 1)
@@ -97,21 +97,21 @@
         validate: /bin/bash -n %s
       notify: run genpw.sh
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/genpw.sh shebang
+    - name: /home/docker/nextcloud/genpw.sh shebang
       lineinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/genpw.sh
+        path: /home/docker/nextcloud/genpw.sh
         insertbefore: BOF
         line: "#!/bin/bash -e"
 
     - name: Gen initial passwords if not exists
       ansible.builtin.shell: ./genpw.sh
       args:
-        chdir: /home/docker/nextcloud.{{inventory_hostname}}
-        creates: /home/docker/nextcloud.{{inventory_hostname}}/env
+        chdir: /home/docker/nextcloud
+        creates: /home/docker/nextcloud/env
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/fulldockerfile.sh (Download full Dockerfile)
+    - name: /home/docker/nextcloud/fulldockerfile.sh (Download full Dockerfile)
       blockinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/fulldockerfile.sh
+        path: /home/docker/nextcloud/fulldockerfile.sh
         create: yes
         mode: 0550
         owner: root
@@ -119,7 +119,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # Change to service directory
-          cd /home/docker/nextcloud.{{inventory_hostname}}
+          cd /home/docker/nextcloud
 
           # Download current Dockerfile template from Nextcloud repository
           wget -q https://raw.githubusercontent.com/nextcloud/docker/refs/heads/master/Dockerfile-debian.template -O Dockerfile
@@ -130,22 +130,22 @@
         validate: /bin/bash -n %s
       notify: run fulldockerfile.sh
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/fulldockerfile.sh shebang
+    - name: /home/docker/nextcloud/fulldockerfile.sh shebang
       lineinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/fulldockerfile.sh
+        path: /home/docker/nextcloud/fulldockerfile.sh
         insertbefore: BOF
         line: "#!/bin/bash -e"
 
     - name: Gen initial passwords if not exists
       ansible.builtin.shell: ./fulldockerfile.sh
       args:
-        chdir: /home/docker/nextcloud.{{inventory_hostname}}
-        creates: /home/docker/nextcloud.{{inventory_hostname}}/Dockerfile
+        chdir: /home/docker/nextcloud
+        creates: /home/docker/nextcloud/Dockerfile
 
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/collabora.genpw.sh (generate Collabora PW)
+    - name: /home/docker/nextcloud/collabora.genpw.sh (generate Collabora PW)
       blockinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/collabora.genpw.sh
+        path: /home/docker/nextcloud/collabora.genpw.sh
         create: yes
         mode: 0550
         owner: root
@@ -153,7 +153,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # Change to service directory
-          cd /home/docker/nextcloud.{{inventory_hostname}}
+          cd /home/docker/nextcloud
 
           # Generate random password for Collabora
           g_collabora_password=$(pwgen -s 32 1)
@@ -174,21 +174,21 @@
         validate: /bin/bash -n %s
       notify: run collabora.genpw.sh
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/collabora.genpw.sh shebang
+    - name: /home/docker/nextcloud/collabora.genpw.sh shebang
       lineinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/collabora.genpw.sh
+        path: /home/docker/nextcloud/collabora.genpw.sh
         insertbefore: BOF
         line: "#!/bin/bash -e"
 
     - name: Generate Collabora password
       ansible.builtin.shell: ./collabora.genpw.sh
       args:
-        chdir: /home/docker/nextcloud.{{inventory_hostname}}
-        creates: /home/docker/nextcloud.{{inventory_hostname}}/env.collabora
+        chdir: /home/docker/nextcloud
+        creates: /home/docker/nextcloud/env.collabora
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/remoteip.conf (real IP logging and no Proxy IP)
+    - name: /home/docker/nextcloud/remoteip.conf (real IP logging and no Proxy IP)
       blockinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/remoteip.conf
+        path: /home/docker/nextcloud/remoteip.conf
         create: yes
         mode: 0444
         owner: root
@@ -202,9 +202,9 @@
         backup: yes
       notify: Restart nextcloud
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/turnserver.conf
+    - name: /home/docker/nextcloud/turnserver.conf
       blockinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/turnserver.conf
+        path: /home/docker/nextcloud/turnserver.conf
         mode: "0400"
         owner: root
         group: root
@@ -223,9 +223,9 @@
           no-multicast-peers
         backup: yes
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/docker-compose.yml Container Configuration
+    - name: /home/docker/nextcloud/docker-compose.yml Container Configuration
       blockinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/docker-compose.yml
+        path: /home/docker/nextcloud/docker-compose.yml
         create: yes
         mode: 0440
         owner: root
@@ -406,21 +406,21 @@
 
     - name: Create oidc client secret for Nextcloud
       ansible.builtin.shell: |
-        /home/docker/authelia.{{inventory_hostname}}/gen-oidc-client-secret.sh /home/docker/nextcloud.{{inventory_hostname}}
+        /home/docker/authelia/gen-oidc-client-secret.sh /home/docker/nextcloud
       changed_when: false
       failed_when: false
 
     - name: write OIDC config in authelias configuration.yml for Nextcloud
       ansible.builtin.blockinfile:
-        path: /home/docker/authelia.{{inventory_hostname}}/authelia-data/configuration.yml
+        path: /home/docker/authelia/authelia-data/configuration.yml
         marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC nextcloud.{{inventory_hostname}}"
         block: |2
                 # Nextcloud
                 - client_id: 'nextcloud'
                   client_name: 'Nextcloud'
-                  client_secret: '{{ lookup('file', '/home/docker/nextcloud.' + inventory_hostname + '/oidc_digest') }}'
+                  client_secret: '{{ lookup('file', '/home/docker/nextcloud/oidc_digest') }}'
                   public: false
-                  authorization_policy: '{{ lookup('file', '/home/docker/authelia.' + inventory_hostname + '/authorization_policy') }}'
+                  authorization_policy: '{{ lookup('file', '/home/docker/authelia/authorization_policy') }}'
                   redirect_uris:
                     - 'https://nextcloud.{{inventory_hostname}}/apps/user_oidc/code'
                   scopes:
@@ -444,16 +444,16 @@
     - name: Start nextcloud
       ansible.builtin.shell: docker-compose up -d
       args:
-        chdir: /home/docker/nextcloud.{{inventory_hostname}}
-        creates: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/config.php
+        chdir: /home/docker/nextcloud
+        creates: /home/docker/nextcloud/nextcloud-data/config/config.php
 
     - name: Wait until nextcloud install is finished
       wait_for:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/config.php
+        path: /home/docker/nextcloud/nextcloud-data/config/config.php
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/local.config.php (local nextcloud config)
+    - name: /home/docker/nextcloud/nextcloud-data/config/local.config.php (local nextcloud config)
       blockinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/local.config.php
+        path: /home/docker/nextcloud/nextcloud-data/config/local.config.php
         create: yes
         mode: 0444
         owner: root
@@ -471,15 +471,15 @@
           );
         backup: yes
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/local.config.php shebang
+    - name: /home/docker/nextcloud/nextcloud-data/config/local.config.php shebang
       lineinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/config/local.config.php
+        path: /home/docker/nextcloud/nextcloud-data/config/local.config.php
         insertbefore: BOF
         line: "<?php"
 
-    - name: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud.init.sh
+    - name: /home/docker/nextcloud/nextcloud.init.sh
       blockinfile:
-        path: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud.init.sh
+        path: /home/docker/nextcloud/nextcloud.init.sh
         mode: "0500"
         owner: root
         group: root
@@ -502,7 +502,7 @@
           done
 
           # Change to service directory
-          if ! cd /home/docker/nextcloud.{{inventory_hostname}}
+          if ! cd /home/docker/nextcloud
           then
             exit 1
           fi
@@ -530,9 +530,9 @@
           done
           
           # stun/turn server
-          if [ -s /home/docker/turn.{{inventory_hostname}}/env ]
+          if [ -s /home/docker/turn/env ]
           then
-            source /home/docker/turn.{{inventory_hostname}}/env
+            source /home/docker/turn/env
             docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:turn:add --secret $TURN_SECRET turns turn.{{inventory_hostname}}:5349 udp,tcp
             docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:add turn.{{inventory_hostname}}:5349
             docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:delete stun.nextcloud.com:443
@@ -554,9 +554,9 @@
           # OIDC via Authelia (user_oidc)
           if ! [ -s app.user_oidc.configured ]
           then
-            if [ -s /home/docker/nextcloud.{{inventory_hostname}}/oidc_password ]
+            if [ -s /home/docker/nextcloud/oidc_password ]
             then
-              oidc_secret=$(cat /home/docker/nextcloud.{{inventory_hostname}}/oidc_password)
+              oidc_secret=$(cat /home/docker/nextcloud/oidc_password)
 
               echo "
                 ./occ user_oidc:provider \
@@ -587,9 +587,9 @@
             LDAP_BASE_DN="{{ ldap_basedn }}"
             LDAP_BIND_DN="cn=readuser,${LDAP_BASE_DN}"
 
-            if [ -s /home/docker/ldap.{{inventory_hostname}}/env.openldap ]
+            if [ -s /home/docker/ldap/env.openldap ]
             then
-              LDAP_PASSWORD=$(grep ^LDAP_READUSER_PASSWORD= /home/docker/ldap.{{inventory_hostname}}/env.openldap | cut -d= -f2-)
+              LDAP_PASSWORD=$(grep ^LDAP_READUSER_PASSWORD= /home/docker/ldap/env.openldap | cut -d= -f2-)
             fi
 
             docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:create-empty-config >>app.user_ldap.configured
@@ -620,10 +620,10 @@
       notify: run nextcloud.init
 
     - name: Run nextcloud.init after install
-      ansible.builtin.shell: bash /home/docker/nextcloud.{{inventory_hostname}}/nextcloud.init.sh
+      ansible.builtin.shell: bash /home/docker/nextcloud/nextcloud.init.sh
       args:
-        chdir: /home/docker/nextcloud.{{inventory_hostname}}
-        creates: /home/docker/nextcloud.{{inventory_hostname}}/nextcloud.init.log
+        chdir: /home/docker/nextcloud
+        creates: /home/docker/nextcloud/nextcloud.init.log
 
     - name: /usr/local/sbin/autoupdate.d/nextcloud.update
       blockinfile:
@@ -635,13 +635,13 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # Change to service directory or skip update
-          if ! cd /home/docker/nextcloud.{{inventory_hostname}}
+          if ! cd /home/docker/nextcloud
           then
             continue
           fi
 
           # Update full Dockerfile
-          /home/docker/nextcloud.{{inventory_hostname}}/fulldockerfile.sh
+          /home/docker/nextcloud/fulldockerfile.sh
           # Nextcloud maintenance and app-update
           docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ db:add-missing-columns
           docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ db:add-missing-indices
@@ -655,10 +655,10 @@
           #docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ maps:scan-photos --now
           docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ db:convert-filecache-bigint -n
           # define stun/turn server maybe new password
-          if [ -s /home/docker/turn.{{inventory_hostname}}/env ]
+          if [ -s /home/docker/turn/env ]
           then
              # turn
-             source /home/docker/turn.{{inventory_hostname}}/env
+             source /home/docker/turn/env
              docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:turn:delete turns turn.{{inventory_hostname}}:5349 udp,tcp
              docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:turn:add --secret $TURN_SECRET turns turn.{{inventory_hostname}}:5349 udp,tcp
              # stun
@@ -666,9 +666,9 @@
              docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:add turn.{{inventory_hostname}}:5349
              docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:delete stun.nextcloud.com:443
           fi
-          if [ -s /home/docker/nextcloud.{{inventory_hostname}}/nextcloud-data/data/nextcloud.log ]
+          if [ -s /home/docker/nextcloud/nextcloud-data/data/nextcloud.log ]
           then
-            docker compose -f /home/docker/nextcloud.{{inventory_hostname}}/docker-compose.yml exec -ti -u www-data nextcloud.{{inventory_hostname}} ./occ log:tail 1000 | grep " Error " | grep -v "Can't get app storage," | dd bs=1M count=1 2>/dev/null >"${g_tmp}/nextcloud-error.log"
+            docker compose -f /home/docker/nextcloud/docker-compose.yml exec -ti -u www-data nextcloud.{{inventory_hostname}} ./occ log:tail 1000 | grep " Error " | grep -v "Can't get app storage," | dd bs=1M count=1 2>/dev/null >"${g_tmp}/nextcloud-error.log"
             if [ -s "${g_tmp}/nextcloud-error.log" ]
             then
               g_echo_error "Errors in Nextcloud Log: $(cat "${g_tmp}/nextcloud-error.log")"
@@ -683,29 +683,29 @@
     - name: run genpw.sh
       ansible.builtin.shell: ./genpw.sh
       args:
-        chdir: /home/docker/nextcloud.{{inventory_hostname}}
+        chdir: /home/docker/nextcloud
       notify: Restart nextcloud
 
     - name: run fulldockerfile.sh
       ansible.builtin.shell: ./fulldockerfile.sh
       args:
-        chdir: /home/docker/nextcloud.{{inventory_hostname}}
+        chdir: /home/docker/nextcloud
 
     - name: run nextcloud.update
       ansible.builtin.shell: bash /usr/local/sbin/autoupdate.d/nextcloud.update
 
     - name: run nextcloud.init
-      ansible.builtin.shell: bash /home/docker/nextcloud.{{inventory_hostname}}/nextcloud.init.sh
+      ansible.builtin.shell: bash /home/docker/nextcloud/nextcloud.init.sh
 
     - name: Restart nextcloud
       ansible.builtin.shell: docker-compose up -d --force-recreate
       args:
-        chdir: /home/docker/nextcloud.{{inventory_hostname}}
+        chdir: /home/docker/nextcloud
 
     - name: run collabora.genpw.sh
       ansible.builtin.shell: ./collabora.genpw.sh
       args:
-        chdir: /home/docker/nextcloud.{{inventory_hostname}}
+        chdir: /home/docker/nextcloud
       notify: Restart nextcloud
 
     - name: Restart authelia
@@ -715,5 +715,5 @@
           docker-compose up -d
         fi
       args:
-        chdir: /home/docker/authelia.{{inventory_hostname}}
+        chdir: /home/docker/authelia
 

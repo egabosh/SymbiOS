@@ -16,12 +16,12 @@
 #     - name: traefik
 #       type: docker
 #       compose_file: /home/docker/traefik/docker-compose.yml
-#       status: docker compose -f /home/docker/traefik/docker-compose.yml ps
+#       status: test -d /home/docker/traefik || exit 2; docker compose -f /home/docker/traefik/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: traefik
 #       command: docker compose -f /home/docker/traefik/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/traefik/docker-compose.yml down -v
+#     uninstall: docker compose -f /home/docker/traefik/docker-compose.yml down
 #     start: docker compose -f /home/docker/traefik/docker-compose.yml up -d
 #     stop: docker compose -f /home/docker/traefik/docker-compose.yml down
 #     restart: docker compose -f /home/docker/traefik/docker-compose.yml restart

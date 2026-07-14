@@ -16,7 +16,7 @@
 #     - name: dedyn
 #       type: cron
 #       file: /etc/cron.d/dedyn_local
-#       status: cat /etc/cron.d/dedyn_local
+#       status: test -f /etc/cron.d/dedyn_local || exit 2
 #     logs:
 #     - name: dedyn
 #       command: tail -F /var/log/syslog | grep dedyn

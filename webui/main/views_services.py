@@ -12,7 +12,7 @@ _JOBS_LOCK = threading.Lock()
 from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from .playbook_catalog import get_catalog, get_playbook, compose_base
-from .utils.ssh_exec import run_docker, run_systemctl, run_cron, run_ufw, stream_command, stream_log, stop_log
+from .utils.ssh_exec import stream_command, stream_log, stop_log, run_service_status
 
 # Built-in base-services can be managed but never uninstalled from the WebUI.
 PROTECTED_GROUPS = {'base-services'}
@@ -45,48 +45,7 @@ STATE_META = {
     'error': ('Error', 'bg-warning text-dark'),
 }
 
-# Map (service type, UI action) -> gateway verb/subcommand for status display.
-_STATUS_VERB = {
-    'docker': 'ps',
-    'systemd': 'is-active',
-    'cron': 'status',
-    'ufw': 'status',
-}
 
-
-def _normalize_state(type_, raw):
-    """Turn a raw gateway status string into a clear, comparable state."""
-    raw = (raw or '').strip()
-    if type_ == 'docker':
-        if 'Up ' in raw:
-            return 'running'
-        if any(k in raw for k in ('Exited', 'Created', 'Restarting', 'Paused')):
-            return 'stopped'
-        if not raw or 'no container' in raw.lower() or 'no resource' in raw.lower():
-            return 'not-installed'
-        return 'stopped'
-    if type_ == 'systemd':
-        if raw == 'active':
-            return 'running'
-        if raw == 'unknown':
-            return 'not-installed'
-        if raw == 'failed':
-            return 'error'
-        return 'stopped'
-    if type_ == 'cron':
-        if raw.startswith('installed'):
-            return 'running'
-        if raw == 'not installed':
-            return 'not-installed'
-        return 'stopped'
-    if type_ == 'ufw':
-        low = raw.lower()
-        if 'active' in low and 'inactive' not in low:
-            return 'running'
-        if 'inactive' in low:
-            return 'stopped'
-        return 'stopped'
-    return 'stopped'
 
 
 def _state_badge(state):
@@ -105,45 +64,7 @@ def _aggregate_state(states):
     return 'stopped'
 
 
-def _dispatch(svc, action):
-    """Resolve a (type, action) pair to an execution through the SSH gateway.
 
-    Returns a result dict or None if the action is not applicable to this type.
-    """
-    t = svc.get('type')
-    if t == 'docker':
-        base = compose_base(svc.get('compose_file'))
-        verb = {'start': 'up', 'stop': 'down', 'restart': 'restart',
-                'reload': 'up', 'uninstall': 'remove', 'status': 'ps'}.get(action)
-        if not verb or not base:
-            return None
-        ok, out = run_docker(base, verb, timeout=300)
-        return {'target': svc.get('name'), 'type': t, 'ok': ok, 'output': out}
-    if t == 'systemd':
-        unit = svc.get('unit')
-        sub = {'start': 'start', 'stop': 'stop', 'restart': 'restart',
-               'reload': 'reload', 'uninstall': 'disable --now',
-               'status': 'is-active'}.get(action)
-        if not sub or not unit:
-            return None
-        ok, out = run_systemctl(sub, unit, timeout=120)
-        return {'target': svc.get('name'), 'type': t, 'ok': ok, 'output': out}
-    if t == 'cron':
-        file = svc.get('file')
-        sub = {'start': 'enable', 'stop': 'disable', 'restart': 'enable',
-               'uninstall': 'remove', 'status': 'status'}.get(action)
-        if not sub or not file:
-            return None
-        ok, out = run_cron(sub, file, timeout=120)
-        return {'target': svc.get('name'), 'type': t, 'ok': ok, 'output': out}
-    if t == 'ufw':
-        sub = {'start': 'enable', 'stop': 'disable', 'restart': 'reload',
-               'reload': 'reload', 'uninstall': 'disable', 'status': 'status'}.get(action)
-        if not sub:
-            return None
-        ok, out = run_ufw(sub, timeout=120)
-        return {'target': svc.get('name'), 'type': t, 'ok': ok, 'output': out}
-    return None
 
 
 @login_required
@@ -354,6 +275,22 @@ def services_source(request, playbook):
     return JsonResponse({'source': out})
 
 
+def _state_from_rc(rc):
+    """Map a status command's exit code to a normalized service state.
+
+    Playbook-declared `status:` commands follow this convention:
+      0   -> running
+      2   -> not-installed (author signal, e.g. `test -d dir || exit 2`)
+      4   -> not-installed (systemd `is-active` for a missing unit)
+      else-> stopped
+    """
+    if rc == 0:
+        return 'running'
+    if rc in (2, 4):
+        return 'not-installed'
+    return 'stopped'
+
+
 @login_required
 def services_status(request, playbook):
     item = get_playbook(playbook)
@@ -362,18 +299,16 @@ def services_status(request, playbook):
     services = item['docs'].get('service_control', {}).get('services', [])
     out = []
     for s in services:
-        r = _dispatch(s, 'status')
-        if r:
-            raw = (r.get('output') or '').strip()
-            state = _normalize_state(s.get('type'), raw)
-            out.append({
-                'name': s.get('name'),
-                'type': s.get('type'),
-                'status': raw,
-                'ok': r.get('ok'),
-                'state': state,
-                'badge': _state_badge(state),
-            })
+        name = s.get('name')
+        rc, stdout, stderr = run_service_status(playbook, name)
+        state = _state_from_rc(rc)
+        out.append({
+            'name': name,
+            'type': s.get('type'),
+            'status': (stdout or stderr or '').strip(),
+            'state': state,
+            'badge': _state_badge(state),
+        })
     states = [s['state'] for s in out]
     overall = _aggregate_state(states)
     return JsonResponse({

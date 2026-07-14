@@ -15,12 +15,12 @@
 #     services:
 #     - name: ufw
 #       type: ufw
-#       status: ufw status verbose
+#       status: 'ufw status | grep -qi "Status: active"'
 #     logs:
-#     - name: ufw
-#       command: tail -F /var/log/syslog | grep ufw
 #     - name: firewall
-#       command: tail -n 1000 /var/log/firewall.log
+#       command: tail -F -n 1000 /var/log/firewall.log
+#     - name: ufw
+#       command: tail -F -n 10000 /var/log/syslog | grep =ufw 
 #   actions:
 #     start: ufw --force enable
 #     stop: ufw disable

@@ -16,12 +16,12 @@
 #     - name: symbios-ui
 #       type: docker
 #       compose_file: /home/docker/symbios-ui/docker-compose.yml
-#       status: docker compose -f /home/docker/symbios-ui/docker-compose.yml ps
+#       status: test -d /home/docker/symbios-ui || exit 2; docker compose -f /home/docker/symbios-ui/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: symbios-ui
 #       command: docker compose -f /home/docker/symbios-ui/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/symbios-ui/docker-compose.yml down -v
+#     uninstall: docker compose -f /home/docker/symbios-ui/docker-compose.yml down
 #     start: docker compose -f /home/docker/symbios-ui/docker-compose.yml up -d
 #     stop: docker compose -f /home/docker/symbios-ui/docker-compose.yml down
 #     restart: docker compose -f /home/docker/symbios-ui/docker-compose.yml restart
@@ -183,7 +183,7 @@
       ansible.builtin.lineinfile:
         path: /root/.ssh/authorized_keys
         regexp: ".*symbios-webui$"
-        line: 'command="/usr/local/sbin/symbios-exec.sh",restrict,no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding {{ symbios_ssh_pubkey }}'
+        line: '{{ symbios_ssh_pubkey }}'
         mode: "0644"
         create: yes
 

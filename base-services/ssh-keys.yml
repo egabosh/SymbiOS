@@ -63,6 +63,6 @@
       ansible.builtin.lineinfile:
         path: /root/.ssh/authorized_keys
         regexp: ".*symbios-webui$"
-        line: 'command="/usr/local/sbin/symbios-exec.sh",restrict,no-agent-forwarding,no-port-forwarding,no-pty,no-user-rc,no-X11-forwarding {{ symbios_ssh_pubkey_raw.content | b64decode | trim }}'
+        line: '{{ symbios_ssh_pubkey_raw.content | b64decode | trim }}'
         mode: "0644"
       become: yes
