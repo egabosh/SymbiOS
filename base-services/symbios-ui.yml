@@ -121,6 +121,12 @@
         src: /home/SymbiOS/webui/
         dest: "{{ docker_path }}/webui/"
         mode: preserve
+        owner: "10000"
+        group: "10000"
+        # Keep synced directories aligned with "Create required directories" so
+        # the directory mode (0770) and ownership (10000:10000) stay stable across
+        # runs; otherwise this task would reset the webui dir and flip it back.
+        directory_mode: "0770"
       notify: Restart {{ service_name }}
 
     - name: Remove obsolete WebUI files (DB-free auth refactor)
@@ -133,8 +139,12 @@
         - main/templates/main/login.html
 
     - name: Set permissions
+      # Add others-read to files only. Recursing into directories would flip
+      # their mode (e.g. 0770 -> 0774) and make the "Create required
+      # directories" webui assertion report changed on every run. The container
+      # user (uid 10000) traverses via the group rwx bits, so dirs are left alone.
       ansible.builtin.command:
-        cmd: "chmod -R o+r {{ docker_path }}/webui"
+        cmd: "find {{ docker_path }}/webui -type f -exec chmod o+r {} +"
       changed_when: false
 
     - name: Copy symbios-exec.sh wrapper
@@ -330,12 +340,14 @@
         nft flush chain ip6 filter DOCKER-USER 2>/dev/null || true
       changed_when: false
 
-    - name: Disable and mask LAN restriction service
+    - name: Disable LAN restriction service
+      # Do NOT mask here: masking creates a /dev/null symlink at the unit path,
+      # which the "Remove LAN restriction unit file" task then deletes every run,
+      # causing a non-idempotent changed loop. The unit file itself is removed below.
       ansible.builtin.systemd:
         name: symbios-lan-8080.service
         enabled: no
         state: stopped
-        masked: yes
       failed_when: false
 
     - name: Remove LAN restriction unit file
