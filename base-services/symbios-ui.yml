@@ -409,41 +409,38 @@
         block: |
           # Update SymbiOS from git and redeploy the WebUI. Executed automatically
           # by the autoupdate.d dispatcher (/usr/local/sbin/autoupdate.sh, cron).
-          function f_symbios_update {
-            # Resolve the clone source; override it with SYMBIOS_REPO_URL if set.
-            local f_repo_url="${SYMBIOS_REPO_URL:-https://github.com/egabosh/SymbiOS.git}"
-            local f_dir="${SYMBIOS_DIR:-/home/SymbiOS}"
+          # Clone source and target directory; override them via the environment
+          # if a non-default setup is required.
+          g_repo_url="${SYMBIOS_REPO_URL:-https://github.com/egabosh/SymbiOS.git}"
+          g_symbios_dir="${SYMBIOS_DIR:-/home/SymbiOS}"
 
-            # Pull when a checkout already exists, otherwise clone it fresh.
-            if [[ -d "$f_dir/.git" ]]
-            then
-              g_echo_ok "Updating SymbiOS repository in $f_dir"
-              cd "$f_dir" || return 1
-              git pull --ff-only || g_echo_error "git pull failed"
-            elif [[ -d "$f_dir" ]] && [[ -n "$(ls -A "$f_dir" 2>/dev/null)" ]]
-            then
-              g_echo_warn "$f_dir is not a git repository; skipping git update"
-            else
-              g_echo_ok "Cloning SymbiOS repository to $f_dir"
-              git clone "$f_repo_url" "$f_dir" || g_echo_error "git clone failed"
-            fi
+          # Pull when a checkout already exists, otherwise clone it fresh.
+          if [[ -d "$g_symbios_dir/.git" ]]
+          then
+            g_echo_ok "Updating SymbiOS repository in $g_symbios_dir"
+            cd "$g_symbios_dir" || exit 1
+            git pull --ff-only || g_echo_error "git pull failed"
+          elif [[ -d "$g_symbios_dir" ]] && [[ -n "$(ls -A "$g_symbios_dir" 2>/dev/null)" ]]
+          then
+            g_echo_warn "$g_symbios_dir is not a git repository; skipping git update"
+          else
+            g_echo_ok "Cloning SymbiOS repository to $g_symbios_dir"
+            git clone "$g_repo_url" "$g_symbios_dir" || g_echo_error "git clone failed"
+          fi
 
-            # Redeploy the WebUI from the refreshed repository when able.
-            if [[ -f "$f_dir/base-services/symbios-ui.yml" ]] && command -v ansible-playbook >/dev/null 2>&1
-            then
-              g_echo_ok "Redeploying SymbiOS WebUI"
-              cd "$f_dir" || return 1
-              ansible-playbook --connection=local \
-                --inventory /home/docker/symbios-ui/config/inventory.yml \
-                --limit localhost \
-                -e "ansible_python_interpreter=/usr/bin/python3" \
-                base-services/symbios-ui.yml || g_echo_error "WebUI redeploy failed"
-            else
-              g_echo_warn "ansible-playbook or symbios-ui playbook missing; skipping WebUI redeploy"
-            fi
-          }
-
-          f_symbios_update
+          # Redeploy the WebUI from the refreshed repository when able.
+          if [[ -f "$g_symbios_dir/base-services/symbios-ui.yml" ]] && command -v ansible-playbook >/dev/null 2>&1
+          then
+            g_echo_ok "Redeploying SymbiOS WebUI"
+            cd "$g_symbios_dir" || exit 1
+            ansible-playbook --connection=local \
+              --inventory /home/docker/symbios-ui/config/inventory.yml \
+              --limit localhost \
+              -e "ansible_python_interpreter=/usr/bin/python3" \
+              base-services/symbios-ui.yml || g_echo_error "WebUI redeploy failed"
+          else
+            g_echo_warn "ansible-playbook or symbios-ui playbook missing; skipping WebUI redeploy"
+          fi
         backup: yes
         validate: /bin/bash -n %s
 
