@@ -16,7 +16,7 @@
 #     - name: backup
 #       type: cron
 #       file: /etc/cron.d/backup_local
-#       status: cat /etc/cron.d/backup_local
+#       status: test -f /etc/cron.d/backup_local || exit 2
 #     logs:
 #     - name: backup
 #       command: tail -F /var/log/syslog | grep backup

@@ -15,6 +15,12 @@ SSH_CONNECT_TIMEOUT = 15
 # base-services/symbios-ui.yml; missing/changed keys are rejected (fail-closed).
 SSH_KNOWN_HOSTS = '/config/.ssh/known_hosts'
 
+# The webui's SSH key is a normal root key (no command= restriction): trusted
+# admins operate the host. We invoke the trivial resolver/executor script
+# explicitly; it translates the high-level verbs into concrete commands and
+# logs every call. The host key is still pinned (fail-closed) below.
+SSH_GATEWAY_WRAP = 'bash /home/SymbiOS/symbios-exec.sh '
+
 _ssh_client = None
 _client_lock = threading.Lock()
 
@@ -72,17 +78,19 @@ def _get_ssh_client():
         return _ssh_client
 
 
-def run_command(cmd, timeout=300):
+def _exec(cmd, timeout=300):
+    """Run a gateway command, returning (exit_code, stdout, stderr)."""
     client = _get_ssh_client()
     try:
         transport = client.get_transport()
         if not transport or not transport.is_active():
+            global _ssh_client
             _ssh_client = None
             client = _get_ssh_client()
 
         channel = client.get_transport().open_session(timeout=SSH_CONNECT_TIMEOUT)
         channel.settimeout(timeout)
-        channel.exec_command(cmd)
+        channel.exec_command(SSH_GATEWAY_WRAP + cmd)
         exit_status = channel.recv_exit_status()
         stdout = channel.makefile('r', -1).read()
         stderr = channel.makefile_stderr('r', -1).read()
@@ -90,7 +98,7 @@ def run_command(cmd, timeout=300):
             stdout = stdout.decode('utf-8', errors='replace')
         if isinstance(stderr, bytes):
             stderr = stderr.decode('utf-8', errors='replace')
-        return exit_status == 0, stdout, stderr
+        return exit_status, stdout, stderr
     except Exception as e:
         logger.exception('SSH command failed: ' + cmd)
         try:
@@ -98,7 +106,12 @@ def run_command(cmd, timeout=300):
         except Exception:
             pass
         _ssh_client = None
-        return False, '', str(e)
+        return -1, '', str(e)
+
+
+def run_command(cmd, timeout=300):
+    rc, stdout, stderr = _exec(cmd, timeout=timeout)
+    return rc == 0, stdout, stderr
 
 
 def run_playbook(playbook, timeout=300):
@@ -110,40 +123,7 @@ def run_playbook(playbook, timeout=300):
     return ok, output
 
 
-def run_docker(service_name, action, timeout=120):
-    cmd = 'docker-compose ' + service_name + ' ' + action
-    ok, stdout, stderr = run_command(cmd, timeout=timeout)
-    output = stdout
-    if stderr and not ok:
-        output = output + '\n--- STDERR ---\n' + stderr
-    return ok, output
 
-
-def run_systemctl(subcommand, unit, timeout=120):
-    cmd = 'exec systemctl ' + subcommand + ' ' + unit
-    ok, stdout, stderr = run_command(cmd, timeout=timeout)
-    output = stdout
-    if stderr and not ok:
-        output = output + '\n--- STDERR ---\n' + stderr
-    return ok, output
-
-
-def run_cron(subcommand, file, timeout=120):
-    cmd = 'cron ' + subcommand + ' ' + file
-    ok, stdout, stderr = run_command(cmd, timeout=timeout)
-    output = stdout
-    if stderr and not ok:
-        output = output + '\n--- STDERR ---\n' + stderr
-    return ok, output
-
-
-def run_ufw(subcommand, timeout=120):
-    cmd = 'ufw ' + subcommand
-    ok, stdout, stderr = run_command(cmd, timeout=timeout)
-    output = stdout
-    if stderr and not ok:
-        output = output + '\n--- STDERR ---\n' + stderr
-    return ok, output
 
 
 def run_service_logs(playbook, lines=200, timeout=120):
@@ -175,6 +155,16 @@ def run_service_source(playbook, timeout=60):
     return ok, output
 
 
+def run_service_status(playbook, name, timeout=120):
+    """Resolve and run a playbook's declared `status:` command via the gateway.
+
+    Returns the raw (exit_code, stdout, stderr) so the caller can classify the
+    service state by exit code (0=running, 2/4=not-installed, else=stopped).
+    """
+    rc, stdout, stderr = _exec('service status ' + playbook + ' ' + name, timeout=timeout)
+    return rc, stdout, stderr
+
+
 def stream_command(cmd, timeout=600):
     """Run a gateway command and yield ('out'|'err'|'rc', text) incrementally.
 
@@ -190,7 +180,7 @@ def stream_command(cmd, timeout=600):
             raise RuntimeError('SSH transport not active')
         channel = transport.open_session(timeout=SSH_CONNECT_TIMEOUT)
         channel.settimeout(timeout)
-        channel.exec_command(cmd)
+        channel.exec_command(SSH_GATEWAY_WRAP + cmd)
         while True:
             if channel.recv_ready():
                 data = channel.recv(4096)
@@ -249,7 +239,7 @@ def stream_log(cmd, job):
         if not transport or not transport.is_active():
             raise RuntimeError('SSH transport not active')
         channel = transport.open_session(timeout=SSH_CONNECT_TIMEOUT)
-        channel.exec_command(cmd)
+        channel.exec_command(SSH_GATEWAY_WRAP + cmd)
         job['channel'] = channel
         while True:
             if channel.recv_ready():

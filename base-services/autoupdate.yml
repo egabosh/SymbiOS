@@ -16,7 +16,7 @@
 #     - name: autoupdate
 #       type: cron
 #       file: /etc/cron.d/autoupdate_local
-#       status: cat /etc/cron.d/autoupdate_local
+#       status: test -f /etc/cron.d/autoupdate_local || exit 2
 #     logs:
 #     - name: autoupdate
 #       command: tail -F /var/log/syslog | grep autoupdate

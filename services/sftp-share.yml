@@ -16,12 +16,12 @@
 #     - name: sftp-share
 #       type: docker
 #       compose_file: /home/docker/sftp-share/docker-compose.yml
-#       status: docker compose -f /home/docker/sftp-share/docker-compose.yml ps
+#       status: test -d /home/docker/sftp-share || exit 2; docker compose -f /home/docker/sftp-share/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: sftp-share
 #       command: docker compose -f /home/docker/sftp-share/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/sftp-share/docker-compose.yml down -v
+#     uninstall: docker compose -f /home/docker/sftp-share/docker-compose.yml down
 #     start: docker compose -f /home/docker/sftp-share/docker-compose.yml up -d
 #     stop: docker compose -f /home/docker/sftp-share/docker-compose.yml down
 #     restart: docker compose -f /home/docker/sftp-share/docker-compose.yml restart

@@ -16,12 +16,12 @@
 #     - name: acme-pki (step-ca)
 #       type: docker
 #       compose_file: /home/docker/acme-pki/docker-compose.yml
-#       status: docker compose -f /home/docker/acme-pki/docker-compose.yml ps
+#       status: test -d /home/docker/acme-pki || exit 2; docker compose -f /home/docker/acme-pki/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: acme-pki (step-ca)
 #       command: docker compose -f /home/docker/acme-pki/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/acme-pki/docker-compose.yml down -v
+#     uninstall: docker compose -f /home/docker/acme-pki/docker-compose.yml down
 #     start: docker compose -f /home/docker/acme-pki/docker-compose.yml up -d
 #     stop: docker compose -f /home/docker/acme-pki/docker-compose.yml down
 #     restart: docker compose -f /home/docker/acme-pki/docker-compose.yml restart
