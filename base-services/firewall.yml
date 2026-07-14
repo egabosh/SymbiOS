@@ -22,9 +22,8 @@
 #     - name: firewall
 #       command: tail -F /var/log/firewall.log
 #   actions:
-#     start: ufw enable
+#     start: ufw --force enable
 #     stop: ufw disable
-#     restart: ufw reload
 #     reload: ufw reload
 #
 
