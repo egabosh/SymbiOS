@@ -221,3 +221,76 @@ def stream_command(cmd, timeout=600):
         except Exception:
             pass
         _ssh_client = None
+
+
+# Cap a follow job's accumulated output so a never-ending tail cannot exhaust
+# memory. Keeps the most recent ~100 KB, mirroring a live `tail` view.
+_LOG_MAX_CHARS = 100000
+
+
+def _trim_log(job):
+    out = job.get('output', '')
+    if len(out) > _LOG_MAX_CHARS:
+        job['output'] = out[-_LOG_MAX_CHARS:]
+
+
+def stream_log(cmd, job):
+    """Run a follow command and append its output to ``job`` until stopped.
+
+    Unlike :func:`stream_command` this keeps a reference to the SSH channel in
+    ``job['channel']`` so the caller can terminate the (never-ending) follow
+    stream via :func:`stop_log`. Intended for live log tails.
+    """
+    import time
+    global _ssh_client
+    client = _get_ssh_client()
+    try:
+        transport = client.get_transport()
+        if not transport or not transport.is_active():
+            raise RuntimeError('SSH transport not active')
+        channel = transport.open_session(timeout=SSH_CONNECT_TIMEOUT)
+        channel.exec_command(cmd)
+        job['channel'] = channel
+        while True:
+            if channel.recv_ready():
+                data = channel.recv(4096)
+                if not data:
+                    break
+                text = data.decode('utf-8', errors='replace')
+                with job['lock']:
+                    job['output'] += text
+                    _trim_log(job)
+            elif channel.exit_status_ready():
+                while channel.recv_ready():
+                    data = channel.recv(4096)
+                    if not data:
+                        break
+                    text = data.decode('utf-8', errors='replace')
+                    with job['lock']:
+                        job['output'] += text
+                        _trim_log(job)
+                break
+            else:
+                time.sleep(0.05)
+    except Exception as e:
+        logger.exception('SSH log stream failed: ' + cmd)
+        with job['lock']:
+            job['output'] += '\n[stream error] ' + str(e) + '\n'
+    finally:
+        try:
+            channel.close()
+        except Exception:
+            pass
+        job['channel'] = None
+        with job['lock']:
+            job['done'] = True
+
+
+def stop_log(job):
+    """Terminate a follow stream started by :func:`stream_log`."""
+    channel = job.get('channel')
+    if channel is not None:
+        try:
+            channel.close()
+        except Exception:
+            pass

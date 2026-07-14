@@ -12,7 +12,7 @@ _JOBS_LOCK = threading.Lock()
 from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from .playbook_catalog import get_catalog, get_playbook, compose_base
-from .utils.ssh_exec import run_docker, run_systemctl, run_cron, run_ufw, stream_command
+from .utils.ssh_exec import run_docker, run_systemctl, run_cron, run_ufw, stream_command, stream_log, stop_log
 
 # Built-in base-services can be managed but never uninstalled from the WebUI.
 PROTECTED_GROUPS = {'base-services'}
@@ -179,9 +179,12 @@ def services_detail(request, playbook):
         if name == 'uninstall' and item.get('group') in PROTECTED_GROUPS:
             continue
         action_list.append(_action_button(name))
+    logs = (item.get('docs') or {}).get('service_control', {}).get('logs', []) or []
+    log_units = [{'name': l.get('name'), 'type': l.get('type', 'log')} for l in logs]
     return render(request, 'main/services_detail.html', {
         'item': item,
         'action_list': action_list,
+        'log_units': log_units,
         'all_services': get_catalog(),
     })
 
@@ -275,28 +278,67 @@ def services_output(request, playbook):
 
 @login_required
 def services_logs(request, playbook):
-    """Return the recent logs of every unit managed by the playbook.
+    """Return the log units declared by the playbook (metadata only).
 
-    Mirrors the top-level Logs page: a normal JSON GET that the browser polls
-    to show live service logs (no response streaming, Traefik-safe).
+    The actual content is streamed live via the log-start/log-stop jobs; this
+    endpoint used to re-run a snapshot command on every poll, which was both
+    wasteful and not real-time. The unit list comes from the catalog's parsed
+    '# docs:' block, so no host round-trip is needed here.
     """
     item = get_playbook(playbook)
     if item is None:
         return JsonResponse({'error': 'Playbook not found'}, status=404)
-    try:
-        lines = int(request.GET.get('lines', '200'))
-    except ValueError:
-        lines = 200
-    lines = max(1, min(lines, 500))
-    from .utils.ssh_exec import run_service_logs
-    ok, out = run_service_logs(playbook, lines)
-    if not ok and not out.strip():
-        return JsonResponse({'error': out or 'log fetch failed'}, status=502)
-    try:
-        data = json.loads(out)
-    except Exception:
-        return JsonResponse({'error': 'bad log output', 'raw': out[:500]}, status=502)
-    return JsonResponse(data)
+    logs = (item.get('docs') or {}).get('service_control', {}).get('logs', []) or []
+    units = [{'name': l.get('name'), 'type': l.get('type', 'log')} for l in logs]
+    return JsonResponse({'units': units})
+
+
+@csrf_exempt
+@login_required
+def services_log_start(request, playbook):
+    """Start a live (follow) log stream for one unit and return its job id.
+
+    The follow command runs ONCE on the host and streams into an in-memory job
+    buffer; the browser polls that buffer (cheap) instead of re-executing the
+    command every few seconds. Stop it with services_log_stop.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid request'}, status=400)
+    unit = request.POST.get('unit')
+    item = get_playbook(playbook)
+    if item is None:
+        return JsonResponse({'error': 'Playbook not found'}, status=404)
+    logs = (item.get('docs') or {}).get('service_control', {}).get('logs', []) or []
+    names = {l.get('name') for l in logs}
+    if unit not in names:
+        return JsonResponse({'error': 'Unknown log unit: ' + str(unit)}, status=400)
+    # Drop finished jobs so stopped follow streams don't pile up in memory.
+    with _JOBS_LOCK:
+        for old in [k for k, v in _JOBS.items() if v['done']]:
+            _JOBS.pop(old, None)
+        job_id = uuid.uuid4().hex
+        job = {'output': '', 'done': False, 'success': True,
+               'channel': None, 'lock': threading.Lock()}
+        _JOBS[job_id] = job
+    threading.Thread(
+        target=stream_log,
+        args=('service logfollow ' + playbook + ' ' + unit, job),
+        daemon=True,
+    ).start()
+    return JsonResponse({'job': job_id, 'unit': unit})
+
+
+@csrf_exempt
+@login_required
+def services_log_stop(request, playbook):
+    """Stop a live log stream started by services_log_start."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid request'}, status=400)
+    job_id = request.POST.get('job')
+    if not job_id or job_id not in _JOBS:
+        return JsonResponse({'error': 'Unknown job'}, status=404)
+    stop_log(_JOBS[job_id])
+    return JsonResponse({'ok': True})
 
 
 @login_required

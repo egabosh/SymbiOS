@@ -19,7 +19,7 @@
 #       status: cat /etc/cron.d/autoupdate_local
 #     logs:
 #     - name: autoupdate
-#       command: grep autoupdate /var/log/syslog
+#       command: tail -F /var/log/syslog | grep autoupdate
 #   actions:
 #     uninstall: rm -f /etc/cron.d/autoupdate_local
 #     start: sed -i 's/^#//' /etc/cron.d/autoupdate_local

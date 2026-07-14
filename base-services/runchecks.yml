@@ -23,9 +23,9 @@
 #       status: systemctl is-active runchecks.timer
 #     logs:
 #     - name: runchecks.service
-#       command: journalctl -u runchecks.service -n 100
+#       command: journalctl -fu runchecks.service -n 100
 #     - name: runchecks.timer
-#       command: journalctl -u runchecks.timer -n 100
+#       command: journalctl -fu runchecks.timer -n 100
 #   actions:
 #     uninstall: systemctl disable --now runchecks.service ; systemctl disable --now runchecks.timer
 #     start: systemctl start runchecks.service ; systemctl start runchecks.timer

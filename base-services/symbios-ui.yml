@@ -19,7 +19,7 @@
 #       status: docker compose -f /home/docker/symbios-ui/docker-compose.yml ps
 #     logs:
 #     - name: symbios-ui
-#       command: docker compose -f /home/docker/symbios-ui/docker-compose.yml logs --tail=100
+#       command: docker compose -f /home/docker/symbios-ui/docker-compose.yml logs -f --tail=100
 #   actions:
 #     uninstall: docker compose -f /home/docker/symbios-ui/docker-compose.yml down -v
 #     start: docker compose -f /home/docker/symbios-ui/docker-compose.yml up -d

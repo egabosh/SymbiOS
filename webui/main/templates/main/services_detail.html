@@ -71,8 +71,10 @@
   </div>
   <div class="tab-pane fade" id="pane-logs" role="tabpanel">
     <h4>Logs</h4>
-    <pre id="log-output" class="bg-dark text-light p-2 small" style="max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word;">Loading logs…</pre>
+    <div class="text-muted small mb-2">Live following each unit (tail -f style). Streams run once and update in real time; switching tabs stops them.</div>
+    <div id="log-panes"></div>
   </div>
+  {{ log_units|json_script:"log-units" }}
   <div class="tab-pane fade" id="pane-source" role="tabpanel">
     <h4>Source</h4>
     <pre id="source-output" class="bg-dark text-light p-2 small" style="max-height:480px;overflow:auto;white-space:pre-wrap;word-break:break-word;">Loading source…</pre>
@@ -175,28 +177,83 @@ document.querySelectorAll('[data-action]').forEach(btn => {
   });
 });
 
-const logPre = document.getElementById('log-output');
-let logTimer = null;
-function loadLogs() {
-  fetch('/services/' + PLAYBOOK + '/logs/?lines=200')
+const LOG_UNITS = JSON.parse(document.getElementById('log-units').textContent || '[]');
+const logPanes = document.getElementById('log-panes');
+const unitJobs = {};   // name -> job id
+const unitPre = {};    // name -> <pre> element
+let logPollTimer = null;
+
+// Render one pane per declared log unit (separate output, not a single blob).
+LOG_UNITS.forEach(u => {
+  const wrap = document.createElement('div');
+  wrap.className = 'mb-3 border rounded p-2';
+  wrap.innerHTML =
+    '<div class="d-flex justify-content-between align-items-center mb-1">' +
+      '<span><b>' + String(u.name).replace(/</g, '&lt;') + '</b> ' +
+      '<span class="badge bg-secondary">' + String(u.type).replace(/</g, '&lt;') + '</span></span>' +
+      '<span class="badge bg-success" data-live="' + u.name + '">live</span>' +
+    '</div>' +
+    '<pre class="bg-dark text-light p-2 small mb-0" data-log="' + u.name + '" ' +
+    'style="max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-word;">waiting…</pre>';
+  logPanes.appendChild(wrap);
+  unitPre[u.name] = wrap.querySelector('pre');
+});
+
+function startLog(name) {
+  if (unitJobs[name]) return;
+  const fd = new FormData();
+  fd.append('unit', name);
+  fetch('/services/' + PLAYBOOK + '/log-start/', {method: 'POST', body: fd})
     .then(r => r.json())
     .then(d => {
-      if (d.error) { logPre.textContent = 'ERROR: ' + d.error; return; }
-      let txt = '';
-      (d.units || []).forEach(u => {
-        txt += '==== ' + u.name + ' (' + u.type + ') ====\n';
-        txt += (u.lines || []).join('\n') + '\n\n';
-      });
-      if (!txt) txt = 'no managed units / no logs';
-      logPre.textContent = txt;
-      logPre.scrollTop = logPre.scrollHeight;
+      if (d.error) { if (unitPre[name]) unitPre[name].textContent = 'ERROR: ' + d.error; return; }
+      unitJobs[name] = d.job;
     })
-    .catch(e => { logPre.textContent = 'error: ' + e; });
+    .catch(e => { if (unitPre[name]) unitPre[name].textContent = 'error: ' + e; });
 }
-function startLogs() { if (logTimer) return; loadLogs(); logTimer = setInterval(loadLogs, 3000); }
-function stopLogs() { if (logTimer) { clearInterval(logTimer); logTimer = null; } }
-document.getElementById('tab-logs').addEventListener('shown.bs.tab', startLogs);
-document.getElementById('tab-output').addEventListener('shown.bs.tab', stopLogs);
+
+function stopLog(name) {
+  const job = unitJobs[name];
+  if (!job) return;
+  const fd = new FormData();
+  fd.append('job', job);
+  fetch('/services/' + PLAYBOOK + '/log-stop/', {method: 'POST', body: fd}).catch(() => {});
+  delete unitJobs[name];
+}
+
+function pollLogs() {
+  for (const name in unitJobs) {
+    const job = unitJobs[name];
+    fetch('/services/' + PLAYBOOK + '/output/?job=' + job)
+      .then(r => r.json())
+      .then(o => {
+        const pre = unitPre[name];
+        if (!pre) return;
+        pre.textContent = o.output || '';
+        pre.scrollTop = pre.scrollHeight;
+      })
+      .catch(() => {});
+  }
+}
+
+function startAllLogs() {
+  if (!LOG_UNITS.length) {
+    if (logPanes && !logPanes.children.length)
+      logPanes.innerHTML = '<div class="text-muted small">No log units defined for this service.</div>';
+    return;
+  }
+  LOG_UNITS.forEach(u => startLog(u.name));
+  if (!logPollTimer) logPollTimer = setInterval(pollLogs, 1500);
+}
+
+function stopAllLogs() {
+  LOG_UNITS.forEach(u => stopLog(u.name));
+  if (logPollTimer) { clearInterval(logPollTimer); logPollTimer = null; }
+}
+
+document.getElementById('tab-logs').addEventListener('shown.bs.tab', startAllLogs);
+document.getElementById('tab-output').addEventListener('shown.bs.tab', stopAllLogs);
+document.getElementById('tab-source').addEventListener('shown.bs.tab', stopAllLogs);
 
 const srcPre = document.getElementById('source-output');
 let srcLoaded = false;
