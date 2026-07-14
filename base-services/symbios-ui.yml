@@ -419,7 +419,21 @@
           then
             g_echo_ok "Updating SymbiOS repository in $g_symbios_dir"
             cd "$g_symbios_dir" || exit 1
-            git pull --ff-only || g_echo_error "git pull failed"
+            # Use the currently checked-out branch so we don't assume "main".
+            g_branch="$(git rev-parse --abbrev-ref HEAD)"
+            # Fetch upstream first so we can tell fast-forward from divergence.
+            git fetch origin || g_echo_error "git fetch failed"
+            # Fast-forward when possible. If the local checkout has diverged
+            # (it carries commits not present upstream), reset hard onto the
+            # upstream branch so the updater never stalls on a non-fast-
+            # forwardable pull; any local drift in the mirror is discarded.
+            if git merge --ff-only "origin/$g_branch"
+            then
+              g_echo_ok "SymbiOS repository updated"
+            else
+              g_echo_warn "Local checkout diverged from upstream; resetting to origin/$g_branch"
+              git reset --hard "origin/$g_branch" || g_echo_error "git reset failed"
+            fi
           elif [[ -d "$g_symbios_dir" ]] && [[ -n "$(ls -A "$g_symbios_dir" 2>/dev/null)" ]]
           then
             g_echo_warn "$g_symbios_dir is not a git repository; skipping git update"
