@@ -19,8 +19,9 @@
 #     logs:
 #     - name: ufw
 #       command: grep ufw /var/log/syslog
+#     - name: firewall
+#       command: tail -F /var/log/firewall.log
 #   actions:
-#     uninstall: ufw disable
 #     start: ufw enable
 #     stop: ufw disable
 #     restart: ufw reload
