@@ -18,9 +18,9 @@
 #       status: ufw status verbose
 #     logs:
 #     - name: ufw
-#       command: grep ufw /var/log/syslog
+#       command: grep ufw /var/log/syslog | tail -n 1000
 #     - name: firewall
-#       command: tail -F /var/log/firewall.log
+#       command: tail -n 1000 /var/log/firewall.log
 #   actions:
 #     start: ufw --force enable
 #     stop: ufw disable
