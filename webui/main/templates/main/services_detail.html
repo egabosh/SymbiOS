@@ -159,10 +159,7 @@ document.querySelectorAll('[data-action]').forEach(btn => {
           fetch('/services/' + PLAYBOOK + '/output/?job=' + d.job)
             .then(r => r.json())
             .then(o => {
-              const nearBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
-              const prevTop = out.scrollTop;
-              out.innerHTML = ansiToHtml(header + o.output);
-              out.scrollTop = nearBottom ? out.scrollHeight : prevTop;
+              updateLogPane(out, ansiToHtml(header + o.output));
               if (o.done) {
                 out.innerHTML += ansiToHtml('\n[done] ' + (o.success ? 'OK' : 'FAILED') + '\n');
                 clearActionRunning();
@@ -184,6 +181,25 @@ const logPanes = document.getElementById('log-panes');
 const unitJobs = {};   // name -> job id
 const unitPre = {};    // name -> <pre> element
 let logPollTimer = null;
+
+// Update a log/output pane without destroying the user's text selection or
+// scroll position. If the content is unchanged we touch the DOM not at all
+// (selection survives). If it only grew we append just the new tail via
+// insertAdjacentHTML, which leaves existing nodes (and any selection in them)
+// intact. Only when the text is reshaped do we replace the whole innerHTML.
+function updateLogPane(el, html) {
+  const prev = el.dataset.fullText || '';
+  if (html === prev) return;
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const prevTop = el.scrollTop;
+  if (prev && html.startsWith(prev)) {
+    el.insertAdjacentHTML('beforeend', html.slice(prev.length));
+  } else {
+    el.innerHTML = html;
+  }
+  el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
+  el.dataset.fullText = html;
+}
 
 // Render one pane per declared log unit (separate output, not a single blob).
 LOG_UNITS.forEach(u => {
@@ -231,13 +247,7 @@ function pollLogs() {
       .then(o => {
         const pre = unitPre[name];
         if (!pre) return;
-        // Stick to the bottom only if the user is already near it; otherwise
-        // keep their reading position so scrolling up to read old entries is
-        // not yanked back to the end on every poll.
-        const nearBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-        const prevTop = pre.scrollTop;
-        pre.innerHTML = ansiToHtml(o.output || '');
-        pre.scrollTop = nearBottom ? pre.scrollHeight : prevTop;
+        updateLogPane(pre, ansiToHtml(o.output || ''));
       })
       .catch(() => {});
   }
