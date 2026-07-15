@@ -220,6 +220,15 @@ def stream_command(cmd, timeout=600):
             raise RuntimeError('SSH transport not active')
         channel = transport.open_session(timeout=SSH_CONNECT_TIMEOUT)
         channel.settimeout(timeout)
+        # Allocate a PTY so commands (docker compose logs, ansible-playbook, ...)
+        # detect a terminal and emit ANSI colors. ansiToHtml() renders them; the
+        # lone '\r' that a PTY adds is already stripped there. Without a PTY the
+        # output is colorless, which is why only sources that force ANSI (traefik)
+        # showed colors. This is intentionally uniform across all services.
+        try:
+            channel.get_pty(term='xterm', width=220, height=60)
+        except Exception:
+            pass
         channel.exec_command(_wrap(cmd))
         while True:
             if channel.recv_ready():
@@ -279,6 +288,12 @@ def stream_log(cmd, job):
         if not transport or not transport.is_active():
             raise RuntimeError('SSH transport not active')
         channel = transport.open_session(timeout=SSH_CONNECT_TIMEOUT)
+        # Allocate a PTY so commands detect a terminal and emit ANSI colors
+        # (uniform across all services; ansiToHtml renders them, '\r' stripped).
+        try:
+            channel.get_pty(term='xterm', width=220, height=60)
+        except Exception:
+            pass
         channel.exec_command(_wrap(cmd))
         job['channel'] = channel
         while True:
