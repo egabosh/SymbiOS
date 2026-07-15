@@ -159,7 +159,7 @@ document.querySelectorAll('[data-action]').forEach(btn => {
           fetch('/services/' + PLAYBOOK + '/output/?job=' + d.job)
             .then(r => r.json())
             .then(o => {
-              updateLogPane(out, ansiToHtml(header + o.output));
+              appendLogDelta(out, header + (o.output || ''));
               if (o.done) {
                 out.innerHTML += ansiToHtml('\n[done] ' + (o.success ? 'OK' : 'FAILED') + '\n');
                 clearActionRunning();
@@ -253,12 +253,40 @@ function updateLogPane(el, html) {
   if (offsets) setSelectionOffsets(el, offsets.start, offsets.end);
   // Follow the tail (stick to the end) so the marked text scrolls upward with
   // incoming lines. Only when the user has scrolled up to read do we leave the
-  // view in place. Re-assert on the next frame: setting a selection can make
-  // some browsers scroll the marked text into view, defeating tail-follow.
-  const targetTop = nearBottom ? el.scrollHeight : prevTop;
-  el.scrollTop = targetTop;
-  if (nearBottom) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+  // view in place.
+  el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
   el.dataset.fullText = html;
+}
+
+// Append only the new tail of the raw output as DOM, leaving every existing
+// line/node untouched. Because the browser keeps the original text nodes (and
+// any selection inside them) intact, a marked span rides upward with the text
+// exactly like `tail -f` -- no fragile offset re-anchoring needed. Falls back
+// to a full re-render (with selection re-anchor) if the server trimmed/reset
+// the buffer.
+function appendLogDelta(el, raw) {
+  raw = raw || '';
+  if (el.dataset.rawLen === undefined) {
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    const prevTop = el.scrollTop;
+    el.innerHTML = ansiToHtml(raw);
+    el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
+    el.dataset.rawLen = String(raw.length);
+    return;
+  }
+  const prevLen = parseInt(el.dataset.rawLen, 10);
+  if (raw.length < prevLen) {            // buffer trimmed/reset server-side
+    updateLogPane(el, ansiToHtml(raw));
+    el.dataset.rawLen = String(raw.length);
+    return;
+  }
+  const delta = raw.slice(prevLen);
+  if (!delta) return;
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const prevTop = el.scrollTop;
+  el.insertAdjacentHTML('beforeend', ansiToHtml(delta));
+  el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
+  el.dataset.rawLen = String(raw.length);
 }
 
 // Render one pane per declared log unit (separate output, not a single blob).
@@ -307,7 +335,7 @@ function pollLogs() {
       .then(o => {
         const pre = unitPre[name];
         if (!pre) return;
-        updateLogPane(pre, ansiToHtml(o.output || ''));
+        appendLogDelta(pre, o.output || '');
       })
       .catch(() => {});
   }
