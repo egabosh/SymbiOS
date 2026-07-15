@@ -6,4 +6,6 @@ from .utils.log_utils import logs_stream
 
 @login_required
 def logs(request):
-    return render(request, 'main/logs.html', {'default_log_name': 'messages'})
+    response = render(request, 'main/logs.html', {'default_log_name': 'messages'})
+    response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
