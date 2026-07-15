@@ -117,6 +117,7 @@
     let autoScroll = true;
     let paused = false;
     let startLineNum = 0;
+    let fetchTimer = null;
 
     const logContainer = document.getElementById('log-container');
     const logMeta = document.getElementById('log-meta');
@@ -223,12 +224,17 @@
         if (paused) return;
         const params = new URLSearchParams();
         params.set('log', currentLogName);
+        // Long-poll: server blocks up to 20s until new lines appear (or the
+        // file grows), so updates arrive with near-zero latency -- no fixed
+        // interval, and the browser only transfers the new tail.
         params.set('offset', String(currentOffset));
+        params.set('timeout', '20');
 
         try {
             const response = await fetch('/logs/stream/?' + params.toString());
             if (!response.ok) {
                 logMeta.textContent = 'Error: HTTP ' + response.status;
+                scheduleFetch();
                 return;
             }
             const data = await response.json();
@@ -236,6 +242,7 @@
             if (data.error) {
                 logContainer.innerHTML = '<div class="empty-state"><i class="bi bi-file-earmark-x"></i><div>' + escapeHtml(data.error) + '</div></div>';
                 logMeta.textContent = data.error + ' (' + (data.path || '') + ')';
+                scheduleFetch();
                 return;
             }
 
@@ -269,6 +276,13 @@
         } catch (e) {
             logMeta.textContent = 'Error: ' + e;
         }
+        scheduleFetch();
+    }
+
+    // Self-rescheduling long-poll loop (replaces fixed setInterval).
+    function scheduleFetch() {
+        if (fetchTimer) clearTimeout(fetchTimer);
+        fetchTimer = setTimeout(fetchLogs, 100);
     }
 
     function resizeLogContainer() {
@@ -281,6 +295,5 @@
     fetchLogs();
     window.addEventListener('load', resizeLogContainer);
     window.addEventListener('resize', resizeLogContainer);
-    setInterval(fetchLogs, 2000);
 </script>
 {% endblock %}
