@@ -235,11 +235,11 @@ function refreshStatus(serviceName) {
 function showLog(serviceName) {
     fetch('/services/' + encodeURIComponent(serviceName) + '/log/')
     .then(function(r){
-        if(r.status===404){ document.getElementById('logOutput').textContent='No playbook output found.'; return; }
+        if(r.status===404){ document.getElementById('logOutput').innerHTML=ansiToHtml('No playbook output found.'); return; }
         return r.text();
     })
-    .then(function(t){ document.getElementById('logOutput').textContent=t||'No log data.'; })
-    .catch(function(){ document.getElementById('logOutput').textContent='Error loading log.'; });
+    .then(function(t){ document.getElementById('logOutput').innerHTML=ansiToHtml(t||'No log data.'); })
+    .catch(function(){ document.getElementById('logOutput').innerHTML=ansiToHtml('Error loading log.'); });
     (new bootstrap.Modal(document.getElementById('logModal'))).show();
 }
 function refreshLog() { 

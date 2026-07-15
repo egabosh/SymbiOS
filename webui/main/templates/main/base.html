@@ -63,6 +63,55 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    /* Render ANSI SGR escape sequences as colored HTML (dark-terminal palette).
+       Escapes HTML first, so it is safe to assign the result to innerHTML even
+       for untrusted log/command output. Used by every output surface
+       (service logs, action/playbook output, global logs page). */
+    const ANSI_FG = {30:'#9aa0a6',31:'#ff6b6b',32:'#51cf66',33:'#ffd43b',34:'#339af0',35:'#da77f2',36:'#22b8cf',37:'#f8f9fa',90:'#868e96',91:'#ff8787',92:'#69db7c',93:'#ffe066',94:'#4dabf7',95:'#e599f7',96:'#3bc9db',97:'#ffffff'};
+    const ANSI_BG = {40:'#444444',41:'#ff6b6b',42:'#51cf66',43:'#ffd43b',44:'#339af0',45:'#da77f2',46:'#22b8cf',47:'#f8f9fa',100:'#868e96',101:'#ff8787',102:'#69db7c',103:'#ffe066',104:'#4dabf7',105:'#e599f7',106:'#3bc9db',107:'#ffffff'};
+    function ansiToHtml(s) {
+        if (s === null || s === undefined) return '';
+        let html = String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r/g, '');
+        let st = {color:null, bg:null, bold:false, dim:false, underline:false, italic:false};
+        let depth = 0;
+        html = html.replace(/\x1b\[([0-9;]*)m/g, function (_m, codes) {
+            const parts = (codes === '' ? '0' : codes).split(';').map(function (x) { return parseInt(x, 10); });
+            for (let i = 0; i < parts.length; i++) {
+                const n = parts[i];
+                if (isNaN(n)) continue;
+                if (n === 0) { st = {color:null, bg:null, bold:false, dim:false, underline:false, italic:false}; }
+                else if (n === 1) st.bold = true;
+                else if (n === 2) st.dim = true;
+                else if (n === 3) st.italic = true;
+                else if (n === 4) st.underline = true;
+                else if (n === 9) st.underline = 'line-through';
+                else if (n >= 30 && n <= 37) st.color = ANSI_FG[n];
+                else if (n === 39) st.color = null;
+                else if (n >= 90 && n <= 97) st.color = ANSI_FG[n];
+                else if (n >= 40 && n <= 47) st.bg = ANSI_BG[n];
+                else if (n === 49) st.bg = null;
+                else if (n >= 100 && n <= 107) st.bg = ANSI_BG[n];
+            }
+            let style = '';
+            if (st.color) style += 'color:' + st.color + ';';
+            if (st.bg) style += 'background-color:' + st.bg + ';';
+            if (st.bold) style += 'font-weight:bold;';
+            if (st.dim) style += 'opacity:.7;';
+            if (st.italic) style += 'font-style:italic;';
+            if (st.underline === true) style += 'text-decoration:underline;';
+            else if (st.underline === 'line-through') style += 'text-decoration:line-through;';
+            let res = '';
+            if (depth > 0) { res += '</span>'; depth--; }
+            if (style) { res += '<span style="' + style + '">'; depth++; }
+            return res;
+        });
+        // Strip any remaining non-SGR escapes (cursor moves, OSC, charset).
+        html = html.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/\x1b[()][AB0]/g, '');
+        if (depth > 0) html += '</span>'.repeat(depth);
+        return html;
+    }
+    </script>
     {% block scripts %}{% endblock %}
 
 </body>

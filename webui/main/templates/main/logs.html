@@ -174,24 +174,23 @@
     });
 
     function stripAnsi(text) {
-        return text.replace(/\x1B\[[0-9;]*m/g, '');
+        return text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/\x1b[()][AB0]/g, '').replace(/\r/g, '');
+    }
+
+    // Split a leading ANSI-tinted timestamp from the rest, keeping ANSI codes
+    // in the remainder so colors survive (e.g. traefik's dim timestamp prefix).
+    function splitTimestamp(text) {
+        const m = text.match(/^(\x1b\[[0-9;]*m)*((\d{4}[-\s]\d{2}[-\s]\d{2}[\sT]\d{2}:\d{2}:\d{2})|([A-Z][a-z]{2}\s+\d{1,2}\s\d{2}:\d{2}:\d{2}))/);
+        if (!m) return {ts: '', rest: text};
+        return {ts: m[2], rest: text.substring(m[0].length)};
     }
 
     function formatLine(lineNum, text) {
-        let raw = stripAnsi(text);
+        let plain = stripAnsi(text);
         let className = 'log-line';
 
-        // Highlight timestamps like "2024-01-01 12:00:00" or "Jan  1 12:00:00"
-        let ts = '';
-        const tsMatch = raw.match(/^\d{4}[-\s]\d{2}[-\s]\d{2}[\sT]\d{2}:\d{2}:\d{2}/)
-            || raw.match(/^[A-Z][a-z]{2}\s+\d{1,2}\s\d{2}:\d{2}:\d{2}/);
-        if (tsMatch) {
-            ts = '<span class="timestamp">' + escapeHtml(tsMatch[0]) + '</span>';
-            raw = raw.substring(tsMatch[0].length);
-        }
-
         // Highlight Python tracebacks / Ansible PLAY RECAP
-        const trimmed = raw.trim();
+        const trimmed = plain.trim();
         if (/^[A-Z]+:/.test(trimmed)) {
             const level = trimmed.split(':')[0];
             const lc = level.toLowerCase();
@@ -203,9 +202,14 @@
                 className += ' level-info';
         }
 
+        // Keep the (possibly ANSI-tinted) timestamp highlighted; render the
+        // remaining text with ANSI colors intact via the shared ansiToHtml().
+        const tsInfo = splitTimestamp(text);
+        const tsHtml = tsInfo.ts ? '<span class="timestamp">' + escapeHtml(tsInfo.ts) + '</span>' : '';
+
         return '<div class="' + className + '">' +
             '<span class="line-num">' + lineNum + '</span>' +
-            '<span class="line-content">' + ts + escapeHtml(raw) + '</span>' +
+            '<span class="line-content">' + tsHtml + ansiToHtml(tsInfo.rest) + '</span>' +
             '</div>';
     }
 
