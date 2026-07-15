@@ -253,8 +253,11 @@ function updateLogPane(el, html) {
   if (offsets) setSelectionOffsets(el, offsets.start, offsets.end);
   // Follow the tail (stick to the end) so the marked text scrolls upward with
   // incoming lines. Only when the user has scrolled up to read do we leave the
-  // view in place.
-  el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
+  // view in place. Re-assert on the next frame: setting a selection can make
+  // some browsers scroll the marked text into view, defeating tail-follow.
+  const targetTop = nearBottom ? el.scrollHeight : prevTop;
+  el.scrollTop = targetTop;
+  if (nearBottom) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
   el.dataset.fullText = html;
 }
 

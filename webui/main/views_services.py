@@ -88,10 +88,12 @@ def services_manage(request):
     # Reuse the unified catalog view; the manage page lists deployable
     # service playbooks (those under services/), each linking to its detail.
     catalog = [i for i in get_catalog() if i['group'] == 'services']
-    return render(request, 'main/services.html', {
+    response = render(request, 'main/services.html', {
         'catalog': catalog,
         'all_services': get_catalog(),
     })
+    response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
 
 
 @login_required
@@ -109,12 +111,16 @@ def services_detail(request, playbook):
         action_list.append(_action_button(name))
     logs = (item.get('docs') or {}).get('service_control', {}).get('logs', []) or []
     log_units = [{'name': l.get('name'), 'type': l.get('type', 'log')} for l in logs]
-    return render(request, 'main/services_detail.html', {
+    response = render(request, 'main/services_detail.html', {
         'item': item,
         'action_list': action_list,
         'log_units': log_units,
         'all_services': get_catalog(),
     })
+    # Never cache: the inline JS/logic changes frequently during development
+    # and a stale cached copy would hide UI fixes.
+    response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
 
 
 @csrf_exempt
