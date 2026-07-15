@@ -1,6 +1,6 @@
 # docs:
 #   short_description: Deploy the SymbiOS WebUI
-#   description: Builds and runs the SymbiOS web interface (Django/gunicorn), wires it to Traefik/Authelia, and configures the loopback break-glass and the hardened SSH exec gateway.
+#   description: Builds and runs the SymbiOS web interface (Django/gunicorn), wires it to Traefik/Authelia, and configures the loopback break-glass and the audit-logging SSH executor.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3

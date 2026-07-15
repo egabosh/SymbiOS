@@ -75,7 +75,6 @@ daemon is required.
         |              |                |
         |              |                |
     +----v--------------v----------------v-----------------------------+
-    |  service-handler.sh  (optional manual helper: run a service playbook) |
     |  symbios-exec.sh     (audit-logging SSH executor used by the WebUI)   |
     +---------------------------------------------------------------+
         |
@@ -108,7 +107,6 @@ SymbiOS/
 │   ├── lam.conf          # LAM configuration template
 │   └── traefik-static.yml# Traefik static config (entrypoints, etc.)
 ├── services/             # OPTIONAL user services (each = one playbook)
-│   ├── service-handler.sh# Runs a service playbook / docker up|down
 │   ├── home-assistant.yml# Example service (canonical Traefik file-provider pattern)
 │   ├── nextcloud.yml     # Example service
 │   └── sftp-share.yml    # Example service (exposes a raw port, not via Traefik)
@@ -323,7 +321,11 @@ ansible-playbook --limit localhost \
   /home/SymbiOS/base-services/traefik.yml
 
 # run a service playbook
-/home/SymbiOS/services/service-handler.sh playbook home-assistant
+ansible-playbook --connection=local \
+  --inventory /home/docker/symbios-ui/config/inventory.yml \
+  --limit localhost \
+  -e ansible_python_interpreter=/usr/bin/python3 \
+  /home/SymbiOS/services/home-assistant.yml
 ```
 
 ---
@@ -332,16 +334,20 @@ ansible-playbook --limit localhost \
 
 A "service" is a single Ansible playbook in `services/<name>.yml`. It creates a
 Docker compose stack under `/home/docker/<name>/` and (if it should be
-web-exposed) a Traefik provider snippet. The WebUI discovers it, and the config
-daemon / `service-handler.sh` runs it.
+web-exposed) a Traefik provider snippet. The WebUI discovers it via its `# docs:`
+block and runs its actions through `symbios-exec.sh`.
 
 ### Workflow
 
 1. Create `services/<name>.yml` (see skeleton below).
 2. Make it executable-not-required; it is invoked by `ansible-playbook`.
-3. Trigger it — either from the WebUI, by dropping a trigger file, or directly:
+3. Trigger it — either from the WebUI, or directly on the host:
    ```bash
-   /home/SymbiOS/services/service-handler.sh playbook <name>
+   ansible-playbook --connection=local \
+     --inventory /home/docker/symbios-ui/config/inventory.yml \
+     --limit localhost \
+     -e ansible_python_interpreter=/usr/bin/python3 \
+     /home/SymbiOS/services/<name>.yml
    ```
  4. The playbook writes the compose file and a Traefik provider snippet, then
     restarts the container. Traefik picks up the new route automatically.
@@ -503,7 +509,11 @@ Fields:
   something, the WebUI resolves the concrete command and ships it to
   `symbios-exec.sh` over SSH (commands are shell-quoted so the host runs them
   verbatim).
-- `services/service-handler.sh` remains as an optional **manual** helper for
-  running a service playbook / `docker compose` directly on the host.
+- For a **manual** run on the host, use the same command the WebUI sends
+  through `symbios-exec.sh`, e.g.
+  `ansible-playbook --connection=local --inventory
+  /home/docker/symbios-ui/config/inventory.yml --limit localhost -e
+  ansible_python_interpreter=/usr/bin/python3 /home/SymbiOS/services/<name>.yml`
+  (or `docker compose` directly in `/home/docker/<name>/`).
 
 

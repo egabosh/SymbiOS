@@ -145,10 +145,10 @@ def check_stepca():
 
 def check_remote_exec():
     import socket
-    # The WebUI applies config changes by running playbooks directly via SSH
-    # (paramiko -> host root + forced command symbios-exec.sh). No daemon is
-    # involved, so we verify the on-demand exec path is ready: the SSH key must
-    # be present and the host SSH gateway reachable.
+    # The WebUI applies config changes by running playbooks via SSH
+    # (subprocess + shlex.quote -> bash /home/SymbiOS/symbios-exec.sh). No daemon
+    # is involved, so we verify the on-demand exec path is ready: the SSH key
+    # must be present and the host SSH gateway reachable.
     key = "/config/.ssh/id_symbios"
     if not os.path.exists(key):
         return {"status": "warn", "message": "SSH exec key missing"}

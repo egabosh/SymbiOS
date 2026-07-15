@@ -384,8 +384,6 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          . /etc/bash/gaboshlib.include
-
           # Truncate hosts file and collect all hostnames from docker-compose
           >"$g_tmp/hosts"
           find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "\.del$|\.bak$|\.old$|var-lib-docker$" | while read f_dir

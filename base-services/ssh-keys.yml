@@ -1,6 +1,6 @@
 # docs:
 #   short_description: Deploy managed SSH authorized_keys
-#   description: Distributes managed SSH authorized_keys from the inventory to users/hosts and protects the forced-command key used by the WebUI exec gateway. Reloads sshd after changes.
+#   description: Distributes managed SSH authorized_keys from the inventory to users/hosts and protects the WebUI exec-gateway key. Reloads sshd after changes.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -59,7 +59,7 @@
         src: /home/docker/symbios-ui/config/.ssh/id_symbios.pub
       register: symbios_ssh_pubkey_raw
 
-    - name: Re-assert webui forced-command key (never removed by key edits)
+    - name: Re-assert webui exec-gateway key (never removed by key edits)
       ansible.builtin.lineinfile:
         path: /root/.ssh/authorized_keys
         regexp: ".*symbios-webui$"
