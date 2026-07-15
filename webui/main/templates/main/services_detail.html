@@ -182,18 +182,70 @@ const unitJobs = {};   // name -> job id
 const unitPre = {};    // name -> <pre> element
 let logPollTimer = null;
 
+// --- Keep a text selection alive across innerHTML rebuilds -----------------
+// Capture the current selection as plain character offsets into the element's
+// text content (so it survives a full DOM replace), and re-anchor it afterwards.
+// Needed because live output may rewrite tail lines in place (carriage-return
+// progress), so we cannot rely on purely appending a delta.
+function _charOffset(root, node, offset) {
+  if (node === root) return offset;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  let total = 0, n;
+  while ((n = walker.nextNode())) {
+    if (n === node) return total + offset;
+    total += n.textContent.length;
+  }
+  return total;
+}
+function _locateOffset(root, target) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  let total = 0, n, last = null;
+  while ((n = walker.nextNode())) {
+    const len = n.textContent.length;
+    if (total + len >= target) return { node: n, offset: target - total };
+    total += len;
+    last = n;
+  }
+  return last ? { node: last, offset: last.textContent.length } : { node: root, offset: 0 };
+}
+function getSelectionOffsets(root) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+  return {
+    start: _charOffset(root, range.startContainer, range.startOffset),
+    end: _charOffset(root, range.endContainer, range.endOffset)
+  };
+}
+function setSelectionOffsets(root, start, end) {
+  const len = root.textContent.length;
+  start = Math.max(0, Math.min(start, len));
+  end = Math.max(0, Math.min(end, len));
+  const s = _locateOffset(root, start);
+  const e = _locateOffset(root, end);
+  if (!s || !e) return;
+  const range = document.createRange();
+  range.setStart(s.node, s.offset);
+  range.setEnd(e.node, e.offset);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 // Update a log/output pane without destroying the user's text selection or
 // scroll position. If the content is unchanged we touch the DOM not at all
 // (selection survives). If it only grew we append just the new tail via
-// insertAdjacentHTML, which leaves existing nodes (and any selection in them)
-// intact. Only when the text is reshaped do we replace the whole innerHTML.
-// While the user has a selection in the pane we never auto-scroll to the
-// bottom, so marking text freezes the view without halting the incoming log.
+// insertAdjacentHTML; otherwise we replace the whole innerHTML but re-anchor
+// any active selection by character offset so the mark stays put. While the
+// user has a selection in the pane we never auto-scroll to the bottom, so
+// marking text freezes the view without halting the incoming log.
 function updateLogPane(el, html) {
   const prev = el.dataset.fullText || '';
   if (html === prev) return;
+  const offsets = getSelectionOffsets(el);
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  const hasSel = paneHasSelection(el);
+  const hasSel = !!offsets;
   const prevTop = el.scrollTop;
   if (prev && html.startsWith(prev)) {
     el.insertAdjacentHTML('beforeend', html.slice(prev.length));
@@ -201,6 +253,7 @@ function updateLogPane(el, html) {
     el.innerHTML = html;
   }
   el.scrollTop = (nearBottom && !hasSel) ? el.scrollHeight : prevTop;
+  if (offsets) setSelectionOffsets(el, offsets.start, offsets.end);
   el.dataset.fullText = html;
 }
 
