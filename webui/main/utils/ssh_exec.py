@@ -1,5 +1,6 @@
 import os
 import sys
+import shlex
 import threading
 import time
 import logging
@@ -16,9 +17,10 @@ SSH_CONNECT_TIMEOUT = 15
 SSH_KNOWN_HOSTS = '/config/.ssh/known_hosts'
 
 # The webui's SSH key is a normal root key (no command= restriction): trusted
-# admins operate the host. We invoke the trivial resolver/executor script
-# explicitly; it translates the high-level verbs into concrete commands and
-# logs every call. The host key is still pinned (fail-closed) below.
+# admins operate the host. Every command is sent to the trivial executor
+# symbios-exec.sh, which audit-logs and runs it. The host key is still pinned
+# (fail-closed). Commands are shell-quoted so the remote shell does not
+# interpret metacharacters (|, ;, &&) before the executor runs them.
 SSH_GATEWAY_WRAP = 'bash /home/SymbiOS/symbios-exec.sh '
 
 _ssh_client = None
@@ -78,6 +80,11 @@ def _get_ssh_client():
         return _ssh_client
 
 
+def _wrap(cmd):
+    """Quote a command so the remote shell passes it verbatim to the executor."""
+    return SSH_GATEWAY_WRAP + shlex.quote(cmd)
+
+
 def _exec(cmd, timeout=300):
     """Run a gateway command, returning (exit_code, stdout, stderr)."""
     client = _get_ssh_client()
@@ -90,7 +97,7 @@ def _exec(cmd, timeout=300):
 
         channel = client.get_transport().open_session(timeout=SSH_CONNECT_TIMEOUT)
         channel.settimeout(timeout)
-        channel.exec_command(SSH_GATEWAY_WRAP + cmd)
+        channel.exec_command(_wrap(cmd))
         exit_status = channel.recv_exit_status()
         stdout = channel.makefile('r', -1).read()
         stderr = channel.makefile_stderr('r', -1).read()
@@ -115,7 +122,8 @@ def run_command(cmd, timeout=300):
 
 
 def run_playbook(playbook, timeout=300):
-    cmd = 'playbook ' + playbook
+    """Run a service's Ansible playbook on the host (idempotent install)."""
+    cmd = build_action_command(playbook, '__playbook__')
     ok, stdout, stderr = run_command(cmd, timeout=timeout)
     output = stdout
     if stderr and not ok:
@@ -123,46 +131,78 @@ def run_playbook(playbook, timeout=300):
     return ok, output
 
 
+# ---------------------------------------------------------------------------
+# Command resolution from the local playbook catalog.
+# The WebUI parses the '# docs:' blocks itself, so only concrete commands are
+# shipped to the host executor (no host-side verb dispatch remains).
+# ---------------------------------------------------------------------------
+
+def _item(playbook):
+    from ..playbook_catalog import get_playbook
+    return get_playbook(playbook)
 
 
-
-def run_service_logs(playbook, lines=200, timeout=120):
-    cmd = 'service logs ' + playbook + ' ' + str(lines)
-    ok, stdout, stderr = run_command(cmd, timeout=timeout)
-    # Prefer stdout (the JSON payload); only fall back to stderr if empty,
-    # so a stray warning on stderr can never corrupt the JSON we parse.
-    if stdout and stdout.strip():
-        return ok, stdout
-    output = stdout
-    if stderr:
-        output = output + '\n--- STDERR ---\n' + stderr
-    return ok, output
+def _status_command(playbook, name):
+    item = _item(playbook)
+    if not item:
+        return None
+    services = (item['docs'].get('service_control', {}) or {}).get('services', []) or []
+    for s in services:
+        if s.get('name') == name:
+            return s.get('status')
+    return None
 
 
-def run_service_source(playbook, timeout=60):
-    """Fetch the raw playbook source for display via the exec gateway.
+def _action_command(playbook, action):
+    item = _item(playbook)
+    if not item:
+        return None
+    return (item['docs'].get('actions') or {}).get(action)
 
-    Only playbooks under base-services/ or services/ are permitted by the
-    gateway, so this cannot be abused to read arbitrary host files.
-    """
-    cmd = 'service source ' + playbook
-    ok, stdout, stderr = run_command(cmd, timeout=timeout)
-    if stdout and stdout.strip():
-        return ok, stdout
-    output = stdout
-    if stderr:
-        output = output + '\n--- STDERR ---\n' + stderr
-    return ok, output
+
+def _log_command(playbook, unit):
+    item = _item(playbook)
+    if not item:
+        return None
+    logs = (item['docs'].get('service_control', {}) or {}).get('logs', []) or []
+    for l in logs:
+        if l.get('name') == unit:
+            return l.get('command')
+    return None
+
+
+def _playbook_command(playbook):
+    return (
+        "ansible-playbook --connection=local "
+        "--inventory /home/docker/symbios-ui/config/inventory.yml "
+        "--limit localhost "
+        "-e ansible_python_interpreter=/usr/bin/python3 "
+        "/home/SymbiOS/" + playbook
+    )
+
+
+def build_action_command(playbook, action):
+    """Resolve the concrete host command for an action (or the playbook run)."""
+    if action == '__playbook__':
+        return _playbook_command(playbook)
+    return _action_command(playbook, action)
+
+
+def build_log_command(playbook, unit):
+    """Resolve the concrete host command that streams one log unit."""
+    return _log_command(playbook, unit)
 
 
 def run_service_status(playbook, name, timeout=120):
-    """Resolve and run a playbook's declared `status:` command via the gateway.
+    """Run a playbook's declared `status:` command on the host.
 
     Returns the raw (exit_code, stdout, stderr) so the caller can classify the
     service state by exit code (0=running, 2/4=not-installed, else=stopped).
     """
-    rc, stdout, stderr = _exec('service status ' + playbook + ' ' + name, timeout=timeout)
-    return rc, stdout, stderr
+    cmd = _status_command(playbook, name)
+    if not cmd:
+        return 1, '', 'status command not defined for ' + str(name)
+    return _exec(cmd, timeout=timeout)
 
 
 def stream_command(cmd, timeout=600):
@@ -180,7 +220,7 @@ def stream_command(cmd, timeout=600):
             raise RuntimeError('SSH transport not active')
         channel = transport.open_session(timeout=SSH_CONNECT_TIMEOUT)
         channel.settimeout(timeout)
-        channel.exec_command(SSH_GATEWAY_WRAP + cmd)
+        channel.exec_command(_wrap(cmd))
         while True:
             if channel.recv_ready():
                 data = channel.recv(4096)
@@ -239,7 +279,7 @@ def stream_log(cmd, job):
         if not transport or not transport.is_active():
             raise RuntimeError('SSH transport not active')
         channel = transport.open_session(timeout=SSH_CONNECT_TIMEOUT)
-        channel.exec_command(SSH_GATEWAY_WRAP + cmd)
+        channel.exec_command(_wrap(cmd))
         job['channel'] = channel
         while True:
             if channel.recv_ready():

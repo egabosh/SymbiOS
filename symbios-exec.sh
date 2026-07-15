@@ -1,36 +1,33 @@
 #!/bin/bash
-# SymbiOS Remote Execution - minimal audit-logging shim.
+# SymbiOS Remote Execution - pure executor + audit logger.
 # The webui's SSH key is a normal root key (no command= restriction): trusted
-# admins operate the host. Every high-level verb is resolved and executed by
-# the companion helper symbios-docs.py; this script only logs the invocation
-# and delegates. The helper's output is streamed straight to the SSH channel.
+# admins operate the host. The WebUI resolves every high-level verb into a
+# concrete command and sends it (shell-quoted) over SSH; this script only
+# audit-logs the invocation and runs it. The WebUI already holds the playbook
+# metadata, so no host-side parsing or verb dispatch remains.
 # Logging uses the gaboshlib helpers (g_logger -> syslog, g_echo_error).
 
 # Load shared bash helpers (g_echo_error, g_logger, ...).
 source /etc/bash/gaboshlib.include
 
 # Client IP for the audit trail (from the SSH connection metadata).
-g_client_ip="unknown"
-if [ -n "$SSH_CONNECTION" ]
-then
-  g_client_ip="${SSH_CONNECTION%% *}"
-fi
+g_client_ip="${SSH_CONNECTION%% *}"
 
-# Build the command tokens (forced command or explicit arguments).
-set -f
-set -- ${SSH_ORIGINAL_COMMAND:-$*}
-set +f
+# The command to run is the script arguments (the webui sends it shell-quoted,
+# so it arrives as a single token). Fall back to the original command if set.
+cmd="${SSH_ORIGINAL_COMMAND:-$*}"
+cmd="${cmd#*symbios-exec.sh }"
 
 # Nothing to do -> interactive shell was requested.
-if [ -z "$1" ]
+if [ -z "$cmd" ]
 then
   echo "interactive"
   exit 0
 fi
 
 # Audit every invocation: syslog and a local log file.
-g_logger "client=${g_client_ip} action=$1 cmd=$*"
-echo "$(date -Iseconds) client=${g_client_ip} action=$1 cmd=$*" >> /var/log/symbios-exec.log 2>/dev/null || true
+g_logger "client=${g_client_ip} cmd=${cmd}"
+echo "$(date -Iseconds) client=${g_client_ip} cmd=${cmd}" >> /var/log/symbios-exec.log 2>/dev/null || true
 
-# Delegate everything to the helper.
-exec python3 /home/SymbiOS/symbios-docs.py run "$@"
+# Run the command as-is.
+exec bash -c "${cmd}"

@@ -1,41 +1,69 @@
 """Dynamic catalog of all SymbiOS playbooks.
 
-The WebUI container does not have the playbook sources mounted (to avoid
-exposing repo secrets). Instead it asks the host exec gateway for the catalog:
-the gateway parses the machine-readable '# docs:' blocks of every playbook and
-returns only that metadata as JSON. Nothing is hardcoded: the menu, the service
-overview and the available actions are all derived from the playbooks.
-
-See symbios-exec.sh (verb: `service list`).
+The WebUI container has the playbook sources mounted read-only at /repo, so it
+parses the machine-readable '# docs:' blocks locally (no SSH round-trip, no
+host helper). Nothing is hardcoded: the menu, the service overview and the
+available actions are all derived from the playbooks.
 """
+import os
 import time
-import json
+import yaml
 
-EXCLUDE_PLAYBOOKS = {"traefik-static.yml"}
+REPO_BASE = "/repo"
+EXCLUDE_PLAYBOOKS = {"traefik-static.yml", "inventory.yml"}
 
 # Cache the parsed catalog for a short time so it is not re-fetched on every
 # request (the sidebar is rendered on several pages).
 _CACHE = {"data": None, "updated": 0.0, "ttl": 30.0}
 
 
-def _fetch_via_ssh():
+def parse_docs(path):
+    """Return the 'docs:' mapping from a playbook's leading comment block."""
     try:
-        from .utils.ssh_exec import run_command
-        ok, out, err = run_command("service list", timeout=60)
-        if ok and out:
-            return json.loads(out)
+        lines = open(path).read().splitlines()
     except Exception:
         return None
-    return None
+    if not lines or not lines[0].lstrip().startswith("# docs:"):
+        return None
+    yaml_lines = []
+    for line in lines:
+        if not line.startswith("#"):
+            break
+        yaml_lines.append(line[2:] if line.startswith("# ") else line[1:])
+    try:
+        doc = yaml.safe_load("\n".join(yaml_lines))
+    except Exception:
+        return None
+    return doc.get("docs") if isinstance(doc, dict) else None
+
+
+def _load_local():
+    results = []
+    for group in ("services", "base-services"):
+        d = os.path.join(REPO_BASE, group)
+        if not os.path.isdir(d):
+            continue
+        for fn in sorted(os.listdir(d)):
+            if not fn.endswith(".yml") or fn in EXCLUDE_PLAYBOOKS:
+                continue
+            docs = parse_docs(os.path.join(d, fn))
+            if not docs:
+                continue
+            results.append({
+                "group": group,
+                "name": fn[:-4],
+                "playbook": "%s/%s" % (group, fn),
+                "title": docs.get("short_description", fn[:-4]),
+                "docs": docs,
+            })
+    return results
 
 
 def get_catalog(force=False):
     now = time.time()
     if not force and _CACHE["data"] is not None and (now - _CACHE["updated"]) < _CACHE["ttl"]:
         return _CACHE["data"]
-    data = _fetch_via_ssh()
-    if data is None:
-        data = _CACHE["data"] or []
+    data = _load_local()
     for item in data:
         item.setdefault("menu_label", _menu_label(item.get("playbook", "")))
     _CACHE["data"] = data

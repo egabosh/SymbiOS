@@ -92,6 +92,9 @@
                 - /var/log:/var/log:ro
                 - /var/lib/docker/containers:/docker/containers:ro
                 - /root/.ssh/authorized_keys:/root-host-keys:ro
+                # Playbook sources, read-only, so the WebUI can parse the
+                # machine-readable '# docs:' blocks locally (no host helper).
+                - /home/SymbiOS:/repo:ro
                 - type: tmpfs
                   target: /app/db
                   tmpfs:
