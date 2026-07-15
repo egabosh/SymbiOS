@@ -4,19 +4,10 @@
 # admins operate the host. Every high-level verb is resolved and executed by
 # the companion helper symbios-docs.py; this script only logs the invocation
 # and delegates. The helper's output is streamed straight to the SSH channel.
-# Logging uses g_logger/g_echo_error (defined below): gaboshlib is intentionally
-# NOT sourced here, because its stderr-recolor machinery mirrors stderr into
-# stdout and injects ANSI codes, which would corrupt the structured output
-# (catalog JSON, command results) this dispatcher returns.
+# Logging uses the gaboshlib helpers (g_logger -> syslog, g_echo_error).
 
-# Minimal logging helpers (syslog via logger).
-function g_logger {
-  printf "%s\n" "$*" | logger -t "symbios-exec[$$]"
-}
-function g_echo_error {
-  printf "ERROR: %s\n" "$*" 1>&2
-  printf "%s\n" "$*" | logger -t "symbios-exec[$$]"
-}
+# Load shared bash helpers (g_echo_error, g_logger, ...).
+source /etc/bash/gaboshlib.include
 
 # Client IP for the audit trail (from the SSH connection metadata).
 g_client_ip="unknown"
