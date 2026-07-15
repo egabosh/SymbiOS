@@ -83,6 +83,7 @@
 
 {% endblock %}
 
+{% block scripts %}
 <style>
   #source-output .yk-comment { color: #6a9955; font-style: italic; }
   #source-output .yk-key     { color: #79c0ff; }
@@ -93,8 +94,6 @@
   #source-output .yk-jinja   { color: #dcdcaa; }
   #source-output .yk-value   { color: #d4d4d4; }
 </style>
-
-{% block scripts %}
 <script>
 const PLAYBOOK = "{{ item.playbook }}";
 function loadStatus() {
