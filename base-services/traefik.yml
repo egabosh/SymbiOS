@@ -505,6 +505,21 @@
               copytruncate
           }
 
+    - name: Ensure ACME account files are not group/world readable
+      # Traefik refuses to load acme.json unless its mode is 0600
+      # ("permissions ... are too open, please use 600"). The files are written
+      # at runtime with the host umask (0027 -> 0640), so this breaks TLS after
+      # every Traefik restart. Re-assert 0600 as a safety net. The PKI file is
+      # owned by the step-ca user; 0600 keeps it readable for root (Traefik) and
+      # writable for its owner (step-ca).
+      ansible.builtin.file:
+        path: "{{ item }}"
+        mode: '0600'
+      loop:
+        - /home/docker/traefik/letsencrypt/acme.json
+        - /home/docker/acme-pki/data/acme/acme.json
+      ignore_errors: true
+
   handlers:
 
     - name: Restart traefik
