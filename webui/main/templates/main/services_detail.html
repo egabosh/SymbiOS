@@ -372,12 +372,15 @@ function startAllLogs() {
 
 function stopAllLogs() {
   LOG_UNITS.forEach(u => stopLog(u.name));
-  if (logPollTimer) { clearTimeout(logPollTimer); logPollTimer = null; }
+  if (logPollTimer) { clearInterval(logPollTimer); logPollTimer = null; }
 }
 
+// The live log follows in the background no matter which tab is active: starting
+// it only on 'shown.bs.tab' meant the default (Output) tab never triggered it,
+// so the log pane stayed frozen on "waiting…" until a manual F5/click. Start
+// polling immediately on load; it is cheap and keeps the pane in tail -f sync.
+startAllLogs();
 document.getElementById('tab-logs').addEventListener('shown.bs.tab', startAllLogs);
-document.getElementById('tab-output').addEventListener('shown.bs.tab', stopAllLogs);
-document.getElementById('tab-source').addEventListener('shown.bs.tab', stopAllLogs);
 
 const srcPre = document.getElementById('source-output');
 let srcLoaded = false;

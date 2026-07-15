@@ -278,7 +278,9 @@ _LOG_MAX_CHARS = 100000
 def _trim_log(job):
     out = job.get('output', '')
     if len(out) > _LOG_MAX_CHARS:
+        dropped = len(out) - _LOG_MAX_CHARS
         job['output'] = out[-_LOG_MAX_CHARS:]
+        job['dropped'] += dropped
 
 
 def stream_log(cmd, job):
@@ -287,6 +289,13 @@ def stream_log(cmd, job):
     Unlike :func:`stream_command` this keeps a reference to the SSH channel in
     ``job['channel']`` so the caller can terminate the (never-ending) follow
     stream via :func:`stop_log`. Intended for live log tails.
+
+    The accumulated ``output`` is a rolling window capped at ``_LOG_MAX_CHARS``
+    (so a never-ending tail cannot exhaust memory). To let the browser resume
+    polling correctly after trims, we also track ``total`` (cumulative chars
+    received) and ``dropped`` (chars evicted from the window). The tail endpoint
+    maps the browser's absolute offset into the current window; if the browser
+    fell behind past the window, it resyncs to the whole window (tail -f style).
     """
     import time
     global _ssh_client
@@ -312,6 +321,7 @@ def stream_log(cmd, job):
                 text = data.decode('utf-8', errors='replace')
                 with job['lock']:
                     job['output'] += text
+                    job['total'] += len(text)
                     _trim_log(job)
             elif channel.exit_status_ready():
                 while channel.recv_ready():
@@ -321,6 +331,7 @@ def stream_log(cmd, job):
                     text = data.decode('utf-8', errors='replace')
                     with job['lock']:
                         job['output'] += text
+                        job['total'] += len(text)
                         _trim_log(job)
                 break
             else:
@@ -329,6 +340,7 @@ def stream_log(cmd, job):
         logger.exception('SSH log stream failed: ' + cmd)
         with job['lock']:
             job['output'] += '\n[stream error] ' + str(e) + '\n'
+            job['total'] += len(str(e)) + 18
     finally:
         try:
             channel.close()
