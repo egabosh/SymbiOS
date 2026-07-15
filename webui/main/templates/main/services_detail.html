@@ -88,7 +88,10 @@
   #source-output .yk-key     { color: #79c0ff; }
   #source-output .yk-str     { color: #ce9178; }
   #source-output .yk-num     { color: #b5cea8; }
+  #source-output .yk-bool    { color: #c586c0; }
   #source-output .yk-list    { color: #c586c0; }
+  #source-output .yk-jinja   { color: #dcdcaa; }
+  #source-output .yk-value   { color: #d4d4d4; }
 </style>
 
 {% block scripts %}
@@ -391,22 +394,57 @@ let srcLoaded = false;
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
-// Lightweight YAML highlighter (comments, keys, strings, numbers/booleans,
-// list markers). Operates on HTML-escaped text and returns highlighted HTML.
+// YAML syntax highlighter. Renders comments, keys, quoted/unquoted values,
+// numbers/booleans, list markers and Jinja templates into colored spans.
+// Operates on HTML-escaped text and returns highlighted HTML.
 function highlightYaml(text) {
-  return escapeHtml(text).split('\n').map(line => {
-    if (line.trimStart().startsWith('#')) {
-      return '<span class="yk-comment">' + line + '</span>';
+  const esc = escapeHtml(text);
+  return esc.split('\n').map(line => {
+    // Full-line comment (incl. indented).
+    const cm = line.match(/^(\s*)(#.*)$/);
+    if (cm) {
+      return cm[1] + '<span class="yk-comment">' + cm[2] + '</span>';
     }
-    let out = line;
-    out = out.replace(/('[^']*'|"[^"]*")/g, '<span class="yk-str">$1</span>');
-    out = out.replace(/(:\s+)(true|false|null|yes|no|on|off|-?\d+(?:\.\d+)?)/gi,
-      (m, p, v) => p + '<span class="yk-num">' + v + '</span>');
-    out = out.replace(/^(\s*(?:-\s)?)([A-Za-z_][\w.\/-]*)(:)(\s|$)/,
-      (m, ind, key, colon, rest) => ind + '<span class="yk-key">' + key + '</span>' + colon + rest);
-    out = out.replace(/^(\s*)(-\s)/, '$1<span class="yk-list">$2</span>');
-    return out;
+    // Trailing comment after a value.
+    let trailing = '';
+    const tcm = line.match(/^(.*?)(#.*)$/);
+    if (tcm && !/['"]/.test(tcm[1]) ) {
+      line = tcm[1];
+      trailing = '<span class="yk-comment">' + tcm[2] + '</span>';
+    }
+    const lm = line.match(/^(\s*)(-\s+)?(.*)$/);
+    const indent = lm[1];
+    const dash = lm[2] ? '<span class="yk-list">' + lm[2] + '</span>' : '';
+    let rest = lm[3];
+    const kv = rest.match(/^([\w.\/-]+)(:)(\s*)([\s\S]*)$/);
+    if (kv) {
+      const key = '<span class="yk-key">' + kv[1] + '</span>' + kv[2] + kv[3];
+      let val = kv[4];
+      val = highlightYamlValue(val);
+      return indent + dash + key + val + trailing;
+    }
+    // Value-only line (continuation / list scalar).
+    return indent + dash + highlightYamlValue(rest) + trailing;
   }).join('\n');
+}
+
+function highlightYamlValue(val) {
+  if (val === '') return '';
+  let out = val;
+  // Jinja templates (double-brace / percent-brace blocks) -- the delimiter
+  // characters are concatenated above so Django's template parser does not treat
+  // them as template tags.
+  const LB = '{', RB = '}', PC = '%';
+  const jinja = new RegExp('(' + LB + LB + '[^}]*' + RB + RB + '|' + LB + PC + '-?[\\s\\S]*?-?' + PC + RB + ')', 'g');
+  out = out.replace(jinja, '<span class="yk-jinja">$1</span>');
+  // Quoted strings.
+  out = out.replace(/('[^']*'|"[^"]*")/g, '<span class="yk-str">$1</span>');
+  // Numbers / booleans / null.
+  out = out.replace(/(^|\s|>|\(|\[)(-?\d+(?:\.\d+)?)(?=\s|$|\]|\)|,)/g,
+    '$1<span class="yk-num">$2</span>');
+  out = out.replace(/(^|\s|:\s*)(true|false|null|yes|no|on|off)(?=\s|$)/gi,
+    '$1<span class="yk-bool">$2</span>');
+  return out;
 }
 
 function loadSource() {
