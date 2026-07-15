@@ -12,7 +12,14 @@ _JOBS_LOCK = threading.Lock()
 from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from .playbook_catalog import get_catalog, get_playbook, compose_base
-from .utils.ssh_exec import stream_command, stream_log, stop_log, run_service_status
+from .utils.ssh_exec import (
+    stream_command,
+    stream_log,
+    stop_log,
+    run_service_status,
+    build_action_command,
+    build_log_command,
+)
 
 # Built-in base-services can be managed but never uninstalled from the WebUI.
 PROTECTED_GROUPS = {'base-services'}
@@ -116,11 +123,10 @@ def services_action(request, playbook):
     """Start an action as a background job and return a job id.
 
     The special action ``__playbook__`` runs the service's Ansible playbook
-    (idempotent install/reinstall). Any other action name is resolved against
-    the playbook's docs.actions dict on the host (via the `service run` gateway
-    verb), which executes the associated command. The browser polls
-    /output/?job=<id> to display progress (no response streaming, which Traefik
-    buffers).
+    (idempotent install/reinstall). Any other action name is resolved locally
+    from the playbook's docs.actions into the concrete host command, which is
+    then executed via the SSH gateway. The browser polls /output/?job=<id> to
+    display progress (no response streaming, which Traefik buffers).
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'Invalid action'}, status=400)
@@ -130,9 +136,7 @@ def services_action(request, playbook):
         return JsonResponse({'error': 'Playbook not found'}, status=404)
     # (Re)Install always runs the Ansible playbook; it is allowed for every
     # service. All other actions must be defined in the playbook's docs.actions.
-    if action == '__playbook__':
-        display_cmd = 'ansible-playbook ' + playbook
-    else:
+    if action != '__playbook__':
         actions = item['docs'].get('actions') or {}
         if action not in actions:
             return JsonResponse({'error': 'Unknown action: ' + str(action)}, status=400)
@@ -142,7 +146,8 @@ def services_action(request, playbook):
                 {'error': 'Uninstall is not allowed for built-in base-services.'},
                 status=403,
             )
-        display_cmd = actions.get(action, 'service run ' + playbook + ' ' + action)
+    cmd = build_action_command(playbook, action)
+    display_cmd = cmd
     job_id = uuid.uuid4().hex
     job = {'output': '', 'done': False, 'success': False, 'lock': threading.Lock()}
     with _JOBS_LOCK:
@@ -150,22 +155,13 @@ def services_action(request, playbook):
         for old in [k for k, v in _JOBS.items() if v['done']]:
             _JOBS.pop(old, None)
         _JOBS[job_id] = job
-    threading.Thread(target=_run_job, args=(job, playbook, action), daemon=True).start()
+    threading.Thread(target=_run_job, args=(job, cmd), daemon=True).start()
     return JsonResponse({'job': job_id, 'action': action, 'command': display_cmd})
 
 
-def _run_job(job, playbook, action):
-    """Run the action on the host, appending output as it arrives.
-
-    ``__playbook__`` invokes the Ansible playbook directly; any other action is
-    resolved by the gateway's `service run` verb from the playbook's
-    docs.actions.
-    """
+def _run_job(job, cmd):
+    """Run the resolved host command, appending output as it arrives."""
     overall_ok = True
-    if action == '__playbook__':
-        cmd = 'playbook ' + playbook
-    else:
-        cmd = 'service run ' + playbook + ' ' + action
     try:
         for kind, text in stream_command(cmd, timeout=900):
             if kind == 'rc':
@@ -233,6 +229,9 @@ def services_log_start(request, playbook):
     names = {l.get('name') for l in logs}
     if unit not in names:
         return JsonResponse({'error': 'Unknown log unit: ' + str(unit)}, status=400)
+    cmd = build_log_command(playbook, unit)
+    if not cmd:
+        return JsonResponse({'error': 'No log command for unit: ' + str(unit)}, status=400)
     # Drop finished jobs so stopped follow streams don't pile up in memory.
     with _JOBS_LOCK:
         for old in [k for k, v in _JOBS.items() if v['done']]:
@@ -243,7 +242,7 @@ def services_log_start(request, playbook):
         _JOBS[job_id] = job
     threading.Thread(
         target=stream_log,
-        args=('service logfollow ' + playbook + ' ' + unit, job),
+        args=(cmd, job),
         daemon=True,
     ).start()
     return JsonResponse({'job': job_id, 'unit': unit})
@@ -264,14 +263,20 @@ def services_log_stop(request, playbook):
 
 @login_required
 def services_source(request, playbook):
-    """Return the raw playbook source (read-only) for display in the WebUI."""
+    """Return the raw playbook source (read-only) for display in the WebUI.
+
+    The playbooks are mounted read-only at /repo, so the source is read locally
+    (no SSH round-trip, and no secrets are exposed beyond the playbook itself).
+    """
     item = get_playbook(playbook)
     if item is None:
         return JsonResponse({'error': 'Playbook not found'}, status=404)
-    from .utils.ssh_exec import run_service_source
-    ok, out = run_service_source(playbook)
-    if not ok and not out.strip():
-        return JsonResponse({'error': out or 'source fetch failed'}, status=502)
+    path = '/repo/' + playbook
+    try:
+        with open(path) as fh:
+            out = fh.read()
+    except Exception as e:
+        return JsonResponse({'error': 'source read failed: ' + str(e)}, status=502)
     return JsonResponse({'source': out})
 
 
