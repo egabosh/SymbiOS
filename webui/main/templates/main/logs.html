@@ -249,6 +249,10 @@
                     html += formatLine(startLineNum + i, data.lines[i]);
                 }
                 logContainer.innerHTML = html;
+                // Defer the scroll to the next frame: with 500 lines just
+                // inserted, layout (and therefore scrollHeight) is not final yet,
+                // so an immediate scrollTop assignment would land too high.
+                requestAnimationFrame(() => { logContainer.scrollTop = logContainer.scrollHeight; });
             } else {
                 if (data.lines && data.lines.length > 0) {
                     // Append via insertAdjacentHTML so the existing DOM is not
@@ -276,6 +280,9 @@
         const rect = logContainer.getBoundingClientRect();
         const available = window.innerHeight - rect.top - 20;
         logContainer.style.height = Math.max(200, available) + 'px';
+        if (autoScroll) {
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
     }
 
     loadDockerContainers();
