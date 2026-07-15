@@ -159,8 +159,10 @@ document.querySelectorAll('[data-action]').forEach(btn => {
           fetch('/services/' + PLAYBOOK + '/output/?job=' + d.job)
             .then(r => r.json())
             .then(o => {
+              const nearBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
+              const prevTop = out.scrollTop;
               out.innerHTML = ansiToHtml(header + o.output);
-              out.scrollTop = out.scrollHeight;
+              out.scrollTop = nearBottom ? out.scrollHeight : prevTop;
               if (o.done) {
                 out.innerHTML += ansiToHtml('\n[done] ' + (o.success ? 'OK' : 'FAILED') + '\n');
                 clearActionRunning();
@@ -229,8 +231,13 @@ function pollLogs() {
       .then(o => {
         const pre = unitPre[name];
         if (!pre) return;
+        // Stick to the bottom only if the user is already near it; otherwise
+        // keep their reading position so scrolling up to read old entries is
+        // not yanked back to the end on every poll.
+        const nearBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+        const prevTop = pre.scrollTop;
         pre.innerHTML = ansiToHtml(o.output || '');
-        pre.scrollTop = pre.scrollHeight;
+        pre.scrollTop = nearBottom ? pre.scrollHeight : prevTop;
       })
       .catch(() => {});
   }

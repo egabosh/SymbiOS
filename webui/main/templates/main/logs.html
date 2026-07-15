@@ -250,11 +250,14 @@
                 logContainer.innerHTML = html;
             } else {
                 if (data.lines && data.lines.length > 0) {
-                    let html = '';
-                    for (let i = 0; i < data.lines.length; i++) {
-                        html += formatLine(startLineNum + (data.total_lines - data.lines.length + (currentOffset === 0 ? 0 : 0)), data.lines[i]);
-                    }
-                    logContainer.innerHTML += data.lines.map((line, i) => formatLine(startLineNum + i, line)).join('');
+                    // Append via insertAdjacentHTML so the existing DOM is not
+                    // reparsed (which would reset/affect the scroll position).
+                    // Number the new lines from the current tail of the file.
+                    const base = data.total_lines - data.lines.length + 1;
+                    logContainer.insertAdjacentHTML(
+                        'beforeend',
+                        data.lines.map((line, i) => formatLine(base + i, line)).join('')
+                    );
                 }
             }
 
