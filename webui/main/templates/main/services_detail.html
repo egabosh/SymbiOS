@@ -180,6 +180,7 @@ const LOG_UNITS = JSON.parse(document.getElementById('log-units').textContent ||
 const logPanes = document.getElementById('log-panes');
 const unitJobs = {};   // name -> job id
 const unitPre = {};    // name -> <pre> element
+const unitOffsets = {}; // name -> last consumed byte offset (long-poll)
 let logPollTimer = null;
 
 // --- Keep a text selection alive across innerHTML rebuilds -----------------
@@ -307,6 +308,8 @@ LOG_UNITS.forEach(u => {
 
 function startLog(name) {
   if (unitJobs[name]) return;
+  unitOffsets[name] = 0;
+  if (unitPre[name]) { unitPre[name].innerHTML = ''; unitPre[name].dataset.rawLen = undefined; }
   const fd = new FormData();
   fd.append('unit', name);
   fetch('/services/' + PLAYBOOK + '/log-start/', {method: 'POST', body: fd})
@@ -330,14 +333,19 @@ function stopLog(name) {
 function pollLogs() {
   for (const name in unitJobs) {
     const job = unitJobs[name];
-    fetch('/services/' + PLAYBOOK + '/output/?job=' + job)
+    const off = unitOffsets[name] || 0;
+    // Long-poll: the server blocks until new data (or timeout), so we get
+    // near-zero latency with no fixed interval and no full-output transfer.
+    fetch('/services/' + PLAYBOOK + '/log-tail/?job=' + job + '&offset=' + off + '&timeout=20')
       .then(r => r.json())
       .then(o => {
         const pre = unitPre[name];
         if (!pre) return;
-        appendLogDelta(pre, o.output || '');
+        if (o.delta) appendLogDelta(pre, o.delta);
+        unitOffsets[name] = o.offset;
+        if (!o.done) pollLogs();
       })
-      .catch(() => {});
+      .catch(() => { if (unitJobs[name]) setTimeout(pollLogs, 1000); });
   }
 }
 
@@ -348,12 +356,12 @@ function startAllLogs() {
     return;
   }
   LOG_UNITS.forEach(u => startLog(u.name));
-  if (!logPollTimer) logPollTimer = setInterval(pollLogs, 1500);
+  if (!logPollTimer) logPollTimer = setTimeout(pollLogs, 100);
 }
 
 function stopAllLogs() {
   LOG_UNITS.forEach(u => stopLog(u.name));
-  if (logPollTimer) { clearInterval(logPollTimer); logPollTimer = null; }
+  if (logPollTimer) { clearTimeout(logPollTimer); logPollTimer = null; }
 }
 
 document.getElementById('tab-logs').addEventListener('shown.bs.tab', startAllLogs);

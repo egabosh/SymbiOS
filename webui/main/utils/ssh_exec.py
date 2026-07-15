@@ -189,8 +189,16 @@ def build_action_command(playbook, action):
 
 
 def build_log_command(playbook, unit):
-    """Resolve the concrete host command that streams one log unit."""
-    return _log_command(playbook, unit)
+    """Resolve the concrete host command that streams one log unit.
+
+    The follow command is wrapped with ``stdbuf -oL -eL`` so output is flushed
+    line-by-line even when the command is piped (e.g. ``tail | grep``), which
+    would otherwise block-buffer ~4 KB and only appear once the buffer fills.
+    """
+    cmd = _log_command(playbook, unit)
+    if not cmd:
+        return None
+    return "stdbuf -oL -eL " + cmd
 
 
 def run_service_status(playbook, name, timeout=120):

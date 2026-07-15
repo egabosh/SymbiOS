@@ -4,6 +4,7 @@ Supports system logs and Docker container logs.
 """
 import os
 import json
+import time
 from django.http import JsonResponse, HttpResponseBadRequest
 
 LOG_BASE_DIR = "/var/log"
@@ -80,6 +81,12 @@ def logs_stream(request):
     except ValueError:
         return HttpResponseBadRequest("Invalid offset parameter")
 
+    timeout_param = request.GET.get("timeout")
+    try:
+        timeout = max(1, min(30, int(timeout_param))) if timeout_param else 0
+    except ValueError:
+        timeout = 0
+
     # Docker container log
     if log_name.startswith("docker:"):
         container_id = log_name.split(":", 1)[1]
@@ -94,10 +101,21 @@ def logs_stream(request):
             {"log_name": log_name, "path": real_path, "lines": [], "total_lines": 0, "error": "Log file does not exist"},
         )
 
-    with open(real_path, "r", encoding="utf-8", errors="ignore") as f:
-        all_lines = f.readlines()
+    deadline = time.time() + timeout if timeout else 0
+    while True:
+        with open(real_path, "r", encoding="utf-8", errors="ignore") as f:
+            all_lines = f.readlines()
+        total_lines = len(all_lines)
 
-    total_lines = len(all_lines)
+        # Long-poll: if the caller already has the tail (offset > 0) and the
+        # file has not grown, block until it does (or the timeout elapses).
+        # This pushes new entries to the browser with near-zero latency using
+        # only plain HTTP/JSON -- nothing Traefik-specific to mis-buffer.
+        if offset == 0 or total_lines > offset or not deadline:
+            break
+        time.sleep(0.2)
+        if time.time() >= deadline:
+            break
 
     if offset == 0:
         raw_lines = all_lines[-500:]
