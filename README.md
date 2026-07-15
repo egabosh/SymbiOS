@@ -42,9 +42,14 @@ new web app is mostly "write one playbook and drop it in `services/`":
 | App isolation      | Docker, one compose stack per service               |
 
 Everything is driven by Ansible playbooks. There is no long-running agent: the
-web UI runs playbooks on the host **directly over SSH** through a restricted
-exec gateway (`symbios-exec.sh`, invoked via a forced command + a scoped SSH
-key). No extra daemon is required.
+web UI runs playbooks on the host **directly over SSH** through a minimal
+audit-logging executor (`symbios-exec.sh`). The WebUI container has the
+playbook sources mounted read-only at `/repo`; it parses their machine-readable
+`# docs:` blocks locally, resolves every status/action/log command itself, and
+ships only the concrete command to the host (no host-side verb dispatch, no
+secrets leave the host). The webui's SSH key is a normal root key — trusted
+admins operate the host, so the executor imposes no command allow-list. No extra
+daemon is required.
 
 ---
 
@@ -70,8 +75,8 @@ key). No extra daemon is required.
         |              |                |
         |              |                |
     +----v--------------v----------------v-----------------------------+
-    |  service-handler.sh  (runs a service playbook / docker compose)  |
-    |  symbios-exec.sh     (restricted SSH exec used by the WebUI)     |
+    |  service-handler.sh  (optional manual helper: run a service playbook) |
+    |  symbios-exec.sh     (audit-logging SSH executor used by the WebUI)   |
     +---------------------------------------------------------------+
         |
    +----v----------------------------+
@@ -95,8 +100,7 @@ container's IP/port.
 SymbiOS/
 ├── install.sh            # Bootstrap: install ansible, clone repo, run base-services
 ├── inventory.yml         # Template inventory (copied to the host on first install)
-├── cleanup.sh            # Helper to tear down / reset
-├── symbios-exec.sh       # Restricted SSH exec gateway used by the WebUI
+├── symbios-exec.sh       # Minimal audit-logging SSH executor used by the WebUI
 ├── base-services/          # Core Ansible playbooks (the "Basisservices")
 │   ├── *.yml             # One playbook per concern (see section 4)
 │   ├── traefik-services.j2   # Template -> /home/docker/traefik/providers/symbios-services.yml
@@ -297,10 +301,18 @@ matching playbook over SSH, see section 8).
   `dedyn.yml`, saving Auth runs `authelia.yml`, saving the mailserver runs
   `smtp.yml`). Inventory edits made directly on the host can be applied the
   same way by running the relevant playbook via SSH.
-- **symbios-exec.sh** is the restricted command that the WebUI invokes over SSH
-  (`command=` restriction in `authorized_keys`). It only permits
-  `playbook`, `docker-compose`, and a narrow `exec` set, and only for paths
-  under `base-services/` or `services/`.
+- **symbios-exec.sh** is the minimal executor the WebUI invokes over SSH. It
+  receives a concrete, already-resolved command, audit-logs the invocation
+  (client IP, command, syslog + `/var/log/symbios-exec.log`) and runs it. The
+  webui's SSH key is a normal root key with **no `command=` restriction** —
+  trusted admins operate the host, so the executor imposes no command allow-list.
+  All verb logic (status / action / log resolution, catalog building) lives in
+  the WebUI, which parses the playbooks' `# docs:` blocks locally.
+- **Secrets stay on the host.** The WebUI container mounts the playbook repo
+  read-only at `/repo` (see `base-services/symbios-ui.yml`); the repo only ever
+  contains runtime-generated placeholders (`!...!`), never real credentials.
+  Real secrets live in each service's `/home/docker/<name>/env` and are never
+  mounted into the WebUI.
 
 Manual equivalents:
 
@@ -424,9 +436,14 @@ daemon / `service-handler.sh` runs it.
 ### Discovery and lifecycle
 
 - Service lifecycle (`playbook`, `start` = `docker compose up -d`, `stop` =
-  `docker compose down`) is handled by `service-handler.sh`, invoked by the
-  WebUI through `symbios-exec.sh` over SSH.
-- The WebUI's service-discovery reads the same directory
-  (`webui/main/service_discover.py`).
+  `docker compose down`) is driven by the WebUI. The WebUI container has the
+  playbooks mounted read-only at `/repo`; `webui/main/playbook_catalog.py`
+  parses each playbook's `# docs:` block to build the catalog (services,
+  actions, status and log commands) entirely on the WebUI side. To run
+  something, the WebUI resolves the concrete command and ships it to
+  `symbios-exec.sh` over SSH (commands are shell-quoted so the host runs them
+  verbatim).
+- `services/service-handler.sh` remains as an optional **manual** helper for
+  running a service playbook / `docker compose` directly on the host.
 
 
