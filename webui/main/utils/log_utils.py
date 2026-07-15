@@ -4,7 +4,6 @@ Supports system logs and Docker container logs.
 """
 import os
 import json
-import time
 from django.http import JsonResponse, HttpResponseBadRequest
 
 LOG_BASE_DIR = "/var/log"
@@ -81,12 +80,6 @@ def logs_stream(request):
     except ValueError:
         return HttpResponseBadRequest("Invalid offset parameter")
 
-    timeout_param = request.GET.get("timeout")
-    try:
-        timeout = max(1, min(30, int(timeout_param))) if timeout_param else 0
-    except ValueError:
-        timeout = 0
-
     # Docker container log
     if log_name.startswith("docker:"):
         container_id = log_name.split(":", 1)[1]
@@ -101,14 +94,13 @@ def logs_stream(request):
             {"log_name": log_name, "path": real_path, "lines": [], "total_lines": 0, "error": "Log file does not exist"},
         )
 
-    deadline = time.time() + timeout if timeout else 0
+    # Non-blocking: the browser polls at a short fixed interval, so this returns
+    # the current tail immediately without waiting. New entries appear within
+    # that interval without ever stalling the single-worker server.
     with open(real_path, "r", encoding="utf-8", errors="ignore") as f:
         all_lines = f.readlines()
     total_lines = len(all_lines)
 
-    # NOTE: intentionally non-blocking. A blocking long-poll would freeze the
-    # single-worker dev server (every other request stalls); the client polls
-    # at a short fixed interval instead. New entries appear within that interval.
     if offset == 0:
         raw_lines = all_lines[-500:]
     else:

@@ -14,7 +14,6 @@ urlpatterns = [
     re_path(r'^services/(?P<playbook>.+\.yml)/$', views_services.services_detail, name='services_detail'),
     re_path(r'^services/(?P<playbook>.+\.yml)/action/$', views_services.services_action, name='services_action'),
     re_path(r'^services/(?P<playbook>.+\.yml)/output/$', views_services.services_output, name='services_output'),
-    re_path(r'^services/(?P<playbook>.+\.yml)/logs/$', views_services.services_logs, name='services_logs'),
     re_path(r'^services/(?P<playbook>.+\.yml)/log-start/$', views_services.services_log_start, name='services_log_start'),
     re_path(r'^services/(?P<playbook>.+\.yml)/log-stop/$', views_services.services_log_stop, name='services_log_stop'),
     re_path(r'^services/(?P<playbook>.+\.yml)/log-tail/$', views_services.services_log_tail, name='services_log_tail'),

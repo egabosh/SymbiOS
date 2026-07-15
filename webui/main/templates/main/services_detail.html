@@ -180,7 +180,7 @@ const LOG_UNITS = JSON.parse(document.getElementById('log-units').textContent ||
 const logPanes = document.getElementById('log-panes');
 const unitJobs = {};   // name -> job id
 const unitPre = {};    // name -> <pre> element
-const unitOffsets = {}; // name -> last consumed byte offset (long-poll)
+const unitOffsets = {}; // name -> absolute char offset consumed so far
 let logPollTimer = null;
 
 // --- Keep a text selection alive across innerHTML rebuilds -----------------

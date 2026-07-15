@@ -205,10 +205,11 @@ def services_log_tail(request, playbook):
     """Return only the bytes appended to a live log job since ``offset``.
 
     Non-blocking: the client polls at a short fixed interval (see the frontend)
-    and receives just the new tail. This avoids server-side blocking, which on
-    the single-worker dev server would freeze every other request (the classic
-    long-poll pitfall). ``stdbuf`` on the follow command keeps the underlying
-    stream flush line-by-line so new entries appear immediately.
+    and receives just the new tail, so this view returns immediately and never
+    holds a worker. The follow command is wrapped with ``stdbuf`` so it flushes
+    line-by-line and new entries appear within the poll interval. ``offset`` is
+    an absolute character position into the stream; it is mapped into the
+    rolling output window below (see stream_log).
     """
     job_id = request.GET.get('job')
     try:
@@ -244,22 +245,6 @@ def services_log_tail(request, playbook):
 
 
 @login_required
-def services_logs(request, playbook):
-    """Return the log units declared by the playbook (metadata only).
-
-    The actual content is streamed live via the log-start/log-stop jobs; this
-    endpoint used to re-run a snapshot command on every poll, which was both
-    wasteful and not real-time. The unit list comes from the catalog's parsed
-    '# docs:' block, so no host round-trip is needed here.
-    """
-    item = get_playbook(playbook)
-    if item is None:
-        return JsonResponse({'error': 'Playbook not found'}, status=404)
-    logs = (item.get('docs') or {}).get('service_control', {}).get('logs', []) or []
-    units = [{'name': l.get('name'), 'type': l.get('type', 'log')} for l in logs]
-    return JsonResponse({'units': units})
-
-
 @csrf_exempt
 @login_required
 def services_log_start(request, playbook):
