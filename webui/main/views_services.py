@@ -220,12 +220,24 @@ def services_log_tail(request, playbook):
     job = _JOBS[job_id]
     with job['lock']:
         out = job['output']
+        total = job['total']
+        dropped = job['dropped']
         done = job['done']
         success = job['success']
-    delta = out[offset:]
+    # Map the browser's absolute offset into the rolling window. The window holds
+    # absolute positions [total - len(out), total). If the browser fell behind
+    # past the window (its offset was trimmed away), resync to the whole window
+    # -- tail -f style, the browser simply jumps to the most recent lines.
+    win_start = total - len(out)
+    if offset <= win_start:
+        delta = out
+        new_offset = total
+    else:
+        delta = out[offset - win_start:]
+        new_offset = total
     return JsonResponse({
         'delta': delta,
-        'offset': offset + len(delta),
+        'offset': new_offset,
         'done': done,
         'success': success,
     })
@@ -276,7 +288,8 @@ def services_log_start(request, playbook):
             _JOBS.pop(old, None)
         job_id = uuid.uuid4().hex
         job = {'output': '', 'done': False, 'success': True,
-               'channel': None, 'lock': threading.Lock()}
+                'channel': None, 'lock': threading.Lock(),
+                'total': 0, 'dropped': 0}
         _JOBS[job_id] = job
     threading.Thread(
         target=stream_log,
