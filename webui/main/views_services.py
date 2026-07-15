@@ -244,7 +244,6 @@ def services_log_tail(request, playbook):
     })
 
 
-@login_required
 @csrf_exempt
 @login_required
 def services_log_start(request, playbook):
