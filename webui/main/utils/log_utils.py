@@ -102,21 +102,13 @@ def logs_stream(request):
         )
 
     deadline = time.time() + timeout if timeout else 0
-    while True:
-        with open(real_path, "r", encoding="utf-8", errors="ignore") as f:
-            all_lines = f.readlines()
-        total_lines = len(all_lines)
+    with open(real_path, "r", encoding="utf-8", errors="ignore") as f:
+        all_lines = f.readlines()
+    total_lines = len(all_lines)
 
-        # Long-poll: if the caller already has the tail (offset > 0) and the
-        # file has not grown, block until it does (or the timeout elapses).
-        # This pushes new entries to the browser with near-zero latency using
-        # only plain HTTP/JSON -- nothing Traefik-specific to mis-buffer.
-        if offset == 0 or total_lines > offset or not deadline:
-            break
-        time.sleep(0.2)
-        if time.time() >= deadline:
-            break
-
+    # NOTE: intentionally non-blocking. A blocking long-poll would freeze the
+    # single-worker dev server (every other request stalls); the client polls
+    # at a short fixed interval instead. New entries appear within that interval.
     if offset == 0:
         raw_lines = all_lines[-500:]
     else:

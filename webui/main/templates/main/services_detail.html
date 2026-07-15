@@ -330,22 +330,31 @@ function stopLog(name) {
   delete unitJobs[name];
 }
 
+// Append an already-computed delta (raw text) as DOM without touching existing
+// nodes, so a marked span rides up with the text like tail -f. Used for the
+// non-blocking log-tail polling (the server returns only the new tail).
+function appendRawDelta(el, text) {
+  if (!text) return;
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const prevTop = el.scrollTop;
+  el.insertAdjacentHTML('beforeend', ansiToHtml(text));
+  el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
+}
+
 function pollLogs() {
   for (const name in unitJobs) {
     const job = unitJobs[name];
     const off = unitOffsets[name] || 0;
-    // Long-poll: the server blocks until new data (or timeout), so we get
-    // near-zero latency with no fixed interval and no full-output transfer.
-    fetch('/services/' + PLAYBOOK + '/log-tail/?job=' + job + '&offset=' + off + '&timeout=20')
+    // Non-blocking poll: the server returns only the new tail, no waiting.
+    fetch('/services/' + PLAYBOOK + '/log-tail/?job=' + job + '&offset=' + off)
       .then(r => r.json())
       .then(o => {
         const pre = unitPre[name];
         if (!pre) return;
-        if (o.delta) appendLogDelta(pre, o.delta);
+        if (o.delta) appendRawDelta(pre, o.delta);
         unitOffsets[name] = o.offset;
-        if (!o.done) pollLogs();
       })
-      .catch(() => { if (unitJobs[name]) setTimeout(pollLogs, 1000); });
+      .catch(() => {});
   }
 }
 
@@ -356,7 +365,9 @@ function startAllLogs() {
     return;
   }
   LOG_UNITS.forEach(u => startLog(u.name));
-  if (!logPollTimer) logPollTimer = setTimeout(pollLogs, 100);
+  // Short fixed interval (non-blocking): new entries appear within ~300 ms
+  // without ever stalling the single-worker server.
+  if (!logPollTimer) logPollTimer = setInterval(pollLogs, 300);
 }
 
 function stopAllLogs() {
