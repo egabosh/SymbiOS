@@ -202,46 +202,33 @@ def services_output(request, playbook):
 
 @login_required
 def services_log_tail(request, playbook):
-    """Long-poll endpoint for a live log job.
+    """Return only the bytes appended to a live log job since ``offset``.
 
-    Returns only the bytes appended since the caller's last offset, blocking
-    (up to ``timeout`` seconds) until new data appears or the stream ends. This
-    gives near-zero latency over plain HTTP/JSON -- no fixed poll interval, no
-    full-output transfer, and nothing Traefik-specific to mis-buffer (unlike
-    SSE/chunked long-lived responses).
+    Non-blocking: the client polls at a short fixed interval (see the frontend)
+    and receives just the new tail. This avoids server-side blocking, which on
+    the single-worker dev server would freeze every other request (the classic
+    long-poll pitfall). ``stdbuf`` on the follow command keeps the underlying
+    stream flush line-by-line so new entries appear immediately.
     """
     job_id = request.GET.get('job')
     try:
         offset = int(request.GET.get('offset', '0'))
     except ValueError:
         offset = 0
-    try:
-        timeout = max(1, min(30, int(request.GET.get('timeout', '20'))))
-    except ValueError:
-        timeout = 20
     if not job_id or job_id not in _JOBS:
         return JsonResponse({'error': 'Unknown job'}, status=404)
     job = _JOBS[job_id]
-    deadline = time.time() + timeout
-    while True:
-        with job['lock']:
-            out = job['output']
-            done = job['done']
-            success = job['success']
-        if len(out) >= offset or done:
-            delta = out[offset:]
-            return JsonResponse({
-                'delta': delta,
-                'offset': offset + len(delta),
-                'done': done,
-                'success': success,
-            })
-        # No new data yet: wait briefly, then re-check. A short sleep keeps the
-        # request cheap and lets client disconnects surface between iterations.
-        time.sleep(0.15)
-        if time.time() >= deadline:
-            return JsonResponse({'delta': '', 'offset': offset, 'done': done,
-                                 'success': success})
+    with job['lock']:
+        out = job['output']
+        done = job['done']
+        success = job['success']
+    delta = out[offset:]
+    return JsonResponse({
+        'delta': delta,
+        'offset': offset + len(delta),
+        'done': done,
+        'success': success,
+    })
 
 
 @login_required
