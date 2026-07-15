@@ -263,7 +263,7 @@
 
             currentOffset = data.total_lines;
 
-            if (autoScroll && !paneHasSelection(logContainer)) {
+            if (autoScroll) {
                 logContainer.scrollTop = logContainer.scrollHeight;
             }
         } catch (e) {

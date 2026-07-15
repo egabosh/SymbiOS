@@ -233,27 +233,28 @@ function setSelectionOffsets(root, start, end) {
   sel.addRange(range);
 }
 
-// Update a log/output pane without destroying the user's text selection or
-// scroll position. If the content is unchanged we touch the DOM not at all
-// (selection survives). If it only grew we append just the new tail via
-// insertAdjacentHTML; otherwise we replace the whole innerHTML but re-anchor
-// any active selection by character offset so the mark stays put. While the
-// user has a selection in the pane we never auto-scroll to the bottom, so
-// marking text freezes the view without halting the incoming log.
+// Update a log/output pane like `tail -f`: the selection is anchored to the
+// text characters (re-anchored by offset across a full rebuild) and the pane
+// keeps following the tail, so marked text rides upward as new lines arrive.
+// If the content is unchanged we touch the DOM not at all. If it only grew we
+// append just the new tail via insertAdjacentHTML (selection preserved
+// natively); otherwise we replace innerHTML and re-anchor the selection.
 function updateLogPane(el, html) {
   const prev = el.dataset.fullText || '';
   if (html === prev) return;
   const offsets = getSelectionOffsets(el);
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  const hasSel = !!offsets;
   const prevTop = el.scrollTop;
   if (prev && html.startsWith(prev)) {
     el.insertAdjacentHTML('beforeend', html.slice(prev.length));
   } else {
     el.innerHTML = html;
   }
-  el.scrollTop = (nearBottom && !hasSel) ? el.scrollHeight : prevTop;
   if (offsets) setSelectionOffsets(el, offsets.start, offsets.end);
+  // Follow the tail (stick to the end) so the marked text scrolls upward with
+  // incoming lines. Only when the user has scrolled up to read do we leave the
+  // view in place.
+  el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
   el.dataset.fullText = html;
 }
 
