@@ -343,8 +343,68 @@ daemon / `service-handler.sh` runs it.
    ```bash
    /home/SymbiOS/services/service-handler.sh playbook <name>
    ```
-4. The playbook writes the compose file and a Traefik provider snippet, then
-   restarts the container. Traefik picks up the new route automatically.
+ 4. The playbook writes the compose file and a Traefik provider snippet, then
+    restarts the container. Traefik picks up the new route automatically.
+
+### The `# docs:` block (WebUI control metadata)
+
+Each service playbook starts with a machine-readable `# docs:` block — a YAML
+document written in `# ` comment lines at the very top of the file. It is the
+**single source of truth for what the WebUI can do with the service**: its
+title/description and which actions, status checks and log streams exist.
+
+The WebUI container mounts the playbook repo **read-only at `/repo`** and parses
+these blocks locally (`webui/main/playbook_catalog.py`) — there is no SSH
+round-trip and no host-side Python for this. To run something, the WebUI
+resolves the concrete command from the block and ships it to `symbios-exec.sh`
+over SSH (commands are shell-quoted so the host runs them verbatim).
+
+```yaml
+# docs:
+#   short_description: Deploy the Nextcloud service
+#   description: Deploys Nextcloud together with its database and storage.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   category: Service
+#   service_control:
+#     services:
+#       - name: nextcloud
+#         type: docker
+#         compose_file: /home/docker/nextcloud/docker-compose.yml
+#         status: test -d /home/docker/nextcloud || exit 2; docker compose -f /home/docker/nextcloud/docker-compose.yml ps | grep -q "Up "
+#       logs:
+#         - name: nextcloud
+#           command: docker compose -f /home/docker/nextcloud/docker-compose.yml logs -f --tail=100
+#   actions:
+#     uninstall: docker compose -f /home/docker/nextcloud/docker-compose.yml down
+#     start:    docker compose -f /home/docker/nextcloud/docker-compose.yml up -d
+#     stop:     docker compose -f /home/docker/nextcloud/docker-compose.yml down
+#     restart:  docker compose -f /home/docker/nextcloud/docker-compose.yml restart
+#     reload:   docker compose -f /home/docker/nextcloud/docker-compose.yml up -d
+```
+
+Fields:
+
+- **`short_description` / `description`** — title and longer text shown in the
+  WebUI service list.
+- **`author`, `version`, `license`, `copyright`, `min_ansible_version`,
+  `platforms`, `category`** — informational metadata.
+- **`service_control.services[]`** — one entry per container the service
+  consists of:
+  - **`name`**, **`type: docker`**, **`compose_file`** — identity and compose
+    file location.
+  - **`status`** — a shell command whose **exit code** tells the WebUI the
+    state: `0` = running, `2`/`4` = not installed, anything else = stopped/error.
+  - **`logs[]`** — each item has a `name` and a `command` used for live log
+    following in the WebUI.
+- **`actions`** — a mapping of action name → shell command. Every key becomes a
+  button in the WebUI (common names: `start`, `stop`, `restart`, `reload`,
+  `uninstall`). Each command is resolved on the WebUI side and executed on the
+  host via `symbios-exec.sh`.
+
+> Secrets: only runtime-generated placeholders (`!...!`) ever appear in a
+> playbook. Real credentials live in `/home/docker/<name>/env` and are never
+> part of the repo or the `# docs:` block.
 
 ### Anatomy of a service playbook
 
