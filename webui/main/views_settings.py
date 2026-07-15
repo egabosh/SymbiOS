@@ -379,9 +379,9 @@ def _read_host_authorized_keys():
 
 
 def _is_system_ssh_key(line):
-    # Forced-command keys (e.g. the WebUI's own symbios-exec gateway key) are
-    # managed automatically and must never be edited or deleted via the UI.
-    return "command=" in line
+    # The WebUI's own exec-gateway key (comment "symbios-webui") is deployed
+    # automatically and must never be edited or deleted via the UI.
+    return "symbios-webui" in line
 
 
 def settings_ssh_keys(request):
@@ -392,14 +392,14 @@ def settings_ssh_keys(request):
         config["all"]["vars"] = {}
     vars_ = config["all"]["vars"]
 
-    # Live host keys, split into user-managed and system (forced-command) keys.
+    # Live host keys, split into user-managed and system (exec-gateway) keys.
     host_keys = _read_host_authorized_keys()
     system_keys = [k for k in host_keys if _is_system_ssh_key(k)]
     user_keys_from_host = [k for k in host_keys if not _is_system_ssh_key(k)]
 
     # Seed / repair the inventory-managed user key list from the live host file
     # the first time (or when empty) so the UI reflects reality. The system
-    # forced-command key is never part of the editable list.
+    # exec-gateway key is never part of the editable list.
     managed = vars_.get("ssh_authorized_keys")
     if not isinstance(managed, list) or len(managed) == 0:
         vars_["ssh_authorized_keys"] = list(user_keys_from_host)
