@@ -187,17 +187,20 @@ let logPollTimer = null;
 // (selection survives). If it only grew we append just the new tail via
 // insertAdjacentHTML, which leaves existing nodes (and any selection in them)
 // intact. Only when the text is reshaped do we replace the whole innerHTML.
+// While the user has a selection in the pane we never auto-scroll to the
+// bottom, so marking text freezes the view without halting the incoming log.
 function updateLogPane(el, html) {
   const prev = el.dataset.fullText || '';
   if (html === prev) return;
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const hasSel = paneHasSelection(el);
   const prevTop = el.scrollTop;
   if (prev && html.startsWith(prev)) {
     el.insertAdjacentHTML('beforeend', html.slice(prev.length));
   } else {
     el.innerHTML = html;
   }
-  el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
+  el.scrollTop = (nearBottom && !hasSel) ? el.scrollHeight : prevTop;
   el.dataset.fullText = html;
 }
 

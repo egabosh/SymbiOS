@@ -111,6 +111,15 @@
         if (depth > 0) html += '</span>'.repeat(depth);
         return html;
     }
+
+    /* True if the user currently holds a (non-collapsed) text selection inside
+       el. Used so that marking text in a live log/output pane freezes the
+       auto-scroll instead of yanking the view to the bottom. */
+    function paneHasSelection(el) {
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+        return el.contains(sel.anchorNode) && el.contains(sel.focusNode);
+    }
     </script>
     {% block scripts %}{% endblock %}
 
