@@ -20,7 +20,7 @@
 #     - name: firewall
 #       command: tail -F -n 1000 /var/log/firewall.log
 #     - name: ufw
-#       command: tail -F -n 10000 /var/log/syslog | grep =ufw 
+#       command: tail -F -n 10000 /var/log/syslog | grep ufw
 #   actions:
 #     start: ufw --force enable
 #     stop: ufw disable
