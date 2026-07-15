@@ -145,35 +145,35 @@ document.querySelectorAll('[data-action]').forEach(btn => {
     const action = btn.dataset.action;
     const out = document.getElementById('action-output');
     const cmdHeader = '$ ' + action + '\n\n';
-    out.textContent = cmdHeader + 'starting…';
+    out.innerHTML = ansiToHtml(cmdHeader + 'starting…');
     setActionRunning(btn);
     const fd = new FormData();
     fd.append('action', action);
     fetch('/services/' + PLAYBOOK + '/action/', {method: 'POST', body: fd})
       .then(r => r.json())
       .then(d => {
-        if (d.error) { out.textContent = 'ERROR: ' + d.error; clearActionRunning(); return; }
-        if (!d.job) { out.textContent = 'no job returned'; clearActionRunning(); return; }
+        if (d.error) { out.innerHTML = ansiToHtml('ERROR: ' + d.error); clearActionRunning(); return; }
+        if (!d.job) { out.innerHTML = ansiToHtml('no job returned'); clearActionRunning(); return; }
         const header = '$ ' + (d.command || action) + '\n\n';
         const poll = () => {
           fetch('/services/' + PLAYBOOK + '/output/?job=' + d.job)
             .then(r => r.json())
             .then(o => {
-              out.textContent = header + o.output;
+              out.innerHTML = ansiToHtml(header + o.output);
               out.scrollTop = out.scrollHeight;
               if (o.done) {
-                out.textContent += '\n[done] ' + (o.success ? 'OK' : 'FAILED') + '\n';
+                out.innerHTML += ansiToHtml('\n[done] ' + (o.success ? 'OK' : 'FAILED') + '\n');
                 clearActionRunning();
                 loadStatus();
                 return;
               }
               setTimeout(poll, 1000);
             })
-            .catch(e => { out.textContent += '\n[error] ' + e + '\n'; clearActionRunning(); });
-        };
-        poll();
-      })
-      .catch(e => { out.textContent = 'error: ' + e; clearActionRunning(); });
+            .catch(e => { out.innerHTML += ansiToHtml('\n[error] ' + e + '\n'); clearActionRunning(); });
+         };
+         poll();
+       })
+       .catch(e => { out.innerHTML = ansiToHtml('error: ' + e); clearActionRunning(); });
   });
 });
 
@@ -206,10 +206,10 @@ function startLog(name) {
   fetch('/services/' + PLAYBOOK + '/log-start/', {method: 'POST', body: fd})
     .then(r => r.json())
     .then(d => {
-      if (d.error) { if (unitPre[name]) unitPre[name].textContent = 'ERROR: ' + d.error; return; }
+      if (d.error) { if (unitPre[name]) unitPre[name].innerHTML = ansiToHtml('ERROR: ' + d.error); return; }
       unitJobs[name] = d.job;
     })
-    .catch(e => { if (unitPre[name]) unitPre[name].textContent = 'error: ' + e; });
+    .catch(e => { if (unitPre[name]) unitPre[name].innerHTML = ansiToHtml('error: ' + e); });
 }
 
 function stopLog(name) {
@@ -229,7 +229,7 @@ function pollLogs() {
       .then(o => {
         const pre = unitPre[name];
         if (!pre) return;
-        pre.textContent = o.output || '';
+        pre.innerHTML = ansiToHtml(o.output || '');
         pre.scrollTop = pre.scrollHeight;
       })
       .catch(() => {});

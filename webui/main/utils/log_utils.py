@@ -150,32 +150,45 @@ def _docker_logs_stream(container_id, offset=0):
     total_lines = 0
     try:
         with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-            all_lines = []
-            for line in f:
-                all_lines.append(line)
-            total_lines = len(all_lines)
+            raw = f.read()
 
-            if offset == 0:
-                raw_lines = all_lines[-500:]
-            elif offset > total_lines:
-                raw_lines = all_lines[-500:]
-            else:
-                raw_lines = all_lines[offset:]
+        # The json-file log driver writes one JSON object per *entry*, but a
+        # single entry's "log" field may contain embedded newlines (multi-line
+        # stack traces). So we must not parse line-by-line; instead decode the
+        # concatenated stream of JSON objects, preserving ANSI color codes
+        # (the WebUI renders them) and embedded newlines (shown as multiple
+        # visual lines).
+        decoder = json.JSONDecoder()
+        entries = []
+        idx = 0
+        n = len(raw)
+        while idx < n:
+            while idx < n and raw[idx] in " \r\n\t":
+                idx += 1
+            if idx >= n:
+                break
+            try:
+                obj, end = decoder.raw_decode(raw, idx)
+            except json.JSONDecodeError:
+                # Fall back to the rest of the file as one raw blob.
+                entries.append(raw[idx:])
+                break
+            idx = end
+            msg = obj.get("log", "")
+            if isinstance(msg, str) and msg.endswith("\n"):
+                msg = msg[:-1]
+            entries.append(msg)
 
-        lines_to_send = []
-        for line in raw_lines:
-            line = line.strip()
-            if line:
-                try:
-                    entry = json.loads(line)
-                    msg = entry.get("log", line)
-                    ts = entry.get("time", "")
-                except json.JSONDecodeError:
-                    msg = line
-                    ts = ""
-                lines_to_send.append(msg)
-            else:
-                lines_to_send.append("")
+        total_lines = len(entries)
+
+        if offset == 0:
+            raw_lines = entries[-500:]
+        elif offset > total_lines:
+            raw_lines = entries[-500:]
+        else:
+            raw_lines = entries[offset:]
+
+        lines_to_send = [line if isinstance(line, str) else str(line) for line in raw_lines]
     except FileNotFoundError:
         pass
 
