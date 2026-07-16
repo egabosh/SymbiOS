@@ -3,7 +3,7 @@ from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from .views import _get_inventory_config, _save_inventory_config, _safe_write, CONFIG_PATH
-from .utils.ssh_exec import run_playbook
+from .utils.ssh_exec import run_playbook, run_command
 
 import urllib.request
 import urllib.error
@@ -651,3 +651,301 @@ def settings_backup_test(request):
         return JsonResponse({'ok': False, 'error': 'SSH client not found on the server.'})
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Disk / Home partition management
+# ---------------------------------------------------------------------------
+
+@login_required
+def settings_disk(request):
+    config = _get_inventory_config()
+    vars_ = config.get('all', {}).get('vars', {})
+    return render(request, 'main/settings_disk.html', {'vars': vars_})
+
+
+@login_required
+def settings_disk_list(request):
+    """AJAX GET — list block devices via lsblk."""
+    ok, stdout, stderr = run_command(
+        'lsblk -J -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,TRAN,RM',
+        timeout=10)
+    if not ok:
+        return JsonResponse({'ok': False, 'error': stderr or 'lsblk failed'})
+    try:
+        data = json.loads(stdout)
+        devices = data.get('blockdevices', [])
+        # Filter: only show real disks and partitions, skip loop, ram, etc.
+        filtered = []
+        for dev in devices:
+            if dev.get('name', '').startswith(('loop', 'ram', 'sr', 'zram')):
+                continue
+            filtered.append(_describe_block(dev))
+        return JsonResponse({'ok': True, 'devices': filtered})
+    except json.JSONDecodeError as e:
+        return JsonResponse({'ok': False, 'error': f'Failed to parse lsblk: {e}'})
+
+
+def _describe_block(dev):
+    """Build a flat description dict for a block device (recursive for children)."""
+    item = {
+        'name': dev.get('name', ''),
+        'path': '/dev/' + dev.get('name', ''),
+        'size': dev.get('size', ''),
+        'type': dev.get('type', ''),
+        'fstype': dev.get('fstype') or '',
+        'mountpoint': dev.get('mountpoint') or '',
+        'model': (dev.get('model') or '').strip(),
+        'uuid': dev.get('uuid') or '',
+        'tran': dev.get('tran') or '',
+        'rm': dev.get('rm', False),
+        'children': [],
+    }
+    for child in dev.get('children', []) or []:
+        item['children'].append(_describe_block(child))
+    return item
+
+
+@login_required
+def settings_disk_status(request):
+    """AJAX GET — check /home mount status and LUKS status."""
+    result = {
+        'home_device': '',
+        'home_fstype': '',
+        'home_size': '',
+        'home_used': '',
+        'home_avail': '',
+        'luks_name': '',
+        'luks_device': '',
+        'luks_open': False,
+        'needs_unlock': False,
+    }
+
+    # Check what /home is mounted on
+    ok, stdout, _ = run_command("df -hT /home | tail -1", timeout=5)
+    if ok and stdout.strip():
+        parts = stdout.strip().split()
+        if len(parts) >= 7:
+            result['home_device'] = parts[0]
+            result['home_size'] = parts[2]
+            result['home_used'] = parts[3]
+            result['home_avail'] = parts[4]
+            result['home_fstype'] = parts[1]
+
+    # Check LUKS status
+    ok, stdout, _ = run_command("lsblk -J -o NAME,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null", timeout=10)
+    if ok:
+        try:
+            data = json.loads(stdout)
+            for dev in data.get('blockdevices', []):
+                _check_luks_recursive(dev, result)
+        except json.JSONDecodeError:
+            pass
+
+    # Also check for locked LUKS volumes
+    ok, stdout, _ = run_command(
+        "ls /dev/mapper/ 2>/dev/null | grep -E 'home|luks' || true", timeout=5)
+    if ok and stdout.strip():
+        result['luks_open'] = True
+
+    return JsonResponse(result)
+
+
+def _check_luks_recursive(dev, result):
+    """Find LUKS devices in the block device tree."""
+    if dev.get('fstype') == 'crypto_LUKS':
+        name = dev.get('name', '')
+        result['luks_name'] = name
+        result['luks_device'] = '/dev/' + name
+        # Check if it's open
+        uuid = dev.get('uuid', '')
+        ok, stdout, _ = run_command(
+            f"cryptsetup status {name} 2>/dev/null | head -1 || true", timeout=5)
+        if ok and 'is active' in stdout:
+            result['luks_open'] = True
+        elif ok and 'not found' in stdout.lower():
+            result['needs_unlock'] = True
+    for child in dev.get('children', []) or []:
+        _check_luks_recursive(child, result)
+
+
+@login_required
+def settings_disk_setup(request):
+    """AJAX POST — format, optionally encrypt, and mount a disk as /home."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    device = request.POST.get('device', '').strip()
+    encrypt = request.POST.get('encrypt', 'no') == 'yes'
+    password = request.POST.get('password', '').strip()
+
+    if not device:
+        return JsonResponse({'ok': False, 'error': 'No device selected'})
+
+    if not device.startswith('/dev/'):
+        return JsonResponse({'ok': False, 'error': 'Invalid device path'})
+
+    if encrypt and not password:
+        return JsonResponse({'ok': False, 'error': 'Password required for LUKS encryption'})
+
+    # Safety: check the device is not the root device
+    ok, stdout, _ = run_command("findmnt -n -o SOURCE /", timeout=5)
+    if ok:
+        root_dev = stdout.strip()
+        if device in root_dev or root_dev in device:
+            return JsonResponse({'ok': False, 'error': 'Cannot format the root device!'})
+
+    # Safety: check the device is not mounted (except as swap etc.)
+    ok, stdout, _ = run_command(f"findmnt -n -o TARGET {device} 2>/dev/null || true", timeout=5)
+    if ok and stdout.strip():
+        mountpoint = stdout.strip()
+        if mountpoint == '/home':
+            return JsonResponse({'ok': False, 'error': 'This device is already mounted as /home'})
+        return JsonResponse({'ok': False, 'error': f'Device is mounted at {mountpoint}. Unmount it first.'})
+
+    # Build the setup commands
+    cmds = []
+
+    # Unmount if mounted anywhere
+    cmds.append(f"umount {device} 2>/dev/null || true")
+
+    luks_name = 'home-luks'
+
+    if encrypt:
+        # LUKS format
+        cmds.append(f"echo '{password}' | cryptsetup luksFormat --batch-mode {device}")
+        # Open LUKS
+        cmds.append(f"echo '{password}' | cryptsetup open {device} {luks_name}")
+        # Get the mapper path for mkfs
+        target = f'/dev/mapper/{luks_name}'
+    else:
+        target = device
+
+    # Format as ext4
+    cmds.append(f"mkfs.ext4 -F {target}")
+
+    # Mount temporarily
+    cmds.append("mkdir -p /home.new")
+    cmds.append(f"mount {target} /home.new")
+
+    # Copy data
+    cmds.append("rsync -av --exclude='.trashed-*' /home/ /home.new/")
+
+    # Get UUID for fstab
+    if encrypt:
+        cmds.append(f"UUID=$(blkid -s UUID -o value {device})")
+    else:
+        cmds.append(f"UUID=$(blkid -s UUID -o value {device})")
+
+    # Unmount old /home (if it's a separate partition)
+    cmds.append("umount /home 2>/dev/null || true")
+
+    # Remove old /home contents if it was on root fs
+    cmds.append("rm -rf /home/* 2>/dev/null || true")
+
+    # Update fstab - remove any existing /home entry
+    cmds.append("sed -i '\\#.*[[:space:]]/home[[:space:]]#d' /etc/fstab")
+
+    # Add new fstab entry
+    if encrypt:
+        cmds.append("echo \"UUID=$UUID /home ext4 defaults,noatime 0 2\" >> /etc/fstab")
+    else:
+        cmds.append("echo \"UUID=$UUID /home ext4 defaults,noatime 0 2\" >> /etc/fstab")
+
+    # Mount new /home
+    cmds.append("mount /home")
+
+    # Store LUKS info in inventory if encrypted
+    if encrypt:
+        cmds.append(f"echo '{luks_name}' > /config/.luks-name 2>/dev/null || true")
+
+    full_cmd = ' && '.join(cmds)
+
+    # Run via run_command (longer timeout for rsync)
+    ok, stdout, stderr = run_command(full_cmd, timeout=600)
+    output = stdout
+    if stderr:
+        output = output + '\n' + stderr
+
+    if ok:
+        return JsonResponse({'ok': True, 'message': 'Disk setup complete. /home is now on the new partition.'})
+    else:
+        return JsonResponse({'ok': False, 'error': f'Setup failed:\n{output[-2000:]}'})
+
+
+@login_required
+def settings_disk_unlock(request):
+    """AJAX POST — unlock a LUKS-encrypted /home volume."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    password = request.POST.get('password', '').strip()
+    if not password:
+        return JsonResponse({'ok': False, 'error': 'Password required'})
+
+    # Find the LUKS device
+    ok, stdout, _ = run_command(
+        "lsblk -J -o NAME,TYPE,FSTYPE 2>/dev/null", timeout=10)
+    luks_device = ''
+    luks_name = 'home-luks'
+    if ok:
+        try:
+            data = json.loads(stdout)
+            for dev in data.get('blockdevices', []):
+                luks_device = _find_luks_device(dev)
+                if luks_device:
+                    break
+        except json.JSONDecodeError:
+            pass
+
+    if not luks_device:
+        # Check if already open
+        ok, stdout, _ = run_command(
+            "ls /dev/mapper/home-luks 2>/dev/null && echo exists || echo missing", timeout=5)
+        if ok and 'exists' in stdout:
+            # Already open, just mount
+            run_command("mkdir -p /home && mount /dev/mapper/home-luks /home", timeout=30)
+            return JsonResponse({'ok': True, 'message': 'Volume already unlocked. /home mounted.'})
+        return JsonResponse({'ok': False, 'error': 'No LUKS device found'})
+
+    # Unlock the device
+    ok, stdout, stderr = run_command(
+        f"echo '{password}' | cryptsetup open {luks_device} {luks_name}", timeout=30)
+    if not ok:
+        if 'No key available' in (stderr + stdout):
+            return JsonResponse({'ok': False, 'error': 'Wrong password or no key available.'})
+        return JsonResponse({'ok': False, 'error': f'Failed to unlock: {stderr or stdout}'})
+
+    # Mount /home
+    ok, stdout, stderr = run_command(
+        "mkdir -p /home && mount /dev/mapper/home-luks /home", timeout=30)
+    if not ok:
+        return JsonResponse({'ok': False, 'error': f'Unlocked but mount failed: {stderr}'})
+
+    return JsonResponse({'ok': True, 'message': 'Volume unlocked and /home mounted.'})
+
+
+def _find_luks_device(dev):
+    """Find a LUKS device in the block device tree."""
+    if dev.get('fstype') == 'crypto_LUKS':
+        return '/dev/' + dev.get('name', '')
+    for child in dev.get('children', []) or []:
+        result = _find_luks_device(child)
+        if result:
+            return result
+    return ''
+
+
+@login_required
+def settings_disk_umount(request):
+    """AJAX POST — unmount and close a LUKS /home volume."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    cmds = [
+        'umount /home 2>/dev/null || true',
+        'cryptsetup close home-luks 2>/dev/null || true',
+    ]
+
+    ok, stdout, stderr = run_command(' && '.join(cmds), timeout=30)
+    return JsonResponse({'ok': True, 'message': '/home unmounted and LUKS volume closed.'})
