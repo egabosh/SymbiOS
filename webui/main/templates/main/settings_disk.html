@@ -178,6 +178,7 @@ function loadStatus() {
       unlockRow.style.display = 'none';
 
       if (data.home_device) {
+        window._homeSize = data.home_size;
         var html = '<div class="row">';
         html += '<div class="col-md-3"><strong>Device:</strong><br><code>' + data.home_device + '</code></div>';
         html += '<div class="col-md-2"><strong>Size:</strong><br>' + data.home_size + '</div>';
@@ -209,6 +210,7 @@ function loadDisks() {
       }
 
       diskData = data.devices;
+      window._diskData = diskData;
 
       if (diskData.length === 0) {
         el.innerHTML = '<div class="text-muted">No block devices found</div>';
@@ -295,6 +297,29 @@ function hasMountedChildren(dev) {
   return false;
 }
 
+function findDeviceByPath(devs, path) {
+  for (var i = 0; i < devs.length; i++) {
+    if (devs[i].path === path) return devs[i];
+    if (devs[i].children) {
+      var found = findDeviceByPath(devs[i].children, path);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function parseSizeBytes(sizeStr) {
+  var match = sizeStr.match(/^([\d.]+)\s*(G|M|T|K)?/i);
+  if (!match) return 0;
+  var num = parseFloat(match[1]);
+  var unit = (match[2] || '').toUpperCase();
+  if (unit === 'T') return num * 1024 * 1024 * 1024 * 1024;
+  if (unit === 'G') return num * 1024 * 1024 * 1024;
+  if (unit === 'M') return num * 1024 * 1024;
+  if (unit === 'K') return num * 1024;
+  return num;
+}
+
 function toggleEncrypt() {
   var show = document.getElementById('setup-encrypt').checked;
   document.getElementById('encrypt-password-group').style.display = show ? '' : 'none';
@@ -316,6 +341,16 @@ function setupDisk(e) {
   if (encrypt && !password) {
     result.innerHTML = '<span class="text-danger">Enter an encryption passphrase.</span>';
     return false;
+  }
+
+  // Frontend size check: compare device size with /home size
+  var devInfo = findDeviceByPath(window._diskData || [], device);
+  if (devInfo) {
+    var devBytes = parseSizeBytes(devInfo.size);
+    var homeBytes = parseSizeBytes(window._homeSize || '0');
+    if (devBytes > 0 && homeBytes > 0 && devBytes < homeBytes * 1.1) {
+      result.innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Disk (' + devInfo.size + ') may be too small for /home (' + window._homeSize + '). The backend will verify before proceeding.</span>';
+    }
   }
 
   if (!confirm('WARNING: All data on ' + device + ' will be erased!\n\nThis will:\n1. Format ' + device + ' as ext4' +

@@ -803,6 +803,36 @@ def settings_disk_setup(request):
             return JsonResponse({'ok': False, 'error': 'This device is already mounted as /home'})
         return JsonResponse({'ok': False, 'error': f'Device is mounted at {mountpoint}. Unmount it first.'})
 
+    # Size check: ensure target disk has enough space for /home
+    ok, stdout, _ = run_command("du -sb /home/ 2>/dev/null | awk '{print $1}'", timeout=30)
+    if ok and stdout.strip():
+        try:
+            home_size = int(stdout.strip())
+        except ValueError:
+            home_size = 0
+    else:
+        return JsonResponse({'ok': False, 'error': 'Could not determine /home size'})
+
+    # Check raw disk size in bytes (before LUKS/mkfs overhead)
+    ok, stdout, _ = run_command(f"blockdev --getsize64 {device} 2>/dev/null", timeout=5)
+    if ok and stdout.strip():
+        try:
+            disk_size = int(stdout.strip())
+        except ValueError:
+            disk_size = 0
+    else:
+        return JsonResponse({'ok': False, 'error': 'Could not determine disk size'})
+
+    # LUKS metadata overhead ~16MB, ext4 metadata ~1%, add 5% safety margin
+    overhead = max(16 * 1024 * 1024, home_size // 20)
+    if disk_size < home_size + overhead:
+        home_gb = home_size / (1024**3)
+        disk_gb = disk_size / (1024**3)
+        return JsonResponse({
+            'ok': False,
+            'error': f'Disk too small! /home is {home_gb:.1f}G but disk is only {disk_gb:.1f}G. Need at least {home_gb + overhead / (1024**3):.1f}G.'
+        })
+
     # Build the setup commands
     cmds = []
 
