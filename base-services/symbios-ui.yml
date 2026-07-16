@@ -306,6 +306,41 @@
           [Install]
           WantedBy=timers.target
 
+    - name: Copy boot unlock server script
+      ansible.builtin.copy:
+        src: /home/SymbiOS/webui/main/boot_unlock.py
+        dest: /usr/local/sbin/symbios-boot-unlock.py
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install symbios-boot-unlock systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-boot-unlock.service
+        content: |
+          [Unit]
+          Description=SymbiOS boot unlock for encrypted /home
+          Before=docker.service
+          After=network.target local-fs.target
+          DefaultDependencies=no
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/bin/python3 /usr/local/sbin/symbios-boot-unlock.py
+          # Allow binding to privileged ports 80/443
+          AmbientCapabilities=CAP_NET_BIND_SERVICE
+          # When unlock-server stops itself, Docker can take over 80/443
+          Restart=no
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable symbios-boot-unlock service
+      ansible.builtin.systemd:
+        name: symbios-boot-unlock.service
+        enabled: yes
+        state: started
+
     - name: Reload systemd
       ansible.builtin.systemd:
         daemon_reload: yes
