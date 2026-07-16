@@ -321,7 +321,7 @@
           [Unit]
           Description=SymbiOS boot unlock for encrypted /home
           Before=docker.service
-          After=network.target local-fs.target
+          After=network.target local-fs.target ssh.service sshd.service
           DefaultDependencies=no
 
           [Service]
