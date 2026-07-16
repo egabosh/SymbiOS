@@ -272,7 +272,9 @@ function addDeviceOptions(dev, select, prefix) {
   prefix = prefix || '';
   // Only offer disks/partitions that are not root, not mounted, and not boot
   if (dev.type === 'part' || dev.type === 'disk') {
-    if (dev.mountpoint !== '/' && dev.mountpoint !== '/boot/firmware' && dev.mountpoint !== '/home' && !dev.mountpoint) {
+    // Skip if this device or any child is mounted
+    var hasMountedChild = hasMountedChildren(dev);
+    if (dev.mountpoint !== '/' && dev.mountpoint !== '/boot/firmware' && dev.mountpoint !== '/home' && !dev.mountpoint && !hasMountedChild) {
       var opt = document.createElement('option');
       opt.value = dev.path;
       opt.textContent = prefix + dev.path + ' (' + dev.size + ') ' + (dev.fstype || 'empty') + (dev.model ? ' - ' + dev.model : '');
@@ -282,6 +284,15 @@ function addDeviceOptions(dev, select, prefix) {
   (dev.children || []).forEach(function(child) {
     addDeviceOptions(child, select, '  ');
   });
+}
+
+function hasMountedChildren(dev) {
+  for (var i = 0; i < (dev.children || []).length; i++) {
+    var child = dev.children[i];
+    if (child.mountpoint) return true;
+    if (hasMountedChildren(child)) return true;
+  }
+  return false;
 }
 
 function toggleEncrypt() {
