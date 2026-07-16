@@ -439,15 +439,26 @@
             # Fetch upstream first so we can tell fast-forward from divergence.
             git fetch origin || g_echo_error "git fetch failed"
             # Fast-forward when possible. If the local checkout has diverged
-            # (it carries commits not present upstream), reset hard onto the
-            # upstream branch so the updater never stalls on a non-fast-
-            # forwardable pull; any local drift in the mirror is discarded.
+            # (it carries commits not present upstream), stash local changes,
+            # merge, then restore them. Conflicts are warned about but never
+            # silently discarded.
             if git merge --ff-only "origin/$g_branch"
             then
               g_echo_ok "SymbiOS repository updated"
             else
-              g_echo_warn "Local checkout diverged from upstream; resetting to origin/$g_branch"
-              git reset --hard "origin/$g_branch" || g_echo_error "git reset failed"
+              g_echo_warn "Local checkout diverged; stashing local changes"
+              git stash push -m "autoupdate-stash" || g_echo_error "git stash failed"
+              if git merge --ff-only "origin/$g_branch"
+              then
+                g_echo_ok "SymbiOS repository updated"
+              else
+                g_echo_error "Merge still failed after stash; resetting to origin/$g_branch"
+                git reset --hard "origin/$g_branch" || g_echo_error "git reset failed"
+              fi
+              if ! git stash pop
+              then
+                g_echo_warn "Stash pop had conflicts — resolve manually or git checkout --theirs <file>"
+              fi
             fi
           elif [[ -d "$g_symbios_dir" ]] && [[ -n "$(ls -A "$g_symbios_dir" 2>/dev/null)" ]]
           then
