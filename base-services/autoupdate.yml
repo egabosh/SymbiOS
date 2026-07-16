@@ -83,11 +83,11 @@
           if ! hostname | grep -q ".mint."
           then
 
-            if ! grep -r "non-free non-free-firmware" /etc/apt/sources.list /etc/apt/sources.list.d/*
+            if ! grep -q "non-free-firmware" /etc/apt/sources.list 2>/dev/null && ! grep -rq "non-free-firmware" /etc/apt/sources.list.d/ 2>/dev/null
             then
                g_echo_warn "Allowing non-free-firmware"
-               sed -i 's/non-free/non-free non-free-firmware/g' /etc/apt/sources.list
-               sed -i 's/non-free/non-free non-free-firmware/g' /etc/apt/sources.list.d/*
+               sed -i 's/ non-free / non-free non-free-firmware /g; s/ non-free$/ non-free non-free-firmware/' /etc/apt/sources.list
+               for f in /etc/apt/sources.list.d/*; do [ -f "$f" ] && sed -i 's/ non-free / non-free non-free-firmware /g; s/ non-free$/ non-free non-free-firmware/' "$f"; done
             fi
 
             if ! apt-get -s dist-upgrade 2>&1 | sed -e "s/'/'\\\\''/g; 1s/^/'/; \$s/\$/'/" | tee $g_tmp/sys-updatelist | egrep "^0.+, 0 .+, 0 .+ 0 .+\."
