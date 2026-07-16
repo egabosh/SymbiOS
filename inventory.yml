@@ -25,6 +25,11 @@ all:
     # ansible defaults
     ansible_user: "root"
     ansible_python_interpreter: "/usr/bin/python3"
+    # ssh/sftp backup
+    backup_server_host: ''
+    backup_server_port: ''
+    backup_server_path: ''
+    backup_server_user: ''
   hosts:
     # SymbiOS server
     localhost:
