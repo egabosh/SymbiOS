@@ -336,8 +336,7 @@ def create_https_server(port, handler):
 
 def main():
     if not check_home_encrypted():
-        print("/home is not encrypted or already unlocked, starting Docker directly")
-        start_docker()
+        print("/home is not encrypted or already unlocked, nothing to do")
         return
 
     if not generate_self_signed_cert():
