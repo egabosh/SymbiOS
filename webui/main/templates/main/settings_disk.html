@@ -1,0 +1,392 @@
+{% extends "main/base.html" %}
+{% block sidebar %}
+    {% include "main/sidebar_settings.html" %}
+{% endblock %}
+{% block content %}
+<h2><i class="bi bi-device-hdd"></i> Disk / Home</h2>
+
+<!-- Current /home status -->
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="card" id="home-status-card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-hdd"></i> Current /home</span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="refreshAll()">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body" id="home-status">
+        <span class="spinner-border spinner-border-sm"></span> Loading...
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LUKS unlock (hidden by default) -->
+<div class="row mb-3" id="unlock-row" style="display:none">
+  <div class="col-md-12">
+    <div class="card border-warning">
+      <div class="card-header bg-warning text-dark">
+        <i class="bi bi-lock-fill"></i> Encrypted /home requires unlock
+      </div>
+      <div class="card-body">
+        <p class="small mb-3">
+          The LUKS-encrypted volume for /home is locked. Enter the passphrase
+          to unlock and mount it.
+        </p>
+        <form id="unlock-form" onsubmit="return unlockVolume(event)">
+          <div class="input-group">
+            <input type="password" class="form-control" id="unlock-password"
+                   placeholder="LUKS passphrase" autofocus>
+            <button type="submit" class="btn btn-warning" id="unlock-btn">
+              <i class="bi bi-unlock"></i> Unlock
+            </button>
+          </div>
+        </form>
+        <div id="unlock-result" class="mt-2"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Available disks -->
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-disc"></i> Available Disks / Partitions
+      </div>
+      <div class="card-body" id="disk-list">
+        <span class="spinner-border spinner-border-sm"></span> Scanning...
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Setup form -->
+<div class="row">
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-gear"></i> Setup /home Partition
+      </div>
+      <div class="card-body">
+        <div class="alert alert-info small">
+          <i class="bi bi-info-circle"></i>
+          Select an unused disk or partition to format and mount as <code>/home</code>.
+          Existing data from the current <code>/home</code> will be copied automatically.
+        </div>
+
+        <form id="setup-form" onsubmit="return setupDisk(event)">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Target Device</label>
+            <select class="form-select" id="setup-device" required>
+              <option value="">-- select a device --</option>
+            </select>
+            <div id="device-info" class="form-text"></div>
+          </div>
+
+          <div class="mb-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" role="switch"
+                     id="setup-encrypt" onchange="toggleEncrypt()">
+              <label class="form-check-label" for="setup-encrypt">
+                <strong>Enable LUKS encryption</strong>
+              </label>
+            </div>
+            <div class="small text-muted">
+              The partition will be encrypted with LUKS. You will need to enter
+              the passphrase at each boot via this WebUI.
+            </div>
+          </div>
+
+          <div class="mb-3" id="encrypt-password-group" style="display:none">
+            <label class="form-label">Encryption Passphrase</label>
+            <input type="password" class="form-control" id="setup-password"
+                   placeholder="Choose a strong passphrase">
+            <div class="form-text">
+              This passphrase will be required to unlock /home after each reboot.
+              There is no recovery if you forget it.
+            </div>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary" id="setup-btn">
+              <i class="bi bi-play-fill"></i> Setup Disk
+            </button>
+            <span id="setup-result" class="align-self-center"></span>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-info-circle"></i> About
+      </div>
+      <div class="card-body small">
+        <p class="card-text">
+          Move <code>/home</code> to a dedicated disk for better performance
+          and more storage. Supports optional LUKS encryption.
+        </p>
+        <h6>How it works:</h6>
+        <ol class="ps-3 mb-2">
+          <li>Select an unused disk</li>
+          <li>Optionally enable encryption</li>
+          <li>Click "Setup Disk"</li>
+          <li>Data is copied automatically</li>
+          <li><code>/home</code> is remounted on the new disk</li>
+        </ol>
+        <div class="alert alert-warning small py-2 px-3 mb-0">
+          <i class="bi bi-exclamation-triangle-fill"></i>
+          <strong>Important:</strong> Back up your data before proceeding.
+          The target device will be <strong>completely erased</strong>.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var diskData = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+  refreshAll();
+});
+
+function refreshAll() {
+  loadStatus();
+  loadDisks();
+}
+
+function loadStatus() {
+  fetch('{% url "settings_disk_status" %}')
+    .then(r => r.json())
+    .then(data => {
+      var el = document.getElementById('home-status');
+      var unlockRow = document.getElementById('unlock-row');
+
+      if (data.luks_name && !data.luks_open) {
+        // LUKS volume is locked
+        el.innerHTML = '<div class="text-warning"><i class="bi bi-lock-fill"></i> /home is on an encrypted volume that is <strong>locked</strong></div>';
+        unlockRow.style.display = '';
+        return;
+      }
+
+      unlockRow.style.display = 'none';
+
+      if (data.home_device) {
+        var html = '<div class="row">';
+        html += '<div class="col-md-3"><strong>Device:</strong><br><code>' + data.home_device + '</code></div>';
+        html += '<div class="col-md-2"><strong>Size:</strong><br>' + data.home_size + '</div>';
+        html += '<div class="col-md-2"><strong>Used:</strong><br>' + data.home_used + '</div>';
+        html += '<div class="col-md-2"><strong>Available:</strong><br>' + data.home_avail + '</div>';
+        html += '<div class="col-md-3"><strong>Filesystem:</strong><br>' + data.home_fstype + '</div>';
+        html += '</div>';
+        el.innerHTML = html;
+      } else {
+        el.innerHTML = '<div class="text-muted">No /home partition detected (using root filesystem)</div>';
+      }
+    })
+    .catch(err => {
+      document.getElementById('home-status').innerHTML =
+        '<div class="text-danger">Failed to load status: ' + err.message + '</div>';
+    });
+}
+
+function loadDisks() {
+  fetch('{% url "settings_disk_list" %}')
+    .then(r => r.json())
+    .then(data => {
+      var el = document.getElementById('disk-list');
+      var select = document.getElementById('setup-device');
+
+      if (!data.ok) {
+        el.innerHTML = '<div class="text-danger">' + data.error + '</div>';
+        return;
+      }
+
+      diskData = data.devices;
+
+      if (diskData.length === 0) {
+        el.innerHTML = '<div class="text-muted">No block devices found</div>';
+        return;
+      }
+
+      // Build table
+      var html = '<div class="table-responsive"><table class="table table-sm align-middle">';
+      html += '<thead><tr><th>Device</th><th>Size</th><th>Type</th><th>Filesystem</th><th>Mount</th><th>Model</th><th></th></tr></thead><tbody>';
+
+      // Build select options
+      select.innerHTML = '<option value="">-- select a device --</option>';
+
+      diskData.forEach(function(dev) {
+        html += renderDevice(dev, 0);
+        addDeviceOptions(dev, select);
+      });
+
+      html += '</tbody></table></div>';
+      el.innerHTML = html;
+    })
+    .catch(err => {
+      document.getElementById('disk-list').innerHTML =
+        '<div class="text-danger">Failed to load disks: ' + err.message + '</div>';
+    });
+}
+
+function renderDevice(dev, indent) {
+  var html = '';
+  var pad = 'padding-left: ' + (indent * 20) + 'px;';
+  var isRoot = dev.mountpoint === '/';
+  var isBoot = dev.mountpoint === '/boot/firmware';
+  var isHome = dev.mountpoint === '/home';
+  var rowClass = '';
+  if (isRoot) rowClass = 'table-danger';
+  else if (isHome) rowClass = 'table-success';
+  else if (dev.mountpoint) rowClass = 'table-warning';
+
+  html += '<tr class="' + rowClass + '">';
+  html += '<td style="' + pad + '"><code>' + dev.path + '</code></td>';
+  html += '<td>' + dev.size + '</td>';
+  html += '<td>' + dev.type + '</td>';
+  html += '<td>' + (dev.fstype || '<span class="text-muted">-</span>') + '</td>';
+  html += '<td>' + (dev.mountpoint || '<span class="text-muted">-</span>') + '</td>';
+  html += '<td>' + (dev.model || '<span class="text-muted">-</span>') + '</td>';
+  html += '<td>';
+  if (isRoot) html += '<span class="badge bg-danger">root</span> ';
+  if (isBoot) html += '<span class="badge bg-info">boot</span> ';
+  if (isHome) html += '<span class="badge bg-success">home</span> ';
+  if (dev.fstype === 'crypto_LUKS') html += '<span class="badge bg-warning text-dark">LUKS</span> ';
+  html += '</td>';
+  html += '</tr>';
+
+  (dev.children || []).forEach(function(child) {
+    html += renderDevice(child, indent + 1);
+  });
+  return html;
+}
+
+function addDeviceOptions(dev, select, prefix) {
+  prefix = prefix || '';
+  // Only offer disks/partitions that are not root, not mounted, and not boot
+  if (dev.type === 'part' || dev.type === 'disk') {
+    if (dev.mountpoint !== '/' && dev.mountpoint !== '/boot/firmware' && dev.mountpoint !== '/home' && !dev.mountpoint) {
+      var opt = document.createElement('option');
+      opt.value = dev.path;
+      opt.textContent = prefix + dev.path + ' (' + dev.size + ') ' + (dev.fstype || 'empty') + (dev.model ? ' - ' + dev.model : '');
+      select.appendChild(opt);
+    }
+  }
+  (dev.children || []).forEach(function(child) {
+    addDeviceOptions(child, select, '  ');
+  });
+}
+
+function toggleEncrypt() {
+  var show = document.getElementById('setup-encrypt').checked;
+  document.getElementById('encrypt-password-group').style.display = show ? '' : 'none';
+}
+
+function setupDisk(e) {
+  e.preventDefault();
+  var device = document.getElementById('setup-device').value;
+  var encrypt = document.getElementById('setup-encrypt').checked;
+  var password = document.getElementById('setup-password').value;
+  var btn = document.getElementById('setup-btn');
+  var result = document.getElementById('setup-result');
+
+  if (!device) {
+    result.innerHTML = '<span class="text-danger">Select a device first.</span>';
+    return false;
+  }
+
+  if (encrypt && !password) {
+    result.innerHTML = '<span class="text-danger">Enter an encryption passphrase.</span>';
+    return false;
+  }
+
+  if (!confirm('WARNING: All data on ' + device + ' will be erased!\n\nThis will:\n1. Format ' + device + ' as ext4' +
+      (encrypt ? '\n2. Encrypt with LUKS' : '') +
+      '\n' + (encrypt ? '3' : '2') + '. Copy data from current /home' +
+      '\n' + (encrypt ? '4' : '3') + '. Mount as /home\n\nContinue?')) {
+    return false;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Setting up...';
+  result.innerHTML = '<span class="text-info"><i class="bi bi-hourglass-split"></i> This may take a while for large /home directories...</span>';
+
+  var formData = new FormData();
+  formData.append('device', device);
+  formData.append('encrypt', encrypt ? 'yes' : 'no');
+  formData.append('password', password);
+  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+
+  fetch('{% url "settings_disk_setup" %}', {
+    method: 'POST',
+    body: formData
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        result.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + data.message + '</span>';
+        refreshAll();
+      } else {
+        result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + data.error.replace(/\n/g, '<br>') + '</span>';
+      }
+    })
+    .catch(err => {
+      result.innerHTML = '<span class="text-danger">Error: ' + err.message + '</span>';
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-play-fill"></i> Setup Disk';
+    });
+  return false;
+}
+
+function unlockVolume(e) {
+  e.preventDefault();
+  var password = document.getElementById('unlock-password').value;
+  var btn = document.getElementById('unlock-btn');
+  var result = document.getElementById('unlock-result');
+
+  if (!password) {
+    result.innerHTML = '<span class="text-danger">Enter the passphrase.</span>';
+    return false;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Unlocking...';
+  result.innerHTML = '';
+
+  var formData = new FormData();
+  formData.append('password', password);
+  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+
+  fetch('{% url "settings_disk_unlock" %}', {
+    method: 'POST',
+    body: formData
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        result.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + data.message + '</span>';
+        setTimeout(refreshAll, 1000);
+      } else {
+        result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + data.error + '</span>';
+      }
+    })
+    .catch(err => {
+      result.innerHTML = '<span class="text-danger">Error: ' + err.message + '</span>';
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-unlock"></i> Unlock';
+    });
+  return false;
+}
+</script>
+{% endblock %}
