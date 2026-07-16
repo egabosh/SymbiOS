@@ -17,16 +17,7 @@
 #       type: systemd
 #       unit: ssh.service
 #       status: systemctl is-active ssh.service
-#     logs:
-#     - name: ssh.service
-#       command: journalctl -fu ssh.service -n 100
 #   actions:
-#     uninstall: systemctl disable --now ssh.service
-#     start: systemctl start ssh.service
-#     stop: systemctl stop ssh.service
-#     restart: systemctl restart ssh.service
-#     reload: systemctl reload ssh.service
-#
 
 ---
 - name: Basic Debian Linux Hardening

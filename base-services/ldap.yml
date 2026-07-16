@@ -19,14 +19,11 @@
 #       status: test -d /home/docker/ldap || exit 2; docker compose -f /home/docker/ldap/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: ldap
-#       command: docker compose -f /home/docker/ldap/docker-compose.yml logs -f --tail=100
+#       command: docker compose -f /home/docker/ldap/docker-compose.yml logs -f --tail=1000
 #   actions:
-#     uninstall: docker compose -f /home/docker/ldap/docker-compose.yml down
 #     start: docker compose -f /home/docker/ldap/docker-compose.yml up -d
 #     stop: docker compose -f /home/docker/ldap/docker-compose.yml down
 #     restart: docker compose -f /home/docker/ldap/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/ldap/docker-compose.yml up -d
-#
 
 ---
 - name: ldap

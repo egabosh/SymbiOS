@@ -1,6 +1,6 @@
 # docs:
 #   short_description: Install and configure Docker
-#   description: Installs the Docker engine and compose plugin, configures storage/driver and daemon settings, and prepares the container runtime used by all SymbiOS services.
+#   description: Installs the Docker engine and compose plugin, configures storage/driver and daemon settings, and prepares the container runtime used by SymbiOS services.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -23,16 +23,11 @@
 #       status: systemctl is-active containerd.service
 #     logs:
 #     - name: docker.service
-#       command: journalctl -fu docker.service -n 100
+#       command: journalctl -fu docker.service -n 1000
 #     - name: containerd.service
-#       command: journalctl -fu containerd.service -n 100
+#       command: journalctl -fu containerd.service -n 1000
 #   actions:
-#     uninstall: systemctl disable --now docker.service ; systemctl disable --now containerd.service
-#     start: systemctl start docker.service ; systemctl start containerd.service
-#     stop: systemctl stop docker.service ; systemctl stop containerd.service
 #     restart: systemctl restart docker.service ; systemctl restart containerd.service
-#     reload: systemctl reload docker.service ; systemctl reload containerd.service
-#
 
 ---
 

@@ -26,19 +26,25 @@
 #       unit: postfix.service
 #       status: systemctl is-active postfix.service
 #     logs:
-#     - name: ssh.service
-#       command: journalctl -fu ssh.service -n 100
-#     - name: rsyslog.service
-#       command: journalctl -fu rsyslog.service -n 100
-#     - name: postfix.service
-#       command: journalctl -fu postfix.service -n 100
+#     - name: GaboshLib
+#       command: tail -F -n 1000 /var/log/g_bash-scripts.log
+#     - name: DPKG
+#       command: tail -F -n 1000 /var/log/dpkg.log
+#     - name: Cron
+#       command: tail -F -n 1000 /var/log/cron.log
+#     - name: System
+#       command: tail -F -n 1000 /var/log/messages
+#     - name: Kernel
+#       command: tail -F -n 1000 /var/log/kernel.log
+#     - name: Auth
+#       command: tail -F -n 1000 /var/log/auth.log
+#     - name: SSH
+#       command: tail -F -n 1000 /var/log/sshd.log
+#     - name: Systemd
+#       command: tail -F -n 1000 /var/log/systemd.log
+#     - name: mail
+#       command: tail -F -n 1000 /var/log/mail.log
 #   actions:
-#     uninstall: systemctl disable --now ssh.service ; systemctl disable --now rsyslog.service ; systemctl disable --now postfix.service
-#     start: systemctl start ssh.service ; systemctl start rsyslog.service ; systemctl start postfix.service
-#     stop: systemctl stop ssh.service ; systemctl stop rsyslog.service ; systemctl stop postfix.service
-#     restart: systemctl restart ssh.service ; systemctl restart rsyslog.service ; systemctl restart postfix.service
-#     reload: systemctl reload ssh.service ; systemctl reload rsyslog.service ; systemctl reload postfix.service
-#
 
 ---
 - name: Basic SymbiOS Setup
