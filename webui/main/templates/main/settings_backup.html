@@ -1,0 +1,133 @@
+{% extends "main/base.html" %}
+{% block sidebar %}
+    {% include "main/sidebar_settings.html" %}
+{% endblock %}
+{% block content %}
+<h2><i class="bi bi-cloud-arrow-up"></i> Backup</h2>
+
+<div class="row">
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-hdd-network"></i> SSH/SFTP Backup Server
+      </div>
+      <div class="card-body">
+        <form method="post" id="backup-form">
+          {% csrf_token %}
+
+          <div class="mb-3">
+            <label class="form-label">Hostname / IP</label>
+            <input type="text" class="form-control" name="backup_server_host" id="backup_host"
+                   value="{{ vars.backup_server_host|default:'' }}"
+                   placeholder="backup.example.com">
+          </div>
+
+          <div class="row mb-3">
+            <div class="col-md-4">
+              <label class="form-label">Port</label>
+              <input type="number" class="form-control" name="backup_server_port" id="backup_port"
+                     value="{{ vars.backup_server_port|default:'22' }}"
+                     placeholder="22" min="1" max="65535">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">User</label>
+              <input type="text" class="form-control" name="backup_server_user" id="backup_user"
+                     value="{{ vars.backup_server_user|default:'root' }}"
+                     placeholder="root">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Path</label>
+              <input type="text" class="form-control" name="backup_server_path" id="backup_path"
+                     value="{{ vars.backup_server_path|default:'' }}"
+                     placeholder="/backups/symbios">
+            </div>
+          </div>
+
+          <div class="d-flex gap-2 align-items-center">
+            <button type="button" class="btn btn-outline-secondary" id="test-btn" onclick="testConnection()">
+              <i class="bi bi-plug"></i> Test Connection
+            </button>
+            <div id="test-result" class="flex-grow-1"></div>
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-save"></i> Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-info-circle"></i> About
+      </div>
+      <div class="card-body small">
+        <p class="card-text">
+          Configure an SSH/SFTP server for automated backups. The server
+          must be reachable via SSH with key-based authentication.
+        </p>
+        <ul class="mb-2 ps-3">
+          <li>The WebUI's SSH key is used for authentication</li>
+          <li>Test the connection before saving</li>
+          <li>The remote directory must already exist</li>
+          <li>Backups are stored as timestamped files</li>
+        </ul>
+        <p class="mb-0 small text-muted">
+          <i class="bi bi-info-circle"></i>
+          Ensure the SSH key is authorized on the remote host
+          (see <a href="/settings/ssh-keys/">SSH Keys</a>).
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function testConnection() {
+  var btn = document.getElementById('test-btn');
+  var result = document.getElementById('test-result');
+
+  var host = document.getElementById('backup_host').value.trim();
+  var port = document.getElementById('backup_port').value.trim();
+  var user = document.getElementById('backup_user').value.trim();
+  var path = document.getElementById('backup_path').value.trim();
+
+  if (!host) {
+    result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> Please enter a hostname.</span>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Testing...';
+  result.innerHTML = '';
+
+  var formData = new FormData();
+  formData.append('host', host);
+  formData.append('port', port);
+  formData.append('user', user);
+  formData.append('path', path);
+  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+
+  fetch('{% url "settings_backup_test" %}', {
+    method: 'POST',
+    body: formData
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        result.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + data.message + '</span>';
+      } else {
+        result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + data.error + '</span>';
+      }
+    })
+    .catch(err => {
+      result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> Connection error: ' + err.message + '</span>';
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-plug"></i> Test Connection';
+    });
+}
+</script>
+{% endblock %}

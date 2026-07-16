@@ -545,3 +545,109 @@ def settings_config(request):
     return render(request, 'main/settings_config.html', {
         'config_content': raw_yaml,
     })
+
+
+@login_required
+def settings_backup(request):
+    config = _get_inventory_config()
+    if 'all' not in config:
+        config['all'] = {}
+    if 'vars' not in config['all']:
+        config['all']['vars'] = {}
+    vars_ = config['all']['vars']
+
+    if request.method == 'POST':
+        try:
+            vars_['backup_server_host'] = request.POST.get('backup_server_host', '').strip()
+            vars_['backup_server_port'] = request.POST.get('backup_server_port', '').strip() or '22'
+            vars_['backup_server_user'] = request.POST.get('backup_server_user', '').strip() or 'root'
+            vars_['backup_server_path'] = request.POST.get('backup_server_path', '').strip()
+            _save_inventory_config(config)
+            messages.success(request, 'Backup settings saved.')
+        except Exception as e:
+            messages.error(request, f'Error: {e}')
+        return redirect('settings_backup')
+
+    return render(request, 'main/settings_backup.html', {
+        'vars': vars_,
+    })
+
+
+@login_required
+def settings_backup_test(request):
+    """AJAX POST — test SSH/SCP connectivity to the backup server."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    host = request.POST.get('host', '').strip()
+    port = request.POST.get('port', '').strip() or '22'
+    user = request.POST.get('user', '').strip() or 'root'
+    path = request.POST.get('path', '').strip()
+
+    if not host:
+        return JsonResponse({'ok': False, 'error': 'Host is required'})
+
+    try:
+        port_int = int(port)
+        if port_int < 1 or port_int > 65535:
+            return JsonResponse({'ok': False, 'error': 'Invalid port number'})
+    except ValueError:
+        return JsonResponse({'ok': False, 'error': 'Port must be a number'})
+
+    # Use the WebUI's own SSH key for the test
+    import subprocess
+    key_path = '/config/.ssh/id_symbios'
+    known_hosts = '/config/.ssh/known_hosts'
+
+    cmd = [
+        'ssh',
+        '-i', key_path,
+        '-o', 'StrictHostKeyChecking=no',
+        '-o', 'ConnectTimeout=10',
+        '-o', 'BatchMode=yes',
+        '-p', port,
+        f'{user}@{host}',
+        'echo ok',
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            # Also test the path if provided
+            if path:
+                cmd_path = [
+                    'ssh',
+                    '-i', key_path,
+                    '-o', 'StrictHostKeyChecking=no',
+                    '-o', 'ConnectTimeout=10',
+                    '-o', 'BatchMode=yes',
+                    '-p', port,
+                    f'{user}@{host}',
+                    f'test -d {path} && echo path_ok || echo path_missing',
+                ]
+                result_path = subprocess.run(cmd_path, capture_output=True, text=True, timeout=15)
+                if 'path_ok' in result_path.stdout:
+                    return JsonResponse({'ok': True, 'message': f'Connection successful. Directory {path} exists.'})
+                elif 'path_missing' in result_path.stdout:
+                    return JsonResponse({'ok': False, 'error': f'Connection successful, but directory {path} does not exist on the remote host.'})
+                else:
+                    return JsonResponse({'ok': False, 'error': f'Connection successful, but could not verify path: {result_path.stderr.strip()}'})
+            return JsonResponse({'ok': True, 'message': 'Connection successful.'})
+        else:
+            stderr = result.stderr.strip()
+            if 'Permission denied' in stderr:
+                return JsonResponse({'ok': False, 'error': 'Connection failed: Permission denied. Check that the SSH key is authorized on the remote host.'})
+            elif 'Connection refused' in stderr:
+                return JsonResponse({'ok': False, 'error': f'Connection refused on port {port}. Is SSH running?'})
+            elif 'timed out' in stderr.lower() or 'timeout' in stderr.lower():
+                return JsonResponse({'ok': False, 'error': f'Connection timed out. Is {host} reachable?'})
+            elif 'No route to host' in stderr:
+                return JsonResponse({'ok': False, 'error': f'No route to host {host}. Is the host reachable?'})
+            else:
+                return JsonResponse({'ok': False, 'error': f'Connection failed: {stderr}'})
+    except subprocess.TimeoutExpired:
+        return JsonResponse({'ok': False, 'error': 'Connection timed out (15s). Is the host reachable?'})
+    except FileNotFoundError:
+        return JsonResponse({'ok': False, 'error': 'SSH client not found on the server.'})
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)})
