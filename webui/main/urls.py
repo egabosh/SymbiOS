@@ -32,6 +32,7 @@ urlpatterns = [
     path('settings/mailserver/autoconfig.xml', views_mailserver.autoconfig_xml, name='autoconfig_xml'),
     path('settings/auth/', views_settings.settings_auth, name='settings_auth'),
     path('settings/ssh-keys/', views_settings.settings_ssh_keys, name='settings_ssh_keys'),
+    path('settings/config/', views_settings.settings_config, name='settings_config'),
     path('settings/local-ip/', views_settings.settings_local_ip, name='settings_local_ip'),
     path('logs/', views_logs.logs, name='logs'),
     path('logs/stream/', views.logs_stream, name='logs_stream'),

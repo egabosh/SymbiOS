@@ -6,15 +6,15 @@
 <h2><i class="bi bi-gear"></i> Settings</h2>
 
 <div class="row mt-3">
-  <!-- Dynamic DNS -->
+  <!-- DNS -->
   <div class="col-md-6 col-lg-4 mb-3">
     <div class="card h-100">
       <div class="card-body">
-        <h5 class="card-title"><i class="bi bi-globe text-primary"></i> Dynamic DNS</h5>
+        <h5 class="card-title"><i class="bi bi-globe text-primary"></i> DNS</h5>
         <p class="card-text small">
-          Makes your server reachable under a fixed hostname via
-          <strong>deSEC</strong>, even if your ISP changes your public IP.
-          The DDNS update runs every <strong>5 minutes</strong> via cron.
+          Makes your server reachable under a fixed hostname. Choose between
+          <strong>Dynamic DNS via deSEC</strong> (automatic IP updates) or
+          <strong>self-managed DNS</strong> (bring your own domain).
         </p>
         <p class="card-text small text-muted">
           Required for any service that needs to be accessed from the internet
@@ -106,13 +106,13 @@
     </p>
     <ol class="ps-3 mb-1">
       <li>Enable IPv6 on your router. Verify on the
-          <a href="/settings/ddns/">DDNS page</a> that your server has
+          <a href="/settings/ddns/">DNS page</a> that your server has
           a global IPv6 address (starts with <code>2001:</code> /
           <code>2a0:</code> / <code>2a01:</code>…).</li>
       <li>In your router's <em>Firewall</em> / <em>Traffic Rules</em>
           section, allow incoming TCP traffic on ports 80 and 443 to your
           server's IPv6 address.</li>
-      <li>On the <a href="/settings/ddns/">DDNS page</a>, select
+      <li>On the <a href="/settings/ddns/">DNS page</a>, select
           <strong>"IPv6 only"</strong> (or <strong>"Dual-Stack"</strong>
           if you also have working public IPv4).</li>
     </ol>

@@ -1,0 +1,71 @@
+{% extends "main/base.html" %}
+{% block sidebar %}
+    {% include "main/sidebar_settings.html" %}
+{% endblock %}
+{% block content %}
+<h2><i class="bi bi-file-earmark-code"></i> Config Editor</h2>
+
+<div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
+  <i class="bi bi-exclamation-triangle-fill"></i>
+  <span>Directly editing <code>inventory.yml</code> can break your system.
+  Changes are validated as YAML before saving. Always keep a backup.</span>
+</div>
+
+<div class="row">
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-file-earmark-text"></i> /config/inventory.yml</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('config-form').reset();">
+          <i class="bi bi-arrow-counterclockwise"></i> Reset
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <form method="post" id="config-form">
+          {% csrf_token %}
+          <textarea class="form-control border-0 rounded-0 font-monospace"
+                    name="config_content"
+                    id="config-content"
+                    rows="25"
+                    spellcheck="false"
+                    style="resize: vertical; font-size: 0.85rem; line-height: 1.5; tab-size: 2;">{{ config_content }}</textarea>
+        </form>
+      </div>
+      <div class="card-footer d-flex justify-content-between align-items-center">
+        <small class="text-muted">
+          <i class="bi bi-info-circle"></i>
+          Press <kbd>Ctrl</kbd>+<kbd>S</kbd> to save. Tabs insert actual tab characters.
+        </small>
+        <button type="submit" form="config-form" class="btn btn-primary btn-sm">
+          <i class="bi bi-save"></i> Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var textarea = document.getElementById('config-content');
+
+  // Ctrl+S to save
+  textarea.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      document.getElementById('config-form').submit();
+    }
+  });
+
+  // Tab key inserts tab character instead of moving focus
+  textarea.addEventListener('keydown', function(e) {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      var start = this.selectionStart;
+      var end = this.selectionEnd;
+      this.value = this.value.substring(0, start) + '\t' + this.value.substring(end);
+      this.selectionStart = this.selectionEnd = start + 1;
+    }
+  });
+});
+</script>
+{% endblock %}
