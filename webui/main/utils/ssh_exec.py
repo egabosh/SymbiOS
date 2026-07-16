@@ -43,6 +43,10 @@ def _get_ssh_client():
             try:
                 transport = _ssh_client.get_transport()
                 if transport and transport.is_active():
+                    # is_active() only checks a flag, not socket health.
+                    # Send an SSH ignore packet to verify the connection is
+                    # actually alive; a dead socket raises OSError/EOFError.
+                    transport.send_ignore()
                     return _ssh_client
             except Exception:
                 pass
@@ -86,11 +90,11 @@ def _wrap(cmd):
 
 def _exec(cmd, timeout=300):
     """Run a gateway command, returning (exit_code, stdout, stderr)."""
+    global _ssh_client
     client = _get_ssh_client()
     try:
         transport = client.get_transport()
         if not transport or not transport.is_active():
-            global _ssh_client
             _ssh_client = None
             client = _get_ssh_client()
 
@@ -224,7 +228,9 @@ def stream_command(cmd, timeout=600):
     try:
         transport = client.get_transport()
         if not transport or not transport.is_active():
-            raise RuntimeError('SSH transport not active')
+            _ssh_client = None
+            client = _get_ssh_client()
+            transport = client.get_transport()
         channel = transport.open_session(timeout=SSH_CONNECT_TIMEOUT)
         channel.settimeout(timeout)
         # Allocate a PTY so commands (docker compose logs, ansible-playbook, ...)
@@ -302,10 +308,14 @@ def stream_log(cmd, job):
     try:
         transport = client.get_transport()
         if not transport or not transport.is_active():
-            raise RuntimeError('SSH transport not active')
+            _ssh_client = None
+            client = _get_ssh_client()
+            transport = client.get_transport()
         channel = transport.open_session(timeout=SSH_CONNECT_TIMEOUT)
-        # Allocate a PTY so commands detect a terminal and emit ANSI colors
-        # (uniform across all services; ansiToHtml renders them, '\r' stripped).
+        # Allocate a PTY so commands (docker compose logs, etc.) detect a
+        # terminal and emit ANSI colors. ansiToHtml() renders them; '\r' that
+        # a PTY adds is already stripped there. Without a PTY the output is
+        # colorless — this is intentionally uniform across all services.
         try:
             channel.get_pty(term='xterm', width=220, height=60)
         except Exception:
@@ -337,6 +347,13 @@ def stream_log(cmd, job):
                 time.sleep(0.05)
     except Exception as e:
         logger.exception('SSH log stream failed: ' + cmd)
+        # Reset cached client so the next connection attempt creates a fresh
+        # one (same pattern as stream_command / _exec).
+        try:
+            _ssh_client.close()
+        except Exception:
+            pass
+        _ssh_client = None
         with job['lock']:
             job['output'] += '\n[stream error] ' + str(e) + '\n'
             job['total'] += len(str(e)) + 18
