@@ -214,11 +214,6 @@
             '</div>';
     }
 
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
 
     async function fetchLogs() {
         if (paused) return;

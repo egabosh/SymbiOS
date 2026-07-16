@@ -3,17 +3,6 @@
     border-right: 1px solid #dee2e6;
 }
 
-/* colors for logfile output */
-#log-container {
-    background-color: #000;
-    color: #f8f9fa;  /* Standard-Logfarbe */
-    padding: 10px;
-    height: 500px;
-    overflow-y: scroll;
-    font-family: monospace;
-    font-size: 0.9rem;
-    white-space: pre-wrap;
-}
 .ansi-red { color: #ff6b6b; }
 .ansi-green { color: #51cf66; }
 .ansi-yellow { color: #ffd43b; }

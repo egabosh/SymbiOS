@@ -200,8 +200,3 @@ def _docker_logs_stream(container_id, offset=0):
         "lines": lines_to_send,
         "total_lines": total_lines,
     })
-
-
-def container_list(request):
-    containers = _get_container_list()
-    return JsonResponse({"containers": containers})

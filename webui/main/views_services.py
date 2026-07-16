@@ -2,8 +2,6 @@ from django.shortcuts import render, Http404
 from django.http import JsonResponse
 import threading
 import uuid
-import json
-import time
 
 # In-memory registry of running action jobs. The WebUI runs a single gunicorn
 # worker, so this is shared across requests. Jobs capture live command output
@@ -12,7 +10,7 @@ _JOBS = {}
 _JOBS_LOCK = threading.Lock()
 from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
-from .playbook_catalog import get_catalog, get_playbook, compose_base
+from .playbook_catalog import get_catalog, get_playbook
 from .utils.ssh_exec import (
     stream_command,
     stream_log,
@@ -222,7 +220,6 @@ def services_log_tail(request, playbook):
     with job['lock']:
         out = job['output']
         total = job['total']
-        dropped = job['dropped']
         done = job['done']
         success = job['success']
     # Map the browser's absolute offset into the rolling window. The window holds
@@ -356,18 +353,3 @@ def services_status(request, playbook):
         'overall': overall,
         'overall_badge': _state_badge(overall),
     })
-
-
-@login_required
-def services_playbook_log(request, service_name):
-    return JsonResponse({'running': False, 'output': ''})
-
-
-@login_required
-def services_playbook_output(request, service_name):
-    return JsonResponse({'output': ''})
-
-
-@login_required
-def services_directories(request, service_name):
-    return JsonResponse({'directories': []})

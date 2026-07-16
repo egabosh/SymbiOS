@@ -1,13 +1,11 @@
-import subprocess
 from django.shortcuts import render, redirect
 from .decorators import login_required
 from django.contrib import messages
-from django.http import JsonResponse
 from .views import (
     _get_inventory_config, _save_inventory_config, _get_ldap_vars,
     _ldap_search, _ldap_modify, _ldap_add, _ldap_delete,
     _get_next_uid_number, _get_ldap_groups, _get_ldap_users,
-    _add_user_to_group, LDAP_URI
+    _add_user_to_group,
 )
 
 

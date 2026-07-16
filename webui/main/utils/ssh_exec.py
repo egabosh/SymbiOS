@@ -1,5 +1,4 @@
 import os
-import sys
 import shlex
 import threading
 import time

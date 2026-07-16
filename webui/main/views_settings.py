@@ -2,7 +2,7 @@ from django.shortcuts import render, redirect
 from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
-from .views import _get_inventory_config, _save_inventory_config, CONFIG_PATH
+from .views import _get_inventory_config, _save_inventory_config
 from .utils.ssh_exec import run_playbook
 
 import urllib.request
