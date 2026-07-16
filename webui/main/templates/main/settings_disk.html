@@ -22,33 +22,6 @@
   </div>
 </div>
 
-<!-- LUKS unlock (hidden by default) -->
-<div class="row mb-3" id="unlock-row" style="display:none">
-  <div class="col-md-12">
-    <div class="card border-warning">
-      <div class="card-header bg-warning text-dark">
-        <i class="bi bi-lock-fill"></i> Encrypted /home requires unlock
-      </div>
-      <div class="card-body">
-        <p class="small mb-3">
-          The LUKS-encrypted volume for /home is locked. Enter the passphrase
-          to unlock and mount it.
-        </p>
-        <form id="unlock-form" onsubmit="return unlockVolume(event)">
-          <div class="input-group">
-            <input type="password" class="form-control" id="unlock-password"
-                   placeholder="LUKS passphrase" autofocus>
-            <button type="submit" class="btn btn-warning" id="unlock-btn">
-              <i class="bi bi-unlock"></i> Unlock
-            </button>
-          </div>
-        </form>
-        <div id="unlock-result" class="mt-2"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- Available disks -->
 <div class="row mb-3">
   <div class="col-md-12">
@@ -166,16 +139,11 @@ function loadStatus() {
     .then(r => r.json())
     .then(data => {
       var el = document.getElementById('home-status');
-      var unlockRow = document.getElementById('unlock-row');
 
       if (data.luks_name && !data.luks_open) {
-        // LUKS volume is locked
-        el.innerHTML = '<div class="text-warning"><i class="bi bi-lock-fill"></i> /home is on an encrypted volume that is <strong>locked</strong></div>';
-        unlockRow.style.display = '';
+        el.innerHTML = '<div class="text-warning"><i class="bi bi-lock-fill"></i> /home is on an encrypted volume that is <strong>locked</strong>. Reboot and unlock via the boot screen.</div>';
         return;
       }
-
-      unlockRow.style.display = 'none';
 
       if (data.home_device) {
         window._homeSize = data.home_size;
@@ -389,48 +357,6 @@ function setupDisk(e) {
     .finally(() => {
       btn.disabled = false;
       btn.innerHTML = '<i class="bi bi-play-fill"></i> Setup Disk';
-    });
-  return false;
-}
-
-function unlockVolume(e) {
-  e.preventDefault();
-  var password = document.getElementById('unlock-password').value;
-  var btn = document.getElementById('unlock-btn');
-  var result = document.getElementById('unlock-result');
-
-  if (!password) {
-    result.innerHTML = '<span class="text-danger">Enter the passphrase.</span>';
-    return false;
-  }
-
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Unlocking...';
-  result.innerHTML = '';
-
-  var formData = new FormData();
-  formData.append('password', password);
-  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
-
-  fetch('{% url "settings_disk_unlock" %}', {
-    method: 'POST',
-    body: formData
-  })
-    .then(r => r.json())
-    .then(data => {
-      if (data.ok) {
-        result.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + data.message + '</span>';
-        setTimeout(refreshAll, 1000);
-      } else {
-        result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + data.error + '</span>';
-      }
-    })
-    .catch(err => {
-      result.innerHTML = '<span class="text-danger">Error: ' + err.message + '</span>';
-    })
-    .finally(() => {
-      btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-unlock"></i> Unlock';
     });
   return false;
 }
