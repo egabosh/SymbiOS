@@ -25,7 +25,7 @@
 #     start: docker compose -f /home/docker/acme-pki/docker-compose.yml up -d
 #     stop: docker compose -f /home/docker/acme-pki/docker-compose.yml down
 #     restart: docker compose -f /home/docker/acme-pki/docker-compose.yml restart
-#     root_cert: cat ./pki/ca/root-ca.pem
+#     root_cert: cat /home/docker/acme-pki/pki/ca/root-ca.pem
 
 - name: ACME PKI - Set up local Fallback CA (step-ca)
   hosts: all
