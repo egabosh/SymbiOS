@@ -24,8 +24,6 @@
 #     logs:
 #     - name: runchecks.service
 #       command: journalctl -fu runchecks.service -n 1000
-#     - name: runchecks.timer
-#       command: journalctl -fu runchecks.timer -n 1000
 #   actions:
 #     start: systemctl start runchecks.service
 #     stop: systemctl stop runchecks.service

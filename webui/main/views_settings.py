@@ -2,12 +2,14 @@ from django.shortcuts import render, redirect
 from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
-from .views import _get_inventory_config, _save_inventory_config
+from .views import _get_inventory_config, _save_inventory_config, _safe_write, CONFIG_PATH
 from .utils.ssh_exec import run_playbook
 
 import urllib.request
 import urllib.error
 import json
+import yaml
+import os
 
 
 
@@ -20,13 +22,21 @@ def settings_ddns(request):
         config['all']['vars'] = {}
     vars_ = config['all']['vars']
 
+    # Determine current DNS mode from inventory
+    current_dns_mode = vars_.get('dns_mode', '')
+    if not current_dns_mode:
+        # Backward compatibility: if ddns_host is set, assume desec mode
+        current_dns_mode = 'desec' if vars_.get('ddns_host') else ''
+
     if request.method == 'POST':
         action = request.POST.get('action', 'save')
+        dns_mode = request.POST.get('dns_mode', 'desec')
         try:
             if action == 'remove':
                 config['all']['vars']['ddns_apikey'] = ''
                 config['all']['vars']['ddns_host'] = ''
                 config['all']['vars']['ddns_ipv6'] = ''
+                config['all']['vars']['dns_mode'] = ''
                 # Reset domains to the local fallback (shared base_domain so the
                 # Authelia session cookie can span all service subdomains)
                 config['all']['vars']['default_domain'] = 'local'
@@ -35,22 +45,41 @@ def settings_ddns(request):
                 config['all']['vars']['authelia_domain'] = 'auth.symbios.local'
                 config['all']['vars']['traefik_domain'] = 'traefik.symbios.local'
                 _save_inventory_config(config)
-                messages.success(request, 'Dynamic DNS configuration removed.')
-                try:
-                    ok, out = run_playbook('base-services/dedyn.yml', timeout=120)
-                    if ok:
-                        messages.success(request, 'DDNS playbook completed successfully.')
-                    else:
-                        messages.warning(request, 'DDNS playbook completed with issues.')
-                except Exception as e:
-                    messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
+                messages.success(request, 'DNS configuration removed.')
+                if dns_mode == 'desec':
+                    try:
+                        ok, out = run_playbook('base-services/dedyn.yml', timeout=120)
+                        if ok:
+                            messages.success(request, 'DDNS playbook completed successfully.')
+                        else:
+                            messages.warning(request, 'DDNS playbook completed with issues.')
+                    except Exception as e:
+                        messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
+            elif dns_mode == 'self-managed':
+                self_domain = request.POST.get('self_domain', '').strip().lower().rstrip('.')
+                if not self_domain:
+                    messages.error(request, 'Please enter a domain.')
+                    return redirect('settings_ddns')
+                config['all']['vars']['dns_mode'] = 'self-managed'
+                config['all']['vars']['ddns_apikey'] = ''
+                config['all']['vars']['ddns_host'] = ''
+                config['all']['vars']['ddns_ipv6'] = ''
+                config['all']['vars']['default_domain'] = self_domain
+                config['all']['vars']['base_domain'] = self_domain
+                config['all']['vars']['symbios_domain'] = 'symbios.' + self_domain
+                config['all']['vars']['authelia_domain'] = 'auth.' + self_domain
+                config['all']['vars']['traefik_domain'] = 'traefik.' + self_domain
+                _save_inventory_config(config)
+                messages.success(request, f'DNS settings saved for {self_domain}.')
             else:
+                # deSEC mode (existing behavior)
                 ddns_host = request.POST.get('ddns_host', '')
                 ddns_host = ddns_host.lower().strip()
                 if ddns_host.endswith('.dedyn.io'):
                     ddns_host = ddns_host[:-len('.dedyn.io')]
                 ddns_host = ddns_host + '.dedyn.io'
 
+                config['all']['vars']['dns_mode'] = 'desec'
                 config['all']['vars']['ddns_apikey'] = request.POST.get('ddns_apikey', '')
                 config['all']['vars']['ddns_host'] = ddns_host
                 config['all']['vars']['ddns_ipv6'] = request.POST.get('ddns_ipv6', '')
@@ -62,7 +91,7 @@ def settings_ddns(request):
                 config['all']['vars']['authelia_domain'] = 'auth.' + ddns_host
                 config['all']['vars']['traefik_domain'] = 'traefik.' + ddns_host
                 _save_inventory_config(config)
-                messages.success(request, 'Dynamic DNS settings saved.')
+                messages.success(request, 'DNS settings saved.')
                 try:
                     ok, out = run_playbook('base-services/dedyn.yml', timeout=120)
                     if ok:
@@ -74,8 +103,11 @@ def settings_ddns(request):
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_ddns')
+
     return render(request, 'main/settings_ddns.html', {
         'vars': vars_,
+        'dns_mode': current_dns_mode,
+        'self_domain': vars_.get('base_domain', '') if current_dns_mode == 'self-managed' else '',
     })
 
 
@@ -472,4 +504,44 @@ def settings_ssh_keys(request):
         "keys": user_keys,
         "key_info": key_info,
         "system_keys": system_info,
+    })
+
+
+@login_required
+def settings_config(request):
+    raw_yaml = ''
+    try:
+        with open(CONFIG_PATH, 'r') as f:
+            raw_yaml = f.read()
+    except FileNotFoundError:
+        raw_yaml = '# inventory.yml not found\n'
+    except Exception as e:
+        raw_yaml = f'# Error reading config: {e}\n'
+
+    if request.method == 'POST':
+        content = request.POST.get('config_content', '')
+        # Validate YAML before saving
+        try:
+            parsed = yaml.safe_load(content)
+            if not isinstance(parsed, dict):
+                messages.error(request, 'Config must be a YAML mapping (dictionary).')
+                return redirect('settings_config')
+        except yaml.YAMLError as e:
+            messages.error(request, f'YAML syntax error: {e}')
+            return redirect('settings_config')
+        try:
+            # Backup + atomic write
+            if os.path.exists(CONFIG_PATH):
+                with open(CONFIG_PATH) as f:
+                    bak = CONFIG_PATH + '.bak'
+                    with open(bak, 'w') as b:
+                        b.write(f.read())
+            _safe_write(CONFIG_PATH, content)
+            messages.success(request, 'Config saved.')
+        except Exception as e:
+            messages.error(request, f'Error saving config: {e}')
+        return redirect('settings_config')
+
+    return render(request, 'main/settings_config.html', {
+        'config_content': raw_yaml,
     })

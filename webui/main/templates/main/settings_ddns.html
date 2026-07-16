@@ -4,88 +4,161 @@
     {% include "main/sidebar_settings.html" %}
 {% endblock %}
 {% block content %}
-<h2><i class="bi bi-globe"></i> Dynamic DNS (deSEC)</h2>
+<h2><i class="bi bi-globe"></i> DNS</h2>
 
-
-<!-- Remote execution status -->
-<div class="alert alert-info d-flex align-items-center gap-2" role="alert" id="daemon-status">
-  <i class="bi bi-check-circle-fill text-success"></i>
-  <span>Changes are applied immediately via SSH — no daemon required.</span>
-</div>
 
 <div class="row">
   <!-- Main form -->
   <div class="col-md-8">
     <div class="card">
       <div class="card-body">
-        <form method="post" id="ddns-form">
-          {% csrf_token %}
 
-          <div class="mb-3">
-            <label class="form-label">API Key</label>
-            <div class="input-group">
-              <input type="password" class="form-control" name="ddns_apikey" id="ddns_apikey"
-                     value="{{ vars.ddns_apikey|default:'' }}"
-                     placeholder="deSEC API token">
-              <button type="button" class="btn btn-outline-secondary" id="test-api-btn"
-                      onclick="testApiKey()">
-                <i class="bi bi-shield-check"></i> Test
+        <!-- DNS Mode selector -->
+        <div class="mb-4">
+          <label class="form-label fw-semibold">DNS Mode</label>
+          <div class="d-flex gap-3">
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="dns_mode" id="mode-desec"
+                     value="desec" {% if dns_mode != 'self-managed' %}checked{% endif %}
+                     onchange="switchMode('desec')">
+              <label class="form-check-label" for="mode-desec">
+                <i class="bi bi-arrow-repeat"></i> Dynamic DNS (deSEC)
+                <div class="small text-muted">Automatic IP updates via cron</div>
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="dns_mode" id="mode-self"
+                     value="self-managed" {% if dns_mode == 'self-managed' %}checked{% endif %}
+                     onchange="switchMode('self-managed')">
+              <label class="form-check-label" for="mode-self">
+                <i class="bi bi-globe2"></i> Self-managed DNS
+                <div class="small text-muted">Bring your own domain</div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- deSEC form -->
+        <div id="desec-section" {% if dns_mode == 'self-managed' %}style="display:none"{% endif %}>
+          <form method="post" id="ddns-form">
+            {% csrf_token %}
+            <input type="hidden" name="dns_mode" value="desec">
+
+            <div class="mb-3">
+              <label class="form-label">API Key</label>
+              <div class="input-group">
+                <input type="password" class="form-control" name="ddns_apikey" id="ddns_apikey"
+                       value="{{ vars.ddns_apikey|default:'' }}"
+                       placeholder="deSEC API token">
+                <button type="button" class="btn btn-outline-secondary" id="test-api-btn"
+                        onclick="testApiKey()">
+                  <i class="bi bi-shield-check"></i> Test
+                </button>
+              </div>
+              <div id="api-key-status" class="form-text"></div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Host</label>
+              <div class="input-group">
+                <input type="text" class="form-control" name="ddns_host" id="ddns_host"
+                       value="{{ vars.ddns_host|default:''|cut:'.dedyn.io' }}"
+                       placeholder="myserver">
+                <span class="input-group-text">.dedyn.io</span>
+              </div>
+              <div id="host-status" class="form-text"></div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">IPv6 mode</label>
+              <div id="ip-detection" class="mb-2">
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+                Detecting IP connectivity...
+              </div>
+              <select class="form-select" name="ddns_ipv6" id="ddns_ipv6">
+                <option value="" {% if vars.ddns_ipv6 == '' %}selected{% endif %}>
+                  IPv4 only (recommended if no public IPv6)
+                </option>
+                <option value="yes" {% if vars.ddns_ipv6 == 'yes' %}selected{% endif %}>
+                  IPv4 + IPv6 (Dual-Stack)
+                </option>
+                <option value="only" {% if vars.ddns_ipv6 == 'only' %}selected{% endif %}>
+                  IPv6 only (IPv6-only connection)
+                </option>
+              </select>
+            </div>
+
+            <div class="d-flex gap-2">
+              <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save"></i> Save
               </button>
+              {% if vars.ddns_host %}
+              <button type="submit" name="action" value="remove" class="btn btn-outline-danger"
+                      onclick="return confirm('Remove DNS configuration? This will reset default_domain to local.')">
+                <i class="bi bi-trash"></i> Remove
+              </button>
+              {% endif %}
             </div>
-            <div id="api-key-status" class="form-text"></div>
-          </div>
+          </form>
+          <script>
+          document.getElementById('ddns-form').addEventListener('submit', function(e) {
+            var hostInput = document.getElementById('ddns_host');
+            var val = hostInput.value.trim();
+            if (val && !val.endsWith('.dedyn.io')) {
+              hostInput.value = val + '.dedyn.io';
+            }
+          });
+          </script>
+        </div>
 
-          <div class="mb-3">
-            <label class="form-label">Host</label>
-            <div class="input-group">
-              <input type="text" class="form-control" name="ddns_host" id="ddns_host"
-                     value="{{ vars.ddns_host|default:''|cut:'.dedyn.io' }}"
-                     placeholder="myserver">
-              <span class="input-group-text">.dedyn.io</span>
+        <!-- Self-managed DNS form -->
+        <div id="self-section" {% if dns_mode != 'self-managed' %}style="display:none"{% endif %}>
+          <form method="post" id="self-managed-form">
+            {% csrf_token %}
+            <input type="hidden" name="dns_mode" value="self-managed">
+
+            <div class="mb-3">
+              <label class="form-label">Domain</label>
+              <input type="text" class="form-control" name="self_domain" id="self_domain"
+                     value="{{ self_domain|default:'' }}"
+                     placeholder="example.com">
+              <div class="form-text">
+                Your full domain (e.g. <code>example.com</code>).
+                This will be set as <code>base_domain</code> in the inventory.
+                Traefik and all services will use subdomains like
+                <code>symbios.example.com</code>, <code>auth.example.com</code>, etc.
+              </div>
             </div>
-            <div id="host-status" class="form-text"></div>
-          </div>
 
-          <div class="mb-3">
-            <label class="form-label">IPv6 mode</label>
-            <div id="ip-detection" class="mb-2">
-              <span class="spinner-border spinner-border-sm" role="status"></span>
-              Detecting IP connectivity...
+            <div class="alert alert-warning py-2 px-3 mb-3">
+              <i class="bi bi-exclamation-triangle-fill"></i>
+              <strong>Strongly recommended:</strong> Create a wildcard CNAME record
+              pointing all subdomains to your server:
+              <div class="mt-2 p-2 bg-body rounded border font-monospace small">
+                <div>*&nbsp;&nbsp;CNAME&nbsp;&nbsp;example.com.</div>
+              </div>
+              <div class="mt-1 small text-muted">
+                This ensures all service subdomains
+                (auth.yourdomain.com, traefik.yourdomain.com, etc.) resolve to your server automatically.
+                If you use Let's Encrypt, also add a
+                <code>CAA</code> record: <code>0 issue "letsencrypt.org"</code>.
+              </div>
             </div>
-            <select class="form-select" name="ddns_ipv6" id="ddns_ipv6">
-              <option value="" {% if vars.ddns_ipv6 == '' %}selected{% endif %}>
-                IPv4 only (recommended if no public IPv6)
-              </option>
-              <option value="yes" {% if vars.ddns_ipv6 == 'yes' %}selected{% endif %}>
-                IPv4 + IPv6 (Dual-Stack)
-              </option>
-              <option value="only" {% if vars.ddns_ipv6 == 'only' %}selected{% endif %}>
-                IPv6 only (IPv6-only connection)
-              </option>
-            </select>
-          </div>
 
-          <div class="d-flex gap-2">
-            <button type="submit" class="btn btn-primary">
-              <i class="bi bi-save"></i> Save
-            </button>
-            {% if vars.ddns_host %}
-            <button type="submit" name="action" value="remove" class="btn btn-outline-danger"
-                    onclick="return confirm('Remove DDNS configuration? This will reset default_domain to local.')">
-              <i class="bi bi-trash"></i> Remove
-            </button>
-            {% endif %}
-          </div>
-        </form>
-        <script>
-        document.getElementById('ddns-form').addEventListener('submit', function(e) {
-          var hostInput = document.getElementById('ddns_host');
-          var val = hostInput.value.trim();
-          if (val && !val.endsWith('.dedyn.io')) {
-            hostInput.value = val + '.dedyn.io';
-          }
-        });
-        </script>
+            <div class="d-flex gap-2">
+              <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save"></i> Save
+              </button>
+              {% if dns_mode == 'self-managed' %}
+              <button type="submit" name="action" value="remove" class="btn btn-outline-danger"
+                      onclick="return confirm('Remove DNS configuration? This will reset default_domain to local.')">
+                <i class="bi bi-trash"></i> Remove
+              </button>
+              {% endif %}
+            </div>
+          </form>
+        </div>
+
       </div>
     </div>
   </div>
@@ -93,10 +166,10 @@
   <!-- Info / Guide column -->
   <div class="col-md-4">
 
-    <!-- About DDNS -->
-    <div class="card">
+    <!-- About deSEC -->
+    <div class="card" id="about-desec" {% if dns_mode == 'self-managed' %}style="display:none"{% endif %}>
       <div class="card-header">
-        <i class="bi bi-info-circle"></i> About
+        <i class="bi bi-info-circle"></i> About deSEC
       </div>
       <div class="card-body small">
         <p class="card-text">
@@ -120,8 +193,32 @@
       </div>
     </div>
 
-    <!-- Current IPs -->
-    <div class="card mt-3" id="current-ip-card">
+    <!-- About self-managed -->
+    <div class="card" id="about-self" {% if dns_mode != 'self-managed' %}style="display:none"{% endif %}>
+      <div class="card-header">
+        <i class="bi bi-info-circle"></i> About self-managed DNS
+      </div>
+      <div class="card-body small">
+        <p class="card-text">
+          Use your own domain and manage DNS externally (e.g. at your registrar
+          or a DNS provider like Cloudflare, BIND, etc.).
+        </p>
+        <ul class="mb-2 ps-3">
+          <li>Enter your domain (e.g. <code>example.com</code>)</li>
+          <li>All services will use subdomains (<code>symbios.*</code>, <code>auth.*</code>)</li>
+          <li>You must manage DNS records yourself</li>
+          <li>Wildcard CNAME recommended for ease of use</li>
+        </ul>
+        <p class="mb-0 small text-muted">
+          <i class="bi bi-info-circle"></i>
+          Need help with port forwarding? See the guide at
+          <a href="/settings/">Settings &rarr; Port Forwarding Guide</a>.
+        </p>
+      </div>
+    </div>
+
+    <!-- Current IPs (deSEC only) -->
+    <div class="card mt-3" id="current-ip-card" {% if dns_mode == 'self-managed' %}style="display:none"{% endif %}>
       <div class="card-header">
         <i class="bi bi-ethernet"></i> Current IPs
       </div>
@@ -131,7 +228,7 @@
       </div>
     </div>
 
-    <!-- Host Status -->
+    <!-- Host Status (deSEC only) -->
     <div class="card mt-3" id="host-status-card" style="display:none">
       <div class="card-header">
         <i class="bi bi-globe"></i> Host Status
@@ -150,10 +247,39 @@
 
 <script>
 
+// Switch between DNS modes
+function switchMode(mode) {
+  var desecSection = document.getElementById('desec-section');
+  var selfSection = document.getElementById('self-section');
+  var aboutDesec = document.getElementById('about-desec');
+  var aboutSelf = document.getElementById('about-self');
+  var ipCard = document.getElementById('current-ip-card');
+  var hostCard = document.getElementById('host-status-card');
+
+  if (mode === 'self-managed') {
+    desecSection.style.display = 'none';
+    selfSection.style.display = '';
+    aboutDesec.style.display = 'none';
+    aboutSelf.style.display = '';
+    ipCard.style.display = 'none';
+    hostCard.style.display = 'none';
+  } else {
+    desecSection.style.display = '';
+    selfSection.style.display = 'none';
+    aboutDesec.style.display = '';
+    aboutSelf.style.display = 'none';
+    ipCard.style.display = '';
+    checkHostStatus();
+  }
+}
+
 // Auto-detect IPs on load
 document.addEventListener('DOMContentLoaded', function() {
-  detectIPs();
-  setupHostValidation();
+  var mode = document.querySelector('input[name="dns_mode"]:checked').value;
+  if (mode === 'desec') {
+    detectIPs();
+    setupHostValidation();
+  }
 });
 
 function detectIPs() {
