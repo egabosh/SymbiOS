@@ -279,6 +279,7 @@
     - name: /usr/local/sbin/update_host_ip.sh
       ansible.builtin.copy:
         dest: /usr/local/sbin/update_host_ip.sh
+        mode: "0755"
         content: |
           #!/bin/bash
           # Write host primary LAN IP for webui container
