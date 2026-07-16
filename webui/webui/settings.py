@@ -88,8 +88,5 @@ MESSAGE_TAGS = {'error': 'danger'}
 
 
 LOGIN_URL = '/'
-LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/'
 
 CONFIG_PATH = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
-LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')

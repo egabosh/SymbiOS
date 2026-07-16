@@ -1,34 +1,8 @@
 import subprocess
-import os
 from django.shortcuts import render, redirect
 from .decorators import login_required
 from django.contrib import messages
-
-LDAP_URI = os.environ.get("LDAP_URI", "ldap://openldap")
-
-
-def _get_ldap_vars():
-    base_dn = "dc=openldap,dc=local"
-    admin_pw = "changeme"
-    try:
-        import yaml
-        config_path = os.environ.get("CONFIG_PATH", "/config/inventory.yml")
-        with open(config_path) as f:
-            config = yaml.safe_load(f) or {}
-        vars_ = config.get("all", {}).get("vars", {})
-        base_dn = vars_.get("ldap_basedn", base_dn)
-        admin_pw = vars_.get("ldap_admin_password", admin_pw)
-    except Exception:
-        pass
-    # Override admin_pw from dotfile if it exists (never committed)
-    try:
-        with open("/config/.ldap_admin_pw") as f:
-            pw = f.read().strip()
-            if pw:
-                admin_pw = pw
-    except Exception:
-        pass
-    return {"base_dn": base_dn, "admin_pw": admin_pw}
+from .views import _get_ldap_vars, LDAP_URI
 
 
 @login_required

@@ -149,8 +149,6 @@
 </style>
 
 <script>
-let apiKeyTested = false;
-let apiKeyValid = false;
 
 // Auto-detect IPs on load
 document.addEventListener('DOMContentLoaded', function() {
@@ -341,17 +339,13 @@ function testApiKey() {
     .then(data => {
       if (data.valid) {
         status.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + data.message + '</span>';
-        apiKeyTested = true;
         apiKeyValid = true;
       } else {
-        status.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + data.error + '</span>';
-        apiKeyTested = true;
         apiKeyValid = false;
       }
     })
     .catch(err => {
       status.innerHTML = '<span class="text-danger">Connection error: ' + err.message + '</span>';
-      apiKeyTested = true;
       apiKeyValid = false;
     })
     .finally(() => {

@@ -6,9 +6,7 @@ import time
 import yaml
 from datetime import datetime, timezone
 
-DOCKER_LOG_DIR = "/docker/containers"
 CONTAINER_INDEX = "/log/docker-containers.tsv"
-SERVICE_STATUS_FILE = "/log/symbios-services.tsv"
 HEALTH_FILE = "/log/system-health.json"
 PUBLIC_IP_CACHE = "/config/.public-ips.json"
 PUBLIC_IP_CACHE_TTL = 300
@@ -65,33 +63,12 @@ def _run(cmd, timeout=10):
         return "", str(e), 1
 
 
-def _get_ldap_vars():
-    try:
-        import yaml
-        config_path = os.environ.get("CONFIG_PATH", "/config/inventory.yml")
-        with open(config_path) as f:
-            config = yaml.safe_load(f) or {}
-        vars_ = config.get("all", {}).get("vars", {})
-        base_dn = vars_.get("ldap_basedn", "dc=openldap,dc=local")
-        admin_pw = vars_.get("ldap_admin_password", "changeme")
-    except Exception:
-        base_dn = "dc=openldap,dc=local"
-        admin_pw = "changeme"
-    try:
-        with open("/config/.ldap_admin_pw") as f:
-            pw = f.read().strip()
-            if pw:
-                admin_pw = pw
-    except Exception:
-        pass
-    return base_dn, admin_pw
-
-
 def check_ldap():
-    base_dn, admin_pw = _get_ldap_vars()
+    from .views import _get_ldap_vars
+    ldap = _get_ldap_vars()
     stdout, stderr, rc = _run([
         "ldapwhoami", "-x", "-H", LDAP_URI,
-        "-D", f"cn=head-of-ldap,{base_dn}", "-w", admin_pw,
+        "-D", f"cn=head-of-ldap,{ldap['base_dn']}", "-w", ldap['admin_pw'],
     ])
     if rc == 0:
         return {"status": "ok", "message": "Bind successful"}

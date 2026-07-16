@@ -1,16 +1,10 @@
 import subprocess
 import yaml
 import os
-from pathlib import Path
 from django.shortcuts import render, redirect
 from .decorators import login_required
-from django.contrib import messages
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse
 from .utils.log_utils import logs_stream
-from .health import run_all as health_run_all
-import urllib.request
-import urllib.error
-import json
 
 CONFIG_PATH = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
 LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')
@@ -34,7 +28,6 @@ def _safe_write(path, data):
 
 
 def _save_inventory_config(config):
-    import os, copy
     # Keep a backup of the last good version
     if os.path.exists(CONFIG_PATH):
         try:
@@ -215,12 +208,9 @@ def logout_view(request):
     default_domain = vars_.get("default_domain", "")
     request.session.flush()
     if default_domain:
-        from django.shortcuts import redirect
         return redirect(f"https://auth.{default_domain}/logout")
-    from django.shortcuts import redirect
     return redirect("/authelia-logout/")
 
 
 def authelia_logout(request):
-    from django.shortcuts import render
     return render(request, "main/authelia_logout.html")

@@ -1,7 +1,6 @@
-import os
 import re
-import ssl
 import smtplib
+import ssl
 import urllib.request
 import urllib.error
 import xml.etree.ElementTree as ET
@@ -10,7 +9,7 @@ from django.shortcuts import render, redirect
 from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
-from .views import _get_inventory_config, _save_inventory_config, _get_ldap_vars
+from .views import _get_inventory_config, _save_inventory_config
 from .utils.ssh_exec import run_playbook
 
 
@@ -52,7 +51,6 @@ def settings_mailserver(request):
                 messages.error(request, f'Required fields missing: {", ".join(missing)}.')
                 return redirect('settings_mailserver')
 
-            import re
             if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', smtp_from):
                 messages.error(request, 'Invalid email address format. Must be like <strong>user@domain.tld</strong>.')
                 return redirect('settings_mailserver')
@@ -86,7 +84,6 @@ def settings_mailserver(request):
 
 
 def _test_smtp(server, port, user, password, sender, tls_mode):
-    import smtplib, ssl
     try:
         port = int(port)
         if tls_mode == 'tls':
@@ -112,8 +109,6 @@ def _test_smtp(server, port, user, password, sender, tls_mode):
 
 
 def _send_test_email(server, port, user, password, sender, to_address, tls_mode):
-    import smtplib, ssl
-    from email.message import EmailMessage
     try:
         port = int(port)
         msg = EmailMessage()
@@ -145,8 +140,6 @@ def _send_test_email(server, port, user, password, sender, to_address, tls_mode)
 
 @login_required
 def settings_mailserver_discover(request):
-    import urllib.request, urllib.error, xml.etree.ElementTree as ET
-
     server = request.GET.get('server', '').strip().lower()
     email = request.GET.get('email', '').strip().lower()
 

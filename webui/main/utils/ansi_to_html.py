@@ -24,7 +24,7 @@ ANSI_COLOR_MAP = {
 }
 
 def ansi_to_html(line: str) -> str:
-    # Gegen XSS sichern: erst escapen
+    # Sanitize against XSS: escape HTML first
     line = escape(line)
 
     result = []
@@ -32,12 +32,12 @@ def ansi_to_html(line: str) -> str:
     pos = 0
 
     for m in ANSI_RE.finditer(line):
-        # Text vor der Sequenz
+        # Text before the escape sequence
         if m.start() > pos:
             result.append(line[pos:m.start()])
 
-        seq = m.group(0)          # z.B. "\x1b[97m"
-        codes = seq[2:-1].split(';')  # "97" oder "0;35" etc.
+        seq = m.group(0)          # e.g. "\x1b[97m"
+        codes = seq[2:-1].split(';')  # "97" or "0;35" etc.
 
         # Reset
         if '0' in codes:
@@ -45,7 +45,7 @@ def ansi_to_html(line: str) -> str:
                 result.append('</span>')
                 open_span = False
         else:
-            # beliebigen passenden Farbcode nehmen
+            # Pick the first matching color code
             color_code = next((c for c in codes if c in ANSI_COLOR_MAP), None)
             if color_code:
                 if open_span:
@@ -57,7 +57,7 @@ def ansi_to_html(line: str) -> str:
 
         pos = m.end()
 
-    # Rest anhängen
+    # Append remaining text
     if pos < len(line):
         result.append(line[pos:])
 

@@ -92,7 +92,6 @@
   #source-output .yk-bool    { color: #c586c0; }
   #source-output .yk-list    { color: #c586c0; }
   #source-output .yk-jinja   { color: #dcdcaa; }
-  #source-output .yk-value   { color: #d4d4d4; }
 </style>
 <script>
 const PLAYBOOK = "{{ item.playbook }}";
@@ -416,12 +415,6 @@ document.getElementById('tab-logs').addEventListener('shown.bs.tab', () => {
 const srcPre = document.getElementById('source-output');
 let srcLoaded = false;
 
-function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-// YAML syntax highlighter. Renders comments, keys, quoted/unquoted values,
-// numbers/booleans, list markers and Jinja templates into colored spans.
-// Operates on HTML-escaped text and returns highlighted HTML.
 function highlightYaml(text) {
   const esc = escapeHtml(text);
   return esc.split('\n').map(line => {

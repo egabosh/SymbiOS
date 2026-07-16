@@ -31,11 +31,7 @@
     return '<span class="badge bg-secondary">Unknown</span>';
   }
 
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
+
 
   function healthCardSmall(key, label, data) {
     const status = data.status || 'unknown';
