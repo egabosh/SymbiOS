@@ -306,6 +306,10 @@
           [Install]
           WantedBy=timers.target
 
+    - name: Reload systemd (for boot unlock service)
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
     - name: Copy boot unlock server script
       ansible.builtin.copy:
         src: /home/SymbiOS/webui/main/boot_unlock.py
