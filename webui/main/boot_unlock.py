@@ -22,7 +22,7 @@ import time
 
 HTTPS_PORT = 443
 HTTP_PORT = 80
-CERT_DIR = "/etc/symbios-boot-unlock"
+CERT_DIR = "/usr/local/sbin/symbios-boot-unlock"
 CERT_FILE = os.path.join(CERT_DIR, "cert.pem")
 KEY_FILE = os.path.join(CERT_DIR, "key.pem")
 
