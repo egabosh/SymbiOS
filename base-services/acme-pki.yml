@@ -1,6 +1,6 @@
 # docs:
-#   short_description: Set up a local fallback Certificate Authority (step-ca)
-#   description: Installs and configures step-ca as a local, ACME-compatible Certificate Authority. It issues internal TLS certificates when the external ACME provider is unreachable, so internal services keep working during outages.
+#   short_description: A local Certificate Authority (step-ca/acme)
+#   description: Installs and configures step-ca as a local, ACME-compatible Certificate Authority. It issues local TLS certificates when the server is not accassable via letsencrypt (airgapped).
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -25,8 +25,7 @@
 #     start: docker compose -f /home/docker/acme-pki/docker-compose.yml up -d
 #     stop: docker compose -f /home/docker/acme-pki/docker-compose.yml down
 #     restart: docker compose -f /home/docker/acme-pki/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/acme-pki/docker-compose.yml up -d
-#
+#     root_cert: cat ./pki/ca/root-ca.pem
 
 - name: ACME PKI - Set up local Fallback CA (step-ca)
   hosts: all
