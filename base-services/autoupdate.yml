@@ -1,6 +1,6 @@
 # docs:
 #   short_description: Configure automated system updates
-#   description: Sets up periodic automatic updates of the host OS packages via a cron job, keeping the system patched without manual intervention.
+#   description: Sets up periodic automatic updates 6:05am of the host OS packages via a cron job, keeping the system up2date without manual intervention.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -21,11 +21,9 @@
 #     - name: autoupdate
 #       command: tail -F /var/log/syslog | grep autoupdate
 #   actions:
-#     uninstall: rm -f /etc/cron.d/autoupdate_local
-#     start: sed -i 's/^#//' /etc/cron.d/autoupdate_local
-#     stop: sed -i 's/^/#/' /etc/cron.d/autoupdate_local
-#     restart: sed -i 's/^#//' /etc/cron.d/autoupdate_local
-#
+#     enable: sed -i 's/^#//' /etc/cron.d/autoupdate_local
+#     disable: sed -i 's/^/#/' /etc/cron.d/autoupdate_local
+#     run now: /usr/local/sbin/autoupdate.sh
 
 ---
 - name: Autoupdate
