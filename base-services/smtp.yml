@@ -106,6 +106,28 @@
       when: smtp_user is defined and smtp_user | length > 0
       notify: Restart postfix
 
+    # Rewrite all sender addresses to smtp_from so the SMTP relay accepts them
+    - name: Create sender canonical map
+      ansible.builtin.copy:
+        dest: /etc/postfix/sender_canonical
+        content: |
+          /.+/  {{ smtp_from }}
+        mode: '0644'
+      when: smtp_from is defined and smtp_from | length > 0
+      notify: Restart postfix
+
+    - name: Set sender canonical maps
+      ansible.builtin.command:
+        cmd: "postconf -e 'sender_canonical_maps = regexp:/etc/postfix/sender_canonical'"
+      when: smtp_from is defined and smtp_from | length > 0
+      notify: Restart postfix
+
+    - name: Remove sender canonical map if SMTP not configured
+      ansible.builtin.file:
+        path: /etc/postfix/sender_canonical
+        state: absent
+      when: smtp_server is not defined or smtp_server | length == 0
+
     # --- TLS configuration ---
     - name: Configure TLS (STARTTLS - port 587)
       ansible.builtin.shell:
