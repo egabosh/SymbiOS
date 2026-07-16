@@ -1,6 +1,6 @@
 # docs:
-#   short_description: Deploy and configure the Authelia identity provider
-#   description: Installs Authelia as the central authentication/authorization server (SSO) and wires it to Traefik via forward-auth. Users and groups are backed by OpenLDAP; optional second-factor authentication is supported.
+#   short_description: Deploy and configure the Authelia identity provider for Auth and SSO
+#   description: Installs Authelia as the central authentication/authorization server with SSO (signe-sign-on). Users and groups are backed by OpenLDAP; optional second-factor authentication (2FA) is supported.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -21,12 +21,9 @@
 #     - name: authelia
 #       command: docker compose -f /home/docker/authelia/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/authelia/docker-compose.yml down
 #     start: docker compose -f /home/docker/authelia/docker-compose.yml up -d
 #     stop: docker compose -f /home/docker/authelia/docker-compose.yml down
 #     restart: docker compose -f /home/docker/authelia/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/authelia/docker-compose.yml up -d
-#
 
 - name: authelia
   hosts: all

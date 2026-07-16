@@ -21,11 +21,9 @@
 #     - name: backup
 #       command: tail -F /var/log/syslog | grep backup
 #   actions:
-#     uninstall: rm -f /etc/cron.d/backup_local
-#     start: sed -i 's/^#//' /etc/cron.d/backup_local
-#     stop: sed -i 's/^/#/' /etc/cron.d/backup_local
-#     restart: sed -i 's/^#//' /etc/cron.d/backup_local
-#
+#     enable: sed -i 's/^#//' /etc/cron.d/backup_local
+#     disable: sed -i 's/^/#/' /etc/cron.d/backup_local
+#     run now: /usr/local/sbin/backup.sh
 
 ---
 - name: Backups
