@@ -25,7 +25,6 @@
 #     start: ufw --force enable
 #     stop: ufw disable
 #     reload: ufw reload
-#
 
 ---
 

@@ -1,6 +1,6 @@
 # docs:
 #   short_description: Install system/service health checks
-#   description: Deploys the runchecks health-check framework (script + systemd service/timer) that periodically verifies critical services and reports their status.
+#   description: Deploys the runchecks health-check framework (script + systemd service) that periodically verifies critical services and reports their status.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -23,16 +23,13 @@
 #       status: systemctl is-active runchecks.timer
 #     logs:
 #     - name: runchecks.service
-#       command: journalctl -fu runchecks.service -n 100
+#       command: journalctl -fu runchecks.service -n 1000
 #     - name: runchecks.timer
-#       command: journalctl -fu runchecks.timer -n 100
+#       command: journalctl -fu runchecks.timer -n 1000
 #   actions:
-#     uninstall: systemctl disable --now runchecks.service ; systemctl disable --now runchecks.timer
-#     start: systemctl start runchecks.service ; systemctl start runchecks.timer
-#     stop: systemctl stop runchecks.service ; systemctl stop runchecks.timer
-#     restart: systemctl restart runchecks.service ; systemctl restart runchecks.timer
-#     reload: systemctl reload runchecks.service ; systemctl reload runchecks.timer
-#
+#     start: systemctl start runchecks.service
+#     stop: systemctl stop runchecks.service
+#     restart: systemctl restart runchecks.service
 
 ---
 - name: Checks

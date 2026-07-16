@@ -19,14 +19,8 @@
 #       status: test -d /home/docker/symbios-ui || exit 2; docker compose -f /home/docker/symbios-ui/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: symbios-ui
-#       command: docker compose -f /home/docker/symbios-ui/docker-compose.yml logs -f --tail=100
+#       command: docker compose -f /home/docker/symbios-ui/docker-compose.yml logs -f --tail=1000
 #   actions:
-#     uninstall: docker compose -f /home/docker/symbios-ui/docker-compose.yml down
-#     start: docker compose -f /home/docker/symbios-ui/docker-compose.yml up -d
-#     stop: docker compose -f /home/docker/symbios-ui/docker-compose.yml down
-#     restart: docker compose -f /home/docker/symbios-ui/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/symbios-ui/docker-compose.yml up -d
-#
 
 ---
 - name: symbios-ui
