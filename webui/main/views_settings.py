@@ -904,69 +904,6 @@ def settings_disk_setup(request):
 
 
 @login_required
-def settings_disk_unlock(request):
-    """AJAX POST — unlock a LUKS-encrypted /home volume."""
-    if request.method != 'POST':
-        return JsonResponse({'ok': False, 'error': 'POST required'})
-
-    password = request.POST.get('password', '').strip()
-    if not password:
-        return JsonResponse({'ok': False, 'error': 'Password required'})
-
-    # Find the LUKS device
-    ok, stdout, _ = run_command(
-        "lsblk -J -o NAME,TYPE,FSTYPE 2>/dev/null", timeout=10)
-    luks_device = ''
-    luks_name = 'home-luks'
-    if ok:
-        try:
-            data = json.loads(stdout)
-            for dev in data.get('blockdevices', []):
-                luks_device = _find_luks_device(dev)
-                if luks_device:
-                    break
-        except json.JSONDecodeError:
-            pass
-
-    if not luks_device:
-        # Check if already open
-        ok, stdout, _ = run_command(
-            "ls /dev/mapper/home-luks 2>/dev/null && echo exists || echo missing", timeout=5)
-        if ok and 'exists' in stdout:
-            # Already open, just mount
-            run_command("mkdir -p /home && mount /dev/mapper/home-luks /home", timeout=30)
-            return JsonResponse({'ok': True, 'message': 'Volume already unlocked. /home mounted.'})
-        return JsonResponse({'ok': False, 'error': 'No LUKS device found'})
-
-    # Unlock the device
-    ok, stdout, stderr = run_command(
-        f"echo '{password}' | cryptsetup open {luks_device} {luks_name}", timeout=30)
-    if not ok:
-        if 'No key available' in (stderr + stdout):
-            return JsonResponse({'ok': False, 'error': 'Wrong password or no key available.'})
-        return JsonResponse({'ok': False, 'error': f'Failed to unlock: {stderr or stdout}'})
-
-    # Mount /home
-    ok, stdout, stderr = run_command(
-        "mkdir -p /home && mount /dev/mapper/home-luks /home", timeout=30)
-    if not ok:
-        return JsonResponse({'ok': False, 'error': f'Unlocked but mount failed: {stderr}'})
-
-    return JsonResponse({'ok': True, 'message': 'Volume unlocked and /home mounted.'})
-
-
-def _find_luks_device(dev):
-    """Find a LUKS device in the block device tree."""
-    if dev.get('fstype') == 'crypto_LUKS':
-        return '/dev/' + dev.get('name', '')
-    for child in dev.get('children', []) or []:
-        result = _find_luks_device(child)
-        if result:
-            return result
-    return ''
-
-
-@login_required
 def settings_disk_umount(request):
     """AJAX POST — unmount and close a LUKS /home volume."""
     if request.method != 'POST':

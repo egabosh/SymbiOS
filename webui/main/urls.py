@@ -39,7 +39,6 @@ urlpatterns = [
     path('settings/disk/list/', views_settings.settings_disk_list, name='settings_disk_list'),
     path('settings/disk/status/', views_settings.settings_disk_status, name='settings_disk_status'),
     path('settings/disk/setup/', views_settings.settings_disk_setup, name='settings_disk_setup'),
-    path('settings/disk/unlock/', views_settings.settings_disk_unlock, name='settings_disk_unlock'),
     path('settings/disk/umount/', views_settings.settings_disk_umount, name='settings_disk_umount'),
     path('settings/local-ip/', views_settings.settings_local_ip, name='settings_local_ip'),
     path('logs/', views_logs.logs, name='logs'),
