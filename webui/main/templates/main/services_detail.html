@@ -338,12 +338,19 @@ function stopLog(name) {
 // Append an already-computed delta (raw text) as DOM without touching existing
 // nodes, so a marked span rides up with the text like tail -f. Used for the
 // non-blocking log-tail polling (the server returns only the new tail).
-function appendRawDelta(el, text) {
+function appendRawDelta(el, text, forceBottom) {
   if (!text) return;
   const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   const prevTop = el.scrollTop;
   el.insertAdjacentHTML('beforeend', ansiToHtml(text));
-  el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
+  if (forceBottom || nearBottom) {
+    // Force layout (reading scrollHeight reflows) then jump to the newest line.
+    // For the large initial tail this lands on the bottom reliably; a deferred
+    // rAF proved unreliable in headless/background tabs.
+    el.scrollTop = el.scrollHeight;
+  } else {
+    el.scrollTop = prevTop;
+  }
 }
 
 function pollLogs() {
@@ -356,7 +363,11 @@ function pollLogs() {
       .then(o => {
         const pre = unitPre[name];
         if (!pre) return;
-        if (o.delta) appendRawDelta(pre, o.delta);
+        // On the very first fill (offset 0) the whole initial tail arrives at
+        // once; force the pane to the bottom so the newest line is visible
+        // without a manual scroll. Later deltas follow only when already near
+        // the bottom (so reading/selecting history is not yanked).
+        if (o.delta) appendRawDelta(pre, o.delta, off === 0);
         unitOffsets[name] = o.offset;
       })
       .catch(() => {});
@@ -385,7 +396,22 @@ function stopAllLogs() {
 // so the log pane stayed frozen on "waiting…" until a manual F5/click. Start
 // polling immediately on load; it is cheap and keeps the pane in tail -f sync.
 startAllLogs();
-document.getElementById('tab-logs').addEventListener('shown.bs.tab', startAllLogs);
+
+// When the Logs tab becomes visible, its panes may already have been filled by
+// background polling while the tab was hidden (zero height -> scrollTop stuck at
+// 0). Jump every pane to the newest line now that it is laid out.
+function scrollLogsToBottom() {
+  requestAnimationFrame(() => {
+    for (const name in unitPre) {
+      const el = unitPre[name];
+      if (el && el.scrollHeight > el.clientHeight) el.scrollTop = el.scrollHeight;
+    }
+  });
+}
+document.getElementById('tab-logs').addEventListener('shown.bs.tab', () => {
+  startAllLogs();
+  scrollLogsToBottom();
+});
 
 const srcPre = document.getElementById('source-output');
 let srcLoaded = false;
