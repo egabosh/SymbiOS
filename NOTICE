@@ -1,0 +1,131 @@
+SymbiOS - Third-Party Software Notices
+=======================================
+
+SymbiOS includes or depends on the following third-party software components.
+Each of the following is included under its respective license.
+
+---
+
+Frontend (CDN)
+---------------
+
+Bootstrap 5.3.0
+  License: MIT
+  Copyright: Copyright (c) 2011-2024 The Bootstrap Authors
+  Source: https://getbootstrap.com/
+  CDN: https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/
+
+Bootstrap Icons 1.10.0
+  License: MIT
+  Copyright: Copyright (c) 2019-2024 The Bootstrap Authors
+  Source: https://icons.getbootstrap.com/
+  CDN: https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/
+
+---
+
+Python Dependencies
+-------------------
+
+Django (>=4.2)
+  License: BSD-3-Clause
+  Copyright: Copyright (c) 2005-present Django Software Foundation
+  Source: https://www.djangoproject.com/
+
+gunicorn
+  License: MIT
+  Copyright: Copyright (c) 2009-2024 Benoit Chesneau and contributors
+  Source: https://gunicorn.org/
+
+uvicorn
+  License: BSD-3-Clause
+  Copyright: Copyright (c) 2017 Encode OSS Ltd.
+  Source: https://www.uvicorn.org/
+
+whitenoise
+  License: MIT
+  Copyright: Copyright (c) 2013 David Evans
+  Source: https://github.com/evansd/whitenoise
+
+PyYAML (>=6.0)
+  License: MIT
+  Copyright: Copyright (c) 2017-2024 Ingy dot Net, Kirill Simonov
+  Source: https://pyyaml.org/
+
+ansible-core (>=2.15)
+  License: GPL-3.0
+  Copyright: Copyright (c) 2012-2024 Ansible Project
+  Source: https://github.com/ansible/ansible
+
+paramiko (>=3.3)
+  License: LGPL-2.1
+  Copyright: Copyright (c) 2013-2024 Jeff Forcier
+  Source: https://www.paramiko.org/
+
+---
+
+Docker Service Images
+---------------------
+
+traefik:latest
+  License: MIT
+  Copyright: Copyright (c) 2016 Traefik Labs
+  Source: https://github.com/traefik/traefik
+
+authelia/authelia:latest
+  License: Apache-2.0
+  Copyright: Copyright (c) 2022 Authelia Contributors
+  Source: https://github.com/authelia/authelia
+
+ghcr.io/ldapaccountmanager/lam:stable
+  License: GPL-2.0
+  Copyright: Copyright (c) 2004-2024 LAM Contributors
+  Source: https://github.com/LDAPAccountManager/lam
+
+smallstep/step-ca:latest
+  License: Apache-2.0
+  Copyright: Copyright (c) 2020 Smallstep Labs, Inc.
+  Source: https://github.com/smallstep/certificates
+
+openldap (via Bitnami)
+  License: OLIVER Public License (OPL)
+  Copyright: Copyright (c) 1994-2024 The OpenLDAP Foundation
+  Source: https://www.openldap.org/
+
+---
+
+Container Base Image
+--------------------
+
+python:3-slim
+  License: PSF License (Python) / Debian components under their licenses
+  Source: https://hub.docker.com/_/python/
+
+---
+
+Runtime Dependencies (installed via apt in the WebUI container)
+--------------------------------------------------------------
+
+  - curl: MIT/X-derived
+  - procps: LGPL-2.1+
+  - ldap-utils: OpenLDAP Public License
+  - openssl: Apache-2.0
+  - sshpass: GPL-2.0+
+
+---
+
+Ansible Community Collections
+-----------------------------
+
+  - community.general: GPL-3.0
+    Source: https://github.com/ansible-collections/community.general
+
+---
+
+Star Trek Reference
+-------------------
+
+The name "SymbiOS" is inspired by "Symbiosis," the Star Trek: The Next
+Generation episode (Season 1, Episode 22, aired April 18, 1988). This is a
+creative reference and does not imply endorsement by or affiliation with
+Paramount Pictures or CBS Studios Inc. Star Trek and all related marks are
+trademarks of CBS Studios Inc.
