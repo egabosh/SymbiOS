@@ -1,3 +1,48 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (C) 2025  SymbiOS Contributors
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# docs:
+#   short_description: Deploy the Open WebUI with SearXNG
+#   description: Deploys Open WebUI (ChatGPT-like interface for local LLMs) with SearXNG for web search. Exposed via Traefik.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   service_control:
+#     services:
+#     - name: openwebui
+#       type: docker
+#       compose_file: /home/docker/openwebui/docker-compose.yml
+#       status: test -d /home/docker/openwebui || exit 2; docker compose -f /home/docker/openwebui/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: openwebui
+#       command: docker compose -f /home/docker/openwebui/docker-compose.yml logs -f --tail=100
+#   actions:
+#     uninstall: docker compose -f /home/docker/openwebui/docker-compose.yml down
+#     start: docker compose -f /home/docker/openwebui/docker-compose.yml up -d
+#     stop: docker compose -f /home/docker/openwebui/docker-compose.yml down
+#     restart: docker compose -f /home/docker/openwebui/docker-compose.yml restart
+#     reload: docker compose -f /home/docker/openwebui/docker-compose.yml up -d
+#
 ---
 - name: open-webui
   hosts: all
@@ -7,9 +52,9 @@
     ai_host: "ai.lan"
   tasks:
 
-    - name: Create /home/docker/openwebui.{{ base_domain }} dir
+    - name: Create /home/docker/openwebui dir
       ansible.builtin.file:
-        path: /home/docker/openwebui.{{ base_domain }}
+        path: /home/docker/openwebui
         owner: root
         group: docker
         state: directory
@@ -17,7 +62,7 @@
 
     - name: Create searxng data dir
       ansible.builtin.file:
-        path: /home/docker/openwebui.{{ base_domain }}/searxng-data
+        path: /home/docker/openwebui/searxng-data
         owner: root
         group: docker
         state: directory
@@ -26,19 +71,19 @@
 
     - name: Generate searxng secret key
       ansible.builtin.shell: |
-        [ -s /home/docker/openwebui.{{ base_domain }}/searxng_secret ] || \
+        [ -s /home/docker/openwebui/searxng_secret ] || \
         tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 64 \
-        > /home/docker/openwebui.{{ base_domain }}/searxng_secret
+        > /home/docker/openwebui/searxng_secret
       changed_when: false
 
     - name: Load searxng secret key
       ansible.builtin.slurp:
-        path: /home/docker/openwebui.{{ base_domain }}/searxng_secret
+        path: /home/docker/openwebui/searxng_secret
       register: searxng_secret
 
     - name: Write searxng limiter.toml (suppress missing config warning)
       ansible.builtin.copy:
-        dest: /home/docker/openwebui.{{ base_domain }}/searxng-data/limiter.toml
+        dest: /home/docker/openwebui/searxng-data/limiter.toml
         force: false
         owner: root
         group: docker
@@ -49,7 +94,7 @@
 
     - name: Write searxng settings.yml
       ansible.builtin.copy:
-        dest: /home/docker/openwebui.{{ base_domain }}/searxng-data/settings.yml
+        dest: /home/docker/openwebui/searxng-data/settings.yml
         owner: root
         group: docker
         mode: '0640'
@@ -102,7 +147,7 @@
 
     - name: Ensure OIDC secret files exist (placeholder for template)
       ansible.builtin.copy:
-        dest: "/home/docker/openwebui.{{ base_domain }}/{{ item }}"
+        dest: "/home/docker/openwebui/{{ item }}"
         content: "placeholder"
         force: false
         mode: '0440'
@@ -111,9 +156,9 @@
         - oidc_digest
       changed_when: false
 
-    - name: /home/docker/openwebui.{{ base_domain }}/docker-compose.yml Container Configuration
+    - name: /home/docker/openwebui/docker-compose.yml Container Configuration
       ansible.builtin.blockinfile:
-        path: /home/docker/openwebui.{{ base_domain }}/docker-compose.yml
+        path: /home/docker/openwebui/docker-compose.yml
         create: yes
         mode: 0440
         owner: root
@@ -144,8 +189,11 @@
                 - ENABLE_API_KEYS=true
                 - OAUTH_MERGE_ACCOUNTS_BY_EMAIL=false
                 - OAUTH_SCOPES=openid profile email groups
-                - OAUTH_CLIENT_ID=ai
-                - OAUTH_CLIENT_SECRET={{ lookup('file', '/home/docker/openwebui.' + base_domain + '/oidc_password') }}
+                - OAUTH_CLIENT_ID=openwebui
+                - OAUTH_CLIENT_SECRET={{ lookup('file', '/home/docker/openwebui/oidc_password') }}
+                - OAUTH_PROVIDER_URL=https://auth.{{ base_domain }}
+                - OAUTH_REDIRECT_URI=https://openwebui.{{ base_domain }}/oauth/oidc
+                - OAUTH_PROVIDER_NAME=Authelia
                 - OPENID_PROVIDER_URL=https://auth.{{ base_domain }}/.well-known/openid-configuration
                 - OAUTH_ALLOWED_ROLES=ai,ai-admin
                 - OAUTH_ADMIN_ROLES=ai-admin
@@ -271,7 +319,7 @@
 
     - name: Create oidc client secret
       ansible.builtin.shell: |
-        /home/docker/authelia.{{ base_domain }}/gen-oidc-client-secret.sh /home/docker/openwebui.{{ base_domain }}
+        /home/docker/authelia/gen-oidc-client-secret.sh /home/docker/openwebui
       changed_when: false
       failed_when: false
 
@@ -285,30 +333,29 @@
 
     - name: write OIDC config in authelias configuration.yml
       ansible.builtin.blockinfile:
-        path: /home/docker/authelia.{{ base_domain }}/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC ai.{{ base_domain }}"
+        path: /home/docker/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC openwebui"
         block: |2
-                # OpenWebUI
-                - client_id: 'ai'
-                  client_name: 'OpenWebUI'
-                  client_secret: '{{ lookup('file', '/home/docker/openwebui.' + base_domain + '/oidc_digest') }}'
+                # Open WebUI
+                - client_id: 'openwebui'
+                  client_name: 'Open WebUI'
+                  client_secret: '{{ lookup('file', '/home/docker/openwebui/oidc_digest') }}'
                   public: false
-                  #authorization_policy: '{{ lookup('file', '/home/docker/authelia.' + base_domain + '/authorization_policy') }}'
-                  authorization_policy: one_factor
+                  authorization_policy: '{{ lookup('file', '/home/docker/authelia/authorization_policy') }}'
                   redirect_uris:
-                    - 'https://ai.{{ base_domain }}/oauth/oidc/callback'
+                    - 'https://openwebui.{{ base_domain }}/oauth/oidc'
                   scopes:
                     - 'openid'
                     - 'profile'
-                    - 'groups'
                     - 'email'
+                    - 'groups'
                   response_types:
                     - 'code'
                   grant_types:
                     - 'authorization_code'
                   access_token_signed_response_alg: 'none'
                   userinfo_signed_response_alg: 'none'
-                  token_endpoint_auth_method: 'client_secret_basic'
+                  token_endpoint_auth_method: 'client_secret_post'
         insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
         backup: yes
         validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
@@ -332,7 +379,7 @@
       ansible.builtin.shell:
         cmd: >
           timeout 60 bash -c '
-            DB="/home/docker/openwebui.{{ base_domain }}/openwebui-data/webui.db"
+            DB="/home/docker/openwebui/openwebui-data/webui.db"
             while [ ! -f "$DB" ]; do sleep 1; done
             until sqlite3 "$DB" ".tables" 2>/dev/null | grep -q api_key; do sleep 2; done
           '
@@ -340,7 +387,7 @@
 
     - name: Create / retrieve OpenWebUI API key (ensure admin user exists)
       ansible.builtin.shell: |
-        DB=/home/docker/openwebui.{{ base_domain }}/openwebui-data/webui.db
+        DB=/home/docker/openwebui/openwebui-data/webui.db
 
         # Create initial admin user if none exists
         USER_ID=$(sqlite3 "$DB" "SELECT id FROM \"user\" ORDER BY role='admin' DESC LIMIT 1")
@@ -378,7 +425,7 @@
 
     - name: Save API key to file
       ansible.builtin.copy:
-        dest: "/home/docker/openwebui.{{ base_domain }}/comfyui_api_key"
+        dest: "/home/docker/openwebui/comfyui_api_key"
         content: "{{ openwebui_api_key.stdout | default('ERROR') }}"
         mode: '0400'
 
@@ -399,7 +446,7 @@
           's|\(workflow\[node_id\]\[.inputs.\]\[node.key if node.key else .text.\]\s*=\s*\)payload\.negative_prompt$|\1payload.negative_prompt if payload.negative_prompt is not None else ""|' \
           /app/backend/open_webui/utils/images/comfyui.py
       args:
-        chdir: /home/docker/openwebui.{{ base_domain }}
+        chdir: /home/docker/openwebui
       changed_when: false
 
     - name: Set ComfyUI workflows in DB (key-value schema)
@@ -407,7 +454,7 @@
         python3 <<'PYEOF'
         import json, sqlite3, time
 
-        DB = "/home/docker/openwebui.{{ base_domain }}/openwebui-data/webui.db"
+        DB = "/home/docker/openwebui/openwebui-data/webui.db"
 
         WF = {
             "3": {"class_type": "KSampler", "inputs": {
@@ -500,14 +547,14 @@
     - name: Restart openwebui
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
-        chdir: /home/docker/openwebui.{{ base_domain }}
+        chdir: /home/docker/openwebui
 
     - name: Restart searxng
       ansible.builtin.shell: docker compose up -d --force-recreate searxng
       args:
-        chdir: /home/docker/openwebui.{{ base_domain }}
+        chdir: /home/docker/openwebui
 
     - name: Restart authelia
       ansible.builtin.shell: docker compose down && docker compose up -d
       args:
-        chdir: /home/docker/authelia.{{ base_domain }}
+        chdir: /home/docker/authelia
