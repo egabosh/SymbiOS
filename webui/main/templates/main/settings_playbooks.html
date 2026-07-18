@@ -1,0 +1,150 @@
+{% extends "main/base.html" %}
+{% block sidebar %}
+    {% include "main/sidebar_settings.html" %}
+{% endblock %}
+{% block content %}
+<h2><i class="bi bi-file-earmark-code"></i> Playbooks</h2>
+
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-upload"></i> Upload Playbook</span>
+      </div>
+      <div class="card-body">
+        <div class="alert alert-info small mb-3">
+          <i class="bi bi-info-circle"></i>
+          Upload custom <code>.yml</code> Ansible playbooks. They will appear in the
+          <a href="/services/">Services</a> list and can be run from the WebUI.
+          Playbooks should include a <code># docs:</code> block at the top — see
+          existing playbooks in <code>services/</code> for the format.
+        </div>
+        <form id="upload-form" enctype="multipart/form-data">
+          {% csrf_token %}
+          <div class="input-group">
+            <input type="file" class="form-control" id="playbook-files"
+                   name="playbooks" accept=".yml,.yaml" multiple
+                   required>
+            <button class="btn btn-outline-success" type="submit"
+                    id="upload-btn">
+              <i class="bi bi-upload"></i> Upload
+            </button>
+          </div>
+        </form>
+        <div id="upload-status" class="mt-2" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-list"></i> Uploaded Playbooks</span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body">
+        {% if playbooks %}
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for pb in playbooks %}
+              <tr>
+                <td>
+                  <code>{{ pb.filename }}</code>
+                  {% if not pb.has_docs %}
+                    <span class="badge bg-warning text-dark" style="font-size:0.55rem;">no docs block</span>
+                  {% endif %}
+                </td>
+                <td class="text-muted small">{{ pb.title }}</td>
+                <td class="text-end">
+                  <a class="btn btn-outline-info btn-sm"
+                     href="/services/user-playbooks/{{ pb.filename }}/">
+                    <i class="bi bi-box-arrow-up-right"></i> Open
+                  </a>
+                  <button class="btn btn-outline-danger btn-sm ms-1"
+                          onclick="deletePlaybook('{{ pb.filename }}')">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">No playbooks uploaded yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const csrfToken = '{{ csrf_token }}';
+
+document.getElementById('upload-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const files = document.getElementById('playbook-files').files;
+  if (!files.length) return;
+  const btn = document.getElementById('upload-btn');
+  const status = document.getElementById('upload-status');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Uploading...';
+  const fd = new FormData();
+  for (const f of files) fd.append('playbooks', f);
+  try {
+    const resp = await fetch('/settings/playbooks/upload/', {
+      method: 'POST', body: fd,
+      headers: { 'X-CSRFToken': csrfToken }
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      let msg = `Saved ${data.saved.length} playbook(s).`;
+      if (data.errors.length) msg += ' Errors: ' + data.errors.join('; ');
+      status.className = 'alert alert-success small mb-0';
+      status.textContent = msg;
+      status.style.display = 'block';
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      status.className = 'alert alert-danger small mb-0';
+      status.textContent = data.error || 'Upload failed';
+      status.style.display = 'block';
+    }
+  } catch(err) {
+    status.className = 'alert alert-danger small mb-0';
+    status.textContent = 'Network error: ' + err.message;
+    status.style.display = 'block';
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="bi bi-upload"></i> Upload';
+});
+
+async function deletePlaybook(filename) {
+  if (!confirm('Delete ' + filename + '?')) return;
+  const fd = new FormData();
+  fd.append('filename', filename);
+  try {
+    const resp = await fetch('/settings/playbooks/delete/', {
+      method: 'POST', body: fd,
+      headers: { 'X-CSRFToken': csrfToken }
+    });
+    const data = await resp.json();
+    if (data.ok) location.reload();
+    else alert(data.error || 'Delete failed');
+  } catch(err) {
+    alert('Network error: ' + err.message);
+  }
+}
+</script>
+{% endblock %}

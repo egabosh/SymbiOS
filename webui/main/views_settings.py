@@ -1,4 +1,5 @@
 from django.shortcuts import render, redirect
+from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
@@ -10,6 +11,7 @@ import urllib.error
 import json
 import yaml
 import os
+import re
 
 
 
@@ -916,3 +918,91 @@ def settings_disk_umount(request):
 
     ok, stdout, stderr = run_command(' && '.join(cmds), timeout=30)
     return JsonResponse({'ok': True, 'message': '/home unmounted and LUKS volume closed.'})
+
+
+# ---------------------------------------------------------------------------
+# Playbooks management
+# ---------------------------------------------------------------------------
+
+USER_PLAYBOOKS_DIR = "/config/user-playbooks"
+
+
+def _ensure_user_playbooks_dir():
+    os.makedirs(USER_PLAYBOOKS_DIR, exist_ok=True)
+
+
+def _safe_playbook_name(name):
+    """Sanitize a playbook filename: only allow [a-z0-9_-] and require .yml."""
+    name = os.path.basename(name)
+    name = re.sub(r'[^a-z0-9_\-\.]', '-', name.lower())
+    if not name.endswith('.yml'):
+        name = name.rsplit('.', 1)[0] + '.yml'
+    return name
+
+
+@login_required
+def settings_playbooks(request):
+    """Show list of user-uploaded playbooks with upload form."""
+    _ensure_user_playbooks_dir()
+    files = sorted(f for f in os.listdir(USER_PLAYBOOKS_DIR)
+                   if f.endswith('.yml') and f != 'inventory.yml')
+    playbooks = []
+    for fn in files:
+        from .playbook_catalog import parse_docs
+        path = os.path.join(USER_PLAYBOOKS_DIR, fn)
+        docs = parse_docs(path)
+        playbooks.append({
+            'filename': fn,
+            'title': (docs or {}).get('short_description', fn[:-4]) if docs else fn[:-4],
+            'has_docs': docs is not None,
+        })
+    return render(request, 'main/settings_playbooks.html', {
+        'playbooks': playbooks,
+    })
+
+
+@csrf_exempt
+@login_required
+def settings_playbooks_upload(request):
+    """AJAX POST — upload one or more .yml playbook files."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+    _ensure_user_playbooks_dir()
+    uploaded = request.FILES.getlist('playbooks')
+    if not uploaded:
+        return JsonResponse({'ok': False, 'error': 'No files provided'})
+    saved = []
+    errors = []
+    for f in uploaded:
+        fn = _safe_playbook_name(f.name)
+        if fn in ('inventory.yml', 'traefik-static.yml'):
+            errors.append(f'{fn}: reserved filename')
+            continue
+        dest = os.path.join(USER_PLAYBOOKS_DIR, fn)
+        try:
+            with open(dest, 'wb') as out:
+                for chunk in f.chunks():
+                    out.write(chunk)
+            saved.append(fn)
+        except Exception as e:
+            errors.append(f'{fn}: {e}')
+    # Invalidate catalog cache so new playbooks appear immediately
+    from .playbook_catalog import get_catalog
+    get_catalog(force=True)
+    return JsonResponse({'ok': True, 'saved': saved, 'errors': errors})
+
+
+@csrf_exempt
+@login_required
+def settings_playbooks_delete(request):
+    """AJAX POST — delete a user-uploaded playbook."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+    fn = _safe_playbook_name(request.POST.get('filename', ''))
+    path = os.path.join(USER_PLAYBOOKS_DIR, fn)
+    if not os.path.isfile(path):
+        return JsonResponse({'ok': False, 'error': 'File not found'})
+    os.remove(path)
+    from .playbook_catalog import get_catalog
+    get_catalog(force=True)
+    return JsonResponse({'ok': True, 'message': f'Deleted {fn}'})
