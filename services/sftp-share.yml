@@ -244,9 +244,9 @@
 
   - name: Restart sftp-share
     ansible.builtin.shell: |
-      if docker-compose build --pull --no-cache --force-rm
+      if docker compose build --pull --no-cache --force-rm
       then
-        docker-compose up -d
+        docker compose up -d
       fi
     args:
       chdir: /home/docker/sftp-share

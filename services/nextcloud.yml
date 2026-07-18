@@ -49,7 +49,11 @@
   hosts: all
 
   vars:
-    ldap_basedn: "{{ 'dc=openldap,' ~ inventory_hostname | split('.') | map('regex_replace', '^(.*)$', 'dc=\\1') | join(',') }}"
+    service_name: nextcloud
+    service_domain: "{{ service_name }}.{{ base_domain }}"
+    traefik_ip: "192.168.41.200"
+    trusted_proxies_cidr: "192.168.41.0/24"
+    ldap_basedn: "{{ 'dc=openldap,' ~ base_domain | split('.') | map('regex_replace', '^(.*)$', 'dc=\\1') | join(',') }}"
 
 
   tasks:
@@ -232,7 +236,7 @@
           fingerprint
           use-auth-secret
           static-auth-secret=
-          realm=nextcloud.{{inventory_hostname}}
+          realm=nextcloud.{{ base_domain }}
           total-quota=100
           bps-capacity=0
           stale-nonce
@@ -250,7 +254,7 @@
         block: |
         
           services:
-            nextcloud.{{inventory_hostname}}:
+            nextcloud.{{ base_domain }}:
               image: nextcloud:stable-apache
               security_opt:
                 - no-new-privileges:true
@@ -261,48 +265,48 @@
                 - /etc/localtime:/etc/localtime:ro
                 - /etc/hosts:/etc/hosts:ro
               depends_on:
-                - nextcloud.{{inventory_hostname}}--db
-                - nextcloud.{{inventory_hostname}}--redis
+                - nextcloud.{{ base_domain }}--db
+                - nextcloud.{{ base_domain }}--redis
               env_file: env
               environment:
-                - MYSQL_HOST=nextcloud.{{inventory_hostname}}--db
+                - MYSQL_HOST=nextcloud.{{ base_domain }}--db
                 - MYSQL_DATABASE=nextcloud-db
-                - NEXTCLOUD_TRUSTED_DOMAINS=nextcloud.{{inventory_hostname}}
-                - TRUSTED_PROXIES=192.168.41.200/24
-                - REDIS_HOST=nextcloud.{{inventory_hostname}}--redis
-                - SMTP_HOST=mail.{{inventory_hostname}}
+                - NEXTCLOUD_TRUSTED_DOMAINS=nextcloud.{{ base_domain }}
+                - TRUSTED_PROXIES={{ traefik_ip }}/24
+                - REDIS_HOST=nextcloud.{{ base_domain }}--redis
+                - SMTP_HOST=mail.{{ base_domain }}
                 - SMTP_PORT=25
                 - MAIL_FROM_ADDRESS=nextcloud
-                - MAIL_DOMAIN={{inventory_hostname}}
+                - MAIL_DOMAIN={{ base_domain }}
                 - OVERWRITEPROTOCOL=https
                 - NEXTCLOUD_ADMIN_USER=ncadmin
                 - PHP_MEMORY_LIMIT=1024M
                 - PHP_UPLOAD_LIMIT=1024M
               networks:
-                - nextcloud.{{inventory_hostname}}--network
+                - nextcloud.{{ base_domain }}--network
                 - traefik
               labels:
                 - traefik.enable=true
                 # HTTPS
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.rule=Host(`nextcloud.{{ ansible_facts['nodename'] }}`)
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.entrypoints=https
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.tls=true
+                - traefik.http.routers.nextcloud-{{ base_domain }}.rule=Host(`nextcloud.{{ base_domain }}`)
+                - traefik.http.routers.nextcloud-{{ base_domain }}.entrypoints=https
+                - traefik.http.routers.nextcloud-{{ base_domain }}.tls=true
                 # Proxy to service-port
-                - traefik.http.services.nextcloud-{{ ansible_facts['hostname'] }}.loadbalancer.server.port=80
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.service=nextcloud-{{ ansible_facts['hostname'] }}
+                - traefik.http.services.nextcloud-{{ base_domain }}.loadbalancer.server.port=80
+                - traefik.http.routers.nextcloud-{{ base_domain }}.service=nextcloud-{{ base_domain }}
                 # cert via letsencrypt
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.tls.certresolver=letsencrypt
+                - traefik.http.routers.nextcloud-{{ base_domain }}.tls.certresolver={{ acme_resolver }}
                 # Traefik network
                 - traefik.docker.network=traefik
                 # Nextcloud specific
                 # .well-known for dav
-                - traefik.http.middlewares.nextcloud-{{ ansible_facts['hostname'] }}-dav.redirectRegex.permanent=true
-                - traefik.http.middlewares.nextcloud-{{ ansible_facts['hostname'] }}-dav.redirectRegex.regex=https://(.*)/.well-known/(card|cal)dav
-                - traefik.http.middlewares.nextcloud-{{ ansible_facts['hostname'] }}-dav.redirectRegex.replacement=https://$${1}/remote.php/dav/
+                - traefik.http.middlewares.nextcloud-{{ base_domain }}-dav.redirectRegex.permanent=true
+                - traefik.http.middlewares.nextcloud-{{ base_domain }}-dav.redirectRegex.regex=https://(.*)/.well-known/(card|cal)dav
+                - traefik.http.middlewares.nextcloud-{{ base_domain }}-dav.redirectRegex.replacement=https://$${1}/remote.php/dav/
                 # activate secHeaders@file and .well.known
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}.middlewares=secHeaders@file,nextcloud-{{ ansible_facts['hostname'] }}-dav
+                - traefik.http.routers.nextcloud-{{ base_domain }}.middlewares=secHeaders@file,nextcloud-{{ base_domain }}-dav
             
-            nextcloud.{{inventory_hostname}}--db:
+            nextcloud.{{ base_domain }}--db:
               image: mariadb:lts
               cap_add:
                 - SYS_NICE
@@ -317,15 +321,15 @@
                 - MARIADB_AUTO_UPGRADE=1
                 - MARIADB_INITDB_SKIP_TZINFO=1
               networks:
-                - nextcloud.{{inventory_hostname}}--network
+                - nextcloud.{{ base_domain }}--network
 
-            nextcloud.{{inventory_hostname}}--redis:
+            nextcloud.{{ base_domain }}--redis:
               image: redis:latest
               restart: unless-stopped
               networks:
-                - nextcloud.{{inventory_hostname}}--network
+                - nextcloud.{{ base_domain }}--network
 
-            nextcloud.{{inventory_hostname}}--cron:
+            nextcloud.{{ base_domain }}--cron:
               image: nextcloud:stable-apache
               restart: unless-stopped
               volumes:
@@ -336,39 +340,39 @@
                 - PHP_MEMORY_LIMIT=1024M
                 - PHP_UPLOAD_LIMIT=1024M
               depends_on:
-                - nextcloud.{{inventory_hostname}}--db
+                - nextcloud.{{ base_domain }}--db
               networks:
-                - nextcloud.{{inventory_hostname}}--network
+                - nextcloud.{{ base_domain }}--network
 
-            nextcloud.{{inventory_hostname}}--phpmyadmin:
+            nextcloud.{{ base_domain }}--phpmyadmin:
               image: phpmyadmin:latest
               restart: unless-stopped
               env_file: env.phpmyadmin
               environment:
                 - PMA_ARBITRARY=0
-                - PMA_HOST=nextcloud.{{inventory_hostname}}--db
+                - PMA_HOST=nextcloud.{{ base_domain }}--db
               volumes:
                 - /etc/localtime:/etc/localtime:ro
               networks:
-                - nextcloud.{{inventory_hostname}}--network
+                - nextcloud.{{ base_domain }}--network
                 - traefik
               labels:
                 - traefik.enable=true
                 # HTTPS
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.rule=Host(`nextcloud-phpmyadmin.{{ ansible_facts['nodename'] }}`)
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.entrypoints=https
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.tls=true
+                - traefik.http.routers.nextcloud-{{ base_domain }}--phpmyadmin.rule=Host(`nextcloud-phpmyadmin.{{ base_domain }}`)
+                - traefik.http.routers.nextcloud-{{ base_domain }}--phpmyadmin.entrypoints=https
+                - traefik.http.routers.nextcloud-{{ base_domain }}--phpmyadmin.tls=true
                 # Proxy to service-port
-                - traefik.http.services.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.loadbalancer.server.port=80
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.service=nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin
+                - traefik.http.services.nextcloud-{{ base_domain }}--phpmyadmin.loadbalancer.server.port=80
+                - traefik.http.routers.nextcloud-{{ base_domain }}--phpmyadmin.service=nextcloud-{{ base_domain }}--phpmyadmin
                 # cert via letsencrypt
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.tls.certresolver=letsencrypt
+                - traefik.http.routers.nextcloud-{{ base_domain }}--phpmyadmin.tls.certresolver={{ acme_resolver }}
                 # Auth
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--phpmyadmin.middlewares=secHeaders@file,default-basic-auth@file
+                - traefik.http.routers.nextcloud-{{ base_domain }}--phpmyadmin.middlewares=secHeaders@file,default-basic-auth@file
                 # Traefik network
                 - traefik.docker.network=traefik
 
-            nextcloud.{{inventory_hostname}}--collabora:
+            nextcloud.{{ base_domain }}--collabora:
               image: collabora/code:latest
               cap_add:
                 - FOWNER
@@ -381,31 +385,31 @@
                 - /etc/hosts:/etc/hosts:ro
               environment:
                 - username=admin
-                - aliasgroup1=https://nextcloud.{{inventory_hostname}}
+                - aliasgroup1=https://nextcloud.{{ base_domain }}
                 - extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:storage.wopi{wopi://}@enable=true --o:auth.allow_known=true --o:net.proto=websocket
                 - DONT_GEN_SSL_CERTS=true
               networks:
-                - nextcloud.{{inventory_hostname}}--network 
+                - nextcloud.{{ base_domain }}--network 
                 - traefik
               labels:
                 - traefik.enable=true
                 # HTTPS
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--collabora.rule=Host(`office.{{ ansible_facts['nodename'] }}`)
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--collabora.entrypoints=https
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--collabora.tls=true
+                - traefik.http.routers.nextcloud-{{ base_domain }}--collabora.rule=Host(`office.{{ base_domain }}`)
+                - traefik.http.routers.nextcloud-{{ base_domain }}--collabora.entrypoints=https
+                - traefik.http.routers.nextcloud-{{ base_domain }}--collabora.tls=true
                 # Proxy to service-port
-                - traefik.http.services.nextcloud-{{ ansible_facts['hostname'] }}--collabora.loadbalancer.server.port=9980
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--collabora.service=nextcloud-{{ ansible_facts['hostname'] }}--collabora
+                - traefik.http.services.nextcloud-{{ base_domain }}--collabora.loadbalancer.server.port=9980
+                - traefik.http.routers.nextcloud-{{ base_domain }}--collabora.service=nextcloud-{{ base_domain }}--collabora
                 # cert via letsencrypt
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--collabora.tls.certresolver=letsencrypt
+                - traefik.http.routers.nextcloud-{{ base_domain }}--collabora.tls.certresolver={{ acme_resolver }}
                 # Auth
-                - traefik.http.routers.nextcloud-{{ ansible_facts['hostname'] }}--collabora.middlewares=secHeaders@file
+                - traefik.http.routers.nextcloud-{{ base_domain }}--collabora.middlewares=secHeaders@file
                 # Traefik network
                 - traefik.docker.network=traefik
 
 
           networks:
-            nextcloud.{{inventory_hostname}}--network:
+            nextcloud.{{ base_domain }}--network:
               driver: bridge
               driver_opts:
                 com.docker.network.bridge.name: br-nextcloud
@@ -429,7 +433,7 @@
     - name: write OIDC config in authelias configuration.yml for Nextcloud
       ansible.builtin.blockinfile:
         path: /home/docker/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC nextcloud.{{inventory_hostname}}"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC nextcloud.{{ base_domain }}"
         block: |2
                 # Nextcloud
                 - client_id: 'nextcloud'
@@ -438,7 +442,7 @@
                   public: false
                   authorization_policy: '{{ lookup('file', '/home/docker/authelia/authorization_policy') }}'
                   redirect_uris:
-                    - 'https://nextcloud.{{inventory_hostname}}/apps/user_oidc/code'
+                    - 'https://nextcloud.{{ base_domain }}/apps/user_oidc/code'
                   scopes:
                     - 'openid'
                     - 'profile'
@@ -458,7 +462,7 @@
 
 
     - name: Start nextcloud
-      ansible.builtin.shell: docker-compose up -d
+      ansible.builtin.shell: docker compose up -d
       args:
         chdir: /home/docker/nextcloud
         creates: /home/docker/nextcloud/nextcloud-data/config/config.php
@@ -503,13 +507,13 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # waiting for started Nextcloud (Login-Screen)
-          until wget nextcloud.{{inventory_hostname}} -O - | grep -q Login
+          until wget nextcloud.{{ base_domain }} -O - | grep -q Login
           do
             echo "Waiting for Login screen..."
             # restart traefik on Problems with ACME/letsencrypt
             if [ -f /home/docker/traefik/docker-compose.yml ]
             then
-              if docker compose -f /home/docker/traefik/docker-compose.yml logs | grep -E -q "nextcloud.{{inventory_hostname}}.+error.+acme-challenge"
+              if docker compose -f /home/docker/traefik/docker-compose.yml logs | grep -E -q "nextcloud.{{ base_domain }}.+error.+acme-challenge"
               then
                 docker compose -f /home/docker/traefik/docker-compose.yml up -d --force-recreate
               fi
@@ -528,11 +532,11 @@
           do
             if [ ! -f "app.${app}.installed" ]
             then
-              docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:install "${app}" | tee -a nextcloud.init.log >"app.${app}.installed" 2>&1
+              docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ app:install "${app}" | tee -a nextcloud.init.log >"app.${app}.installed" 2>&1
             fi
             if [ ! -f "app.${app}.installed" ]
             then
-              docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:enable "${app}" | tee -a nextcloud.init.log >>"app.${app}.installed" 2>&1
+              docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ app:enable "${app}" | tee -a nextcloud.init.log >>"app.${app}.installed" 2>&1
             fi
           done
 
@@ -541,7 +545,7 @@
           do
             if [ ! -f "app.${app}.installed" ]
             then
-              docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:disable "${app}" | tee -a nextcloud.update.log >"app.${app}.disabled" 2>&1
+              docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ app:disable "${app}" | tee -a nextcloud.update.log >"app.${app}.disabled" 2>&1
             fi
           done
           
@@ -549,22 +553,22 @@
           if [ -s /home/docker/turn/env ]
           then
             source /home/docker/turn/env
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:turn:add --secret $TURN_SECRET turns turn.{{inventory_hostname}}:5349 udp,tcp
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:add turn.{{inventory_hostname}}:5349
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:delete stun.nextcloud.com:443
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ talk:turn:add --secret $TURN_SECRET turns turn.{{ base_domain }}:5349 udp,tcp
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ talk:stun:add turn.{{ base_domain }}:5349
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ talk:stun:delete stun.nextcloud.com:443
           fi
 
           #  richdocuments Collabora Office (Nextcloud Office App)
           if ! [ -s app.richdocuments.configured ]
           then
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ config:app:set richdocuments wopi_allowlist --value="0.0.0.0/0,::0" >>app.richdocuments.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ richdocuments:activate-config >>app.richdocuments.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ config:app:set richdocuments wopi_callback_url   --value="https://nextcloud.{{inventory_hostname}}" >>app.richdocuments.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ config:app:set richdocuments wopi_url            --value="https://office.{{inventory_hostname}}" >>app.richdocuments.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ config:app:set richdocuments public_wopi_url     --value="https://office.{{inventory_hostname}}" >>app.richdocuments.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ config:system:set overwrite.cli.url --value="https://nextcloud.{{inventory_hostname}}"
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ config:system:set trusted_proxies 1 --value="192.168.41.0/24"
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ config:system:set trusted_proxies 2 --value="fdaa:a192:b168:cd41::/64"
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ config:app:set richdocuments wopi_allowlist --value="0.0.0.0/0,::0" >>app.richdocuments.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ richdocuments:activate-config >>app.richdocuments.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ config:app:set richdocuments wopi_callback_url   --value="https://nextcloud.{{ base_domain }}" >>app.richdocuments.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ config:app:set richdocuments wopi_url            --value="https://office.{{ base_domain }}" >>app.richdocuments.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ config:app:set richdocuments public_wopi_url     --value="https://office.{{ base_domain }}" >>app.richdocuments.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ config:system:set overwrite.cli.url --value="https://nextcloud.{{ base_domain }}"
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ config:system:set trusted_proxies 1 --value="{{ trusted_proxies_cidr }}"
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ config:system:set trusted_proxies 2 --value="fdaa:a192:b168:cd41::/64"
           fi
 
           # OIDC via Authelia (user_oidc)
@@ -578,18 +582,18 @@
                 ./occ user_oidc:provider \
                 --clientid=\"nextcloud\" \
                 --clientsecret='${oidc_secret}' \
-                --discoveryuri=\"https://auth.{{inventory_hostname}}/.well-known/openid-configuration\" \
+                --discoveryuri=\"https://auth.{{ base_domain }}/.well-known/openid-configuration\" \
                 --scope=\"openid profile email groups\" \
                 --mapping-uid=\"preferred_username\" \
                 --mapping-groups=\"groups\" \
                 Authelia" >nextcloud-data/oidc.sh
-              docker-compose exec -ti -u www-data nextcloud.{{inventory_hostname}} bash oidc.sh
+              docker compose exec -ti -u www-data nextcloud.{{ base_domain }} bash oidc.sh
               rm nextcloud-data/oidc.sh
 
               # multiple backends
-              docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ config:app:set user_oidc allow_multiple_user_backends --value="1"
+              docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ config:app:set user_oidc allow_multiple_user_backends --value="1"
               # local remote ip
-              docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ config:system:set allow_local_remote_servers --value true --type bool
+              docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ config:system:set allow_local_remote_servers --value true --type bool
 
               date >> app.user_oidc.configured
 
@@ -608,24 +612,24 @@
               LDAP_PASSWORD=$(grep ^LDAP_READUSER_PASSWORD= /home/docker/ldap/env.openldap | cut -d= -f2-)
             fi
 
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:create-empty-config >>app.user_ldap.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapHost "openldap.{{inventory_hostname}}" >>app.user_ldap.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapPort "636" >>app.user_ldap.configured
-            #docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapTLS "1" >>app.user_ldap.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapBase "${LDAP_BASE_DN}" >>app.user_ldap.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapBaseUsers "ou=users,${LDAP_BASE_DN}" >>app.user_ldap.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapBaseGroups "ou=groups,${LDAP_BASE_DN}" >>app.user_ldap.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapAgentName "${LDAP_BIND_DN}" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:create-empty-config >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapHost "openldap.{{ base_domain }}" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapPort "636" >>app.user_ldap.configured
+            #docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapTLS "1" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapBase "${LDAP_BASE_DN}" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapBaseUsers "ou=users,${LDAP_BASE_DN}" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapBaseGroups "ou=groups,${LDAP_BASE_DN}" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapAgentName "${LDAP_BIND_DN}" >>app.user_ldap.configured
             if [ -n "${LDAP_PASSWORD}" ]
             then
-              docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapAgentPassword "${LDAP_PASSWORD}" >>app.user_ldap.configured
+              docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapAgentPassword "${LDAP_PASSWORD}" >>app.user_ldap.configured
             fi
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapLoginFilter "(&(|(objectclass=posixAccount))(uid=%uid))" >>app.user_ldap.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapGroupFilter "(&(objectClass=posixGroup)(memberUid=%uid))" >>app.user_ldap.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapUserDisplayName "cn" >>app.user_ldap.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapEmailAttribute "mail" >>app.user_ldap.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapConfigurationActive "1" >>app.user_ldap.configured
-            docker-compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ ldap:set-config s01 ldapUserLoginName uid >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapLoginFilter "(&(|(objectclass=posixAccount))(uid=%uid))" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapGroupFilter "(&(objectClass=posixGroup)(memberUid=%uid))" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapUserDisplayName "cn" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapEmailAttribute "mail" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapConfigurationActive "1" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ ldap:set-config s01 ldapUserLoginName uid >>app.user_ldap.configured
             date >> app.user_ldap.configured
           fi
 
@@ -659,32 +663,32 @@
           # Update full Dockerfile
           /home/docker/nextcloud/fulldockerfile.sh
           # Nextcloud maintenance and app-update
-          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ db:add-missing-columns
-          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ db:add-missing-indices
-          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ db:add-missing-primary-keys
-          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ app:update --all
-          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ dav:sync-birthday-calendar
-          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ trashbin:cleanup --all-users
-          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ files:cleanup
-          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ files:scan --all --generate-metadata --home-only --no-interaction -q
+          docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ db:add-missing-columns
+          docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ db:add-missing-indices
+          docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ db:add-missing-primary-keys
+          docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ app:update --all
+          docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ dav:sync-birthday-calendar
+          docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ trashbin:cleanup --all-users
+          docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ files:cleanup
+          docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ files:scan --all --generate-metadata --home-only --no-interaction -q
           # maps:scan-photos replaced by "occ files:scan --generate-metadata"
-          #docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ maps:scan-photos --now
-          docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ db:convert-filecache-bigint -n
+          #docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ maps:scan-photos --now
+          docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ db:convert-filecache-bigint -n
           # define stun/turn server maybe new password
           if [ -s /home/docker/turn/env ]
           then
              # turn
              source /home/docker/turn/env
-             docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:turn:delete turns turn.{{inventory_hostname}}:5349 udp,tcp
-             docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:turn:add --secret $TURN_SECRET turns turn.{{inventory_hostname}}:5349 udp,tcp
+             docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ talk:turn:delete turns turn.{{ base_domain }}:5349 udp,tcp
+             docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ talk:turn:add --secret $TURN_SECRET turns turn.{{ base_domain }}:5349 udp,tcp
              # stun
-             docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:delete turn.{{inventory_hostname}}:5349
-             docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:add turn.{{inventory_hostname}}:5349
-             docker compose exec -T -u www-data nextcloud.{{inventory_hostname}} ./occ talk:stun:delete stun.nextcloud.com:443
+             docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ talk:stun:delete turn.{{ base_domain }}:5349
+             docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ talk:stun:add turn.{{ base_domain }}:5349
+             docker compose exec -T -u www-data nextcloud.{{ base_domain }} ./occ talk:stun:delete stun.nextcloud.com:443
           fi
           if [ -s /home/docker/nextcloud/nextcloud-data/data/nextcloud.log ]
           then
-            docker compose -f /home/docker/nextcloud/docker-compose.yml exec -ti -u www-data nextcloud.{{inventory_hostname}} ./occ log:tail 1000 | grep " Error " | grep -v "Can't get app storage," | dd bs=1M count=1 2>/dev/null >"${g_tmp}/nextcloud-error.log"
+            docker compose -f /home/docker/nextcloud/docker-compose.yml exec -ti -u www-data nextcloud.{{ base_domain }} ./occ log:tail 1000 | grep " Error " | grep -v "Can't get app storage," | dd bs=1M count=1 2>/dev/null >"${g_tmp}/nextcloud-error.log"
             if [ -s "${g_tmp}/nextcloud-error.log" ]
             then
               g_echo_error "Errors in Nextcloud Log: $(cat "${g_tmp}/nextcloud-error.log")"
@@ -714,7 +718,7 @@
       ansible.builtin.shell: bash /home/docker/nextcloud/nextcloud.init.sh
 
     - name: Restart nextcloud
-      ansible.builtin.shell: docker-compose up -d --force-recreate
+      ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /home/docker/nextcloud
 
@@ -726,9 +730,9 @@
 
     - name: Restart authelia
       ansible.builtin.shell: |
-        if docker-compose down
+        if docker compose down
         then
-          docker-compose up -d
+          docker compose up -d
         fi
       args:
         chdir: /home/docker/authelia

@@ -47,6 +47,11 @@
 ---
 - name: home-assistant
   hosts: all
+  vars:
+    service_name: home-assistant
+    service_domain: "{{ service_name }}.{{ base_domain }}"
+    traefik_ip: "{{ traefik_ip }}"
+    home_assistant_ip: "{{ home_assistant_ip }}"
   tasks:
 
     - name: Create /home/docker/home-assistant dir
@@ -98,7 +103,7 @@
             unit_system: metric
             currency: EUR
             time_zone: Europe/Berlin
-            external_url: "https://home-assistant.{{inventory_hostname}}"
+            external_url: "https://home-assistant.{{ base_domain }}"
 
           api:
           history:
@@ -127,12 +132,12 @@
           http:
             use_x_forwarded_for: true
             trusted_proxies:
-              - 192.168.41.200 # traefik
+              - {{ traefik_ip }} # traefik
           
           auth_oidc:
             client_id: 'home-assistant'
             client_secret: '{{ lookup('file', '/home/docker/home-assistant/oidc_password') }}'
-            discovery_url: 'https://auth.{{inventory_hostname}}/.well-known/openid-configuration'
+            discovery_url: 'https://auth.{{ base_domain }}/.well-known/openid-configuration'
             display_name: 'Authelia'
             claims:
               groups: 'groups'
@@ -205,7 +210,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           services:
-            home-assistant.{{inventory_hostname}}:
+            home-assistant.{{ base_domain }}:
               image: ghcr.io/home-assistant/home-assistant
               restart: unless-stopped
               volumes:
@@ -216,7 +221,7 @@
               network_mode: host
               privileged: true
 
-            matter.{{inventory_hostname}}:
+            matter.{{ base_domain }}:
               image: ghcr.io/home-assistant-libs/python-matter-server:stable
               restart: unless-stopped
               network_mode: host
@@ -231,7 +236,7 @@
                   --bluetooth-adapter 0
               #privileged: true
             
-            ha_pingcheck.{{inventory_hostname}}:
+            ha_pingcheck.{{ base_domain }}:
               image: nginx:latest
               restart: unless-stopped
               ports:
@@ -243,10 +248,10 @@
                 - traefik
               labels:
                 - traefik.enable=true
-                - traefik.http.routers.ha_pingcheck.rule=Host(`ha-health.{{inventory_hostname}}`)
+                - traefik.http.routers.ha_pingcheck.rule=Host(`ha-health.{{ base_domain }}`)
                 - traefik.http.routers.ha_pingcheck.entrypoints=https
                 - traefik.http.routers.ha_pingcheck.tls=true
-                - traefik.http.routers.ha_pingcheck.tls.certresolver=letsencrypt
+                - traefik.http.routers.ha_pingcheck.tls.certresolver={{ acme_resolver }}
                 - traefik.http.routers.ha_pingcheck.middlewares=secHeaders@file
                 - traefik.http.services.ha_pingcheck.loadbalancer.server.port=80
                 - traefik.docker.network=traefik
@@ -269,22 +274,22 @@
           http:
             routers:
               home-assistant:
-                rule: "Host(`home-assistant.{{inventory_hostname}}`)"
+                rule: "Host(`home-assistant.{{ base_domain }}`)"
                 service: home-assistant
                 entryPoints:
                   - "https"
                 tls:
-                  certresolver: letsencrypt
+                  certResolver: {{ acme_resolver }}
                 middlewares: 
                   - "secHeaders@file"
 
               matter:
-                rule: "Host(`matter.{{inventory_hostname}}`)"
+                rule: "Host(`matter.{{ base_domain }}`)"
                 service: matter
                 entryPoints:
                   - "https"
                 tls:
-                  certresolver: letsencrypt
+                  certResolver: {{ acme_resolver }}
                 middlewares: 
                   - "secHeaders@file"
                   - "allowlocalipsonly"
@@ -293,11 +298,11 @@
               home-assistant:
                 loadBalancer:
                   servers:
-                    - url: "http://192.168.41.1:8123"
+                    - url: "http://{{ home_assistant_ip }}:8123"
               matter:
                 loadBalancer:
                   servers:
-                    - url: "http://192.168.41.1:5580"
+                    - url: "http://{{ home_assistant_ip }}:5580"
 
     - name: Create group and add user if not exists
       ansible.builtin.shell: |
@@ -333,7 +338,7 @@
     - name: write OIDC config in authelias configuration.yml
       ansible.builtin.blockinfile:
         path: /home/docker/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC home-assistant.{{inventory_hostname}}"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC home-assistant.{{ base_domain }}"
         block: |2
                 # home-assistant
                 - client_id: 'home-assistant'
@@ -345,7 +350,7 @@
                   authorization_policy: '{{ lookup('file', '/home/docker/authelia/authorization_policy') }}'
                   consent_mode: 'implicit'
                   redirect_uris:
-                    - 'https://home-assistant.{{inventory_hostname}}/auth/oidc/callback'
+                    - 'https://home-assistant.{{ base_domain }}/auth/oidc/callback'
                   scopes:
                     - 'openid'
                     - 'profile'
@@ -363,7 +368,7 @@
       notify: Restart authelia
 
     - name: Start home-assistant
-      ansible.builtin.shell: docker-compose up -d
+      ansible.builtin.shell: docker compose up -d
       args:
         chdir: /home/docker/home-assistant
         creates: /home/docker/home-assistant/config/home-assistant_v2.db
@@ -392,15 +397,15 @@
 
           # Load environment variables
           . ./env
-          curl --location --request POST 'http://192.168.41.1:8123/api/onboarding/users' --header 'Content-Type: application/json' --data-raw "{
-            \"client_id\": \"http://192.168.41.1:8123/\",
+          curl --location --request POST 'http://{{ home_assistant_ip }}:8123/api/onboarding/users' --header 'Content-Type: application/json' --data-raw "{
+            \"client_id\": \"http://{{ home_assistant_ip }}:8123/\",
            \"name\": \"admin\",
             \"username\": \"haadmin\",
             \"password\": \"${HA_ADMIN_PASSWORD}\",
             \"language\": \"de\"
           }" >>/home/docker/home-assistant/home-assistant.init.log 2>&1
           # install home assistant community store (hacs)
-          docker compose exec -ti home-assistant.{{inventory_hostname}} wget -O - https://get.hacs.xyz | bash - >>/home/docker/home-assistant/home-assistant.init.log 2>&1
+          docker compose exec -ti home-assistant.{{ base_domain }} wget -O - https://get.hacs.xyz | bash - >>/home/docker/home-assistant/home-assistant.init.log 2>&1
         backup: yes
         validate: /bin/bash -n %s
       #notify: run home-assistant.init
@@ -546,15 +551,15 @@
     #  ansible.builtin.shell: bash /home/docker/home-assistant/home-assistant.init.sh
 
     - name: Restart home-assistant
-      ansible.builtin.shell: docker-compose up -d --force-recreate
+      ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /home/docker/home-assistant
 
     - name: Restart authelia
       ansible.builtin.shell: |
-        if docker-compose down
+        if docker compose down
         then
-          docker-compose up -d
+          docker compose up -d
         fi
       args:
         chdir: /home/docker/authelia
