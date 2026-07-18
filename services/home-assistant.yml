@@ -210,7 +210,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           services:
-            home-assistant.{{ base_domain }}:
+            home-assistant:
               image: ghcr.io/home-assistant/home-assistant
               restart: unless-stopped
               volumes:
@@ -221,7 +221,7 @@
               network_mode: host
               privileged: true
 
-            matter.{{ base_domain }}:
+            matter:
               image: ghcr.io/home-assistant-libs/python-matter-server:stable
               restart: unless-stopped
               network_mode: host
@@ -236,7 +236,7 @@
                   --bluetooth-adapter 0
               #privileged: true
             
-            ha_pingcheck.{{ base_domain }}:
+            ha_pingcheck:
               image: nginx:latest
               restart: unless-stopped
               ports:
@@ -405,7 +405,7 @@
             \"language\": \"de\"
           }" >>/home/docker/home-assistant/home-assistant.init.log 2>&1
           # install home assistant community store (hacs)
-          docker compose exec -ti home-assistant.{{ base_domain }} wget -O - https://get.hacs.xyz | bash - >>/home/docker/home-assistant/home-assistant.init.log 2>&1
+          docker compose exec -ti home-assistant wget -O - https://get.hacs.xyz | bash - >>/home/docker/home-assistant/home-assistant.init.log 2>&1
         backup: yes
         validate: /bin/bash -n %s
       #notify: run home-assistant.init
