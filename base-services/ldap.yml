@@ -695,7 +695,6 @@
         owner: "10000"
         group: "10000"
       no_log: true
-      when: ldap_admin_password.stdout is defined
 
 
   handlers:
