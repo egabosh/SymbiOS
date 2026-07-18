@@ -245,16 +245,9 @@
                 - /home/docker/home-assistant/ha_pingcheck_data:/usr/share/nginx/html/pingcheck:ro
                 - /etc/localtime:/etc/localtime:ro
               networks:
-                - traefik
-              labels:
-                - traefik.enable=true
-                - traefik.http.routers.ha_pingcheck.rule=Host(`ha-health.{{ base_domain }}`)
-                - traefik.http.routers.ha_pingcheck.entrypoints=https
-                - traefik.http.routers.ha_pingcheck.tls=true
-                - traefik.http.routers.ha_pingcheck.tls.certresolver={{ acme_resolver }}
-                - traefik.http.routers.ha_pingcheck.middlewares=secHeaders@file
-                - traefik.http.services.ha_pingcheck.loadbalancer.server.port=80
-                - traefik.docker.network=traefik
+                traefik:
+                  aliases:
+                    - ha_pingcheck
 
           networks:
             traefik:

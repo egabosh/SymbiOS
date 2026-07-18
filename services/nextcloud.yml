@@ -284,27 +284,9 @@
                 - PHP_UPLOAD_LIMIT=1024M
               networks:
                 - nextcloud
-                - traefik
-              labels:
-                - traefik.enable=true
-                # HTTPS
-                - traefik.http.routers.nextcloud.rule=Host(`nextcloud.{{ base_domain }}`)
-                - traefik.http.routers.nextcloud.entrypoints=https
-                - traefik.http.routers.nextcloud.tls=true
-                # Proxy to service-port
-                - traefik.http.services.nextcloud.loadbalancer.server.port=80
-                - traefik.http.routers.nextcloud.service=nextcloud
-                # cert via letsencrypt
-                - traefik.http.routers.nextcloud.tls.certresolver={{ acme_resolver }}
-                # Traefik network
-                - traefik.docker.network=traefik
-                # Nextcloud specific
-                # .well-known for dav
-                - traefik.http.middlewares.nextcloud-dav.redirectRegex.permanent=true
-                - traefik.http.middlewares.nextcloud-dav.redirectRegex.regex=https://(.*)/.well-known/(card|cal)dav
-                - traefik.http.middlewares.nextcloud-dav.redirectRegex.replacement=https://$${1}/remote.php/dav/
-                # activate secHeaders@file and .well.known
-                - traefik.http.routers.nextcloud.middlewares=secHeaders@file,nextcloud-dav
+                traefik:
+                  aliases:
+                    - nextcloud
             
             nextcloud-db:
               image: mariadb:lts
@@ -355,22 +337,9 @@
                 - /etc/localtime:/etc/localtime:ro
               networks:
                 - nextcloud
-                - traefik
-              labels:
-                - traefik.enable=true
-                # HTTPS
-                - traefik.http.routers.nextcloud-phpmyadmin.rule=Host(`nextcloud-phpmyadmin.{{ base_domain }}`)
-                - traefik.http.routers.nextcloud-phpmyadmin.entrypoints=https
-                - traefik.http.routers.nextcloud-phpmyadmin.tls=true
-                # Proxy to service-port
-                - traefik.http.services.nextcloud-phpmyadmin.loadbalancer.server.port=80
-                - traefik.http.routers.nextcloud-phpmyadmin.service=nextcloud-phpmyadmin
-                # cert via letsencrypt
-                - traefik.http.routers.nextcloud-phpmyadmin.tls.certresolver={{ acme_resolver }}
-                # Auth
-                - traefik.http.routers.nextcloud-phpmyadmin.middlewares=secHeaders@file,default-basic-auth@file
-                # Traefik network
-                - traefik.docker.network=traefik
+                traefik:
+                  aliases:
+                    - nextcloud-phpmyadmin
 
             nextcloud-collabora:
               image: collabora/code:latest
@@ -390,22 +359,9 @@
                 - DONT_GEN_SSL_CERTS=true
               networks:
                 - nextcloud
-                - traefik
-              labels:
-                - traefik.enable=true
-                # HTTPS
-                - traefik.http.routers.nextcloud-collabora.rule=Host(`office.{{ base_domain }}`)
-                - traefik.http.routers.nextcloud-collabora.entrypoints=https
-                - traefik.http.routers.nextcloud-collabora.tls=true
-                # Proxy to service-port
-                - traefik.http.services.nextcloud-collabora.loadbalancer.server.port=9980
-                - traefik.http.routers.nextcloud-collabora.service=nextcloud-collabora
-                # cert via letsencrypt
-                - traefik.http.routers.nextcloud-collabora.tls.certresolver={{ acme_resolver }}
-                # Auth
-                - traefik.http.routers.nextcloud-collabora.middlewares=secHeaders@file
-                # Traefik network
-                - traefik.docker.network=traefik
+                traefik:
+                  aliases:
+                    - nextcloud-collabora
 
 
           networks:
@@ -418,6 +374,68 @@
 
         backup: yes
       notify: Restart nextcloud
+
+    - name: /home/docker/traefik/providers/nextcloud.yml Routing Configuration
+      blockinfile:
+        path: /home/docker/traefik/providers/nextcloud.yml
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              nextcloud:
+                rule: "Host(`nextcloud.{{ base_domain }}`)"
+                service: nextcloud
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+                  - "nextcloud-dav"
+              nextcloud-phpmyadmin:
+                rule: "Host(`nextcloud-phpmyadmin.{{ base_domain }}`)"
+                service: nextcloud-phpmyadmin
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+                  - "default-basic-auth@file"
+              nextcloud-collabora:
+                rule: "Host(`office.{{ base_domain }}`)"
+                service: nextcloud-collabora
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+            middlewares:
+              nextcloud-dav:
+                redirectRegex:
+                  permanent: true
+                  regex: "https://(.*)/.well-known/(card|cal)dav"
+                  replacement: "https://$${1}/remote.php/dav/"
+            services:
+              nextcloud:
+                loadBalancer:
+                  servers:
+                    - url: "http://nextcloud:80"
+              nextcloud-phpmyadmin:
+                loadBalancer:
+                  servers:
+                    - url: "http://nextcloud-phpmyadmin:80"
+              nextcloud-collabora:
+                loadBalancer:
+                  servers:
+                    - url: "http://nextcloud-collabora:9980"
+        backup: yes
+      notify: Restart traefik
 
 
     #######################
