@@ -1,0 +1,201 @@
+---
+- name: jellyfin
+  hosts: all
+  vars:
+    service_name: jellyfin
+    service_domain: "jellyfin.{{ base_domain }}"
+  tasks:
+
+    - name: Create /home/docker/jellyfin.{{ base_domain }} dir
+      ansible.builtin.file:
+        path: /home/docker/jellyfin.{{ base_domain }}
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+#    - name: /home/docker/jellyfin.{{ base_domain }}/genpw.sh (generate Random PW for Semaphore and DB)
+#      blockinfile:
+#        path: /home/docker/jellyfin.{{ base_domain }}/genpw.sh
+#        create: yes
+#        mode: 0550
+#        owner: root
+#        group: docker
+#        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+#        block: |
+#          cd /home/docker/jellyfin.{{ base_domain }}
+#
+#          mysqluser=$(pwgen -s 32 1)
+#          mysqlpassword=$(pwgen -s 32 1)
+#          wpadminpassword=$(pwgen -s 32 1)
+#
+#          [ -f env ] || echo "WORDPRESS_DB_USER=!MYSQLUSER!
+#          WORDPRESS_DB_PASSWORD=!MYSQLPASSWORD!
+#          WORDPRESS_ADMIN_PASSWORD=!WPADMINPASSWD!
+#          " >env
+#
+#          [ -f env.db ] || echo "MARIADB_USER=!MYSQLUSER!
+#          MARIADB_PASSWORD=!MYSQLPASSWORD!
+#          " >env.db
+#
+#          [ -f env.phpmyadmin ] || echo "PMA_USER=!MYSQLUSER!
+#          PMA_PASSWORD=!MYSQLPASSWORD!
+#          " >env.phpmyadmin
+#
+#          chmod 440 env env.db env.phpmyadmin
+#          chown root:docker env env.db env.phpmyadmin
+#          sed -i "s/\!MYSQLUSER\!/$mysqluser/g" env env.db env.phpmyadmin
+#          sed -i "s/\!MYSQLPASSWORD\!/$mysqlpassword/g" env env.db env.phpmyadmin
+#          sed -i "s/\!WPADMINPASSWD\!/$wpadminpassword/g" env
+#        backup: yes
+#        validate: /bin/bash -n %s
+#      notify: run genpw.sh
+#
+#    - name: /home/docker/jellyfin.{{ base_domain }}/genpw.sh shebang
+#      lineinfile:
+#        path: /home/docker/jellyfin.{{ base_domain }}/genpw.sh
+#        insertbefore: BOF
+#        line: "#!/bin/bash -e"
+#
+#    - name: Gen initial passwords if not exists
+#      ansible.builtin.shell: ./genpw.sh
+#      args:
+#        chdir: /home/docker/jellyfin.{{ base_domain }}
+#        creates: /home/docker/jellyfin.{{ base_domain }}/env
+
+    - name: /home/docker/jellyfin.{{ base_domain }}/docker-compose.yml Container Configuration
+      blockinfile:
+        path: /home/docker/jellyfin.{{ base_domain }}/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+
+          services:
+
+            jellyfin:
+              image: jellyfin/jellyfin:latest
+              restart: unless-stopped
+              #env_file: env
+              user: 0:0
+              #environment:
+              volumes:
+                - ./data/config:/config
+                - ./data/cache:/cache
+                - /etc/localtime:/etc/localtime
+              networks:
+                - traefik
+          # optional hardware acceleration
+          #    devices:
+          #      - /dev/dri:/dev/dri
+          #      - /dev/vcsm:/dev/vcsm
+          #      - /dev/vchiq:/dev/vchiq
+          #      - /dev/video10:/dev/video10
+          #      - /dev/video11:/dev/video11
+          #      - /dev/video12:/dev/video12
+
+
+          networks:
+            traefik:
+              external: true
+
+        backup: yes
+      notify: Restart jellyfin
+
+    - name: Start jellyfin
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: /home/docker/jellyfin.{{ base_domain }}
+
+    - name: /home/docker/traefik/providers/jellyfin.yml Routing Configuration
+      blockinfile:
+        path: /home/docker/traefik/providers/jellyfin.yml
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              jellyfin:
+                rule: "Host(`jellyfin.{{ base_domain }}`)"
+                service: jellyfin
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+                  - "allowlocalipsonly@file"
+            services:
+              jellyfin:
+                loadBalancer:
+                  servers:
+                    - url: "http://jellyfin:8096"
+        backup: yes
+      notify: Restart traefik
+
+#        creates: /home/docker/jellyfin.{{ base_domain }}/db-data/sys/db.opt
+
+#    - name: Wait until jellyfin install is finished
+#      wait_for:
+#        path: /home/docker/jellyfin.{{ base_domain }}/wp-data/index.php
+#
+#    - name: /home/docker/jellyfin.{{ base_domain }}/jellyfin.init.sh
+#      blockinfile:
+#        path: /home/docker/jellyfin.{{ base_domain }}/jellyfin.init.sh
+#        mode: "0500"
+#        owner: root
+#        group: root
+#        create: yes
+#        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+#        block: |
+#          # install jellyfin Login URL: https://jellyfin.{{ base_domain }}/wp-login.php
+#          cd /home/docker/jellyfin.{{ base_domain }}
+#          if ! docker-compose run jellyfin.{{ base_domain }}--cli wp core is-installed
+#          then
+#            until wget -t1 --timeout=15 https://jellyfin.{{ base_domain }} >/dev/null 2>&1
+#            do 
+#             sleep 5
+#            done
+#            cat env | egrep "^WORDPRESS_ADMIN_PASSWORD=" >env.tmp
+#            . env.tmp
+#            rm -f env.tmp
+#            docker-compose run jellyfin.{{ base_domain }}--cli wp core install --url="https://jellyfin.{{ base_domain }}" --title="jellyfin.{{ base_domain }}" --admin_name=wpadmin --admin_password=${WORDPRESS_ADMIN_PASSWORD} --admin_email='admin@{{ base_domain }}'
+#          fi
+#        backup: yes
+#        validate: /bin/bash -n %s
+#      notify: run jellyfin.init
+#
+#    - name: Run jellyfin.init after install
+#      ansible.builtin.shell: bash /home/docker/jellyfin.{{ base_domain }}/jellyfin.init.sh
+#      args:
+#        chdir: /home/docker/jellyfin.{{ base_domain }}
+#        creates: /home/docker/jellyfin.{{ base_domain }}/jellyfin.init.log
+
+
+
+  handlers:
+
+#    - name: run genpw.sh
+#      ansible.builtin.shell: ./genpw.sh
+#      args:
+#        chdir: /home/docker/jellyfin.{{ base_domain }}
+#      notify: Restart jellyfin
+
+#    - name: run jellyfin.init
+#      ansible.builtin.shell: bash /home/docker/jellyfin.{{ base_domain }}/jellyfin.init.sh
+
+    - name: Restart jellyfin
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /home/docker/jellyfin.{{ base_domain }}
+
+    - name: Restart traefik
+      ansible.builtin.shell: docker compose restart traefik
+      args:
+        chdir: /home/docker/traefik
+

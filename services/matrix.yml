@@ -1,0 +1,708 @@
+---
+- name: matrix
+  hosts: all
+  vars:
+    service_name: matrix
+    service_domain: "matrix.{{ base_domain }}"
+  tasks:
+
+    - name: Create /home/docker/matrix.{{ base_domain }} dir
+      ansible.builtin.file:
+        path: /home/docker/matrix.{{ base_domain }}
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: Create /home/docker/matrix.{{ base_domain }}/data dir
+      ansible.builtin.file:
+        path: /home/docker/matrix.{{ base_domain }}/data
+        owner: 3000
+        group: 3000
+        state: directory
+        mode: '0750'
+
+    - name: Gen initial passwords if not exists
+      ansible.builtin.shell: docker run --rm -v ./data:/data -e SYNAPSE_SERVER_NAME=matrix.{{ base_domain }} -e SYNAPSE_HTTP_PORT=8008 -e SYNAPSE_REPORT_STATS=no -e UID=3000 -e GUID=3000 matrixdotorg/synapse:latest generate
+      args:
+        chdir: /home/docker/matrix.{{ base_domain }}
+        creates: /home/docker/matrix.{{ base_domain }}/data/homeserver.yaml
+
+    - name: get turn secret
+      shell: bash -c 'source /home/docker/turn.{{ base_domain }}/env ; echo $TURN_SECRET'
+      register: turnsecret
+      changed_when: false
+
+    - name: Edit Matrix/Synapse config
+      blockinfile:
+        path: /home/docker/matrix.{{ base_domain }}/data/homeserver.yaml
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          public_baseurl: https://matrix-synapse.{{ base_domain }}/
+          enable_registration: false
+          max_upload_size: 2048M
+          retention:
+            enabled: true
+            default_policy:
+              min_lifetime: 30d
+              max_lifetime: 180d
+            allowed_lifetime_min: 30d
+            allowed_lifetime_max: 180d
+            #purge_jobs:
+            #  - longest_max_lifetime: 3d
+            #    interval: 12h
+            #  - shortest_max_lifetime: 3d
+            #    interval: 1d
+            purge_jobs:
+              - shortest_max_lifetime: 30d
+                longest_max_lifetime: 180d
+                interval: 1d
+          federation_ip_range_blacklist:
+            - '127.0.0.0/8'
+            - '10.0.0.0/8'
+            - '172.16.0.0/12'
+            - '192.168.0.0/16'
+            - '100.64.0.0/10'
+            - '169.254.0.0/16'
+            - '::1/128'
+            - 'fe80::/64'
+            - 'fc00::/7'
+          #server_notices:
+          ##  system_mxid_localpart: mx-admin
+          #  system_mxid_display_name: "Server Notices"
+          #  system_mxid_avatar_url: "mxc://server.com/xumMIlgDBLYFaPVkEsdrNVLW"
+          #  room_name: "Server Notices"
+          web_client_location: https://matrix-web.{{ base_domain }}/
+          trusted_key_servers:
+            - server_name: "matrix.org"
+          redis:
+            enabled: true
+            host: matrix-redis
+            port: 6379
+          media_retention:
+            local_media_lifetime: 28d
+            remote_media_lifetime: 14d
+          turn_uris: 
+            - "turns:turn.{{ base_domain }}:5349?transport=udp"
+            - "turns:turn.{{ base_domain }}:5349?transport=tcp"
+          turn_shared_secret: "{{turnsecret.stdout}}"
+          turn_user_lifetime: 86400000
+          turn_allow_guests: True
+          allow_public_rooms_without_auth: False
+          allow_public_rooms_over_federation: False
+          allow_guest_access: False
+        backup: yes
+      notify: Restart matrix
+
+    - name: Create Matrix Group
+      ansible.builtin.group:
+        name: matrix
+        state: present
+        gid: 1007
+
+    - name: Hide matrix user from login screen
+      blockinfile:
+        path: /var/lib/AccountsService/users/matrix
+        mode: "0444"
+        owner: root
+        group: root
+        create: yes
+        block: |
+          [User]
+          SystemAccount=true                              
+        backup: no
+
+    - name: Create matrix User
+      ansible.builtin.user:
+        name: matrix
+        comment: matrix User
+        uid: 1007
+        group: matrix
+
+    - name: Create ssh dir
+      ansible.builtin.file:
+        path: /home/matrix/.ssh
+        owner: matrix
+        group: matrix
+        state: directory
+        mode: '0700'
+
+    - name: Generate an OpenSSH keypair ed25519
+      community.crypto.openssh_keypair:
+        owner: matrix
+        group: matrix
+        path: /home/matrix/.ssh/id_ed25519
+        type: ed25519
+
+    - name: Force matrix user to run notify.sh via ssh /usr/local/bin/notify.sh
+      blockinfile:
+        path: /etc/ssh/sshd_config.d/matrix.conf
+        create: yes
+        mode: 0644
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          Match User matrix
+            ForceCommand /usr/local/bin/notify.sh
+
+    - name: /home/docker/matrix.{{ base_domain }}/genpw.sh (generate Random PW for Matrix and DB)
+      blockinfile:
+        path: /home/docker/matrix.{{ base_domain }}/genpw.sh
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd /home/docker/matrix.{{ base_domain }}
+          postgresqluser=$(pwgen -s 32 1)
+          postgresqlpassword=$(pwgen -s 32 1)
+          matrixadminpassword=$(pwgen -s 32 1)
+          matrixsrvuserpassword=$(pwgen -s 32 1)
+
+          [ -f env ] || echo "POSTGRES_USER=!POSTGRESUSER!
+          POSTGRES_PASSWORD=!POSTGRESPASSWORD!
+          MATRIX_ADMIN_PASSWORD=!MATRIX_ADMIN_PASSWORD!
+          " >env
+
+          [ -f env.user ] || echo "MATRIX_SRV_USER={{ base_domain }}
+          MATRIX_SRV_USER_PASSWORD=!MATRIX_SEV_USER_PASSWORD!
+          " >env.user
+
+          [ -f env.db ] || echo "POSTGRES_USER=!POSTGRESUSER!
+          POSTGRES_PASSWORD=!POSTGRESPASSWORD!
+          " >env.db
+
+          chmod 440 env env.db env.user
+          chown root:docker env env.db env.user
+          sed -i "s/\!MATRIX_ADMIN_PASSWORD\!/$matrixadminpassword/g" env
+          sed -i "s/\!POSTGRESUSER\!/$postgresqluser/g" env env.db
+          sed -i "s/\!POSTGRESPASSWORD\!/$postgresqlpassword/g" env env.db
+          sed -i "s/\!MATRIX_SEV_USER_PASSWORD\!/$matrixsrvuserpassword/g" env.user
+          
+          if ! grep -q "name: psycopg2" data/homeserver.yaml
+          then
+            # Remove sqlite config
+            sed -i '/database:/,/database: \/data\/homeserver.d/d' data/homeserver.yaml
+            # add postgres config
+            echo "
+          database:
+            name: psycopg2
+            args:
+              user: $postgresqluser
+              password: $postgresqlpassword
+              database: synapse
+              host: matrix-db
+              cp_min: 5
+              cp_max: 10
+            " >>data/homeserver.yaml
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: run genpw.sh
+
+    - name: /home/docker/matrix.{{ base_domain }}/genpw.sh shebang
+      lineinfile:
+        path: /home/docker/matrix.{{ base_domain }}/genpw.sh
+        insertbefore: BOF
+        line: "#!/bin/bash -e"
+
+    - name: Gen initial passwords if not exists
+      ansible.builtin.shell: ./genpw.sh
+      args:
+        chdir: /home/docker/matrix.{{ base_domain }}
+        creates: /home/docker/matrix.{{ base_domain }}/env
+
+    - name: /home/docker/matrix.{{ base_domain }}/nginx-matrix.conf
+      blockinfile:
+        path: /home/docker/matrix.{{ base_domain }}/nginx-matrix.conf
+        mode: "0444"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Needed for federation while not using Port 8448
+          server {
+            listen         80 default_server;
+            server_name    matrix.{{ base_domain }};
+          
+            location / {
+              proxy_pass http://matrix-synapse:8008;
+              proxy_set_header X-Forwarded-For $remote_addr;
+              client_max_body_size 2048m;
+            }
+
+            location /.well-known/matrix/ {
+              root /var/www/;
+              default_type application/json;
+              add_header Access-Control-Allow-Origin  *;
+            }
+          }
+        backup: yes
+      notify: Restart matrix  
+
+    - name: Create /home/docker/matrix.{{ base_domain }}/well-known dir
+      ansible.builtin.file:
+        path: /home/docker/matrix.{{ base_domain }}/well-known
+        owner: root
+        group: root
+        state: directory
+        mode: '0555'
+
+    - name: /home/docker/matrix.{{ base_domain }}/well-known/client
+      copy:
+        dest: /home/docker/matrix.{{ base_domain }}/well-known/client
+        mode: "0444"
+        owner: root
+        group: root
+        content: |
+          {
+            "m.homeserver": {
+              "base_url": "https://matrix.{{ base_domain }}"
+             }
+          }
+        backup: yes
+
+    - name: /home/docker/matrix.{{ base_domain }}/well-known/server
+      copy:
+        dest: /home/docker/matrix.{{ base_domain }}/well-known/server
+        mode: "0444"
+        owner: root
+        group: root
+        content: |
+          {
+            "m.server": "matrix-synapse.{{ base_domain }}:443"
+          }
+        backup: yes
+
+
+    - name: Element Web configuration
+      copy: 
+        dest: /home/docker/matrix.{{ base_domain }}/element-web-config.json
+        owner: root
+        group: root
+        mode: 0444
+        content: |
+          {
+              "default_server_config": {
+                  "m.homeserver": {
+                     "base_url": "https://matrix.{{ base_domain }}",
+                     "server_name": "matrix.{{ base_domain }}"
+                  },
+                  "m.identity_server": {
+                      "base_url": "https://vector.im"
+                  }
+              },
+              "disable_custom_urls": true,
+              "disable_guests": true,
+              "disable_login_language_selector": true,
+              "disable_3pid_login": true,
+              "brand": "Element",
+              "integrations_ui_url": "https://scalar.vector.im/",
+              "integrations_rest_url": "https://scalar.vector.im/api",
+              "integrations_widgets_urls": [
+                  "https://scalar.vector.im/_matrix/integrations/v1",
+                  "https://scalar.vector.im/api",
+                  "https://scalar-staging.vector.im/_matrix/integrations/v1",
+                  "https://scalar-staging.vector.im/api",
+                  "https://scalar-staging.riot.im/scalar/api"
+              ],
+              "default_country_code": "DE",
+              "show_labs_settings": false,
+              "features": {},
+              "default_federate": true,
+              "default_theme": "dark",
+              "default_device_display_name" : "Matrix",
+              "room_directory": {
+                  "servers": ["matrix.{{ base_domain }}"]
+              },
+              "enable_presence_by_hs_url": {
+                  "https://matrix.org": false,
+                  "https://matrix-client.matrix.org": false
+              },
+              "setting_defaults": {
+                  "breadcrumbs": false
+              },
+              "jitsi": {
+                   "preferred_domain": "meet.element.io"
+              },
+              "element_call": {
+                  "url": "https://call.element.io",
+                  "participant_limit": 8,
+                  "brand": "Element Call"
+              },
+              "map_style_url": "https://api.maptiler.com/maps/streets/style.json?key=fU3vlMsMn4Jb6dnEIFsx"
+          }
+        backup: yes
+
+    - name: /home/docker/matrix.{{ base_domain }}/docker-compose.yml Container Configuration
+      blockinfile:
+        path: /home/docker/matrix.{{ base_domain }}/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+
+          services:
+            matrix:
+              image: "nginx:latest"
+              restart: unless-stopped
+              volumes:
+                - ./nginx-matrix.conf:/etc/nginx/conf.d/matrix.conf:ro
+                - ./well-known:/var/www/.well-known/matrix
+              depends_on:
+                - matrix-synapse
+              networks:
+                - matrix
+                - traefik:
+                    aliases:
+                      - matrix
+
+            matrix-synapse:
+              image: docker.io/matrixdotorg/synapse:latest
+              restart: unless-stopped
+              user: 3000:3000
+              healthcheck:
+                timeout: 30s
+                retries: 3
+                start_period: 300s
+                interval: 15s
+              volumes:
+                - ./data:/data
+                - /etc/localtime:/etc/localtime:ro
+              depends_on:
+                - matrix-db
+              networks:
+                - matrix
+                - traefik:
+                    aliases:
+                      - matrix-synapse
+              environment:
+                SYNAPSE_HTTP_PORT: 8008
+                SYNAPSE_SERVER_NAME: "matrix.{{ base_domain }}"
+                SYNAPSE_REPORT_STATS: "no"
+
+            matrix-db:
+              image: docker.io/postgres:15
+              restart: unless-stopped
+              #command: postgres -c wal_level=minimal -c max_wal_size=100MB -c max_wal_senders=0
+              command: postgres -c wal_level=minimal -c max_wal_size=100MB -c max_wal_senders=0 -c shared_buffers=256MB -c effective_cache_size=768MB -c maintenance_work_mem=256MB -c work_mem=8MB -c autovacuum_vacuum_scale_factor=0.05 -c autovacuum_analyze_scale_factor=0.02
+              volumes:
+                - ./matrixdb-data:/var/lib/postgresql/data
+                - /etc/localtime:/etc/localtime:ro
+              env_file: env.db
+              environment:
+                - POSTGRES_INITDB_ARGS=--encoding='UTF8' --lc-collate='C' --lc-ctype='C'
+                - POSTGRES_DB=synapse
+              networks:
+                - matrix
+
+            matrix-redis:
+              image: redis:latest
+              restart: unless-stopped
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+              networks:
+                - matrix
+
+            matrix-admin:
+              image: awesometechnologies/synapse-admin:latest
+              restart: unless-stopped
+              networks:
+                - matrix
+                - traefik:
+                    aliases:
+                      - matrix-admin
+              environment:
+                - REACT_APP_SERVER=https://{{ base_domain }}
+
+            matrix-web:
+              image: vectorim/element-web:latest
+              restart: unless-stopped
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - ./element-web-config.json:/app/config.json:ro
+              networks:
+                - matrix
+                - traefik:
+                    aliases:
+                      - matrix-web
+
+            matrix-commander:
+              image: matrixcommander/matrix-commander:7.5
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - ./matrix-commander-data:/data:rw
+              restart: no
+
+          networks:
+            matrix:
+              driver: bridge
+              driver_opts:
+                com.docker.network.bridge.name: br-matrix
+            traefik:
+              external: true
+
+        backup: yes
+      notify: Restart matrix
+
+    - name: /home/docker/traefik/providers/matrix.yml Matrix<->Traefik provider
+      blockinfile:
+        path: /home/docker/traefik/providers/matrix.yml
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              matrix:
+                rule: "Host(`matrix.{{ base_domain }}`)"
+                service: matrix-http
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+
+              matrix-synapse:
+                rule: "Host(`matrix-synapse.{{ base_domain }}`)"
+                service: matrix-synapse-http
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+
+              matrix-admin:
+                rule: "Host(`matrix-admin.{{ base_domain }}`)"
+                service: matrix-admin-http
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+
+              matrix-web:
+                rule: "Host(`matrix-web.{{ base_domain }}`)"
+                service: matrix-web-http
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+
+            services:
+              matrix-http:
+                loadBalancer:
+                  servers:
+                    - url: "http://matrix:80"
+              matrix-synapse-http:
+                loadBalancer:
+                  servers:
+                    - url: "http://matrix-synapse:8008"
+              matrix-admin-http:
+                loadBalancer:
+                  servers:
+                    - url: "http://matrix-admin:80"
+              matrix-web-http:
+                loadBalancer:
+                  servers:
+                    - url: "http://matrix-web:80"
+
+    - name: Start matrix
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: /home/docker/matrix.{{ base_domain }}
+        creates: /home/docker/matrix.{{ base_domain }}/matrixdb-data/postmaster.pid
+
+    - name: Wait until matrix install is finished
+      wait_for:
+        path: /home/docker/matrix.{{ base_domain }}/matrixdb-data/base
+
+    - name: /home/docker/matrix.{{ base_domain }}/matrix.init.sh
+      blockinfile:
+        path: /home/docker/matrix.{{ base_domain }}/matrix.init.sh
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # matrix
+          sleep 120
+          cd /home/docker/matrix.{{ base_domain }} || exit 1 
+          . ./env
+          . ./env.user
+          date >>matrix.init.log
+          docker compose exec -T matrix-synapse register_new_matrix_user -c /data/homeserver.yaml -a -u mx-admin         -p $MATRIX_ADMIN_PASSWORD    http://localhost:8008 >>matrix.init.log 2>&1
+
+          # Create System User for Server-Notifications
+          docker compose exec -T matrix-synapse register_new_matrix_user -c /data/homeserver.yaml --no-admin -u $MATRIX_SRV_USER -p $MATRIX_SRV_USER_PASSWORD http://localhost:8008 >>matrix.init.log 2>&1
+
+          ## Matrix Commander
+          #
+          # Configure CLI Client (matrix-commander) Access
+          docker compose -f /home/docker/matrix.{{ base_domain }}/docker-compose.yml run -T matrix-commander --login password --homeserver matrix.{{ base_domain }} --user-login $MATRIX_SRV_USER --password $MATRIX_SRV_USER_PASSWORD --device {{ base_domain }} --room-default {{ base_domain }}
+
+          # Create Room
+          docker compose -f /home/docker/matrix.{{ base_domain }}/docker-compose.yml run -T matrix-commander --room-create {{ base_domain }}
+
+          # Invite other users example
+          # docker compose -f /home/docker/matrix.{{ base_domain }}/docker-compose.yml run -ti matrix-commander --room-invite {{ base_domain }} --user @user:matrix.{{ base_domain }}
+        backup: yes
+        validate: /bin/bash -n %s
+#      notify: run matrix.init
+
+    - name: Script to crate pipes and containers for existing rooms
+      blockinfile:
+        path: /home/docker/matrix.{{ base_domain }}/pipe-rooms.sh
+        mode: "0500"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd /home/docker/matrix.{{ base_domain }}
+          echo "services:" >docker-compose.override.yml.new
+
+          # go through existing rooms (ids) of matrix-commander user
+          for roomid in $(docker run -t -v ./matrix-commander-data:/data:rw -v /etc/hosts:/etc/hosts:ro  matrixcommander/matrix-commander  --joined-rooms --output text | grep ":matrix.{{ base_domain }}")
+          do
+
+            echo "== Room ID $roomid"
+
+            # get room name
+            room=$(docker run -t -v ./matrix-commander-data:/data:rw -v /etc/hosts:/etc/hosts:ro matrixcommander/matrix-commander:7.5 --get-room-info "\\$roomid" --log-level ERROR ERROR | cut -d\# -f2 | cut -d: -f1)
+
+            if [ -z "$room" ]
+            then
+              echo "ERROR: Got no roomname for \"$roomid\""
+              continue
+            fi
+
+            echo "== Room: $room"
+
+            # define/create pipe
+            pipe="/usr/local/share/matrix-room-${room}.fifo"
+            pipebasename="matrix-room-${room}.fifo"
+            [ -e "$pipe" ] || mkfifo "$pipe"
+            chown root:matrix "$pipe"
+            chmod 660 "$pipe"
+
+            # roomname for scripts
+            roomnospace=${room// /_}
+
+            # container config for room-pipe
+            echo "  matrix.room-pipe-${roomnospace}:
+              image: matrixcommander/matrix-commander
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - /etc/hosts:/etc/hosts:ro
+                - ./matrix-commander-data-${roomnospace}:/data:rw
+                - ${pipe}:/${pipebasename}
+              entrypoint: /bin/bash -c 'cd /data && tail -F \"/${pipebasename}\" | /app/matrix_commander/matrix-commander -m _ --html --room \"$room\" --log-level INFO INFO'
+              restart: unless-stopped
+              depends_on:
+                matrix-synapse:
+                  condition: service_healthy
+              " >> docker-compose.override.yml.new
+
+            # Auth commander instance if not exists
+            declare -a newrooms
+            [ -s "matrix-commander-data-${roomnospace}/credentials.json" ] || newrooms+=("$roomnospace")
+
+          done
+
+          mv docker-compose.override.yml.new docker-compose.override.yml
+
+          for newroom in "${newrooms[@]}"
+          do
+            echo "== Auth new root/matrix-commander instance ${newroom}"
+            . ./env.user
+            docker run -t -v ./matrix-commander-data-${newroom}:/data:rw -v /etc/hosts:/etc/hosts:ro matrixcommander/matrix-commander --login password --homeserver matrix.{{ base_domain }} --user-login $MATRIX_SRV_USER --password $MATRIX_SRV_USER_PASSWORD --device {{ base_domain }} --room-default {{ base_domain }}
+            docker compose down matrix.room-pipe-${newroom}
+            docker compose up -d matrix.room-pipe-${newroom}
+          done
+
+          docker compose up -d --remove-orphans
+        backup: yes
+        validate: /bin/bash -n %s
+#      notify: run matrix.init
+
+
+    - name: Run matrix.init after install
+      ansible.builtin.shell: bash /home/docker/matrix.{{ base_domain }}/matrix.init.sh
+      args:
+        chdir: /home/docker/matrix.{{ base_domain }}
+        creates: /home/docker/matrix.{{ base_domain }}/matrix.init.log
+
+#    - name: /usr/local/sbin/autoupdate.d/matrix.update
+#      blockinfile:
+#        path: /usr/local/sbin/autoupdate.d/matrix.update
+#        mode: "0400"
+#        owner: root
+#        group: root
+#        create: yes
+#        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+#        block: |
+
+#        backup: yes
+#        validate: /bin/bash -n %s
+#      notify: run matrix.update
+
+    - name: /usr/local/sbin/runchecks.d/matrix.check
+      blockinfile:
+        path: /usr/local/sbin/runchecks.d/matrix.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          egrep "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read dzpid
+          do
+            if find ${g_tmp}/proc-check/$dzpid -mmin +30 | grep -q $dzpid
+            then
+              if ps auxn | egrep -q "3000.*$dzpid.+ Z "
+              then
+                #g_echo_warn "Killing synapse server because of zombie curls"
+                kill $(pgrep -f "/usr/local/bin/python -m synapse.app.homeserver --config-path /data/homeserver.yaml")
+               sleep 2
+              fi
+            fi
+          done
+        backup: yes
+        validate: /bin/bash -n %s
+
+  handlers:
+    - name: run genpw.sh
+      ansible.builtin.shell: ./genpw.sh
+      args:
+        chdir: /home/docker/matrix.{{ base_domain }}
+      notify: Restart matrix
+
+#    - name: run matrix.update
+#      ansible.builtin.shell: bash /usr/local/sbin/autoupdate.d/matrix.update
+#
+#    - name: run matrix.init
+#      ansible.builtin.shell: bash /home/docker/matrix.{{ base_domain }}/matrix.init.sh
+
+    - name: Restart matrix
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /home/docker/matrix.{{ base_domain }}
+

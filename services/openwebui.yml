@@ -1,0 +1,513 @@
+---
+- name: open-webui
+  hosts: all
+  vars:
+    service_name: openwebui
+    service_domain: "openwebui.{{ base_domain }}"
+    ai_host: "ai.lan"
+  tasks:
+
+    - name: Create /home/docker/openwebui.{{ base_domain }} dir
+      ansible.builtin.file:
+        path: /home/docker/openwebui.{{ base_domain }}
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: Create searxng data dir
+      ansible.builtin.file:
+        path: /home/docker/openwebui.{{ base_domain }}/searxng-data
+        owner: root
+        group: docker
+        state: directory
+        mode: '0750'
+      changed_when: false
+
+    - name: Generate searxng secret key
+      ansible.builtin.shell: |
+        [ -s /home/docker/openwebui.{{ base_domain }}/searxng_secret ] || \
+        tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 64 \
+        > /home/docker/openwebui.{{ base_domain }}/searxng_secret
+      changed_when: false
+
+    - name: Load searxng secret key
+      ansible.builtin.slurp:
+        path: /home/docker/openwebui.{{ base_domain }}/searxng_secret
+      register: searxng_secret
+
+    - name: Write searxng limiter.toml (suppress missing config warning)
+      ansible.builtin.copy:
+        dest: /home/docker/openwebui.{{ base_domain }}/searxng-data/limiter.toml
+        force: false
+        owner: root
+        group: docker
+        mode: '0640'
+        content: |
+          # minimal limiter config – suppresses WARNING about missing limiter.toml
+          [botdetection.ip_limit]
+
+    - name: Write searxng settings.yml
+      ansible.builtin.copy:
+        dest: /home/docker/openwebui.{{ base_domain }}/searxng-data/settings.yml
+        owner: root
+        group: docker
+        mode: '0640'
+        content: |
+          use_default_settings: true
+
+          general:
+            instance_name: "SearXNG ai.{{ base_domain }}"
+            debug: false
+
+          server:
+            secret_key: "{{ searxng_secret['content'] | b64decode }}"
+            bind_address: "0.0.0.0"
+            port: 8080
+            rateLimit: true
+
+          search:
+            safe_search: 0
+            default_lang: ''
+            formats:
+              - html
+              - json
+            engines:
+              - name: google
+                disabled: false
+              - name: duckduckgo
+                disabled: false
+              - name: wikipedia
+                disabled: false
+              - name: bing
+                disabled: false
+              # deactivate failing engines
+              - name: ahmia
+                disabled: true
+              - name: torch
+                disabled: true
+              - name: radio browser
+                disabled: true
+
+          ui:
+            static_use_hash: true
+      changed_when: false
+
+    - name: Add ai.{{ base_domain }} to WoL hosts file
+      ansible.builtin.lineinfile:
+        path: /usr/local/etc/ai-wol-hosts.txt
+        line: ai.{{ base_domain }}
+        create: true
+        mode: '0644'
+
+    - name: Ensure OIDC secret files exist (placeholder for template)
+      ansible.builtin.copy:
+        dest: "/home/docker/openwebui.{{ base_domain }}/{{ item }}"
+        content: "placeholder"
+        force: false
+        mode: '0440'
+      loop:
+        - oidc_password
+        - oidc_digest
+      changed_when: false
+
+    - name: /home/docker/openwebui.{{ base_domain }}/docker-compose.yml Container Configuration
+      ansible.builtin.blockinfile:
+        path: /home/docker/openwebui.{{ base_domain }}/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+
+          services:
+
+            openwebui:
+              image: ghcr.io/open-webui/open-webui
+              restart: unless-stopped
+              environment:
+                # Global
+                - GLOBAL_LOG_LEVEL=WARNING
+                - USER_AGENT=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+                - CORS_ALLOW_ORIGIN=https://ai.{{ base_domain }}
+                # UI
+                - ENABLE_LOGIN_FORM=false
+                - ENABLE_FOLLOW_UP_GENERATION=false
+                - ENABLE_AUTOCOMPLETE_GENERATION=false
+                - ENABLE_EVALUATION_ARENA_MODELS=false
+                - ENABLE_MESSAGE_RATING=false
+                - ENABLE_TAGS_GENERATION=false
+                # Auth / OIDC
+                - ENABLE_OAUTH_SIGNUP=true
+                - ENABLE_OAUTH_ROLE_MAPPING=true
+                - ENABLE_API_KEYS=true
+                - OAUTH_MERGE_ACCOUNTS_BY_EMAIL=false
+                - OAUTH_SCOPES=openid profile email groups
+                - OAUTH_CLIENT_ID=ai
+                - OAUTH_CLIENT_SECRET={{ lookup('file', '/home/docker/openwebui.' + base_domain + '/oidc_password') }}
+                - OPENID_PROVIDER_URL=https://auth.{{ base_domain }}/.well-known/openid-configuration
+                - OAUTH_ALLOWED_ROLES=ai,ai-admin
+                - OAUTH_ADMIN_ROLES=ai-admin
+                - OAUTH_ROLES_CLAIM=groups
+                - OAUTH_EMAIL_REQUIRED=false
+                - OAUTH_MAP_EMAIL_TO_USERNAME=true
+                - AUTO_APPROVE_OAUTH_ACCOUNTS=true
+                - DEFAULT_USER_ROLE=user
+                # RAG / Document Processing
+                - CONTENT_EXTRACTION_ENGINE=external
+                - PDF_EXTRACT_IMAGES=true
+                - ENABLE_IMAGE_INTERPRETATION=true
+                - BYPASS_EMBEDDING_AND_RETRIEVAL=true
+                # Web Search (SearXNG)
+                - ENABLE_WEB_SEARCH=true
+                - WEB_SEARCH_ENGINE=searxng
+                - WEB_SEARCH_RESULT_COUNT=3
+                - SEARXNG_QUERY_URL=http://searxng:8080/search?format=json&q=<query>
+                - ENABLE_RAG_LOCAL_WEB_FETCH=false
+                - BYPASS_WEB_SEARCH_WEB_LOADER=true
+                # AI Model Defaults (llama.cpp via OpenAI-compatible API)
+                - OLLAMA_BASE_URL=
+                - OPENAI_API_BASE_URL=http://{{ ai_host }}:8080/v1
+                - OPENAI_API_KEY=
+                - ENABLE_OPENAI_API=true
+                - BYPASS_MODEL_ACCESS_CONTROL=true
+                - DEFAULT_MODEL_METADATA={"capabilities":{"vision":true,"web_search":true,"image_generation":true,"builtin_tools":true}}
+                #- DEFAULT_MODEL_PARAMS={"function_calling":"native"}
+                - DEFAULT_MODEL_PARAMS={"function_calling":"native","max_tokens":8192}
+                - DEFAULT_PROMPT_SUGGESTIONS=[]
+                - OPENAI_API_REQUEST_TIMEOUT=180
+                # Image Generation (ComfyUI)
+                - ENABLE_IMAGE_GENERATION=true
+                - IMAGE_GENERATION_ENGINE=comfyui
+                - IMAGE_GENERATION_MODEL=sd15.safetensors
+                - COMFYUI_BASE_URL=http://{{ ai_host }}:8188
+                - ENABLE_IMAGE_EDIT=true
+                - IMAGE_EDIT_ENGINE=comfyui
+                - IMAGE_EDIT_MODEL=sd15.safetensors
+                - IMAGES_EDIT_COMFYUI_BASE_URL=http://{{ ai_host }}:8188
+                # Speech-to-Text (Whisper)
+                - STT_WHISPER_API_BASE_URL=http://{{ ai_host }}:8082/v1
+                - STT_WHISPER_API_KEY=
+                - STT_WHISPER_MODEL=ggml-large-v3-turbo.bin
+                # Text-to-Speech (Piper)
+                - AUDIO_TTS_ENGINE=openai
+                - AUDIO_TTS_OPENAI_API_BASE_URL=http://{{ ai_host }}:8083/v1
+                - AUDIO_TTS_MODEL=tts-1
+                - AUDIO_TTS_OPENAI_API_KEY=sk-placeholder
+                # Other
+                - ENABLE_OLLAMA_API=false
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - ./openwebui-data:/app/backend/data
+              depends_on:
+                searxng:
+                  condition: service_started
+              networks:
+                - openwebui--network
+                - traefik:
+                    aliases:
+                      - openwebui
+
+            searxng:
+              image: searxng/searxng:latest
+              restart: unless-stopped
+              networks:
+                - openwebui--network
+              volumes:
+                - ./searxng-data:/etc/searxng:rw
+              cap_drop:
+                - ALL
+              cap_add:
+                - CHOWN
+                - SETGID
+                - SETUID
+                - DAC_OVERRIDE
+              logging:
+                driver: json-file
+                options:
+                  max-size: 1m
+                  max-file: 1
+
+          networks:
+            openwebui--network:
+              driver: bridge
+              driver_opts:
+                com.docker.network.bridge.name: br-openwebui
+            traefik:
+              external: true
+
+      notify: Restart openwebui
+
+    - name: /home/docker/traefik/providers/openwebui.yml OpenWebUI<->Traefik provider
+      blockinfile:
+        path: /home/docker/traefik/providers/openwebui.yml
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              openwebui:
+                rule: "Host(`ai.{{ base_domain }}`)"
+                service: openwebui
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+            services:
+              openwebui:
+                loadBalancer:
+                  servers:
+                    - url: "http://openwebui:8080"
+
+#######################
+#### OIDC Authelia ####
+#######################
+
+    - name: Create oidc client secret
+      ansible.builtin.shell: |
+        /home/docker/authelia.{{ base_domain }}/gen-oidc-client-secret.sh /home/docker/openwebui.{{ base_domain }}
+      changed_when: false
+      failed_when: false
+
+    - name: Create group and add user if not exists
+      ansible.builtin.shell: |
+        ldapaddgroup ai
+        ldapaddgroup ai-admin
+        ldapaddusertogroup admin ai-admin
+      changed_when: false
+      failed_when: false
+
+    - name: write OIDC config in authelias configuration.yml
+      ansible.builtin.blockinfile:
+        path: /home/docker/authelia.{{ base_domain }}/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC ai.{{ base_domain }}"
+        block: |2
+                # OpenWebUI
+                - client_id: 'ai'
+                  client_name: 'OpenWebUI'
+                  client_secret: '{{ lookup('file', '/home/docker/openwebui.' + base_domain + '/oidc_digest') }}'
+                  public: false
+                  #authorization_policy: '{{ lookup('file', '/home/docker/authelia.' + base_domain + '/authorization_policy') }}'
+                  authorization_policy: one_factor
+                  redirect_uris:
+                    - 'https://ai.{{ base_domain }}/oauth/oidc/callback'
+                  scopes:
+                    - 'openid'
+                    - 'profile'
+                    - 'groups'
+                    - 'email'
+                  response_types:
+                    - 'code'
+                  grant_types:
+                    - 'authorization_code'
+                  access_token_signed_response_alg: 'none'
+                  userinfo_signed_response_alg: 'none'
+                  token_endpoint_auth_method: 'client_secret_basic'
+        insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
+        backup: yes
+        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
+      notify: Restart authelia
+
+###########################
+#### OpenWebUI Automation #
+###########################
+
+    - name: Flush handlers - restart OpenWebUI with new config
+      ansible.builtin.meta: flush_handlers
+
+    - name: Install sqlite3 CLI
+      ansible.builtin.apt:
+        name: sqlite3
+        state: present
+      tags:
+        - prereqs
+
+    - name: Wait for OpenWebUI to initialize the database
+      ansible.builtin.shell:
+        cmd: >
+          timeout 60 bash -c '
+            DB="/home/docker/openwebui.{{ base_domain }}/openwebui-data/webui.db"
+            while [ ! -f "$DB" ]; do sleep 1; done
+            until sqlite3 "$DB" ".tables" 2>/dev/null | grep -q api_key; do sleep 2; done
+          '
+      changed_when: false
+
+    - name: Create / retrieve OpenWebUI API key (ensure admin user exists)
+      ansible.builtin.shell: |
+        DB=/home/docker/openwebui.{{ base_domain }}/openwebui-data/webui.db
+
+        # Create initial admin user if none exists
+        USER_ID=$(sqlite3 "$DB" "SELECT id FROM \"user\" ORDER BY role='admin' DESC LIMIT 1")
+        if [ -z "$USER_ID" ]; then
+          UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
+          NOW=$(date +%s%3N)
+          sqlite3 "$DB" \
+            "INSERT INTO \"user\"(id,name,email,role,profile_image_url,created_at,updated_at,last_active_at) \
+             VALUES('$UUID','admin','admin@localhost','admin','/user.png',$NOW,$NOW,$NOW)"
+          USER_ID=$UUID
+        fi
+
+        # Look for an existing key named 'comfyui-automation'
+        KEY=$(sqlite3 "$DB" \
+          "SELECT key FROM api_key WHERE json_extract(data,'$.name')='comfyui-automation' LIMIT 1")
+        if [ -n "$KEY" ]; then
+          echo "$KEY"
+          exit 0
+        fi
+
+        # Generate a fresh UUID, API key and timestamp
+        UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
+        API_KEY="sk-$(openssl rand -base64 48 | tr '+/' '-_' | tr -d '=')"
+        NOW=$(date +%s%3N)
+
+        # Insert the key into the database
+        sqlite3 "$DB" \
+          "INSERT INTO api_key(id,user_id,key,data,created_at,updated_at) \
+           VALUES('$UUID','$USER_ID','$API_KEY','{\"name\":\"comfyui-automation\"}',$NOW,$NOW)"
+
+        echo "$API_KEY"
+      register: openwebui_api_key
+      changed_when: false
+      no_log: true
+
+    - name: Save API key to file
+      ansible.builtin.copy:
+        dest: "/home/docker/openwebui.{{ base_domain }}/comfyui_api_key"
+        content: "{{ openwebui_api_key.stdout | default('ERROR') }}"
+        mode: '0400'
+
+    # patch: https://github.com/open-webui/open-webui/blob/main/backend/open_webui/utils/images/comfyui.py#L482
+    # upstream passes payload.negative_prompt (Optional[str] = None) directly to ComfyUI
+    # causing 400 when None → replace with empty string fallback
+    # Applied via docker exec to survive container rebuilds; idempotent (check first).
+    - name: Patch comfyui.py inside container (negative_prompt None fix)
+      ansible.builtin.shell: |
+        set -e
+        CID=$(docker compose ps -q 2>/dev/null | head -1)
+        [ -z "$CID" ] && exit 0
+        if docker exec "$CID" grep -q "payload.negative_prompt is not None" \
+          /app/backend/open_webui/utils/images/comfyui.py 2>/dev/null; then
+          exit 0
+        fi
+        docker exec "$CID" sed -i \
+          's|\(workflow\[node_id\]\[.inputs.\]\[node.key if node.key else .text.\]\s*=\s*\)payload\.negative_prompt$|\1payload.negative_prompt if payload.negative_prompt is not None else ""|' \
+          /app/backend/open_webui/utils/images/comfyui.py
+      args:
+        chdir: /home/docker/openwebui.{{ base_domain }}
+      changed_when: false
+
+    - name: Set ComfyUI workflows in DB (key-value schema)
+      ansible.builtin.shell: |
+        python3 <<'PYEOF'
+        import json, sqlite3, time
+
+        DB = "/home/docker/openwebui.{{ base_domain }}/openwebui-data/webui.db"
+
+        WF = {
+            "3": {"class_type": "KSampler", "inputs": {
+                "cfg": 8, "denoise": 1, "latent_image": ["5", 0], "model": ["4", 0],
+                "negative": ["6", 0], "positive": ["7", 0], "sampler_name": "euler",
+                "scheduler": "normal", "seed": 42, "steps": 20}},
+            "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "sd15.safetensors"}},
+            "5": {"class_type": "EmptyLatentImage", "inputs": {"batch_size": 1, "height": 512, "width": 512}},
+            "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": "NEGATIVE_PROMPT"}},
+            "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": "PROMPT"}},
+            "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+            "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ComfyUI", "images": ["8", 0]}},
+        }
+        EDIT_WF = {
+            "3": {"class_type": "KSampler", "inputs": {
+                "cfg": 8, "denoise": 0.7, "latent_image": ["10", 0], "model": ["4", 0],
+                "negative": ["6", 0], "positive": ["7", 0], "sampler_name": "euler",
+                "scheduler": "normal", "seed": 42, "steps": 20}},
+            "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "sd15.safetensors"}},
+            "5": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+            "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": "NEGATIVE_PROMPT"}},
+            "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": "PROMPT"}},
+            "8": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ComfyUI", "images": ["5", 0]}},
+            "10": {"class_type": "VAEEncode", "inputs": {"samples": ["11", 0], "vae": ["4", 2]}},
+            "11": {"class_type": "LoadImage", "inputs": {"image": ""}},
+        }
+        gen_nodes = [
+            {"type": "model",           "node_ids": ["4"], "key": "ckpt_name"},
+            {"type": "prompt",          "node_ids": ["7"], "key": "text"},
+            {"type": "negative_prompt", "node_ids": ["6"], "key": "text"},
+            {"type": "width",           "node_ids": ["5"], "key": "width"},
+            {"type": "height",          "node_ids": ["5"], "key": "height"},
+            {"type": "n",               "node_ids": ["5"], "key": "batch_size"},
+            {"type": "steps",           "node_ids": ["3"], "key": "steps"},
+            {"type": "seed",            "node_ids": ["3"], "key": "seed"},
+        ]
+        edit_nodes = [
+            {"type": "model",           "node_ids": ["4"], "key": "ckpt_name"},
+            {"type": "prompt",          "node_ids": ["7"], "key": "text"},
+            {"type": "negative_prompt", "node_ids": ["6"], "key": "text"},
+            {"type": "image",           "node_ids": ["11"], "key": "image"},
+        ]
+
+        db = sqlite3.connect(DB)
+        c = db.cursor()
+        now = int(time.time())
+
+        c.execute("SELECT key FROM config")
+        existing = {row[0] for row in c.fetchall()}
+
+        def upsert(key, value):
+            c.execute(
+                "INSERT INTO config (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                (key, json.dumps(value) if not isinstance(value, str) else value, now),
+            )
+
+        upsert("COMFYUI_WORKFLOW_NODES", gen_nodes)
+        upsert("image_generation.comfyui.workflow", json.dumps(WF))
+        upsert("image_generation.comfyui.nodes", gen_nodes)
+
+        upsert("IMAGES_EDIT_COMFYUI_WORKFLOW_NODES", edit_nodes)
+        upsert("IMAGES_EDIT_COMFYUI_WORKFLOW", json.dumps(EDIT_WF))
+        upsert("images.edit.comfyui.workflow", json.dumps(EDIT_WF))
+        upsert("images.edit.comfyui.nodes", edit_nodes)
+
+        upsert("ui.prompt_suggestions", [])
+
+        needs_restart = False
+        if "openai.enable" not in existing:
+            upsert("openai.enable", True)
+            upsert("openai.api_base_urls", ["http://{{ ai_host }}:8080/v1"])
+            upsert("openai.api_keys", [""])
+            upsert("openai.api_configs", {})
+            needs_restart = True
+
+        db.commit()
+        db.close()
+        print("restart" if needs_restart else "done")
+        PYEOF
+      register: db_config_result
+      changed_when: '"restart" in db_config_result.stdout'
+      notify: Restart openwebui
+
+    - name: Flush handlers - restart OpenWebUI to pick up DB config
+      ansible.builtin.meta: flush_handlers
+
+  handlers:
+
+    - name: Restart openwebui
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /home/docker/openwebui.{{ base_domain }}
+
+    - name: Restart searxng
+      ansible.builtin.shell: docker compose up -d --force-recreate searxng
+      args:
+        chdir: /home/docker/openwebui.{{ base_domain }}
+
+    - name: Restart authelia
+      ansible.builtin.shell: docker compose down && docker compose up -d
+      args:
+        chdir: /home/docker/authelia.{{ base_domain }}

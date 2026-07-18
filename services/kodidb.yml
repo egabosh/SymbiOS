@@ -1,0 +1,306 @@
+---
+- name: kodidb
+  hosts: all
+  vars:
+    service_name: kodidb
+    service_domain: "kodidb.{{ base_domain }}"
+  tasks:
+
+    - name: Create /home/docker/kodidb dir
+      ansible.builtin.file:
+        path: /home/docker/kodidb
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: /usr/local/sbin/autoupdate.d/kodidb-ssl.update
+      blockinfile:
+        path: /usr/local/sbin/autoupdate.d/kodidb-ssl.update
+        create: yes
+        mode: 0550
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd /home/docker/kodidb
+
+          # start phpmyadmin (if not) to force traefik to get a letsencrypt certificate
+          docker compose up -d kodidb--phpmyadmin
+          mkdir -p ssl
+
+          # take letsencrypt-certs from traefik and check for new ones
+          new=0
+          for ssl in key certificate
+          do
+            touch ssl/${ssl}.pem
+            [ -d ssl/${ssl}.pem ] && rm -r ssl/${ssl}.pem
+            
+            # wait if no cert is available
+            until [ -s "ssl/${ssl}.pem.new" ]
+            do
+              cat /home/docker/traefik/letsencrypt/acme.json  | jq -r ".letsencrypt.Certificates[] | select(.domain.main==\"kodidb.{{ base_domain }}\") | .${ssl}" | base64 -d >ssl/${ssl}.pem.new
+              sleep 5
+            done
+            old=$(shasum ssl/${ssl}.pem)
+            new=$(shasum ssl/${ssl}.pem.new)
+            if ! [ "$new" = "$old" ]
+            then
+              new=1
+              mv ssl/${ssl}.pem.new >shasum ssl/${ssl}.pem
+            else
+              rm ssl/${ssl}.pem.new
+            fi
+          done
+
+          # make it readable for mysql user in the container
+          chmod 400 ssl/*.pem
+          chown 999:0 ssl/*.pem
+
+          # restart if new cert ist available
+          if [ -n "$new" ]
+          then
+            # start mariadb if not initialized and down
+            notinitilized=""
+            [ -s "db-data/mariadb_upgrade_info" ] || notinitilized=1
+            if [ -n "$notinitilized" ] 
+            then 
+              docker compose up -d kodidb
+              # get sure mariadb is ready with initializing
+              until [ -s "db-data/mariadb_upgrade_info" ]
+              do
+                sleep 5
+              done
+              sleep 120
+            else
+              docker compose up -d --force-recreate kodidb
+            fi
+          fi
+
+          if ! [ -s advancedsettings.xml ]
+          then 
+            db_user=kodidb
+            echo "db_user_pw=$(pwgen -s 32 1)" >env.kodidb
+            . ./env.kodidb
+            db_host=localhost
+            . /home/docker/_defaults/mariadb/envroot.db
+            
+            echo "grant all privileges on *.* TO '${db_user}'@'%' identified by '${db_user_pw}';" \
+             | mariadb -u root -h $db_host --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD}
+            echo "flush privileges;" \
+             | mariadb -u root -h $db_host --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD}
+            echo "ALTER USER '${db_user}'@'%' REQUIRE SSL;" \
+             | mariadb -u root -h $db_host --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD}
+            
+            echo 'show databases;' | mariadb -u $db_user -h $db_host --ssl --ssl-verify-server-cert -P 3307 -p${db_user_pw}
+
+            echo "<advancedsettings>
+            <videodatabase>
+              <type>mysql</type>
+              <host>${db_host}</host>
+              <port>3307</port>
+              <user>kodidb</user>
+              <pass>${db_user_pw}</pass>
+              <name>myKodiVideo</name>
+            </videodatabase> 
+            <musicdatabase>
+              <type>mysql</type>
+              <host>${db_host}</host>
+              <port>3307</port>
+              <user>kodidb</user>
+              <pass>${db_user_pw}</pass>
+              <name>myKodiMusic</name>
+            </musicdatabase>
+            <videolibrary>
+              <importwatchedstate>true</importwatchedstate>
+              <importresumepoint>true</importresumepoint>
+            </videolibrary>
+          </advancedsettings>" >advancedsettings.xml
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /usr/local/sbin/autoupdate.d/kodidb-ssl.update shebang
+      lineinfile:
+        path: /usr/local/sbin/autoupdate.d/kodidb-ssl.update
+        insertbefore: BOF
+        line: "#!/bin/bash -e"
+
+    - name: /home/docker/kodidb/ssl.cnf (use ssl in mariadb)
+      blockinfile:
+        path: /home/docker/kodidb/ssl.cnf
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          [mariadbd]
+          ssl=1
+          ssl-cert=/etc/mysql/certificate.pem
+          ssl-key=/etc/mysql/key.pem
+        backup: yes
+
+    - name: /home/docker/kodidb/phpmyadmin-config.user.inc.php (use ssl in phpmyadmin)
+      blockinfile:
+        path: /home/docker/kodidb/phpmyadmin-config.user.inc.php
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "// {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          // IP address / host of your instance
+          $cfg['Servers'][$i]['host'] = 'kodidb';
+          // Use SSL for connection
+          $cfg['Servers'][$i]['ssl'] = true;
+          // Disable SSL verification
+          $cfg['Servers'][$i]['ssl_verify'] = false;
+        backup: yes
+
+    - name: /home/docker/kodidb/docker-compose.yml Container Configuration
+      blockinfile:
+        path: /home/docker/kodidb/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+        
+          services:
+
+            kodidb:
+              image: mariadb:lts
+              cap_add:
+                - SYS_NICE
+              restart: unless-stopped
+              networks:
+                - kodidb--network
+              volumes:
+                - ./db-data:/var/lib/mysql
+                - /etc/localtime:/etc/localtime:ro
+                - /home/docker/_defaults/mariadb/99-server.cnf:/etc/mysql/mariadb.conf.d/99-server.cnf:ro
+                - ./ssl.cnf:/etc/mysql/mariadb.conf.d/99-ssl.cnf:ro
+                - ./ssl/certificate.pem:/etc/mysql/certificate.pem:ro
+                - ./ssl/key.pem:/etc/mysql/key.pem:ro
+              env_file:
+                - /home/docker/_defaults/mariadb/envroot.db
+                - /home/docker/_defaults/mariadb/mariadb.env
+              ports:
+                - 0.0.0.0:3307:3306
+
+            kodidb--phpmyadmin:
+              image: phpmyadmin:latest
+              restart: unless-stopped
+              env_file: /home/docker/_defaults/mariadb/env.rootphpmyadmin
+              environment:
+                - PMA_ARBITRARY=0
+                - PMA_HOST=kodidb
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - ./phpmyadmin-config.user.inc.php:/etc/phpmyadmin/config.user.inc.php:ro
+              networks:
+                - kodidb--network
+                - traefik:
+                    aliases:
+                      - kodidb--phpmyadmin
+
+          networks:
+            kodidb--network:
+              driver: bridge
+              driver_opts:
+                com.docker.network.bridge.name: br-kodidb
+            traefik:
+              external: true
+
+        backup: yes        
+      notify:
+        - Restart mariadb
+        - Restart traefik
+
+    - name: /home/docker/traefik/providers/kodidb.yml Traefik File Provider
+      blockinfile:
+        path: /home/docker/traefik/providers/kodidb.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              kodidb:
+                rule: "Host(`{{ service_domain }}`)"
+                entryPoints:
+                  - https
+                service: kodidb-pma
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - secHeaders@file
+                  - default-basic-auth@file
+            services:
+              kodidb-pma:
+                loadBalancer:
+                  servers:
+                    - url: "http://kodidb--phpmyadmin:80"
+        backup: yes
+
+    - name: Get letsencrypt cert from traefik
+      ansible.builtin.shell: /usr/local/sbin/autoupdate.d/kodidb-ssl.update
+      args:
+        chdir: /home/docker/kodidb
+        creates: /home/docker/kodidb/ssl/certificate.pem
+
+    - name: /usr/local/sbin/backup.d/kodidb-docker.backup
+      blockinfile:
+        path: /usr/local/sbin/backup.d/kodidb-docker.backup
+        create: yes
+        mode: 0550 
+        owner: root
+        group: root 
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          . /home/docker/_defaults/mariadb/envroot.db
+
+          DAYS=7
+          TIMESTAMP=$(date +"%Y%m%d%H%M")
+
+          for i in $(echo "show databases" | mariadb -u root -h localhost --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD} | egrep -v "^Database$|^performance_schema$|^information_schema$")
+          do
+            if mariadb-dump  -u root -h localhost --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD} $i 2>${g_tmp}/dberr >$BACKUPDIR/KODIDB-$i-$TIMESTAMP.sql
+            then
+              gzip $BACKUPDIR/KODIDB-$i-$TIMESTAMP.sql
+            else
+              g_echo_error "MariaDB Backup failed $(cat ${g_tmp}/dberr)"
+            fi
+            # dont delete last old backups!
+            OLD_BACKUPS=$(ls -1 $BACKUPDIR/KODIDB-$i*.gz 2>/dev/null | wc -l)
+            [ -n "$OLD_BACKUPS" ] && if [ $OLD_BACKUPS -gt $DAYS ]
+            then
+              find $BACKUPDIR -name "KODIDB-$i*.gz" -daystart -mtime +$DAYS -delete
+            fi
+          done
+          unset MARIADB_ROOT_PASSWORD
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: Allow mysql/kodidb over network
+      community.general.ufw:
+        rule: allow
+        port: '3307'
+        proto: tcp
+
+  handlers:
+
+    - name: Restart mariadb
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /home/docker/kodidb
+
+    - name: Restart traefik
+      ansible.builtin.shell: docker compose restart traefik
+      args:
+        chdir: /home/docker/traefik
+
