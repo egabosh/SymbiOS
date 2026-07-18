@@ -1,3 +1,47 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (C) 2025  SymbiOS Contributors
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# docs:
+#   short_description: Deploy the Matrix communication server
+#   description: Deploys Matrix (Synapse) with Nginx reverse proxy, PostgreSQL, Redis, Element Web, Matrix Commander, and Admin UI. Exposed via Traefik.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   service_control:
+#     services:
+#     - name: matrix
+#       type: docker
+#       compose_file: /home/docker/matrix/docker-compose.yml
+#       status: test -d /home/docker/matrix || exit 2; docker compose -f /home/docker/matrix/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: matrix
+#       command: docker compose -f /home/docker/matrix/docker-compose.yml logs -f --tail=100
+#   actions:
+#     uninstall: docker compose -f /home/docker/matrix/docker-compose.yml down
+#     start: docker compose -f /home/docker/matrix/docker-compose.yml up -d
+#     stop: docker compose -f /home/docker/matrix/docker-compose.yml down
+#     restart: docker compose -f /home/docker/matrix/docker-compose.yml restart
+#     reload: docker compose -f /home/docker/matrix/docker-compose.yml up -d
+#
 ---
 - name: matrix
   hosts: all
@@ -6,17 +50,17 @@
     service_domain: "matrix.{{ base_domain }}"
   tasks:
 
-    - name: Create /home/docker/matrix.{{ base_domain }} dir
+    - name: Create /home/docker/matrix dir
       ansible.builtin.file:
-        path: /home/docker/matrix.{{ base_domain }}
+        path: /home/docker/matrix
         owner: root
         group: docker
         state: directory
         mode: '0550'
 
-    - name: Create /home/docker/matrix.{{ base_domain }}/data dir
+    - name: Create /home/docker/matrix/data dir
       ansible.builtin.file:
-        path: /home/docker/matrix.{{ base_domain }}/data
+        path: /home/docker/matrix/data
         owner: 3000
         group: 3000
         state: directory
@@ -25,17 +69,17 @@
     - name: Gen initial passwords if not exists
       ansible.builtin.shell: docker run --rm -v ./data:/data -e SYNAPSE_SERVER_NAME=matrix.{{ base_domain }} -e SYNAPSE_HTTP_PORT=8008 -e SYNAPSE_REPORT_STATS=no -e UID=3000 -e GUID=3000 matrixdotorg/synapse:latest generate
       args:
-        chdir: /home/docker/matrix.{{ base_domain }}
-        creates: /home/docker/matrix.{{ base_domain }}/data/homeserver.yaml
+        chdir: /home/docker/matrix
+        creates: /home/docker/matrix/data/homeserver.yaml
 
     - name: get turn secret
-      shell: bash -c 'source /home/docker/turn.{{ base_domain }}/env ; echo $TURN_SECRET'
+      shell: bash -c 'source /home/docker/turn/env ; echo $TURN_SECRET'
       register: turnsecret
       changed_when: false
 
     - name: Edit Matrix/Synapse config
       blockinfile:
-        path: /home/docker/matrix.{{ base_domain }}/data/homeserver.yaml
+        path: /home/docker/matrix/data/homeserver.yaml
         create: yes
         mode: 0444
         owner: root
@@ -92,6 +136,25 @@
           turn_shared_secret: "{{turnsecret.stdout}}"
           turn_user_lifetime: 86400000
           turn_allow_guests: True
+          oidc_providers:
+            - idp_id: authelia
+              idp_name: Authelia
+              issuer: "https://auth.{{ base_domain }}"
+              client_id: "matrix"
+              client_secret: "{{ lookup('file', '/home/docker/matrix/oidc_digest') }}"
+              authorization_endpoint: "https://auth.{{ base_domain }}/api/oidc/authorization"
+              token_endpoint: "https://auth.{{ base_domain }}/api/oidc/token"
+              userinfo_endpoint: "https://auth.{{ base_domain }}/api/oidc/userinfo"
+              jwks_uri: "https://auth.{{ base_domain }}/api/oidc/jwks"
+              scopes:
+                - openid
+                - profile
+                - email
+                - groups
+              user_mapping_provider:
+                config:
+                  localpart_template: "{{ '{{' }} user.preferred_username {{ '}}' }}"
+                  display_name_template: "{{ '{{' }} user.name {{ '}}' }}"
           allow_public_rooms_without_auth: False
           allow_public_rooms_over_federation: False
           allow_guest_access: False
@@ -150,16 +213,16 @@
           Match User matrix
             ForceCommand /usr/local/bin/notify.sh
 
-    - name: /home/docker/matrix.{{ base_domain }}/genpw.sh (generate Random PW for Matrix and DB)
+    - name: /home/docker/matrix/genpw.sh (generate Random PW for Matrix and DB)
       blockinfile:
-        path: /home/docker/matrix.{{ base_domain }}/genpw.sh
+        path: /home/docker/matrix/genpw.sh
         create: yes
         mode: 0550
         owner: root
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          cd /home/docker/matrix.{{ base_domain }}
+          cd /home/docker/matrix
           postgresqluser=$(pwgen -s 32 1)
           postgresqlpassword=$(pwgen -s 32 1)
           matrixadminpassword=$(pwgen -s 32 1)
@@ -206,21 +269,21 @@
         validate: /bin/bash -n %s
       notify: run genpw.sh
 
-    - name: /home/docker/matrix.{{ base_domain }}/genpw.sh shebang
+    - name: /home/docker/matrix/genpw.sh shebang
       lineinfile:
-        path: /home/docker/matrix.{{ base_domain }}/genpw.sh
+        path: /home/docker/matrix/genpw.sh
         insertbefore: BOF
         line: "#!/bin/bash -e"
 
     - name: Gen initial passwords if not exists
       ansible.builtin.shell: ./genpw.sh
       args:
-        chdir: /home/docker/matrix.{{ base_domain }}
-        creates: /home/docker/matrix.{{ base_domain }}/env
+        chdir: /home/docker/matrix
+        creates: /home/docker/matrix/env
 
-    - name: /home/docker/matrix.{{ base_domain }}/nginx-matrix.conf
+    - name: /home/docker/matrix/nginx-matrix.conf
       blockinfile:
-        path: /home/docker/matrix.{{ base_domain }}/nginx-matrix.conf
+        path: /home/docker/matrix/nginx-matrix.conf
         mode: "0444"
         owner: root
         group: root
@@ -247,17 +310,17 @@
         backup: yes
       notify: Restart matrix  
 
-    - name: Create /home/docker/matrix.{{ base_domain }}/well-known dir
+    - name: Create /home/docker/matrix/well-known dir
       ansible.builtin.file:
-        path: /home/docker/matrix.{{ base_domain }}/well-known
+        path: /home/docker/matrix/well-known
         owner: root
         group: root
         state: directory
         mode: '0555'
 
-    - name: /home/docker/matrix.{{ base_domain }}/well-known/client
+    - name: /home/docker/matrix/well-known/client
       copy:
-        dest: /home/docker/matrix.{{ base_domain }}/well-known/client
+        dest: /home/docker/matrix/well-known/client
         mode: "0444"
         owner: root
         group: root
@@ -269,9 +332,9 @@
           }
         backup: yes
 
-    - name: /home/docker/matrix.{{ base_domain }}/well-known/server
+    - name: /home/docker/matrix/well-known/server
       copy:
-        dest: /home/docker/matrix.{{ base_domain }}/well-known/server
+        dest: /home/docker/matrix/well-known/server
         mode: "0444"
         owner: root
         group: root
@@ -284,7 +347,7 @@
 
     - name: Element Web configuration
       copy: 
-        dest: /home/docker/matrix.{{ base_domain }}/element-web-config.json
+        dest: /home/docker/matrix/element-web-config.json
         owner: root
         group: root
         mode: 0444
@@ -341,9 +404,9 @@
           }
         backup: yes
 
-    - name: /home/docker/matrix.{{ base_domain }}/docker-compose.yml Container Configuration
+    - name: /home/docker/matrix/docker-compose.yml Container Configuration
       blockinfile:
-        path: /home/docker/matrix.{{ base_domain }}/docker-compose.yml
+        path: /home/docker/matrix/docker-compose.yml
         create: yes
         mode: 0440
         owner: root
@@ -523,19 +586,59 @@
                   servers:
                     - url: "http://matrix-web:80"
 
+    ##########################
+    #### OIDC Authelia   ####
+    ##########################
+
+    - name: Create oidc client secret for Matrix
+      ansible.builtin.shell: |
+        /home/docker/authelia/gen-oidc-client-secret.sh /home/docker/matrix
+      changed_when: false
+      failed_when: false
+
+    - name: Write OIDC config in authelias configuration.yml for Matrix
+      ansible.builtin.blockinfile:
+        path: /home/docker/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC matrix"
+        block: |2
+                # Matrix Synapse
+                - client_id: 'matrix'
+                  client_name: 'Matrix'
+                  client_secret: '{{ lookup('file', '/home/docker/matrix/oidc_digest') }}'
+                  public: false
+                  authorization_policy: '{{ lookup('file', '/home/docker/authelia/authorization_policy') }}'
+                  redirect_uris:
+                    - 'https://matrix.{{ base_domain }}/_synapse/client/oidc/callback'
+                  scopes:
+                    - 'openid'
+                    - 'profile'
+                    - 'email'
+                    - 'groups'
+                  response_types:
+                    - 'code'
+                  grant_types:
+                    - 'authorization_code'
+                  access_token_signed_response_alg: 'none'
+                  userinfo_signed_response_alg: 'none'
+                  token_endpoint_auth_method: 'client_secret_post'
+        insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
+        backup: yes
+        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
+      notify: Restart authelia
+
     - name: Start matrix
       ansible.builtin.shell: docker compose up -d
       args:
-        chdir: /home/docker/matrix.{{ base_domain }}
-        creates: /home/docker/matrix.{{ base_domain }}/matrixdb-data/postmaster.pid
+        chdir: /home/docker/matrix
+        creates: /home/docker/matrix/matrixdb-data/postmaster.pid
 
     - name: Wait until matrix install is finished
       wait_for:
-        path: /home/docker/matrix.{{ base_domain }}/matrixdb-data/base
+        path: /home/docker/matrix/matrixdb-data/base
 
-    - name: /home/docker/matrix.{{ base_domain }}/matrix.init.sh
+    - name: /home/docker/matrix/matrix.init.sh
       blockinfile:
-        path: /home/docker/matrix.{{ base_domain }}/matrix.init.sh
+        path: /home/docker/matrix/matrix.init.sh
         mode: "0500"
         owner: root
         group: root
@@ -544,7 +647,7 @@
         block: |
           # matrix
           sleep 120
-          cd /home/docker/matrix.{{ base_domain }} || exit 1 
+          cd /home/docker/matrix || exit 1 
           . ./env
           . ./env.user
           date >>matrix.init.log
@@ -556,27 +659,27 @@
           ## Matrix Commander
           #
           # Configure CLI Client (matrix-commander) Access
-          docker compose -f /home/docker/matrix.{{ base_domain }}/docker-compose.yml run -T matrix-commander --login password --homeserver matrix.{{ base_domain }} --user-login $MATRIX_SRV_USER --password $MATRIX_SRV_USER_PASSWORD --device {{ base_domain }} --room-default {{ base_domain }}
+          docker compose -f /home/docker/matrix/docker-compose.yml run -T matrix-commander --login password --homeserver matrix.{{ base_domain }} --user-login $MATRIX_SRV_USER --password $MATRIX_SRV_USER_PASSWORD --device {{ base_domain }} --room-default {{ base_domain }}
 
           # Create Room
-          docker compose -f /home/docker/matrix.{{ base_domain }}/docker-compose.yml run -T matrix-commander --room-create {{ base_domain }}
+          docker compose -f /home/docker/matrix/docker-compose.yml run -T matrix-commander --room-create {{ base_domain }}
 
           # Invite other users example
-          # docker compose -f /home/docker/matrix.{{ base_domain }}/docker-compose.yml run -ti matrix-commander --room-invite {{ base_domain }} --user @user:matrix.{{ base_domain }}
+          # docker compose -f /home/docker/matrix/docker-compose.yml run -ti matrix-commander --room-invite {{ base_domain }} --user @user:matrix.{{ base_domain }}
         backup: yes
         validate: /bin/bash -n %s
 #      notify: run matrix.init
 
     - name: Script to crate pipes and containers for existing rooms
       blockinfile:
-        path: /home/docker/matrix.{{ base_domain }}/pipe-rooms.sh
+        path: /home/docker/matrix/pipe-rooms.sh
         mode: "0500"
         owner: root
         group: root
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          cd /home/docker/matrix.{{ base_domain }}
+          cd /home/docker/matrix
           echo "services:" >docker-compose.override.yml.new
 
           # go through existing rooms (ids) of matrix-commander user
@@ -645,10 +748,10 @@
 
 
     - name: Run matrix.init after install
-      ansible.builtin.shell: bash /home/docker/matrix.{{ base_domain }}/matrix.init.sh
+      ansible.builtin.shell: bash /home/docker/matrix/matrix.init.sh
       args:
-        chdir: /home/docker/matrix.{{ base_domain }}
-        creates: /home/docker/matrix.{{ base_domain }}/matrix.init.log
+        chdir: /home/docker/matrix
+        creates: /home/docker/matrix/matrix.init.log
 
 #    - name: /usr/local/sbin/autoupdate.d/matrix.update
 #      blockinfile:
@@ -692,17 +795,17 @@
     - name: run genpw.sh
       ansible.builtin.shell: ./genpw.sh
       args:
-        chdir: /home/docker/matrix.{{ base_domain }}
+        chdir: /home/docker/matrix
       notify: Restart matrix
 
 #    - name: run matrix.update
 #      ansible.builtin.shell: bash /usr/local/sbin/autoupdate.d/matrix.update
 #
 #    - name: run matrix.init
-#      ansible.builtin.shell: bash /home/docker/matrix.{{ base_domain }}/matrix.init.sh
+#      ansible.builtin.shell: bash /home/docker/matrix/matrix.init.sh
 
     - name: Restart matrix
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
-        chdir: /home/docker/matrix.{{ base_domain }}
+        chdir: /home/docker/matrix
 

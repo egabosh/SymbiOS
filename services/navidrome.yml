@@ -1,3 +1,47 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (C) 2025  SymbiOS Contributors
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# docs:
+#   short_description: Deploy the Navidrome music streaming server
+#   description: Deploys Navidrome, a self-hosted music server and streamer compatible with Subsonic/Airsonic, exposed via Traefik.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   service_control:
+#     services:
+#     - name: navidrome
+#       type: docker
+#       compose_file: /home/docker/navidrome/docker-compose.yml
+#       status: test -d /home/docker/navidrome || exit 2; docker compose -f /home/docker/navidrome/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: navidrome
+#       command: docker compose -f /home/docker/navidrome/docker-compose.yml logs -f --tail=100
+#   actions:
+#     uninstall: docker compose -f /home/docker/navidrome/docker-compose.yml down
+#     start: docker compose -f /home/docker/navidrome/docker-compose.yml up -d
+#     stop: docker compose -f /home/docker/navidrome/docker-compose.yml down
+#     restart: docker compose -f /home/docker/navidrome/docker-compose.yml restart
+#     reload: docker compose -f /home/docker/navidrome/docker-compose.yml up -d
+#
 ---
 - name: navidrome
   hosts: all
