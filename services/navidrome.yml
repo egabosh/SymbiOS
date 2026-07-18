@@ -1,0 +1,96 @@
+---
+- name: navidrome
+  hosts: all
+  vars:
+    service_name: navidrome
+    service_domain: "{{ service_name }}.{{ base_domain }}"
+  tasks:
+
+    - name: Create /home/docker/navidrome dir
+      ansible.builtin.file:
+        path: /home/docker/navidrome
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: Create /home/docker/navidrome/navidrome-data dir
+      ansible.builtin.file:
+        path: /home/docker/navidrome/navidrome-data
+        owner: 33
+        group: docker
+        state: directory
+        mode: '0750'
+
+
+    - name: /home/docker/navidrome/docker-compose.yml Container Configuration
+      blockinfile:
+        path: /home/docker/navidrome/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+
+          services:
+            navidrome:
+              image: deluan/navidrome:latest
+              restart: unless-stopped
+              environment:
+                ND_SCANSCHEDULE: 24h
+                ND_LOGLEVEL: warn
+                ND_SESSIONTIMEOUT: 24h
+                ND_ENABLEINSIGHTSCOLLECTOR: false
+                ND_LASTFM_ENABLED: false
+                ND_LISTENBRAINZ_ENABLED: false
+                ND_SCANNER_PURGEMISSING: always
+              networks:
+                - traefik
+              user: 33
+              volumes:
+                - /data-crypt/share/Musik/Uploaddatum:/music:ro
+                - ./navidrome-data:/data
+                - /etc/localtime:/etc/localtime:ro
+
+          networks:
+            traefik:
+              external: true
+
+        backup: yes
+      notify: Restart navidrome
+
+    - name: /home/docker/traefik/providers/navidrome.yml Navidrome<->Traefik provider
+      blockinfile:
+        path: /home/docker/traefik/providers/navidrome.yml
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              navidrome:
+                rule: "Host(`{{ service_domain }}`)"
+                service: navidrome
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+
+            services:
+              navidrome:
+                loadBalancer:
+                  servers:
+                    - url: "http://navidrome:4533"
+
+  handlers:
+
+    - name: Restart navidrome
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /home/docker/navidrome
+

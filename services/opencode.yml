@@ -1,0 +1,232 @@
+---
+- name: opencode
+  hosts: all
+  vars:
+    service_name: opencode
+    service_domain: "{{ service_name }}.{{ base_domain }}"
+  tasks:
+
+    - name: Create /home/docker/opencode dir
+      ansible.builtin.file:
+        path: /home/docker/opencode
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: /home/docker/opencode/docker-compose.yml Container Configuration
+      blockinfile:
+        path: /home/docker/opencode/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          services:
+
+            opencode:
+              build:
+                context: .
+                dockerfile: Dockerfile
+              restart: unless-stopped
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - ./projects:/projects:rw
+                - ./opencode-config:/root/.config/opencode:rw
+                - ./opencode-data:/root/.local/share/opencode:rw
+                - ./ssh/:/root/.ssh:ro
+              networks:
+                - opencode
+                traefik:
+                  aliases:
+                    - opencode
+              entrypoint: ["/root/.opencode/bin/opencode", "serve", "--hostname=0.0.0.0", "--port=80", "--print-logs", "--log-level", "WARN"]
+
+          networks:
+            opencode:
+              driver: bridge
+              driver_opts:
+                com.docker.network.bridge.name: br-opencode
+            traefik:
+              external: true
+        backup: yes
+      notify: Restart opencode
+
+    - name: /home/docker/traefik/providers/opencode.yml Traefik Routing Configuration
+      blockinfile:
+        path: /home/docker/traefik/providers/opencode.yml
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              opencode:
+                rule: "Host(`opencode.{{ base_domain }}`)"
+                service: opencode
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+                  - "authelia@file"
+            services:
+              opencode:
+                loadBalancer:
+                  servers:
+                    - url: "http://opencode:80"
+        backup: yes
+      notify: Restart traefik
+
+    - name: /home/docker/opencode/Dockerfile
+      blockinfile:
+        path: /home/docker/opencode/Dockerfile
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          FROM ghcr.io/egabosh/debian:latest
+          ENV DEBIAN_FRONTEND=noninteractive
+          # opencode and tools
+          RUN apt-get update \
+           && apt-get install -y bash curl nodejs git vim htop tree \
+           && rm -rf /var/lib/apt/lists/* \
+           && unset VERSION \
+           && curl -fsSL https://opencode.ai/install | bash
+          ENTRYPOINT ["/root/.opencode/bin/opencode"]
+        backup: yes
+      notify: Restart opencode
+
+    - name: Create /home/docker/opencode/ssh dir
+      ansible.builtin.file:
+        path: /home/docker/opencode/ssh
+        owner: root
+        group: root
+        state: directory
+        mode: '0700'
+
+    - name: Generate ssh ed25519 keypair
+      ansible.builtin.shell: ssh-keygen -q -N "" -t ed25519 -f id_ed25519 -C opencode
+      args:
+        chdir: /home/docker/opencode/ssh
+        creates: /home/docker/opencode/ssh/id_ed25519
+      notify: Restart opencode
+
+    - name: Create /home/docker/opencode/opencode-config dir
+      ansible.builtin.file:
+        path: /home/docker/opencode/opencode-config
+        owner: root
+        group: root
+        state: directory
+        mode: '0550'
+
+    - name: Create AGENTS.md if not exists
+      copy:
+        content: |
+          # Coding Standards
+
+          ## General
+          - All comments and variable names are in English
+          - Use gaboshlib (/etc/bash/gaboshlib) whenever sensible and available
+          - Use Ansible playbooks for installations and configurations by default
+        dest: "/home/docker/opencode/opencode-config/AGENTS.md"
+        mode: "0644"
+        force: false
+
+    - name: /home/docker/opencode/opencode-config/opencode.json
+      copy:
+        content: |
+          {
+            "$schema": "https://opencode.ai/config.json",
+            "provider": {
+              "ai": {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "ai.lan",
+                "options": {
+                  "baseURL": "http://ai.lan:8080/v1"
+                },
+                "models": {
+                  "llamacpp-default": {
+                    "name": "llamacpp-default",
+                    "reasoning": true,
+                    "limit": {
+                      "context": 133120,
+                      "output": 32768
+                    },
+                    "parameters": {
+                      "maxTokens": 32768,
+                      "temperature": 0.7,
+                      "topP": 0.8
+                    }
+                  }
+                }
+              }
+            },
+            "model": "ai/llamacpp-default",
+            "shell": "/bin/bash",
+            "instructions": ["AGENTS.md"],
+            "compaction": {
+              "auto": true,
+              "tail_turns": 10
+            }
+          }
+        dest: /home/docker/opencode/opencode-config/opencode.json
+        mode: 0440
+        owner: root
+        group: root
+        #backup: yes
+      #args:
+      #  creates: /home/docker/opencode/opencode-config/opencode.json
+      notify: Restart opencode
+
+    - name: Add opencode to WoL hosts file
+      ansible.builtin.lineinfile:
+        path: /usr/local/etc/ai-wol-hosts.txt
+        line: opencode.{{ base_domain }}
+        create: true
+        mode: '0644'
+
+
+##################
+#### Authelia ####
+##################
+
+    - name: Create group and add user if not exists
+      ansible.builtin.shell: |
+        ldapaddgroup opencode
+        ldapaddusertogroup admin opencode
+      changed_when: false
+      failed_when: false
+
+    - name: write OIDC config in authelias configuration.yml
+      ansible.builtin.blockinfile:
+        path: /home/docker/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK opencode ACCESS CONTROL"
+        block: |2
+              - domain: "opencode.{{ base_domain }}"
+                policy: two_factor
+                subject:
+                  - 'group:opencode'
+
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
+      notify: Restart authelia
+
+  handlers:
+
+    - name: Restart opencode
+      ansible.builtin.shell: docker compose build --pull --no-cache --force-rm && docker compose up -d --force-recreate
+      args:
+        chdir: /home/docker/opencode
+
+    - name: Restart authelia
+      ansible.builtin.shell: docker compose down && docker compose up -d
+      args:
+        chdir: /home/docker/authelia

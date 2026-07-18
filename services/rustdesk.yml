@@ -1,0 +1,76 @@
+---
+- name: rustdesk setup
+  hosts: all
+
+  vars:
+    service_name: rustdesk
+    service_domain: "{{ service_name }}.{{ base_domain }}"
+    this_arch: "{{ '-arm64v8' if ansible_architecture == 'aarch64' }}"
+
+  tasks:
+
+    - name: Allow port 21115:21119/tcp
+      community.general.ufw:
+        rule: allow
+        port: '21115:21119'
+        proto: tcp
+
+    - name: Allow port 21116/udp
+      community.general.ufw:
+        rule: allow
+        port: '21116'
+        proto: udp
+
+    - name: /home/docker/{{ service_name }}/docker-compose.yml Container Configuration
+      blockinfile:
+        path: /home/docker/{{ service_name }}/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          
+          services:
+            {{ service_name }}-hbbs:
+              ports:
+                - 21115:21115
+                - 21116:21116
+                - 21116:21116/udp
+                - 21118:21118
+              image: rustdesk/rustdesk-server:latest{{this_arch}}
+              command: hbbs -r {{ service_domain }}:21117 -k _
+              volumes:
+                - ./data:/root
+              networks:
+                - {{ service_name }}
+              depends_on:
+                - {{ service_name }}-hbbr
+              restart: unless-stopped
+             
+            {{ service_name }}-hbbr:
+              ports:
+                - 21117:21117
+                - 21119:21119
+              image: rustdesk/rustdesk-server:latest{{this_arch}}
+              command: hbbr -k _
+              volumes:
+                - ./data:/root
+              networks:
+                - {{ service_name }}
+              restart: unless-stopped
+             
+          networks:
+            {{ service_name }}:
+              external: false
+        backup: yes
+      notify: Restart rustdesk
+
+
+  handlers:
+
+    - name: Restart rustdesk
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /home/docker/{{ service_name }}
+
