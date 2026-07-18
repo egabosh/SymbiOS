@@ -17,6 +17,9 @@
               {% if svc.group == 'base-services' %}
                 <span class="badge bg-info" style="font-size:0.55rem;">built-in</span>
               {% endif %}
+              {% if svc.group == 'user-playbooks' %}
+                <span class="badge bg-success" style="font-size:0.55rem;">custom</span>
+              {% endif %}
               <span class="card-status badge bg-secondary" data-playbook="{{ svc.playbook }}">…</span>
             </h5>
             <p class="card-text small flex-grow-1">{{ svc.docs.description|truncatewords:30 }}</p>

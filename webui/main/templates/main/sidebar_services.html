@@ -1,22 +1,60 @@
 {% regroup all_services by group as groups %}
+{% with user_pbs="" %}
 <ul class="nav flex-column">
+  {# Always render groups in a fixed order: user-playbooks first, #}
+  {# then services (built-in), then base-services. #}
   {% for g in groups %}
-    <li class="nav-item mt-2 mb-1">
-      <small class="text-muted text-uppercase fw-bold">{{ g.grouper }}</small>
-    </li>
-    {% for svc in g.list %}
-      <li class="nav-item mb-1">
-        <a class="nav-link d-flex align-items-center gap-2 py-1 {% if svc.group == 'base-services' %}text-secondary{% endif %}"
-           href="/services/{{ svc.playbook }}/">
-          <i class="bi bi-box"></i>
-          <span>{{ svc.menu_label }}</span>
-          {% if svc.group == 'base-services' %}
-            <span class="badge bg-info ms-1" style="font-size:0.55rem;">built-in</span>
-          {% endif %}
-        </a>
+    {% if g.grouper == 'user-playbooks' %}
+      <li class="nav-item mt-2 mb-1">
+        <small class="text-uppercase fw-bold" style="color:#198754;">
+          <i class="bi bi-journal-plus"></i> Custom Playbooks
+        </small>
       </li>
-    {% endfor %}
+      {% for svc in g.list %}
+        <li class="nav-item mb-1">
+          <a class="nav-link d-flex align-items-center gap-2 py-1"
+             href="/services/{{ svc.playbook }}/"
+             style="border-left:3px solid #198754; padding-left:0.75rem;">
+            <i class="bi bi-file-earmark-code" style="color:#198754;"></i>
+            <span>{{ svc.menu_label }}</span>
+          </a>
+        </li>
+      {% endfor %}
+    {% elif g.grouper == 'services' %}
+      <li class="nav-item mt-2 mb-1">
+        <small class="text-muted text-uppercase fw-bold">Services</small>
+      </li>
+      {% for svc in g.list %}
+        <li class="nav-item mb-1">
+          <a class="nav-link d-flex align-items-center gap-2 py-1"
+             href="/services/{{ svc.playbook }}/">
+            <i class="bi bi-box"></i>
+            <span>{{ svc.menu_label }}</span>
+          </a>
+        </li>
+      {% endfor %}
+    {% elif g.grouper == 'base-services' %}
+      <li class="nav-item mt-2 mb-1">
+        <small class="text-muted text-uppercase fw-bold">Base Services</small>
+      </li>
+      {% for svc in g.list %}
+        <li class="nav-item mb-1">
+          <a class="nav-link d-flex align-items-center gap-2 py-1 text-secondary"
+             href="/services/{{ svc.playbook }}/">
+            <i class="bi bi-box"></i>
+            <span>{{ svc.menu_label }}</span>
+            <span class="badge bg-info ms-1" style="font-size:0.55rem;">built-in</span>
+          </a>
+        </li>
+      {% endfor %}
+    {% endif %}
   {% empty %}
     <li class="nav-item px-3"><small class="text-muted">No services available</small></li>
   {% endfor %}
 </ul>
+<div class="mt-3 px-3">
+  <a class="btn btn-outline-success btn-sm w-100" href="/settings/playbooks/">
+    <i class="bi bi-upload"></i> Manage Playbooks
+  </a>
+</div>
+{% endwith %}

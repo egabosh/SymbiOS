@@ -23,6 +23,16 @@ from .utils.ssh_exec import (
 # Built-in base-services can be managed but never uninstalled from the WebUI.
 PROTECTED_GROUPS = {'base-services'}
 
+# Sidebar group display order: user-playbooks on top, then services, then
+# base-services at the bottom.
+_GROUP_ORDER = ('user-playbooks', 'services', 'base-services')
+
+
+def _order_catalog(catalog):
+    """Return catalog items sorted by _GROUP_ORDER for sidebar display."""
+    order = {g: i for i, g in enumerate(_GROUP_ORDER)}
+    return sorted(catalog, key=lambda x: order.get(x.get('group'), 99))
+
 # Visual class per action name when rendered as a button. Arbitrary action
 # names (e.g. "pommes") fall back to a neutral outline style.
 _ACTION_CLS = {
@@ -77,8 +87,8 @@ def _aggregate_state(states):
 def services(request):
     catalog = get_catalog()
     return render(request, 'main/services.html', {
-        'catalog': catalog,
-        'all_services': catalog,
+        'catalog': _order_catalog(catalog),
+        'all_services': _order_catalog(catalog),
     })
 
 
@@ -89,7 +99,7 @@ def services_manage(request):
     catalog = [i for i in get_catalog() if i['group'] == 'services']
     response = render(request, 'main/services.html', {
         'catalog': catalog,
-        'all_services': get_catalog(),
+        'all_services': _order_catalog(get_catalog()),
     })
     response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     return response
@@ -297,13 +307,16 @@ def services_log_stop(request, playbook):
 def services_source(request, playbook):
     """Return the raw playbook source (read-only) for display in the WebUI.
 
-    The playbooks are mounted read-only at /repo, so the source is read locally
-    (no SSH round-trip, and no secrets are exposed beyond the playbook itself).
+    Built-in playbooks are under /repo; user-uploaded playbooks are under
+    /config/user-playbooks/. The source is always read locally from disk.
     """
     item = get_playbook(playbook)
     if item is None:
         return JsonResponse({'error': 'Playbook not found'}, status=404)
-    path = '/repo/' + playbook
+    if item.get('group') == 'user-playbooks':
+        path = '/config/user-playbooks/' + playbook.split('/', 1)[-1]
+    else:
+        path = '/repo/' + playbook
     try:
         with open(path) as fh:
             out = fh.read()

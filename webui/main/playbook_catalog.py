@@ -10,7 +10,11 @@ import time
 import yaml
 
 REPO_BASE = "/repo"
+CONFIG_BASE = "/config"
 EXCLUDE_PLAYBOOKS = {"traefik-static.yml", "inventory.yml"}
+# User-uploaded playbooks live under /config/user-playbooks/ (writable),
+# while built-in playbooks live under /repo/{services,base-services} (read-only).
+_REPO_GROUPS = ("services", "base-services")
 
 # Cache the parsed catalog for a short time so it is not re-fetched on every
 # request (the sidebar is rendered on several pages).
@@ -37,25 +41,35 @@ def parse_docs(path):
     return doc.get("docs") if isinstance(doc, dict) else None
 
 
+def _scan_dir(group, base, d):
+    """Scan a single directory for playbooks and return catalog entries."""
+    results = []
+    if not os.path.isdir(d):
+        return results
+    for fn in sorted(os.listdir(d)):
+        if not fn.endswith(".yml") or fn in EXCLUDE_PLAYBOOKS:
+            continue
+        docs = parse_docs(os.path.join(d, fn))
+        if not docs:
+            continue
+        results.append({
+            "group": group,
+            "name": fn[:-4],
+            "playbook": "%s/%s" % (group, fn),
+            "title": docs.get("short_description", fn[:-4]),
+            "docs": docs,
+        })
+    return results
+
+
 def _load_local():
     results = []
-    for group in ("services", "base-services"):
-        d = os.path.join(REPO_BASE, group)
-        if not os.path.isdir(d):
-            continue
-        for fn in sorted(os.listdir(d)):
-            if not fn.endswith(".yml") or fn in EXCLUDE_PLAYBOOKS:
-                continue
-            docs = parse_docs(os.path.join(d, fn))
-            if not docs:
-                continue
-            results.append({
-                "group": group,
-                "name": fn[:-4],
-                "playbook": "%s/%s" % (group, fn),
-                "title": docs.get("short_description", fn[:-4]),
-                "docs": docs,
-            })
+    # Built-in playbooks (read-only repo mount)
+    for group in _REPO_GROUPS:
+        results += _scan_dir(group, REPO_BASE, os.path.join(REPO_BASE, group))
+    # User-uploaded playbooks (writable config dir)
+    user_dir = os.path.join(CONFIG_BASE, "user-playbooks")
+    results += _scan_dir("user-playbooks", "user-playbooks", user_dir)
     return results
 
 

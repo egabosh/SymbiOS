@@ -175,12 +175,16 @@ def _log_command(playbook, unit):
 
 
 def _playbook_command(playbook):
+    if playbook.startswith("user-playbooks/"):
+        path = "/home/docker/symbios-ui/config/user-playbooks/" + playbook.split("/", 1)[-1]
+    else:
+        path = "/home/SymbiOS/" + playbook
     return (
         "ansible-playbook --connection=local "
         "--inventory /home/docker/symbios-ui/config/inventory.yml "
         "--limit localhost "
         "-e ansible_python_interpreter=/usr/bin/python3 "
-        "/home/SymbiOS/" + playbook
+        + path
     )
 
 
