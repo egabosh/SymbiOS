@@ -23,6 +23,7 @@ subdirectory.
 7. [Installation](#7-installation)
 8. [Managing the system (WebUI / SSH)](#8-managing-the-system-webui--ssh)
 9. [Adding your own service](#9-adding-your-own-service)
+10. [User-uploaded playbooks](#10-user-uploaded-playbooks)
 
 ---
 
@@ -117,7 +118,8 @@ SymbiOS/
 
 On the target host the repo lives at `/home/SymbiOS`, and generated service
 state lives under `/home/docker/<service>/`. The live inventory is at
-`/home/docker/symbios-ui/config/inventory.yml`.
+`/home/docker/symbios-ui/config/inventory.yml`. User-uploaded playbooks are
+stored in `/home/docker/symbios-ui/config/user-playbooks/` (see section 10).
 
 ---
 
@@ -293,7 +295,10 @@ matching playbook over SSH, see section 8).
 
 - **symbios-ui** is a Django web app (container `symbios-webui`) that reads the
   inventory and lets you change settings, add/remove services, and start/stop
-  containers.
+  containers. The **Services** section in the sidebar lists all discovered
+  playbooks (built-in, service, and custom) and lets you run their actions.
+  Uploaded playbooks appear under **Custom Playbooks** with a distinct visual
+  style and can be managed from **Settings → Playbooks**.
 - **No daemon is involved.** Every settings change is applied immediately: the
   WebUI runs the matching base-services playbook over SSH (e.g. saving DDNS runs
   `dedyn.yml`, saving Auth runs `authelia.yml`, saving the mailserver runs
@@ -515,5 +520,54 @@ Fields:
   /home/docker/symbios-ui/config/inventory.yml --limit localhost -e
   ansible_python_interpreter=/usr/bin/python3 /home/SymbiOS/services/<name>.yml`
   (or `docker compose` directly in `/home/docker/<name>/`).
+
+---
+
+## 10. User-uploaded playbooks
+
+Besides the built-in `services/` and `base-services/` directories, you can
+upload custom Ansible playbooks through the WebUI. Uploaded playbooks are stored
+on the host at `/home/docker/symbios-ui/config/user-playbooks/` and appear
+alongside built-in playbooks in the **Services** section (under **Custom
+Playbooks** in the sidebar).
+
+### How it works
+
+- **Upload**: Go to **Settings → Playbooks** (or the **Manage Playbooks** button
+  in the sidebar). Select one or more `.yml` files and upload them. Filenames
+  are sanitized to `[a-z0-9_-]` and must end in `.yml`.
+- **Discovery**: The catalog scanner (`playbook_catalog.py`) reads the
+  `user-playbooks/` directory in addition to `services/` and `base-services/`.
+  Playbooks without a `# docs:` block are ignored.
+- **Execution**: Uploaded playbooks are run exactly like built-in ones — the
+  WebUI resolves commands from the `# docs:` block and sends them to the host
+  via SSH.
+- **Delete**: Uploaded playbooks can be removed from the **Settings → Playbooks**
+  page.
+
+### Format
+
+User-uploaded playbooks follow the same `# docs:` format as built-in playbooks.
+At minimum, include a `short_description` so the WebUI can display a title:
+
+```yaml
+# docs:
+#   short_description: My custom backup job
+#   description: Runs a backup to an external NFS mount.
+#   actions:
+#     run:
+#       command: /usr/local/sbin/my-backup.sh
+#
+---
+- name: My custom backup
+  hosts: localhost
+  tasks:
+    - name: Run backup
+      ansible.builtin.command: /usr/local/sbin/my-backup.sh
+```
+
+> **Note**: User-uploaded playbooks are stored on the host (not in the git
+> repository) and survive container restarts. They are **not** backed up or
+> version-controlled automatically.
 
 
