@@ -51,12 +51,23 @@
   vars:
     service_name: nextcloud
     service_domain: "{{ service_name }}.{{ base_domain }}"
-    traefik_ip: "192.168.41.200"
-    trusted_proxies_cidr: "192.168.41.0/24"
     ldap_basedn: "{{ 'dc=openldap,' ~ base_domain | split('.') | map('regex_replace', '^(.*)$', 'dc=\\1') | join(',') }}"
 
 
   tasks:
+
+    - name: Get traefik IP on docker network
+      ansible.builtin.shell: docker inspect traefik --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{% endraw %}'
+      register: traefik_ip_result
+      changed_when: false
+
+    - name: Set traefik_ip
+      ansible.builtin.set_fact:
+        traefik_ip: "{{ traefik_ip_result.stdout }}"
+
+    - name: Compute trusted_proxies_cidr from traefik IP
+      ansible.builtin.set_fact:
+        trusted_proxies_cidr: "{{ traefik_ip_result.stdout | regex_replace('^([0-9]+\\.[0-9]+\\.[0-9]+)\\..*$', '\\1.0/24') }}"
 
     - name: Create /home/docker/nextcloud dir
       ansible.builtin.file:
