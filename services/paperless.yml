@@ -92,6 +92,12 @@
         chdir: /home/docker/paperless
         creates: /home/docker/paperless/docker-compose.env
 
+    - name: Gen OIDC client secret if not exists
+      ansible.builtin.shell: pwgen -s 64 1 | tr -d '\n' > oidc_digest
+      args:
+        chdir: /home/docker/paperless
+        creates: /home/docker/paperless/oidc_digest
+
     - name: /home/docker/paperless/docker-compose.yml Container Configuration
       blockinfile:
         path: /home/docker/paperless/docker-compose.yml
@@ -136,7 +142,7 @@
                 - PAPERLESS_OIDC_DISPLAY_NAME=Authelia
                 - PAPERLESS_OIDC_AUTO_logout=true
               networks:
-                - paperless
+                paperless: {}
                 traefik:
                   aliases:
                     - paperless
@@ -174,10 +180,12 @@
         uid: 998
         shell: /bin/false
         group: docker
+      failed_when: false
 
     - name: Samba Share for incoming documents
       blockinfile:
         path: /etc/samba/smb-{{ ansible_facts['hostname'] }}.conf
+        create: yes
         mode: "0444"
         owner: root
         group: root
@@ -198,7 +206,7 @@
     - name: Give paperless permissions for consume dir
       ansible.builtin.file:
         path: /home/docker/paperless/consume
-        owner: paperless
+        owner: 998
         group: root
         mode: '0770'
 
@@ -287,12 +295,16 @@
         state: restarted
 
     - name: Restart traefik
-      ansible.builtin.shell: docker compose restart traefik
+      ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /home/docker/traefik
 
     - name: Restart authelia
-      ansible.builtin.shell: docker compose restart authelia
+      ansible.builtin.shell: |
+        if docker compose down
+        then
+          docker compose up -d
+        fi
       args:
         chdir: /home/docker/authelia
 

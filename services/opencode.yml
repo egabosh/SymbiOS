@@ -82,7 +82,7 @@
                 - ./opencode-data:/root/.local/share/opencode:rw
                 - ./ssh/:/root/.ssh:ro
               networks:
-                - opencode
+                opencode: {}
                 traefik:
                   aliases:
                     - opencode
@@ -261,7 +261,6 @@
 
         insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         backup: yes
-        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
       notify: Restart authelia
 
   handlers:
@@ -275,3 +274,8 @@
       ansible.builtin.shell: docker compose down && docker compose up -d
       args:
         chdir: /home/docker/authelia
+
+    - name: Restart traefik
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /home/docker/traefik

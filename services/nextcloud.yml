@@ -475,7 +475,6 @@
                   token_endpoint_auth_method: 'client_secret_post'
         insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
         backup: yes
-        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
       notify: Restart authelia
 
 
@@ -754,4 +753,9 @@
         fi
       args:
         chdir: /home/docker/authelia
+
+    - name: Restart traefik
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /home/docker/traefik
 

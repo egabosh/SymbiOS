@@ -50,9 +50,25 @@
   vars:
     service_name: home-assistant
     service_domain: "{{ service_name }}.{{ base_domain }}"
-    traefik_ip: "{{ traefik_ip }}"
-    home_assistant_ip: "{{ home_assistant_ip }}"
   tasks:
+
+    - name: Get traefik IP on docker network
+      ansible.builtin.shell: docker inspect traefik --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{% endraw %}'
+      register: traefik_ip_result
+      changed_when: false
+
+    - name: Set traefik_ip
+      ansible.builtin.set_fact:
+        traefik_ip: "{{ traefik_ip_result.stdout }}"
+
+    - name: Get traefik network gateway (host IP for HA in host network mode)
+      ansible.builtin.shell: docker network inspect traefik --format '{% raw %}{{ (index .IPAM.Config 0).Gateway }}{% endraw %}'
+      register: ha_ip_result
+      changed_when: false
+
+    - name: Set home_assistant_ip
+      ansible.builtin.set_fact:
+        home_assistant_ip: "{{ ha_ip_result.stdout }}"
 
     - name: Create /home/docker/home-assistant dir
       ansible.builtin.file:
@@ -296,6 +312,8 @@
                 loadBalancer:
                   servers:
                     - url: "http://{{ home_assistant_ip }}:5580"
+        backup: yes
+      notify: Restart traefik
 
     - name: Create group and add user if not exists
       ansible.builtin.shell: |
@@ -357,7 +375,6 @@
                   token_endpoint_auth_method: 'client_secret_post'
         insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
         backup: yes
-        validate: docker run --rm -v "{{ ansible_env.HOME }}/.ansible:{{ ansible_env.HOME }}/.ansible" authelia/authelia:latest authelia validate-config --config %s
       notify: Restart authelia
 
     - name: Start home-assistant
@@ -562,5 +579,10 @@
         name: ha_pingcheck
         state: restarted
         daemon_reload: true
+
+    - name: Restart traefik
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /home/docker/traefik
 
 

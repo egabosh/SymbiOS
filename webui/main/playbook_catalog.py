@@ -43,13 +43,34 @@ def parse_docs(path):
         lines = open(path).read().splitlines()
     except Exception:
         return None
-    if not lines or not lines[0].lstrip().startswith("# docs:"):
+    if not lines:
         return None
-    yaml_lines = []
+    # First pass: find all comment lines (skipping blank lines between comment blocks)
+    comment_lines = []
+    in_comment_block = False
     for line in lines:
-        if not line.startswith("#"):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            in_comment_block = True
+            comment_lines.append(line)
+        elif in_comment_block and stripped == "":
+            # Allow blank lines between comment blocks (e.g. license + docs)
+            continue
+        elif in_comment_block:
             break
-        yaml_lines.append(line[2:] if line.startswith("# ") else line[1:])
+    # Now extract everything from "# docs:" onward
+    yaml_lines = []
+    in_docs = False
+    for line in comment_lines:
+        content = line[2:] if line.startswith("# ") else line[1:]
+        if not in_docs:
+            if content.startswith("docs:"):
+                in_docs = True
+                yaml_lines.append(content)
+        else:
+            yaml_lines.append(content)
+    if not yaml_lines:
+        return None
     try:
         doc = yaml.safe_load("\n".join(yaml_lines))
     except Exception:

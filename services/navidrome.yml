@@ -91,7 +91,7 @@
                 ND_SCANNER_PURGEMISSING: always
               networks:
                 - traefik
-              user: 33
+              user: "33"
               volumes:
                 - /data-crypt/share/Musik/Uploaddatum:/music:ro
                 - ./navidrome-data:/data
@@ -130,6 +130,8 @@
                 loadBalancer:
                   servers:
                     - url: "http://navidrome:4533"
+        backup: yes
+      notify: Restart traefik
 
   handlers:
 
@@ -137,4 +139,9 @@
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /home/docker/navidrome
+
+    - name: Restart traefik
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /home/docker/traefik
 
