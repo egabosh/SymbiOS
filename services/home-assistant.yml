@@ -349,7 +349,7 @@
     - name: write OIDC config in authelias configuration.yml
       ansible.builtin.blockinfile:
         path: /home/docker/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC home-assistant.{{ base_domain }}"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC home-assistant"
         block: |2
                 # home-assistant
                 - client_id: 'home-assistant'
