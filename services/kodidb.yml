@@ -245,10 +245,10 @@
                 - /etc/localtime:/etc/localtime:ro
                 - ./phpmyadmin-config.user.inc.php:/etc/phpmyadmin/config.user.inc.php:ro
               networks:
-                - kodidb--network
-                - traefik:
-                    aliases:
-                      - kodidb--phpmyadmin
+                kodidb--network: {}
+                traefik:
+                  aliases:
+                    - kodidb--phpmyadmin
 
           networks:
             kodidb--network:
