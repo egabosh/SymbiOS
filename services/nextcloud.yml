@@ -294,11 +294,11 @@
                 - PHP_MEMORY_LIMIT=1024M
                 - PHP_UPLOAD_LIMIT=1024M
               networks:
-                - nextcloud
+                nextcloud: {}
                 traefik:
                   aliases:
                     - nextcloud
-            
+
             nextcloud-db:
               image: mariadb:lts
               cap_add:
@@ -347,7 +347,7 @@
               volumes:
                 - /etc/localtime:/etc/localtime:ro
               networks:
-                - nextcloud
+                nextcloud: {}
                 traefik:
                   aliases:
                     - nextcloud-phpmyadmin
@@ -369,7 +369,7 @@
                 - extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:storage.wopi{wopi://}@enable=true --o:auth.allow_known=true --o:net.proto=websocket
                 - DONT_GEN_SSL_CERTS=true
               networks:
-                - nextcloud
+                nextcloud: {}
                 traefik:
                   aliases:
                     - nextcloud-collabora
