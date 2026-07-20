@@ -7,12 +7,14 @@ directory, a local fallback CA, and a web UI to manage it all. On top of the
 base system you can drop in your own services through the `services/`
 subdirectory.
 
-The name is inspired by *Symbiosis*, the Star Trek TNG episode (Season 1,
-Episode 22, aired April 18, 1988) where Captain Picard describes two
-interdependent societies as "intertwined in a symbiotic relationship." Much
-like the Ornarans and Brekkians, the services in SymbiOS rely on each other —
-Traefik, Authelia, LDAP, Docker, the WebUI — each one stronger together than
-alone. SymbiOS stands for **Symbio**sis + **OS**.
+The name is inspired by the Trill symbionts from *Star Trek: Deep Space
+Nine* — sentient beings that join with humanoid hosts in a mutualistic
+symbiosis. Neither can survive without the other; the host gains the memories
+and experiences of all previous hosts, while the symbiont gains a new life.
+Much like the Dax symbiont passing through Curzon, Jadzia, and Ezri, the
+services in SymbiOS rely on each other — Traefik, Authelia, LDAP, Docker,
+the WebUI — each one stronger together than alone. SymbiOS stands for
+**Symbio**sis + **OS**.
 
 - Source: <https://github.com/egabosh/SymbiOS>
 - Target OS: Debian (also runs on Raspberry Pi OS)
