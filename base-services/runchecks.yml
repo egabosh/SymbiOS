@@ -74,6 +74,7 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          #!/bin/bash
           # Source gaboshlib and set up environment
           . /etc/bash/gaboshlib.include
           g_lockfile
@@ -97,6 +98,9 @@
             g_echo "Waiting 5min"
             sleep 300
             g_echo "Next Loop"
+
+            # Ensure g_tmp directory exists (may be cleaned between cycles)
+            mkdir -p "$g_tmp"
 
             g_json_results=""
             g_json_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -148,12 +152,6 @@
         create: yes
         insertbefore: EOF
         line: "cron rsyslog sshd"
-
-    - name: /usr/local/sbin/runchecks.sh shebang
-      lineinfile:
-        path: /usr/local/sbin/runchecks.sh
-        insertbefore: BOF
-        line: "#!/bin/bash"
 
     - name: /etc/systemd/system/runchecks.service
       blockinfile:
