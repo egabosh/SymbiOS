@@ -580,7 +580,7 @@
           then
             g_echo_error "Healthcheck failed for symbios-webui: container not running"
           else
-            g_http_code=$(wget -q -O /dev/null --server-response --timeout=10 "http://symbios-ui:8080/health" 2>&1 | grep -oE "HTTP/[0-9.]+" | tail -1 | grep -oE "[0-9]+$")
+            g_http_code=$(wget -q -O /dev/null --server-response --timeout=10 "http://127.0.0.1:8080/health" 2>&1 | grep -oE "HTTP/[0-9.]+" | tail -1 | grep -oE "[0-9]+$")
             if [ -z "$g_http_code" ] || [ "$g_http_code" -ge 500 ]
             then
               g_echo_error "Healthcheck failed for symbios-webui: HTTP $g_http_code"
