@@ -458,12 +458,15 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          name: ""
+
           services:
 
             openldap:
               build:
                 context: .
                 dockerfile: Dockerfile
+              container_name: openldap
               volumes:
                 - ./ldap-db:/var/lib/ldap:rw
                 - ./ldap-config:/ldap-config:rw
@@ -473,8 +476,9 @@
                 - ldap
                 - traefik
 
-            ldap.{{service_domain}}:
-              image: ghcr.io/ldapaccountmanager/lam:stable 
+            ldapam:
+              image: ghcr.io/ldapaccountmanager/lam:stable
+              container_name: ldapam
               volumes:
                 - /etc/localtime:/etc/localtime:ro
                 - /etc/hosts:/etc/hosts:ro

@@ -86,11 +86,14 @@
       create: yes
       marker: "# {mark} ANSIBLE MANAGED BLOCK"
       block: |
+        name: ""
+
         services:
           sftp-share:
             build:
               context: .
               dockerfile: Dockerfile
+            container_name: sftp-share
             restart: unless-stopped
             env_file: env
             ports: 

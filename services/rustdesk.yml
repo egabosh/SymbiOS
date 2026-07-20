@@ -75,8 +75,11 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           
+          name: ""
+
           services:
             {{ service_name }}-hbbs:
+              container_name: {{ service_name }}-hbbs
               ports:
                 - 21115:21115
                 - 21116:21116
@@ -93,6 +96,7 @@
               restart: unless-stopped
              
             {{ service_name }}-hbbr:
+              container_name: {{ service_name }}-hbbr
               ports:
                 - 21117:21117
                 - 21119:21119

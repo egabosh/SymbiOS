@@ -94,7 +94,7 @@ def check_ldap():
 def check_authelia():
     stdout, stderr, rc = _run([
         "curl", "-sf", "-o", "/dev/null", "-w", "%{http_code}",
-        "http://authelia-authelia.local-1:9091/api/health",
+        "http://authelia:9091/api/health",
     ], timeout=5)
     if rc == 0:
         code = stdout.strip()
@@ -102,7 +102,7 @@ def check_authelia():
             return {"status": "ok", "message": "Healthy"}
         return {"status": "warn", "message": f"Unexpected HTTP {code}"}
 
-    container_info = _get_container_state("authelia-authelia.local-1")
+    container_info = _get_container_state("authelia")
     if container_info:
         return {"status": "error", "message": f"{container_info}"}
 
@@ -187,9 +187,9 @@ def check_containers():
     default_domain = vars_.get("default_domain", "local")
     expected = {
         "traefik": "Traefik (Reverse Proxy)",
-        "symbios-ui-symbios-webui-1": "WebUI",
-        "ldap-openldap-1": "OpenLDAP",
-        f"ldap-ldap.ldap.{default_domain}-1": "LDAP Domain",
+        "symbios-webui": "WebUI",
+        "openldap": "OpenLDAP",
+        "ldapam": "LDAP Admin",
         "acme-pki-stepca": "Step-CA (ACME-PKI)",
     }
     running = set()

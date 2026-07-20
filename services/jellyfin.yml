@@ -117,10 +117,13 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
 
+          name: ""
+
           services:
 
             jellyfin:
               image: jellyfin/jellyfin:latest
+              container_name: jellyfin
               restart: unless-stopped
               #env_file: env
               user: "0:0"

@@ -68,12 +68,15 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          name: ""
+
           services:
 
             opencode:
               build:
                 context: .
                 dockerfile: Dockerfile
+              container_name: opencode
               restart: unless-stopped
               volumes:
                 - /etc/localtime:/etc/localtime:ro
@@ -83,9 +86,7 @@
                 - ./ssh/:/root/.ssh:ro
               networks:
                 opencode: {}
-                traefik:
-                  aliases:
-                    - opencode
+                traefik: null
               entrypoint: ["/root/.opencode/bin/opencode", "serve", "--hostname=0.0.0.0", "--port=80", "--print-logs", "--log-level", "WARN"]
 
           networks:

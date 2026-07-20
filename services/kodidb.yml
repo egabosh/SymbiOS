@@ -212,10 +212,13 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
         
+          name: ""
+
           services:
 
             kodidb:
               image: mariadb:lts
+              container_name: kodidb
               cap_add:
                 - SYS_NICE
               restart: unless-stopped
@@ -236,6 +239,7 @@
 
             kodidb--phpmyadmin:
               image: phpmyadmin:latest
+              container_name: kodidb--phpmyadmin
               restart: unless-stopped
               env_file: /home/docker/_defaults/mariadb/env.rootphpmyadmin
               environment:
@@ -246,9 +250,7 @@
                 - ./phpmyadmin-config.user.inc.php:/etc/phpmyadmin/config.user.inc.php:ro
               networks:
                 kodidb--network: {}
-                traefik:
-                  aliases:
-                    - kodidb--phpmyadmin
+                traefik: null
 
           networks:
             kodidb--network:

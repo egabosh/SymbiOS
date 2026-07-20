@@ -225,9 +225,12 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          name: ""
+
           services:
             home-assistant:
               image: ghcr.io/home-assistant/home-assistant
+              container_name: home-assistant
               restart: unless-stopped
               volumes:
                 - ./config:/config
@@ -239,6 +242,7 @@
 
             matter:
               image: ghcr.io/home-assistant-libs/python-matter-server:stable
+              container_name: matter
               restart: unless-stopped
               network_mode: host
               volumes:
@@ -254,6 +258,7 @@
             
             ha_pingcheck:
               image: nginx:latest
+              container_name: ha_pingcheck
               restart: unless-stopped
               ports:
                 - "8889:80"
@@ -261,9 +266,7 @@
                 - /home/docker/home-assistant/ha_pingcheck_data:/usr/share/nginx/html/pingcheck:ro
                 - /etc/localtime:/etc/localtime:ro
               networks:
-                traefik:
-                  aliases:
-                    - ha_pingcheck
+                traefik: null
 
           networks:
             traefik:

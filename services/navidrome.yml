@@ -77,9 +77,12 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
 
+          name: ""
+
           services:
             navidrome:
               image: deluan/navidrome:latest
+              container_name: navidrome
               restart: unless-stopped
               environment:
                 ND_SCANSCHEDULE: 24h

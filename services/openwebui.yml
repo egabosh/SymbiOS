@@ -166,10 +166,13 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
 
+          name: ""
+
           services:
 
             openwebui:
               image: ghcr.io/open-webui/open-webui
+              container_name: openwebui
               restart: unless-stopped
               environment:
                 # Global
@@ -253,12 +256,11 @@
                   condition: service_started
               networks:
                 openwebui--network: {}
-                traefik:
-                  aliases:
-                    - openwebui
+                traefik: null
 
             searxng:
               image: searxng/searxng:latest
+              container_name: searxng
               restart: unless-stopped
               networks:
                 - openwebui--network

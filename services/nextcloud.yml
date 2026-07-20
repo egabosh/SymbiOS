@@ -264,9 +264,12 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
         
+          name: ""
+
           services:
             nextcloud:
               image: nextcloud:stable-apache
+              container_name: nextcloud
               security_opt:
                 - no-new-privileges:true
               restart: unless-stopped
@@ -295,12 +298,11 @@
                 - PHP_UPLOAD_LIMIT=1024M
               networks:
                 nextcloud: {}
-                traefik:
-                  aliases:
-                    - nextcloud
+                traefik: null
 
             nextcloud-db:
               image: mariadb:lts
+              container_name: nextcloud-db
               cap_add:
                 - SYS_NICE
               restart: unless-stopped
@@ -318,12 +320,14 @@
 
             nextcloud-redis:
               image: redis:latest
+              container_name: nextcloud-redis
               restart: unless-stopped
               networks:
                 - nextcloud
 
             nextcloud-cron:
               image: nextcloud:stable-apache
+              container_name: nextcloud-cron
               restart: unless-stopped
               volumes:
                 - ./nextcloud-data:/var/www/html
@@ -339,6 +343,7 @@
 
             nextcloud-phpmyadmin:
               image: phpmyadmin:latest
+              container_name: nextcloud-phpmyadmin
               restart: unless-stopped
               env_file: env.phpmyadmin
               environment:
@@ -348,12 +353,11 @@
                 - /etc/localtime:/etc/localtime:ro
               networks:
                 nextcloud: {}
-                traefik:
-                  aliases:
-                    - nextcloud-phpmyadmin
+                traefik: null
 
             nextcloud-collabora:
               image: collabora/code:latest
+              container_name: nextcloud-collabora
               cap_add:
                 - FOWNER
                 - CHOWN
@@ -370,9 +374,7 @@
                 - DONT_GEN_SSL_CERTS=true
               networks:
                 nextcloud: {}
-                traefik:
-                  aliases:
-                    - nextcloud-collabora
+                traefik: null
 
 
           networks:

@@ -283,16 +283,17 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          name: ""
+
           services:
 
-            authelia.local:
+            authelia:
               image: authelia/authelia:latest
+              container_name: authelia
               restart: unless-stopped
               networks:
                 authelia:
                 traefik:
-                  aliases:
-                    - authelia
                 ldap:
               volumes:
                 - ./authelia-data:/config
