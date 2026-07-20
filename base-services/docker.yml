@@ -501,6 +501,29 @@
           - subnet: fdaa:a192:b168:cd41::/64
             gateway: fdaa:a192:b168:cd41::1
 
+    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-docker.check
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-docker.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Healthcheck for docker daemon
+          g_check_file="${g_tmp}/symbios-healthcheck-docker"
+          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+          then
+            return 2>/dev/null || true
+          fi
+          date > "$g_check_file"
+          if ! docker info >/dev/null 2>&1
+          then
+            g_echo_error "Healthcheck failed for docker: daemon not responding"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
 
   handlers:
 

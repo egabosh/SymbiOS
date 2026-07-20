@@ -484,6 +484,39 @@ def check_ddns():
     return {"status": overall, "message": host_msg, "ddns_host_status": details}
 
 
+RUNCHECKS_FILE = "/log/runchecks-results.json"
+
+def check_runchecks():
+    """Read the runchecks daemon JSON output and return the latest results."""
+    try:
+        with open(RUNCHECKS_FILE) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {"status": "warn", "message": "No runchecks data yet (daemon not started or no run completed)"}
+    except (json.JSONDecodeError, ValueError) as e:
+        return {"status": "warn", "message": f"Invalid runchecks data: {e}"}
+
+    checks = data.get("checks", [])
+    if not checks:
+        return {"status": "warn", "message": "No checks found in runchecks data"}
+
+    errors = [c for c in checks if c.get("status") == "error"]
+    last_run = data.get("last_run", "unknown")
+
+    results = []
+    for c in checks:
+        entry = {"name": c.get("name", "?"), "status": c.get("status", "unknown")}
+        if c.get("message"):
+            entry["message"] = c["message"]
+        results.append(entry)
+
+    if errors:
+        msg = f"{len(errors)} of {len(checks)} checks failed"
+        return {"status": "error", "message": msg, "last_run": last_run, "results": results}
+
+    return {"status": "ok", "message": f"All {len(checks)} checks passed", "last_run": last_run, "results": results}
+
+
 def run_all():
     data = {
         "ldap": check_ldap(),
@@ -498,6 +531,7 @@ def run_all():
         "disk": check_disk(),
         "certs": check_certs(),
         "root_ca": check_root_ca(),
+        "runchecks": check_runchecks(),
     }
     _write_health_file(data)
     return data
