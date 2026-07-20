@@ -316,3 +316,120 @@
         backup: yes
         validate: /bin/bash -n %s
       when: ddns_host is defined and ddns_host | length > 0
+
+    - name: Deploy healthcheck for DDNS
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-ddns.check
+        mode: "0400"
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          g_check_file="${g_tmp}/symbios-healthcheck-ddns"
+          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+          then
+            return 2>/dev/null || true
+          fi
+          date > "$g_check_file"
+
+          g_ddns_host=$(python3 -c "import yaml; c=yaml.safe_load(open('/home/docker/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print(v.get('ddns_host',''))")
+          g_ddns_apikey=$(python3 -c "import yaml; c=yaml.safe_load(open('/home/docker/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print(v.get('ddns_apikey',''))")
+          g_ddns_ipv6=$(python3 -c "import yaml; c=yaml.safe_load(open('/home/docker/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print(v.get('ddns_ipv6',''))")
+          g_default_domain=$(python3 -c "import yaml; c=yaml.safe_load(open('/home/docker/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print(v.get('default_domain','local'))")
+
+          if [ -z "$g_ddns_host" ]
+          then
+            if [ "$g_default_domain" = "local" ]
+            then
+              return 0
+            fi
+            g_echo_error "DDNS not configured but default_domain is not local"
+            return 2>/dev/null || true
+          fi
+
+          g_ddns_fqdn="$g_ddns_host"
+          echo "$g_ddns_fqdn" | grep -q '\.dedyn\.io$' || g_ddns_fqdn="${g_ddns_fqdn}.dedyn.io"
+
+          if [ -n "$g_ddns_apikey" ]
+          then
+            g_api_status=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Token ${g_ddns_apikey}" "https://desec.io/api/v1/domains/${g_ddns_fqdn}/" 2>/dev/null)
+            if [ "$g_api_status" = "401" ]
+            then
+              g_echo_error "deSEC API key invalid for ${g_ddns_fqdn}"
+              return 2>/dev/null || true
+            elif [ "$g_api_status" = "404" ]
+            then
+              g_echo_error "Domain ${g_ddns_fqdn} not found on deSEC"
+              return 2>/dev/null || true
+            elif [ "$g_api_status" != "200" ]
+            then
+              g_echo_error "deSEC API error for ${g_ddns_fqdn}: HTTP ${g_api_status}"
+              return 2>/dev/null || true
+            fi
+          else
+            g_echo_error "DDNS configured (${g_ddns_fqdn}) but no API key set"
+            return 2>/dev/null || true
+          fi
+
+          g_ip_cache="/home/docker/symbios-ui/config/.public-ips.json"
+          g_refresh_ips=1
+          if [ -f "$g_ip_cache" ]
+          then
+            g_cache_age=$(python3 -c "import time,json; d=json.load(open('${g_ip_cache}')); print(int(time.time())-d.get('ts',0))" 2>/dev/null)
+            if [ -n "$g_cache_age" ] && [ "$g_cache_age" -lt 300 ]
+            then
+              g_refresh_ips=0
+            fi
+          fi
+
+          g_current_ipv4=""
+          g_current_ipv6=""
+
+          if [ "$g_refresh_ips" -eq 1 ]
+          then
+            g_candidate=$(curl -s --max-time 5 https://checkipv4.dedyn.io/ 2>/dev/null)
+            if echo "$g_candidate" | python3 -c "import sys; s=sys.stdin.read().strip(); parts=s.split('.'); sys.exit(0 if len(parts)==4 and all(p.isdigit() and 0<=int(p)<=255 for p in parts) else 1)" 2>/dev/null
+            then
+              g_current_ipv4="$g_candidate"
+            fi
+
+            g_candidate=$(curl -s --max-time 5 https://checkipv6.dedyn.io/ 2>/dev/null)
+            if echo "$g_candidate" | python3 -c "import sys; s=sys.stdin.read().strip(); sys.exit(0 if ':' in s and s else 1)" 2>/dev/null
+            then
+              g_current_ipv6="$g_candidate"
+            fi
+
+            if [ -n "$g_current_ipv4" ] || [ -n "$g_current_ipv6" ]
+            then
+              python3 -c "import json,time; json.dump({'ipv4':'${g_current_ipv4}','ipv6':'${g_current_ipv6}','ts':int(time.time())},open('${g_ip_cache}','w'))" 2>/dev/null
+            fi
+          else
+            g_current_ipv4=$(python3 -c "import json; d=json.load(open('${g_ip_cache}')); print(d.get('ipv4',''))" 2>/dev/null)
+            g_current_ipv6=$(python3 -c "import json; d=json.load(open('${g_ip_cache}')); print(d.get('ipv6',''))" 2>/dev/null)
+          fi
+
+          g_dns_ipv4=""
+          g_dns_ipv6=""
+          g_rrsets=$(curl -s -H "Authorization: Token ${g_ddns_apikey}" "https://desec.io/api/v1/domains/${g_ddns_fqdn}/rrsets/" 2>/dev/null)
+          if [ -n "$g_rrsets" ]
+          then
+            g_dns_ipv4=$(echo "$g_rrsets" | python3 -c "import sys,json; rrsets=json.load(sys.stdin); print(','.join(r for rr in rrsets if rr['type']=='A' for r in rr['records']))" 2>/dev/null)
+            g_dns_ipv6=$(echo "$g_rrsets" | python3 -c "import sys,json; rrsets=json.load(sys.stdin); print(','.join(r for rr in rrsets if rr['type']=='AAAA' for r in rr['records']))" 2>/dev/null)
+          fi
+
+          g_skip_ipv4=0
+          [ "$g_ddns_ipv6" = "only" ] && g_skip_ipv4=1
+
+          if [ "$g_skip_ipv4" -eq 0 ]
+          then
+            if [ -n "$g_current_ipv4" ]
+            then
+              echo ",$g_dns_ipv4," | grep -q ",${g_current_ipv4}," || g_echo_error "DDNS IPv4 mismatch for ${g_ddns_fqdn}: current ${g_current_ipv4}, DNS has ${g_dns_ipv4}"
+            fi
+          fi
+
+          if [ -n "$g_current_ipv6" ]
+          then
+            echo ",$g_dns_ipv6," | grep -q ",${g_current_ipv6}," || g_echo_error "DDNS IPv6 mismatch for ${g_ddns_fqdn}: current ${g_current_ipv6}, DNS has ${g_dns_ipv6}"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s

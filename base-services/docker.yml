@@ -524,6 +524,36 @@
         backup: yes
         validate: /bin/bash -n %s
 
+    - name: Deploy healthcheck for Docker containers
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-containers.check
+        mode: "0400"
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          g_check_file="${g_tmp}/symbios-healthcheck-containers"
+          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+          then
+            return 2>/dev/null || true
+          fi
+          date > "$g_check_file"
+
+          g_missing=""
+          for g_container in traefik symbios-webui openldap ldapam acme-pki-stepca
+          do
+            if ! docker ps --format '{% raw %}{{.Names}}{% endraw %}' | grep -q "^${g_container}$"
+            then
+              g_missing="${g_missing:+${g_missing}, }${g_container}"
+            fi
+          done
+
+          if [ -n "$g_missing" ]
+          then
+            g_echo_error "Containers not running: ${g_missing}"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
 
   handlers:
 
