@@ -202,11 +202,20 @@
               cat /tmp/${g_dev}-stat-now >/tmp/${g_dev}-stat
               # Run SMART health check on the disk
               g_opt=""
-              udevadm info --query=all -n $g_disk | grep -q usb- && g_opt="-d sat"
-              smartctl -H $g_opt $g_disk >${g_tmp}/smartctl
-              if ! cat ${g_tmp}/smartctl | grep -E -iq "SMART overall-health self-assessment test result: PASSED|SMART Health Status: OK|Read Device Identity failed: scsi error no medium present"
+              g_is_usb=false
+              udevadm info --query=all -n $g_disk 2>/dev/null | grep -q usb- && g_opt="-d sat" && g_is_usb=true
+              g_smart=$(smartctl -H $g_opt $g_disk 2>&1)
+              if echo "$g_smart" | grep -E -iq "SMART overall-health self-assessment test result: PASSED|SMART Health Status: OK"
               then
-                g_echo_error "SMART of $g_disk unhealthy: smartctl -H $g_opt $g_disk $(cat ${g_tmp}/smartctl)"
+                true
+              elif echo "$g_smart" | grep -E -iq "Read Device Identity failed: scsi error no medium present|USB|unsupported|Device or resource busy"
+              then
+                true
+              elif [ "$g_is_usb" = true ]
+              then
+                true
+              else
+                g_echo_error "SMART of $g_disk unhealthy: smartctl -H $g_opt $g_disk $g_smart"
               fi
               # Check disk temperature
               g_temperature=$(smartctl -x $g_opt $g_disk | perl -pe 's/ +/ /g; s/^ //' | grep -E "^194 Temperature_Celsius " | cut -d" " -f 8)

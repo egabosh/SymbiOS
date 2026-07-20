@@ -259,10 +259,9 @@
             return 2>/dev/null || true
           fi
           date > "$g_check_file"
-          g_http_code=$(wget -q -O /dev/null --server-response --timeout=10 "https://acme-pki-stepca:{{ stepca_port }}/health" 2>&1 | grep -oE "HTTP/[0-9.]+" | tail -1 | grep -oE "[0-9]+$")
-          if [ -z "$g_http_code" ] || [ "$g_http_code" -ge 500 ]
+          if ! docker exec acme-pki-stepca wget -q -O /dev/null --no-check-certificate --timeout=10 https://localhost:{{ stepca_port }}/health 2>/dev/null
           then
-            g_echo_error "Healthcheck failed for acme-pki: HTTP $g_http_code from step-ca"
+            g_echo_error "Healthcheck failed for acme-pki: step-ca health endpoint unreachable"
           fi
         backup: yes
         validate: /bin/bash -n %s
@@ -281,7 +280,7 @@
           fi
           date > "$g_check_file"
 
-          g_stepca_ip=$(docker inspect acme-pki-stepca --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{% endraw %}' 2>/dev/null)
+          g_stepca_ip=$(docker inspect acme-pki-stepca --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}{% endraw %}' 2>/dev/null | grep '^192\.168\.' | head -1)
           if [ -z "$g_stepca_ip" ]
           then
             g_echo_error "Cannot determine Step-CA container IP for root CA check"
@@ -304,7 +303,7 @@
             g_echo_error "Step-CA root certificate EXPIRED on $(date -d "$g_enddate" +%F)"
           elif [ "$g_days_left" -lt 7 ]
           then
-            g_echo_error "Step-CA root certificate expires in ${g_days_left} days ($(date -d "$g_enddate" +%F))"
+            g_echo_error "Step-CA root certificate expires in ${g_days_left} days ($(date -d "$g_enddate" +%F)) — renew now"
           fi
         backup: yes
         validate: /bin/bash -n %s

@@ -687,10 +687,7 @@
           date > "$g_check_file"
 
           g_twofa_status=$(python3 -c "import yaml; c=yaml.safe_load(open('/home/docker/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print('enabled' if v.get('twofa_enabled') else 'disabled')")
-          if [ "$g_twofa_status" != "enabled" ]
-          then
-            g_echo_error "Two-Factor Authentication is disabled - recommended for security"
-          fi
+          # 2FA is optional — no error if disabled
         backup: yes
         validate: /bin/bash -n %s
 

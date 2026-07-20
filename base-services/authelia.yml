@@ -423,7 +423,7 @@
             return 2>/dev/null || true
           fi
           date > "$g_check_file"
-          if ! wget -q -O /dev/null --timeout=10 "http://authelia:9091/api/health" 2>/dev/null
+          if ! docker exec authelia wget -q -O /dev/null --timeout=10 http://localhost:9091/api/health 2>/dev/null
           then
             g_echo_error "Healthcheck failed for authelia: HTTP health endpoint unreachable"
           fi
