@@ -712,6 +712,29 @@
         group: "10000"
       no_log: true
 
+    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-ldap.check
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-ldap.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Healthcheck for openldap (LDAP bind test)
+          g_check_file="${g_tmp}/symbios-healthcheck-ldap"
+          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+          then
+            return 2>/dev/null || true
+          fi
+          date > "$g_check_file"
+          if ! ldapwhoami -x -H ldap://openldap -b "dc=openldap,dc=local" >/dev/null 2>&1
+          then
+            g_echo_error "Healthcheck failed for ldap: LDAP bind test failed"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
 
   handlers:
 

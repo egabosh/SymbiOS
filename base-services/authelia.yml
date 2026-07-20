@@ -407,6 +407,29 @@
         insertbefore: BOF
         line: "#!/bin/bash"
 
+    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-authelia.check
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-authelia.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Healthcheck for authelia (HTTP health endpoint)
+          g_check_file="${g_tmp}/symbios-healthcheck-authelia"
+          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+          then
+            return 2>/dev/null || true
+          fi
+          date > "$g_check_file"
+          if ! wget -q -O /dev/null --timeout=10 "http://authelia:9091/api/health" 2>/dev/null
+          then
+            g_echo_error "Healthcheck failed for authelia: HTTP health endpoint unreachable"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
 
   handlers:
 

@@ -201,6 +201,29 @@
       when: smtp_server is not defined or smtp_server | length == 0
       notify: Restart postfix
 
+    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-smtp.check
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-smtp.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Healthcheck for postfix (SMTP)
+          g_check_file="${g_tmp}/symbios-healthcheck-smtp"
+          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+          then
+            return 2>/dev/null || true
+          fi
+          date > "$g_check_file"
+          if ! systemctl is-active postfix.service >/dev/null 2>&1
+          then
+            g_echo_error "Healthcheck failed for smtp: postfix not active"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
   handlers:
     - name: Restart postfix
       ansible.builtin.systemd:
