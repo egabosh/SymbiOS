@@ -336,6 +336,31 @@
         port: '3307'
         proto: tcp
 
+    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-kodidb.check
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-kodidb.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Healthcheck for kodidb (phpMyAdmin)
+          g_svc_url="https://{{ service_domain }}"
+          g_check_file="${g_tmp}/symbios-healthcheck-kodidb"
+          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+          then
+            return 2>/dev/null || true
+          fi
+          date > "$g_check_file"
+          g_http_code=$(wget -q -O /dev/null --server-response --timeout=10 "$g_svc_url" 2>&1 | grep -oE "HTTP/[0-9.]+" | tail -1 | grep -oE "[0-9]+$")
+          if [ -z "$g_http_code" ] || [ "$g_http_code" -ge 500 ]
+          then
+            g_echo_error "Healthcheck failed for kodidb: HTTP $g_http_code from $g_svc_url"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
   handlers:
 
     - name: Restart mariadb

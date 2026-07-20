@@ -513,6 +513,77 @@ Fields:
 - For non-HTTP services (e.g. SFTP on a custom port, like `sftp-share.yml`),
   just publish the port in compose and open it with `ufw` — no Traefik needed.
 
+### Healthcheck scripts
+
+Every service playbook should deploy a healthcheck script to
+`/usr/local/sbin/runchecks.d/symbios-healthcheck-<name>.check` (where `<name>`
+is the playbook filename without `.yml`). The `runchecks.sh` daemon (installed
+by `base-services/runchecks.yml`) iterates over all `*.check` files in that
+directory every 5 minutes and runs them via `source`.
+
+**For web-facing services** (those with a Traefik provider), the check should
+verify the HTTP status code:
+
+```yaml
+    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Healthcheck for {{ service_name }}
+          g_svc_url="https://{{ service_domain }}"
+          g_check_file="${g_tmp}/symbios-healthcheck-{{ service_name }}"
+          # Skip if checked within last 5 minutes
+          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+          then
+            return 2>/dev/null || true
+          fi
+          date > "$g_check_file"
+          # Check HTTP status code via wget
+          g_http_code=$(wget -q -O /dev/null --server-response --timeout=10 "$g_svc_url" 2>&1 | grep -oE "HTTP/[0-9.]+" | tail -1 | grep -oE "[0-9]+$")
+          if [ -z "$g_http_code" ] || [ "$g_http_code" -ge 500 ]
+          then
+            g_echo_error "Healthcheck failed for {{ service_name }}: HTTP $g_http_code from $g_svc_url"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+```
+
+**For non-web services** (SFTP, TCP/UDP relays), check that the Docker
+container is running:
+
+```yaml
+    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Healthcheck for {{ service_name }} (container)
+          if ! docker ps | grep -q "{{ service_name }}"
+          then
+            g_echo_error "Healthcheck failed for {{ service_name }}: container not running"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+```
+
+Conventions:
+- File name: `symbios-healthcheck-<name>.check`
+- Uses `g_echo_error` from gaboshlib for error reporting (logged to syslog)
+- Uses `g_tmp` for 5-minute cooldown file to avoid redundant checks
+- Any HTTP status `>= 500` or connection failure is an error; `200`-`499` (including
+  `302` auth redirects and `401` auth challenges) are considered healthy
+- The `runchecks.sh` daemon picks up new/changed `.check` files automatically
+  on its next loop iteration — no restart required
+
 ### Discovery and lifecycle
 
 - Service lifecycle (`playbook`, `start` = `docker compose up -d`, `stop` =
