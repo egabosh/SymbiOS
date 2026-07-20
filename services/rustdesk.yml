@@ -110,6 +110,23 @@
         backup: yes
       notify: Restart rustdesk
 
+    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-rustdesk.check
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-rustdesk.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Healthcheck for rustdesk (container)
+          if ! docker ps | grep -q "rustdesk"
+          then
+            g_echo_error "Healthcheck failed for rustdesk: container not running"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
 
   handlers:
 

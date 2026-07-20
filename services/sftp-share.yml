@@ -239,6 +239,23 @@
     notify:
     - Restart sftp-share
 
+  - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-sftp-share.check
+    ansible.builtin.blockinfile:
+      path: /usr/local/sbin/runchecks.d/symbios-healthcheck-sftp-share.check
+      mode: "0400"
+      owner: root
+      group: root
+      create: yes
+      marker: "# {mark} ANSIBLE MANAGED BLOCK"
+      block: |
+        # Healthcheck for sftp-share (container)
+        if ! docker ps | grep -q "sftp-share"
+        then
+          g_echo_error "Healthcheck failed for sftp-share: container not running"
+        fi
+      backup: yes
+      validate: /bin/bash -n %s
+
   
   handlers:
 
