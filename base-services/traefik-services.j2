@@ -11,7 +11,7 @@ http:
       tls:
         certResolver: "{{ acme_resolver }}"
     symbios-ui:
-      rule: "Host(`{{ symbios_domain }}`)"
+      rule: "Host(`{{ base_domain }}`)"
       entryPoints:
         - https
       middlewares:

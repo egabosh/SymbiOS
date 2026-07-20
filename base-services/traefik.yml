@@ -43,7 +43,6 @@
   hosts: all
 
   vars:
-    symbios_domain: "{{ base_domain }}"
     authelia_domain: "auth.{{ base_domain }}"
     traefik_domain: "traefik.{{ base_domain }}"
 

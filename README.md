@@ -209,9 +209,6 @@ Subdomains are derived from `base_domain`:
 
 ```yaml
 base_domain:     "symbios-dev.dedyn.io"   # shared parent for all services
-symbios_domain:  "{{ base_domain }}"      # the main UI / landing host
-authelia_domain: "auth.{{ base_domain }}" # SSO login host
-traefik_domain:  "traefik.{{ base_domain }}"# proxy dashboard host
 ```
 
 ---

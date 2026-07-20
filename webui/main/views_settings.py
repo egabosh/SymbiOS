@@ -59,9 +59,6 @@ def settings_ddns(request):
                 # Authelia session cookie can span all service subdomains)
                 config['all']['vars']['default_domain'] = 'local'
                 config['all']['vars']['base_domain'] = 'symbios.local'
-                config['all']['vars']['symbios_domain'] = 'symbios.local'
-                config['all']['vars']['authelia_domain'] = 'auth.symbios.local'
-                config['all']['vars']['traefik_domain'] = 'traefik.symbios.local'
                 _save_inventory_config(config)
                 messages.success(request, 'DNS configuration removed.')
                 if dns_mode == 'desec':
@@ -84,9 +81,6 @@ def settings_ddns(request):
                 config['all']['vars']['ddns_ipv6'] = ''
                 config['all']['vars']['default_domain'] = self_domain
                 config['all']['vars']['base_domain'] = self_domain
-                config['all']['vars']['symbios_domain'] = 'symbios.' + self_domain
-                config['all']['vars']['authelia_domain'] = 'auth.' + self_domain
-                config['all']['vars']['traefik_domain'] = 'traefik.' + self_domain
                 _save_inventory_config(config)
                 messages.success(request, f'DNS settings saved for {self_domain}.')
             else:
@@ -105,9 +99,6 @@ def settings_ddns(request):
                 # the Authelia session cookie can span all service subdomains.
                 config['all']['vars']['default_domain'] = ddns_host
                 config['all']['vars']['base_domain'] = ddns_host
-                config['all']['vars']['symbios_domain'] = 'symbios.' + ddns_host
-                config['all']['vars']['authelia_domain'] = 'auth.' + ddns_host
-                config['all']['vars']['traefik_domain'] = 'traefik.' + ddns_host
                 _save_inventory_config(config)
                 messages.success(request, 'DNS settings saved.')
                 try:
@@ -411,20 +402,14 @@ def _is_valid_ssh_pubkey(key):
         return False
 
 
-SSH_KEYS_FILE = "/config/ssh-authorized-keys"
-
-
 def _read_host_authorized_keys():
     # Live host authorized_keys is bind-mounted read-only into the container.
-    for src in ("/root-host-keys", SSH_KEYS_FILE):
-        try:
-            with open(src) as f:
-                keys = [line.strip() for line in f
-                        if line.strip() and not line.startswith("#")]
-            if keys:
-                return keys
-        except Exception:
-            pass
+    try:
+        with open("/root-host-keys") as f:
+            return [line.strip() for line in f
+                    if line.strip() and not line.startswith("#")]
+    except Exception:
+        pass
     return []
 
 
@@ -435,26 +420,11 @@ def _is_system_ssh_key(line):
 
 
 def settings_ssh_keys(request):
-    config = _get_inventory_config()
-    if "all" not in config:
-        config["all"] = {}
-    if "vars" not in config["all"]:
-        config["all"]["vars"] = {}
-    vars_ = config["all"]["vars"]
-
-    # Live host keys, split into user-managed and system (exec-gateway) keys.
+    # Read keys directly from the host's /root/.ssh/authorized_keys
+    # (bind-mounted read-only into the container as /root-host-keys).
     host_keys = _read_host_authorized_keys()
     system_keys = [k for k in host_keys if _is_system_ssh_key(k)]
-    user_keys_from_host = [k for k in host_keys if not _is_system_ssh_key(k)]
-
-    # Seed / repair the inventory-managed user key list from the live host file
-    # the first time (or when empty) so the UI reflects reality. The system
-    # exec-gateway key is never part of the editable list.
-    managed = vars_.get("ssh_authorized_keys")
-    if not isinstance(managed, list) or len(managed) == 0:
-        vars_["ssh_authorized_keys"] = list(user_keys_from_host)
-        _save_inventory_config(config)
-    user_keys = vars_.get("ssh_authorized_keys", [])
+    user_keys = [k for k in host_keys if not _is_system_ssh_key(k)]
 
     if request.method == "POST":
         action = request.POST.get("action", "save")
@@ -479,22 +449,17 @@ def settings_ssh_keys(request):
                     raise ValueError(f"{len(invalid)} invalid SSH key(s) found")
                 user_keys = new_keys
 
-            vars_["ssh_authorized_keys"] = user_keys
-            _save_inventory_config(config)
-
-            with open(SSH_KEYS_FILE, "w") as f:
-                for k in vars_["ssh_authorized_keys"]:
-                    f.write(k + "\n")
+            # Build the complete authorized_keys content: system keys first,
+            # then user keys.  Write directly to /root/.ssh/authorized_keys
+            # on the host via the SSH exec gateway — no inventory intermediary.
+            all_keys = system_keys + user_keys
+            keys_content = "\\n".join(all_keys) + "\\n"
+            cmd = f"printf '%s\\n' '{keys_content}' > /root/.ssh/authorized_keys"
+            ok, stdout, stderr = run_command(cmd, timeout=15)
+            if ok != 0:
+                raise RuntimeError(f"Failed to write authorized_keys: {stderr}")
 
             messages.success(request, "SSH keys saved.")
-            try:
-                ok, out = run_playbook('base-services/ssh-keys.yml', timeout=120)
-                if ok:
-                    messages.success(request, "SSH keys playbook completed successfully.")
-                else:
-                    messages.warning(request, "SSH keys playbook completed with issues.")
-            except Exception as e:
-                messages.warning(request, "Could not run SSH keys playbook: " + str(e))
         except Exception as e:
             messages.error(request, f"Error: {e}")
         return redirect("settings_ssh_keys")
