@@ -5,9 +5,6 @@ all:
     # base_domain is the shared parent for all service subdomains and the
     # Authelia session cookie scope (e.g. symbios.local or myhost.dedyn.io).
     base_domain: "symbios.local"
-    symbios_domain: "{{ base_domain }}"
-    authelia_domain: "auth.{{ base_domain }}"
-    traefik_domain: "traefik.{{ base_domain }}"
     acme_resolver: "{{ 'symbios-pki' if default_domain == 'local' else 'letsencrypt' }}"
     instance: "default"
     ldap_basedn: "dc=openldap,dc=local"

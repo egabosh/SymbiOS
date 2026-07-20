@@ -15,10 +15,10 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
-#   short_description: Deploy managed SSH authorized_keys
-#   description: Distributes managed SSH authorized_keys from the inventory to users/hosts and protects the WebUI exec-gateway key. Reloads sshd after changes.
+#   short_description: Re-assert WebUI exec-gateway SSH key
+#   description: Ensures the WebUI exec-gateway key is always present in /root/.ssh/authorized_keys. The WebUI writes user keys directly via SSH exec; this playbook only re-asserts the system key.
 #   author: Oliver Bohlen
-#   version: '1.0'
+#   version: '2.0'
 #   license: GPLv3
 #   copyright: Copyright 2026, Oliver Bohlen
 #   min_ansible_version: '2.11'
@@ -38,7 +38,7 @@
 #       command: journalctl -fu ssh.service -n 1000
 #   actions:
 
-- name: Deploy SSH authorized keys
+- name: Re-assert WebUI exec-gateway SSH key
   hosts: localhost
   connection: local
   gather_facts: no
@@ -48,18 +48,6 @@
         path: /root/.ssh
         state: directory
         mode: "0700"
-        owner: root
-        group: root
-      become: yes
-
-    - name: Write authorized_keys from inventory
-      copy:
-        dest: /root/.ssh/authorized_keys
-        content: |
-          {% for key in ssh_authorized_keys | default([]) %}
-          {{ key }}
-          {% endfor %}
-        mode: "0644"
         owner: root
         group: root
       become: yes
