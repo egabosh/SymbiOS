@@ -82,7 +82,7 @@
           g_echo_ok "Starting $0"
           g_staleumount
 
-          g_json_file="/log/runchecks-results.json"
+          g_json_file="/home/docker/symbios-ui/log/runchecks-results.json"
 
           # Override g_echo_error to capture failures for JSON output
           g_echo_error() {
