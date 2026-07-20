@@ -31,86 +31,14 @@
     return '<span class="badge bg-secondary">Unknown</span>';
   }
 
-
-
-  function healthCardSmall(key, label, data) {
-    const status = data.status || 'unknown';
-    const border = status === 'ok' ? 'success' : status === 'warn' ? 'warning' : 'danger';
-    return '<div class="col-lg-3 col-md-4 col-sm-6">' +
-      '<div class="card h-100 border-' + border + ' health-card" data-bs-toggle="collapse" data-bs-target="#detail-' + key + '" role="button">' +
-      '<div class="card-body text-center py-3">' +
-      '<div class="fs-3 mb-1">' + statusIcon(status) + '</div>' +
-      '<div class="fw-semibold small">' + label + '</div>' +
-      '</div></div></div>';
-  }
-
-  function detailCard(key, label, data) {
-    const status = data.status || 'unknown';
-    const border = status === 'ok' ? 'success' : status === 'warn' ? 'warning' : 'danger';
-    let detailsHtml = '';
-
-    if (data.playbooks) {
-      detailsHtml += '<p class="mb-1"><strong>Playbooks:</strong> ' + escapeHtml(data.message || '') + '</p>';
-    } else {
-      detailsHtml += '<p class="mb-1">' + escapeHtml(data.message || '') + '</p>';
-    }
-
-    if (data.containers) {
-      detailsHtml += '<div class="mt-2"><strong>Containers</strong><ul class="list-unstyled small mb-0">';
-      for (const [cname, cstatus] of Object.entries(data.containers)) {
-        detailsHtml += '<li>' + statusIcon(cstatus) + ' ' + escapeHtml(cname) + '</li>';
-      }
-      detailsHtml += '</ul></div>';
-    }
-
-    if (data.certs && Array.isArray(data.certs)) {
-      detailsHtml += '<div class="mt-2"><strong>Certificates</strong><ul class="list-unstyled small mb-0">';
-      for (const cert of data.certs) {
-        detailsHtml += '<li>' + statusIcon(cert.status) + ' ' + escapeHtml(cert.message) + '</li>';
-      }
-      detailsHtml += '</ul></div>';
-    }
-
-    if (data.ddns_host_status) {
-      detailsHtml += '<div class="mt-2"><strong>DNS Match</strong><ul class="list-unstyled small mb-0">';
-      for (const [key, val] of Object.entries(data.ddns_host_status)) {
-        if (val && val.message) {
-          detailsHtml += '<li>' + statusIcon(val.status) + ' ' + escapeHtml(val.message) + '</li>';
-        }
-      }
-      detailsHtml += '</ul></div>';
-    }
-
-    if (data.disk) {
-      detailsHtml += '<div class="mt-2"><div class="progress" style="height:20px">' +
-        '<div class="progress-bar ' + (data.disk.pct > 90 ? 'bg-danger' : data.disk.pct > 75 ? 'bg-warning' : 'bg-success') +
-        '" style="width:' + data.disk.pct + '%">' + data.disk.pct + '%</div></div>' +
-        '<small class="text-muted">' + escapeHtml(data.disk.used || '') + ' / ' + escapeHtml(data.disk.total || '') + '</small></div>';
-    }
-
-    if (data.results && Array.isArray(data.results)) {
-      detailsHtml += '<div class="mt-2"><strong>Checks</strong>' +
-        '<table class="table table-sm table-borderless small mb-0"><tbody>';
-      for (const r of data.results) {
-        detailsHtml += '<tr><td style="width:24px">' + statusIcon(r.status) + '</td>' +
-          '<td>' + escapeHtml(r.name) + '</td>' +
-          '<td class="text-muted">' + escapeHtml(r.message || '') + '</td></tr>';
-      }
-      detailsHtml += '</tbody></table></div>';
-      if (data.last_run) {
-        detailsHtml += '<small class="text-muted">Last run: ' + escapeHtml(data.last_run) + '</small>';
-      }
-    }
-
-    return '<div class="collapse" id="detail-' + key + '">' +
-      '<div class="card card-body bg-light mt-1 mb-3 border-' + border + '">' +
-      '<h6 class="card-subtitle mb-2 text-muted">' + label + ' ' + statusBadge(status) + '</h6>' +
-      detailsHtml +
-      '</div></div>';
+  function escapeHtml(text) {
+    if (!text) return '';
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(text));
+    return d.innerHTML;
   }
 
   async function fetchHealth() {
-    // Remember which detail sections are currently expanded
     const expanded = new Set();
     document.querySelectorAll('.collapse.show').forEach(el => {
       if (el.id) expanded.add(el.id);
@@ -121,57 +49,50 @@
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const data = await resp.json();
 
-      const labels = {
-        runchecks: 'System Checks',
-        ldap: 'LDAP',
-        authelia: 'Authelia',
-        traefik: 'Traefik',
-        stepca: 'Step-CA',
-        remote_exec: 'Remote Execution (SSH)',
-        twofa: '2FA',
-        playbooks: 'Playbooks',
-        ddns: 'DNS',
-        containers: 'Docker',
-        disk: 'Disk',
-        certs: 'Certificates',
-        root_ca: 'Root CA',
-      };
+      const rc = data.runchecks || {};
+      const status = rc.status || 'unknown';
+      const lastRun = rc.last_run || 'unknown';
+      const results = rc.results || [];
 
-      let cardsHtml = '';
-      let detailsHtml = '';
       let okCount = 0, warnCount = 0, errorCount = 0;
-      for (const [key, label] of Object.entries(labels)) {
-        if (data[key]) {
-          const s = data[key].status || 'unknown';
-          if (s === 'ok') okCount++;
-          else if (s === 'warn') warnCount++;
-          else if (s === 'error') errorCount++;
-          cardsHtml += healthCardSmall(key, label, data[key]);
-          detailsHtml += detailCard(key, label, data[key]);
-        }
-      }
+      results.forEach(r => {
+        if (r.status === 'ok') okCount++;
+        else if (r.status === 'warn') warnCount++;
+        else if (r.status === 'error') errorCount++;
+      });
 
-      const overall = errorCount > 0 ? 'error' : warnCount > 0 ? 'warn' : 'ok';
       const overallBadge = errorCount > 0
         ? '<span class="badge bg-danger fs-5 me-2"><i class="bi bi-x-circle-fill"></i> ' + errorCount + ' Error' + (errorCount > 1 ? 's' : '') + '</span>'
         : warnCount > 0
         ? '<span class="badge bg-warning text-dark fs-5 me-2"><i class="bi bi-exclamation-triangle-fill"></i> ' + warnCount + ' Warning' + (warnCount > 1 ? 's' : '') + '</span>'
         : '<span class="badge bg-success fs-5"><i class="bi bi-check-circle-fill"></i> All OK</span>';
 
+      let tableRows = '';
+      results.forEach(r => {
+        tableRows += '<tr>' +
+          '<td style="width:30px">' + statusIcon(r.status) + '</td>' +
+          '<td class="fw-semibold">' + escapeHtml(r.name) + '</td>' +
+          '<td class="text-muted">' + escapeHtml(r.message || '') + '</td>' +
+          '</tr>';
+      });
+
       document.getElementById('health-container').innerHTML =
         '<div class="col-12 mb-3">' +
         '<div class="d-flex align-items-center gap-3">' + overallBadge +
-        '<span class="text-muted small">' + Object.keys(labels).length + ' checks</span>' +
+        '<span class="text-muted small">' + results.length + ' checks &mdash; last run: ' + escapeHtml(lastRun) + '</span>' +
         '</div></div>' +
-        cardsHtml +
-        '<div class="col-12 mt-2">' + detailsHtml + '</div>';
+        '<div class="col-12">' +
+        '<div class="card border-' + (status === 'ok' ? 'success' : status === 'warn' ? 'warning' : 'danger') + '">' +
+        '<div class="card-body">' +
+        '<h6 class="card-title">Runchecks Results</h6>' +
+        '<div class="table-responsive">' +
+        '<table class="table table-sm table-borderless align-middle mb-0">' +
+        '<tbody>' + tableRows + '</tbody></table>' +
+        '</div></div></div></div>';
 
-      // Re-expand previously expanded sections
       expanded.forEach(id => {
         const el = document.getElementById(id);
-        if (el) {
-          el.classList.add('show');
-        }
+        if (el) el.classList.add('show');
       });
     } catch (e) {
       document.getElementById('health-container').innerHTML =

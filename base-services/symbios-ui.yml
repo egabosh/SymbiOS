@@ -378,7 +378,7 @@
         group: root
         mode: "0755"
 
-    - name: Cron: extract LE cert for boot unlock (every 6h)
+    - name: "Cron: extract LE cert for boot unlock (every 6h)"
       ansible.builtin.cron:
         name: "symbios-extract-le-cert"
         minute: "0"
