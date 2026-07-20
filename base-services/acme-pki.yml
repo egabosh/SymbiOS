@@ -173,6 +173,8 @@
     - name: Write step-ca Docker Compose
       ansible.builtin.copy:
         content: |
+          name: ""
+
           services:
             stepca:
               image: smallstep/step-ca:latest

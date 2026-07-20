@@ -106,6 +106,8 @@
         content: |
           # BEGIN ANSIBLE MANAGED BLOCK
 
+          name: ""
+
           services:
             traefik:
               image: traefik:latest

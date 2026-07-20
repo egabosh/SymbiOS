@@ -84,12 +84,15 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          name: ""
+
           services:
 
             symbios-webui:
               build:
                 context: .
                 dockerfile: Dockerfile
+              container_name: symbios-webui
               ports:
                 # Published only on the loopback interface. The WebUI is reached
                 # externally only through Traefik + Authelia on :443; 127.0.0.1:8080

@@ -108,9 +108,12 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
         
+          name: ""
+
           services:
             paperless:
               image: ghcr.io/paperless-ngx/paperless-ngx:latest
+              container_name: paperless
               restart: unless-stopped
               volumes:
                 - ./data:/usr/src/paperless/data
@@ -143,13 +146,12 @@
                 - PAPERLESS_OIDC_AUTO_logout=true
               networks:
                 paperless: {}
-                traefik:
-                  aliases:
-                    - paperless
+                traefik: null
               labels: []
             
             paperless-broker:
               image: redis:6.0
+              container_name: paperless-broker
               restart: unless-stopped
               volumes:
                 - ./redisdata:/data
