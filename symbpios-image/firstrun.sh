@@ -27,10 +27,14 @@
 # This script also logs to /var/log/symbios-firstrun.log.
 
 # rc.local runs after the system is fully booted, so plymouth should
-# already be stopped. Stop it anyway just in case.
+# already be stopped. Stop it anyway just in case. Also stop
+# plymouth-quit-wait.service which would otherwise hang indefinitely
+# waiting for a plymouth that was never started.
 systemctl stop plymouth.service 2>/dev/null || true
 systemctl stop plymouth-quit.service 2>/dev/null || true
 systemctl stop plymouth-read-write.service 2>/dev/null || true
+systemctl stop plymouth-quit-wait.service 2>/dev/null || true
+systemctl mask plymouth-quit-wait.service 2>/dev/null || true
 
 # Clear screen for clean output
 clear
