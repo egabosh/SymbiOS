@@ -21,8 +21,7 @@ import struct
 from django.shortcuts import redirect
 
 from .auth_user import SymbiosUser, AnonymousUser
-
-LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')
+from .constants import LDAP_URI
 
 
 def _trusted_proxy_addresses():

@@ -21,9 +21,7 @@ from django.shortcuts import render, redirect
 from .decorators import login_required
 from django.http import JsonResponse
 from .utils.log_utils import logs_stream
-
-CONFIG_PATH = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
-LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')
+from .constants import CONFIG_PATH, LDAP_URI
 
 
 def _get_inventory_config():

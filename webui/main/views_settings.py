@@ -19,7 +19,8 @@ from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
-from .views import _get_inventory_config, _save_inventory_config, _safe_write, CONFIG_PATH
+from .views import _get_inventory_config, _save_inventory_config, _safe_write
+from .constants import CONFIG_PATH
 from .utils.ssh_exec import run_playbook, run_command
 
 import urllib.request
@@ -389,8 +390,6 @@ def settings_auth(request):
     return render(request, 'main/settings_auth.html', {'vars': vars_})
 
 
-import subprocess
-
 _HOST_IP_FILE = "/config/.host-ip"
 
 @login_required
@@ -613,7 +612,6 @@ def settings_backup_test(request):
         return JsonResponse({'ok': False, 'error': 'Port must be a number'})
 
     # Use the WebUI's own SSH key for the test
-    import subprocess
     key_path = '/config/.ssh/id_symbios'
     known_hosts = '/config/.ssh/known_hosts'
 

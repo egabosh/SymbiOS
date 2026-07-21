@@ -137,18 +137,3 @@ def get_playbook(playbook):
         if item["playbook"] == playbook:
             return item
     return None
-
-
-def compose_base(compose_file):
-    """Derive the docker-compose service base name from a compose_file path.
-
-    Paths may contain the Jinja placeholder '.{{ inventory_hostname }}', which is
-    stripped so the exec gateway glob (/home/docker/<name>*) finds the real dir.
-    """
-    if not compose_file:
-        return ""
-    directory = compose_file.replace("/home/docker/", "").rstrip("/")
-    if directory.endswith("/docker-compose.yml"):
-        directory = directory[: -len("/docker-compose.yml")]
-    directory = directory.split("/")[-1]
-    return directory.replace(".{{ inventory_hostname }}", "")

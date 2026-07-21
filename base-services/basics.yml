@@ -156,6 +156,15 @@
         mode: '0755'
       when: not nocontainer.stat.exists
 
+    - name: Install symbios-ldap.sh
+      ansible.builtin.copy:
+        src: /home/SymbiOS/symbios-ldap.sh
+        dest: /usr/local/sbin/symbios-ldap.sh
+        owner: root
+        group: root
+        mode: '0755'
+      when: not nocontainer.stat.exists
+
     - name: Install Basic Packages if not running in container
       apt:
         name:

@@ -18,7 +18,8 @@ import subprocess
 from django.shortcuts import render, redirect
 from .decorators import login_required
 from django.contrib import messages
-from .views import _get_ldap_vars, LDAP_URI
+from .views import _get_ldap_vars
+from .constants import LDAP_URI
 
 
 @login_required
