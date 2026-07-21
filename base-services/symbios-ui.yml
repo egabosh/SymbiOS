@@ -454,6 +454,75 @@
         chdir: "{{ docker_path }}"
       changed_when: false
 
+    - name: Install SymbiOS desktop icon
+      ansible.builtin.copy:
+        src: /home/SymbiOS/webui/main/static/main/img/symbios.svg
+        dest: /usr/share/icons/hicolor/scalable/apps/symbios.svg
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Update icon cache
+      ansible.builtin.command:
+        cmd: gtk-update-icon-cache -f -t /usr/share/icons/hicolor
+      changed_when: false
+      failed_when: false
+
+    - name: Create SymbiOS WebUI desktop shortcut
+      # Find the user with UID 1000, determine their Desktop folder,
+      # and create a .desktop launcher for the SymbiOS WebUI.
+      ansible.builtin.shell: |
+        set -e
+        # Find user with UID 1000
+        f_entry=$(getent passwd 1000)
+        if [ -z "$f_entry" ]
+        then
+          echo "No user with UID 1000 found, skipping"
+          exit 0
+        fi
+        f_user=$(echo "$f_entry" | cut -d: -f1)
+        f_home=$(echo "$f_entry" | cut -d: -f6)
+
+        # Find desktop directory (try common names)
+        f_desktop=""
+        for f_dir in Desktop Schreibtisch desktop schreibtisch
+        do
+          if [ -d "$f_home/$f_dir" ]
+          then
+            f_desktop="$f_home/$f_dir"
+            break
+          fi
+        done
+
+        if [ -z "$f_desktop" ]
+        then
+          echo "No desktop directory found for $f_user, skipping"
+          exit 0
+        fi
+
+        # Create .desktop file
+        printf '%s\n' \
+          "[Desktop Entry]" \
+          "Version=1.0" \
+          "Type=Link" \
+          "Name=SymbiOS WebUI" \
+          "Comment=Open SymbiOS Web Management Interface" \
+          "URL=http://localhost:8080" \
+          "Icon=symbios" \
+          "Terminal=false" \
+          "Categories=Network;WebBrowser;" \
+          > "$f_desktop/symbios-webui.desktop"
+
+        # Set ownership and permissions
+        chown 1000:1000 "$f_desktop/symbios-webui.desktop"
+        chmod 644 "$f_desktop/symbios-webui.desktop"
+
+        # Mark as trusted (GNOME/Nautilus)
+        gio set "$f_desktop/symbios-webui.desktop" "metadata::trusted" true 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+
     - name: Seed pinned SSH known_hosts for exec gateway
       # Pin the host key used by the WebUI's SSH exec path. The WebUI connects
       # to host.docker.internal:22; we record the real host key (from 127.0.0.1)
