@@ -44,8 +44,6 @@
     - name: Install packages for cinnamon, desktop-stuff and tools
       apt:
         name:
-          # share desk
-          - x11vnc
           # desktop specific
           - cinnamon-desktop-environment
           - cinnamon-l10n
@@ -107,7 +105,6 @@
         raspi-config nonint do_{{ item.action }} {{ item.value }}
       loop:
         - { action: ssh, value: "0" }
-        - { action: vnc, value: "0" }
         - { action: boot_splash, value: "1" }
         - { action: boot_behaviour, value: "B4" }
         - { action: blanking, value: "1" }
@@ -143,11 +140,38 @@
         path: /usr/local/sbin/switch-kodi-desk.sh
       register: kodisetup
 
+    - name: Enable lightdm
+      ansible.builtin.systemd:
+        name: lightdm.service
+        enabled: true
+        masked: false
+      when: not kodisetup.stat.exists
+
     - name: Disable lightdm
       ansible.builtin.systemd:
         name: lightdm.service
         enabled: false
       when: kodisetup.stat.exists == true
+
+    - name: Disable first-run wizard (language/user dialog)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/xdg/autostart/cinnamon-first-run.desktop
+        - /etc/xdg/autostart/raspi-config-autostart.desktop
+        - /etc/xdg/autostart/piwiz.desktop
+      failed_when: false
+
+    - name: Disable first-run wizard service
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: false
+        masked: true
+      loop:
+        - raspi-config.service
+        - piwiz.service
+      failed_when: false
 
     - name: Add default user to docker group
       ansible.builtin.user:
