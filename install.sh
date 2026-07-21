@@ -16,15 +16,32 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-set -e
 set -x
+
+# Track failed playbooks for final report
+g_failed=""
+
+function f_run_playbook {
+    local f_playbook="${1}"
+    echo ">>> Running: $(basename "${f_playbook}")"
+    if ansible-playbook --limit localhost --inventory "${g_inventory}" "${f_playbook}"
+    then
+        echo ">>> OK: $(basename "${f_playbook}")"
+    else
+        echo ">>> FAILED: $(basename "${f_playbook}") (exit $?)"
+        g_failed="${g_failed} $(basename "${f_playbook}")"
+    fi
+}
+
+# Fix interrupted dpkg state (can happen after image expansion / e2fsck)
+dpkg --configure -a 2>/dev/null || true
 
 # Install ansible and git if not already present
 if ! which ansible >/dev/null 2>&1
 then
-  DEBIAN_FRONTEND=noninteractive apt-get -y update --allow-releaseinfo-change
-  DEBIAN_FRONTEND=noninteractive apt-get -y install ansible git
-  ansible-galaxy collection install community.general
+    DEBIAN_FRONTEND=noninteractive apt-get -y update --allow-releaseinfo-change
+    DEBIAN_FRONTEND=noninteractive apt-get -y install ansible git
+    ansible-galaxy collection install community.general
 fi
 
 # Clone or update SymbiOS from GitHub
@@ -33,8 +50,8 @@ cd /home
 cd SymbiOS
 if ! git pull
 then
-  git stash
-  git pull
+    git stash
+    git pull
 fi
 
 # Create initial inventory if it does not exist
@@ -42,31 +59,44 @@ g_inventory_path="/home/docker/symbios-ui/config"
 g_inventory="${g_inventory_path}/inventory.yml"
 if ! [[ -s ${g_inventory} ]]
 then
-  mkdir -p ${g_inventory_path}
-  chmod 700 ${g_inventory_path}
-  cp /home/SymbiOS/inventory.yml ${g_inventory}
-  chmod 600 ${g_inventory}
+    mkdir -p "${g_inventory_path}"
+    chmod 700 "${g_inventory_path}"
+    cp /home/SymbiOS/inventory.yml "${g_inventory}"
+    chmod 600 "${g_inventory}"
 fi
 
-# Install base-services playbooks
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/basics.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/hardening.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/firewall.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/backup.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/autoupdate.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/runchecks.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/docker.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/dedyn.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/acme-pki.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/traefik.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/ldap.yml
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/authelia.yml
+# Run base-services playbooks
+f_run_playbook /home/SymbiOS/base-services/basics.yml
+f_run_playbook /home/SymbiOS/base-services/hardening.yml
+f_run_playbook /home/SymbiOS/base-services/firewall.yml
+f_run_playbook /home/SymbiOS/base-services/backup.yml
+f_run_playbook /home/SymbiOS/base-services/autoupdate.yml
+f_run_playbook /home/SymbiOS/base-services/runchecks.yml
+f_run_playbook /home/SymbiOS/base-services/docker.yml
+f_run_playbook /home/SymbiOS/base-services/dedyn.yml
+f_run_playbook /home/SymbiOS/base-services/acme-pki.yml
+f_run_playbook /home/SymbiOS/base-services/traefik.yml
+f_run_playbook /home/SymbiOS/base-services/ldap.yml
+f_run_playbook /home/SymbiOS/base-services/authelia.yml
 
 # Detect Raspberry Pi and install platform-specific playbooks
 if [ -f /proc/device-tree/model ] && grep -qi "raspberry" /proc/device-tree/model
 then
-  ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/raspberry.yml
-  ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/desktop/firefox.yml
+    f_run_playbook /home/SymbiOS/base-services/raspberry.yml
+    f_run_playbook /home/SymbiOS/desktop/firefox.yml
 fi
 
-ansible-playbook --limit localhost  --inventory ${g_inventory} /home/SymbiOS/base-services/symbios-ui.yml
+f_run_playbook /home/SymbiOS/base-services/symbios-ui.yml
+
+# Report results
+echo ""
+echo "=== Installation summary ==="
+if [ -n "${g_failed}" ]
+then
+    echo "FAILED playbooks:${g_failed}"
+    echo "Fix the issues and run again, or reboot to retry."
+    exit 1
+else
+    echo "All playbooks completed successfully."
+    exit 0
+fi

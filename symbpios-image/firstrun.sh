@@ -166,6 +166,28 @@ then
     exit 1
 fi
 
+# --- Wait for NTP time sync ---
+# Raspberry Pi has no RTC — system clock is wrong until NTP syncs.
+# APT signature verification fails if clock is in the past/future.
+echo "Waiting for NTP time sync..."
+f_ntp_ready=0
+for f_i in $(seq 1 30)
+do
+    if timedatectl show --property=NTPSynchronized --value 2>/dev/null | grep -q "yes"
+    then
+        echo "NTP synced after ${f_i} seconds ($(date))"
+        f_ntp_ready=1
+        break
+    fi
+    sleep 2
+done
+
+if [ "${f_ntp_ready}" -ne 1 ]
+then
+    echo "WARNING: NTP not synced after 60 seconds, trying manual ntpdate..."
+    ntpdate -b pool.ntp.org 2>/dev/null || true
+fi
+
 # --- Run SymbiOS installer ---
 echo "Downloading SymbiOS installer..."
 wget -q https://raw.githubusercontent.com/egabosh/SymbiOS/refs/heads/main/install.sh -O /tmp/symbios-install.sh
