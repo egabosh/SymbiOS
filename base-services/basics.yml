@@ -165,6 +165,31 @@
         mode: '0755'
       when: not nocontainer.stat.exists
 
+    - name: Create symbios user
+      ansible.builtin.user:
+        name: symbios
+        uid: 1000
+        shell: /bin/bash
+        home: /home/symbios
+        create_home: true
+        password: "{{ 'symbios' | password_hash('sha512') }}"
+        groups:
+          - sudo
+          - docker
+          - adm
+        append: true
+        state: present
+      when: not nocontainer.stat.exists
+
+    - name: Allow symbios passwordless sudo
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers.d/symbios
+        line: "symbios ALL=(ALL) NOPASSWD:ALL"
+        create: true
+        mode: '0440'
+        validate: "visudo -cf %s"
+      when: not nocontainer.stat.exists
+
     - name: Install Basic Packages if not running in container
       apt:
         name:
