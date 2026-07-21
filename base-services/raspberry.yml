@@ -129,7 +129,7 @@
         dest: /etc/lightdm/lightdm.conf
         content: |
           [Seat:*]
-          autologin-user=user
+          autologin-user=symbios
           autologin-user-timeout=0
           user-session=cinnamon
           greeter-session=lightdm-gtk-greeter
