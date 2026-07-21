@@ -516,6 +516,15 @@
               copytruncate
           }
 
+    - name: Ensure ACME account directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0700'
+      loop:
+        - /home/docker/traefik/letsencrypt
+        - /home/docker/acme-pki/data/acme
+
     - name: Ensure ACME account files are not group/world readable
       # Traefik refuses to load acme.json unless its mode is 0600
       # ("permissions ... are too open, please use 600"). The files are written
@@ -525,11 +534,13 @@
       # writable for its owner (step-ca).
       ansible.builtin.file:
         path: "{{ item }}"
+        state: touch
+        modification_time: preserve
+        access_time: preserve
         mode: '0600'
       loop:
         - /home/docker/traefik/letsencrypt/acme.json
         - /home/docker/acme-pki/data/acme/acme.json
-      ignore_errors: true
 
     - name: Deploy healthcheck for TLS certificates
       ansible.builtin.blockinfile:
