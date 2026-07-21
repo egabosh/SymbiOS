@@ -337,6 +337,7 @@ g_packages="file bc psmisc procps htop iotop sysstat strace net-tools vim git ne
 
 chroot "${g_rootfs}" /bin/bash -c "
     export DEBIAN_FRONTEND=noninteractive
+    dpkg --configure -a
     apt-get -y update --allow-releaseinfo-change
     apt-get -y install --no-install-recommends ${g_packages}
     apt-get -y dist-upgrade
