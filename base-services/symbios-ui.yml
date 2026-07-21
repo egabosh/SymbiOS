@@ -666,6 +666,10 @@
         backup: yes
         validate: /bin/bash -n %s
 
+
+    - name: Register playbook as installed
+      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set symbios-ui.yml
+      changed_when: false
   handlers:
 
     - name: Restart {{ service_name }}

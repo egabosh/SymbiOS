@@ -748,6 +748,10 @@
         validate: /bin/bash -n %s
 
 
+
+    - name: Register playbook as installed
+      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set ldap.yml
+      changed_when: false
   handlers:
 
     # Rebuild and restart LDAP container

@@ -309,6 +309,10 @@
         validate: /bin/bash -n %s
 
 
+
+    - name: Register playbook as installed
+      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set acme-pki.yml
+      changed_when: false
   handlers:
 
     # Restart step-ca container after config changes
