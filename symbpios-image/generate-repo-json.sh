@@ -72,20 +72,6 @@ function f_generate_json {
                 "matching_type": "inclusive"
             },
             {
-                "name": "Raspberry Pi 3",
-                "tags": ["pi3-64bit", "pi3-32bit"],
-                "icon": "https://downloads.raspberrypi.com/imager/icons/RPi_3.png",
-                "description": "Raspberry Pi 3 Model A+ / B / B+ and Compute Module 3 / 3+",
-                "matching_type": "inclusive"
-            },
-            {
-                "name": "Raspberry Pi Zero 2 W",
-                "tags": ["pi3-64bit", "pi3-32bit"],
-                "icon": "https://downloads.raspberrypi.com/imager/icons/RPi_Zero_2_W.png",
-                "description": "Raspberry Pi Zero 2 W",
-                "matching_type": "inclusive"
-            },
-            {
                 "name": "No filtering",
                 "tags": [],
                 "description": "Show every possible image",
@@ -102,8 +88,7 @@ function f_generate_json {
             "init_format": "systemd",
             "devices": [
                 "pi5-64bit",
-                "pi4-64bit",
-                "pi3-64bit"
+                "pi4-64bit"
             ]
         }
     ]
