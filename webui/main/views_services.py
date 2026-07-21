@@ -50,6 +50,50 @@ def _order_catalog(catalog):
     order = {g: i for i, g in enumerate(_GROUP_ORDER)}
     return sorted(catalog, key=lambda x: order.get(x.get('group'), 99))
 
+
+def _get_installed_playbooks():
+    """Read the state file and return a set of installed playbook paths."""
+    state_file = '/config/installed-playbooks.yml'
+    installed = set()
+    try:
+        with open(state_file) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                path = line.split(':')[0].strip()
+                if path:
+                    installed.add(path)
+    except (FileNotFoundError, PermissionError):
+        pass
+    return installed
+
+
+def _get_healthcheck_status():
+    """Read runchecks results JSON and return a dict of check_name -> status.
+
+    Status values: 'ok', 'error', 'unknown' (if no data yet).
+    """
+    results_file = '/log/runchecks-results.json'
+    status = {}
+    try:
+        import json
+        with open(results_file) as fh:
+            data = json.load(fh)
+        for check in data.get('checks', []):
+            status[check['name']] = check.get('status', 'unknown')
+    except (FileNotFoundError, PermissionError, json.JSONDecodeError, KeyError):
+        pass
+    return status
+
+
+def _sidebar_context(catalog):
+    """Build context data for the sidebar: installed set and healthcheck status."""
+    return {
+        'installed_playbooks': _get_installed_playbooks(),
+        'healthcheck_status': _get_healthcheck_status(),
+    }
+
 # Visual class per action name when rendered as a button. Arbitrary action
 # names (e.g. "pommes") fall back to a neutral outline style.
 _ACTION_CLS = {
@@ -111,10 +155,12 @@ def services(request):
             docs_md = fh.read()
     except FileNotFoundError:
         pass
+    ordered = _order_catalog(catalog)
     return render(request, 'main/services.html', {
-        'catalog': _order_catalog(catalog),
-        'all_services': _order_catalog(catalog),
+        'catalog': ordered,
+        'all_services': ordered,
         'docs_md': docs_md,
+        **_sidebar_context(catalog),
     })
 
 
@@ -123,9 +169,11 @@ def services_manage(request):
     # Reuse the unified catalog view; the manage page lists deployable
     # service playbooks (those under services/), each linking to its detail.
     catalog = [i for i in get_catalog() if i['group'] == 'services']
+    all_catalog = get_catalog()
     response = render(request, 'main/services.html', {
         'catalog': catalog,
-        'all_services': _order_catalog(get_catalog()),
+        'all_services': _order_catalog(all_catalog),
+        **_sidebar_context(all_catalog),
     })
     response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     return response
@@ -146,11 +194,13 @@ def services_detail(request, playbook):
         action_list.append(_action_button(name))
     logs = (item.get('docs') or {}).get('service_control', {}).get('logs', []) or []
     log_units = [{'name': l.get('name'), 'type': l.get('type', 'log')} for l in logs]
+    all_catalog = get_catalog()
     response = render(request, 'main/services_detail.html', {
         'item': item,
         'action_list': action_list,
         'log_units': log_units,
-        'all_services': get_catalog(),
+        'all_services': all_catalog,
+        **_sidebar_context(all_catalog),
     })
     # Never cache: the inline JS/logic changes frequently during development
     # and a stale cached copy would hide UI fixes.

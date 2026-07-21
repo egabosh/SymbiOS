@@ -26,3 +26,23 @@ register = template.Library()
 def markdown_filter(text):
     """Render a markdown string as safe HTML."""
     return mark_safe(md.markdown(text, extensions=['fenced_code', 'tables', 'nl2br']))
+
+
+@register.filter(name='dict_get')
+def dict_get(d, key):
+    """Get a value from a dictionary by variable key in templates."""
+    if isinstance(d, dict):
+        return d.get(key, '')
+    return ''
+
+
+@register.filter(name='hc_name')
+def hc_name(playbook):
+    """Derive the healthcheck check name from a playbook path.
+
+    'base-services/traefik.yml' -> 'traefik'
+    'services/home-assistant.yml' -> 'home-assistant'
+    """
+    name = playbook.rsplit('/', 1)[-1]  # strip directory
+    name = name.rsplit('.', 1)[0]       # strip .yml
+    return name

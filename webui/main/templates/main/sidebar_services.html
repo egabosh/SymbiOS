@@ -1,3 +1,4 @@
+{% load markdown_extras %}
 {% regroup all_services by group as groups %}
 {% with user_pbs="" %}
 <ul class="nav flex-column">
@@ -25,27 +26,51 @@
         <small class="text-muted text-uppercase fw-bold">Services</small>
       </li>
       {% for svc in g.list %}
+        {% with svc_hc=svc.playbook|hc_name %}
         <li class="nav-item mb-1">
           <a class="nav-link d-flex align-items-center gap-2 py-1"
              href="/services/{{ svc.playbook }}/">
             <i class="bi bi-box"></i>
             <span>{{ svc.menu_label }}</span>
+            {% if svc.playbook in installed_playbooks %}
+              <i class="bi bi-check-circle-fill text-success" style="font-size:0.65rem;" title="Installed"></i>
+            {% endif %}
+            {% with hc_status=healthcheck_status|dict_get:svc_hc %}
+              {% if hc_status == "ok" %}
+                <i class="bi bi-heart-pulse text-success" style="font-size:0.65rem;" title="Healthcheck OK"></i>
+              {% elif hc_status == "error" %}
+                <i class="bi bi-exclamation-triangle-fill text-danger" style="font-size:0.65rem;" title="Healthcheck error"></i>
+              {% endif %}
+            {% endwith %}
           </a>
         </li>
+        {% endwith %}
       {% endfor %}
     {% elif g.grouper == 'base-services' %}
       <li class="nav-item mt-2 mb-1">
         <small class="text-muted text-uppercase fw-bold">Base Services</small>
       </li>
       {% for svc in g.list %}
+        {% with svc_hc=svc.playbook|hc_name %}
         <li class="nav-item mb-1">
           <a class="nav-link d-flex align-items-center gap-2 py-1 text-secondary"
              href="/services/{{ svc.playbook }}/">
             <i class="bi bi-box"></i>
             <span>{{ svc.menu_label }}</span>
             <span class="badge bg-info ms-1" style="font-size:0.55rem;">built-in</span>
+            {% if svc.playbook in installed_playbooks %}
+              <i class="bi bi-check-circle-fill text-success" style="font-size:0.65rem;" title="Installed"></i>
+            {% endif %}
+            {% with hc_status=healthcheck_status|dict_get:svc_hc %}
+              {% if hc_status == "ok" %}
+                <i class="bi bi-heart-pulse text-success" style="font-size:0.65rem;" title="Healthcheck OK"></i>
+              {% elif hc_status == "error" %}
+                <i class="bi bi-exclamation-triangle-fill text-danger" style="font-size:0.65rem;" title="Healthcheck error"></i>
+              {% endif %}
+            {% endwith %}
           </a>
         </li>
+        {% endwith %}
       {% endfor %}
     {% endif %}
   {% empty %}
