@@ -28,6 +28,32 @@ import json
 import yaml
 import os
 import re
+import subprocess
+
+REAPPLY_STATUS_FILE = '/tmp/symbios-reapply.status'
+
+
+def _start_reapply(domain_only=False):
+    """Start symbios-reapply.sh in the background (non-blocking).
+
+    The script writes its status to /tmp/symbios-reapply.status so the
+    WebUI can poll progress without blocking the HTTP response.
+    """
+    flag = '--domain-only' if domain_only else ''
+    cmd = f'nohup /usr/local/sbin/symbios-reapply.sh {flag} > /dev/null 2>&1 &'
+    try:
+        run_command(cmd, timeout=5)
+    except Exception:
+        pass  # non-critical
+
+
+def _reapply_status():
+    """Read the current reapply status from the status file."""
+    try:
+        with open(REAPPLY_STATUS_FILE, 'r') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return 'idle'
 
 
 
@@ -70,6 +96,9 @@ def settings_ddns(request):
                             messages.warning(request, 'DDNS playbook completed with issues.')
                     except Exception as e:
                         messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
+                # Reapply all playbooks with updated domain in the background
+                messages.info(request, 'Reapplying all playbooks in the background...')
+                _start_reapply(domain_only=False)
             elif dns_mode == 'self-managed':
                 self_domain = request.POST.get('self_domain', '').strip().lower().rstrip('.')
                 if not self_domain:
@@ -83,6 +112,9 @@ def settings_ddns(request):
                 config['all']['vars']['base_domain'] = self_domain
                 _save_inventory_config(config)
                 messages.success(request, f'DNS settings saved for {self_domain}.')
+                # Reapply all playbooks with updated domain in the background
+                messages.info(request, 'Reapplying all playbooks in the background...')
+                _start_reapply(domain_only=False)
             else:
                 # deSEC mode (existing behavior)
                 ddns_host = request.POST.get('ddns_host', '')
@@ -109,6 +141,9 @@ def settings_ddns(request):
                         messages.warning(request, 'DDNS playbook completed with issues.')
                 except Exception as e:
                     messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
+                # Reapply all playbooks with updated domain in the background
+                messages.info(request, 'Reapplying all playbooks in the background...')
+                _start_reapply(domain_only=False)
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_ddns')
@@ -855,3 +890,33 @@ def settings_playbooks_delete(request):
     from .playbook_catalog import get_catalog
     get_catalog(force=True)
     return JsonResponse({'ok': True, 'message': f'Deleted {fn}'})
+
+
+@login_required
+def settings_reapply_status(request):
+    """AJAX GET — return current reapply progress.
+
+    Status file values:
+      idle                     — not running
+      running                  — in progress (no detail)
+      running:<n>/<total> <pb> — in progress with detail
+      done:<exit_code>         — finished (0 = success)
+    """
+    raw = _reapply_status()
+    if raw.startswith('running:'):
+        parts = raw.split(' ', 2)
+        progress = parts[0].replace('running:', '')
+        playbook = parts[1] if len(parts) > 1 else ''
+        return JsonResponse({
+            'status': 'running',
+            'progress': progress,
+            'playbook': playbook,
+        })
+    elif raw.startswith('done:'):
+        code = raw.replace('done:', '')
+        return JsonResponse({
+            'status': 'done',
+            'success': code == '0',
+        })
+    else:
+        return JsonResponse({'status': 'idle'})

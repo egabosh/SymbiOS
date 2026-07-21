@@ -36,6 +36,7 @@
 
 <div class="d-flex align-items-center gap-3 mb-2 flex-wrap">
   <h4 class="mb-0">Status</h4>
+  <span id="installed-badge" class="badge bg-secondary fs-6">…</span>
   <span id="overall-badge" class="badge bg-secondary fs-6">…</span>
 </div>
 <div id="status-area" class="mb-3">
@@ -103,6 +104,15 @@ function loadStatus() {
       const b = d.overall_badge || {label: '?', cls: 'bg-secondary'};
       ob.className = 'badge fs-6 ' + b.cls;
       ob.textContent = b.label;
+      // Installed badge from state file
+      const ib = document.getElementById('installed-badge');
+      if (d.installed) {
+        ib.className = 'badge fs-6 bg-success';
+        ib.textContent = 'Installed';
+      } else {
+        ib.className = 'badge fs-6 bg-secondary';
+        ib.textContent = 'Not installed';
+      }
       const area = document.getElementById('status-area');
       if (!d.services || !d.services.length) {
         area.innerHTML = '<div class="text-muted small">no managed units</div>';

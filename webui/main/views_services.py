@@ -186,11 +186,13 @@ def services_action(request, playbook):
         for old in [k for k, v in _JOBS.items() if v['done']]:
             _JOBS.pop(old, None)
         _JOBS[job_id] = job
-    threading.Thread(target=_run_job, args=(job, cmd), daemon=True).start()
+    threading.Thread(
+        target=_run_job, args=(job, cmd, playbook, action), daemon=True
+    ).start()
     return JsonResponse({'job': job_id, 'action': action, 'command': display_cmd})
 
 
-def _run_job(job, cmd):
+def _run_job(job, cmd, playbook=None, action=None):
     """Run the resolved host command, appending output as it arrives."""
     overall_ok = True
     try:
@@ -208,6 +210,19 @@ def _run_job(job, cmd):
     with job['lock']:
         job['done'] = True
         job['success'] = overall_ok
+
+    # Update the installed-playbooks state file after a successful (Re)Install
+    # or Uninstall so symbios-reapply.sh knows which playbooks to re-run.
+    if playbook and action in ('__playbook__', 'uninstall') and overall_ok:
+        state_action = 'set' if action == '__playbook__' else 'unset'
+        state_cmd = (
+            f'symbios-state.sh {state_action} {playbook}'
+        )
+        try:
+            from .utils.ssh_exec import run_command as _run_command
+            _run_command(state_cmd, timeout=10)
+        except Exception:
+            pass  # non-critical; log failure silently
 
 
 @login_required
@@ -377,8 +392,19 @@ def services_status(request, playbook):
         })
     states = [s['state'] for s in out]
     overall = _aggregate_state(states)
+
+    # Check if playbook is installed in the state file
+    installed = False
+    try:
+        from .utils.ssh_exec import run_command as _run_command
+        rc, _, _ = _run_command(f'symbios-state.sh is-installed {playbook}', timeout=5)
+        installed = (rc == 0)
+    except Exception:
+        pass  # non-critical, default to False
+
     return JsonResponse({
         'services': out,
         'overall': overall,
         'overall_badge': _state_badge(overall),
+        'installed': installed,
     })

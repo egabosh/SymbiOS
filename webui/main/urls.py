@@ -60,6 +60,7 @@ urlpatterns = [
     path('settings/playbooks/', views_settings.settings_playbooks, name='settings_playbooks'),
     path('settings/playbooks/upload/', views_settings.settings_playbooks_upload, name='settings_playbooks_upload'),
     path('settings/playbooks/delete/', views_settings.settings_playbooks_delete, name='settings_playbooks_delete'),
+    path('settings/reapply/status/', views_settings.settings_reapply_status, name='settings_reapply_status'),
     path('logs/', views_logs.logs, name='logs'),
     path('logs/stream/', views.logs_stream, name='logs_stream'),
     path('logs/containers/', views.container_list, name='logs_containers'),

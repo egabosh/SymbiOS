@@ -31,6 +31,7 @@ the WebUI — each one stronger together than alone. SymbiOS stands for
 6. [Networking and Traefik routing](#6-networking-and-traefik-routing)
 7. [Installation](#7-installation)
 8. [Managing the system (WebUI / SSH)](#8-managing-the-system-webui--ssh)
+   - [State-file install tracking](#state-file-install-tracking)
 9. [Adding your own service](#9-adding-your-own-service)
 10. [User-uploaded playbooks](#10-user-uploaded-playbooks)
 11. [License](#license)
@@ -598,7 +599,61 @@ Conventions:
   `ansible-playbook --connection=local --inventory
   /home/docker/symbios-ui/config/inventory.yml --limit localhost -e
   ansible_python_interpreter=/usr/bin/python3 /home/SymbiOS/services/<name>.yml`
-  (or `docker compose` directly in `/home/docker/<name>/`).
+   (or `docker compose` directly in `/home/docker/<name>/`).
+
+### State-file install tracking
+
+SymbiOS keeps a persistent record of which playbooks are currently installed in
+`/home/docker/symbios-ui/config/installed-playbooks.yml`. Each line contains a
+playbook path and an ISO timestamp:
+
+```yaml
+# Auto-maintained by playbooks via symbios-state.sh
+base-services/traefik.yml: "2025-07-21T12:30:00Z"
+base-services/authelia.yml: "2025-07-21T12:30:05Z"
+```
+
+**How it works:**
+
+- **`symbios-state.sh`** — the state manager script (`/usr/local/sbin/symbios-state.sh`).
+  Commands: `set <path>` (register), `unset <path>` (remove), `list` (print paths),
+  `is-installed <path>` (exit 0/1).
+
+- **Automatic registration** — every time the WebUI runs (Re)Install on a playbook
+  successfully, it calls `symbios-state.sh set <playbook>` on the host. Uninstall
+  calls `symbios-state.sh unset <playbook>`.
+
+- **`symbios-reapply.sh`** — the reapply script (`/usr/local/sbin/symbios-reapply.sh`).
+  Reads the state file and re-runs all registered playbooks in dependency order.
+  Runs in the background (nohup) so the WebUI never blocks.
+
+**When reapply runs:**
+
+- After any DNS settings save (domain change), all playbooks are re-run to apply
+  the new domain across every service.
+- The WebUI can trigger a reapply via `symbios-reapply.sh [--domain-only]`.
+- Progress is written to `/tmp/symbios-reapply.status` and can be polled by the
+  WebUI without blocking the HTTP response.
+
+**Manual equivalents:**
+
+```bash
+# List installed playbooks
+symbios-state.sh list
+
+# Check if a playbook is installed
+symbios-state.sh is-installed base-services/traefik.yml
+echo $?  # 0 = installed, 1 = not installed
+
+# Full reapply (all installed playbooks)
+symbios-reapply.sh
+
+# Domain-only reapply (just traefik, authelia, ldap, etc.)
+symbios-reapply.sh --domain-only
+
+# View reapply log
+cat /home/docker/symbios-ui/log/reapply.log
+```
 
 ---
 
