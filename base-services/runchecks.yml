@@ -66,14 +66,12 @@
         mode: '0700'
 
     - name: /usr/local/sbin/runchecks.sh
-      blockinfile:
-        path: /usr/local/sbin/runchecks.sh
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/runchecks.sh
         mode: "0500"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
+        content: |
           #!/bin/bash
           # Source gaboshlib and set up environment
           . /etc/bash/gaboshlib.include
@@ -141,8 +139,6 @@
               mv "$g_json_file.tmp" "$g_json_file" || \
               echo "$g_json" > "$g_json_file"
           done
-        backup: yes
-        validate: /bin/bash -n %s
       notify:
       - Restart runchecks
 
@@ -154,14 +150,12 @@
         line: "cron rsyslog sshd"
 
     - name: /etc/systemd/system/runchecks.service
-      blockinfile:
-        path: /etc/systemd/system/runchecks.service
-        create: yes
-        mode: 0444
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/runchecks.service
+        mode: "0444"
         owner: root
         group: root
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
+        content: |
           [Unit]
           Description=checks
           After=syslog.target network.target
@@ -169,7 +163,7 @@
           [Service]
           Type=simple
           User=root
-          ExecStart=/usr/local/sbin/runchecks.sh
+          ExecStart=/bin/bash /usr/local/sbin/runchecks.sh
           Restart=on-abort
           
           [Install]

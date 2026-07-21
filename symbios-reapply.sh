@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # SymbiOS - Debian-based server management platform
 # Copyright (C) 2025  SymbiOS Contributors
 #
@@ -13,8 +15,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-#!/bin/bash
 
 # symbios-reapply.sh — Re-run all installed playbooks.
 #
