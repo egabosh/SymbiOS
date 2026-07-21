@@ -188,7 +188,21 @@ g_loopdev=""
 # Step 6: Compress output image
 g_output_file="${g_output_dir}/symbpios-$(date +%Y%m%d).img.xz"
 echo "Compressing image to ${g_output_file}..."
-xz -9 -T0 -c "${g_image_file}" > "${g_output_file}"
+
+# Use -1 (fast) instead of -9 (extremely slow, RAM-hungry) and limit threads
+# to avoid OOM on systems with limited RAM. Level 1 already achieves good
+# compression for disk images; level 9 saves ~5% more but takes 10x longer
+# and uses ~600MB RAM per thread.
+xz -1 -T2 -c "${g_image_file}" > "${g_output_file}"
+
+# Sanity check: output file must not be empty
+if [ ! -s "${g_output_file}" ]
+then
+    echo "ERROR: Compressed image is empty (0 bytes). xz may have failed."
+    echo "Try running without -T flag or check available disk space / memory."
+    rm -f "${g_output_file}"
+    exit 1
+fi
 
 g_output_size="$(du -h "${g_output_file}" | cut -f1)"
 
