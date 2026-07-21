@@ -49,7 +49,6 @@ EOF
 function f_generate_json {
     local f_image_path="$1"
     local f_image_name="$2"
-    local f_output_path="$3"
 
     cat << JSONEOF
 {
@@ -176,7 +175,7 @@ g_json_name="${g_json_name%.img}"
 g_json_name="${g_json_name}.json"
 g_json_path="${g_output_dir}/${g_json_name}"
 
-f_generate_json "${g_image_path}" "${g_image_name}" "${g_json_path}"
+f_generate_json "${g_image_path}" "${g_image_name}" > "${g_json_path}"
 
 echo "=== Content Repository JSON generated ==="
 echo "Output: ${g_json_path}"
