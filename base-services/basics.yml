@@ -136,7 +136,7 @@
         owner: root
         group: root
         mode: '0755'
-      when: not nocontainer.stat.exists
+      when: nocontainer.stat.exists
 
     - name: Install symbios-reapply.sh
       ansible.builtin.copy:
@@ -145,7 +145,7 @@
         owner: root
         group: root
         mode: '0755'
-      when: not nocontainer.stat.exists
+      when: nocontainer.stat.exists
 
     - name: Install symbios-exec.sh
       ansible.builtin.copy:
@@ -154,7 +154,7 @@
         owner: root
         group: root
         mode: '0755'
-      when: not nocontainer.stat.exists
+      when: nocontainer.stat.exists
 
     - name: Install symbios-ldap.sh
       ansible.builtin.copy:
@@ -163,7 +163,7 @@
         owner: root
         group: root
         mode: '0755'
-      when: not nocontainer.stat.exists
+      when: nocontainer.stat.exists
 
     - name: Create symbios user
       ansible.builtin.user:
@@ -179,7 +179,7 @@
           - adm
         append: true
         state: present
-      when: not nocontainer.stat.exists
+      when: nocontainer.stat.exists
 
     - name: Allow symbios passwordless sudo
       ansible.builtin.lineinfile:
@@ -188,7 +188,7 @@
         create: true
         mode: '0440'
         validate: "visudo -cf %s"
-      when: not nocontainer.stat.exists
+      when: nocontainer.stat.exists
 
     - name: Install Basic Packages if not running in container
       apt:
