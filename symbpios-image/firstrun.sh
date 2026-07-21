@@ -172,4 +172,17 @@ bash /tmp/symbios-install.sh
 f_install_exit=$?
 
 echo "SymbiOS installation finished at: $(date) (exit code: ${f_install_exit})"
-echo "=== End of SymbiOS First Boot ==="
+
+# Mark first boot as complete — prevents re-execution on next boot
+if [ "${f_install_exit}" -eq 0 ]
+then
+    touch /var/lib/symbios-firstrun.done
+    echo "First boot marked as complete"
+    echo "=== End of SymbiOS First Boot ==="
+    echo "Rebooting in 5 seconds..."
+    sleep 5
+    reboot
+else
+    echo "ERROR: Installation failed (exit code: ${f_install_exit})"
+    echo "=== First boot NOT marked — will retry on next boot ==="
+fi
