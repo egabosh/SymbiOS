@@ -92,6 +92,10 @@
       when: nocontainer.stat.exists == true
 
 
+
+    - name: Register playbook as installed
+      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set hardening.yml
+      changed_when: false
   handlers:
 
     - name: Restart sshd

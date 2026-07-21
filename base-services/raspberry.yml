@@ -292,3 +292,7 @@
           
           dtoverlay=w1-gpio
 
+
+    - name: Register playbook as installed
+      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set raspberry.yml
+      changed_when: false
