@@ -164,6 +164,27 @@ fi
 echo "Image file: ${g_image_file}"
 echo "Image size: $(du -h "${g_image_file}" | cut -f1)"
 
+# Step 2b: Expand image to make room for all packages.
+# The stock Pi OS image is too small for desktop + all SymbiOS packages.
+echo "Expanding image by 8GB for package pre-installation..."
+g_orig_size=$(stat -c%s "${g_image_file}")
+g_expand_bytes=$((8 * 1024 * 1024 * 1024))
+truncate -s +${g_expand_bytes} "${g_image_file}"
+
+# Expand the root partition (partition 2) into the new space
+g_loopdev_tmp=$(losetup --find --show --partscan "${g_image_file}")
+sleep 1
+
+# Use parted to resize partition 2 to fill remaining space
+parted -s "${g_loopdev_tmp}" resizepart 2 100%
+
+# Resize the ext4 filesystem to fill the enlarged partition
+e2fsck -f -y "${g_loopdev_tmp}p2" || true
+resize2fs "${g_loopdev_tmp}p2"
+
+losetup -d "${g_loopdev_tmp}"
+echo "Image expanded: $(du -h "${g_image_file}" | cut -f1)"
+
 # Step 3: Mount boot partition via loop device
 echo "Attaching image as loop device with partition scanning..."
 g_loopdev=$(losetup --find --show --partscan "${g_image_file}")
