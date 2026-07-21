@@ -18,6 +18,7 @@ from django.shortcuts import render, Http404
 from django.http import JsonResponse
 import threading
 import uuid
+import os
 
 # In-memory registry of running action jobs. The WebUI runs a single gunicorn
 # worker, so this is shared across requests. Jobs capture live command output
@@ -102,9 +103,18 @@ def _aggregate_state(states):
 @login_required
 def services(request):
     catalog = get_catalog()
+    # Load the services documentation markdown
+    docs_md = ''
+    docs_path = os.path.join(os.path.dirname(__file__), 'docs', 'services.md')
+    try:
+        with open(docs_path) as fh:
+            docs_md = fh.read()
+    except FileNotFoundError:
+        pass
     return render(request, 'main/services.html', {
         'catalog': _order_catalog(catalog),
         'all_services': _order_catalog(catalog),
+        'docs_md': docs_md,
     })
 
 

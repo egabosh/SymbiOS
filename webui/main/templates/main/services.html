@@ -1,63 +1,26 @@
 {% extends "main/base.html" %}
+{% load markdown_extras %}
 {% block sidebar %}{% include "main/sidebar_services.html" %}{% endblock %}
 {% block content %}
 <h2>Services</h2>
-<p class="text-muted">All services are managed through Ansible playbooks. Base-services playbooks are built into SymbiOS; service playbooks deploy additional containers.</p>
 
-{% regroup catalog by group as groups %}
-{% for g in groups %}
-  <h4 class="mt-4 mb-3">{{ g.grouper }}</h4>
-  <div class="row">
-    {% for svc in g.list %}
-      <div class="col-md-4 mb-3">
-        <div class="card h-100">
-          <div class="card-body d-flex flex-column">
-            <h5 class="card-title d-flex align-items-center gap-2 flex-wrap">
-              {{ svc.title }}
-              {% if svc.group == 'base-services' %}
-                <span class="badge bg-info" style="font-size:0.55rem;">built-in</span>
-              {% endif %}
-              {% if svc.group == 'user-playbooks' %}
-                <span class="badge bg-success" style="font-size:0.55rem;">custom</span>
-              {% endif %}
-              <span class="card-status badge bg-secondary" data-playbook="{{ svc.playbook }}">…</span>
-            </h5>
-            <p class="card-text small flex-grow-1">{{ svc.docs.description|truncatewords:30 }}</p>
-            <a href="/services/{{ svc.playbook }}/" class="btn btn-sm btn-outline-primary mt-auto">Details</a>
-          </div>
-        </div>
-      </div>
-    {% endfor %}
-  </div>
-{% endfor %}
-{% endblock %}
+<style>
+  .services-docs h1 { font-size: 1.4rem; margin-top: 1.5rem; }
+  .services-docs h2 { font-size: 1.25rem; margin-top: 1.8rem; border-bottom: 1px solid var(--bs-border-color); padding-bottom: 0.3rem; }
+  .services-docs h3 { font-size: 1.1rem; margin-top: 1.4rem; }
+  .services-docs table { width: 100%; margin: 1rem 0; }
+  .services-docs th, .services-docs td { padding: 0.4rem 0.7rem; border: 1px solid var(--bs-border-color); }
+  .services-docs th { background: var(--bs-tertiary-bg); }
+  .services-docs pre { background: var(--bs-dark-bg-subtle); color: var(--bs-body-color); padding: 0.8rem; border-radius: 0.375rem; overflow-x: auto; }
+  .services-docs code { font-size: 0.88em; }
+  .services-docs p code { background: var(--bs-tertiary-bg); padding: 0.15em 0.35em; border-radius: 0.2rem; }
+  .services-docs blockquote { border-left: 3px solid var(--bs-primary); margin: 1rem 0; padding: 0.5rem 1rem; background: var(--bs-tertiary-bg); }
+  .services-docs ul { padding-left: 1.5rem; }
+  .services-docs li { margin-bottom: 0.3rem; }
+  .services-docs hr { margin: 1.5rem 0; }
+</style>
 
-{% block scripts %}
-<script>
-const STATE_META = {
-  running: {cls: 'bg-success', label: 'Running'},
-  stopped: {cls: 'bg-danger', label: 'Stopped'},
-  'not-installed': {cls: 'bg-secondary', label: 'Not installed'},
-  error: {cls: 'bg-warning text-dark', label: 'Error'},
-};
-function applyBadge(el, state) {
-  const m = STATE_META[state] || STATE_META['not-installed'];
-  el.className = 'card-status badge ' + m.cls;
-  el.textContent = m.label;
-}
-function aggregateState(services) {
-  if (!services.length) return 'not-installed';
-  const st = services.map(s => s.state);
-  if (st.every(s => s === 'not-installed')) return 'not-installed';
-  if (st.some(s => s === 'running')) return 'running';
-  return 'stopped';
-}
-document.querySelectorAll('.card-status[data-playbook]').forEach(el => {
-  const pb = el.dataset.playbook;
-  fetch('/services/' + pb + '/status/')
-    .then(r => r.json())
-    .then(d => applyBadge(el, aggregateState(d.services || [])))
-    .catch(() => applyBadge(el, 'error'));
-});
-</script>
+<div class="services-docs">
+  {{ docs_md|markdown }}
+</div>
 {% endblock %}
