@@ -242,6 +242,38 @@ systemctl --root="${g_rootfs}" disable gdm3.service 2>/dev/null || true
 systemctl --root="${g_rootfs}" disable sddm.service 2>/dev/null || true
 echo "Graphical interface disabled in systemd"
 
+# Disable Raspberry Pi OS first-boot wizard (keyboard layout, user creation).
+# This is handled by cloud-init in Trixie. We handle user creation in
+# firstrun.sh (Imager customizations) and basics.yml (symbios user).
+systemctl --root="${g_rootfs}" mask cloud-init.service 2>/dev/null || true
+systemctl --root="${g_rootfs}" mask cloud-init-local.service 2>/dev/null || true
+systemctl --root="${g_rootfs}" mask cloud-final.service 2>/dev/null || true
+systemctl --root="${g_rootfs}" mask cloud-config.service 2>/dev/null || true
+
+# Disable the first-boot wizard modules in cloud-init config
+mkdir -p "${g_rootfs}/etc/cloud/cloud.cfg.d"
+cat > "${g_rootfs}/etc/cloud/cloud.cfg.d/99-disable-first-boot.cfg" << 'CIEOF'
+# Disable Pi OS first-boot wizard — SymbiOS handles setup via firstrun.sh
+cloud_init_modules:
+  - clear_hotplug
+  - write_password
+  - users_groups
+runcmd: []
+CIEOF
+
+# Create cloud-init semaphore so it thinks it already ran
+mkdir -p "${g_rootfs}/var/lib/cloud/sem"
+cat > "${g_rootfs}/var/lib/cloud/sem/semaphore" << 'SEMEOF'
+{
+  "mode": "once",
+  "name": "SymbiOS",
+  "data": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "stamp": "$(date +%s)"
+}
+SEMEOF
+
+echo "Cloud-init first-boot wizard disabled"
+
 # Ensure getty runs on tty1 with autologin so user can see output
 mkdir -p "${g_rootfs}/etc/systemd/system/getty@tty1.service.d"
 cat > "${g_rootfs}/etc/systemd/system/getty@tty1.service.d/override.conf" << 'GETTYEOF'
