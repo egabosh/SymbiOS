@@ -133,7 +133,7 @@ fi
 if [[ "${g_image_source}" == *.xz ]]
 then
     echo "Extracting image (this may take a moment)..."
-    xz -dk -T2 "${g_image_source}" -c > "${g_work_dir}/raspios.img"
+    ionice -c3 nice -n19 xz -dk -T2 "${g_image_source}" -c > "${g_work_dir}/raspios.img"
     g_image_file="${g_work_dir}/raspios.img"
 elif [[ "${g_image_source}" == *.img ]]
 then
@@ -193,7 +193,7 @@ echo "Compressing image to ${g_output_file}..."
 # to avoid OOM on systems with limited RAM. Level 1 already achieves good
 # compression for disk images; level 9 saves ~5% more but takes 10x longer
 # and uses ~600MB RAM per thread.
-xz -1 -T2 -c "${g_image_file}" > "${g_output_file}"
+ionice -c3 nice -n19 xz -1 -T2 -c "${g_image_file}" > "${g_output_file}"
 
 # Sanity check: output file must not be empty
 if [ ! -s "${g_output_file}" ]
