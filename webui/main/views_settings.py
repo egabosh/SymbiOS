@@ -842,7 +842,7 @@ def settings_disk_setup(request):
     cmds.append(f"mount {target} /home.new")
 
     # Copy data
-    cmds.append("rsync -av --exclude='.trashed-*' /home/ /home.new/")
+    cmds.append("rsync -av --exclude=docker/var-lib-docker --exclude=docker/var-lib-containerd --exclude='.trashed-*' /home/ /home.new/")
 
     # Get UUID for fstab
     if encrypt:

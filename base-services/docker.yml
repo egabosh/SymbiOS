@@ -94,6 +94,14 @@
         state: directory
         mode: '0710'
 
+    - name: Create docker-data dir
+      ansible.builtin.file:
+        path: /home/docker/var-lib-containerd
+        owner: root
+        group: root
+        state: directory
+        mode: '0710'
+
     - name: Create dir for container defaults
       ansible.builtin.file:
         path: /home/docker/_defaults
@@ -106,6 +114,14 @@
       ansible.builtin.file:
         src: /home/docker/var-lib-docker
         dest: /var/lib/docker
+        owner: root
+        group: root
+        state: link
+
+    - name: Create /var/lib/docker -> /home/docker/var-lib-containerd symlink
+      ansible.builtin.file:
+        src: /home/docker/var-lib-containerd
+        dest: /var/lib/containerd
         owner: root
         group: root
         state: link
@@ -340,7 +356,7 @@
           docker system prune -af
 
           # Find all Docker compose directories excluding special ones
-          find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "mailcow-dockerized$|.del$|.bak$|.old$|var-lib-docker$" | while read f_docker_dir
+          find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "mailcow-dockerized$|.del$|.bak$|.old$|var-lib-docker$|var-lib-containerd$" | while read f_docker_dir
           do
             # Skip directories without a compose file
             if [ ! -f "$f_docker_dir/docker-compose.yml" ]
