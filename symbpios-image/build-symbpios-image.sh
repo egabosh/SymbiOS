@@ -305,7 +305,7 @@ mount -t sysfs sysfs "${g_rootfs}/sys"
 # Copy host resolv.conf for DNS resolution inside chroot
 cp /etc/resolv.conf "${g_rootfs}/etc/resolv.conf"
 
-# All packages from basics.yml + ansible from install.sh
+# All packages from basics.yml + raspberry.yml + ansible from install.sh
 g_packages="
 file bc psmisc procps htop iotop sysstat strace net-tools vim git
 netcat-traditional debconf-utils iputils-ping lsof inotify-tools rsync
@@ -319,6 +319,14 @@ crudini kpartx hd-idle jnettop tmux ethtool logrotate smartmontools at
 certbot btrfs-progs mdadm ufw btrfsmaintenance sudo ldmtool traceroute
 mailutils rsyslog postgresql-client ntpsec-ntpdate systemd-resolved
 ansible
+x11vnc cinnamon-desktop-environment cinnamon-l10n gnome-terminal
+dconf-cli dphys-swapfile tsdecrypt x264 x265 flatpak
+ttf-mscorefonts-installer fonts-terminus mint-y-icons arj p7zip
+unace unadf bvi fdupes debootstrap geoip-bin speedtest-cli
+gnome-characters blueman dconf-editor vlc gthumb mediainfo-gui
+easytag audacity asunder audacious guvcview easyeffects calf-plugins
+gpodder wireguard wireguard-tools tinyproxy rpi-imager hardinfo
+redshift-gtk heimdall-flash adb fastboot mkbootimg brasero
 "
 
 chroot "${g_rootfs}" /bin/bash -c "
