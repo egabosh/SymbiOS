@@ -55,6 +55,11 @@ function f_cleanup {
     # Unmount and detach loop device if still attached
     if [ -n "${g_loopdev:-}" ] && losetup "${g_loopdev}" &>/dev/null
     then
+        # Unmount virtual filesystems first (in case of failure during chroot)
+        umount "${g_work_dir}/rootfs/sys" 2>/dev/null || true
+        umount "${g_work_dir}/rootfs/proc" 2>/dev/null || true
+        umount "${g_work_dir}/rootfs/dev/pts" 2>/dev/null || true
+        umount "${g_work_dir}/rootfs/dev" 2>/dev/null || true
         umount "${g_work_dir}/rootfs" 2>/dev/null || true
         umount "${g_loopdev}p1" 2>/dev/null || true
         umount "${g_loopdev}p2" 2>/dev/null || true
@@ -285,6 +290,62 @@ GETTYEOF
 echo "rc.local installed, lightdm masked"
 ls -la "${g_mount_point}/firstrun.sh"
 ls -la "${g_rootfs}/etc/rc.local"
+
+# Step 4b: Pre-install packages and upgrade to speed up first boot.
+# This runs apt inside the image's root filesystem so packages are
+# already present when the Pi boots and the playbook runs.
+echo "Pre-installing packages in image (this may take a while)..."
+
+# Mount virtual filesystems for chroot
+mount --bind /dev "${g_rootfs}/dev"
+mount --bind /dev/pts "${g_rootfs}/dev/pts"
+mount -t proc proc "${g_rootfs}/proc"
+mount -t sysfs sysfs "${g_rootfs}/sys"
+
+# Copy host resolv.conf for DNS resolution inside chroot
+cp /etc/resolv.conf "${g_rootfs}/etc/resolv.conf"
+
+# All packages from basics.yml + ansible from install.sh
+g_packages="
+file bc psmisc procps htop iotop sysstat strace net-tools vim git
+netcat-traditional debconf-utils iputils-ping lsof inotify-tools rsync
+dos2unix locales iproute2 curl moreutils telnet libstring-approx-perl
+postfix zip whois libfile-readbackwards-perl pwgen jq apt-transport-https
+html-xml-utils wget bind9-host bind9-dnsutils python3-pip python3-venv
+python3-html2text man-db cryptsetup ffmpeg mediainfo nmap
+libcrypt-cbc-perl libcrypt-des-perl cifs-utils golang make sshfs
+imagemagick libimage-exiftool-perl sqlite3 openssh-server gpg rblcheck
+crudini kpartx hd-idle jnettop tmux ethtool logrotate smartmontools at
+certbot btrfs-progs mdadm ufw btrfsmaintenance sudo ldmtool traceroute
+mailutils rsyslog postgresql-client ntpsec-ntpdate systemd-resolved
+ansible
+"
+
+chroot "${g_rootfs}" /bin/bash -c "
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get -y update --allow-releaseinfo-change
+    apt-get -y install --no-install-recommends ${g_packages}
+    apt-get -y dist-upgrade
+    apt-get -y autoremove
+    apt-get -y clean
+    rm -rf /var/lib/apt/lists/*
+"
+
+# Install ansible-galaxy collection
+chroot "${g_rootfs}" /bin/bash -c "
+    ansible-galaxy collection install community.general 2>/dev/null || true
+"
+
+# Remove resolv.conf copy (will be regenerated on boot)
+rm -f "${g_rootfs}/etc/resolv.conf"
+
+# Unmount virtual filesystems
+umount "${g_rootfs}/sys"
+umount "${g_rootfs}/proc"
+umount "${g_rootfs}/dev/pts"
+umount "${g_rootfs}/dev"
+
+echo "Package pre-installation complete"
 
 # Step 5: Unmount
 echo "Unmounting partitions..."
