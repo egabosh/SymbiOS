@@ -181,10 +181,26 @@ mount "${g_loopdev}p1" "${g_mount_point}"
 
 echo "Boot partition mounted at ${g_mount_point}"
 
-# Step 4: Copy firstrun.sh and create systemd service for first-boot execution
+# Step 4: Copy firstrun.sh, disable splash, and create systemd service
 echo "Installing firstrun.sh and first-boot systemd service..."
 cp "${g_script_dir}/firstrun.sh" "${g_mount_point}/firstrun.sh"
 chmod +x "${g_mount_point}/firstrun.sh"
+
+# Disable splash screen on boot partition so first-boot output is visible.
+# Remove 'quiet' and 'splash' from cmdline.txt so kernel messages are shown.
+if [ -f "${g_mount_point}/cmdline.txt" ]
+then
+    sed -i 's/ quiet//g; s/ splash//g' "${g_mount_point}/cmdline.txt"
+    echo "cmdline.txt: removed quiet and splash"
+    cat "${g_mount_point}/cmdline.txt"
+fi
+
+# Disable rainbow splash in config.txt
+if [ -f "${g_mount_point}/config.txt" ]
+then
+    echo "disable_splash=1" >> "${g_mount_point}/config.txt"
+    echo "config.txt: added disable_splash=1"
+fi
 
 # Create systemd service on root partition that runs firstrun.sh once on first boot.
 # On Trixie, boot partition is at /boot/firmware, so firstrun.sh path varies.
@@ -201,21 +217,26 @@ fi
 
 mount "${g_root_dev}" "${g_rootfs}"
 
-# Create the first-boot systemd service
+# Create the first-boot systemd service.
+# TTY1 is used for visible console output so the user can watch the
+# installation progress instead of being stuck behind a splash screen.
 cat > "${g_rootfs}/etc/systemd/system/symbios-firstrun.service" << 'SVCEOF'
 [Unit]
 Description=SymbiOS First Boot Installer
-After=network-online.target
+After=network-online.target plymouth-quit.service
 Wants=network-online.target
 ConditionPathExists=!/var/lib/symbios-firstrun.done
 
 [Service]
 Type=oneshot
+ExecStartPre=/bin/systemctl stop plymouth.service 2>/dev/null || true
+ExecStartPre=/bin/systemctl stop plymouth-quit.service 2>/dev/null || true
 ExecStart=/bin/bash /boot/firmware/firstrun.sh
 ExecStartPost=/bin/touch /var/lib/symbios-firstrun.done
 RemainAfterExit=yes
-StandardOutput=journal
-StandardError=journal
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
 
 [Install]
 WantedBy=multi-user.target
@@ -224,6 +245,14 @@ SVCEOF
 # Enable the service
 mkdir -p "${g_rootfs}/var/lib"
 ln -sf "/etc/systemd/system/symbios-firstrun.service" "${g_rootfs}/etc/systemd/system/multi-user.target.wants/symbios-firstrun.service"
+
+# Ensure getty runs on tty1 so user can see output and interact
+mkdir -p "${g_rootfs}/etc/systemd/system/getty@tty1.service.d"
+cat > "${g_rootfs}/etc/systemd/system/getty@tty1.service.d/override.conf" << 'GETTYEOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
+GETTYEOF
 
 echo "First-boot service installed"
 ls -la "${g_mount_point}/firstrun.sh"

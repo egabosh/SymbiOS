@@ -22,11 +22,24 @@
 # This script processes Raspberry Pi Imager customizations (user, WiFi,
 # SSH keys) before running the SymbiOS installer, so users can fully
 # customize the image via the Imager.
+#
+# Output is visible on the console (tty1) via the systemd service.
+# This script also logs to /var/log/symbios-firstrun.log.
 
+# Stop plymouth splash screen so output is visible
+systemctl stop plymouth.service 2>/dev/null || true
+systemctl stop plymouth-quit.service 2>/dev/null || true
+systemctl stop plymouth-read-write.service 2>/dev/null || true
+
+# Clear screen for clean output
+clear
+
+# Log to both console and file
 exec > >(tee -a /var/log/symbios-firstrun.log) 2>&1
 
 echo "=== SymbiOS First Boot Installer ==="
 echo "Started at: $(date)"
+echo ""
 
 # --- Process Raspberry Pi Imager customizations ---
 
