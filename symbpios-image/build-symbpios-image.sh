@@ -166,12 +166,12 @@ echo "Image size: $(du -h "${g_image_file}" | cut -f1)"
 
 # Step 2b: Expand image to make room for all packages.
 # The stock Pi OS image is too small for desktop + all SymbiOS packages.
-# Skip if already expanded (idempotent rebuilds).
+# Skip if root partition is already >= 8GB (idempotent rebuilds).
 g_orig_size=$(stat -c%s "${g_image_file}")
-g_min_size=$((12 * 1024 * 1024 * 1024))
+g_min_size=$((8 * 1024 * 1024 * 1024))
 if [ "${g_orig_size}" -ge "${g_min_size}" ]
 then
-    echo "Image already expanded ($(du -h "${g_image_file}" | cut -f1)), skipping expansion"
+    echo "Image already >= 8GB ($(du -h "${g_image_file}" | cut -f1)), skipping expansion"
 else
     g_expand_bytes=$((4 * 1024 * 1024 * 1024))
     echo "Expanding image by 4GB for package pre-installation..."
