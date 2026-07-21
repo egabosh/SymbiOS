@@ -56,6 +56,7 @@ function f_cleanup {
     if [ -n "${g_loopdev:-}" ] && losetup "${g_loopdev}" &>/dev/null
     then
         # Unmount virtual filesystems first (in case of failure during chroot)
+        umount "${g_work_dir}/rootfs/var/cache/apt/archives" 2>/dev/null || true
         umount "${g_work_dir}/rootfs/sys" 2>/dev/null || true
         umount "${g_work_dir}/rootfs/proc" 2>/dev/null || true
         umount "${g_work_dir}/rootfs/dev/pts" 2>/dev/null || true
@@ -305,6 +306,11 @@ mount -t sysfs sysfs "${g_rootfs}/sys"
 # Copy host resolv.conf for DNS resolution inside chroot
 cp /etc/resolv.conf "${g_rootfs}/etc/resolv.conf"
 
+# Mount host apt cache into chroot to avoid running out of disk space
+# on the image's root partition (only ~4GB total).
+mkdir -p /var/cache/apt/archives
+mount --bind /var/cache/apt/archives "${g_rootfs}/var/cache/apt/archives"
+
 # All packages from basics.yml + raspberry.yml + ansible from install.sh
 g_packages="
 file bc psmisc procps htop iotop sysstat strace net-tools vim git
@@ -346,6 +352,9 @@ chroot "${g_rootfs}" /bin/bash -c "
 
 # Remove resolv.conf copy (will be regenerated on boot)
 rm -f "${g_rootfs}/etc/resolv.conf"
+
+# Unmount host apt cache
+umount "${g_rootfs}/var/cache/apt/archives"
 
 # Unmount virtual filesystems
 umount "${g_rootfs}/sys"
