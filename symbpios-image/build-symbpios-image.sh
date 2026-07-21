@@ -123,18 +123,28 @@ then
     g_image_source="$(realpath "${g_image_arg}")"
     echo "Using provided image: ${g_image_source}"
 else
-    # Download default image
+    # Download default image (skip if already present)
     g_image_source="${g_work_dir}/${g_default_image_name}"
-    echo "Downloading Raspberry Pi OS Trixie Desktop arm64..."
-    wget -q --show-progress -O "${g_image_source}" "${g_default_image_url}"
+    if [ -f "${g_image_source}" ]
+    then
+        echo "Image already downloaded: ${g_image_source}"
+    else
+        echo "Downloading Raspberry Pi OS Trixie Desktop arm64..."
+        wget -q --show-progress -O "${g_image_source}" "${g_default_image_url}"
+    fi
 fi
 
-# Step 2: Extract if compressed
+# Step 2: Extract if compressed (skip if .img already exists)
 if [[ "${g_image_source}" == *.xz ]]
 then
-    echo "Extracting image (this may take a moment)..."
-    ionice -c3 nice -n19 xz -dk -T2 "${g_image_source}" -c > "${g_work_dir}/raspios.img"
     g_image_file="${g_work_dir}/raspios.img"
+    if [ -f "${g_image_file}" ] && [ "$(stat -c%s "${g_image_file}" 2>/dev/null)" -gt 0 ]
+    then
+        echo "Image already extracted: ${g_image_file}"
+    else
+        echo "Extracting image (this may take a moment)..."
+        ionice -c3 nice -n19 xz -dk -T2 "${g_image_source}" -c > "${g_image_file}"
+    fi
 elif [[ "${g_image_source}" == *.img ]]
 then
     g_image_file="${g_image_source}"
