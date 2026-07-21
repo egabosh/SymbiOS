@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # SymbiOS - Debian-based server management platform
 # Copyright (C) 2025  SymbiOS Contributors
 #
@@ -14,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#!/bin/bash
 # SymbiOS Remote Execution - pure executor + audit logger.
 # The webui's SSH key is a normal root key (no command= restriction): trusted
 # admins operate the host. The WebUI resolves every high-level verb into a

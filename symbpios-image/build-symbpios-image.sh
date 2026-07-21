@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # SymbiOS - Debian-based server management platform
 # Copyright (C) 2025  SymbiOS Contributors
 #
@@ -13,8 +15,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-#!/bin/bash
 
 # Build a custom Raspberry Pi OS image with SymbiOS first-boot installer.
 # The resulting image can be flashed via Raspberry Pi Imager ("Use custom").
@@ -179,7 +179,7 @@ mount "${g_loopdev}p1" "${g_mount_point}"
 
 echo "Boot partition mounted at ${g_mount_point}"
 
-# Step 4: Copy firstrun.sh to boot partition
+# Step 4: Copy firstrun.sh and optional Imager customization files
 echo "Installing firstrun.sh..."
 cp "${g_script_dir}/firstrun.sh" "${g_mount_point}/firstrun.sh"
 chmod +x "${g_mount_point}/firstrun.sh"
@@ -216,14 +216,20 @@ fi
 
 g_output_size="$(du -h "${g_output_file}" | cut -f1)"
 
+# Step 7: Generate Imager Content Repository JSON
+echo "Generating Imager Content Repository JSON..."
+"${g_script_dir}/generate-repo-json.sh" -i "${g_output_file}" -o "${g_output_dir}"
+
 echo ""
 echo "=== Build complete ==="
 echo "Output: ${g_output_file} (${g_output_size})"
 echo ""
 echo "Next steps:"
 echo "  1. Open Raspberry Pi Imager"
-echo "  2. Click 'Raspberry Pi OS (other)' -> 'Use custom'"
-echo "  3. Select: ${g_output_file}"
-echo "  4. Flash to SD card"
-echo "  5. Boot the Pi - SymbiOS installs automatically on first boot"
-echo "  6. Check progress: ssh into Pi and watch /var/log/symbios-firstrun.log"
+echo "  2. Go to App Options -> Content Repository -> Use custom file"
+echo "  3. Select the generated .json file"
+echo "  4. Click 'Raspberry Pi OS (other)' -> 'Use custom' -> select the .img.xz"
+echo "  5. Click the settings gear to customize user, WiFi, SSH keys"
+echo "  6. Flash to SD card"
+echo "  7. Boot the Pi - SymbiOS installs automatically on first boot"
+echo "  8. Check progress: ssh into Pi and watch /var/log/symbios-firstrun.log"

@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # SymbiOS - Debian-based server management platform
 # Copyright (C) 2025  SymbiOS Contributors
 #
@@ -14,7 +16,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#!/bin/bash
 # Extract Let's Encrypt cert from Traefik acme.json to boot unlock dir.
 # Run via cron so the cert is available on root partition even when
 # /home (encrypted) is locked after reboot.

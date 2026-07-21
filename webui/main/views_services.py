@@ -453,14 +453,17 @@ def services_status(request, playbook):
     states = [s['state'] for s in out]
     overall = _aggregate_state(states)
 
-    # Check if playbook is installed in the state file
-    installed = False
-    try:
-        from .utils.ssh_exec import run_command as _run_command
-        rc, _, _ = _run_command(f'symbios-state.sh is-installed {playbook}', timeout=5)
-        installed = (rc == 0)
-    except Exception:
-        pass  # non-critical, default to False
+    # A service is "installed" if systemd reports any of its units as
+    # running or stopped (not all not-installed), OR if it is tracked in
+    # the state file (for reapply tracking).
+    installed = overall in ('running', 'stopped')
+    if not installed:
+        try:
+            from .utils.ssh_exec import run_command as _run_command
+            rc, _, _ = _run_command(f'symbios-state.sh is-installed {playbook}', timeout=5)
+            installed = (rc == 0)
+        except Exception:
+            pass  # non-critical, default to False
 
     return JsonResponse({
         'services': out,
