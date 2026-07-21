@@ -100,6 +100,13 @@
           # burning
           - brasero
 
+    - name: Purge RealVNC server (not needed, x11vnc or headless instead)
+      ansible.builtin.apt:
+        name: realvnc-vnc-server
+        state: absent
+        purge: true
+      failed_when: false
+
     - name: Set raspi-config options
       ansible.builtin.command: >
         raspi-config nonint do_{{ item.action }} {{ item.value }}
