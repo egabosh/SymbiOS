@@ -26,7 +26,8 @@
 # Output is visible on the console (tty1) via the systemd service.
 # This script also logs to /var/log/symbios-firstrun.log.
 
-# Stop plymouth splash screen so output is visible
+# rc.local runs after the system is fully booted, so plymouth should
+# already be stopped. Stop it anyway just in case.
 systemctl stop plymouth.service 2>/dev/null || true
 systemctl stop plymouth-quit.service 2>/dev/null || true
 systemctl stop plymouth-read-write.service 2>/dev/null || true

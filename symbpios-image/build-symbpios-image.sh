@@ -202,12 +202,10 @@ then
     echo "config.txt: added disable_splash=1"
 fi
 
-# Create systemd service on root partition that runs firstrun.sh once on first boot.
-# On Trixie, boot partition is at /boot/firmware, so firstrun.sh path varies.
+# Mount root partition for modifications
 g_rootfs="${g_work_dir}/rootfs"
 mkdir -p "${g_rootfs}"
 
-# Determine root device (second partition of the loop image)
 g_root_dev="${g_loopdev}p2"
 if [ ! -b "${g_root_dev}" ]
 then
@@ -217,36 +215,34 @@ fi
 
 mount "${g_root_dev}" "${g_rootfs}"
 
-# Create the first-boot systemd service.
-# TTY1 is used for visible console output so the user can watch the
-# installation progress instead of being stuck behind a splash screen.
-cat > "${g_rootfs}/etc/systemd/system/symbios-firstrun.service" << 'SVCEOF'
-[Unit]
-Description=SymbiOS First Boot Installer
-After=network-online.target plymouth-quit.service
-Wants=network-online.target
-ConditionPathExists=!/var/lib/symbios-firstrun.done
+# Use rc.local for first-boot execution — runs AFTER the system is
+# fully booted (all systemd services started), avoiding conflicts with
+# Docker, network, and other services that start during boot.
+# firstrun.sh is idempotent: it checks for Imager files and the
+# installed-playbooks state file before doing anything.
+cat > "${g_rootfs}/etc/rc.local" << 'RCLOCALEOF'
+#!/bin/bash
+# SymbiOS first-boot trigger
+# Runs once after the system is fully booted.
+# Deleted by firstrun.sh after successful execution.
 
-[Service]
-Type=oneshot
-ExecStartPre=/bin/systemctl stop plymouth.service 2>/dev/null || true
-ExecStartPre=/bin/systemctl stop plymouth-quit.service 2>/dev/null || true
-ExecStart=/bin/bash /boot/firmware/firstrun.sh
-ExecStartPost=/bin/touch /var/lib/symbios-firstrun.done
-RemainAfterExit=yes
-StandardOutput=tty
-StandardError=tty
-TTYPath=/dev/tty1
+if [ ! -f /var/lib/symbios-firstrun.done ]
+then
+    /bin/bash /boot/firmware/firstrun.sh
+fi
 
-[Install]
-WantedBy=multi-user.target
-SVCEOF
+exit 0
+RCLOCALEOF
+chmod +x "${g_rootfs}/etc/rc.local"
 
-# Enable the service
-mkdir -p "${g_rootfs}/var/lib"
-ln -sf "/etc/systemd/system/symbios-firstrun.service" "${g_rootfs}/etc/systemd/system/multi-user.target.wants/symbios-firstrun.service"
+# Disable graphical interface in systemd so it does not start automatically.
+# The SymbiOS playbook handles display manager setup (lightdm, X11, etc.) later.
+systemctl --root="${g_rootfs}" disable lightdm.service 2>/dev/null || true
+systemctl --root="${g_rootfs}" disable gdm3.service 2>/dev/null || true
+systemctl --root="${g_rootfs}" disable sddm.service 2>/dev/null || true
+echo "Graphical interface disabled in systemd"
 
-# Ensure getty runs on tty1 so user can see output and interact
+# Ensure getty runs on tty1 with autologin so user can see output
 mkdir -p "${g_rootfs}/etc/systemd/system/getty@tty1.service.d"
 cat > "${g_rootfs}/etc/systemd/system/getty@tty1.service.d/override.conf" << 'GETTYEOF'
 [Service]
@@ -254,9 +250,9 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin root --noclear %I $TERM
 GETTYEOF
 
-echo "First-boot service installed"
+echo "rc.local installed, lightdm masked"
 ls -la "${g_mount_point}/firstrun.sh"
-ls -la "${g_rootfs}/etc/systemd/system/symbios-firstrun.service"
+ls -la "${g_rootfs}/etc/rc.local"
 
 # Step 5: Unmount
 echo "Unmounting partitions..."
