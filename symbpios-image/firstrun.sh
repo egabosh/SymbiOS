@@ -31,7 +31,7 @@ echo "Waiting for network..."
 f_network_ready=0
 for f_i in $(seq 1 60)
 do
-    if ping -c1 -W2 8.8.8.8 &>/dev/null
+    if ping -c1 -W2 raw.githubusercontent.com &>/dev/null
     then
         echo "Network available after ${f_i} attempts"
         f_network_ready=1
