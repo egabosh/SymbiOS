@@ -129,6 +129,33 @@
         update_cache: yes
         cache_valid_time: 3600
 
+    - name: Install symbios-state.sh
+      ansible.builtin.copy:
+        src: /home/SymbiOS/symbios-state.sh
+        dest: /usr/local/sbin/symbios-state.sh
+        owner: root
+        group: root
+        mode: '0755'
+      when: not nocontainer.stat.exists
+
+    - name: Install symbios-reapply.sh
+      ansible.builtin.copy:
+        src: /home/SymbiOS/symbios-reapply.sh
+        dest: /usr/local/sbin/symbios-reapply.sh
+        owner: root
+        group: root
+        mode: '0755'
+      when: not nocontainer.stat.exists
+
+    - name: Install symbios-exec.sh
+      ansible.builtin.copy:
+        src: /home/SymbiOS/symbios-exec.sh
+        dest: /usr/local/sbin/symbios-exec.sh
+        owner: root
+        group: root
+        mode: '0755'
+      when: not nocontainer.stat.exists
+
     - name: Install Basic Packages if not running in container
       apt:
         name:
