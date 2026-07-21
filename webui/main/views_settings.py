@@ -640,6 +640,9 @@ def settings_backup_test(request):
 # Disk / Home partition management
 # ---------------------------------------------------------------------------
 
+_HOME_PART_SCRIPT = '/usr/local/sbin/symbios-home-partition.sh'
+
+
 @login_required
 def settings_disk(request):
     config = _get_inventory_config()
@@ -649,16 +652,14 @@ def settings_disk(request):
 
 @login_required
 def settings_disk_list(request):
-    """AJAX GET — list block devices via lsblk."""
+    """AJAX GET — list block devices via shell script."""
     ok, stdout, stderr = run_command(
-        'lsblk -J -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,TRAN,RM',
-        timeout=10)
+        f'{_HOME_PART_SCRIPT} list', timeout=10)
     if not ok:
         return JsonResponse({'ok': False, 'error': stderr or 'lsblk failed'})
     try:
         data = json.loads(stdout)
         devices = data.get('blockdevices', [])
-        # Filter: only show real disks and partitions, skip loop, ram, etc.
         filtered = []
         for dev in devices:
             if dev.get('name', '').startswith(('loop', 'ram', 'sr', 'zram')):
@@ -692,64 +693,27 @@ def _describe_block(dev):
 @login_required
 def settings_disk_status(request):
     """AJAX GET — check /home mount status and LUKS status."""
-    result = {
-        'home_device': '',
-        'home_fstype': '',
-        'home_size': '',
-        'home_used': '',
-        'home_avail': '',
-        'luks_name': '',
-        'luks_device': '',
-        'luks_open': False,
-        'needs_unlock': False,
-    }
-
-    # Check what /home is mounted on
-    ok, stdout, _ = run_command("df -hT /home | tail -1", timeout=5)
-    if ok and stdout.strip():
-        parts = stdout.strip().split()
-        if len(parts) >= 7:
-            result['home_device'] = parts[0]
-            result['home_size'] = parts[2]
-            result['home_used'] = parts[3]
-            result['home_avail'] = parts[4]
-            result['home_fstype'] = parts[1]
-
-    # Check LUKS status
-    ok, stdout, _ = run_command("lsblk -J -o NAME,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null", timeout=10)
-    if ok:
-        try:
-            data = json.loads(stdout)
-            for dev in data.get('blockdevices', []):
-                _check_luks_recursive(dev, result)
-        except json.JSONDecodeError:
-            pass
-
-    # Also check for locked LUKS volumes
-    ok, stdout, _ = run_command(
-        "ls /dev/mapper/ 2>/dev/null | grep -E 'home|luks' || true", timeout=5)
-    if ok and stdout.strip():
-        result['luks_open'] = True
-
-    return JsonResponse(result)
-
-
-def _check_luks_recursive(dev, result):
-    """Find LUKS devices in the block device tree."""
-    if dev.get('fstype') == 'crypto_LUKS':
-        name = dev.get('name', '')
-        result['luks_name'] = name
-        result['luks_device'] = '/dev/' + name
-        # Check if it's open
-        uuid = dev.get('uuid', '')
-        ok, stdout, _ = run_command(
-            f"cryptsetup status {name} 2>/dev/null | head -1 || true", timeout=5)
-        if ok and 'is active' in stdout:
-            result['luks_open'] = True
-        elif ok and 'not found' in stdout.lower():
-            result['needs_unlock'] = True
-    for child in dev.get('children', []) or []:
-        _check_luks_recursive(child, result)
+    ok, stdout, stderr = run_command(
+        f'{_HOME_PART_SCRIPT} status', timeout=15)
+    if not ok:
+        return JsonResponse({
+            'ok': False, 'error': stderr or 'status check failed',
+            'home_device': '', 'home_fstype': '', 'home_size': '',
+            'home_used': '', 'home_avail': '',
+            'luks_name': '', 'luks_device': '',
+            'luks_open': False, 'needs_unlock': False,
+        })
+    try:
+        data = json.loads(stdout)
+        return JsonResponse(data)
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'ok': False, 'error': f'Invalid JSON from script: {stdout[:500]}',
+            'home_device': '', 'home_fstype': '', 'home_size': '',
+            'home_used': '', 'home_avail': '',
+            'luks_name': '', 'luks_device': '',
+            'luks_open': False, 'needs_unlock': False,
+        })
 
 
 @login_required
@@ -759,131 +723,35 @@ def settings_disk_setup(request):
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
     device = request.POST.get('device', '').strip()
-    encrypt = request.POST.get('encrypt', 'no') == 'yes'
+    encrypt = 'yes' if request.POST.get('encrypt', 'no') == 'yes' else 'no'
     password = request.POST.get('password', '').strip()
 
     if not device:
         return JsonResponse({'ok': False, 'error': 'No device selected'})
-
     if not device.startswith('/dev/'):
         return JsonResponse({'ok': False, 'error': 'Invalid device path'})
-
-    if encrypt and not password:
+    if encrypt == 'yes' and not password:
         return JsonResponse({'ok': False, 'error': 'Password required for LUKS encryption'})
 
-    # Safety: check the device is not the root device
-    ok, stdout, _ = run_command("findmnt -n -o SOURCE /", timeout=5)
-    if ok:
-        root_dev = stdout.strip()
-        if device in root_dev or root_dev in device:
-            return JsonResponse({'ok': False, 'error': 'Cannot format the root device!'})
+    cmd_parts = [f'{_HOME_PART_SCRIPT} setup', device, encrypt]
+    if encrypt == 'yes':
+        cmd_parts.append(f'password={password}')
+    cmd = ' '.join(cmd_parts)
 
-    # Safety: check the device is not mounted (except as swap etc.)
-    ok, stdout, _ = run_command(f"findmnt -n -o TARGET {device} 2>/dev/null || true", timeout=5)
-    if ok and stdout.strip():
-        mountpoint = stdout.strip()
-        if mountpoint == '/home':
-            return JsonResponse({'ok': False, 'error': 'This device is already mounted as /home'})
-        return JsonResponse({'ok': False, 'error': f'Device is mounted at {mountpoint}. Unmount it first.'})
-
-    # Size check: ensure target disk has enough space for /home
-    ok, stdout, _ = run_command("du -sb /home/ 2>/dev/null | awk '{print $1}'", timeout=30)
-    if ok and stdout.strip():
-        try:
-            home_size = int(stdout.strip())
-        except ValueError:
-            home_size = 0
-    else:
-        return JsonResponse({'ok': False, 'error': 'Could not determine /home size'})
-
-    # Check raw disk size in bytes (before LUKS/mkfs overhead)
-    ok, stdout, _ = run_command(f"blockdev --getsize64 {device} 2>/dev/null", timeout=5)
-    if ok and stdout.strip():
-        try:
-            disk_size = int(stdout.strip())
-        except ValueError:
-            disk_size = 0
-    else:
-        return JsonResponse({'ok': False, 'error': 'Could not determine disk size'})
-
-    # LUKS metadata overhead ~16MB, ext4 metadata ~1%, add 5% safety margin
-    overhead = max(16 * 1024 * 1024, home_size // 20)
-    if disk_size < home_size + overhead:
-        home_gb = home_size / (1024**3)
-        disk_gb = disk_size / (1024**3)
-        return JsonResponse({
-            'ok': False,
-            'error': f'Disk too small! /home is {home_gb:.1f}G but disk is only {disk_gb:.1f}G. Need at least {home_gb + overhead / (1024**3):.1f}G.'
-        })
-
-    # Build the setup commands
-    cmds = []
-
-    # Unmount if mounted anywhere
-    cmds.append(f"umount {device} 2>/dev/null || true")
-
-    luks_name = 'home-luks'
-
-    if encrypt:
-        # LUKS format
-        cmds.append(f"echo '{password}' | cryptsetup luksFormat --batch-mode {device}")
-        # Open LUKS
-        cmds.append(f"echo '{password}' | cryptsetup open {device} {luks_name}")
-        # Get the mapper path for mkfs
-        target = f'/dev/mapper/{luks_name}'
-    else:
-        target = device
-
-    # Format as ext4
-    cmds.append(f"mkfs.ext4 -F {target}")
-
-    # Mount temporarily
-    cmds.append("mkdir -p /home.new")
-    cmds.append(f"mount {target} /home.new")
-
-    # Copy data
-    cmds.append("rsync -av --exclude=docker/var-lib-docker --exclude=docker/var-lib-containerd --exclude='.trashed-*' /home/ /home.new/")
-
-    # Get UUID for fstab
-    if encrypt:
-        cmds.append(f"UUID=$(blkid -s UUID -o value {device})")
-    else:
-        cmds.append(f"UUID=$(blkid -s UUID -o value {device})")
-
-    # Unmount old /home (if it's a separate partition)
-    cmds.append("umount /home 2>/dev/null || true")
-
-    # Remove old /home contents if it was on root fs
-    cmds.append("rm -rf /home/* 2>/dev/null || true")
-
-    # Update fstab - remove any existing /home entry
-    cmds.append("sed -i '\\#.*[[:space:]]/home[[:space:]]#d' /etc/fstab")
-
-    # Add new fstab entry
-    if encrypt:
-        cmds.append("echo \"UUID=$UUID /home ext4 defaults,noatime 0 2\" >> /etc/fstab")
-    else:
-        cmds.append("echo \"UUID=$UUID /home ext4 defaults,noatime 0 2\" >> /etc/fstab")
-
-    # Mount new /home
-    cmds.append("mount /home")
-
-    # Store LUKS info in inventory if encrypted
-    if encrypt:
-        cmds.append(f"echo '{luks_name}' > /config/.luks-name 2>/dev/null || true")
-
-    full_cmd = ' && '.join(cmds)
-
-    # Run via run_command (longer timeout for rsync)
-    ok, stdout, stderr = run_command(full_cmd, timeout=600)
+    # Long timeout for rsync of large /home directories
+    ok, stdout, stderr = run_command(cmd, timeout=600)
     output = stdout
     if stderr:
         output = output + '\n' + stderr
 
-    if ok:
-        return JsonResponse({'ok': True, 'message': 'Disk setup complete. /home is now on the new partition.'})
-    else:
+    try:
+        data = json.loads(output)
+        return JsonResponse(data)
+    except json.JSONDecodeError:
+        if ok:
+            return JsonResponse({'ok': True, 'message': 'Disk setup complete.'})
         return JsonResponse({'ok': False, 'error': f'Setup failed:\n{output[-2000:]}'})
+
 
 
 @login_required
@@ -892,13 +760,13 @@ def settings_disk_umount(request):
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
-    cmds = [
-        'umount /home 2>/dev/null || true',
-        'cryptsetup close home-luks 2>/dev/null || true',
-    ]
-
-    ok, stdout, stderr = run_command(' && '.join(cmds), timeout=30)
-    return JsonResponse({'ok': True, 'message': '/home unmounted and LUKS volume closed.'})
+    ok, stdout, stderr = run_command(
+        f'{_HOME_PART_SCRIPT} umount', timeout=30)
+    try:
+        data = json.loads(stdout)
+        return JsonResponse(data)
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': True, 'message': '/home unmounted and LUKS volume closed.'})
 
 
 # ---------------------------------------------------------------------------
