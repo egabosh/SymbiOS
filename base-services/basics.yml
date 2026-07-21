@@ -174,8 +174,8 @@
         create_home: true
         password: "{{ 'symbios' | password_hash('sha512') }}"
         groups:
+          - root
           - sudo
-          - docker
           - adm
         append: true
         state: present
