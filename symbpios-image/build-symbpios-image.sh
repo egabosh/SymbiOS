@@ -55,7 +55,9 @@ function f_cleanup {
     # Unmount and detach loop device if still attached
     if [ -n "${g_loopdev:-}" ] && losetup "${g_loopdev}" &>/dev/null
     then
+        umount "${g_work_dir}/rootfs" 2>/dev/null || true
         umount "${g_loopdev}p1" 2>/dev/null || true
+        umount "${g_loopdev}p2" 2>/dev/null || true
         losetup -d "${g_loopdev}" 2>/dev/null || true
     fi
     # Note: working directory is NOT cleaned up to preserve the cached
@@ -179,16 +181,57 @@ mount "${g_loopdev}p1" "${g_mount_point}"
 
 echo "Boot partition mounted at ${g_mount_point}"
 
-# Step 4: Copy firstrun.sh and optional Imager customization files
-echo "Installing firstrun.sh..."
+# Step 4: Copy firstrun.sh and create systemd service for first-boot execution
+echo "Installing firstrun.sh and first-boot systemd service..."
 cp "${g_script_dir}/firstrun.sh" "${g_mount_point}/firstrun.sh"
 chmod +x "${g_mount_point}/firstrun.sh"
 
-# Verify
+# Create systemd service on root partition that runs firstrun.sh once on first boot.
+# On Trixie, boot partition is at /boot/firmware, so firstrun.sh path varies.
+g_rootfs="${g_work_dir}/rootfs"
+mkdir -p "${g_rootfs}"
+
+# Determine root device (second partition of the loop image)
+g_root_dev="${g_loopdev}p2"
+if [ ! -b "${g_root_dev}" ]
+then
+    echo "ERROR: Root partition ${g_root_dev} not found"
+    exit 1
+fi
+
+mount "${g_root_dev}" "${g_rootfs}"
+
+# Create the first-boot systemd service
+cat > "${g_rootfs}/etc/systemd/system/symbios-firstrun.service" << 'SVCEOF'
+[Unit]
+Description=SymbiOS First Boot Installer
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/symbios-firstrun.done
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /boot/firmware/firstrun.sh
+ExecStartPost=/bin/touch /var/lib/symbios-firstrun.done
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+# Enable the service
+mkdir -p "${g_rootfs}/var/lib"
+ln -sf "/etc/systemd/system/symbios-firstrun.service" "${g_rootfs}/etc/systemd/system/multi-user.target.wants/symbios-firstrun.service"
+
+echo "First-boot service installed"
 ls -la "${g_mount_point}/firstrun.sh"
+ls -la "${g_rootfs}/etc/systemd/system/symbios-firstrun.service"
 
 # Step 5: Unmount
-echo "Unmounting boot partition..."
+echo "Unmounting partitions..."
+umount "${g_rootfs}"
 umount "${g_mount_point}"
 
 # Detach loop device
