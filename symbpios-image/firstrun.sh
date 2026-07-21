@@ -176,6 +176,19 @@ echo "SymbiOS installation finished at: $(date) (exit code: ${f_install_exit})"
 # Mark first boot as complete — prevents re-execution on next boot
 if [ "${f_install_exit}" -eq 0 ]
 then
+    # Restore splash screen for normal operation
+    f_boot="/boot/firmware"
+    if [ -f "${f_boot}/cmdline.txt" ]
+    then
+        sed -i 's/$/ quiet splash/' "${f_boot}/cmdline.txt"
+        echo "Restored quiet splash to cmdline.txt"
+    fi
+    if [ -f "${f_boot}/config.txt" ]
+    then
+        sed -i '/^disable_splash=1$/d' "${f_boot}/config.txt"
+        echo "Removed disable_splash=1 from config.txt"
+    fi
+
     touch /var/lib/symbios-firstrun.done
     echo "First boot marked as complete"
     echo "=== End of SymbiOS First Boot ==="
