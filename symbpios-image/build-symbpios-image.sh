@@ -58,8 +58,8 @@ function f_cleanup {
         umount "${g_loopdev}p1" 2>/dev/null || true
         losetup -d "${g_loopdev}" 2>/dev/null || true
     fi
-    # Remove working directory
-    rm -rf "${g_work_dir:?}"
+    # Note: working directory is NOT cleaned up to preserve the cached
+    # .xz download and .img extraction for faster subsequent runs.
 }
 
 trap f_cleanup EXIT
