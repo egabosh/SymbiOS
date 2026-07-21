@@ -358,6 +358,40 @@ chroot "${g_rootfs}" /bin/bash -c "
     ansible-galaxy collection install community.general 2>/dev/null || true
 "
 
+# Pre-configure keyboard and console to avoid ncurses dialog on first boot.
+# Without this, keyboard-configuration / console-setup shows an interactive
+# ncurses prompt that blocks boot and prevents rc.local (firstrun.sh) from running.
+echo "Pre-configuring keyboard and console settings..."
+chroot "${g_rootfs}" /bin/bash -c "
+    echo 'keyboard-configuration keyboard-configuration/layoutcode string us' | debconf-set-selections
+    echo 'keyboard-configuration keyboard-configuration/modelcode string pc105' | debconf-set-selections
+    echo 'keyboard-configuration keyboard-configuration/xkb-keymap select us' | debconf-set-selections
+    echo 'keyboard-configuration keyboard-configuration/variant string English (US)' | debconf-set-selections
+    echo 'console-setup console-setup/charmap select UTF-8' | debconf-set-selections
+    echo 'console-setup console-setup/codeset select guess' | debconf-set-selections
+    echo 'console-setup console-setup/fontsize string 16x32' | debconf-set-selections
+    echo 'console-setup console-setup/fontface string Fixed' | debconf-set-selections
+    echo 'locales locales/default_environment_locale select en_US.UTF-8' | debconf-set-selections
+    echo 'locales locales/locales_to_be_generated multiselect en_US.UTF-8 UTF-8' | debconf-set-selections
+    dpkg-reconfigure -f noninteractive locales 2>/dev/null || true
+    dpkg-reconfigure -f noninteractive keyboard-configuration 2>/dev/null || true
+    dpkg-reconfigure -f noninteractive console-setup 2>/dev/null || true
+    locale-gen en_US.UTF-8 2>/dev/null || true
+    update-locale LANG=en_US.UTF-8 2>/dev/null || true
+"
+
+# Disable raspi-config first-boot wizard (ncurses user/keyboard dialog)
+# This runs as a systemd service and shows the interactive setup wizard
+chroot "${g_rootfs}" /bin/bash -c "
+    systemctl mask raspi-config.service 2>/dev/null || true
+    systemctl mask raspi-config-noint.service 2>/dev/null || true
+    systemctl mask setup-first-boot.service 2>/dev/null || true
+    systemctl mask initial-setup.service 2>/dev/null || true
+    # Create marker file so raspi-config thinks first-boot is done
+    mkdir -p /var/lib/raspi-config
+    echo 'done' > /var/lib/raspi-config/first-boot-done
+"
+
 # Remove resolv.conf copy (will be regenerated on boot)
 rm -f "${g_rootfs}/etc/resolv.conf"
 
