@@ -48,6 +48,7 @@ fi
 cd /home
 [[ -d SymbiOS ]] || git clone https://github.com/egabosh/SymbiOS.git
 cd SymbiOS
+git remote set-url origin https://github.com/egabosh/SymbiOS.git
 if ! git pull
 then
     git stash
