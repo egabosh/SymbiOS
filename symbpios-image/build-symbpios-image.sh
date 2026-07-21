@@ -133,7 +133,7 @@ fi
 if [[ "${g_image_source}" == *.xz ]]
 then
     echo "Extracting image (this may take a moment)..."
-    xz -dk "${g_image_source}" -c > "${g_work_dir}/raspios.img"
+    xz -dk -T2 "${g_image_source}" -c > "${g_work_dir}/raspios.img"
     g_image_file="${g_work_dir}/raspios.img"
 elif [[ "${g_image_source}" == *.img ]]
 then
