@@ -468,57 +468,57 @@
       changed_when: false
       failed_when: false
 
-    - name: Create SymbiOS WebUI desktop shortcut
-      # Find the user with UID 1000, determine their Desktop folder,
-      # and create a .desktop launcher for the SymbiOS WebUI.
+    - name: Install SymbiOS WebUI .desktop file (system-wide)
+      ansible.builtin.copy:
+        dest: /usr/share/applications/symbios-webui.desktop
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Desktop Entry]
+          Version=1.0
+          Type=Link
+          Name=SymbiOS WebUI
+          Comment=Open SymbiOS Web Management Interface
+          URL=http://localhost:8080
+          Icon=symbios
+          Terminal=false
+          Categories=Network;WebBrowser;
+
+    - name: Create SymbiOS WebUI desktop shortcut for all users
       ansible.builtin.shell: |
-        set -e
-        # Find user with UID 1000
-        f_entry=$(getent passwd 1000)
-        if [ -z "$f_entry" ]
-        then
-          echo "No user with UID 1000 found, skipping"
-          exit 0
-        fi
-        f_user=$(echo "$f_entry" | cut -d: -f1)
-        f_home=$(echo "$f_entry" | cut -d: -f6)
-
-        # Find desktop directory (try common names)
-        f_desktop=""
-        for f_dir in Desktop Schreibtisch desktop schreibtisch
+        # Place .desktop file on every user's Desktop folder
+        for f_entry in $(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1":"$6}')
         do
-          if [ -d "$f_home/$f_dir" ]
+          f_user=$(echo "$f_entry" | cut -d: -f1)
+          f_home=$(echo "$f_entry" | cut -d: -f2)
+          f_uid=$(id -u "$f_user")
+
+          f_desktop=""
+          for f_dir in Desktop Schreibtisch desktop schreibtisch
+          do
+            if [ -d "$f_home/$f_dir" ]
+            then
+              f_desktop="$f_home/$f_dir"
+              break
+            fi
+          done
+
+          if [ -z "$f_desktop" ]
           then
-            f_desktop="$f_home/$f_dir"
-            break
+            continue
           fi
+
+          if [ -f "$f_desktop/symbios-webui.desktop" ]
+          then
+            continue
+          fi
+
+          cp /usr/share/applications/symbios-webui.desktop "$f_desktop/symbios-webui.desktop"
+          chown "${f_uid}:${f_uid}" "$f_desktop/symbios-webui.desktop"
+          chmod 644 "$f_desktop/symbios-webui.desktop"
+          gio set "$f_desktop/symbios-webui.desktop" "metadata::trusted" true 2>/dev/null || true
         done
-
-        if [ -z "$f_desktop" ]
-        then
-          echo "No desktop directory found for $f_user, skipping"
-          exit 0
-        fi
-
-        # Create .desktop file
-        printf '%s\n' \
-          "[Desktop Entry]" \
-          "Version=1.0" \
-          "Type=Link" \
-          "Name=SymbiOS WebUI" \
-          "Comment=Open SymbiOS Web Management Interface" \
-          "URL=http://localhost:8080" \
-          "Icon=symbios" \
-          "Terminal=false" \
-          "Categories=Network;WebBrowser;" \
-          > "$f_desktop/symbios-webui.desktop"
-
-        # Set ownership and permissions
-        chown 1000:1000 "$f_desktop/symbios-webui.desktop"
-        chmod 644 "$f_desktop/symbios-webui.desktop"
-
-        # Mark as trusted (GNOME/Nautilus)
-        gio set "$f_desktop/symbios-webui.desktop" "metadata::trusted" true 2>/dev/null || true
       args:
         executable: /bin/bash
       changed_when: false
