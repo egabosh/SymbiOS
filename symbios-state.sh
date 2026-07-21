@@ -37,6 +37,7 @@ if [ ! -f "$g_state_file" ]
 then
     mkdir -p "$(dirname "$g_state_file")"
     printf '%s\n' "# Auto-maintained by playbooks via symbios-state.sh" > "$g_state_file"
+    chmod 644 "$g_state_file"
 fi
 
 function f_usage {
@@ -83,6 +84,7 @@ function f_unset_quiet {
     # Remove lines matching this playbook (prefix or full match)
     grep -v "^${f_playbook}:" "$g_state_file" > "$f_tmp" 2>/dev/null || true
     mv "$f_tmp" "$g_state_file"
+    chmod 644 "$g_state_file"
 }
 
 function f_list {
