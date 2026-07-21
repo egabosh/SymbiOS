@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="serverGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#4a90d9;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3584e4;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Server rack body -->
+  <rect x="24" y="16" width="56" height="96" rx="4" ry="4" fill="url(#serverGrad)" stroke="#2a6db5" stroke-width="2"/>
+  
+  <!-- Server slot 1 -->
+  <rect x="32" y="24" width="40" height="18" rx="2" ry="2" fill="#1a5a9e" stroke="#0d4a8a" stroke-width="1"/>
+  <circle cx="38" cy="33" r="2.5" fill="#4ade80"/>
+  <rect x="44" y="31" width="12" height="2" rx="1" fill="#6bb8f0"/>
+  
+  <!-- Server slot 2 -->
+  <rect x="32" y="48" width="40" height="18" rx="2" ry="2" fill="#1a5a9e" stroke="#0d4a8a" stroke-width="1"/>
+  <circle cx="38" cy="57" r="2.5" fill="#4ade80"/>
+  <rect x="44" y="55" width="12" height="2" rx="1" fill="#6bb8f0"/>
+  
+  <!-- Server slot 3 -->
+  <rect x="32" y="72" width="40" height="18" rx="2" ry="2" fill="#1a5a9e" stroke="#0d4a8a" stroke-width="1"/>
+  <circle cx="38" cy="81" r="2.5" fill="#fbbf24"/>
+  <rect x="44" y="79" width="12" height="2" rx="1" fill="#6bb8f0"/>
+  
+  <!-- Network connection lines -->
+  <line x1="80" y1="33" x2="104" y2="33" stroke="#6bb8f0" stroke-width="2" stroke-linecap="round"/>
+  <line x1="80" y1="57" x2="104" y2="57" stroke="#6bb8f0" stroke-width="2" stroke-linecap="round"/>
+  <line x1="80" y1="81" x2="104" y2="81" stroke="#6bb8f0" stroke-width="2" stroke-linecap="round"/>
+  
+  <!-- Network nodes -->
+  <circle cx="108" cy="28" r="5" fill="#4a90d9" stroke="#3584e4" stroke-width="1.5"/>
+  <circle cx="108" cy="52" r="5" fill="#4a90d9" stroke="#3584e4" stroke-width="1.5"/>
+  <circle cx="108" cy="76" r="5" fill="#4a90d9" stroke="#3584e4" stroke-width="1.5"/>
+  <circle cx="108" cy="100" r="5" fill="#4a90d9" stroke="#3584e4" stroke-width="1.5"/>
+  
+  <!-- Inter-node connections -->
+  <line x1="108" y1="33" x2="108" y2="47" stroke="#6bb8f0" stroke-width="1.5"/>
+  <line x1="108" y1="57" x2="108" y2="71" stroke="#6bb8f0" stroke-width="1.5"/>
+  <line x1="108" y1="81" x2="108" y2="95" stroke="#6bb8f0" stroke-width="1.5"/>
+  
+  <!-- Small network nodes on left -->
+  <circle cx="16" cy="40" r="3" fill="#4a90d9" stroke="#3584e4" stroke-width="1"/>
+  <circle cx="16" cy="64" r="3" fill="#4a90d9" stroke="#3584e4" stroke-width="1"/>
+  <circle cx="16" cy="88" r="3" fill="#4a90d9" stroke="#3584e4" stroke-width="1"/>
+  
+  <!-- Left connections -->
+  <line x1="19" y1="40" x2="24" y2="33" stroke="#6bb8f0" stroke-width="1.5"/>
+  <line x1="19" y1="64" x2="24" y2="57" stroke="#6bb8f0" stroke-width="1.5"/>
+  <line x1="19" y1="88" x2="24" y2="81" stroke="#6bb8f0" stroke-width="1.5"/>
+</svg>

@@ -6,6 +6,14 @@
 {% block content %}
 <h2><i class="bi bi-globe"></i> DNS</h2>
 
+<!-- Reapply status banner -->
+<div id="reapply-banner" class="alert alert-info d-none mb-3">
+  <div class="d-flex align-items-center">
+    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+    <span id="reapply-text">Reapplying playbooks...</span>
+  </div>
+</div>
+
 
 <div class="row">
   <!-- Main form -->
@@ -479,5 +487,43 @@ function testApiKey() {
       btn.innerHTML = '<i class="bi bi-shield-check"></i> Test';
     });
 }
+
+// Poll reapply status
+function pollReapplyStatus() {
+  fetch('{% url "settings_reapply_status" %}')
+    .then(r => r.json())
+    .then(data => {
+      const banner = document.getElementById('reapply-banner');
+      const text = document.getElementById('reapply-text');
+      if (data.status === 'running') {
+        banner.className = 'alert alert-info mb-3';
+        let msg = 'Reapplying playbooks...';
+        if (data.progress) msg += ' (' + data.progress + ')';
+        if (data.playbook) msg += ' — ' + data.playbook;
+        text.textContent = msg;
+        banner.classList.remove('d-none');
+        setTimeout(pollReapplyStatus, 2000);
+      } else if (data.status === 'done') {
+        banner.className = data.success
+          ? 'alert alert-success mb-3'
+          : 'alert alert-warning mb-3';
+        text.textContent = data.success
+          ? 'Reapply completed successfully.'
+          : 'Reapply finished with errors. Check logs.';
+        banner.classList.remove('d-none');
+        setTimeout(() => banner.classList.add('d-none'), 10000);
+      } else {
+        banner.classList.add('d-none');
+      }
+    })
+    .catch(() => {
+      // Ignore errors, just hide banner
+    });
+}
+
+// Start polling on page load
+document.addEventListener('DOMContentLoaded', function() {
+  pollReapplyStatus();
+});
 </script>
 {% endblock %}
