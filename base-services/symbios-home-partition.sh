@@ -268,7 +268,11 @@ action_setup() {
 
   # Update fstab: remove existing /home entry, add new one
   sed -i '\#.*[[:space:]]/home[[:space:]]#d' /etc/fstab
-  echo "UUID=$uuid /home ext4 defaults,noatime 0 2" >> /etc/fstab
+  if [ "$encrypt" = "yes" ]; then
+    echo "/dev/mapper/$luks_name /home ext4 defaults,noatime 0 2" >> /etc/fstab
+  else
+    echo "UUID=$uuid /home ext4 defaults,noatime 0 2" >> /etc/fstab
+  fi
 
   # Mount new /home
   mount /home || json_error "Mount /home failed"
