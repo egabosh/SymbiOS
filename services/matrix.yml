@@ -381,7 +381,7 @@
                   "https://scalar-staging.vector.im/api",
                   "https://scalar-staging.riot.im/scalar/api"
               ],
-              "default_country_code": "DE",
+              "default_country_code": "US",
               "show_labs_settings": false,
               "features": {},
               "default_federate": true,

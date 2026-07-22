@@ -398,14 +398,14 @@
             alias fgrep='grep -F --colour=auto'
           fi
 
-          # Source profile in bashrc and set German locale for LinuxMint
+          # Source profile in bashrc
           if [ -d /etc/linuxmint ] 
           then
             if ! grep -q /etc/profile.d/settings-from-ansible.sh ~/.bashrc
             then
               echo '. /etc/profile.d/settings-from-ansible.sh' >> ~/.bashrc
             fi
-            export LANG="de_DE.UTF-8"
+            export LANG="en_US.UTF-8"
           fi
         backup: yes
         validate: /bin/bash -n %s
