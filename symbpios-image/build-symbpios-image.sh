@@ -282,8 +282,10 @@ echo "Graphical interface disabled in systemd"
 systemctl --root="${g_rootfs}" mask cloud-init.service 2>/dev/null || true
 systemctl --root="${g_rootfs}" mask cloud-init-local.service 2>/dev/null || true
 systemctl --root="${g_rootfs}" mask userconf-pi.service 2>/dev/null || true
+systemctl --root="${g_rootfs}" mask userconfig.service 2>/dev/null || true
 systemctl --root="${g_rootfs}" mask cloud-final.service 2>/dev/null || true
 systemctl --root="${g_rootfs}" mask cloud-config.service 2>/dev/null || true
+systemctl --root="${g_rootfs}" mask keyboard-setup.service 2>/dev/null || true
 
 # Disable the first-boot wizard modules in cloud-init config
 mkdir -p "${g_rootfs}/etc/cloud/cloud.cfg.d"
