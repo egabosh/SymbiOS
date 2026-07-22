@@ -168,7 +168,7 @@
 
     - name: Install symbios-home-partition.sh
       ansible.builtin.copy:
-        src: /home/SymbiOS/symbios-home-partition.sh
+        src: /home/SymbiOS/base-services/symbios-home-partition.sh
         dest: /usr/local/sbin/symbios-home-partition.sh
         owner: root
         group: root
