@@ -186,7 +186,10 @@
                 - ENABLE_EVALUATION_ARENA_MODELS=false
                 - ENABLE_MESSAGE_RATING=false
                 - ENABLE_TAGS_GENERATION=false
+                - WEBUI_NAME=AI
                 # Auth / OIDC
+                - WEBUI_AUTH=true
+                - ENABLE_SIGNUP=false
                 - ENABLE_OAUTH_SIGNUP=true
                 - ENABLE_OAUTH_ROLE_MAPPING=true
                 - ENABLE_API_KEYS=true
@@ -225,9 +228,16 @@
                 - BYPASS_MODEL_ACCESS_CONTROL=true
                 - DEFAULT_MODEL_METADATA={"capabilities":{"vision":true,"web_search":true,"image_generation":true,"builtin_tools":true}}
                 #- DEFAULT_MODEL_PARAMS={"function_calling":"native"}
+                - DEFAULT_USER_SYSTEM_PROMPT=Antworte IMMER ausschließlich auf Deutsch oder Englisch. Schreibe niemals in einer anderen Sprache außer es ist ausdrücklich erwünscht. Sei präzise und halte Antworten kurz, es sei denn, der Nutzer wünscht detaillierte Erklärungen.
+                - DEFAULT_MODEL=llamacpp-default
+                - ENABLE_MESSAGE_RATING=false
+                - ENABLE_FOLLOW_UP_GENERATION=false
+                - DEFAULT_CONTEXT_LENGTH=262144
                 - DEFAULT_MODEL_PARAMS={"function_calling":"native","max_tokens":8192}
                 - DEFAULT_PROMPT_SUGGESTIONS=[]
                 - OPENAI_API_REQUEST_TIMEOUT=180
+                - ENABLE_CONTEXT_COMPACTION=true
+                - CONTEXT_COMPACTION_TOKEN_THRESHOLD=25000
                 # Image Generation (ComfyUI)
                 - ENABLE_IMAGE_GENERATION=true
                 - IMAGE_GENERATION_ENGINE=comfyui
