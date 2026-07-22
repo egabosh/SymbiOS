@@ -175,6 +175,13 @@
         mode: '0755'
       when: nocontainer.stat.exists
 
+    - name: Remove default pi user if present
+      ansible.builtin.user:
+        name: pi
+        state: absent
+        remove: true
+      when: nocontainer.stat.exists
+
     - name: Create symbios user
       ansible.builtin.user:
         name: symbios
