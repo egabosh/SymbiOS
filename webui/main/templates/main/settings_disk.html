@@ -74,12 +74,21 @@
           </div>
 
           <div class="mb-3" id="encrypt-password-group" style="display:none">
+            <div class="alert alert-danger small py-2 px-3 mb-3">
+              <i class="bi bi-exclamation-triangle-fill"></i>
+              <strong>If you forget this passphrase, your data is permanently unrecoverable.</strong>
+              Write it down and store it somewhere safe.
+            </div>
             <label class="form-label">Encryption Passphrase</label>
-            <input type="password" class="form-control" id="setup-password"
-                   placeholder="Choose a strong passphrase">
-            <div class="form-text">
-              This passphrase will be required to unlock /home after each reboot.
-              There is no recovery if you forget it.
+            <input type="password" class="form-control mb-2" id="setup-password"
+                   placeholder="Choose a strong passphrase"
+                   oninput="checkPasswords()">
+            <label class="form-label">Confirm Passphrase</label>
+            <input type="password" class="form-control" id="setup-password-confirm"
+                   placeholder="Repeat the passphrase"
+                   oninput="checkPasswords()">
+            <div id="password-mismatch" class="form-text text-danger" style="display:none">
+              Passphrases do not match.
             </div>
           </div>
 
@@ -291,6 +300,22 @@ function parseSizeBytes(sizeStr) {
 function toggleEncrypt() {
   var show = document.getElementById('setup-encrypt').checked;
   document.getElementById('encrypt-password-group').style.display = show ? '' : 'none';
+  if (!show) {
+    document.getElementById('setup-password').value = '';
+    document.getElementById('setup-password-confirm').value = '';
+    document.getElementById('password-mismatch').style.display = 'none';
+  }
+}
+
+function checkPasswords() {
+  var pw = document.getElementById('setup-password').value;
+  var pw2 = document.getElementById('setup-password-confirm').value;
+  var mismatch = document.getElementById('password-mismatch');
+  if (pw2 && pw !== pw2) {
+    mismatch.style.display = '';
+  } else {
+    mismatch.style.display = 'none';
+  }
 }
 
 function setupDisk(e) {
@@ -309,6 +334,14 @@ function setupDisk(e) {
   if (encrypt && !password) {
     result.innerHTML = '<span class="text-danger">Enter an encryption passphrase.</span>';
     return false;
+  }
+
+  if (encrypt) {
+    var pw2 = document.getElementById('setup-password-confirm').value;
+    if (password !== pw2) {
+      result.innerHTML = '<span class="text-danger">Passphrases do not match.</span>';
+      return false;
+    }
   }
 
   // Frontend size check: compare device size with /home size
