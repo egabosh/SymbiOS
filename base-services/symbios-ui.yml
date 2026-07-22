@@ -485,6 +485,14 @@
           Terminal=false
           Categories=Network;WebBrowser;
 
+    - name: Ensure /etc/skel/Desktop exists for new users
+      ansible.builtin.file:
+        path: /etc/skel/Desktop
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
     - name: SymbiOS WebUI .desktop file for new users (skel)
       ansible.builtin.copy:
         dest: /etc/skel/Desktop/symbios-webui.desktop
