@@ -125,6 +125,7 @@
           - python3-pip
           - python3-venv
           - python3-html2text
+          - python3-passlib
         install_recommends: no
         update_cache: yes
         cache_valid_time: 3600
