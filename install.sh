@@ -75,8 +75,8 @@ f_run_playbook /home/SymbiOS/base-services/autoupdate.yml
 f_run_playbook /home/SymbiOS/base-services/runchecks.yml
 f_run_playbook /home/SymbiOS/base-services/docker.yml
 f_run_playbook /home/SymbiOS/base-services/dedyn.yml
-f_run_playbook /home/SymbiOS/base-services/acme-pki.yml
 f_run_playbook /home/SymbiOS/base-services/traefik.yml
+f_run_playbook /home/SymbiOS/base-services/acme-pki.yml
 f_run_playbook /home/SymbiOS/base-services/ldap.yml
 f_run_playbook /home/SymbiOS/base-services/authelia.yml
 
