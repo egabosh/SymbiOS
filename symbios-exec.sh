@@ -25,7 +25,8 @@
 # Logging uses the gaboshlib helpers (g_logger -> syslog, g_echo_error).
 
 # Load shared bash helpers (g_echo_error, g_logger, ...).
-source /etc/bash/gaboshlib.include
+# Redirect to stderr so helper messages don't corrupt JSON output on stdout.
+source /etc/bash/gaboshlib.include 1>&2
 
 # Client IP for the audit trail (from the SSH connection metadata).
 g_client_ip="${SSH_CONNECTION%% *}"
