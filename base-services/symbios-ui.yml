@@ -468,7 +468,7 @@
       changed_when: false
       failed_when: false
 
-    - name: Install SymbiOS WebUI .desktop file (system-wide)
+    - name: Install SymbiOS WebUI .desktop file (system-wide app menu)
       ansible.builtin.copy:
         dest: /usr/share/applications/symbios-webui.desktop
         owner: root
@@ -485,43 +485,49 @@
           Terminal=false
           Categories=Network;WebBrowser;
 
-    - name: Create SymbiOS WebUI desktop shortcut for all users
-      ansible.builtin.shell: |
-        # Place .desktop file on every user's Desktop folder
-        for f_entry in $(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1":"$6}')
-        do
-          f_user=$(echo "$f_entry" | cut -d: -f1)
-          f_home=$(echo "$f_entry" | cut -d: -f2)
-          f_uid=$(id -u "$f_user")
+    - name: SymbiOS WebUI .desktop file for new users (skel)
+      ansible.builtin.copy:
+        dest: /etc/skel/Desktop/symbios-webui.desktop
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          [Desktop Entry]
+          Version=1.0
+          Type=Link
+          Name=SymbiOS WebUI
+          Comment=Open SymbiOS Web Management Interface
+          URL=http://localhost:8080
+          Icon=symbios
+          Terminal=false
+          Categories=Network;WebBrowser;
 
-          f_desktop=""
-          for f_dir in Desktop Schreibtisch desktop schreibtisch
-          do
-            if [ -d "$f_home/$f_dir" ]
-            then
-              f_desktop="$f_home/$f_dir"
-              break
-            fi
-          done
+    - name: Ensure symbios user Desktop directory exists
+      ansible.builtin.file:
+        path: /home/symbios/Desktop
+        state: directory
+        owner: "1000"
+        group: "1000"
+        mode: "0755"
+      failed_when: false
 
-          if [ -z "$f_desktop" ]
-          then
-            continue
-          fi
-
-          if [ -f "$f_desktop/symbios-webui.desktop" ]
-          then
-            continue
-          fi
-
-          cp /usr/share/applications/symbios-webui.desktop "$f_desktop/symbios-webui.desktop"
-          chown "${f_uid}:${f_uid}" "$f_desktop/symbios-webui.desktop"
-          chmod 644 "$f_desktop/symbios-webui.desktop"
-          gio set "$f_desktop/symbios-webui.desktop" "metadata::trusted" true 2>/dev/null || true
-        done
-      args:
-        executable: /bin/bash
-      changed_when: false
+    - name: SymbiOS WebUI .desktop file for symbios user
+      ansible.builtin.copy:
+        dest: /home/symbios/Desktop/symbios-webui.desktop
+        owner: "1000"
+        group: "1000"
+        mode: "0755"
+        content: |
+          [Desktop Entry]
+          Version=1.0
+          Type=Link
+          Name=SymbiOS WebUI
+          Comment=Open SymbiOS Web Management Interface
+          URL=http://localhost:8080
+          Icon=symbios
+          Terminal=false
+          Categories=Network;WebBrowser;
+      failed_when: false
 
     - name: Seed pinned SSH known_hosts for exec gateway
       # Pin the host key used by the WebUI's SSH exec path. The WebUI connects
