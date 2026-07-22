@@ -281,6 +281,7 @@ echo "Graphical interface disabled in systemd"
 # firstrun.sh (Imager customizations) and basics.yml (symbios user).
 systemctl --root="${g_rootfs}" mask cloud-init.service 2>/dev/null || true
 systemctl --root="${g_rootfs}" mask cloud-init-local.service 2>/dev/null || true
+systemctl --root="${g_rootfs}" mask userconf-pi.service 2>/dev/null || true
 systemctl --root="${g_rootfs}" mask cloud-final.service 2>/dev/null || true
 systemctl --root="${g_rootfs}" mask cloud-config.service 2>/dev/null || true
 
