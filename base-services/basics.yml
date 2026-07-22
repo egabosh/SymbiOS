@@ -166,6 +166,15 @@
         mode: '0755'
       when: nocontainer.stat.exists
 
+    - name: Install symbios-home-partition.sh
+      ansible.builtin.copy:
+        src: /home/SymbiOS/symbios-home-partition.sh
+        dest: /usr/local/sbin/symbios-home-partition.sh
+        owner: root
+        group: root
+        mode: '0755'
+      when: nocontainer.stat.exists
+
     - name: Create symbios user
       ansible.builtin.user:
         name: symbios
