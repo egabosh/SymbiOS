@@ -59,16 +59,6 @@ The script will:
 EOF
 }
 
-function f_notice {
-    local f_msg="${1}"
-    f_echo_norm "*** ${f_msg}"
-}
-
-function f_error {
-    local f_msg="${1}"
-    g_echo_error "${f_msg}" 1>&2
-}
-
 # Parse arguments
 while [ $# -gt 0 ]
 do
@@ -87,7 +77,7 @@ do
             exit 0
             ;;
         *)
-            f_error "Unknown option: ${1}"
+            g_echo_error "Unknown option: ${1}"
             f_usage
             exit 1
             ;;
@@ -97,71 +87,71 @@ done
 
 if [ "${g_verbose}" = true ]
 then
-    f_notice "Verbose mode enabled"
+    g_echo_note "Verbose mode enabled"
 fi
 
 if [ "${g_dry_run}" = true ]
 then
-    f_notice "Dry run mode - checking changes only"
+    g_echo_note "Dry run mode - checking changes only"
 fi
 
 if [ "${g_no_reapply}" = true ]
 then
-    f_notice "Will not start reapply script"
+    g_echo_note "Will not start reapply script"
 fi
 
-f_notice "Starting SymbiOS update at $(date)"
+g_echo_note "Starting SymbiOS update at $(date)"
 
 # Clone or update the SymbiOS repository
 if [ ! -d "${g_symbios_dir}" ]
 then
-    f_notice "Cloning SymbiOS repository into ${g_symbios_dir}"
+    g_echo_note "Cloning SymbiOS repository into ${g_symbios_dir}"
     if [ ! -d "$(dirname "${g_symbios_dir}")" ]
     then
         mkdir -p "$(dirname "${g_symbios_dir}")"
     fi
     if git clone "${g_repo_url}" "${g_symbios_dir}"
     then
-        f_notice "  Successfully cloned repository"
+        g_echo_note "  Successfully cloned repository"
     else
-        f_error "  Failed to clone repository"
+        g_echo_error "  Failed to clone repository"
         exit 1
     fi
 else
-    f_notice "Updating SymbiOS repository in ${g_symbios_dir}"
+    g_echo_note "Updating SymbiOS repository in ${g_symbios_dir}"
     cd "${g_symbios_dir}" || {
-        f_error "Could not change to SymbiOS directory"
+        g_echo_error "Could not change to SymbiOS directory"
         exit 1
     }
     if git remote get-url origin | grep -q "https"
     then
-        f_notice "  Repository source is HTTPS - pulling from remote"
+        g_echo_note "  Repository source is HTTPS - pulling from remote"
         if git checkout main 2>/dev/null
         then
             if git pull origin main
             then
-                f_notice "  Successfully updated repository"
+                g_echo_note "  Successfully updated repository"
             else
-                f_error "  Failed to update repository"
+                g_echo_error "  Failed to update repository"
                 exit 1
             fi
         else
-            f_notice "  On detached HEAD - doing a hard pull"
+            g_echo_note "  On detached HEAD - doing a hard pull"
             if git fetch origin main && git reset --hard origin/main
             then
-                f_notice "  Successfully updated repository"
+                g_echo_note "  Successfully updated repository"
             else
-                f_error "  Failed to update repository"
+                g_echo_error "  Failed to update repository"
                 exit 1
             fi
         fi
     else
-        f_notice "  Repository source is SSH - using git pull"
+        g_echo_note "  Repository source is SSH - using git pull"
         if git pull
         then
-            f_notice "  Successfully updated repository"
+            g_echo_note "  Successfully updated repository"
         else
-            f_error "  Failed to update repository"
+            g_echo_error "  Failed to update repository"
             exit 1
         fi
     fi
@@ -169,28 +159,28 @@ fi
 
 # Change to SymbiOS directory
 cd "${g_symbios_dir}" || {
-    f_error "Could not change to SymbiOS directory"
+    g_echo_error "Could not change to SymbiOS directory"
     exit 1
 }
 
 # Check if ansible is available
 if ! which ansible >/dev/null 2>&1
 then
-    f_error "Ansible is not installed. Please install ansible first."
+    g_echo_error "Ansible is not installed. Please install ansible first."
     exit 1
 fi
 
 # Check if we have an inventory file
 if [ ! -f "${g_inventory}" ]
 then
-    f_error "Inventory file not found: ${g_inventory}"
+    g_echo_error "Inventory file not found: ${g_inventory}"
     exit 1
 fi
 
 # Get list of installed playbooks from state file
-f_notice "Checking installed playbooks"
-f_installed_playbooks=()
-f_line=""
+g_echo_note "Checking installed playbooks"
+local f_installed_playbooks=()
+local f_line=""
 
 if [ -f "installed-playbooks.yml" ]
 then
@@ -205,29 +195,29 @@ then
 fi
 
 f_playbooks_count=${#f_installed_playbooks[@]}
-f_notice "Found ${f_playbooks_count} installed playbook(s):"
+g_echo_note "Found ${f_playbooks_count} installed playbook(s):"
 for f_playbook in "${f_installed_playbooks[@]}"
 do
-    f_notice "  - ${f_playbook}"
+    g_echo_note "  - ${f_playbook}"
 done
 
 # Check each installed playbook for changes
 f_updated_playbooks=()
 for f_playbook in "${f_installed_playbooks[@]}"
 do
-    f_notice "Checking ${f_playbook} for changes"
+    g_echo_note "Checking ${f_playbook} for changes"
     f_repo_file="${g_symbios_dir}/${f_playbook}"
     f_installed_path="${f_playbook}"
 
     if [ ! -f "${f_repo_file}" ]
     then
-        f_notice "  Warning: Playbook not found in SymbiOS repository: ${f_playbook}"
+        g_echo_warn "  Warning: Playbook not found in SymbiOS repository: ${f_playbook}"
         continue
     fi
 
     if [ ! -f "${f_installed_path}" ]
     then
-        f_notice "  Warning: Installed playbook file not found: ${f_installed_path}"
+        g_echo_warn "  Warning: Installed playbook file not found: ${f_installed_path}"
         continue
     fi
 
@@ -237,58 +227,58 @@ do
         f_diff_count=$(diff -u "${f_installed_path}" "${f_repo_file}" 2>/dev/null | wc -l)
         if [ "${f_diff_count}" -gt 0 ]
         then
-            f_notice "  Changes detected - will update"
+            g_echo_note "  Changes detected - will update"
             f_updated_playbooks+=("${f_playbook}")
         else
-            f_notice "  Already up-to-date"
+            g_echo_note "  Already up-to-date"
         fi
     else
-        f_notice "  Already up-to-date (same file)"
+        g_echo_note "  Already up-to-date (same file)"
     fi
 done
 
 if [ ${#f_updated_playbooks[@]} -eq 0 ]
 then
-    f_notice "No updates needed"
+    g_echo_note "No updates needed"
 else
-    f_notice "Will update ${#f_updated_playbooks[@]} playbook(s):"
+    g_echo_note "Will update ${#f_updated_playbooks[@]} playbook(s):"
     for f_playbook in "${f_updated_playbooks[@]}"
     do
-        f_notice "  - ${f_playbook}"
+        g_echo_note "  - ${f_playbook}"
     done
 
     if [ "${g_dry_run}" = true ]
     then
-        f_notice "Dry run: Skipping actual updates"
+        g_echo_note "Dry run: Skipping actual updates"
     else
         # Update and run each updated playbook
         for f_playbook in "${f_updated_playbooks[@]}"
         do
-            f_notice "Processing ${f_playbook}"
+            g_echo_note "Processing ${f_playbook}"
             f_repo_file="${g_symbios_dir}/${f_playbook}"
             f_installed_path="${f_playbook}"
 
             # Backup existing file if it exists
             if [ -f "${f_installed_path}" ]
             then
-                f_notice "  Backing up existing ${f_installed_path} to ${f_installed_path}.backup"
+                g_echo_note "  Backing up existing ${f_installed_path} to ${f_installed_path}.backup"
                 cp "${f_installed_path}" "${f_installed_path}.backup"
             fi
 
             # Copy new file
-            f_notice "  Copying ${f_repo_file} to ${f_installed_path}"
+            g_echo_note "  Copying ${f_repo_file} to ${f_installed_path}"
             if ! cp "${f_repo_file}" "${f_installed_path}"
             then
-                f_error "  Failed to copy ${f_repo_file} to ${f_installed_path}"
+                g_echo_error "  Failed to copy ${f_repo_file} to ${f_installed_path}"
                 continue
             fi
 
-            f_notice "  Running ${f_playbook}"
+            g_echo_note "  Running ${f_playbook}"
             if ansible-playbook --connection=local --limit localhost --inventory "${g_inventory}" "${f_installed_path}"
             then
-                f_notice "  Successfully ran ${f_playbook}"
+                g_echo_note "  Successfully ran ${f_playbook}"
             else
-                f_error "  Failed to run ${f_playbook}"
+                g_echo_error "  Failed to run ${f_playbook}"
                 g_failed="${g_failed} ${f_playbook}"
             fi
         done
@@ -296,28 +286,28 @@ else
 fi
 
 # Report results
-f_notice ""
-f_notice "=== Update Summary ==="
+g_echo_note ""
+g_echo_note "=== Update Summary ==="
 if [ -z "${g_failed}" ]
 then
-    f_notice "All playbooks updated successfully"
+    g_echo_note "All playbooks updated successfully"
 else
-    f_notice "FAILED playbooks:${g_failed}"
-    f_notice "Fix the issues and run again, or reboot to retry."
+    g_echo_error "FAILED playbooks:${g_failed}"
+    g_echo_error "Fix the issues and run again, or reboot to retry."
 fi
 
 if [ "${g_no_reapply}" = false ]
 then
-    f_notice "Starting reapply script for background processing"
+    g_echo_note "Starting reapply script for background processing"
     if command -v nohup >/dev/null 2>&1 && command -v sleep >/dev/null 2>&1
     then
         nohup /usr/local/sbin/symbios-reapply.sh > /dev/null 2>&1 &
-        f_notice "Reapply script started with PID $!"
+        g_echo_note "Reapply script started with PID $!"
     else
-        f_notice "Nohup or sleep not available - cannot start reapply script"
+        g_echo_warn "Nohup or sleep not available - cannot start reapply script"
     fi
 else
-    f_notice "Skipping reapply script start"
+    g_echo_note "Skipping reapply script start"
 fi
 
-f_notice "Update completed at $(date)"
+g_echo_note "Update completed at $(date)"
