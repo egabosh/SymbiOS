@@ -10,7 +10,7 @@ g_echo_ok "Starting $0"
 # https://github.com/ssllabs/ssllabs-scan/
 
 # Download and build ssllabs-scan if not already installed
-if ! [ -f /usr/local/bin/ssllabs-scan ]
+if ! [[ -f /usr/local/bin/ssllabs-scan ]]
 then
   cd /tmp
   rm -rf ssllabs-scan
@@ -21,7 +21,7 @@ then
   else
     cd ssllabs-scan
     make >"${g_tmp}/ssllabs-scan-make.out"
-    if [ -f ssllabs-scan-v3 ]
+    if [[ -f ssllabs-scan-v3 ]]
     then
       cp ssllabs-scan-v3 /usr/local/bin/ssllabs-scan
       chmod 755 /usr/local/bin/ssllabs-scan
@@ -33,7 +33,7 @@ then
 fi
 
 # Scan every Traefik-hosted service
-if [ -f /usr/local/bin/ssllabs-scan ]
+if [[ -f /usr/local/bin/ssllabs-scan ]]
 then
   # Collect all hostnames from docker-compose files
   find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "\.del$|\.bak$|\.old$|var-lib-docker$" | while read g_dir
@@ -42,7 +42,7 @@ then
     then
       grep Host "$g_dir"/docker-compose.override.yml >>"$g_tmp/hosts"
     else
-      if [ -f "$g_dir"/docker-compose.yml ]
+      if [[ -f "$g_dir"/docker-compose.yml ]]
       then
         grep Host "$g_dir"/docker-compose.yml >>"$g_tmp/hosts"
       fi

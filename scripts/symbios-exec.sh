@@ -37,7 +37,7 @@ g_cmd="${SSH_ORIGINAL_COMMAND:-$*}"
 g_cmd="${g_cmd#*symbios-exec.sh }"
 
 # Nothing to do -> interactive shell was requested.
-if [ -z "$g_cmd" ]
+if [[ -z "$g_cmd" ]]
 then
   echo "interactive"
   exit 0

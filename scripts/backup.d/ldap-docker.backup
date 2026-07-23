@@ -20,9 +20,9 @@ cd -
 g_old_backups=$(ls -1 $g_backupdir/openldap.ldap.local-*.gz 2>/dev/null | wc -l)
 
 # Remove old backups if more than retention period
-if [ -n "$g_old_backups" ]
+if [[ -n "$g_old_backups" ]]
 then
-  if [ $g_old_backups -gt $g_days ]
+  if [[ $g_old_backups -gt $g_days ]]
   then
     find $g_backupdir -name "openldap.ldap.local-*.gz" -daystart -mtime +$g_days -delete
   fi

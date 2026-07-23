@@ -1,8 +1,8 @@
 # Alert when swap is active and free space drops below 50MB
-if ! [ $(free | grep "^Swap:" | sed 's/  */ /g' | cut -d" " -f 2) == 0 ]
+if ! [[ $(free | grep "^Swap:" | sed 's/  */ /g' | cut -d" " -f 2) == 0 ]]
 then
   g_mem=`free | grep "^Swap:" | sed 's/  */ /g' | cut -d" " -f 4`
-  if [ $g_mem -lt 50000 ]
+  if [[ $g_mem -lt 50000 ]]
   then
     g_echo_error "Swap full! Free: ${g_mem}kB"
   fi

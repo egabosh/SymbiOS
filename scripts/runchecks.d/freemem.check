@@ -1,6 +1,6 @@
 # Alert when free memory drops below 20MB
 g_mem=`free | grep "^Mem:" | sed 's/  */ /g' | cut -d" " -f 4`
-if [ $g_mem -lt 20480 ]
+if [[ $g_mem -lt 20480 ]]
 then
   g_echo_error "Memory full! Free: ${g_mem}kB"
 fi

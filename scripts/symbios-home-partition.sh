@@ -62,11 +62,11 @@ function f_action_status {
   # What is /home mounted on?
   local f_df_out
   f_df_out=$(df -hT /home 2>/dev/null | tail -1) || true
-  if [ -n "$f_df_out" ]
+  if [[ -n "$f_df_out" ]]
   then
     local f_parts
     f_parts=($f_df_out)
-    if [ ${#f_parts[@]} -ge 7 ]
+    if [[ ${#f_parts[@]} -ge 7 ]]
     then
       f_home_device="${f_parts[0]}"
       f_home_fstype="${f_parts[1]}"
@@ -79,7 +79,7 @@ function f_action_status {
   # Check LUKS in block device tree
   local f_lsblk_out
   f_lsblk_out=$(lsblk -J -o NAME,TYPE,FSTYPE,MOUNTPOINT,UUID 2>/dev/null) || true
-  if [ -n "$f_lsblk_out" ]
+  if [[ -n "$f_lsblk_out" ]]
   then
     local f_found
     f_found=$(echo "$f_lsblk_out" | python3 -c "
@@ -109,7 +109,7 @@ if result:
     print(result[0])
     print(result[1])
 " 2>/dev/null) || true
-    if [ -n "$f_found" ]
+    if [[ -n "$f_found" ]]
     then
       f_luks_name=$(echo "$f_found" | head -1)
       local f_luks_uuid
@@ -130,7 +130,7 @@ if result:
   fi
 
   # Also check mapper for open LUKS
-  if [ "$f_luks_open" = "false" ]
+  if [[ "$f_luks_open" == "false" ]]
   then
     if ls /dev/mapper/ 2>/dev/null | grep -qE 'home|luks'
     then
@@ -161,14 +161,14 @@ function f_action_setup {
   local f_password="${3:-}"
 
   # Validation
-  [ -z "$f_device" ] && f_json_error "No device selected"
+  [[ -z "$f_device" ]] && f_json_error "No device selected"
   [[ "$f_device" == /dev/* ]] || f_json_error "Invalid device path"
-  [ "$f_encrypt" = "yes" ] && [ -z "$f_password" ] && f_json_error "Password required for LUKS encryption"
+  [[ "$f_encrypt" == "yes" ]] && [[ -z "$f_password" ]] && f_json_error "Password required for LUKS encryption"
 
   # Safety: not the root device
   local f_root_dev
   f_root_dev=$(findmnt -n -o SOURCE / 2>/dev/null) || true
-  if [ -n "$f_root_dev" ]
+  if [[ -n "$f_root_dev" ]]
   then
     if [[ "$f_device" == *"$f_root_dev"* ]] || [[ "$f_root_dev" == *"$f_device"* ]]
     then
@@ -179,9 +179,9 @@ function f_action_setup {
   # Safety: not mounted (except as /home itself)
   local f_cur_mount
   f_cur_mount=$(findmnt -n -o TARGET "$f_device" 2>/dev/null) || true
-  if [ -n "$f_cur_mount" ]
+  if [[ -n "$f_cur_mount" ]]
   then
-    if [ "$f_cur_mount" = "/home" ]
+    if [[ "$f_cur_mount" == "/home" ]]
     then
       f_json_error "This device is already mounted as /home"
     fi
@@ -193,11 +193,11 @@ function f_action_setup {
   f_home_size=$(du -sb /home/ 2>/dev/null | awk '{print $1}') || f_home_size=0
   f_disk_size=$(blockdev --getsize64 "$f_device" 2>/dev/null) || f_disk_size=0
 
-  if [ "$f_home_size" -eq 0 ] 2>/dev/null
+  if [[ "$f_home_size" -eq 0 ]] 2>/dev/null
   then
     f_json_error "Could not determine /home size"
   fi
-  if [ "$f_disk_size" -eq 0 ] 2>/dev/null
+  if [[ "$f_disk_size" -eq 0 ]] 2>/dev/null
   then
     f_json_error "Could not determine disk size"
   fi
@@ -205,10 +205,10 @@ function f_action_setup {
   # LUKS metadata overhead ~16MB, ext4 ~1%, add 5% safety margin
   local f_overhead=$(( 16 * 1024 * 1024 ))
   local f_home_margin=$(( f_home_size / 20 ))
-  [ "$f_home_margin" -gt "$f_overhead" ] && f_overhead=$f_home_margin
+  [[ "$f_home_margin" -gt "$f_overhead" ]] && f_overhead=$f_home_margin
   local f_needed=$(( f_home_size + f_overhead ))
 
-  if [ "$f_disk_size" -lt "$f_needed" ]
+  if [[ "$f_disk_size" -lt "$f_needed" ]]
   then
     local f_home_gb f_disk_gb f_needed_gb
     f_home_gb=$(python3 -c "print(f'{$f_home_size/1024**3:.1f}')")
@@ -224,7 +224,7 @@ function f_action_setup {
   # Unmount if mounted anywhere
   umount "$f_device" 2>/dev/null || true
 
-  if [ "$f_encrypt" = "yes" ]
+  if [[ "$f_encrypt" == "yes" ]]
   then
     echo "$f_password" | cryptsetup luksFormat --batch-mode "$f_device" || \
       f_json_error "LUKS format failed"
@@ -261,7 +261,7 @@ function f_action_setup {
 
   # Update fstab: remove existing /home entry, add new one
   sed -i '\#.*[[:space:]]/home[[:space:]]#d' /etc/fstab
-  if [ "$f_encrypt" = "yes" ]
+  if [[ "$f_encrypt" == "yes" ]]
   then
     echo "/dev/mapper/$f_luks_name /home ext4 defaults,noatime 0 2" >> /etc/fstab
   else
@@ -272,7 +272,7 @@ function f_action_setup {
   mount /home || f_json_error "Mount /home failed"
 
   # Store LUKS name for boot unlock
-  if [ "$f_encrypt" = "yes" ]
+  if [[ "$f_encrypt" == "yes" ]]
   then
     echo "$f_luks_name" > /config/.luks-name 2>/dev/null || true
   fi

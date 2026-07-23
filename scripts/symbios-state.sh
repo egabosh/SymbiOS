@@ -33,7 +33,7 @@ source /etc/bash/gaboshlib.include 2>/dev/null || true
 g_state_file="/home/docker/symbios-ui/config/installed-playbooks.yml"
 
 # Ensure state file exists
-if [ ! -f "$g_state_file" ]
+if [[ ! -f "$g_state_file" ]]
 then
   mkdir -p "$(dirname "$g_state_file")"
   printf '%s\n' "# Auto-maintained by playbooks via symbios-state.sh" > "$g_state_file"
@@ -54,9 +54,9 @@ EOF
 
 function f_set {
   local f_playbook="$1"
-  if [ -z "$f_playbook" ]
+  if [[ -z "$f_playbook" ]]
   then
-    echo "ERROR: No playbook path given" >&2
+    g_echo_error "No playbook path given"
     exit 1
   fi
   local f_timestamp
@@ -69,9 +69,9 @@ function f_set {
 
 function f_unset {
   local f_playbook="$1"
-  if [ -z "$f_playbook" ]
+  if [[ -z "$f_playbook" ]]
   then
-    echo "ERROR: No playbook path given" >&2
+    g_echo_error "No playbook path given"
     exit 1
   fi
   f_unset_quiet "$f_playbook"

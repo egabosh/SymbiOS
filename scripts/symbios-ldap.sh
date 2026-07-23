@@ -58,11 +58,11 @@ function f_cmd_search {
   local f_search_base="${f_base:-ou=users,${g_base_dn}}"
 
   local f_cmd=(ldapsearch -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -w "${g_admin_pw}" -b "${f_search_base}")
-  if [ -n "${f_filter}" ]
+  if [[ -n "${f_filter}" ]]
   then
     f_cmd+=("${f_filter}")
   fi
-  if [ -n "${f_attrs}" ]
+  if [[ -n "${f_attrs}" ]]
   then
     f_cmd+=(${f_attrs})
   fi
@@ -116,7 +116,7 @@ function f_cmd_next_uid {
 
   for f_uid in ${f_output}
   do
-    if [ "${f_uid}" -gt "${f_max_uid}" ] 2>/dev/null
+    if [[ "${f_uid}" -gt "${f_max_uid}" ]] 2>/dev/null
     then
       f_max_uid="${f_uid}"
     fi
@@ -189,7 +189,7 @@ case "${1:-}" in
   remove-from-group) f_cmd_remove_from_group "${2:-}" "${3:-}" ;;
   -h|--help|help) f_usage ;;
   *)
-    echo "ERROR: Unknown command: ${1:-}" >&2
+    g_echo_error "Unknown command: ${1:-}"
     f_usage >&2
     exit 1
     ;;

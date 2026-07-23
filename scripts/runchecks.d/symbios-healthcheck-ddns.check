@@ -1,27 +1,27 @@
 # Check: Verify deDyn DDNS cron job and configuration are present
 g_check_file="${g_tmp}/symbios-healthcheck-ddns"
-if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+if [[ -f "$g_check_file" ]] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
 then
   return 2>/dev/null || true
 fi
 date > "$g_check_file"
 
 # Check if dedyn cron job exists
-if ! [ -f /etc/cron.d/dedyn_local ]
+if ! [[ -f /etc/cron.d/dedyn_local ]]
 then
   g_echo_error "Healthcheck failed for ddns: cron job missing"
   return 2>/dev/null || true
 fi
 
 # Check if dedyn.conf exists and has required settings
-if ! [ -f /usr/local/etc/dedyn.conf ]
+if ! [[ -f /usr/local/etc/dedyn.conf ]]
 then
   g_echo_error "Healthcheck failed for ddns: /usr/local/etc/dedyn.conf missing"
   return 2>/dev/null || true
 fi
 
 . /usr/local/etc/dedyn.conf
-if [ -z "${dedynpw}" ] || [ -z "${dedynhosts}" ]
+if [[ -z "${dedynpw}" ]] || [[ -z "${dedynhosts}" ]]
 then
   g_echo_error "Healthcheck failed for ddns: dedynpw or dedynhosts not configured"
 fi

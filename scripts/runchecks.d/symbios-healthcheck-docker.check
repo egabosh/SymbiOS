@@ -1,6 +1,6 @@
 # Healthcheck for docker daemon
 g_check_file="${g_tmp}/symbios-healthcheck-docker"
-if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+if [[ -f "$g_check_file" ]] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
 then
   return 2>/dev/null || true
 fi

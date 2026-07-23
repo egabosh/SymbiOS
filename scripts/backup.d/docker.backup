@@ -28,7 +28,7 @@ do
   fi
 
   # Skip if no dump command is found
-  if [ -z "$g_dumpcmd" ]
+  if [[ -z "$g_dumpcmd" ]]
   then
     g_echo_error "No dump command found in container $g_container_id! No backup created!"
     continue
@@ -44,7 +44,7 @@ do
 
   # Remove old backups but keep at least the last g_days
   g_old_backups=$(ls -1 $g_backupdir/$g_container_id*.gz | wc -l)
-  if [ $g_old_backups -gt $g_days ]
+  if [[ $g_old_backups -gt $g_days ]]
   then
     find $g_backupdir -name "$g_container_id*.gz" -daystart -mtime +$g_days -delete
   fi
@@ -71,7 +71,7 @@ do
 
   # Remove old backups but keep at least the last g_days
   g_old_backups=$(ls -1 $g_backupdir/$g_container_id*.gz | wc -l)
-  if [ $g_old_backups -gt $g_days ]
+  if [[ $g_old_backups -gt $g_days ]]
   then
     find $g_backupdir -name "$g_container_id*.gz" -daystart -mtime +$g_days -delete
   fi

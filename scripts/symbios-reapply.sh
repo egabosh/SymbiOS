@@ -47,7 +47,7 @@ base-services/symbios-ui.yml
 "
 
 # Parse arguments
-if [ "${1:-}" = "--domain-only" ]
+if [[ "${1:-}" == "--domain-only" ]]
 then
   g_domain_only=true
 fi
@@ -63,12 +63,12 @@ function f_log {
 }
 
 # Prevent concurrent runs
-if [ -f "$g_pid_file" ]
+if [[ -f "$g_pid_file" ]]
 then
   g_old_pid=$(cat "$g_pid_file")
   if kill -0 "$g_old_pid" 2>/dev/null
   then
-    echo "REAPPLY already running (PID $g_old_pid). Exiting."
+    g_echo_warn "REAPPLY already running (PID $g_old_pid). Exiting."
     exit 0
   fi
   # Stale PID file
@@ -83,7 +83,7 @@ mkdir -p "$g_log_dir"
 mkdir -p "$(dirname "$g_state_file")"
 
 # Initialise state file if missing
-if [ ! -f "$g_state_file" ]
+if [[ ! -f "$g_state_file" ]]
 then
   printf '%s\n' "# Auto-maintained by playbooks via symbios-state.sh" > "$g_state_file"
 fi
@@ -97,13 +97,13 @@ echo "running" > "$g_status_file"
 # Build list of playbooks to re-run
 g_playbooks=""
 
-if [ "$g_domain_only" = true ]
+if [[ "$g_domain_only" == true ]]
 then
   # Only domain-dependent playbooks
   g_playbooks="$g_domain_playbooks"
 else
   # All playbooks registered in state file
-  if [ -s "$g_state_file" ]
+  if [[ -s "$g_state_file" ]]
   then
     g_playbooks=$(grep -v '^#' "$g_state_file" 2>/dev/null | sed 's/:.*//' | sort)
   fi
@@ -111,16 +111,16 @@ fi
 
 # Also include any user-playbooks (always re-run all)
 g_user_dir="/home/docker/symbios-ui/config/user-playbooks"
-if [ -d "$g_user_dir" ]
+if [[ -d "$g_user_dir" ]]
 then
   for g_user_file in "$g_user_dir"/*.yml
   do
-    [ -f "$g_user_file" ] || continue
+    [[ -f "$g_user_file" ]] || continue
     g_playbooks=$(printf '%s\n' "$g_playbooks" "user-playbooks/$(basename "$g_user_file")")
   done
 fi
 
-if [ -z "$g_playbooks" ]
+if [[ -z "$g_playbooks" ]]
 then
   f_log "No playbooks to re-run"
   exit 0
@@ -137,15 +137,15 @@ do
 
   # Resolve full path
   g_path=""
-  if [ -f "$g_repo/$g_playbook" ]
+  if [[ -f "$g_repo/$g_playbook" ]]
   then
     g_path="$g_repo/$g_playbook"
-  elif [ -f "/home/docker/symbios-ui/config/user-playbooks/$(basename "$g_playbook")" ]
+  elif [[ -f "/home/docker/symbios-ui/config/user-playbooks/$(basename "$g_playbook")" ]]
   then
     g_path="/home/docker/symbios-ui/config/user-playbooks/$(basename "$g_playbook")"
   fi
 
-  if [ -z "$g_path" ]
+  if [[ -z "$g_path" ]]
   then
     f_log "WARN [$g_count/$g_total] Playbook not found: $g_playbook (skipping)"
     continue
