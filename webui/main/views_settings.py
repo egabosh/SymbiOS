@@ -367,14 +367,58 @@ def settings_localization(request):
         config['all']['vars'] = {}
     vars_ = config['all']['vars']
 
-    # Generate the list of valid timezone values
-    import pytz
-    timezones = pytz.all_timezones
-    valid_timezones = [tz.replace('_', ' ') for tz in timezones]
-    valid_timezones_display = sorted(valid_timezones)
+    # Get available options from host via symbios-exec.sh
+    try:
+        # Get timezone list from host using timedatectl
+        timezones_cmd = 'timedatectl list-timezones'
+        ok, stdout, stderr = run_command(timezones_cmd, timeout=10)
+        if ok:
+            timezones = [line.strip() for line in stdout.split('\n') if line.strip()]
+            valid_timezones = [tz.replace('_', ' ') for tz in timezones]
+            valid_timezones_display = sorted(valid_timezones)
+        else:
+            # Fallback to static list
+            import pytz
+            timezones = pytz.all_timezones
+            valid_timezones = [tz.replace('_', ' ') for tz in timezones]
+            valid_timezones_display = sorted(valid_timezones)
+    except Exception:
+        # Fallback to static list
+        import pytz
+        timezones = pytz.all_timezones
+        valid_timezones = [tz.replace('_', ' ') for tz in timezones]
+        valid_timezones_display = sorted(valid_timezones)
 
-    # Generate the list of valid keyboard layouts (common ones)
-    keyboards = ['us', 'gb', 'de', 'fr', 'it', 'es', 'pt', 'nl', 'pl', 'ru', 'ar', 'zh', 'jp', 'kr', 'in']
+    # Get keyboard layouts from host
+    try:
+        # Try to get keyboard layouts from host's /etc/default/keyboard or via kbdlist
+        keyboards_cmd = 'ls /usr/share/keymaps/ || kbdlist'
+        ok, stdout, stderr = run_command(keyboards_cmd, timeout=10)
+        if ok and stdout:
+            keyboards = []
+            for line in stdout.split('\n'):
+                line = line.strip()
+                if not line or line == 'locale':
+                    continue
+                # Extract keyboard name from various formats
+                kb = line.split('/')[-1].replace('.map.gz', '').replace('.map', '').replace('.kbd', '').replace('.kbd.gh', '')
+                if kb and kb not in keyboards:
+                    keyboards.append(kb)
+        else:
+            # Try to get keyboard layouts from keyboard-configuration.debconf output
+            keyboard_cmd = 'debconf-show keyboard-configuration 2>/dev/null | grep -i layoutcode || echo "us"'
+            ok, stdout, stderr = run_command(keyboard_cmd, timeout=10)
+            if ok and stdout:
+                keyboards = []
+                for line in stdout.split('\n'):
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        kb = line.strip('"\'')
+                        if kb and kb not in keyboards:
+                            keyboards.append(kb)
+    except Exception:
+        # Fallback to static list
+        keyboards = ['us', 'gb', 'de', 'fr', 'it', 'es', 'pt', 'nl', 'pl', 'ru', 'ar', 'zh', 'jp', 'kr', 'in']
 
     if request.method == 'POST':
         try:
