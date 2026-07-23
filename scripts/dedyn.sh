@@ -1,0 +1,198 @@
+#!/bin/bash
+# Source gaboshlib for utility functions
+. /etc/bash/gaboshlib.include
+g_lockfile
+
+# Log to shared log file
+g_dedyn_log="/home/docker/symbios-ui/log/dedyn.log"
+exec > >(tee -a "$g_dedyn_log") 2>&1
+
+# deDyn/deSEC-Settings
+[ -f /usr/local/etc/dedyn.conf ] || exit 0
+. /usr/local/etc/dedyn.conf
+
+g_dedyndns="ns2.desec.org. ns1.desec.io."
+
+# Validate config
+if [ -z "${dedynpw}" ]
+then
+    g_echo_error "dedynpw not set in /usr/local/etc/dedyn.conf"
+    exit 1
+fi
+if [ -z "${dedynhosts}" ]
+then
+    g_echo_error "dedynhosts not set in /usr/local/etc/dedyn.conf"
+    exit 1
+fi
+
+# Ensure domain exists on desec.io (create if not)
+function f_ensure_domain {
+    local f_domain="$1"
+    local f_exists
+    # Check if domain already exists
+    f_exists=$(curl -s -o /dev/null -w "%{http_code}" \
+        "https://desec.io/api/v1/domains/${f_domain}/" \
+        --header "Authorization: Token ${dedynpw}")
+    if [ "${f_exists}" = "404" ]
+    then
+        # Domain does not exist, create it
+        g_echo_ok "Creating domain ${f_domain} on desec.io..."
+        local f_create
+        f_create=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "https://desec.io/api/v1/domains/" \
+            --header "Authorization: Token ${dedynpw}" \
+            --header "Content-Type: application/json" \
+            --data "{\"name\": \"${f_domain}\"}")
+        if [ "${f_create}" = "201" ]
+        then
+            g_echo_ok "Domain ${f_domain} created successfully"
+        else
+            g_echo_error "Failed to create domain ${f_domain} (HTTP ${f_create})"
+            return 1
+        fi
+    elif [ "${f_exists}" = "200" ]
+    then
+        g_echo_ok "Domain ${f_domain} already exists"
+    else
+        g_echo_error "Cannot check domain ${f_domain} (HTTP ${f_exists})"
+        return 1
+    fi
+}
+
+# Get IP(s)
+g_ipv4=""
+g_ipv6=""
+
+# Fetch IPv6 address if enabled
+if [ -n "${doipv6}" ]
+then
+    g_echo_note "Fetching IPv6 address..."
+    g_ipv6=$(curl -s https://checkipv6.dedyn.io/ 2>/dev/null)
+    if ! g_valid_ipv6 "${g_ipv6}"
+    then
+        g_echo_error "Did not receive a valid IPv6 address: ${g_ipv6}"
+        doipv6=""
+    else
+        g_echo_ok "IPv6: ${g_ipv6}"
+    fi
+fi
+
+# Fetch IPv4 address if not IPv6-only
+if ! echo "${doipv6}" | grep -q "only"
+then
+    g_echo_note "Fetching IPv4 address..."
+    g_ipv4=$(curl -s https://checkipv4.dedyn.io/ 2>/dev/null)
+    if ! g_valid_ipv4 "${g_ipv4}"
+    then
+        g_echo_error_exit "Did not receive a valid IPv4 address: ${g_ipv4}"
+    fi
+    g_echo_ok "IPv4: ${g_ipv4}"
+fi
+
+# Determine update server and string based on IP mode
+g_updatesrv="update.dedyn.io"
+if echo "${doipv6}" | grep -q "only"
+then
+    g_updatesrv="update6.dedyn.io"
+    g_updatestring="myipv6=${g_ipv6}"
+elif [ -n "${doipv6}" ]
+then
+    g_updatestring="myipv4=${g_ipv4}&myipv6=${g_ipv6}"
+else
+    g_updatestring="myipv4=${g_ipv4}"
+fi
+
+# Iterate over all configured DynDNS hosts
+for g_dynaddr in ${dedynhosts}
+do
+    g_changed=""
+    g_dynaddr="${g_dynaddr%.dedyn.io}"
+    g_dynaddr="${g_dynaddr}.dedyn.io"
+
+    # Ensure domain exists on desec.io
+    f_ensure_domain "${g_dynaddr}" || continue
+
+    # Resolve current DNS records for this domain
+    host "${g_dynaddr}" ${g_dedyndns} >"${g_tmp}/${g_dynaddr}" 2>/dev/null
+    for g_ip in ${g_ipv4} ${g_ipv6}
+    do
+        if [ -z "${g_ip}" ]
+        then
+            continue
+        fi
+        # Check if IP is already up to date
+        if grep -q "${g_ip}" "${g_tmp}/${g_dynaddr}" 2>/dev/null
+        then
+            g_echo_ok "DynDNS IP ${g_ip} for ${g_dynaddr} up to date"
+        else
+            # Update DynDNS record with new IP
+            g_echo_note "Updating DynDNS IP ${g_ip} for ${g_dynaddr}..."
+            g_response=$(curl -s -o /dev/null -w "%{http_code}" \
+                "https://${g_updatesrv}/?hostname=${g_dynaddr}&${g_updatestring}" \
+                --header "Authorization: Token ${dedynpw}")
+            if [ "${g_response}" = "200" ] || [ "${g_response}" = "204" ]
+            then
+                g_echo_ok "DynDNS IP ${g_ip} for ${g_dynaddr} renewed"
+                g_changed=1
+                # Restart Traefik if ACME errors detected
+                if [ -f /home/docker/traefik/docker-compose.yml ]
+                then
+                    if docker compose -f /home/docker/traefik/docker-compose.yml logs 2>/dev/null | grep -q "error.*acme-challenge"
+                    then
+                        docker compose -f /home/docker/traefik/docker-compose.yml up -d --force-recreate
+                    fi
+                fi
+                # Trigger TURN server IP update
+                [ -x /home/docker/turn/newip.sh ] && /home/docker/turn/newip.sh
+            else
+                g_echo_error "Failed to update DynDNS IP ${g_ip} for ${g_dynaddr} (HTTP ${g_response})"
+            fi
+        fi
+    done
+
+    # IPv6-only mode: delete A record if present
+    if echo "${doipv6}" | grep -q "only"
+    then
+        g_current_dns_check=$(curl -s -X GET \
+            "https://desec.io/api/v1/domains/${g_dynaddr}/rrsets/" \
+            --header "Authorization: Token ${dedynpw}")
+        # Check if A record exists and delete it
+        if echo "${g_current_dns_check}" | jq -r '.[] | select(.subname=="" and .type=="A") | .records[]' 2>/dev/null | grep -q .
+        then
+            g_echo_note "Deleting A record (IPv6-only mode)..."
+            curl -s -X DELETE "https://desec.io/api/v1/domains/${g_dynaddr}/rrsets/%40/A/" \
+                --header "Authorization: Token ${dedynpw}"
+            g_echo_ok "A record deleted"
+            g_changed=1
+        fi
+    fi
+
+    # Post-update actions if domain was changed
+    if [ "${g_changed}" = "1" ]
+    then
+        # Ensure wildcard CNAME record exists
+        g_current_dns=$(curl -s -X GET \
+            "https://desec.io/api/v1/domains/${g_dynaddr}/rrsets/" \
+            --header "Authorization: Token ${dedynpw}")
+        if ! echo "${g_current_dns}" | jq -r '.[] | select(.subname=="*" and .type=="CNAME") | .records[]' 2>/dev/null | grep -q "^${g_dynaddr}\.$"
+        then
+            g_echo_ok "Creating wildcard CNAME for ${g_dynaddr}"
+            curl -s -X POST "https://desec.io/api/v1/domains/${g_dynaddr}/rrsets/" \
+                --header "Authorization: Token ${dedynpw}" \
+                --header "Content-Type: application/json" \
+                --data "{\"subname\": \"*\", \"type\": \"CNAME\", \"ttl\": 3600, \"records\": [\"${g_dynaddr}.\"]}" >/dev/null
+        fi
+        # Ensure Let's Encrypt CAA record exists
+        if ! echo "${g_current_dns}" | jq -r '.[] | select(.subname=="" and .type=="CAA") | .records[]' 2>/dev/null | grep -q '128 issue "letsencrypt.org"'
+        then
+            g_echo_ok "Creating CAA record for Let's Encrypt"
+            curl -s -X POST "https://desec.io/api/v1/domains/${g_dynaddr}/rrsets/" \
+                --header "Authorization: Token ${dedynpw}" \
+                --header "Content-Type: application/json" \
+                --data "{\"subname\": \"\", \"type\": \"CAA\", \"ttl\": 3600, \"records\": [\"128 issue \\\"letsencrypt.org\\\"\"]}" >/dev/null
+        fi
+        # Wait for API rate limiting
+        g_echo_note "Waiting for API rate limit..."
+        sleep "$(shuf -i 61-120 -n 1)"
+    fi
+done

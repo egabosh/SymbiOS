@@ -1,0 +1,32 @@
+g_check_file="${g_tmp}/symbios-healthcheck-root-ca"
+if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+then
+  return 2>/dev/null || true
+fi
+date > "$g_check_file"
+
+g_stepca_ip=$(docker inspect acme-pki-stepca --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' 2>/dev/null | grep '^192\.168\.' | head -1)
+if [ -z "$g_stepca_ip" ]
+then
+  g_echo_error "Cannot determine Step-CA container IP for root CA check"
+  return 2>/dev/null || true
+fi
+
+g_enddate=$(echo | openssl s_client -connect "${g_stepca_ip}:9000" -servername acme-pki-stepca 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+if [ -z "$g_enddate" ]
+then
+  g_echo_error "Step-CA root certificate unreachable at ${g_stepca_ip}:9000"
+  return 2>/dev/null || true
+fi
+
+g_expiry_epoch=$(date -d "$g_enddate" +%s 2>/dev/null)
+g_now_epoch=$(date +%s)
+g_days_left=$(( (g_expiry_epoch - g_now_epoch) / 86400 ))
+
+if [ "$g_days_left" -lt 0 ]
+then
+  g_echo_error "Step-CA root certificate EXPIRED on $(date -d "$g_enddate" +%F)"
+elif [ "$g_days_left" -lt 7 ]
+then
+  g_echo_error "Step-CA root certificate expires in ${g_days_left} days ($(date -d "$g_enddate" +%F)) — renew now"
+fi

@@ -1,0 +1,11 @@
+# Healthcheck for step-ca (ACME PKI)
+g_check_file="${g_tmp}/symbios-healthcheck-acme-pki"
+if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+then
+  return 2>/dev/null || true
+fi
+date > "$g_check_file"
+if ! docker exec acme-pki-stepca wget -q -O /dev/null --no-check-certificate --timeout=10 https://localhost:9000/health 2>/dev/null
+then
+  g_echo_error "Healthcheck failed for acme-pki: step-ca health endpoint unreachable"
+fi

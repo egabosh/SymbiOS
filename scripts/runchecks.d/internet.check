@@ -1,0 +1,6 @@
+# Ping a known external host to verify internet connectivity
+g_testip=dns3.digitalcourage.de
+if ! ping -c3 ${g_testip} >/dev/null 2>&1
+then
+  g_echo_error "No Internet connection? ping $g_testip failed!"
+fi

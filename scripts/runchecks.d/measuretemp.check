@@ -1,0 +1,9 @@
+# Check CPU temperature via vcgencmd on Raspberry Pi
+if which vcgencmd >/dev/null 2>&1
+then
+  g_temp=$(vcgencmd measure_temp | grep ^temp= | cut -d"=" -f2 | cut -d. -f1)
+  if [ $g_temp -gt 65 ]
+  then
+    g_echo_error "Server temperature high $g_temp°C"
+  fi
+fi

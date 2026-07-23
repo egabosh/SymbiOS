@@ -1,0 +1,17 @@
+# Healthcheck for symbios-webui (container + health endpoint)
+g_check_file="${g_tmp}/symbios-healthcheck-symbios-ui"
+if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+then
+  return 2>/dev/null || true
+fi
+date > "$g_check_file"
+if ! docker ps | grep -q "symbios-webui"
+then
+  g_echo_error "Healthcheck failed for symbios-webui: container not running"
+else
+  g_http_code=$(wget -q -O /dev/null --server-response --timeout=10 "http://127.0.0.1:8080/health" 2>&1 | grep -oE "HTTP/[0-9.]+" | tail -1 | grep -oE "[0-9]+$")
+  if [ -z "$g_http_code" ] || [ "$g_http_code" -ge 500 ]
+  then
+    g_echo_error "Healthcheck failed for symbios-webui: HTTP $g_http_code"
+  fi
+fi

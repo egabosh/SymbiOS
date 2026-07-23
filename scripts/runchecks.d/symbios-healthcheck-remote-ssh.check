@@ -1,0 +1,16 @@
+g_check_file="${g_tmp}/symbios-healthcheck-remote-ssh"
+if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+then
+  return 2>/dev/null || true
+fi
+date > "$g_check_file"
+
+if [ ! -f "/home/docker/symbios-ui/config/.ssh/id_symbios" ]
+then
+  g_echo_error "Remote SSH exec key missing at /home/docker/symbios-ui/config/.ssh/id_symbios"
+fi
+
+if ! timeout 3 bash -c 'echo > /dev/tcp/192.168.41.1/22' >/dev/null 2>&1
+then
+  g_echo_error "Cannot reach host SSH on 192.168.41.1:22"
+fi

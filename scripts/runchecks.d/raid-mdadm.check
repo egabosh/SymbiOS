@@ -1,0 +1,10 @@
+# Check each mdadm RAID array for healthy state
+mdadm -D --scan | grep -E "^ARRAY" | cut -d" " -f2 | while read g_array
+do
+  mdadm -D $g_array >$g_tmp/raiddetails
+  # Verify array state is clean, active or checking
+  if ! cat $g_tmp/raiddetails | grep -E "^ +State : " | grep -E -q "^ +State : clean $|^ +State : active $|^ +State : active, checking $|^ +State : clean, checking $"
+  then
+    g_echo_error "RAID $g_array state unhealthy - mdadm -D $g_array: $(cat $g_tmp/raiddetails)"
+  fi
+done

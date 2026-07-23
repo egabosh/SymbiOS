@@ -1,0 +1,9 @@
+g_check_file="${g_tmp}/symbios-healthcheck-twofa"
+if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+then
+  return 2>/dev/null || true
+fi
+date > "$g_check_file"
+
+g_twofa_status=$(python3 -c "import yaml; c=yaml.safe_load(open('/home/docker/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print('enabled' if v.get('twofa_enabled') else 'disabled')")
+# 2FA is optional — no error if disabled
