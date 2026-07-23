@@ -29,6 +29,7 @@ proper certs (Let's Encrypt or local CA).
 import http.server
 import json
 import os
+import signal
 import socket
 import ssl
 import subprocess
@@ -281,6 +282,12 @@ def shutdown_self():
     )
 
 
+def handle_signal(signum, frame):
+    """Handle SIGTERM/SIGINT for clean shutdown."""
+    print("Received shutdown signal, exiting...", flush=True)
+    os._exit(0)
+
+
 class UnlockHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
@@ -351,6 +358,9 @@ def create_https_server(port, handler):
 
 
 def main():
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
     if not check_home_encrypted():
         print("/home is not encrypted or already unlocked, nothing to do")
         return
@@ -358,6 +368,17 @@ def main():
     if not generate_self_signed_cert():
         print("Failed to generate SSL cert, aborting", file=sys.stderr)
         sys.exit(1)
+
+    def watchdog():
+        """Exit if /home gets mounted by something else."""
+        time.sleep(10)
+        while True:
+            if not check_home_encrypted():
+                print("/home is now mounted, shutting down", flush=True)
+                os._exit(0)
+            time.sleep(30)
+
+    threading.Thread(target=watchdog, daemon=True).start()
 
     print(f"SymbiOS boot unlock: HTTPS on :{HTTPS_PORT}, HTTP redirect on :{HTTP_PORT}")
 

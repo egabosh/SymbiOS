@@ -6,17 +6,11 @@ then
 fi
 date > "$g_check_file"
 
-g_stepca_ip=$(docker inspect acme-pki-stepca --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' 2>/dev/null | grep '^192\.168\.' | head -1)
-if [[ -z "$g_stepca_ip" ]]
-then
-  g_echo_error "Cannot determine Step-CA container IP for root CA check"
-  return 2>/dev/null || true
-fi
-
-g_enddate=$(echo | openssl s_client -connect "${g_stepca_ip}:9000" -servername acme-pki-stepca 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+# Check root CA cert directly from the Step-CA container
+g_enddate=$(docker exec acme-pki-stepca step certificate inspect /home/step/certs/ca.crt 2>/dev/null | grep "Not After" | sed 's/.*: //')
 if [[ -z "$g_enddate" ]]
 then
-  g_echo_error "Step-CA root certificate unreachable at ${g_stepca_ip}:9000"
+  g_echo_error "Step-CA root certificate unreachable in container"
   return 2>/dev/null || true
 fi
 
