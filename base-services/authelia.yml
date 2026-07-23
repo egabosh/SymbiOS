@@ -433,7 +433,7 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set authelia.yml
+      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/authelia.yml
       changed_when: false
   handlers:
 

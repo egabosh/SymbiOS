@@ -545,7 +545,7 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set runchecks.yml
+      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/runchecks.yml
       changed_when: false
   handlers:
 

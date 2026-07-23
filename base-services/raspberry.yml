@@ -335,5 +335,5 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set raspberry.yml
+      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/raspberry.yml
       changed_when: false

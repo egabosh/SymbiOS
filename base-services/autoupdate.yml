@@ -167,5 +167,5 @@
         backup: yes
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set autoupdate.yml
+      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/autoupdate.yml
       changed_when: false
