@@ -23,10 +23,8 @@
 # 3. Runs changed playbooks via ansible
 
 # Source gaboshlib if available
-if [ -f /etc/bash/gaboshlib.include ]
-then
-    source /etc/bash/gaboshlib.include 2>/dev/null || true
-fi
+source /etc/bash/gaboshlib.include
+g_lockfile
 
 g_symbios_dir="${SYMBIOS_DIR:-/home/SymbiOS}"
 g_repo_url="https://github.com/egabosh/SymbiOS.git"
@@ -113,7 +111,7 @@ then
 fi
 
 # Check if we have an inventory file
-if [ ! -f "${g_inventory}" ]
+if [ ! -s "${g_inventory}" ]
 then
     g_echo_error "Inventory file not found: ${g_inventory}"
     exit 1
