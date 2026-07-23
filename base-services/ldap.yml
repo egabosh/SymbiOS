@@ -514,45 +514,6 @@
         backup: yes        
       notify: Restart ldap
 
-    - name: /usr/local/sbin/backup.d/ldap-docker.backup
-      blockinfile:
-        path: /usr/local/sbin/backup.d/ldap-docker.backup
-        create: yes
-        mode: 0550 
-        owner: root
-        group: root 
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Configure backup retention period in days
-          f_days=7
-          f_timestamp=$(date +"%Y%m%d%H%M")
-
-          cd {{ docker_path }}
-
-          # Export LDAP database using slapcat
-          if docker compose exec -ti openldap.{{service_domain}} slapcat -F /ldap-config/slapd.d >$BACKUPDIR/openldap.{{service_domain}}-$f_timestamp.ldif 2>"${g_tmp}/ldaperr"
-          then
-            # Compress the LDIF backup
-            gzip $BACKUPDIR/openldap.{{service_domain}}-$f_timestamp.ldif
-          else
-            g_echo_error "LDAP backup failed: $(cat ${g_tmp}/ldaperr)"
-          fi
-          cd -
-
-          # Count existing backups
-          f_old_backups=$(ls -1 $BACKUPDIR/openldap.{{service_domain}}-*.gz 2>/dev/null | wc -l)
-
-          # Remove old backups if more than retention period
-          if [ -n "$f_old_backups" ]
-          then
-            if [ $f_old_backups -gt $f_days ]
-            then
-              find $BACKUPDIR -name "openldap.{{service_domain}}-*.gz" -daystart -mtime +$f_days -delete
-            fi
-          fi
-        backup: yes
-        validate: /bin/bash -n %s
-
     # Extract LDAP readuser password from env.openldap for nslcd config
     - name: Get LDAP readuser password from file
       shell: "grep ^LDAP_READUSER_PASSWORD= {{ docker_path }}/env.openldap | cut -d= -f2-"
@@ -715,38 +676,6 @@
         owner: "10000"
         group: "10000"
       no_log: true
-
-    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-ldap.check
-      ansible.builtin.blockinfile:
-        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-ldap.check
-        mode: "0400"
-        owner: root
-        group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Healthcheck for openldap (LDAP bind test)
-          g_check_file="${g_tmp}/symbios-healthcheck-ldap"
-          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-          then
-            return 2>/dev/null || true
-          fi
-          date > "$g_check_file"
-          g_ldap_ip=$(docker inspect openldap --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}{% endraw %}' 2>/dev/null | grep '^192\.168\.' | head -1)
-          g_ldap_pw=$(cat /home/docker/symbios-ui/config/.ldap_admin_pw 2>/dev/null)
-          if [ -z "$g_ldap_ip" ]
-          then
-            g_echo_error "Healthcheck failed for ldap: cannot determine container IP"
-          elif [ -z "$g_ldap_pw" ]
-          then
-            g_echo_error "Healthcheck failed for ldap: admin password file missing"
-          elif ! ldapwhoami -x -H "ldap://${g_ldap_ip}" -D "cn=head-of-ldap,dc=openldap,dc=local" -w "$g_ldap_pw" >/dev/null 2>&1
-          then
-            g_echo_error "Healthcheck failed for ldap: LDAP bind test failed"
-          fi
-        backup: yes
-        validate: /bin/bash -n %s
-
 
 
     - name: Register playbook as installed

@@ -243,29 +243,6 @@
         cat {{ ca_cert }} >> {{ traefik_dir }}/ca-bundle.crt
       changed_when: false
 
-    - name: Deploy healthcheck for ACME PKI
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-acme-pki.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-acme-pki.check
-        mode: 0400
-        owner: root
-        group: root
-        create: yes
-        backup: yes
-        validate: /bin/bash -n %s
-
-    - name: Deploy healthcheck for Step-CA root certificate
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-root-ca.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-root-ca.check
-        mode: 0400
-        owner: root
-        group: root
-        create: yes
-        backup: yes
-        validate: /bin/bash -n %s
-
-
 
     - name: Register playbook as installed
       ansible.builtin.command: symbios-state.sh set base-services/acme-pki.yml

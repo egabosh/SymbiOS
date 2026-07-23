@@ -63,15 +63,6 @@
         group: root
         backup: yes
 
-    - name: /usr/local/sbin/autoupdate.d/debian.update
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/autoupdate.d/debian.update
-        dest: /usr/local/sbin/autoupdate.d/debian.update
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-
     - name: /etc/cron.d/autoupdate_local
       blockinfile:
         path: /etc/cron.d/autoupdate_local

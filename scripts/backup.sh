@@ -9,7 +9,7 @@ BACKUPDIR=/home/backup
 mkdir -p ${BACKUPDIR}
 chmod 700 ${BACKUPDIR}
 chown root:root ${BACKUPDIR}
-for backup in $(find /usr/local/sbin/backup.d -name "*.backup" -type f | sort)
+for backup in $(find /usr/local/sbin/backup.d /home/SymbiOS/scripts/backup.d -name "*.backup" -type f | sort)
 do
   if bash -n "$backup" >$g_tmp/backup_error 2>&1
   then

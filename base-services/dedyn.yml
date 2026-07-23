@@ -111,15 +111,6 @@
         validate: /bin/bash -n %s
       when: ddns_host is defined and ddns_host | length > 0
 
-    - name: Deploy healthcheck for desec DDNS
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-ddns.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-ddns.check
-        mode: "0400"
-        owner: root
-        group: root
-        create: yes
-        backup: yes
 
     - name: Register playbook as installed
       ansible.builtin.command: symbios-state.sh set base-services/dedyn.yml
