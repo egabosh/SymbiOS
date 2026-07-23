@@ -1,0 +1,59 @@
+{% extends "main/base.html" %}
+{% load static %}
+{% block sidebar %}
+    {% include "main/sidebar_settings.html" %}
+{% endblock %}
+{% block content %}
+<h2><i class="bi bi-globe2"></i> Localization</h2>
+
+<!-- Reapply status banner -->
+<div id="reapply-banner" class="alert alert-info d-none mb-3">
+  <div class="d-flex align-items-center">
+    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+    <span id="reapply-text">Reapplying playbooks...</span>
+  </div>
+</div>
+
+
+<div class="row">
+  <!-- Main form -->
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-body">
+
+        <!-- Timezone -->
+        <div class="mb-4">
+          <label class="form-label fw-semibold">Timezone</label>
+          <select class="form-select" name="timezone" required>
+            <option value="" disabled {% if not vars.timezone %}selected{% endif %} hidden>Select timezone...</option>
+            {% for tz in all_timezones %}
+              <option value="{{ tz }}" {% if vars.timezone == tz %}selected{% endif %}>{{ tz }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Keyboard Layout -->
+        <div class="mb-4">
+          <label class="form-label fw-semibold">Keyboard Layout</label>
+          <select class="form-select" name="keyboard">
+            <option value="" disabled {% if not vars.keyboard %}selected{% endif %} hidden>Select layout...</option>
+            {% for kb in all_keyboards %}
+              <option value="{{ kb }}" {% if vars.keyboard == kb %}selected{% endif %}>{{ kb }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <!-- Locale -->
+        <div class="mb-4">
+          <label class="form-label fw-semibold">Locale</label>
+          <input type="text" class="form-control" name="locale" placeholder="e.g. en_US.UTF-8"
+                 value="{% if vars.locale %}{{ vars.locale }}{% endif %}"
+                 required>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Save localization</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

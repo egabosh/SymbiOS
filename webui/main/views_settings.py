@@ -367,6 +367,15 @@ def settings_localization(request):
         config['all']['vars'] = {}
     vars_ = config['all']['vars']
 
+    # Generate the list of valid timezone values
+    import pytz
+    timezones = pytz.all_timezones
+    valid_timezones = [tz.replace('_', ' ') for tz in timezones]
+    valid_timezones_display = sorted(valid_timezones)
+
+    # Generate the list of valid keyboard layouts (common ones)
+    keyboards = ['us', 'gb', 'de', 'fr', 'it', 'es', 'pt', 'nl', 'pl', 'ru', 'ar', 'zh', 'jp', 'kr', 'in']
+
     if request.method == 'POST':
         try:
             vars_['timezone'] = request.POST.get('timezone', '').strip()
@@ -374,14 +383,17 @@ def settings_localization(request):
             vars_['locale'] = request.POST.get('locale', '').strip()
             _save_inventory_config(config)
             messages.success(request, 'Localization settings saved.')
-            # Reapply all playbooks with updated domain in the background
             messages.info(request, 'Reapplying all playbooks in the background...')
             _start_reapply(domain_only=False)
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_localization')
 
-    return render(request, 'main/settings_localization.html', {'vars': vars_})
+    return render(request, 'main/settings_localization.html', {
+        'vars': vars_,
+        'all_timezones': valid_timezones_display,
+        'all_keyboards': keyboards,
+    })
 
 
 @login_required
