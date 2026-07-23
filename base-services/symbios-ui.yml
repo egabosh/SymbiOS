@@ -164,7 +164,7 @@
 
     - name: Copy symbios-exec.sh wrapper
       ansible.builtin.copy:
-        src: /home/SymbiOS/symbios-exec.sh
+        src: /home/SymbiOS/scripts/symbios-exec.sh
         dest: /usr/local/sbin/symbios-exec.sh
         owner: root
         group: root
@@ -379,7 +379,7 @@
 
     - name: Copy LE cert extraction script
       ansible.builtin.copy:
-        src: /home/SymbiOS/base-services/symbios-extract-le-cert.sh
+        src: /home/SymbiOS/scripts/symbios-extract-le-cert.sh
         dest: /usr/local/sbin/symbios-boot-unlock/extract-le-cert.sh
         owner: root
         group: root
@@ -682,7 +682,7 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/symbios-ui.yml
+      ansible.builtin.command: symbios-state.sh set base-services/symbios-ui.yml
       changed_when: false
   handlers:
 

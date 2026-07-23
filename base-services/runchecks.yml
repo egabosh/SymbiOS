@@ -67,78 +67,11 @@
 
     - name: /usr/local/sbin/runchecks.sh
       ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.sh
         dest: /usr/local/sbin/runchecks.sh
         mode: "0500"
         owner: root
         group: root
-        content: |
-          #!/bin/bash
-          # Source gaboshlib and set up environment
-          . /etc/bash/gaboshlib.include
-          g_lockfile
-          g_nice
-          g_all-to-syslog
-          g_echo_ok "Starting $0"
-          g_staleumount
-
-          g_json_file="/home/docker/symbios-ui/log/runchecks-results.json"
-
-          # Override g_echo_error to capture failures for JSON output
-          g_echo_error() {
-            logger -t runchecks "ERROR: $*"
-            G_CURRENT_CHECK_FAILED=1
-            G_CURRENT_CHECK_ERROR="$*"
-          }
-
-          # Main loop - runs forever with 5min intervals
-          while true
-          do
-            g_echo "Waiting 5min"
-            sleep 300
-            g_echo "Next Loop"
-
-            # Ensure g_tmp directory exists (may be cleaned between cycles)
-            mkdir -p "$g_tmp"
-
-            g_json_results=""
-            g_json_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-            # Iterate over all .check scripts sorted alphabetically
-            for g_check in $(find /usr/local/sbin/runchecks.d -name "*.check" -type f | sort)
-            do
-              G_CURRENT_CHECK_FAILED=0
-              G_CURRENT_CHECK_ERROR=""
-
-              # Validate syntax then source each check script
-              if bash -n "$g_check" >$g_tmp/check_error 2>&1
-              then
-                g_echo "Running: $g_check"
-                . "$g_check"
-              else
-                G_CURRENT_CHECK_FAILED=1
-                G_CURRENT_CHECK_ERROR="Syntax error in $g_check: $(cat $g_tmp/check_error)"
-                logger -t runchecks "ERROR: $G_CURRENT_CHECK_ERROR"
-              fi
-
-              g_check_name=$(basename "$g_check" .check | sed 's/^symbios-healthcheck-//')
-              g_check_msg=$(echo "$G_CURRENT_CHECK_ERROR" | sed 's/"/\\"/g' | tr '\n' ' ')
-
-              if [ "$G_CURRENT_CHECK_FAILED" -eq 1 ]
-              then
-                g_entry="{\"name\":\"${g_check_name}\",\"status\":\"error\",\"message\":\"${g_check_msg}\",\"checked\":\"${g_json_ts}\"}"
-              else
-                g_entry="{\"name\":\"${g_check_name}\",\"status\":\"ok\",\"checked\":\"${g_json_ts}\"}"
-              fi
-
-              [ -n "$g_json_results" ] && g_json_results="${g_json_results},${g_entry}" || g_json_results="${g_entry}"
-            done
-
-            # Write JSON results
-            g_json="{\"last_run\":\"${g_json_ts}\",\"checks\":[${g_json_results}]}"
-            echo "$g_json" | python3 -m json.tool > "$g_json_file.tmp" 2>/dev/null && \
-              mv "$g_json_file.tmp" "$g_json_file" || \
-              echo "$g_json" > "$g_json_file"
-          done
       notify:
       - Restart runchecks
 
@@ -173,316 +106,144 @@
 
 
     - name: /usr/local/sbin/runchecks.d/disks.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/disks.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/disks.check
+        dest: /usr/local/sbin/runchecks.d/disks.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Check each block device for SMART health and temperature
-          for g_disk in $(find /dev/ \( -name "nvme?" -o -name "sd?" \) \( -type b -o -type c \))
-          do
-            # Determine if the disk is active (not suspended) by comparing IO stats
-            g_dev=$(basename $g_disk)
-            [ -f /tmp/${g_dev}-stat ] || cat /sys/block/${g_dev}/stat | perl -pe 's/ +/ /g' | cut -d" " -f1,2,3,4,5,6,7,8 > /tmp/${g_dev}-stat
-            cat /sys/block/${g_dev}/stat | perl -pe 's/ +/ /g' | cut -d" " -f1,2,3,4,5,6,7,8 > /tmp/${g_dev}-stat-now
-            # If stats are unchanged, disk might be suspended - skip SMART checks
-            if diff /tmp/${g_dev}-stat-now /tmp/${g_dev}-stat >/dev/null 2>&1
-            then
-              cat /tmp/${g_dev}-stat-now >/tmp/${g_dev}-stat
-              # Run SMART health check on the disk
-              g_opt=""
-              g_is_usb=false
-              udevadm info --query=all -n $g_disk 2>/dev/null | grep -q usb- && g_opt="-d sat" && g_is_usb=true
-              g_smart=$(smartctl -H $g_opt $g_disk 2>&1)
-              if echo "$g_smart" | grep -E -iq "SMART overall-health self-assessment test result: PASSED|SMART Health Status: OK"
-              then
-                true
-              elif echo "$g_smart" | grep -E -iq "Read Device Identity failed: scsi error no medium present|USB|unsupported|Device or resource busy"
-              then
-                true
-              elif [ "$g_is_usb" = true ]
-              then
-                true
-              else
-                g_echo_error "SMART of $g_disk unhealthy: smartctl -H $g_opt $g_disk $g_smart"
-              fi
-              # Check disk temperature
-              g_temperature=$(smartctl -x $g_opt $g_disk | perl -pe 's/ +/ /g; s/^ //' | grep -E "^194 Temperature_Celsius " | cut -d" " -f 8)
-              [ -z "$g_temperature" ] && continue
-              [ $g_temperature -gt 55 ] && g_echo_error "SMART temperature of disk $g_disk high ($g_temperature Celsius)"
-            fi
-          done
         validate: /bin/bash -n %s
         backup: yes
       notify:
       - Restart runchecks
 
     - name: /usr/local/sbin/runchecks.d/raid-mdadm.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/raid-mdadm.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/raid-mdadm.check
+        dest: /usr/local/sbin/runchecks.d/raid-mdadm.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Check each mdadm RAID array for healthy state
-          mdadm -D --scan | grep -E "^ARRAY" | cut -d" " -f2 | while read g_array
-          do
-            mdadm -D $g_array >$g_tmp/raiddetails
-            # Verify array state is clean, active or checking
-            if ! cat $g_tmp/raiddetails | grep -E "^ +State : " | grep -E -q "^ +State : clean $|^ +State : active $|^ +State : active, checking $|^ +State : clean, checking $"
-            then
-              g_echo_error "RAID $g_array state unhealthy - mdadm -D $g_array: $(cat $g_tmp/raiddetails)"
-            fi
-          done
         validate: /bin/bash -n %s
         backup: yes
       notify:
       - Restart runchecks
     
     - name: /usr/local/sbin/runchecks.d/internet.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/internet.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/internet.check
+        dest: /usr/local/sbin/runchecks.d/internet.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Ping a known external host to verify internet connectivity
-          g_testip=dns3.digitalcourage.de
-          if ! ping -c3 ${g_testip} >/dev/null 2>&1
-          then
-            g_echo_error "No Internet connection? ping $g_testip failed!"
-          fi
         validate: /bin/bash -n %s
         backup: yes
       notify:
       - Restart runchecks
 
     - name: /usr/local/sbin/runchecks.d/processes.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/processes.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/processes.check
+        dest: /usr/local/sbin/runchecks.d/processes.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Monitor processes in D (uninterruptible), Z (zombie) or R (running) state
-          mkdir -p ${g_tmp}/proc-check
-          # Clean up processes that are no longer in a monitored state
-          ls ${g_tmp}/proc-check | while read g_odzpid
-          do
-            if ! grep -E -q "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/$g_odzpid/status 2>/dev/null
-            then
-              rm ${g_tmp}/proc-check/$g_odzpid
-            fi
-          done
-          # Report processes stuck in monitored state for more than 30 minutes
-          grep -E "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read g_dzpid
-          do
-            if [ -f ${g_tmp}/proc-check/$g_dzpid ]
-            then
-              g_timestamp=$(ls --full-time ${g_tmp}/proc-check/$g_dzpid | sed 's/  */ /g' | cut -d" " -f6,7)
-              date >>${g_tmp}/proc-check/$g_dzpid
-              touch -d "$g_timestamp" ${g_tmp}/proc-check/$g_dzpid
-              if find ${g_tmp}/proc-check/$g_dzpid -mmin +30 | grep -q $g_dzpid
-              then
-                ps aufx | grep $g_dzpid | grep -v grep >${g_tmp}/proc-check-$g_dzpid.notify
-                pstree $g_dzpid >>${g_tmp}/proc-check-$g_dzpid.notify
-                cat ${g_tmp}/proc-check/$g_dzpid >>${g_tmp}/proc-check-$g_dzpid.notify
-                grep -E -q "usb-storage|md[0-9]*_" ${g_tmp}/proc-check-$g_dzpid.notify || g_echo_error "$(cat ${g_tmp}/proc-check-$g_dzpid.notify)"
-              fi
-            else
-              date >${g_tmp}/proc-check/$g_dzpid
-            fi
-          done
         backup: yes
         validate: /bin/bash -n %s
       notify:
       - Restart runchecks
 
     - name: /usr/local/sbin/runchecks.d/thermal.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/thermal.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/thermal.check
+        dest: /usr/local/sbin/runchecks.d/thermal.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Check CPU temperature from thermal sysfs interface
-          if [ -f /sys/class/thermal/thermal_zone0/temp ]
-          then
-            let g_temp=`cat /sys/class/thermal/thermal_zone0/temp`/1000
-            if [ $g_temp -gt 65 ]
-            then
-              g_echo_error "Server temperature high $g_temp°C"
-            fi
-          fi
         backup: yes
         validate: /bin/bash -n %s
       notify:
       - Restart runchecks
 
     - name: /usr/local/sbin/runchecks.d/measuretemp.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/measuretemp.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/measuretemp.check
+        dest: /usr/local/sbin/runchecks.d/measuretemp.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Check CPU temperature via vcgencmd on Raspberry Pi
-          if which vcgencmd >/dev/null 2>&1
-          then
-            g_temp=$(vcgencmd measure_temp | grep ^temp= | cut -d"=" -f2 | cut -d. -f1)
-            if [ $g_temp -gt 65 ]
-            then
-              g_echo_error "Server temperature high $g_temp°C"
-            fi
-          fi
         backup: yes
         validate: /bin/bash -n %s
       notify:
       - Restart runchecks
 
     - name: /usr/local/sbin/runchecks.d/load.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/load.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/load.check
+        dest: /usr/local/sbin/runchecks.d/load.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Alert if system load average exceeds (number of CPUs + 10)
-          let g_maxload=$(cat /proc/cpuinfo | grep ^processor | wc -l)+10
-          g_load=`cat /proc/loadavg | cut -d" " -f1`
-          g_intload=`echo $g_load | cut -d'.' -f1`
-          if [ $g_intload -gt $g_maxload ]
-          then
-            g_echo_error "System Load high at $g_load"
-          fi
         backup: yes
         validate: /bin/bash -n %s
       notify:
       - Restart runchecks
 
     - name: /usr/local/sbin/runchecks.d/services.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/services.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/services.check
+        dest: /usr/local/sbin/runchecks.d/services.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Verify required system services are running
-          for g_service in $(cat /usr/local/sbin/runchecks.d/services | sort)
-          do
-            if ! ps aux | grep -v grep | grep -q "$g_service"
-            then
-              g_echo_error "$g_service down"
-            fi
-          done
         backup: yes
         validate: /bin/bash -n %s
       notify:
       - Restart runchecks
 
     - name: /usr/local/sbin/runchecks.d/df.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/df.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/df.check
+        dest: /usr/local/sbin/runchecks.d/df.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Alert when any filesystem exceeds 98% disk usage
-          df -al | grep -E -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read g_i
-          do
-            g_disk=`echo $g_i | cut -d" " -f1`
-            g_usa=`echo $g_i | cut -d" " -f2`
-            if [ $g_usa -gt 98 ]
-            then
-              g_echo_error "Space of $g_disk full: $g_usa%"
-            fi
-          done
         backup: yes
         validate: /bin/bash -n %s
       notify:
       - Restart runchecks
 
     - name: /usr/local/sbin/runchecks.d/dfinodes.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/dfinodes.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/dfinodes.check
+        dest: /usr/local/sbin/runchecks.d/dfinodes.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Alert when any filesystem exceeds 98% inode usage
-          df -ali | grep -E -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read g_i
-          do
-            g_disk=`echo $g_i | cut -d" " -f1`
-            g_usa=`echo $g_i | cut -d" " -f2`
-            if [ $g_usa -gt 98 ]
-            then
-              g_echo_error "Inodes if $g_disk full: $g_usa%"
-            fi
-          done
         backup: yes
         validate: /bin/bash -n %s
       notify:
       - Restart runchecks
 
     - name: /usr/local/sbin/runchecks.d/freemem.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/freemem.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/freemem.check
+        dest: /usr/local/sbin/runchecks.d/freemem.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Alert when free memory drops below 20MB
-          g_mem=`free | grep "^Mem:" | sed 's/  */ /g' | cut -d" " -f 4`
-          if [ $g_mem -lt 20480 ]
-          then
-            g_echo_error "Memory full! Free: ${g_mem}kB"
-          fi
         backup: yes
         validate: /bin/bash -n %s
       notify:
       - Restart runchecks
 
     - name: /usr/local/sbin/runchecks.d/freeswap.check
-      blockinfile:
-        path: /usr/local/sbin/runchecks.d/freeswap.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/freeswap.check
+        dest: /usr/local/sbin/runchecks.d/freeswap.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Alert when swap is active and free space drops below 50MB
-          if ! [ $(free | grep "^Swap:" | sed 's/  */ /g' | cut -d" " -f 2) == 0 ]
-          then
-            g_mem=`free | grep "^Swap:" | sed 's/  */ /g' | cut -d" " -f 4`
-            if [ $g_mem -lt 50000 ]
-            then
-              g_echo_error "Swap full! Free: ${g_mem}kB"
-            fi
-          fi
         backup: yes
         validate: /bin/bash -n %s
       notify:
@@ -494,58 +255,30 @@
         creates: /etc/systemd/system/multi-user.target.wants/runchecks.service
 
     - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-runchecks.check
-      ansible.builtin.blockinfile:
-        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-runchecks.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-runchecks.check
+        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-runchecks.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Healthcheck for runchecks daemon itself
-          g_check_file="${g_tmp}/symbios-healthcheck-runchecks"
-          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-          then
-            return 2>/dev/null || true
-          fi
-          date > "$g_check_file"
-          if ! systemctl is-active runchecks.service >/dev/null 2>&1
-          then
-            g_echo_error "Healthcheck failed for runchecks: service not active"
-          fi
         backup: yes
         validate: /bin/bash -n %s
 
     - name: Deploy healthcheck for failed playbooks
-      ansible.builtin.blockinfile:
-        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-playbooks.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-playbooks.check
+        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-playbooks.check
         mode: "0400"
         create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          g_check_file="${g_tmp}/symbios-healthcheck-playbooks"
-          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-          then
-            return 2>/dev/null || true
-          fi
-          date > "$g_check_file"
-
-          g_playbook_failures=$(grep -l 'failed=1\|FAILED' /home/docker/symbios-ui/log/playbook-*.log 2>/dev/null)
-          if [ -n "$g_playbook_failures" ]
-          then
-            for g_logfile in $g_playbook_failures
-            do
-              g_playbook_name=$(basename "$g_logfile" | sed 's/^playbook-//; s/\.log$//')
-              g_echo_error "Playbook failed: $g_playbook_name ($g_logfile)"
-            done
-          fi
+        owner: root
+        group: root
         backup: yes
         validate: /bin/bash -n %s
 
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/runchecks.yml
+      ansible.builtin.command: symbios-state.sh set base-services/runchecks.yml
       changed_when: false
   handlers:
 

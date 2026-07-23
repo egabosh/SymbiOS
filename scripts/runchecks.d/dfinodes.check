@@ -1,0 +1,10 @@
+# Alert when any filesystem exceeds 98% inode usage
+df -ali | grep -E -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read g_i
+do
+  g_disk=`echo $g_i | cut -d" " -f1`
+  g_usa=`echo $g_i | cut -d" " -f2`
+  if [ $g_usa -gt 98 ]
+  then
+    g_echo_error "Inodes if $g_disk full: $g_usa%"
+  fi
+done

@@ -1,0 +1,74 @@
+# Healthcheck for traefik host reachability
+# Truncate hosts file and collect all hostnames from docker-compose
+>"$g_tmp/hosts"
+find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "\.del$|\.bak$|\.old$|var-lib-docker$" | while read f_dir
+do
+  # Skip directories marked as down
+  if [ -s "$f_dir/.downok" ]
+  then
+    continue
+  fi
+  # Extract Host labels from docker-compose files
+  if grep -q Host "$f_dir/docker-compose.override.yml" >/dev/null 2>&1
+  then
+    grep Host "$f_dir/docker-compose.override.yml" >>"$g_tmp/hosts"
+  else
+    if [ -f "$f_dir/docker-compose.yml" ]
+    then
+      grep Host "$f_dir/docker-compose.yml" >>"$g_tmp/hosts"
+    fi
+  fi
+done
+grep Host /home/docker/traefik/providers/*.yml >>"$g_tmp/hosts"
+
+# Ensure each host has a local /etc/hosts entry
+cat "$g_tmp/hosts" | cut -d '`' -f2 | sort -u | while read f_host
+do
+  # Skip hosts checked within the last 5 minutes
+  if find -mmin -5 "/tmp/$f_host" >/dev/null 2>&1 | grep -q "$f_host"
+  then
+    continue
+  fi
+  # Add host to /etc/hosts if not already present
+  if ! grep -E -q "192.168.41.1  $f_host" /etc/hosts
+  then
+    echo "192.168.41.1  $f_host" >>/etc/hosts
+  fi
+done
+
+# Verify each host is reachable via HTTP
+cat "$g_tmp/hosts" | grep -v tcp | cut -d '`' -f2 | sort -u | while read f_host
+do
+  # Skip hosts checked within the last 5 minutes
+  if find -mmin -5 "/tmp/$f_host" >/dev/null 2>&1 | grep -q "$f_host"
+  then
+    continue
+  fi
+  # Attempt HTTP connection with wget
+  if ! wget --dns-timeout=120 -t5 --waitretry=120 --connect-timeout=300 --read-timeout=15 "http://${f_host}" >"${g_tmp}/traefik-wget-check" -O /dev/null 2>&1
+  then
+    # Report error only if it is not a known-auth response
+    if ! grep -E -q "401 Unauthorized|403 Forbidden" "${g_tmp}/traefik-wget-check"
+    then
+      g_echo_error "Error while connecting ${f_host} with wget:
+
+$(cat ${g_tmp}/traefik-wget-check)"
+    else
+      if [ -f "${g_tmp}/$f_host-502" ]
+      then
+        rm "${g_tmp}/$f_host-502"
+      fi
+    fi
+    # Track persistent 502 errors
+    if grep -E -q "502 Bad Gateway" "${g_tmp}/traefik-wget-check"
+    then
+      if [ -s "${g_tmp}/$f_host-502" ] && find "${g_tmp}/$f_host-502" | grep "$f_host-502" -mmin +15
+      then
+        g_echo_error "Error while connecting ${f_host} with wget:
+$(cat ${g_tmp}/traefik-wget-check)"
+      else
+        date >"${g_tmp}/$f_host-502"
+      fi
+    fi
+  fi
+done

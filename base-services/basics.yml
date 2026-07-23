@@ -130,58 +130,12 @@
         update_cache: yes
         cache_valid_time: 3600
 
-    - name: Install symbios-state.sh
-      ansible.builtin.copy:
-        src: /home/SymbiOS/symbios-state.sh
-        dest: /usr/local/sbin/symbios-state.sh
-        owner: root
-        group: root
-        mode: '0755'
-      when: nocontainer.stat.exists
-
-    - name: Install symbios-reapply.sh
-      ansible.builtin.copy:
-        src: /home/SymbiOS/symbios-reapply.sh
-        dest: /usr/local/sbin/symbios-reapply.sh
-        owner: root
-        group: root
-        mode: '0755'
-      when: nocontainer.stat.exists
-
-    - name: Install symbios-exec.sh
-      ansible.builtin.copy:
-        src: /home/SymbiOS/symbios-exec.sh
-        dest: /usr/local/sbin/symbios-exec.sh
-        owner: root
-        group: root
-        mode: '0755'
-      when: nocontainer.stat.exists
-
-    - name: Install symbios-ldap.sh
-      ansible.builtin.copy:
-        src: /home/SymbiOS/symbios-ldap.sh
-        dest: /usr/local/sbin/symbios-ldap.sh
-        owner: root
-        group: root
-        mode: '0755'
-      when: nocontainer.stat.exists
-
-    - name: Install symbios-home-partition.sh
-      ansible.builtin.copy:
-        src: /home/SymbiOS/base-services/symbios-home-partition.sh
-        dest: /usr/local/sbin/symbios-home-partition.sh
-        owner: root
-        group: root
-        mode: '0755'
-      when: nocontainer.stat.exists
-
-    - name: Install symbios-update.sh
-      ansible.builtin.copy:
-        src: /home/SymbiOS/symbios-update.sh
-        dest: /usr/local/sbin/symbios-update.sh
-        owner: root
-        group: root
-        mode: '0755'
+    - name: Ensure /home/SymbiOS/scripts is in system PATH
+      ansible.builtin.lineinfile:
+        path: /etc/profile.d/symbios-path.sh
+        line: 'export PATH="/home/SymbiOS/scripts:$PATH"'
+        create: true
+        mode: '0644'
       when: nocontainer.stat.exists
 
     - name: Remove default pi user if present
@@ -758,59 +712,30 @@
           /usr/bin/apt-get autoclean -y >/dev/null 2>&1
 
     - name: Deploy healthcheck for two-factor authentication
-      ansible.builtin.blockinfile:
-        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-twofa.check
-        mode: "0400"
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-twofa.check
+        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-twofa.check
+        mode: 0400
+        owner: root
+        group: root
         create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          g_check_file="${g_tmp}/symbios-healthcheck-twofa"
-          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-          then
-            return 2>/dev/null || true
-          fi
-          date > "$g_check_file"
-
-          g_twofa_status=$(python3 -c "import yaml; c=yaml.safe_load(open('/home/docker/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print('enabled' if v.get('twofa_enabled') else 'disabled')")
-          # 2FA is optional — no error if disabled
         backup: yes
         validate: /bin/bash -n %s
 
     - name: Deploy healthcheck for disk space
-      ansible.builtin.blockinfile:
-        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-disk.check
-        mode: "0400"
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-disk.check
+        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-disk.check
+        mode: 0400
+        owner: root
+        group: root
         create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          g_check_file="${g_tmp}/symbios-healthcheck-disk"
-          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-          then
-            return 2>/dev/null || true
-          fi
-          date > "$g_check_file"
-
-          g_df_targets="/ /config"
-          [ -d "/home" ] && mountpoint -q /home 2>/dev/null && g_df_targets="/ /config /home"
-
-          df $g_df_targets | tail -n +2 | while read g_line
-          do
-            g_mount=$(echo "$g_line" | awk '{print $6}')
-            g_pct=$(echo "$g_line" | awk '{print $5}' | tr -d '%')
-            if [ "$g_pct" -gt 90 ]
-            then
-              g_echo_error "Disk ${g_mount} critically full: ${g_pct}%"
-            elif [ "$g_pct" -gt 75 ]
-            then
-              g_echo_error "Disk ${g_mount} usage high: ${g_pct}%"
-            fi
-          done
         backup: yes
         validate: /bin/bash -n %s
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/basics.yml
+      ansible.builtin.command: symbios-state.sh set base-services/basics.yml
       changed_when: false
   handlers:
 

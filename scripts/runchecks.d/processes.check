@@ -1,0 +1,29 @@
+# Monitor processes in D (uninterruptible), Z (zombie) or R (running) state
+mkdir -p ${g_tmp}/proc-check
+# Clean up processes that are no longer in a monitored state
+ls ${g_tmp}/proc-check | while read g_odzpid
+do
+  if ! grep -E -q "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/$g_odzpid/status 2>/dev/null
+  then
+    rm ${g_tmp}/proc-check/$g_odzpid
+  fi
+done
+# Report processes stuck in monitored state for more than 30 minutes
+grep -E "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read g_dzpid
+do
+  if [ -f ${g_tmp}/proc-check/$g_dzpid ]
+  then
+    g_timestamp=$(ls --full-time ${g_tmp}/proc-check/$g_dzpid | sed 's/  */ /g' | cut -d" " -f6,7)
+    date >>${g_tmp}/proc-check/$g_dzpid
+    touch -d "$g_timestamp" ${g_tmp}/proc-check/$g_dzpid
+    if find ${g_tmp}/proc-check/$g_dzpid -mmin +30 | grep -q $g_dzpid
+    then
+      ps aufx | grep $g_dzpid | grep -v grep >${g_tmp}/proc-check-$g_dzpid.notify
+      pstree $g_dzpid >>${g_tmp}/proc-check-$g_dzpid.notify
+      cat ${g_tmp}/proc-check/$g_dzpid >>${g_tmp}/proc-check-$g_dzpid.notify
+      grep -E -q "usb-storage|md[0-9]*_" ${g_tmp}/proc-check-$g_dzpid.notify || g_echo_error "$(cat ${g_tmp}/proc-check-$g_dzpid.notify)"
+    fi
+  else
+    date >${g_tmp}/proc-check/$g_dzpid
+  fi
+done

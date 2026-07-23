@@ -1,0 +1,16 @@
+g_check_file="${g_tmp}/symbios-healthcheck-playbooks"
+if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+then
+  return 2>/dev/null || true
+fi
+date > "$g_check_file"
+
+g_playbook_failures=$(grep -l 'failed=1\|FAILED' /home/docker/symbios-ui/log/playbook-*.log 2>/dev/null)
+if [ -n "$g_playbook_failures" ]
+then
+  for g_logfile in $g_playbook_failures
+  do
+    g_playbook_name=$(basename "$g_logfile" | sed 's/^playbook-//; s/\.log$//')
+    g_echo_error "Playbook failed: $g_playbook_name ($g_logfile)"
+  done
+fi

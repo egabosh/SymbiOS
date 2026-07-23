@@ -66,31 +66,16 @@
       become: yes
 
     - name: Deploy healthcheck for remote SSH
-      ansible.builtin.blockinfile:
-        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-remote-ssh.check
-        mode: "0400"
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-remote-ssh.check
+        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-remote-ssh.check
+        mode: 0400
+        owner: root
+        group: root
         create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          g_check_file="${g_tmp}/symbios-healthcheck-remote-ssh"
-          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-          then
-            return 2>/dev/null || true
-          fi
-          date > "$g_check_file"
-
-          if [ ! -f "/home/docker/symbios-ui/config/.ssh/id_symbios" ]
-          then
-            g_echo_error "Remote SSH exec key missing at /home/docker/symbios-ui/config/.ssh/id_symbios"
-          fi
-
-          if ! timeout 3 bash -c 'echo > /dev/tcp/192.168.41.1/22' >/dev/null 2>&1
-          then
-            g_echo_error "Cannot reach host SSH on 192.168.41.1:22"
-          fi
         backup: yes
         validate: /bin/bash -n %s
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/ssh-keys.yml
+      ansible.builtin.command: symbios-state.sh set base-services/ssh-keys.yml
       changed_when: false

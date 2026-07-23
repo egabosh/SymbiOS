@@ -1,0 +1,9 @@
+# Check CPU temperature from thermal sysfs interface
+if [ -f /sys/class/thermal/thermal_zone0/temp ]
+then
+  let g_temp=`cat /sys/class/thermal/thermal_zone0/temp`/1000
+  if [ $g_temp -gt 65 ]
+  then
+    g_echo_error "Server temperature high $g_temp°C"
+  fi
+fi

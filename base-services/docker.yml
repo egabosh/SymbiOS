@@ -336,173 +336,31 @@
         backup: yes
 
     - name: /usr/local/sbin/autoupdate.d/docker.update
-      blockinfile:
-        path: /usr/local/sbin/autoupdate.d/docker.update
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/autoupdate.d/docker.update
+        dest: /usr/local/sbin/autoupdate.d/docker.update
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Remove notify.sh directory if created as a directory by Docker volume
-          if [ -d /usr/local/bin/notify.sh ]
-          then
-            rmdir /usr/local/bin/notify.sh
-          fi
-
-          g_echo_ok "check for updates"
-
-          # Clean up Docker images
-          docker system prune -af
-
-          # Find all Docker compose directories excluding special ones
-          find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "mailcow-dockerized$|.del$|.bak$|.old$|var-lib-docker$|var-lib-containerd$" | while read f_docker_dir
-          do
-            # Skip directories without a compose file
-            if [ ! -f "$f_docker_dir/docker-compose.yml" ]
-            then
-              continue
-            fi
-            g_echo_ok "$f_docker_dir"
-            cd "${f_docker_dir}"
-            if docker -l warn compose --ansi never pull --include-deps 2>&1 | grep " Pulled"
-            then
-              # Write PID file for this service
-              echo $$ >/tmp/$(basename $f_docker_dir)
-              if ! docker -l warn compose --ansi never up -d --remove-orphans >$g_tmp/up 2>&1
-              then
-                g_echo_error "$f_docker_dir: docker compose up failed: $(cat $g_tmp/up)"
-              fi
-              # Check for started containers
-              if grep -E -v -- "-wpcli" $g_tmp/up | grep "Started" >${g_tmp}/started
-              then
-                g_echo_warn "$f_docker_dir Update installed: $(cat ${g_tmp}/started)"
-              fi
-            fi
-            if [ -f Dockerfile ]
-            then
-              if docker -l warn compose --ansi never build --progress=plain --pull --no-cache --force-rm >$g_tmp/build 2>&1
-              then
-                if ! docker -l warn compose --ansi never up -d --force-recreate --remove-orphans >$g_tmp/up 2>&1
-                then
-                  g_echo_error "$f_docker_dir: docker compose up failed: $(cat $g_tmp/up)"
-                fi
-              else
-                g_echo_error "$f_docker_dir: docker compose build failed: $(cat $g_tmp/build)"
-              fi
-            fi
-          done
         backup: yes
-        validate: /bin/bash -n %s
 
     - name: /usr/local/sbin/backup.d/docker.backup
-      blockinfile:
-        path: /usr/local/sbin/backup.d/docker.backup
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/backup.d/docker.backup
+        dest: /usr/local/sbin/backup.d/docker.backup
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          ### DB Backup ###
-          g_echo_ok "Start MySQL and PostgreSQL database backup (Docker)"
-
-          f_days=7
-
-          f_timestamp=$(date +"%Y%m%d%H%M")
-          f_container=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\} | grep -E -v '^mysql|^mariadb' | grep -E 'mysql|mariadb' | cut -d":" -f1 | grep -v mailcow)
-
-          mkdir -p $BACKUPDIR
-
-          ### MYSQL ###
-          for f_container_id in $f_container
-          do
-            # Get database credentials from container environment
-            f_db=$(docker exec $f_container_id env | grep -E "MARIADB_DATABASE|MYSQL_DATABASE" | tail -n1 | cut -d"=" -f2)
-            f_pwd=$(docker exec $f_container_id env | grep -E "MARIADB_PASSWORD|MYSQL_PASSWORD" | tail -n1 | cut -d"=" -f2)
-            f_usr=$(docker exec $f_container_id env | grep -E "MARIADB_USER|MYSQL_USER" | tail -n1 | cut -d"=" -f2)
-
-            # Determine the dump command available in the container
-            f_dumpcmd=""
-            if docker exec $f_container_id /usr/bin/test -x /usr/bin/mariadb-dump
-            then
-              f_dumpcmd=/usr/bin/mariadb-dump
-            fi
-            if docker exec $f_container_id /usr/bin/test -x /usr/bin/mysqldump
-            then
-              f_dumpcmd=/usr/bin/mysqldump
-            fi
-
-            # Skip if no dump command is found
-            if [ -z "$f_dumpcmd" ]
-            then
-              g_echo_error "No dump command found in container $f_container_id! No backup created!"
-              continue
-            fi
-
-            g_echo "Backup MySQL/MariaDB database $f_db from $f_container_id"
-
-            # Perform the database dump and compress it
-            if ! docker exec $f_container_id $f_dumpcmd --no-tablespaces -u $f_usr -p$f_pwd $f_db 2>${g_tmp}/dberr | gzip > $BACKUPDIR/$f_container_id-$f_db-$f_timestamp.sql.gz
-            then
-              g_echo_error "DB backup of $f_db failed: $(cat ${g_tmp}/dberr)"
-            fi
-
-            # Remove old backups but keep at least the last f_days
-            f_old_backups=$(ls -1 $BACKUPDIR/$f_container_id*.gz | wc -l)
-            if [ $f_old_backups -gt $f_days ]
-            then
-              find $BACKUPDIR -name "$f_container_id*.gz" -daystart -mtime +$f_days -delete
-            fi
-          done
-
-          ### POSTGRESQL ###
-          f_container=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\} | grep 'postgres' | cut -d":" -f1 | grep -v mailcow)
-          mkdir -p $BACKUPDIR
-
-          for f_container_id in $f_container
-          do
-            # Get PostgreSQL credentials from container environment
-            f_db=$(docker exec $f_container_id env | grep -E "POSTGRES_DB" | tail -n1 | cut -d"=" -f2)
-            f_pwd=$(docker exec $f_container_id env | grep -E "POSTGRES_PASSWORD" | tail -n1 | cut -d"=" -f2)
-            f_usr=$(docker exec $f_container_id env | grep -E "POSTGRES_USER" | tail -n1 | cut -d"=" -f2)
-
-            g_echo "Backup database $f_db from $f_container_id"
-
-            # Perform the PostgreSQL dump and compress it
-            if ! docker exec -e PGPASSWORD=$f_pwd $f_container_id /usr/bin/pg_dump -U $f_usr $f_db 2>${g_tmp}/dberr | gzip > $BACKUPDIR/$f_container_id-$f_db-$f_timestamp.sql.gz
-            then
-              g_echo_error "DB backup of $f_db failed: $(cat ${g_tmp}/dberr)"
-            fi
-
-            # Remove old backups but keep at least the last f_days
-            f_old_backups=$(ls -1 $BACKUPDIR/$f_container_id*.gz | wc -l)
-            if [ $f_old_backups -gt $f_days ]
-            then
-              find $BACKUPDIR -name "$f_container_id*.gz" -daystart -mtime +$f_days -delete
-            fi
-          done
         backup: yes
-        validate: /bin/bash -n %s
 
     - name: docker-compose command/alias for backward compatibility - now docker compose
-      blockinfile:
-        path: /usr/local/sbin/docker-compose
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/docker-compose
+        dest: /usr/local/sbin/docker-compose
         mode: "0755"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          docker compose $@          
         backup: yes
-        validate: /bin/bash -n %s 
-
-    - name: /usr/local/sbin/docker-compose shebang
-      lineinfile:
-        path: /usr/local/sbin/docker-compose
-        insertbefore: BOF
-        line: "#!/bin/bash -e"
 
     - name: Create traefik network
       community.docker.docker_network:
@@ -518,62 +376,27 @@
             gateway: fdaa:a192:b168:cd41::1
 
     - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-docker.check
-      ansible.builtin.blockinfile:
-        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-docker.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-docker.check
+        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-docker.check
         mode: "0400"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          # Healthcheck for docker daemon
-          g_check_file="${g_tmp}/symbios-healthcheck-docker"
-          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-          then
-            return 2>/dev/null || true
-          fi
-          date > "$g_check_file"
-          if ! docker info >/dev/null 2>&1
-          then
-            g_echo_error "Healthcheck failed for docker: daemon not responding"
-          fi
         backup: yes
-        validate: /bin/bash -n %s
 
     - name: Deploy healthcheck for Docker containers
-      ansible.builtin.blockinfile:
-        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-containers.check
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-containers.check
+        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-containers.check
         mode: "0400"
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          g_check_file="${g_tmp}/symbios-healthcheck-containers"
-          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-          then
-            return 2>/dev/null || true
-          fi
-          date > "$g_check_file"
-
-          g_missing=""
-          for g_container in traefik symbios-webui openldap ldapam acme-pki-stepca
-          do
-            if ! docker ps --format '{% raw %}{{.Names}}{% endraw %}' | grep -q "^${g_container}$"
-            then
-              g_missing="${g_missing:+${g_missing}, }${g_container}"
-            fi
-          done
-
-          if [ -n "$g_missing" ]
-          then
-            g_echo_error "Containers not running: ${g_missing}"
-          fi
+        owner: root
+        group: root
         backup: yes
-        validate: /bin/bash -n %s
 
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/docker.yml
+      ansible.builtin.command: symbios-state.sh set base-services/docker.yml
       changed_when: false
   handlers:
 

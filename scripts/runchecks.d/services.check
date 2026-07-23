@@ -1,0 +1,8 @@
+# Verify required system services are running
+for g_service in $(cat /usr/local/sbin/runchecks.d/services | sort)
+do
+  if ! ps aux | grep -v grep | grep -q "$g_service"
+  then
+    g_echo_error "$g_service down"
+  fi
+done

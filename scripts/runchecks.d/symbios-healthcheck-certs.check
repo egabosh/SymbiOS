@@ -1,0 +1,36 @@
+g_check_file="${g_tmp}/symbios-healthcheck-certs"
+if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+then
+  return 2>/dev/null || true
+fi
+date > "$g_check_file"
+
+g_base_domain=$(python3 -c "import yaml; c=yaml.safe_load(open('/home/docker/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print(v.get('base_domain','symbios.local'))")
+g_trae_ip=$(docker inspect traefik --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null)
+if [ -z "$g_trae_ip" ]
+then
+  g_echo_error "Cannot determine Traefik IP for cert checks"
+  return 2>/dev/null || true
+fi
+
+for g_host in "$g_base_domain" "auth.${g_base_domain}" "traefik.${g_base_domain}"
+do
+  g_enddate=$(echo | openssl s_client -connect "${g_trae_ip}:443" -servername "$g_host" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+  if [ -z "$g_enddate" ]
+  then
+    g_echo_error "Cert check failed for ${g_host}: could not retrieve certificate"
+    continue
+  fi
+
+  g_expiry_epoch=$(date -d "$g_enddate" +%s 2>/dev/null)
+  g_now_epoch=$(date +%s)
+  g_days_left=$(( (g_expiry_epoch - g_now_epoch) / 86400 ))
+
+  if [ "$g_days_left" -lt 0 ]
+  then
+    g_echo_error "Certificate for ${g_host} EXPIRED on $(date -d "$g_enddate" +%F)"
+  elif [ "$g_days_left" -lt 7 ]
+  then
+    g_echo_error "Certificate for ${g_host} expires in ${g_days_left} days ($(date -d "$g_enddate" +%F))"
+  fi
+done

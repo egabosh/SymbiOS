@@ -69,7 +69,7 @@
       when: nocontainer.stat.exists == true
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/localization.yml
+      ansible.builtin.command: symbios-state.sh set base-services/localization.yml
       changed_when: false
 
   handlers:

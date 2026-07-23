@@ -1,0 +1,8 @@
+# Alert if system load average exceeds (number of CPUs + 10)
+let g_maxload=$(cat /proc/cpuinfo | grep ^processor | wc -l)+10
+g_load=`cat /proc/loadavg | cut -d" " -f1`
+g_intload=`echo $g_load | cut -d'.' -f1`
+if [ $g_intload -gt $g_maxload ]
+then
+  g_echo_error "System Load high at $g_load"
+fi

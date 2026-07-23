@@ -1,0 +1,19 @@
+# Healthcheck for openldap (LDAP bind test)
+g_check_file="${g_tmp}/symbios-healthcheck-ldap"
+if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+then
+  return 2>/dev/null || true
+fi
+date > "$g_check_file"
+g_ldap_ip=$(docker inspect openldap --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' 2>/dev/null | grep '^192\.168\.' | head -1)
+g_ldap_pw=$(cat /home/docker/symbios-ui/config/.ldap_admin_pw 2>/dev/null)
+if [ -z "$g_ldap_ip" ]
+then
+  g_echo_error "Healthcheck failed for ldap: cannot determine container IP"
+elif [ -z "$g_ldap_pw" ]
+then
+  g_echo_error "Healthcheck failed for ldap: admin password file missing"
+elif ! ldapwhoami -x -H "ldap://${g_ldap_ip}" -D "cn=head-of-ldap,dc=openldap,dc=local" -w "$g_ldap_pw" >/dev/null 2>&1
+then
+  g_echo_error "Healthcheck failed for ldap: LDAP bind test failed"
+fi
