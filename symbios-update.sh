@@ -168,21 +168,22 @@ then
 fi
 
 # Get list of installed playbooks from state file
-g_echo_note "Checking installed playbooks"
-f_installed_playbooks=()
-f_line=""
+    g_echo_note "Checking installed playbooks"
+    f_installed_playbooks=()
+    f_line=""
+    f_state_file="/home/docker/symbios-ui/config/installed-playbooks.yml"
 
-if [ -f "installed-playbooks.yml" ]
-then
-    while read -r f_line
-    do
-        if [[ "${f_line}" =~ ^(.+): ]]
-        then
-            f_playbook="${BASH_REMATCH[1]}"
-            f_installed_playbooks+=("${f_playbook}")
-        fi
-    done < "installed-playbooks.yml"
-fi
+    if [ -f "${f_state_file}" ]
+    then
+        while read -r f_line
+        do
+            if [[ "${f_line}" =~ ^(.+): ]]
+            then
+                f_playbook="${BASH_REMATCH[1]}"
+                f_installed_playbooks+=("${f_playbook}")
+            fi
+        done < "${f_state_file}"
+    fi
 
 f_playbooks_count=${#f_installed_playbooks[@]}
 g_echo_note "Found ${f_playbooks_count} installed playbook(s):"
