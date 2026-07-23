@@ -16,14 +16,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-# symbios-update.sh - Pull changes from Git repo and apply updates to installed playbooks
-# 
-# This script checks for updates to installed playbooks and runs them. It works by:
-# 1. Cloning/updating the SymbiOS repo from GitHub (https)
-# 2. Reading the installed-playbooks state file to know which playbooks are installed
-# 3. For each installed playbook, check if the version in the updated repo is newer (via git diff)
-# 4. If newer, backup old version and replace with new version
-# 5. Then run the playbook via ansible
+# symbios-update.sh - Pull changes from Git repo and run changed playbooks
+#
+# 1. Clones/updates the SymbiOS repo from GitHub
+# 2. Uses git diff to detect which installed playbooks changed
+# 3. Runs changed playbooks via ansible
 
 # Source gaboshlib if available
 if [ -f /etc/bash/gaboshlib.include ]
@@ -34,9 +31,9 @@ fi
 g_symbios_dir="${SYMBIOS_DIR:-/home/SymbiOS}"
 g_repo_url="https://github.com/egabosh/SymbiOS.git"
 g_inventory="${g_inventory:-/home/docker/symbios-ui/config/inventory.yml}"
+g_state_file="/home/docker/symbios-ui/config/installed-playbooks.yml"
 g_failed=""
 g_dry_run=false
-g_no_reapply=false
 
 function f_usage {
     cat << EOF
@@ -45,29 +42,19 @@ Usage: symbios-update.sh [OPTIONS]
 Options:
   -h, --help          Show this help message
   -d, --dry-run       Check for changes but do not apply them
-  -n, --no-reapply    Do not start reapply script after updates
-  
-Update SymbiOS base-services playbooks from the official GitHub repository.
 
-The script will:
-  1. Clone or update the SymbiOS repository from GitHub
-  2. Check for changes in each installed playbook
-  3. Update and run playbooks that have changes
-  4. Start the background reapply script (unless disabled)
+Pull latest changes from GitHub and run any updated playbooks.
 EOF
 }
 
 # Parse arguments
 while [ $# -gt 0 ]
 do
-case "${1}" in
-            -d|--dry-run)
-                g_dry_run=true
-                ;;
-            -n|--no-reapply)
-                g_no_reapply=true
-                ;;
-            -h|--help)
+    case "${1}" in
+        -d|--dry-run)
+            g_dry_run=true
+            ;;
+        -h|--help)
             f_usage
             exit 0
             ;;
@@ -85,66 +72,31 @@ then
     g_echo_note "Dry run mode - checking changes only"
 fi
 
-if [ "${g_no_reapply}" = true ]
-then
-    g_echo_note "Will not start reapply script"
-fi
-
 g_echo_note "Starting SymbiOS update at $(date)"
 
-# Clone or update the SymbiOS repository
-if [ ! -d "${g_symbios_dir}" ]
+# Clone or update SymbiOS from GitHub
+cd /home
+[[ -d SymbiOS ]] || git clone "${g_repo_url}"
+cd SymbiOS
+git remote set-url origin "${g_repo_url}"
+
+# Save pre-pull HEAD for diff
+f_head_before=$(git rev-parse HEAD 2>/dev/null)
+
+if ! git pull
 then
-    g_echo_note "Cloning SymbiOS repository into ${g_symbios_dir}"
-    if [ ! -d "$(dirname "${g_symbios_dir}")" ]
-    then
-        mkdir -p "$(dirname "${g_symbios_dir}")"
-    fi
-    if git clone "${g_repo_url}" "${g_symbios_dir}"
-    then
-        g_echo_note "  Successfully cloned repository"
-    else
-        g_echo_error "  Failed to clone repository"
-        exit 1
-    fi
-else
-    g_echo_note "Updating SymbiOS repository in ${g_symbios_dir}"
-    cd "${g_symbios_dir}" || {
-        g_echo_error "Could not change to SymbiOS directory"
-        exit 1
-    }
-    if git remote get-url origin | grep -q "https"
-    then
-        g_echo_note "  Repository source is HTTPS - pulling from remote"
-        if git checkout main 2>/dev/null
-        then
-            if git pull origin main
-            then
-                g_echo_note "  Successfully updated repository"
-            else
-                g_echo_error "  Failed to update repository"
-                exit 1
-            fi
-        else
-            g_echo_note "  On detached HEAD - doing a hard pull"
-            if git fetch origin main && git reset --hard origin/main
-            then
-                g_echo_note "  Successfully updated repository"
-            else
-                g_echo_error "  Failed to update repository"
-                exit 1
-            fi
-        fi
-    else
-        g_echo_note "  Repository source is SSH - using git pull"
-        if git pull
-        then
-            g_echo_note "  Successfully updated repository"
-        else
-            g_echo_error "  Failed to update repository"
-            exit 1
-        fi
-    fi
+    git checkout -- .
+    git pull
+fi
+
+f_head_after=$(git rev-parse HEAD 2>/dev/null)
+
+# Nothing changed
+if [ "${f_head_before}" = "${f_head_after}" ]
+then
+    g_echo_note "Repository already up-to-date"
+    g_echo_note "Update completed at $(date)"
+    exit 0
 fi
 
 # Change to SymbiOS directory
@@ -167,23 +119,23 @@ then
     exit 1
 fi
 
-# Get list of installed playbooks from state file
-    g_echo_note "Checking installed playbooks"
-    f_installed_playbooks=()
-    f_line=""
-    f_state_file="/home/docker/symbios-ui/config/installed-playbooks.yml"
+# Get changed files between old and new HEAD
+f_changed_files=$(git diff --name-only "${f_head_before}" "${f_head_after}" 2>/dev/null)
 
-    if [ -f "${f_state_file}" ]
-    then
-        while read -r f_line
-        do
-            if [[ "${f_line}" =~ ^(.+): ]]
-            then
-                f_playbook="${BASH_REMATCH[1]}"
-                f_installed_playbooks+=("${f_playbook}")
-            fi
-        done < "${f_state_file}"
-    fi
+# Get list of installed playbooks from state file
+g_echo_note "Checking installed playbooks"
+f_installed_playbooks=()
+
+if [ -f "${g_state_file}" ]
+then
+    while read -r f_line
+    do
+        if [[ "${f_line}" =~ ^([^:]+): ]]
+        then
+            f_installed_playbooks+=("${BASH_REMATCH[1]}")
+        fi
+    done < "${g_state_file}"
+fi
 
 f_playbooks_count=${#f_installed_playbooks[@]}
 g_echo_note "Found ${f_playbooks_count} installed playbook(s):"
@@ -192,71 +144,25 @@ do
     g_echo_note "  - ${f_playbook}"
 done
 
-# Check each installed playbook for changes
+# Find installed playbooks that changed
 f_updated_playbooks=()
 for f_playbook in "${f_installed_playbooks[@]}"
 do
-    g_echo_note "Checking ${f_playbook} for changes"
-    f_repo_file="${g_symbios_dir}/${f_playbook}"
-    f_installed_path="${f_playbook}"
-
-    if [ ! -f "${f_repo_file}" ]
+    if echo "${f_changed_files}" | grep -q "^${f_playbook}$"
     then
-        g_echo_warn "  Warning: Playbook not found in SymbiOS repository: ${f_playbook}"
-        continue
-    fi
-
-    if [ ! -f "${f_installed_path}" ]
-    then
-        g_echo_warn "  Warning: Installed playbook file not found: ${f_installed_path}"
-        continue
-    fi
-
-    if [ "${f_installed_path}" != "${f_repo_file}" ]
-    then
-        f_diff_count=0
-        f_diff_count=$(diff -u "${f_installed_path}" "${f_repo_file}" 2>/dev/null | wc -l)
-        if [ "${f_diff_count}" -gt 0 ]
-        then
-            g_echo_note "  Changes detected - will update"
-            f_updated_playbooks+=("${f_playbook}")
-        else
-            g_echo_note "  Already up-to-date"
-        fi
-    else
-        g_echo_note "  Already up-to-date (same file)"
+        g_echo_note "  ${f_playbook} - changes detected"
+        f_updated_playbooks+=("${f_playbook}")
     fi
 done
 
-# Also check if webui source files changed (triggers symbios-ui.yml playbook)
-if [ -d "${g_symbios_dir}/webui" ]
+# Also check if webui source files changed (triggers symbios-ui.yml)
+if echo "${f_changed_files}" | grep -q "^webui/"
 then
-    g_echo_note "Checking webui source files for changes"
-    f_webui_changed=false
-    # Compare repo webui/main with installed /home/SymbiOS/webui/main
-    if [ -d "/home/SymbiOS/webui/main" ]
-    then
-        if ! diff -r "${g_symbios_dir}/webui/main" "/home/SymbiOS/webui/main" >/dev/null 2>&1
-        then
-            f_webui_changed=true
-        fi
-    fi
-    # Compare repo webui/webui with installed /home/SymbiOS/webui/webui
-    if [ "${f_webui_changed}" = false ] && [ -d "/home/SymbiOS/webui/webui" ]
-    then
-        if ! diff -r "${g_symbios_dir}/webui/webui" "/home/SymbiOS/webui/webui" >/dev/null 2>&1
-        then
-            f_webui_changed=true
-        fi
-    fi
-
-    if [ "${f_webui_changed}" = true ]
-    then
-        g_echo_note "Webui source files changed - will run symbios-ui.yml"
-        f_updated_playbooks+=("base-services/symbios-ui.yml")
-    fi
+    g_echo_note "  webui source files changed"
+    f_updated_playbooks+=("base-services/symbios-ui.yml")
 fi
 
+# Run changed playbooks
 if [ ${#f_updated_playbooks[@]} -eq 0 ]
 then
     g_echo_note "No updates needed"
@@ -271,30 +177,10 @@ else
     then
         g_echo_note "Dry run: Skipping actual updates"
     else
-        # Update and run each updated playbook
         for f_playbook in "${f_updated_playbooks[@]}"
         do
-            g_echo_note "Processing ${f_playbook}"
-            f_repo_file="${g_symbios_dir}/${f_playbook}"
-            f_installed_path="${f_playbook}"
-
-            # Backup existing file if it exists
-            if [ -f "${f_installed_path}" ]
-            then
-                g_echo_note "  Backing up existing ${f_installed_path} to ${f_installed_path}.backup"
-                cp "${f_installed_path}" "${f_installed_path}.backup"
-            fi
-
-            # Copy new file
-            g_echo_note "  Copying ${f_repo_file} to ${f_installed_path}"
-            if ! cp "${f_repo_file}" "${f_installed_path}"
-            then
-                g_echo_error "  Failed to copy ${f_repo_file} to ${f_installed_path}"
-                continue
-            fi
-
-            g_echo_note "  Running ${f_playbook}"
-            if ansible-playbook --connection=local --limit localhost --inventory "${g_inventory}" "${f_installed_path}"
+            g_echo_note "Running ${f_playbook}"
+            if ansible-playbook --connection=local --limit localhost --inventory "${g_inventory}" "${f_playbook}"
             then
                 g_echo_note "  Successfully ran ${f_playbook}"
             else
@@ -314,20 +200,6 @@ then
 else
     g_echo_error "FAILED playbooks:${g_failed}"
     g_echo_error "Fix the issues and run again, or reboot to retry."
-fi
-
-if [ "${g_no_reapply}" = false ]
-then
-    g_echo_note "Starting reapply script for background processing"
-    if command -v nohup >/dev/null 2>&1 && command -v sleep >/dev/null 2>&1
-    then
-        nohup /usr/local/sbin/symbios-reapply.sh > /dev/null 2>&1 &
-        g_echo_note "Reapply script started with PID $!"
-    else
-        g_echo_warn "Nohup or sleep not available - cannot start reapply script"
-    fi
-else
-    g_echo_note "Skipping reapply script start"
 fi
 
 g_echo_note "Update completed at $(date)"
