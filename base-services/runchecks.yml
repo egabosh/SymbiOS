@@ -104,49 +104,10 @@
       notify:
       - Restart systemd
 
-
-    - name: Deploy check scripts
-      ansible.builtin.copy:
-        src: "/home/SymbiOS/scripts/runchecks.d/{{ item }}"
-        dest: "/usr/local/sbin/runchecks.d/{{ item }}"
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-        validate: /bin/bash -n %s
-      loop:
-        - disks.check
-        - raid-mdadm.check
-        - internet.check
-        - processes.check
-        - thermal.check
-        - measuretemp.check
-        - load.check
-        - services.check
-        - df.check
-        - dfinodes.check
-        - freemem.check
-        - freeswap.check
-      notify:
-      - Restart runchecks
-
     - name: 'add runchecks to startup'
       command: systemctl enable runchecks
       args:
         creates: /etc/systemd/system/multi-user.target.wants/runchecks.service
-
-    - name: Deploy healthcheck scripts
-      ansible.builtin.copy:
-        src: "/home/SymbiOS/scripts/runchecks.d/{{ item }}"
-        dest: "/usr/local/sbin/runchecks.d/{{ item }}"
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-        validate: /bin/bash -n %s
-      loop:
-        - symbios-healthcheck-runchecks.check
-        - symbios-healthcheck-playbooks.check
 
 
 

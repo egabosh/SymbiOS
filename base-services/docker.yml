@@ -335,24 +335,6 @@
           #innodb_log_buffer_size=512K
         backup: yes
 
-    - name: /usr/local/sbin/autoupdate.d/docker.update
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/autoupdate.d/docker.update
-        dest: /usr/local/sbin/autoupdate.d/docker.update
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-
-    - name: /usr/local/sbin/backup.d/docker.backup
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/backup.d/docker.backup
-        dest: /usr/local/sbin/backup.d/docker.backup
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-
     - name: docker-compose command/alias for backward compatibility - now docker compose
       ansible.builtin.copy:
         src: /home/SymbiOS/scripts/docker-compose
@@ -374,25 +356,6 @@
           # Local v6 IP  
           - subnet: fdaa:a192:b168:cd41::/64
             gateway: fdaa:a192:b168:cd41::1
-
-    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-docker.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-docker.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-docker.check
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-
-    - name: Deploy healthcheck for Docker containers
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-containers.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-containers.check
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-
 
 
     - name: Register playbook as installed

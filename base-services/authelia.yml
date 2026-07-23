@@ -407,18 +407,6 @@
         insertbefore: BOF
         line: "#!/bin/bash"
 
-    - name: Deploy healthcheck for Authelia
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-authelia.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-authelia.check
-        mode: 0400
-        owner: root
-        group: root
-        create: yes
-        backup: yes
-        validate: /bin/bash -n %s
-
-
 
     - name: Register playbook as installed
       ansible.builtin.command: symbios-state.sh set base-services/authelia.yml

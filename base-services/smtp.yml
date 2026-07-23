@@ -201,17 +201,6 @@
       when: smtp_server is not defined or smtp_server | length == 0
       notify: Restart postfix
 
-    - name: Deploy healthcheck for SMTP
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-smtp.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-smtp.check
-        mode: 0400
-        owner: root
-        group: root
-        create: yes
-        backup: yes
-        validate: /bin/bash -n %s
-
 
     - name: Register playbook as installed
       ansible.builtin.command: symbios-state.sh set base-services/smtp.yml

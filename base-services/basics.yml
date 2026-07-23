@@ -711,28 +711,6 @@
           /usr/bin/docker image prune -a -f >/dev/null 2>&1
           /usr/bin/apt-get autoclean -y >/dev/null 2>&1
 
-    - name: Deploy healthcheck for two-factor authentication
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-twofa.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-twofa.check
-        mode: 0400
-        owner: root
-        group: root
-        create: yes
-        backup: yes
-        validate: /bin/bash -n %s
-
-    - name: Deploy healthcheck for disk space
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-disk.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-disk.check
-        mode: 0400
-        owner: root
-        group: root
-        create: yes
-        backup: yes
-        validate: /bin/bash -n %s
-
 
     - name: Register playbook as installed
       ansible.builtin.command: symbios-state.sh set base-services/basics.yml

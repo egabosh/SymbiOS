@@ -65,16 +65,6 @@
         mode: "0644"
       become: yes
 
-    - name: Deploy healthcheck for remote SSH
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-remote-ssh.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-remote-ssh.check
-        mode: 0400
-        owner: root
-        group: root
-        create: yes
-        backup: yes
-        validate: /bin/bash -n %s
 
     - name: Register playbook as installed
       ansible.builtin.command: symbios-state.sh set base-services/ssh-keys.yml

@@ -30,7 +30,7 @@ do
   g_json_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   # Iterate over all .check scripts sorted alphabetically
-  for g_check in $(find /usr/local/sbin/runchecks.d -name "*.check" -type f | sort)
+  for g_check in $(find /usr/local/sbin/runchecks.d /home/SymbiOS/scripts/runchecks.d  -name "*.check" -type f | sort)
   do
     G_CURRENT_CHECK_FAILED=0
     G_CURRENT_CHECK_ERROR=""
