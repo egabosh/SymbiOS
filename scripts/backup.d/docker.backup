@@ -1,78 +1,78 @@
 ### DB Backup ###
 g_echo_ok "Start MySQL and PostgreSQL database backup (Docker)"
 
-f_days=7
+g_days=7
 
-f_timestamp=$(date +"%Y%m%d%H%M")
-f_container=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\} | grep -E -v '^mysql|^mariadb' | grep -E 'mysql|mariadb' | cut -d":" -f1 | grep -v mailcow)
+g_timestamp=$(date +"%Y%m%d%H%M")
+g_container=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\} | grep -E -v '^mysql|^mariadb' | grep -E 'mysql|mariadb' | cut -d":" -f1 | grep -v mailcow)
 
-mkdir -p $BACKUPDIR
+mkdir -p $g_backupdir
 
 ### MYSQL ###
-for f_container_id in $f_container
+for g_container_id in $g_container
 do
   # Get database credentials from container environment
-  f_db=$(docker exec $f_container_id env | grep -E "MARIADB_DATABASE|MYSQL_DATABASE" | tail -n1 | cut -d"=" -f2)
-  f_pwd=$(docker exec $f_container_id env | grep -E "MARIADB_PASSWORD|MYSQL_PASSWORD" | tail -n1 | cut -d"=" -f2)
-  f_usr=$(docker exec $f_container_id env | grep -E "MARIADB_USER|MYSQL_USER" | tail -n1 | cut -d"=" -f2)
+  g_db=$(docker exec $g_container_id env | grep -E "MARIADB_DATABASE|MYSQL_DATABASE" | tail -n1 | cut -d"=" -f2)
+  g_pwd=$(docker exec $g_container_id env | grep -E "MARIADB_PASSWORD|MYSQL_PASSWORD" | tail -n1 | cut -d"=" -f2)
+  g_usr=$(docker exec $g_container_id env | grep -E "MARIADB_USER|MYSQL_USER" | tail -n1 | cut -d"=" -f2)
 
   # Determine the dump command available in the container
-  f_dumpcmd=""
-  if docker exec $f_container_id /usr/bin/test -x /usr/bin/mariadb-dump
+  g_dumpcmd=""
+  if docker exec $g_container_id /usr/bin/test -x /usr/bin/mariadb-dump
   then
-    f_dumpcmd=/usr/bin/mariadb-dump
+    g_dumpcmd=/usr/bin/mariadb-dump
   fi
-  if docker exec $f_container_id /usr/bin/test -x /usr/bin/mysqldump
+  if docker exec $g_container_id /usr/bin/test -x /usr/bin/mysqldump
   then
-    f_dumpcmd=/usr/bin/mysqldump
+    g_dumpcmd=/usr/bin/mysqldump
   fi
 
   # Skip if no dump command is found
-  if [ -z "$f_dumpcmd" ]
+  if [ -z "$g_dumpcmd" ]
   then
-    g_echo_error "No dump command found in container $f_container_id! No backup created!"
+    g_echo_error "No dump command found in container $g_container_id! No backup created!"
     continue
   fi
 
-  g_echo "Backup MySQL/MariaDB database $f_db from $f_container_id"
+  g_echo "Backup MySQL/MariaDB database $g_db from $g_container_id"
 
   # Perform the database dump and compress it
-  if ! docker exec $f_container_id $f_dumpcmd --no-tablespaces -u $f_usr -p$f_pwd $f_db 2>${g_tmp}/dberr | gzip > $BACKUPDIR/$f_container_id-$f_db-$f_timestamp.sql.gz
+  if ! docker exec $g_container_id $g_dumpcmd --no-tablespaces -u $g_usr -p$g_pwd $g_db 2>${g_tmp}/dberr | gzip > $g_backupdir/$g_container_id-$g_db-$g_timestamp.sql.gz
   then
-    g_echo_error "DB backup of $f_db failed: $(cat ${g_tmp}/dberr)"
+    g_echo_error "DB backup of $g_db failed: $(cat ${g_tmp}/dberr)"
   fi
 
-  # Remove old backups but keep at least the last f_days
-  f_old_backups=$(ls -1 $BACKUPDIR/$f_container_id*.gz | wc -l)
-  if [ $f_old_backups -gt $f_days ]
+  # Remove old backups but keep at least the last g_days
+  g_old_backups=$(ls -1 $g_backupdir/$g_container_id*.gz | wc -l)
+  if [ $g_old_backups -gt $g_days ]
   then
-    find $BACKUPDIR -name "$f_container_id*.gz" -daystart -mtime +$f_days -delete
+    find $g_backupdir -name "$g_container_id*.gz" -daystart -mtime +$g_days -delete
   fi
 done
 
 ### POSTGRESQL ###
-f_container=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\} | grep 'postgres' | cut -d":" -f1 | grep -v mailcow)
-mkdir -p $BACKUPDIR
+g_container=$(docker ps --format \{\{.Names\}\}:\{\{.Image\}\} | grep 'postgres' | cut -d":" -f1 | grep -v mailcow)
+mkdir -p $g_backupdir
 
-for f_container_id in $f_container
+for g_container_id in $g_container
 do
   # Get PostgreSQL credentials from container environment
-  f_db=$(docker exec $f_container_id env | grep -E "POSTGRES_DB" | tail -n1 | cut -d"=" -f2)
-  f_pwd=$(docker exec $f_container_id env | grep -E "POSTGRES_PASSWORD" | tail -n1 | cut -d"=" -f2)
-  f_usr=$(docker exec $f_container_id env | grep -E "POSTGRES_USER" | tail -n1 | cut -d"=" -f2)
+  g_db=$(docker exec $g_container_id env | grep -E "POSTGRES_DB" | tail -n1 | cut -d"=" -f2)
+  g_pwd=$(docker exec $g_container_id env | grep -E "POSTGRES_PASSWORD" | tail -n1 | cut -d"=" -f2)
+  g_usr=$(docker exec $g_container_id env | grep -E "POSTGRES_USER" | tail -n1 | cut -d"=" -f2)
 
-  g_echo "Backup database $f_db from $f_container_id"
+  g_echo "Backup database $g_db from $g_container_id"
 
   # Perform the PostgreSQL dump and compress it
-  if ! docker exec -e PGPASSWORD=$f_pwd $f_container_id /usr/bin/pg_dump -U $f_usr $f_db 2>${g_tmp}/dberr | gzip > $BACKUPDIR/$f_container_id-$f_db-$f_timestamp.sql.gz
+  if ! docker exec -e PGPASSWORD=$g_pwd $g_container_id /usr/bin/pg_dump -U $g_usr $g_db 2>${g_tmp}/dberr | gzip > $g_backupdir/$g_container_id-$g_db-$g_timestamp.sql.gz
   then
-    g_echo_error "DB backup of $f_db failed: $(cat ${g_tmp}/dberr)"
+    g_echo_error "DB backup of $g_db failed: $(cat ${g_tmp}/dberr)"
   fi
 
-  # Remove old backups but keep at least the last f_days
-  f_old_backups=$(ls -1 $BACKUPDIR/$f_container_id*.gz | wc -l)
-  if [ $f_old_backups -gt $f_days ]
+  # Remove old backups but keep at least the last g_days
+  g_old_backups=$(ls -1 $g_backupdir/$g_container_id*.gz | wc -l)
+  if [ $g_old_backups -gt $g_days ]
   then
-    find $BACKUPDIR -name "$f_container_id*.gz" -daystart -mtime +$f_days -delete
+    find $g_backupdir -name "$g_container_id*.gz" -daystart -mtime +$g_days -delete
   fi
 done

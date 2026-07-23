@@ -1,3 +1,4 @@
+# Check: Monitor disk usage on key mount points and warn on high usage
 g_check_file="${g_tmp}/symbios-healthcheck-disk"
 if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
 then

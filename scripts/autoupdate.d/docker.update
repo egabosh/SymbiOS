@@ -1,3 +1,5 @@
+# Docker update - pull and restart all Docker Compose services
+
 # Remove notify.sh directory if created as a directory by Docker volume
 if [ -d /usr/local/bin/notify.sh ]
 then
@@ -10,27 +12,27 @@ g_echo_ok "check for updates"
 docker system prune -af
 
 # Find all Docker compose directories excluding special ones
-find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "mailcow-dockerized$|.del$|.bak$|.old$|var-lib-docker$|var-lib-containerd$" | while read f_docker_dir
+find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "mailcow-dockerized$|.del$|.bak$|.old$|var-lib-docker$|var-lib-containerd$" | while read g_docker_dir
 do
   # Skip directories without a compose file
-  if [ ! -f "$f_docker_dir/docker-compose.yml" ]
+  if [ ! -f "$g_docker_dir/docker-compose.yml" ]
   then
     continue
   fi
-  g_echo_ok "$f_docker_dir"
-  cd "${f_docker_dir}"
+  g_echo_ok "$g_docker_dir"
+  cd "${g_docker_dir}"
   if docker -l warn compose --ansi never pull --include-deps 2>&1 | grep " Pulled"
   then
     # Write PID file for this service
-    echo $$ >/tmp/$(basename $f_docker_dir)
+    echo $$ >/tmp/$(basename $g_docker_dir)
     if ! docker -l warn compose --ansi never up -d --remove-orphans >$g_tmp/up 2>&1
     then
-      g_echo_error "$f_docker_dir: docker compose up failed: $(cat $g_tmp/up)"
+      g_echo_error "$g_docker_dir: docker compose up failed: $(cat $g_tmp/up)"
     fi
     # Check for started containers
     if grep -E -v -- "-wpcli" $g_tmp/up | grep "Started" >${g_tmp}/started
     then
-      g_echo_warn "$f_docker_dir Update installed: $(cat ${g_tmp}/started)"
+      g_echo_warn "$g_docker_dir Update installed: $(cat ${g_tmp}/started)"
     fi
   fi
   if [ -f Dockerfile ]
@@ -39,10 +41,10 @@ do
     then
       if ! docker -l warn compose --ansi never up -d --force-recreate --remove-orphans >$g_tmp/up 2>&1
       then
-        g_echo_error "$f_docker_dir: docker compose up failed: $(cat $g_tmp/up)"
+        g_echo_error "$g_docker_dir: docker compose up failed: $(cat $g_tmp/up)"
       fi
     else
-      g_echo_error "$f_docker_dir: docker compose build failed: $(cat $g_tmp/build)"
+      g_echo_error "$g_docker_dir: docker compose build failed: $(cat $g_tmp/build)"
     fi
   fi
 done

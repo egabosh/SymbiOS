@@ -1,3 +1,4 @@
+# Check: Verify TLS certificates for base domain, auth, and traefik are not expired
 g_check_file="${g_tmp}/symbios-healthcheck-certs"
 if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
 then

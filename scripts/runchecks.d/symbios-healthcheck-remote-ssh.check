@@ -1,3 +1,4 @@
+# Check: Verify remote SSH key exists and host 192.168.41.1 is reachable on port 22
 g_check_file="${g_tmp}/symbios-healthcheck-remote-ssh"
 if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
 then
