@@ -1,6 +1,9 @@
 all:
   vars:
     # SymbiOS defaults
+    timezone: "America/New_York"
+    keyboard: "us"
+    locale: "en_US.UTF-8"
     default_domain: "local"
     # base_domain is the shared parent for all service subdomains and the
     # Authelia session cookie scope (e.g. symbios.local or myhost.dedyn.io).
