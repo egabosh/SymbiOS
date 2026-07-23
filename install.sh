@@ -68,6 +68,7 @@ fi
 
 # Run base-services playbooks
 f_run_playbook /home/SymbiOS/base-services/basics.yml
+f_run_playbook /home/SymbiOS/base-services/localization.yml
 f_run_playbook /home/SymbiOS/base-services/hardening.yml
 f_run_playbook /home/SymbiOS/base-services/firewall.yml
 f_run_playbook /home/SymbiOS/base-services/backup.yml
