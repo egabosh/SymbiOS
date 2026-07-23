@@ -359,6 +359,32 @@ def settings_ddns_check_ip(request):
     return JsonResponse(result)
 
 @login_required
+def settings_localization(request):
+    config = _get_inventory_config()
+    if 'all' not in config:
+        config['all'] = {}
+    if 'vars' not in config['all']:
+        config['all']['vars'] = {}
+    vars_ = config['all']['vars']
+
+    if request.method == 'POST':
+        try:
+            vars_['timezone'] = request.POST.get('timezone', '').strip()
+            vars_['keyboard'] = request.POST.get('keyboard', '').strip()
+            vars_['locale'] = request.POST.get('locale', '').strip()
+            _save_inventory_config(config)
+            messages.success(request, 'Localization settings saved.')
+            # Reapply all playbooks with updated domain in the background
+            messages.info(request, 'Reapplying all playbooks in the background...')
+            _start_reapply(domain_only=False)
+        except Exception as e:
+            messages.error(request, f'Error: {e}')
+        return redirect('settings_localization')
+
+    return render(request, 'main/settings_localization.html', {'vars': vars_})
+
+
+@login_required
 def settings_auth(request):
     config = _get_inventory_config()
     vars_ = config.get('all', {}).get('vars', {})
@@ -389,8 +415,33 @@ def settings_auth(request):
 
     return render(request, 'main/settings_auth.html', {'vars': vars_})
 
-
 _HOST_IP_FILE = "/config/.host-ip"
+
+
+@login_required
+def settings_localization(request):
+    config = _get_inventory_config()
+    if 'all' not in config:
+        config['all'] = {}
+    if 'vars' not in config['all']:
+        config['all']['vars'] = {}
+    vars_ = config['all']['vars']
+
+    if request.method == 'POST':
+        try:
+            vars_['timezone'] = request.POST.get('timezone', '').strip()
+            vars_['keyboard'] = request.POST.get('keyboard', '').strip()
+            vars_['locale'] = request.POST.get('locale', '').strip()
+            _save_inventory_config(config)
+            messages.success(request, 'Localization settings saved.')
+            messages.info(request, 'Reapplying all playbooks in the background...')
+            _start_reapply(domain_only=False)
+        except Exception as e:
+            messages.error(request, f'Error: {e}')
+        return redirect('settings_localization')
+
+    return render(request, 'main/settings_localization.html', {'vars': vars_})
+
 
 @login_required
 def settings_local_ip(request):
