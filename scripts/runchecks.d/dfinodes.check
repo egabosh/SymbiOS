@@ -3,7 +3,7 @@ df -ali | grep -E -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" "
 do
   g_disk=`echo $g_i | cut -d" " -f1`
   g_usa=`echo $g_i | cut -d" " -f2`
-  if [ $g_usa -gt 98 ]
+  if [[ $g_usa -gt 98 ]]
   then
     g_echo_error "Inodes if $g_disk full: $g_usa%"
   fi

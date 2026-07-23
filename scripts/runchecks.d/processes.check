@@ -11,7 +11,7 @@ done
 # Report processes stuck in monitored state for more than 30 minutes
 grep -E "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read g_dzpid
 do
-  if [ -f ${g_tmp}/proc-check/$g_dzpid ]
+  if [[ -f ${g_tmp}/proc-check/$g_dzpid ]]
   then
     g_timestamp=$(ls --full-time ${g_tmp}/proc-check/$g_dzpid | sed 's/  */ /g' | cut -d" " -f6,7)
     date >>${g_tmp}/proc-check/$g_dzpid

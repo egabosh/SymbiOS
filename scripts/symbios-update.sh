@@ -65,7 +65,7 @@ do
   shift
 done
 
-if [ "${g_dry_run}" = true ]
+if [[ "${g_dry_run}" == true ]]
 then
   g_echo_note "Dry run mode - checking changes only"
 fi
@@ -90,7 +90,7 @@ fi
 g_head_after=$(git rev-parse HEAD 2>/dev/null)
 
 # Nothing changed
-if [ "${g_head_before}" = "${g_head_after}" ]
+if [[ "${g_head_before}" == "${g_head_after}" ]]
 then
   g_echo_note "Repository already up-to-date"
   g_echo_note "Update completed at $(date)"
@@ -111,7 +111,7 @@ then
 fi
 
 # Check if we have an inventory file
-if [ ! -s "${g_inventory}" ]
+if [[ ! -s "${g_inventory}" ]]
 then
   g_echo_error "Inventory file not found: ${g_inventory}"
   exit 1
@@ -124,7 +124,7 @@ g_changed_files=$(git diff --name-only "${g_head_before}" "${g_head_after}" 2>/d
 g_echo_note "Checking installed playbooks"
 g_installed_playbooks=()
 
-if [ -f "${g_state_file}" ]
+if [[ -f "${g_state_file}" ]]
 then
   while read -r g_line
   do
@@ -171,7 +171,7 @@ else
     g_echo_note "  - ${g_playbook}"
   done
 
-  if [ "${g_dry_run}" = true ]
+  if [[ "${g_dry_run}" == true ]]
   then
     g_echo_note "Dry run: Skipping actual updates"
   else
@@ -192,7 +192,7 @@ fi
 # Report results
 g_echo_note ""
 g_echo_note "=== Update Summary ==="
-if [ -z "${g_failed}" ]
+if [[ -z "${g_failed}" ]]
 then
   g_echo_note "All playbooks updated successfully"
 else

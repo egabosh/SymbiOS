@@ -1,22 +1,22 @@
 # Check: Monitor disk usage on key mount points and warn on high usage
 g_check_file="${g_tmp}/symbios-healthcheck-disk"
-if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+if [[ -f "$g_check_file" ]] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
 then
   return 2>/dev/null || true
 fi
 date > "$g_check_file"
 
 g_df_targets="/ /config"
-[ -d "/home" ] && mountpoint -q /home 2>/dev/null && g_df_targets="/ /config /home"
+[[ -d "/home" ]] && mountpoint -q /home 2>/dev/null && g_df_targets="/ /config /home"
 
 df $g_df_targets | tail -n +2 | while read g_line
 do
   g_mount=$(echo "$g_line" | awk '{print $6}')
   g_pct=$(echo "$g_line" | awk '{print $5}' | tr -d '%')
-  if [ "$g_pct" -gt 90 ]
+  if [[ "$g_pct" -gt 90 ]]
   then
     g_echo_error "Disk ${g_mount} critically full: ${g_pct}%"
-  elif [ "$g_pct" -gt 75 ]
+  elif [[ "$g_pct" -gt 75 ]]
   then
     g_echo_error "Disk ${g_mount} usage high: ${g_pct}%"
   fi

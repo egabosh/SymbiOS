@@ -4,7 +4,7 @@
 find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "\.del$|\.bak$|\.old$|var-lib-docker$" | while read f_dir
 do
   # Skip directories marked as down
-  if [ -s "$f_dir/.downok" ]
+  if [[ -s "$f_dir/.downok" ]]
   then
     continue
   fi
@@ -13,7 +13,7 @@ do
   then
     grep Host "$f_dir/docker-compose.override.yml" >>"$g_tmp/hosts"
   else
-    if [ -f "$f_dir/docker-compose.yml" ]
+    if [[ -f "$f_dir/docker-compose.yml" ]]
     then
       grep Host "$f_dir/docker-compose.yml" >>"$g_tmp/hosts"
     fi
@@ -54,7 +54,7 @@ do
 
 $(cat ${g_tmp}/traefik-wget-check)"
     else
-      if [ -f "${g_tmp}/$f_host-502" ]
+      if [[ -f "${g_tmp}/$f_host-502" ]]
       then
         rm "${g_tmp}/$f_host-502"
       fi
@@ -62,7 +62,7 @@ $(cat ${g_tmp}/traefik-wget-check)"
     # Track persistent 502 errors
     if grep -E -q "502 Bad Gateway" "${g_tmp}/traefik-wget-check"
     then
-      if [ -s "${g_tmp}/$f_host-502" ] && find "${g_tmp}/$f_host-502" | grep "$f_host-502" -mmin +15
+      if [[ -s "${g_tmp}/$f_host-502" ]] && find "${g_tmp}/$f_host-502" | grep "$f_host-502" -mmin +15
       then
         g_echo_error "Error while connecting ${f_host} with wget:
 $(cat ${g_tmp}/traefik-wget-check)"

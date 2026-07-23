@@ -1,6 +1,6 @@
 # Check: Verify all required Docker containers are running
 g_check_file="${g_tmp}/symbios-healthcheck-containers"
-if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+if [[ -f "$g_check_file" ]] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
 then
   return 2>/dev/null || true
 fi
@@ -15,7 +15,7 @@ do
   fi
 done
 
-if [ -n "$g_missing" ]
+if [[ -n "$g_missing" ]]
 then
   g_echo_error "Containers not running: ${g_missing}"
 fi

@@ -50,14 +50,14 @@ do
     g_check_name=$(basename "$g_check" .check | sed 's/^symbios-healthcheck-//')
     g_check_msg=$(echo "$g_current_check_error" | sed 's/"/\\"/g' | tr '\n' ' ')
 
-    if [ "$g_current_check_failed" -eq 1 ]
+    if [[ "$g_current_check_failed" -eq 1 ]]
     then
       g_entry="{\"name\":\"${g_check_name}\",\"status\":\"error\",\"message\":\"${g_check_msg}\",\"checked\":\"${g_json_ts}\"}"
     else
       g_entry="{\"name\":\"${g_check_name}\",\"status\":\"ok\",\"checked\":\"${g_json_ts}\"}"
     fi
 
-    [ -n "$g_json_results" ] && g_json_results="${g_json_results},${g_entry}" || g_json_results="${g_entry}"
+    [[ -n "$g_json_results" ]] && g_json_results="${g_json_results},${g_entry}" || g_json_results="${g_entry}"
   done
 
   # Write JSON results

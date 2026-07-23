@@ -9,18 +9,18 @@ g_dedyn_log="/home/docker/symbios-ui/log/dedyn.log"
 exec > >(tee -a "$g_dedyn_log") 2>&1
 
 # deDyn/deSEC-Settings
-[ -f /usr/local/etc/dedyn.conf ] || exit 0
+[[ -f /usr/local/etc/dedyn.conf ]] || exit 0
 . /usr/local/etc/dedyn.conf
 
 g_dedyndns="ns2.desec.org. ns1.desec.io."
 
 # Validate config
-if [ -z "${dedynpw}" ]
+if [[ -z "${dedynpw}" ]]
 then
   g_echo_error "dedynpw not set in /usr/local/etc/dedyn.conf"
   exit 1
 fi
-if [ -z "${dedynhosts}" ]
+if [[ -z "${dedynhosts}" ]]
 then
   g_echo_error "dedynhosts not set in /usr/local/etc/dedyn.conf"
   exit 1
@@ -34,7 +34,7 @@ function f_ensure_domain {
   f_exists=$(curl -s -o /dev/null -w "%{http_code}" \
     "https://desec.io/api/v1/domains/${f_domain}/" \
     --header "Authorization: Token ${dedynpw}")
-  if [ "${f_exists}" = "404" ]
+  if [[ "${f_exists}" == "404" ]]
   then
     # Domain does not exist, create it
     g_echo_ok "Creating domain ${f_domain} on desec.io..."
@@ -44,14 +44,14 @@ function f_ensure_domain {
       --header "Authorization: Token ${dedynpw}" \
       --header "Content-Type: application/json" \
       --data "{\"name\": \"${f_domain}\"}")
-    if [ "${f_create}" = "201" ]
+    if [[ "${f_create}" == "201" ]]
     then
       g_echo_ok "Domain ${f_domain} created successfully"
     else
       g_echo_error "Failed to create domain ${f_domain} (HTTP ${f_create})"
       return 1
     fi
-  elif [ "${f_exists}" = "200" ]
+  elif [[ "${f_exists}" == "200" ]]
   then
     g_echo_ok "Domain ${f_domain} already exists"
   else
@@ -65,7 +65,7 @@ g_ipv4=""
 g_ipv6=""
 
 # Fetch IPv6 address if enabled
-if [ -n "${doipv6}" ]
+if [[ -n "${doipv6}" ]]
 then
   g_echo_note "Fetching IPv6 address..."
   g_ipv6=$(curl -s https://checkipv6.dedyn.io/ 2>/dev/null)
@@ -96,7 +96,7 @@ if echo "${doipv6}" | grep -q "only"
 then
   g_updatesrv="update6.dedyn.io"
   g_updatestring="myipv6=${g_ipv6}"
-elif [ -n "${doipv6}" ]
+elif [[ -n "${doipv6}" ]]
 then
   g_updatestring="myipv4=${g_ipv4}&myipv6=${g_ipv6}"
 else
@@ -117,7 +117,7 @@ do
   host "${g_dynaddr}" ${g_dedyndns} >"${g_tmp}/${g_dynaddr}" 2>/dev/null
   for g_ip in ${g_ipv4} ${g_ipv6}
   do
-    if [ -z "${g_ip}" ]
+    if [[ -z "${g_ip}" ]]
     then
       continue
     fi
@@ -131,12 +131,12 @@ do
       g_response=$(curl -s -o /dev/null -w "%{http_code}" \
         "https://${g_updatesrv}/?hostname=${g_dynaddr}&${g_updatestring}" \
         --header "Authorization: Token ${dedynpw}")
-      if [ "${g_response}" = "200" ] || [ "${g_response}" = "204" ]
+      if [[ "${g_response}" == "200" ]] || [[ "${g_response}" == "204" ]]
       then
         g_echo_ok "DynDNS IP ${g_ip} for ${g_dynaddr} renewed"
         g_changed=1
         # Restart Traefik if ACME errors detected
-        if [ -f /home/docker/traefik/docker-compose.yml ]
+        if [[ -f /home/docker/traefik/docker-compose.yml ]]
         then
           if docker compose -f /home/docker/traefik/docker-compose.yml logs 2>/dev/null | grep -q "error.*acme-challenge"
           then
@@ -144,7 +144,7 @@ do
           fi
         fi
         # Trigger TURN server IP update
-        [ -x /home/docker/turn/newip.sh ] && /home/docker/turn/newip.sh
+        [[ -x /home/docker/turn/newip.sh ]] && /home/docker/turn/newip.sh
       else
         g_echo_error "Failed to update DynDNS IP ${g_ip} for ${g_dynaddr} (HTTP ${g_response})"
       fi
@@ -169,7 +169,7 @@ do
   fi
 
   # Post-update actions if domain was changed
-  if [ "${g_changed}" = "1" ]
+  if [[ "${g_changed}" == "1" ]]
   then
     # Ensure wildcard CNAME record exists
     g_current_dns=$(curl -s -X GET \

@@ -25,7 +25,7 @@ g_cert_dir="/usr/local/sbin/symbios-boot-unlock"
 g_domain="${SYMBIOS_BOOT_CERT_DOMAIN:-symbios-dev.dedyn.io}"
 
 # acme.json may not be readable (e.g. /home locked)
-if [ ! -r "$g_acme_json" ]
+if [[ ! -r "$g_acme_json" ]]
 then
   exit 0
 fi
