@@ -1,13 +1,13 @@
 #!/bin/bash
-# Source LDAP credentials from environment file
+
+# SymbiOS LDAP search wrapper - uses docker exec to bypass Traefik TLS
 . /home/docker/ldap/env.openldap
 
-# Use docker exec to bypass Traefik TLS (Step-CA may be unhealthy)
 docker compose -f /home/docker/ldap/docker-compose.yml exec -T openldap \
   ldapsearch -x -H ldap://localhost -D "cn=readuser,dc=openldap,dc=local" -w "$LDAP_READUSER_PASSWORD" -b "dc=openldap,dc=local" "$@"
-f_rc=$?
+g_rc=$?
 
 # Clear credentials from environment
 unset LDAP_ADMIN_PASSWORD LDAP_READUSER_PASSWORD
 
-exit $f_rc
+exit $g_rc

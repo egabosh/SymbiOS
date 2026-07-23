@@ -33,19 +33,19 @@ g_client_ip="${SSH_CONNECTION%% *}"
 
 # The command to run is the script arguments (the webui sends it shell-quoted,
 # so it arrives as a single token). Fall back to the original command if set.
-cmd="${SSH_ORIGINAL_COMMAND:-$*}"
-cmd="${cmd#*symbios-exec.sh }"
+g_cmd="${SSH_ORIGINAL_COMMAND:-$*}"
+g_cmd="${g_cmd#*symbios-exec.sh }"
 
 # Nothing to do -> interactive shell was requested.
-if [ -z "$cmd" ]
+if [ -z "$g_cmd" ]
 then
   echo "interactive"
   exit 0
 fi
 
 # Audit every invocation: syslog and a local log file.
-g_logger "client=${g_client_ip} cmd=${cmd}"
-echo "$(date -Iseconds) client=${g_client_ip} cmd=${cmd}" >> /var/log/symbios-exec.log 2>/dev/null || true
+g_logger "client=${g_client_ip} cmd=${g_cmd}"
+echo "$(date -Iseconds) client=${g_client_ip} cmd=${g_cmd}" >> /var/log/symbios-exec.log 2>/dev/null || true
 
 # Run the command as-is.
-exec bash -c "${cmd}"
+exec bash -c "${g_cmd}"

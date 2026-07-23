@@ -1,27 +1,29 @@
+# LDAP Docker backup - export LDAP database and clean old backups
+
 # Configure backup retention period in days
-f_days=7
-f_timestamp=$(date +"%Y%m%d%H%M")
+g_days=7
+g_timestamp=$(date +"%Y%m%d%H%M")
 
 cd /home/docker/ldap
 
 # Export LDAP database using slapcat
-if docker compose exec -ti openldap.ldap.local slapcat -F /ldap-config/slapd.d >$BACKUPDIR/openldap.ldap.local-$f_timestamp.ldif 2>"${g_tmp}/ldaperr"
+if docker compose exec -ti openldap.ldap.local slapcat -F /ldap-config/slapd.d >$g_backupdir/openldap.ldap.local-$g_timestamp.ldif 2>"${g_tmp}/ldaperr"
 then
   # Compress the LDIF backup
-  gzip $BACKUPDIR/openldap.ldap.local-$f_timestamp.ldif
+  gzip $g_backupdir/openldap.ldap.local-$g_timestamp.ldif
 else
   g_echo_error "LDAP backup failed: $(cat ${g_tmp}/ldaperr)"
 fi
 cd -
 
 # Count existing backups
-f_old_backups=$(ls -1 $BACKUPDIR/openldap.ldap.local-*.gz 2>/dev/null | wc -l)
+g_old_backups=$(ls -1 $g_backupdir/openldap.ldap.local-*.gz 2>/dev/null | wc -l)
 
 # Remove old backups if more than retention period
-if [ -n "$f_old_backups" ]
+if [ -n "$g_old_backups" ]
 then
-  if [ $f_old_backups -gt $f_days ]
+  if [ $g_old_backups -gt $g_days ]
   then
-    find $BACKUPDIR -name "openldap.ldap.local-*.gz" -daystart -mtime +$f_days -delete
+    find $g_backupdir -name "openldap.ldap.local-*.gz" -daystart -mtime +$g_days -delete
   fi
 fi

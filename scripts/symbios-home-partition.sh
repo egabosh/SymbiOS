@@ -1,4 +1,5 @@
 #!/bin/bash
+
 # SymbiOS - Debian-based server management platform
 # Copyright (C) 2025  SymbiOS Contributors
 #
@@ -15,32 +16,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# docs:
-#   short_description: Manage /home partition (create, encrypt, mount)
-#   description: Creates, copies, optionally encrypts and mounts a dedicated /home partition. All operations output JSON.
-#   author: SymbiOS Contributors
-#   version: '1.0'
-#   license: GPLv3
-#   copyright: Copyright 2026, SymbiOS Contributors
-#   min_ansible_version: '2.11'
-#   platforms:
-#   - name: Debian
-#     versions:
-#     - '13'
-#   category: Disk / Management
-#   actions:
-#   - name: list
-#     command: /usr/local/sbin/symbios-home-partition.sh list
-#     description: List block devices
-#   - name: status
-#     command: /usr/local/sbin/symbios-home-partition.sh status
-#     description: Show /home mount and LUKS status
-#   - name: setup
-#     command: /usr/local/sbin/symbios-home-partition.sh setup <device> [encrypt=yes] [password=<pass>]
-#     description: Format, optionally encrypt, and mount a disk as /home
-#   - name: umount
-#     command: /usr/local/sbin/symbios-home-partition.sh umount
-#     description: Unmount /home and close LUKS volume
+# symbios-home-partition.sh — Manage /home partition (create, encrypt, mount)
+# All operations output JSON.
 
 set -euo pipefail
 
@@ -48,61 +25,64 @@ set -euo pipefail
 # Helpers
 # ---------------------------------------------------------------------------
 
-json_escape() {
+function f_json_escape {
   python3 -c "import json,sys; print(json.dumps(sys.stdin.read().strip()))" 2>/dev/null
 }
 
-json_error() {
-  local msg="$1"
-  printf '{"ok":false,"error":%s}\n' "$(echo "$msg" | json_escape)"
+function f_json_error {
+  local f_msg="$1"
+  printf '{"ok":false,"error":%s}\n' "$(echo "$f_msg" | f_json_escape)"
   exit 1
 }
 
-json_ok() {
-  local data="$1"
-  printf '{"ok":true,%s}\n' "$data"
+function f_json_ok {
+  local f_data="$1"
+  printf '{"ok":true,%s}\n' "$f_data"
 }
 
 # ---------------------------------------------------------------------------
 # action: list
 # ---------------------------------------------------------------------------
 
-action_list() {
-  local raw
-  raw=$(lsblk -J -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,TRAN,RM 2>&1) || \
-    json_error "lsblk failed: $raw"
-  echo "$raw"
+function f_action_list {
+  local f_raw
+  f_raw=$(lsblk -J -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,TRAN,RM 2>&1) || \
+    f_json_error "lsblk failed: $f_raw"
+  echo "$f_raw"
 }
 
 # ---------------------------------------------------------------------------
 # action: status
 # ---------------------------------------------------------------------------
 
-action_status() {
-  local home_device="" home_fstype="" home_size="" home_used="" home_avail=""
-  local luks_name="" luks_device="" luks_open="false" needs_unlock="false"
+function f_action_status {
+  local f_home_device="" f_home_fstype="" f_home_size="" f_home_used="" f_home_avail=""
+  local f_luks_name="" f_luks_device="" f_luks_open="false" f_needs_unlock="false"
 
   # What is /home mounted on?
-  local df_out
-  df_out=$(df -hT /home 2>/dev/null | tail -1) || true
-  if [ -n "$df_out" ]; then
-    local parts
-    parts=($df_out)
-    if [ ${#parts[@]} -ge 7 ]; then
-      home_device="${parts[0]}"
-      home_fstype="${parts[1]}"
-      home_size="${parts[2]}"
-      home_used="${parts[3]}"
-      home_avail="${parts[4]}"
+  local f_df_out
+  f_df_out=$(df -hT /home 2>/dev/null | tail -1) || true
+  if [ -n "$f_df_out" ]
+  then
+    local f_parts
+    f_parts=($f_df_out)
+    if [ ${#f_parts[@]} -ge 7 ]
+    then
+      f_home_device="${f_parts[0]}"
+      f_home_fstype="${f_parts[1]}"
+      f_home_size="${f_parts[2]}"
+      f_home_used="${f_parts[3]}"
+      f_home_avail="${f_parts[4]}"
     fi
   fi
 
   # Check LUKS in block device tree
-  local lsblk_out
-  lsblk_out=$(lsblk -J -o NAME,TYPE,FSTYPE,MOUNTPOINT,UUID 2>/dev/null) || true
-  if [ -n "$lsblk_out" ]; then
-    local found
-    found=$(echo "$lsblk_out" | python3 -c "
+  local f_lsblk_out
+  f_lsblk_out=$(lsblk -J -o NAME,TYPE,FSTYPE,MOUNTPOINT,UUID 2>/dev/null) || true
+  if [ -n "$f_lsblk_out" ]
+  then
+    local f_found
+    f_found=$(echo "$f_lsblk_out" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 
@@ -129,40 +109,45 @@ if result:
     print(result[0])
     print(result[1])
 " 2>/dev/null) || true
-    if [ -n "$found" ]; then
-      luks_name=$(echo "$found" | head -1)
-      local luks_uuid
-      luks_uuid=$(echo "$found" | tail -1)
-      luks_device="/dev/$luks_name"
+    if [ -n "$f_found" ]
+    then
+      f_luks_name=$(echo "$f_found" | head -1)
+      local f_luks_uuid
+      f_luks_uuid=$(echo "$f_found" | tail -1)
+      f_luks_device="/dev/$f_luks_name"
 
       # Check if LUKS is open
-      local cs_out
-      cs_out=$(cryptsetup status "$luks_name" 2>/dev/null | head -1) || true
-      if echo "$cs_out" | grep -q "is active"; then
-        luks_open="true"
-      elif echo "$cs_out" | grep -qi "not found"; then
-        needs_unlock="true"
+      local f_cs_out
+      f_cs_out=$(cryptsetup status "$f_luks_name" 2>/dev/null | head -1) || true
+      if echo "$f_cs_out" | grep -q "is active"
+      then
+        f_luks_open="true"
+      elif echo "$f_cs_out" | grep -qi "not found"
+      then
+        f_needs_unlock="true"
       fi
     fi
   fi
 
   # Also check mapper for open LUKS
-  if [ "$luks_open" = "false" ]; then
-    if ls /dev/mapper/ 2>/dev/null | grep -qE 'home|luks'; then
-      luks_open="true"
+  if [ "$f_luks_open" = "false" ]
+  then
+    if ls /dev/mapper/ 2>/dev/null | grep -qE 'home|luks'
+    then
+      f_luks_open="true"
     fi
   fi
 
   cat <<EOF
-"home_device":"$home_device",
-"home_fstype":"$home_fstype",
-"home_size":"$home_size",
-"home_used":"$home_used",
-"home_avail":"$home_avail",
-"luks_name":"$luks_name",
-"luks_device":"$luks_device",
-"luks_open":$luks_open,
-"needs_unlock":$needs_unlock
+"home_device":"$f_home_device",
+"home_fstype":"$f_home_fstype",
+"home_size":"$f_home_size",
+"home_used":"$f_home_used",
+"home_avail":"$f_home_avail",
+"luks_name":"$f_luks_name",
+"luks_device":"$f_luks_device",
+"luks_open":$f_luks_open,
+"needs_unlock":$f_needs_unlock
 EOF
 }
 
@@ -170,95 +155,103 @@ EOF
 # action: setup
 # ---------------------------------------------------------------------------
 
-action_setup() {
-  local device="${1:-}"
-  local encrypt="${2:-no}"
-  local password="${3:-}"
+function f_action_setup {
+  local f_device="${1:-}"
+  local f_encrypt="${2:-no}"
+  local f_password="${3:-}"
 
-  # --- Validation ----------------------------------------------------------
-  [ -z "$device" ] && json_error "No device selected"
-  [[ "$device" == /dev/* ]] || json_error "Invalid device path"
-  [ "$encrypt" = "yes" ] && [ -z "$password" ] && json_error "Password required for LUKS encryption"
+  # Validation
+  [ -z "$f_device" ] && f_json_error "No device selected"
+  [[ "$f_device" == /dev/* ]] || f_json_error "Invalid device path"
+  [ "$f_encrypt" = "yes" ] && [ -z "$f_password" ] && f_json_error "Password required for LUKS encryption"
 
   # Safety: not the root device
-  local root_dev
-  root_dev=$(findmnt -n -o SOURCE / 2>/dev/null) || true
-  if [ -n "$root_dev" ]; then
-    if [[ "$device" == *"$root_dev"* ]] || [[ "$root_dev" == *"$device"* ]]; then
-      json_error "Cannot format the root device!"
+  local f_root_dev
+  f_root_dev=$(findmnt -n -o SOURCE / 2>/dev/null) || true
+  if [ -n "$f_root_dev" ]
+  then
+    if [[ "$f_device" == *"$f_root_dev"* ]] || [[ "$f_root_dev" == *"$f_device"* ]]
+    then
+      f_json_error "Cannot format the root device!"
     fi
   fi
 
   # Safety: not mounted (except as /home itself)
-  local cur_mount
-  cur_mount=$(findmnt -n -o TARGET "$device" 2>/dev/null) || true
-  if [ -n "$cur_mount" ]; then
-    if [ "$cur_mount" = "/home" ]; then
-      json_error "This device is already mounted as /home"
+  local f_cur_mount
+  f_cur_mount=$(findmnt -n -o TARGET "$f_device" 2>/dev/null) || true
+  if [ -n "$f_cur_mount" ]
+  then
+    if [ "$f_cur_mount" = "/home" ]
+    then
+      f_json_error "This device is already mounted as /home"
     fi
-    json_error "Device is mounted at $cur_mount. Unmount it first."
+    f_json_error "Device is mounted at $f_cur_mount. Unmount it first."
   fi
 
   # Size check
-  local home_size disk_size
-  home_size=$(du -sb /home/ 2>/dev/null | awk '{print $1}') || home_size=0
-  disk_size=$(blockdev --getsize64 "$device" 2>/dev/null) || disk_size=0
+  local f_home_size f_disk_size
+  f_home_size=$(du -sb /home/ 2>/dev/null | awk '{print $1}') || f_home_size=0
+  f_disk_size=$(blockdev --getsize64 "$f_device" 2>/dev/null) || f_disk_size=0
 
-  if [ "$home_size" -eq 0 ] 2>/dev/null; then
-    json_error "Could not determine /home size"
+  if [ "$f_home_size" -eq 0 ] 2>/dev/null
+  then
+    f_json_error "Could not determine /home size"
   fi
-  if [ "$disk_size" -eq 0 ] 2>/dev/null; then
-    json_error "Could not determine disk size"
+  if [ "$f_disk_size" -eq 0 ] 2>/dev/null
+  then
+    f_json_error "Could not determine disk size"
   fi
 
   # LUKS metadata overhead ~16MB, ext4 ~1%, add 5% safety margin
-  local overhead=$(( 16 * 1024 * 1024 ))
-  local home_margin=$(( home_size / 20 ))
-  [ "$home_margin" -gt "$overhead" ] && overhead=$home_margin
-  local needed=$(( home_size + overhead ))
+  local f_overhead=$(( 16 * 1024 * 1024 ))
+  local f_home_margin=$(( f_home_size / 20 ))
+  [ "$f_home_margin" -gt "$f_overhead" ] && f_overhead=$f_home_margin
+  local f_needed=$(( f_home_size + f_overhead ))
 
-  if [ "$disk_size" -lt "$needed" ]; then
-    local home_gb disk_gb needed_gb
-    home_gb=$(python3 -c "print(f'{$home_size/1024**3:.1f}')")
-    disk_gb=$(python3 -c "print(f'{$disk_size/1024**3:.1f}')")
-    needed_gb=$(python3 -c "print(f'{$needed/1024**3:.1f}')")
-    json_error "Disk too small! /home is ${home_gb}G but disk is only ${disk_gb}G. Need at least ${needed_gb}G."
+  if [ "$f_disk_size" -lt "$f_needed" ]
+  then
+    local f_home_gb f_disk_gb f_needed_gb
+    f_home_gb=$(python3 -c "print(f'{$f_home_size/1024**3:.1f}')")
+    f_disk_gb=$(python3 -c "print(f'{$f_disk_size/1024**3:.1f}')")
+    f_needed_gb=$(python3 -c "print(f'{$f_needed/1024**3:.1f}')")
+    f_json_error "Disk too small! /home is ${f_home_gb}G but disk is only ${f_disk_gb}G. Need at least ${f_needed_gb}G."
   fi
 
-  # --- Execute setup -------------------------------------------------------
-  local luks_name="home-luks"
-  local target
+  # Execute setup
+  local f_luks_name="home-luks"
+  local f_target
 
   # Unmount if mounted anywhere
-  umount "$device" 2>/dev/null || true
+  umount "$f_device" 2>/dev/null || true
 
-  if [ "$encrypt" = "yes" ]; then
-    echo "$password" | cryptsetup luksFormat --batch-mode "$device" || \
-      json_error "LUKS format failed"
-    echo "$password" | cryptsetup open "$device" "$luks_name" || \
-      json_error "LUKS open failed"
-    target="/dev/mapper/$luks_name"
+  if [ "$f_encrypt" = "yes" ]
+  then
+    echo "$f_password" | cryptsetup luksFormat --batch-mode "$f_device" || \
+      f_json_error "LUKS format failed"
+    echo "$f_password" | cryptsetup open "$f_device" "$f_luks_name" || \
+      f_json_error "LUKS open failed"
+    f_target="/dev/mapper/$f_luks_name"
   else
-    target="$device"
+    f_target="$f_device"
   fi
 
   # Format as ext4
-  mkfs.ext4 -F "$target" 2>&1 || json_error "mkfs.ext4 failed"
+  mkfs.ext4 -F "$f_target" 2>&1 || f_json_error "mkfs.ext4 failed"
 
   # Mount temporarily and copy data
   mkdir -p /home.new
-  mount "$target" /home.new || json_error "Mount /home.new failed"
+  mount "$f_target" /home.new || f_json_error "Mount /home.new failed"
 
   rsync -av --exclude=docker/var-lib-docker --exclude=docker/var-lib-containerd \
     --exclude='.trashed-*' /home/ /home.new/ 2>&1 || {
     umount /home.new 2>/dev/null || true
-    json_error "rsync failed"
+    f_json_error "rsync failed"
   }
 
   # Get UUID for fstab
-  local uuid
-  uuid=$(blkid -s UUID -o value "$device" 2>/dev/null) || \
-    json_error "blkid failed"
+  local f_uuid
+  f_uuid=$(blkid -s UUID -o value "$f_device" 2>/dev/null) || \
+    f_json_error "blkid failed"
 
   # Unmount old /home
   umount /home 2>/dev/null || true
@@ -268,56 +261,58 @@ action_setup() {
 
   # Update fstab: remove existing /home entry, add new one
   sed -i '\#.*[[:space:]]/home[[:space:]]#d' /etc/fstab
-  if [ "$encrypt" = "yes" ]; then
-    echo "/dev/mapper/$luks_name /home ext4 defaults,noatime 0 2" >> /etc/fstab
+  if [ "$f_encrypt" = "yes" ]
+  then
+    echo "/dev/mapper/$f_luks_name /home ext4 defaults,noatime 0 2" >> /etc/fstab
   else
-    echo "UUID=$uuid /home ext4 defaults,noatime 0 2" >> /etc/fstab
+    echo "UUID=$f_uuid /home ext4 defaults,noatime 0 2" >> /etc/fstab
   fi
 
   # Mount new /home
-  mount /home || json_error "Mount /home failed"
+  mount /home || f_json_error "Mount /home failed"
 
   # Store LUKS name for boot unlock
-  if [ "$encrypt" = "yes" ]; then
-    echo "$luks_name" > /config/.luks-name 2>/dev/null || true
+  if [ "$f_encrypt" = "yes" ]
+  then
+    echo "$f_luks_name" > /config/.luks-name 2>/dev/null || true
   fi
 
-  json_ok '"message":"Disk setup complete. /home is now on the new partition."'
+  f_json_ok '"message":"Disk setup complete. /home is now on the new partition."'
 }
 
 # ---------------------------------------------------------------------------
 # action: umount
 # ---------------------------------------------------------------------------
 
-action_umount() {
+function f_action_umount {
   umount /home 2>/dev/null || true
   cryptsetup close home-luks 2>/dev/null || true
-  json_ok '"message":"/home unmounted and LUKS volume closed."'
+  f_json_ok '"message":"/home unmounted and LUKS volume closed."'
 }
 
 # ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
 
-ACTION="${1:-}"
+g_action="${1:-}"
 shift 2>/dev/null || true
 
-case "$ACTION" in
+case "$g_action" in
   list)
-    action_list
+    f_action_list
     ;;
   status)
     printf '{'
-    action_status
+    f_action_status
     printf '}\n'
     ;;
   setup)
-    action_setup "$@"
+    f_action_setup "$@"
     ;;
   umount)
-    action_umount
+    f_action_umount
     ;;
   *)
-    json_error "Usage: $0 {list|status|setup <device> [encrypt=yes] [password=pass]|umount}"
+    f_json_error "Usage: $0 {list|status|setup <device> [encrypt=yes] [password=pass]|umount}"
     ;;
 esac

@@ -1,4 +1,5 @@
 #!/bin/bash
+
 # Source gaboshlib and set up environment
 . /etc/bash/gaboshlib.include
 g_lockfile
@@ -10,10 +11,10 @@ g_staleumount
 g_json_file="/home/docker/symbios-ui/log/runchecks-results.json"
 
 # Override g_echo_error to capture failures for JSON output
-g_echo_error() {
+function g_echo_error {
   logger -t runchecks "ERROR: $*"
-  G_CURRENT_CHECK_FAILED=1
-  G_CURRENT_CHECK_ERROR="$*"
+  g_current_check_failed=1
+  g_current_check_error="$*"
 }
 
 # Main loop - runs forever with 5min intervals
@@ -32,8 +33,8 @@ do
   # Iterate over all .check scripts sorted alphabetically
   for g_check in $(find /usr/local/sbin/runchecks.d /home/SymbiOS/scripts/runchecks.d  -name "*.check" -type f | sort)
   do
-    G_CURRENT_CHECK_FAILED=0
-    G_CURRENT_CHECK_ERROR=""
+    g_current_check_failed=0
+    g_current_check_error=""
 
     # Validate syntax then source each check script
     if bash -n "$g_check" >$g_tmp/check_error 2>&1
@@ -41,15 +42,15 @@ do
       g_echo "Running: $g_check"
       . "$g_check"
     else
-      G_CURRENT_CHECK_FAILED=1
-      G_CURRENT_CHECK_ERROR="Syntax error in $g_check: $(cat $g_tmp/check_error)"
-      logger -t runchecks "ERROR: $G_CURRENT_CHECK_ERROR"
+      g_current_check_failed=1
+      g_current_check_error="Syntax error in $g_check: $(cat $g_tmp/check_error)"
+      logger -t runchecks "ERROR: $g_current_check_error"
     fi
 
     g_check_name=$(basename "$g_check" .check | sed 's/^symbios-healthcheck-//')
-    g_check_msg=$(echo "$G_CURRENT_CHECK_ERROR" | sed 's/"/\\"/g' | tr '\n' ' ')
+    g_check_msg=$(echo "$g_current_check_error" | sed 's/"/\\"/g' | tr '\n' ' ')
 
-    if [ "$G_CURRENT_CHECK_FAILED" -eq 1 ]
+    if [ "$g_current_check_failed" -eq 1 ]
     then
       g_entry="{\"name\":\"${g_check_name}\",\"status\":\"error\",\"message\":\"${g_check_msg}\",\"checked\":\"${g_json_ts}\"}"
     else

@@ -49,30 +49,30 @@ base-services/symbios-ui.yml
 # Parse arguments
 if [ "${1:-}" = "--domain-only" ]
 then
-    g_domain_only=true
+  g_domain_only=true
 fi
 
 function f_cleanup {
-    rm -f "$g_pid_file"
-    echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") REAPPLY DONE (exit code: ${g_exit_code:-1})" >> "$g_log_file"
-    echo "done:${g_exit_code:-1}" > "$g_status_file"
+  rm -f "$g_pid_file"
+  echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") REAPPLY DONE (exit code: ${g_exit_code:-1})" >> "$g_log_file"
+  echo "done:${g_exit_code:-1}" > "$g_status_file"
 }
 
 function f_log {
-    echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $*" >> "$g_log_file"
+  echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $*" >> "$g_log_file"
 }
 
 # Prevent concurrent runs
 if [ -f "$g_pid_file" ]
 then
-    g_old_pid=$(cat "$g_pid_file")
-    if kill -0 "$g_old_pid" 2>/dev/null
-    then
-        echo "REAPPLY already running (PID $g_old_pid). Exiting."
-        exit 0
-    fi
-    # Stale PID file
-    rm -f "$g_pid_file"
+  g_old_pid=$(cat "$g_pid_file")
+  if kill -0 "$g_old_pid" 2>/dev/null
+  then
+    echo "REAPPLY already running (PID $g_old_pid). Exiting."
+    exit 0
+  fi
+  # Stale PID file
+  rm -f "$g_pid_file"
 fi
 
 echo $$ > "$g_pid_file"
@@ -85,7 +85,7 @@ mkdir -p "$(dirname "$g_state_file")"
 # Initialise state file if missing
 if [ ! -f "$g_state_file" ]
 then
-    printf '%s\n' "# Auto-maintained by playbooks via symbios-state.sh" > "$g_state_file"
+  printf '%s\n' "# Auto-maintained by playbooks via symbios-state.sh" > "$g_state_file"
 fi
 
 # Initialise log
@@ -99,31 +99,31 @@ g_playbooks=""
 
 if [ "$g_domain_only" = true ]
 then
-    # Only domain-dependent playbooks
-    g_playbooks="$g_domain_playbooks"
+  # Only domain-dependent playbooks
+  g_playbooks="$g_domain_playbooks"
 else
-    # All playbooks registered in state file
-    if [ -s "$g_state_file" ]
-    then
-        g_playbooks=$(grep -v '^#' "$g_state_file" 2>/dev/null | sed 's/:.*//' | sort)
-    fi
+  # All playbooks registered in state file
+  if [ -s "$g_state_file" ]
+  then
+    g_playbooks=$(grep -v '^#' "$g_state_file" 2>/dev/null | sed 's/:.*//' | sort)
+  fi
 fi
 
 # Also include any user-playbooks (always re-run all)
 g_user_dir="/home/docker/symbios-ui/config/user-playbooks"
 if [ -d "$g_user_dir" ]
 then
-    for f in "$g_user_dir"/*.yml
-    do
-        [ -f "$f" ] || continue
-        g_playbooks=$(printf '%s\n' "$g_playbooks" "user-playbooks/$(basename "$f")")
-    done
+  for g_user_file in "$g_user_dir"/*.yml
+  do
+    [ -f "$g_user_file" ] || continue
+    g_playbooks=$(printf '%s\n' "$g_playbooks" "user-playbooks/$(basename "$g_user_file")")
+  done
 fi
 
 if [ -z "$g_playbooks" ]
 then
-    f_log "No playbooks to re-run"
-    exit 0
+  f_log "No playbooks to re-run"
+  exit 0
 fi
 
 # Execute each playbook
@@ -133,38 +133,38 @@ f_log "Will re-run $g_total playbooks"
 
 for g_playbook in $g_playbooks
 do
-    g_count=$((g_count + 1))
+  g_count=$((g_count + 1))
 
-    # Resolve full path
-    g_path=""
-    if [ -f "$g_repo/$g_playbook" ]
-    then
-        g_path="$g_repo/$g_playbook"
-    elif [ -f "/home/docker/symbios-ui/config/user-playbooks/$(basename "$g_playbook")" ]
-    then
-        g_path="/home/docker/symbios-ui/config/user-playbooks/$(basename "$g_playbook")"
-    fi
+  # Resolve full path
+  g_path=""
+  if [ -f "$g_repo/$g_playbook" ]
+  then
+    g_path="$g_repo/$g_playbook"
+  elif [ -f "/home/docker/symbios-ui/config/user-playbooks/$(basename "$g_playbook")" ]
+  then
+    g_path="/home/docker/symbios-ui/config/user-playbooks/$(basename "$g_playbook")"
+  fi
 
-    if [ -z "$g_path" ]
-    then
-        f_log "WARN [$g_count/$g_total] Playbook not found: $g_playbook (skipping)"
-        continue
-    fi
+  if [ -z "$g_path" ]
+  then
+    f_log "WARN [$g_count/$g_total] Playbook not found: $g_playbook (skipping)"
+    continue
+  fi
 
-    f_log "RUN [$g_count/$g_total] $g_playbook"
-    echo "running:${g_count}/${g_total} ${g_playbook}" > "$g_status_file"
+  f_log "RUN [$g_count/$g_total] $g_playbook"
+  echo "running:${g_count}/${g_total} ${g_playbook}" > "$g_status_file"
 
-    if ansible-playbook --connection=local \
-        --inventory "$g_inventory" \
-        --limit localhost \
-        -e "ansible_python_interpreter=/usr/bin/python3" \
-        "$g_path" >> "$g_log_file" 2>&1
-    then
-        f_log "OK  [$g_count/$g_total] $g_playbook"
-    else
-        f_log "ERR [$g_count/$g_total] $g_playbook (exit code: $?)"
-        g_exit_code=1
-    fi
+  if ansible-playbook --connection=local \
+    --inventory "$g_inventory" \
+    --limit localhost \
+    -e "ansible_python_interpreter=/usr/bin/python3" \
+    "$g_path" >> "$g_log_file" 2>&1
+  then
+    f_log "OK  [$g_count/$g_total] $g_playbook"
+  else
+    f_log "ERR [$g_count/$g_total] $g_playbook (exit code: $?)"
+    g_exit_code=1
+  fi
 done
 
 f_log "=== REAPPLY COMPLETE ==="
