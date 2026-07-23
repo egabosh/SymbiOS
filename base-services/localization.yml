@@ -45,7 +45,7 @@
 
     - name: Set timezone to {{ timezone }}
       community.general.timezone:
-        name: {{ timezone }}
+        name: "{{ timezone }}"
       when: nocontainer.stat.exists == true
 
     - name: Keyboard layout {{ keyboard }}
@@ -68,7 +68,7 @@
 
     - name: Ensure {{ locale }} locale exists
       community.general.locale_gen:
-        name: {{ locale }}
+        name: "{{ locale }}"
         state: present
       notify: localectl
       when: nocontainer.stat.exists == true
@@ -80,4 +80,4 @@
       ansible.builtin.shell: setupcon
 
     - name: localectl
-      ansible.builtin.shell: localectl set-locale LANG={{ locale }}
+      ansible.builtin.shell: localectl set-locale LANG="{{ locale }}"
