@@ -810,7 +810,7 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set basics.yml
+      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/basics.yml
       changed_when: false
   handlers:
 

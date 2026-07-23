@@ -435,5 +435,5 @@
         validate: /bin/bash -n %s
 
     - name: Register playbook as installed
-      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set dedyn.yml
+      ansible.builtin.command: /usr/local/sbin/symbios-state.sh set base-services/dedyn.yml
       changed_when: false
