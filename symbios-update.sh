@@ -35,7 +35,6 @@ g_symbios_dir="${SYMBIOS_DIR:-/home/SymbiOS}"
 g_repo_url="https://github.com/egabosh/SymbiOS.git"
 g_inventory="${g_inventory:-/home/docker/symbios-ui/config/inventory.yml}"
 g_failed=""
-g_verbose=false
 g_dry_run=false
 g_no_reapply=false
 
@@ -45,7 +44,6 @@ Usage: symbios-update.sh [OPTIONS]
 
 Options:
   -h, --help          Show this help message
-  -v, --verbose       Increase verbosity
   -d, --dry-run       Check for changes but do not apply them
   -n, --no-reapply    Do not start reapply script after updates
   
@@ -62,17 +60,14 @@ EOF
 # Parse arguments
 while [ $# -gt 0 ]
 do
-    case "${1}" in
-        -v|--verbose)
-            g_verbose=true
-            ;;
-        -d|--dry-run)
-            g_dry_run=true
-            ;;
-        -n|--no-reapply)
-            g_no_reapply=true
-            ;;
-        -h|--help)
+case "${1}" in
+            -d|--dry-run)
+                g_dry_run=true
+                ;;
+            -n|--no-reapply)
+                g_no_reapply=true
+                ;;
+            -h|--help)
             f_usage
             exit 0
             ;;
@@ -84,11 +79,6 @@ do
     esac
     shift
 done
-
-if [ "${g_verbose}" = true ]
-then
-    g_echo_note "Verbose mode enabled"
-fi
 
 if [ "${g_dry_run}" = true ]
 then
