@@ -105,147 +105,28 @@
       - Restart systemd
 
 
-    - name: /usr/local/sbin/runchecks.d/disks.check
+    - name: Deploy check scripts
       ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/disks.check
-        dest: /usr/local/sbin/runchecks.d/disks.check
-        mode: "0400"
-        owner: root
-        group: root
-        validate: /bin/bash -n %s
-        backup: yes
-      notify:
-      - Restart runchecks
-
-    - name: /usr/local/sbin/runchecks.d/raid-mdadm.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/raid-mdadm.check
-        dest: /usr/local/sbin/runchecks.d/raid-mdadm.check
-        mode: "0400"
-        owner: root
-        group: root
-        validate: /bin/bash -n %s
-        backup: yes
-      notify:
-      - Restart runchecks
-    
-    - name: /usr/local/sbin/runchecks.d/internet.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/internet.check
-        dest: /usr/local/sbin/runchecks.d/internet.check
-        mode: "0400"
-        owner: root
-        group: root
-        validate: /bin/bash -n %s
-        backup: yes
-      notify:
-      - Restart runchecks
-
-    - name: /usr/local/sbin/runchecks.d/processes.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/processes.check
-        dest: /usr/local/sbin/runchecks.d/processes.check
+        src: "/home/SymbiOS/scripts/runchecks.d/{{ item }}"
+        dest: "/usr/local/sbin/runchecks.d/{{ item }}"
         mode: "0400"
         owner: root
         group: root
         backup: yes
         validate: /bin/bash -n %s
-      notify:
-      - Restart runchecks
-
-    - name: /usr/local/sbin/runchecks.d/thermal.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/thermal.check
-        dest: /usr/local/sbin/runchecks.d/thermal.check
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-        validate: /bin/bash -n %s
-      notify:
-      - Restart runchecks
-
-    - name: /usr/local/sbin/runchecks.d/measuretemp.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/measuretemp.check
-        dest: /usr/local/sbin/runchecks.d/measuretemp.check
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-        validate: /bin/bash -n %s
-      notify:
-      - Restart runchecks
-
-    - name: /usr/local/sbin/runchecks.d/load.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/load.check
-        dest: /usr/local/sbin/runchecks.d/load.check
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-        validate: /bin/bash -n %s
-      notify:
-      - Restart runchecks
-
-    - name: /usr/local/sbin/runchecks.d/services.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/services.check
-        dest: /usr/local/sbin/runchecks.d/services.check
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-        validate: /bin/bash -n %s
-      notify:
-      - Restart runchecks
-
-    - name: /usr/local/sbin/runchecks.d/df.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/df.check
-        dest: /usr/local/sbin/runchecks.d/df.check
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-        validate: /bin/bash -n %s
-      notify:
-      - Restart runchecks
-
-    - name: /usr/local/sbin/runchecks.d/dfinodes.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/dfinodes.check
-        dest: /usr/local/sbin/runchecks.d/dfinodes.check
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-        validate: /bin/bash -n %s
-      notify:
-      - Restart runchecks
-
-    - name: /usr/local/sbin/runchecks.d/freemem.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/freemem.check
-        dest: /usr/local/sbin/runchecks.d/freemem.check
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-        validate: /bin/bash -n %s
-      notify:
-      - Restart runchecks
-
-    - name: /usr/local/sbin/runchecks.d/freeswap.check
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/freeswap.check
-        dest: /usr/local/sbin/runchecks.d/freeswap.check
-        mode: "0400"
-        owner: root
-        group: root
-        backup: yes
-        validate: /bin/bash -n %s
+      loop:
+        - disks.check
+        - raid-mdadm.check
+        - internet.check
+        - processes.check
+        - thermal.check
+        - measuretemp.check
+        - load.check
+        - services.check
+        - df.check
+        - dfinodes.check
+        - freemem.check
+        - freeswap.check
       notify:
       - Restart runchecks
 
@@ -254,26 +135,18 @@
       args:
         creates: /etc/systemd/system/multi-user.target.wants/runchecks.service
 
-    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-runchecks.check
+    - name: Deploy healthcheck scripts
       ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-runchecks.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-runchecks.check
+        src: "/home/SymbiOS/scripts/runchecks.d/{{ item }}"
+        dest: "/usr/local/sbin/runchecks.d/{{ item }}"
         mode: "0400"
         owner: root
         group: root
         backup: yes
         validate: /bin/bash -n %s
-
-    - name: Deploy healthcheck for failed playbooks
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.d/symbios-healthcheck-playbooks.check
-        dest: /usr/local/sbin/runchecks.d/symbios-healthcheck-playbooks.check
-        mode: "0400"
-        create: yes
-        owner: root
-        group: root
-        backup: yes
-        validate: /bin/bash -n %s
+      loop:
+        - symbios-healthcheck-runchecks.check
+        - symbios-healthcheck-playbooks.check
 
 
 
