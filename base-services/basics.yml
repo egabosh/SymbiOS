@@ -175,6 +175,15 @@
         mode: '0755'
       when: nocontainer.stat.exists
 
+    - name: Install symbios-update.sh
+      ansible.builtin.copy:
+        src: /home/SymbiOS/symbios-update.sh
+        dest: /usr/local/sbin/symbios-update.sh
+        owner: root
+        group: root
+        mode: '0755'
+      when: nocontainer.stat.exists
+
     - name: Remove default pi user if present
       ansible.builtin.user:
         name: pi
