@@ -227,6 +227,35 @@ do
     fi
 done
 
+# Also check if webui source files changed (triggers symbios-ui.yml playbook)
+if [ -d "${g_symbios_dir}/webui" ]
+then
+    g_echo_note "Checking webui source files for changes"
+    f_webui_changed=false
+    # Compare repo webui/main with installed /home/SymbiOS/webui/main
+    if [ -d "/home/SymbiOS/webui/main" ]
+    then
+        if ! diff -r "${g_symbios_dir}/webui/main" "/home/SymbiOS/webui/main" >/dev/null 2>&1
+        then
+            f_webui_changed=true
+        fi
+    fi
+    # Compare repo webui/webui with installed /home/SymbiOS/webui/webui
+    if [ "${f_webui_changed}" = false ] && [ -d "/home/SymbiOS/webui/webui" ]
+    then
+        if ! diff -r "${g_symbios_dir}/webui/webui" "/home/SymbiOS/webui/webui" >/dev/null 2>&1
+        then
+            f_webui_changed=true
+        fi
+    fi
+
+    if [ "${f_webui_changed}" = true ]
+    then
+        g_echo_note "Webui source files changed - will run symbios-ui.yml"
+        f_updated_playbooks+=("base-services/symbios-ui.yml")
+    fi
+fi
+
 if [ ${#f_updated_playbooks[@]} -eq 0 ]
 then
     g_echo_note "No updates needed"
