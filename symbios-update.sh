@@ -169,8 +169,8 @@ fi
 
 # Get list of installed playbooks from state file
 g_echo_note "Checking installed playbooks"
-local f_installed_playbooks=()
-local f_line=""
+f_installed_playbooks=()
+f_line=""
 
 if [ -f "installed-playbooks.yml" ]
 then
