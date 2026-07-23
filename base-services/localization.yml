@@ -31,9 +31,10 @@
   hosts: all
   vars:
     # SymbiOS configuration
-    timezone: "America/New_York"
-    keyboard: "us"
-    locale: "en_US.UTF-8"
+    # Variables are optional - set to non-empty strings to override defaults
+    timezone: ""
+    keyboard: ""
+    locale: ""
   tasks:
 
     - name: check if we are in an container env by existing systemd
