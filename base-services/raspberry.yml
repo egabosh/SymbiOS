@@ -118,17 +118,8 @@
         - { action: serial_hw, value: "1" }
         - { action: onewire, value: "0" }
         - { action: wayland, value: "W1" }
+        - { action: wifi_country, value: "{{ keyboard }}" }
       changed_when: false
-
-    #- name: Blacklist WiFi module to suppress rfkill warning
-    #  ansible.builtin.copy:
-    #    dest: /etc/modprobe.d/blacklist-wifi.conf
-    #    content: |
-    #      # Disable WiFi to suppress rfkill blocked message
-    #      # Uncomment to enable WiFi (requires country code via raspi-config)
-    #      blacklist brcmfmac
-    #      blacklist brcmutil
-    #  changed_when: false
 
     - name: lightdm config dir
       file:
