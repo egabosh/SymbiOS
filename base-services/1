@@ -1,0 +1,212 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (C) 2025  SymbiOS Contributors
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   short_description: Configure the mail client defaults
+#   description: Deploys the shared mail-client configuration (/home/docker/_defaults/mailclient) used by containers to send mail. Also configures Postfix as a local mail relay so system commands like mail(1) work.
+#   author: Oliver Bohlen
+#   version: '1.1'
+#   license: GPLv3
+#   copyright: Copyright 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Mail
+#   service_control:
+#     services:
+#     - name: postfix
+#       type: systemd
+#       unit: postfix.service
+#       status: systemctl is-active postfix.service
+#
+
+- name: smtp
+  hosts: all
+
+  tasks:
+    # --- Mailclient marker (used by containers / Authelia) ---
+    - name: Create mailclient marker file if SMTP is configured
+      ansible.builtin.copy:
+        dest: /home/docker/_defaults/mailclient
+        content: |
+          smtp_server={{ smtp_server }}
+          smtp_user={{ smtp_user }}
+          smtp_from={{ smtp_from }}
+        mode: '0644'
+      when: smtp_server is defined and smtp_server | length > 0
+
+    - name: Remove mailclient marker file if SMTP is not configured
+      ansible.builtin.file:
+        path: /home/docker/_defaults/mailclient
+        state: absent
+      when: smtp_server is not defined or smtp_server | length == 0
+
+    # --- Postfix relay configuration (enables mail(1) on the host) ---
+    - name: Ensure Postfix is installed
+      ansible.builtin.apt:
+        name: postfix
+        state: present
+      when: smtp_server is defined and smtp_server | length > 0
+
+    - name: Set Postfix relayhost
+      ansible.builtin.command:
+        cmd: "postconf -e 'relayhost = [{{ smtp_server }}]:{{ smtp_port | default('587') }}'"
+      when: smtp_server is defined and smtp_server | length > 0
+      notify: Restart postfix
+
+    - name: Set Postfix myorigin
+      ansible.builtin.command:
+        cmd: "postconf -e 'myorigin = {{ smtp_from.split('@')[-1] }}'"
+      when: smtp_from is defined and smtp_from | length > 0
+      notify: Restart postfix
+
+    - name: Set Postfix myhostname
+      ansible.builtin.command:
+        cmd: "postconf -e 'myhostname = {{ inventory_hostname }}'"
+      when: smtp_server is defined and smtp_server | length > 0
+      notify: Restart postfix
+
+    - name: Set Postfix mydomain
+      ansible.builtin.command:
+        cmd: "postconf -e 'mydomain = {{ base_domain }}'"
+      when: smtp_server is defined and smtp_server | length > 0
+      notify: Restart postfix
+
+    - name: Enable SASL authentication
+      ansible.builtin.command:
+        cmd: postconf -e 'smtp_sasl_auth_enable = yes'
+      when: smtp_user is defined and smtp_user | length > 0 and smtp_password is defined and smtp_password | length > 0
+      notify: Restart postfix
+
+    - name: Configure SASL password map
+      ansible.builtin.lineinfile:
+        path: /etc/postfix/sasl_passwd
+        line: "[{{ smtp_server }}]:{{ smtp_port | default('587') }} {{ smtp_user }}:{{ smtp_password }}"
+        create: yes
+        mode: '0600'
+        owner: root
+        group: root
+      when: smtp_user is defined and smtp_user | length > 0 and smtp_password is defined and smtp_password | length > 0
+      notify: Restart postfix
+
+    - name: Generate SASL password DB
+      ansible.builtin.command:
+        cmd: postmap /etc/postfix/sasl_passwd
+      when: smtp_user is defined and smtp_user | length > 0 and smtp_password is defined and smtp_password | length > 0
+      notify: Restart postfix
+
+    - name: Set SASL password map config
+      ansible.builtin.command:
+        cmd: "postconf -e 'smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd'"
+      when: smtp_user is defined and smtp_user | length > 0 and smtp_password is defined and smtp_password | length > 0
+      notify: Restart postfix
+
+    - name: Set SASL security options (disable anonymous auth)
+      ansible.builtin.command:
+        cmd: "postconf -e 'smtp_sasl_security_options = noanonymous'"
+      when: smtp_user is defined and smtp_user | length > 0
+      notify: Restart postfix
+
+    # Rewrite all sender addresses to smtp_from so the SMTP relay accepts them
+    - name: Create sender canonical map
+      ansible.builtin.copy:
+        dest: /etc/postfix/sender_canonical
+        content: |
+          /.+/  {{ smtp_from }}
+        mode: '0644'
+      when: smtp_from is defined and smtp_from | length > 0
+      notify: Restart postfix
+
+    - name: Set sender canonical maps
+      ansible.builtin.command:
+        cmd: "postconf -e 'sender_canonical_maps = regexp:/etc/postfix/sender_canonical'"
+      when: smtp_from is defined and smtp_from | length > 0
+      notify: Restart postfix
+
+    - name: Remove sender canonical map if SMTP not configured
+      ansible.builtin.file:
+        path: /etc/postfix/sender_canonical
+        state: absent
+      when: smtp_server is not defined or smtp_server | length == 0
+
+    # --- TLS configuration ---
+    - name: Configure TLS (STARTTLS - port 587)
+      ansible.builtin.shell:
+        cmd: |
+          postconf -e 'smtp_tls_security_level = encrypt'
+          postconf -e 'smtp_tls_wrappermode = no'
+          postconf -e 'smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt'
+      when: smtp_tls is defined and smtp_tls == 'starttls'
+      notify: Restart postfix
+
+    - name: Configure TLS (SMTPS - port 465)
+      ansible.builtin.shell:
+        cmd: |
+          postconf -e 'smtp_tls_security_level = encrypt'
+          postconf -e 'smtp_tls_wrappermode = yes'
+          postconf -e 'smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt'
+      when: smtp_tls is defined and smtp_tls == 'tls'
+      notify: Restart postfix
+
+    - name: Disable TLS (plain SMTP)
+      ansible.builtin.shell:
+        cmd: |
+          postconf -e 'smtp_tls_security_level = may'
+          postconf -e 'smtp_tls_wrappermode = no'
+      when: smtp_tls is not defined or smtp_tls | length == 0
+      notify: Restart postfix
+
+    # --- General Postfix settings ---
+    - name: Set mailbox command (for mail(1) compatibility)
+      ansible.builtin.command:
+        cmd: "postconf -e 'mailbox_command ='"
+      notify: Restart postfix
+
+    - name: Set inet_interfaces to loopback-only
+      ansible.builtin.command:
+        cmd: "postconf -e 'inet_interfaces = loopback-only'"
+      notify: Restart postfix
+
+    - name: Remove SASL password map if SMTP not configured
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/postfix/sasl_passwd
+        - /etc/postfix/sasl_passwd.db
+      when: smtp_server is not defined or smtp_server | length == 0
+
+    - name: Disable SASL auth if SMTP not configured
+      ansible.builtin.shell:
+        cmd: |
+          postconf -e 'relayhost ='
+          postconf -e 'smtp_sasl_auth_enable = no'
+          postconf -e 'smtp_tls_security_level = none'
+          postconf -e 'smtp_sasl_password_maps ='
+      when: smtp_server is not defined or smtp_server | length == 0
+      notify: Restart postfix
+
+
+    - name: Register playbook as installed
+      ansible.builtin.command: symbios-state.sh set base-services/smtp.yml
+      changed_when: false
+  handlers:
+    - name: Restart postfix
+      ansible.builtin.systemd:
+        name: postfix
+        state: restarted
