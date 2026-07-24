@@ -36,6 +36,11 @@
   </div>
 </div>
 
+<!-- Rollback banner (hidden by default, shown if rollback is possible) -->
+<div class="row mb-3" id="rollback-section" style="display:none">
+  <div class="col-md-12"></div>
+</div>
+
 <!-- Setup form -->
 <div class="row">
   <div class="col-md-8">
@@ -50,10 +55,11 @@
           Existing data from the current <code>/home</code> will be copied automatically.
         </div>
 
-        <form id="setup-form" onsubmit="return setupDisk(event)">
+        <form id="setup-form" data-exec="true" method="POST" action="{% url "settings_disk_setup" %}">
+          {% csrf_token %}
           <div class="mb-3">
             <label class="form-label fw-semibold">Target Device</label>
-            <select class="form-select" id="setup-device" required>
+            <select class="form-select" id="setup-device" name="device" required>
               <option value="">-- select a device --</option>
             </select>
             <div id="device-info" class="form-text"></div>
@@ -62,7 +68,8 @@
           <div class="mb-3">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" role="switch"
-                     id="setup-encrypt" onchange="toggleEncrypt()">
+                     id="setup-encrypt" name="encrypt" value="yes"
+                     onchange="toggleEncrypt()">
               <label class="form-check-label" for="setup-encrypt">
                 <strong>Enable LUKS encryption</strong>
               </label>
@@ -81,6 +88,7 @@
             </div>
             <label class="form-label">Encryption Passphrase</label>
             <input type="password" class="form-control mb-2" id="setup-password"
+                   name="password"
                    placeholder="Choose a strong passphrase"
                    oninput="checkPasswords()">
             <label class="form-label">Confirm Passphrase</label>
@@ -141,6 +149,7 @@ document.addEventListener('DOMContentLoaded', function() {
 function refreshAll() {
   loadStatus();
   loadDisks();
+  loadRollbackStatus();
 }
 
 function loadStatus() {
@@ -212,6 +221,53 @@ function loadDisks() {
     .catch(err => {
       document.getElementById('disk-list').innerHTML =
         '<div class="text-danger">Failed to load disks: ' + err.message + '</div>';
+    });
+}
+
+function loadRollbackStatus() {
+  fetch('{% url "settings_disk_rollback_status" %}')
+    .then(r => r.json())
+    .then(data => {
+      var el = document.getElementById('rollback-section');
+      if (data.can_rollback) {
+        el.innerHTML = '<div class="alert alert-warning d-flex align-items-center">' +
+          '<i class="bi bi-arrow-counterclockwise me-2"></i>' +
+          '<span>A previous migration can be undone.</span>' +
+          '<button class="btn btn-outline-warning btn-sm ms-auto" onclick="doRollback()">' +
+          '<i class="bi bi-arrow-counterclockwise"></i> Rollback</button>' +
+          '</div>';
+        el.style.display = '';
+      } else {
+        el.style.display = 'none';
+      }
+    })
+    .catch(() => {
+      document.getElementById('rollback-section').style.display = 'none';
+    });
+}
+
+function doRollback() {
+  if (!confirm('Rollback the last /home migration?\n\nThis will:\n1. Unmount current /home\n2. Restore the original /home location\n3. Close LUKS volume (if encrypted)\n\nContinue?')) {
+    return;
+  }
+  var formData = new FormData();
+  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+  fetch('{% url "settings_disk_rollback" %}', {
+    method: 'POST',
+    body: formData,
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.job) {
+        SymbiOS.exec.start(data.job, data.title || 'Rolling back...');
+        if (data.message) SymbiOS.exec.showAlert(data.message, 'info');
+      } else if (data.error) {
+        SymbiOS.exec.showAlert(data.error, 'danger');
+      }
+    })
+    .catch(err => {
+      SymbiOS.exec.showAlert('Network error: ' + err, 'danger');
     });
 }
 
@@ -318,80 +374,51 @@ function checkPasswords() {
   }
 }
 
-function setupDisk(e) {
-  e.preventDefault();
+/* Frontend validation before the exec-modal interceptor fires */
+document.getElementById('setup-form').addEventListener('submit', function(e) {
   var device = document.getElementById('setup-device').value;
   var encrypt = document.getElementById('setup-encrypt').checked;
   var password = document.getElementById('setup-password').value;
-  var btn = document.getElementById('setup-btn');
-  var result = document.getElementById('setup-result');
 
   if (!device) {
-    result.innerHTML = '<span class="text-danger">Select a device first.</span>';
-    return false;
+    e.preventDefault();
+    SymbiOS.exec.showAlert('Select a device first.', 'danger');
+    return;
   }
 
   if (encrypt && !password) {
-    result.innerHTML = '<span class="text-danger">Enter an encryption passphrase.</span>';
-    return false;
+    e.preventDefault();
+    SymbiOS.exec.showAlert('Enter an encryption passphrase.', 'danger');
+    return;
   }
 
   if (encrypt) {
     var pw2 = document.getElementById('setup-password-confirm').value;
     if (password !== pw2) {
-      result.innerHTML = '<span class="text-danger">Passphrases do not match.</span>';
-      return false;
+      e.preventDefault();
+      SymbiOS.exec.showAlert('Passphrases do not match.', 'danger');
+      return;
     }
   }
 
-  // Frontend size check: compare device size with /home size
+  // Frontend size check
   var devInfo = findDeviceByPath(window._diskData || [], device);
   if (devInfo) {
     var devBytes = parseSizeBytes(devInfo.size);
     var homeBytes = parseSizeBytes(window._homeSize || '0');
     if (devBytes > 0 && homeBytes > 0 && devBytes < homeBytes * 1.1) {
-      result.innerHTML = '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Disk (' + devInfo.size + ') may be too small for /home (' + window._homeSize + '). The backend will verify before proceeding.</span>';
+      e.preventDefault();
+      SymbiOS.exec.showAlert('Disk (' + devInfo.size + ') may be too small for /home (' + window._homeSize + ').', 'warning');
+      return;
     }
   }
 
   if (!confirm('WARNING: All data on ' + device + ' will be erased!\n\nThis will:\n1. Format ' + device + ' as ext4' +
       (encrypt ? '\n2. Encrypt with LUKS' : '') +
       '\n' + (encrypt ? '3' : '2') + '. Copy data from current /home' +
-      '\n' + (encrypt ? '4' : '3') + '. Mount as /home\n\nContinue?')) {
-    return false;
+      '\n' + (encrypt ? '4' : '3') + '. Mount as /home\n\nA rollback option will be available after migration.\n\nContinue?')) {
+    e.preventDefault();
   }
-
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Setting up...';
-  result.innerHTML = '<span class="text-info"><i class="bi bi-hourglass-split"></i> This may take a while for large /home directories...</span>';
-
-  var formData = new FormData();
-  formData.append('device', device);
-  formData.append('encrypt', encrypt ? 'yes' : 'no');
-  formData.append('password', password);
-  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
-
-  fetch('{% url "settings_disk_setup" %}', {
-    method: 'POST',
-    body: formData
-  })
-    .then(r => r.json())
-    .then(data => {
-      if (data.ok) {
-        result.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + data.message + '</span>';
-        refreshAll();
-      } else {
-        result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + data.error.replace(/\n/g, '<br>') + '</span>';
-      }
-    })
-    .catch(err => {
-      result.innerHTML = '<span class="text-danger">Error: ' + err.message + '</span>';
-    })
-    .finally(() => {
-      btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-play-fill"></i> Setup Disk';
-    });
-  return false;
-}
+});
 </script>
 {% endblock %}
