@@ -34,23 +34,18 @@ import subprocess
 REAPPLY_STATUS_FILE = '/tmp/symbios-reapply.status'
 
 
-def _start_reapply(request, domain_only=False):
+def _start_reapply(domain_only=False):
     """Start symbios-reapply.sh in the background (non-blocking).
 
     Uses setsid to fully detach the process from the SSH session so it
-    survives after the channel closes. Reports errors via messages framework.
+    survives after the channel closes.
     """
     flag = '--domain-only' if domain_only else ''
     cmd = f'setsid /usr/local/sbin/symbios-reapply.sh {flag} </dev/null >/dev/null 2>&1'
     try:
-        ok, stdout, stderr = run_command(cmd, timeout=5)
-        if not ok:
-            messages.error(request, f'Reapply failed to start: {stderr.strip() or "unknown error"}')
-            return False
-        return True
-    except Exception as e:
-        messages.error(request, f'Reapply failed to start: {e}')
-        return False
+        run_command(cmd, timeout=5)
+    except Exception:
+        pass  # non-critical
 
 
 def _reapply_status():
@@ -104,7 +99,7 @@ def settings_ddns(request):
                         messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
                 # Reapply all playbooks with updated domain in the background
                 messages.info(request, 'Reapplying all playbooks in the background...')
-                _start_reapply(request, domain_only=False)
+                _start_reapply(domain_only=False)
             elif dns_mode == 'self-managed':
                 self_domain = request.POST.get('self_domain', '').strip().lower().rstrip('.')
                 if not self_domain:
@@ -120,7 +115,7 @@ def settings_ddns(request):
                 messages.success(request, f'DNS settings saved for {self_domain}.')
                 # Reapply all playbooks with updated domain in the background
                 messages.info(request, 'Reapplying all playbooks in the background...')
-                _start_reapply(request, domain_only=False)
+                _start_reapply(domain_only=False)
             else:
                 # deSEC mode (existing behavior)
                 ddns_host = request.POST.get('ddns_host', '')
@@ -149,7 +144,7 @@ def settings_ddns(request):
                     messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
                 # Reapply all playbooks with updated domain in the background
                 messages.info(request, 'Reapplying all playbooks in the background...')
-                _start_reapply(request, domain_only=False)
+                _start_reapply(domain_only=False)
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_ddns')
@@ -411,41 +406,17 @@ def settings_localization(request):
             'Australia/Sydney', 'Pacific/Auckland', 'Pacific/Honolulu',
         ])
 
-    # Get keyboard layouts from host
-    keyboards = []
-    try:
-        # Try to get keyboard layouts from host's /etc/default/keyboard or via kbdlist
-        keyboards_cmd = 'ls /usr/share/keymaps/ || kbdlist'
-        ok, stdout, stderr = run_command(keyboards_cmd, timeout=10)
-        if ok and stdout:
-            keyboards = []
-            for line in stdout.split('\n'):
-                line = line.strip()
-                if not line or line == 'locale':
-                    continue
-                # Extract keyboard name from various formats
-                kb = line.split('/')[-1].replace('.map.gz', '').replace('.map', '').replace('.kbd', '').replace('.kbd.gh', '')
-                if kb and kb not in keyboards:
-                    keyboards.append(kb)
-        else:
-            # Try to get keyboard layouts from keyboard-configuration.debconf output
-            keyboard_cmd = 'debconf-show keyboard-configuration 2>/dev/null | grep -i layoutcode || echo "us"'
-            ok, stdout, stderr = run_command(keyboard_cmd, timeout=10)
-            if ok and stdout:
-                keyboards = []
-                for line in stdout.split('\n'):
-                    line = line.strip()
-                    if line and not line.startswith('#'):
-                        kb = line.strip('"\'')
-                        if kb and kb not in keyboards:
-                            keyboards.append(kb)
-    except Exception:
-        # Fallback to static list
-        keyboards = ['us', 'gb', 'de', 'fr', 'it', 'es', 'pt', 'nl', 'pl', 'ru', 'ar', 'zh', 'jp', 'kr', 'in']
-
-    # Ensure keyboards is always defined
-    if not keyboards:
-        keyboards = ['us', 'gb', 'de', 'fr', 'it', 'es', 'pt', 'nl', 'pl', 'ru', 'ar', 'zh', 'jp', 'kr', 'in']
+    # Get keyboard layouts — use curated static list (XKB symbols contain
+    # too many non-layout entries like modifiers; keymaps dir may not exist)
+    keyboards = [
+        'us', 'gb', 'de', 'fr', 'it', 'es', 'pt', 'nl', 'be', 'ch',
+        'se', 'no', 'dk', 'fi', 'pl', 'cz', 'hu', 'ro', 'bg', 'hr',
+        'rs', 'sk', 'si', 'lt', 'lv', 'ee', 'ie', 'is', 'gr', 'tr',
+        'ru', 'ua', 'by', 'md', 'am', 'ge', 'il', 'ar', 'fa', 'ur',
+        'in', 'bd', 'pk', 'lk', 'np', 'th', 'vn', 'id', 'ms', 'ph',
+        'jp', 'kr', 'cn', 'tw', 'hk', 'sg', 'au', 'nz', 'za', 'br',
+        'latam', 'mx', 'ca', 'dvorak', 'colemak',
+    ]
 
     if request.method == 'POST':
         try:
@@ -455,7 +426,7 @@ def settings_localization(request):
             _save_inventory_config(config)
             messages.success(request, 'Localization settings saved.')
             messages.info(request, 'Reapplying all playbooks in the background...')
-            _start_reapply(request, domain_only=False)
+            _start_reapply(domain_only=False)
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_localization')
@@ -1010,15 +981,6 @@ def settings_reapply_status(request):
       done:<exit_code>         — finished (0 = success)
     """
     raw = _reapply_status()
-
-    # Include last 20 lines of reapply log for context
-    log_tail = []
-    try:
-        with open('/home/docker/symbios-ui/log/reapply.log', 'r') as f:
-            log_tail = f.readlines()[-20:]
-    except FileNotFoundError:
-        pass
-
     if raw.startswith('running:'):
         parts = raw.split(' ', 2)
         progress = parts[0].replace('running:', '')
@@ -1027,14 +989,12 @@ def settings_reapply_status(request):
             'status': 'running',
             'progress': progress,
             'playbook': playbook,
-            'log_tail': [line.rstrip('\n') for line in log_tail],
         })
     elif raw.startswith('done:'):
         code = raw.replace('done:', '')
         return JsonResponse({
             'status': 'done',
             'success': code == '0',
-            'log_tail': [line.rstrip('\n') for line in log_tail],
         })
     else:
         return JsonResponse({'status': 'idle'})
