@@ -577,10 +577,11 @@ def settings_ssh_keys(request):
             # then user keys.  Write directly to /root/.ssh/authorized_keys
             # on the host via the SSH exec gateway — no inventory intermediary.
             all_keys = system_keys + user_keys
-            keys_content = "\\n".join(all_keys) + "\\n"
-            cmd = f"printf '%s\\n' '{keys_content}' > /root/.ssh/authorized_keys"
+            # Join with actual newlines, wrap in single quotes for shell.
+            keys_content = "\n".join(all_keys) + "\n"
+            cmd = "printf '%s' '" + keys_content.replace("'", "'\\''") + "' > /root/.ssh/authorized_keys"
             ok, stdout, stderr = run_command(cmd, timeout=15)
-            if ok != 0:
+            if not ok:
                 raise RuntimeError(f"Failed to write authorized_keys: {stderr}")
 
             messages.success(request, "SSH keys saved.")
