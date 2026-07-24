@@ -37,11 +37,11 @@ REAPPLY_STATUS_FILE = '/tmp/symbios-reapply.status'
 def _start_reapply(domain_only=False):
     """Start symbios-reapply.sh in the background (non-blocking).
 
-    The script writes its status to /tmp/symbios-reapply.status so the
-    WebUI can poll progress without blocking the HTTP response.
+    Uses setsid to fully detach the process from the SSH session so it
+    survives after the channel closes.
     """
     flag = '--domain-only' if domain_only else ''
-    cmd = f'nohup /usr/local/sbin/symbios-reapply.sh {flag} > /dev/null 2>&1 &'
+    cmd = f'setsid /usr/local/sbin/symbios-reapply.sh {flag} </dev/null >/dev/null 2>&1'
     try:
         run_command(cmd, timeout=5)
     except Exception:
