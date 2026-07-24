@@ -406,17 +406,35 @@ def settings_localization(request):
             'Australia/Sydney', 'Pacific/Auckland', 'Pacific/Honolulu',
         ])
 
-    # Get keyboard layouts — use curated static list (XKB symbols contain
-    # too many non-layout entries like modifiers; keymaps dir may not exist)
-    keyboards = [
-        'us', 'gb', 'de', 'fr', 'it', 'es', 'pt', 'nl', 'be', 'ch',
-        'se', 'no', 'dk', 'fi', 'pl', 'cz', 'hu', 'ro', 'bg', 'hr',
-        'rs', 'sk', 'si', 'lt', 'lv', 'ee', 'ie', 'is', 'gr', 'tr',
-        'ru', 'ua', 'by', 'md', 'am', 'ge', 'il', 'ar', 'fa', 'ur',
-        'in', 'bd', 'pk', 'lk', 'np', 'th', 'vn', 'id', 'ms', 'ph',
-        'jp', 'kr', 'cn', 'tw', 'hk', 'sg', 'au', 'nz', 'za', 'br',
-        'latam', 'mx', 'ca', 'dvorak', 'colemak',
-    ]
+    # Get keyboard layouts dynamically from host XKB symbols directory.
+    # Filter out modifiers, special keys, and non-layout entries.
+    keyboards = []
+    try:
+        kb_cmd = (
+            "find /usr/share/X11/xkb/symbols -maxdepth 1 -type f 2>/dev/null "
+            "| xargs -I{} basename {} "
+            "| grep -vE '^(pc|keypad|compose|ctrl|shift|level|capslock|scrolllock"
+            "|terminate|altwin|kpdl|nbsp|srvr|macintosh|olpc|empty|trans|typo"
+            "|group|latin|bqn|brai|inet|rupeesign|eurosign|parens|misc"
+            "|ancient|apl|grab)' | sort"
+        )
+        ok, stdout, stderr = run_command(kb_cmd, timeout=10)
+        if ok and stdout:
+            keyboards = [line.strip() for line in stdout.split('\n') if line.strip()]
+    except Exception:
+        pass
+
+    # Fallback if host query fails
+    if not keyboards:
+        keyboards = [
+            'us', 'gb', 'de', 'fr', 'it', 'es', 'pt', 'nl', 'be', 'ch',
+            'se', 'no', 'dk', 'fi', 'pl', 'cz', 'hu', 'ro', 'bg', 'hr',
+            'rs', 'sk', 'si', 'lt', 'lv', 'ee', 'ie', 'is', 'gr', 'tr',
+            'ru', 'ua', 'by', 'md', 'am', 'ge', 'il', 'ar', 'fa', 'ur',
+            'in', 'bd', 'pk', 'lk', 'np', 'th', 'vn', 'id', 'ms', 'ph',
+            'jp', 'kr', 'cn', 'tw', 'hk', 'sg', 'au', 'nz', 'za', 'br',
+            'latam', 'mx', 'ca', 'dvorak', 'colemak',
+        ]
 
     if request.method == 'POST':
         try:
