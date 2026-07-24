@@ -17,7 +17,7 @@
 <div class="card">
     <div class="card-header">SMTP Configuration</div>
     <div class="card-body">
-        <form method="post">
+        <form method="post" data-exec="true">
             {% csrf_token %}
             <div class="row">
                 <div class="col-md-6 mb-3">
@@ -89,7 +89,7 @@
 
 {% if vars.smtp_server or vars.smtp_port or vars.smtp_user or vars.smtp_from %}
 <hr class="mt-4">
-<form method="post" onsubmit="return confirm('Delete the entire SMTP configuration? This cannot be undone.')" class="d-inline">
+<form method="post" data-exec="true" onsubmit="return confirm('Delete the entire SMTP configuration? This cannot be undone.')" class="d-inline">
     {% csrf_token %}
     <input type="hidden" name="action" value="delete">
     <button type="submit" class="btn btn-outline-danger btn-sm">Delete SMTP Configuration</button>
