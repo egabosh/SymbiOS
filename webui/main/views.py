@@ -14,14 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import subprocess
 import yaml
 import os
 from django.shortcuts import render, redirect
 from .decorators import login_required
-from django.http import JsonResponse
-from .utils.log_utils import logs_stream
-from .constants import CONFIG_PATH, LDAP_URI
+from .constants import CONFIG_PATH
 
 
 def _get_inventory_config():
@@ -55,46 +52,6 @@ def _save_inventory_config(config):
     _safe_write(CONFIG_PATH, dumped)
 
 
-def _ldap_run(cmd, input=None):
-    try:
-        proc = subprocess.run(cmd, input=input, capture_output=True, text=True, timeout=30)
-        return proc.stdout, proc.stderr, proc.returncode
-    except Exception as e:
-        return '', str(e), 1
-
-
-def _ldap_search(base_dn, admin_pw, search_base, filter_expr, attrs=None):
-    cmd = [
-        'ldapsearch', '-x', '-H', LDAP_URI,
-        '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw,
-        '-b', search_base,
-    ]
-    if filter_expr:
-        cmd.append(filter_expr)
-    if attrs:
-        cmd.extend(attrs)
-    stdout, stderr, rc = _ldap_run(cmd)
-    return stdout, rc
-
-
-def _ldap_modify(ldif, base_dn, admin_pw):
-    cmd = ['ldapmodify', '-x', '-H', LDAP_URI, '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw]
-    stdout, stderr, rc = _ldap_run(cmd, input=ldif)
-    return rc, stderr
-
-
-def _ldap_add(ldif, base_dn, admin_pw):
-    cmd = ['ldapadd', '-x', '-H', LDAP_URI, '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw]
-    proc = subprocess.run(cmd, input=ldif, capture_output=True, text=True, timeout=30)
-    return proc.returncode, proc.stderr
-
-
-def _ldap_delete(dn, base_dn, admin_pw):
-    cmd = ['ldapdelete', '-x', '-H', LDAP_URI, '-D', f'cn=head-of-ldap,{base_dn}', '-w', admin_pw, dn]
-    stdout, stderr, rc = _ldap_run(cmd)
-    return rc, stderr
-
-
 def _get_ldap_vars():
     config = _get_inventory_config()
     vars_ = config.get('all', {}).get('vars', {})
@@ -110,93 +67,36 @@ def _get_ldap_vars():
     return {'base_dn': base_dn, 'admin_pw': admin_pw}
 
 
-def _get_next_uid_number():
-    ldap = _get_ldap_vars()
-    stdout, rc = _ldap_search(
-        ldap['base_dn'], ldap['admin_pw'],
-        f"ou=users,{ldap['base_dn']}", "(objectClass=posixAccount)", ["uidNumber"]
-    )
-    max_uid = 19999
-    if rc == 0:
-        for line in stdout.split('\n'):
-            if line.startswith('uidNumber:'):
-                try:
-                    uid = int(line.split(':', 1)[1].strip())
-                    if uid > max_uid:
-                        max_uid = uid
-                except ValueError:
-                    pass
-    return max_uid + 1
-
-
 def _get_ldap_groups():
-    ldap = _get_ldap_vars()
-    stdout, rc = _ldap_search(
-        ldap['base_dn'], ldap['admin_pw'],
-        f"ou=groups,{ldap['base_dn']}", "(objectClass=posixGroup)", ["cn"]
-    )
-    groups = []
-    if rc == 0:
-        for line in stdout.split('\n'):
-            if line.startswith('cn:'):
-                val = line.split(':', 1)[1].strip()
-                if val:
-                    groups.append(val)
-    return groups if groups else ['users']
+    """Get all LDAP groups by calling symbios-ldap-list.sh via symbios-exec.sh."""
+    from .utils.ssh_exec import run_command
+    ok, stdout, stderr = run_command("symbios-ldap-list.sh --groups", timeout=30)
+    if ok and stdout.strip():
+        try:
+            import json
+            groups = json.loads(stdout.strip())
+            return groups if groups else ['users']
+        except Exception:
+            pass
+    return ['users']
 
 
 def _get_ldap_users():
-    ldap = _get_ldap_vars()
-    stdout, rc = _ldap_search(
-        ldap['base_dn'], ldap['admin_pw'],
-        f"ou=users,{ldap['base_dn']}", "(objectClass=posixAccount)", ["uid", "cn", "mail"]
-    )
-    users = []
-    if rc == 0:
-        current_user = {}
-        for line in stdout.split('\n'):
-            if line.startswith('uid:'):
-                if current_user and current_user.get('uid'):
-                    users.append(current_user)
-                current_user = {'uid': line.split(':', 1)[1].strip(), 'cn': '', 'email': '', 'groups': []}
-            elif line.startswith('cn:') and current_user:
-                current_user['cn'] = line.split(':', 1)[1].strip()
-            elif line.startswith('mail:') and current_user:
-                current_user['email'] = line.split(':', 1)[1].strip()
-        if current_user and current_user.get('uid'):
-            users.append(current_user)
-
-    all_groups = set(_get_ldap_groups())
-
-    for user in users:
-        stdout2, rc2 = _ldap_search(
-            ldap['base_dn'], ldap['admin_pw'],
-            f"ou=groups,{ldap['base_dn']}",
-            f"(&(objectClass=posixGroup)(memberUid={user['uid']}))", ["cn"]
-        )
-        if rc2 == 0:
-            for line in stdout2.split('\n'):
-                if line.startswith('cn:'):
-                    val = line.split(':', 1)[1].strip()
-                    if val:
-                        user['groups'].append(val)
-        user['available_groups'] = sorted(all_groups - set(user['groups']))
-    return users
+    """Get all LDAP users with groups by calling symbios-ldap-list.sh via symbios-exec.sh."""
+    from .utils.ssh_exec import run_command
+    ok, stdout, stderr = run_command("symbios-ldap-list.sh --users", timeout=30)
+    if ok and stdout.strip():
+        try:
+            import json
+            return json.loads(stdout.strip())
+        except Exception:
+            pass
+    return []
 
 
 @login_required
 def settings(request):
     return render(request, 'main/settings.html')
-
-
-def _add_user_to_group(uid, group):
-    ldap = _get_ldap_vars()
-    ldif = f"""dn: cn={group},ou=groups,{ldap['base_dn']}
-changetype: modify
-add: memberUid
-memberUid: {uid}
-"""
-    _ldap_modify(ldif, ldap['base_dn'], ldap['admin_pw'])
 
 
 def health(request):

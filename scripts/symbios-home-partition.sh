@@ -16,8 +16,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# symbios-home-partition.sh — Manage /home partition (create, encrypt, mount)
-# All operations output JSON.
+# symbios-home-partition.sh — Manage /home partition (create, encrypt, mount, rollback)
+#
+# Actions:
+#   list                          List block devices (JSON)
+#   status                        Show /home mount + LUKS status (JSON)
+#   setup <device> [encrypt=yes] [password=pw]   Migrate /home to new disk
+#   rollback                      Undo last migration, restore original /home
+#   umount                        Unmount /home and close LUKS
+#
+# State file for rollback: /home/.symbios-home-migration.state
 
 set -euo pipefail
 
@@ -40,6 +48,60 @@ function f_json_ok {
   printf '{"ok":true,%s}\n' "$f_data"
 }
 
+function f_log {
+  # Output a line of text progress (shown in exec modal)
+  echo "[$(date '+%H:%M:%S')] $*"
+}
+
+function f_log_ok {
+  f_log "OK: $*"
+}
+
+function f_log_error {
+  f_log "ERROR: $*"
+}
+
+function f_log_step {
+  f_log "--- STEP: $* ---"
+}
+
+# State file for rollback
+f_state_file="/home/.symbios-home-migration.state"
+
+function f_save_state {
+  # Save migration state so we can rollback later
+  local f_old_device="$1"
+  local f_old_fstype="$2"
+  local f_new_device="$3"
+  local f_encrypt="$4"
+  local f_luks_name="$5"
+  local f_old_fstab_line="$6"
+  cat > "${f_state_file}" <<EOF
+old_device=${f_old_device}
+old_fstype=${f_old_fstype}
+new_device=${f_new_device}
+encrypt=${f_encrypt}
+luks_name=${f_luks_name}
+old_fstab_line=${f_old_fstab_line}
+timestamp=$(date -Iseconds)
+EOF
+  chmod 644 "${f_state_file}"
+}
+
+function f_load_state {
+  # Load state file into variables. Returns 1 if no state file.
+  if [[ ! -f "${f_state_file}" ]]
+  then
+    return 1
+  fi
+  source "${f_state_file}"
+  return 0
+}
+
+function f_clear_state {
+  rm -f "${f_state_file}" 2>/dev/null || true
+}
+
 # ---------------------------------------------------------------------------
 # action: list
 # ---------------------------------------------------------------------------
@@ -58,6 +120,13 @@ function f_action_list {
 function f_action_status {
   local f_home_device="" f_home_fstype="" f_home_size="" f_home_used="" f_home_avail=""
   local f_luks_name="" f_luks_device="" f_luks_open="false" f_needs_unlock="false"
+  local f_can_rollback="false"
+
+  # Check if rollback is possible
+  if [[ -f "${f_state_file}" ]]
+  then
+    f_can_rollback="true"
+  fi
 
   # What is /home mounted on?
   local f_df_out
@@ -147,7 +216,8 @@ if result:
 "luks_name":"$f_luks_name",
 "luks_device":"$f_luks_device",
 "luks_open":$f_luks_open,
-"needs_unlock":$f_needs_unlock
+"needs_unlock":$f_needs_unlock,
+"can_rollback":$f_can_rollback
 EOF
 }
 
@@ -217,67 +287,201 @@ function f_action_setup {
     f_json_error "Disk too small! /home is ${f_home_gb}G but disk is only ${f_disk_gb}G. Need at least ${f_needed_gb}G."
   fi
 
-  # Execute setup
+  # ---- Save state for rollback ----
+  f_log_step "Saving state for rollback"
+
+  # Capture current fstab /home line
+  local f_old_fstab_line
+  f_old_fstab_line=$(grep -E '[[:space:]]/home[[:space:]]' /etc/fstab 2>/dev/null || echo "")
+
+  # Get current /home device info for rollback
+  local f_old_home_device=""
+  local f_old_home_fstype=""
+  if [[ -n "$f_root_dev" ]]
+  then
+    # /home is on root filesystem
+    f_old_home_device="$f_root_dev"
+    f_old_home_fstype="rootfs"
+  else
+    # /home is on a separate device
+    f_old_home_device=$(findmnt -n -o SOURCE /home 2>/dev/null || echo "")
+    f_old_home_fstype=$(findmnt -n -o FSTYPE /home 2>/dev/null || echo "")
+  fi
+
+  # Save state
+  f_save_state "$f_old_home_device" "$f_old_home_fstype" "$f_device" "$f_encrypt" "home-luks" "$f_old_fstab_line"
+  f_log_ok "State saved (can rollback later)"
+
+  # ---- Step 1: Unmount if mounted anywhere ----
+  f_log_step "Preparing device"
+  umount "$f_device" 2>/dev/null || true
+
+  # ---- Step 2: LUKS format (if encrypting) ----
   local f_luks_name="home-luks"
   local f_target
 
-  # Unmount if mounted anywhere
-  umount "$f_device" 2>/dev/null || true
-
   if [[ "$f_encrypt" == "yes" ]]
   then
-    echo "$f_password" | cryptsetup luksFormat --batch-mode "$f_device" || \
+    f_log_step "Formatting device with LUKS encryption"
+    echo "$f_password" | cryptsetup luksFormat --batch-mode "$f_device" || {
+      f_log_error "LUKS format failed"
       f_json_error "LUKS format failed"
-    echo "$f_password" | cryptsetup open "$f_device" "$f_luks_name" || \
+    }
+    f_log_ok "LUKS format complete"
+
+    f_log_step "Opening LUKS volume"
+    echo "$f_password" | cryptsetup open "$f_device" "$f_luks_name" || {
+      f_log_error "LUKS open failed"
       f_json_error "LUKS open failed"
+    }
+    f_log_ok "LUKS volume opened as $f_luks_name"
     f_target="/dev/mapper/$f_luks_name"
   else
     f_target="$f_device"
   fi
 
-  # Format as ext4
-  mkfs.ext4 -F "$f_target" 2>&1 || f_json_error "mkfs.ext4 failed"
+  # ---- Step 3: Format as ext4 ----
+  f_log_step "Formatting $f_device as ext4"
+  mkfs.ext4 -F "$f_target" 2>&1 || {
+    f_log_error "mkfs.ext4 failed"
+    f_json_error "mkfs.ext4 failed"
+  }
+  f_log_ok "ext4 filesystem created"
 
-  # Mount temporarily and copy data
+  # ---- Step 4: Mount temporarily and copy data ----
+  f_log_step "Mounting temporary partition"
   mkdir -p /home.new
-  mount "$f_target" /home.new || f_json_error "Mount /home.new failed"
+  mount "$f_target" /home.new || {
+    f_log_error "Mount /home.new failed"
+    f_json_error "Mount /home.new failed"
+  }
+  f_log_ok "Temporary mount at /home.new"
 
-  rsync -av --exclude=docker/var-lib-docker --exclude=docker/var-lib-containerd \
+  f_log_step "Copying data from /home to new partition (rsync)"
+  f_log "This may take a while for large /home directories..."
+  rsync -av --progress --exclude=docker/var-lib-docker --exclude=docker/var-lib-containerd \
     --exclude='.trashed-*' /home/ /home.new/ 2>&1 || {
     umount /home.new 2>/dev/null || true
+    f_log_error "rsync failed"
     f_json_error "rsync failed"
   }
+  f_log_ok "Data copy complete"
 
-  # Get UUID for fstab
-  local f_uuid
-  f_uuid=$(blkid -s UUID -o value "$f_device" 2>/dev/null) || \
-    f_json_error "blkid failed"
-
-  # Unmount old /home
+  # ---- Step 5: Unmount old /home ----
+  f_log_step "Unmounting old /home"
   umount /home 2>/dev/null || true
+  f_log_ok "Old /home unmounted"
 
-  # Remove old /home contents if it was on root fs
+  # ---- Step 6: Clean old /home (if it was on root fs) ----
+  f_log_step "Cleaning old /home mount point"
   rm -rf /home/* 2>/dev/null || true
+  f_log_ok "Old /home cleaned"
 
-  # Update fstab: remove existing /home entry, add new one
+  # ---- Step 7: Update fstab ----
+  f_log_step "Updating /etc/fstab"
   sed -i '\#.*[[:space:]]/home[[:space:]]#d' /etc/fstab
   if [[ "$f_encrypt" == "yes" ]]
   then
     echo "/dev/mapper/$f_luks_name /home ext4 defaults,noatime 0 2" >> /etc/fstab
   else
+    local f_uuid
+    f_uuid=$(blkid -s UUID -o value "$f_device" 2>/dev/null) || {
+      f_log_error "blkid failed"
+      f_json_error "blkid failed"
+    }
     echo "UUID=$f_uuid /home ext4 defaults,noatime 0 2" >> /etc/fstab
   fi
+  f_log_ok "fstab updated"
 
-  # Mount new /home
-  mount /home || f_json_error "Mount /home failed"
+  # ---- Step 8: Mount new /home ----
+  f_log_step "Mounting new /home"
+  mount /home || {
+    f_log_error "Mount /home failed"
+    f_json_error "Mount /home failed"
+  }
+  f_log_ok "/home is now on new partition"
 
-  # Store LUKS name for boot unlock
+  # ---- Step 9: Store LUKS name for boot unlock ----
   if [[ "$f_encrypt" == "yes" ]]
   then
     echo "$f_luks_name" > /config/.luks-name 2>/dev/null || true
   fi
 
-  f_json_ok '"message":"Disk setup complete. /home is now on the new partition."'
+  f_log_step "Migration complete!"
+  f_log_ok "/home is now on $f_device"
+  f_json_ok '"message":"Disk setup complete. /home is now on the new partition.","can_rollback":true'
+}
+
+# ---------------------------------------------------------------------------
+# action: rollback
+# ---------------------------------------------------------------------------
+
+function f_action_rollback {
+  # Load saved state
+  local f_old_device="" f_old_fstype="" f_new_device="" f_encrypt="" f_luks_name="" f_old_fstab_line=""
+
+  if ! f_load_state
+  then
+    f_json_error "No migration state found. Nothing to rollback."
+  fi
+
+  f_log_step "Rolling back /home migration"
+  f_log "Original device: ${f_old_device} (${f_old_fstype})"
+  f_log "New device: ${f_new_device}"
+
+  # ---- Step 1: Unmount current /home ----
+  f_log_step "Unmounting current /home"
+  umount /home 2>/dev/null || true
+  f_log_ok "Current /home unmounted"
+
+  # ---- Step 2: Close LUKS if the new device was encrypted ----
+  if [[ "${f_encrypt}" == "yes" ]] && [[ -n "${f_luks_name}" ]]
+  then
+    f_log_step "Closing LUKS volume ${f_luks_name}"
+    cryptsetup close "${f_luks_name}" 2>/dev/null || true
+    f_log_ok "LUKS volume closed"
+  fi
+
+  # ---- Step 3: Restore fstab ----
+  f_log_step "Restoring /etc/fstab"
+  sed -i '\#.*[[:space:]]/home[[:space:]]#d' /etc/fstab
+  if [[ -n "${f_old_fstab_line}" ]]
+  then
+    echo "${f_old_fstab_line}" >> /etc/fstab
+    f_log_ok "fstab restored from backup"
+  else
+    # No previous /home entry — /home was on root fs, nothing to add
+    f_log_ok "No previous /home fstab entry (was on root filesystem)"
+  fi
+
+  # ---- Step 4: Mount original /home ----
+  f_log_step "Mounting original /home"
+  if [[ "${f_old_fstype}" == "rootfs" ]]
+  then
+    # /home was on root fs, just remount root if needed
+    f_log_ok "/home returns to root filesystem"
+  else
+    mount /home 2>/dev/null || {
+      f_log_error "Failed to mount original /home! Check /etc/fstab manually."
+      f_json_error "Rollback failed: could not mount original /home. Check /etc/fstab."
+    }
+    f_log_ok "Original /home mounted"
+  fi
+
+  # ---- Step 5: Clean up /home.new if it exists ----
+  f_log_step "Cleaning up temporary files"
+  rm -rf /home.new 2>/dev/null || true
+  f_log_ok "Cleanup complete"
+
+  # ---- Step 6: Remove LUKS config ----
+  rm -f /config/.luks-name 2>/dev/null || true
+
+  # ---- Step 7: Clear state ----
+  f_clear_state
+
+  f_log_step "Rollback complete!"
+  f_log_ok "/home has been restored to its original location"
+  f_json_ok '"message":"Rollback complete. /home restored to original location.","can_rollback":false'
 }
 
 # ---------------------------------------------------------------------------
@@ -309,10 +513,13 @@ case "$g_action" in
   setup)
     f_action_setup "$@"
     ;;
+  rollback)
+    f_action_rollback
+    ;;
   umount)
     f_action_umount
     ;;
   *)
-    f_json_error "Usage: $0 {list|status|setup <device> [encrypt=yes] [password=pass]|umount}"
+    f_json_error "Usage: $0 {list|status|setup|rollback|umount}"
     ;;
 esac

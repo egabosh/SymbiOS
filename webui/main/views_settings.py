@@ -901,7 +901,8 @@ def settings_disk_status(request):
 
 @login_required
 def settings_disk_setup(request):
-    """AJAX POST — format, optionally encrypt, and mount a disk as /home."""
+    """AJAX POST — format, optionally encrypt, and mount a disk as /home.
+    Returns a job_id for the exec modal (streams live output)."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
@@ -921,7 +922,15 @@ def settings_disk_setup(request):
         cmd_parts.append(f'password={password}')
     cmd = ' '.join(cmd_parts)
 
-    # Long timeout for rsync of large /home directories
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=600)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': 'Migrating /home to new disk...',
+                             'message': f'Setting up {device} as /home.'})
+
+    # Fallback: synchronous execution
     ok, stdout, stderr = run_command(cmd, timeout=600)
     output = stdout
     if stderr:
@@ -936,7 +945,45 @@ def settings_disk_setup(request):
         return JsonResponse({'ok': False, 'error': f'Setup failed:\n{output[-2000:]}'})
 
 
+@login_required
+def settings_disk_rollback(request):
+    """AJAX POST — rollback last /home migration via exec modal."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
 
+    cmd = f'{_HOME_PART_SCRIPT} rollback'
+
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=300)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': 'Rolling back /home migration...',
+                             'message': 'Restoring original /home location.'})
+
+    ok, stdout, stderr = run_command(cmd, timeout=300)
+    output = stdout
+    if stderr:
+        output = output + '\n' + stderr
+    try:
+        data = json.loads(output)
+        return JsonResponse(data)
+    except json.JSONDecodeError:
+        if ok:
+            return JsonResponse({'ok': True, 'message': 'Rollback complete.'})
+        return JsonResponse({'ok': False, 'error': f'Rollback failed:\n{output[-2000:]}'})
+
+
+@login_required
+def settings_disk_rollback_status(request):
+    """AJAX GET — check if rollback is possible."""
+    ok, stdout, stderr = run_command(
+        f'{_HOME_PART_SCRIPT} status', timeout=15)
+    try:
+        data = json.loads(stdout)
+        return JsonResponse({'ok': True, 'can_rollback': data.get('can_rollback', False)})
+    except Exception:
+        return JsonResponse({'ok': True, 'can_rollback': False})
 @login_required
 def settings_disk_umount(request):
     """AJAX POST — unmount and close a LUKS /home volume."""
