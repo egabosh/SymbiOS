@@ -269,20 +269,6 @@ def _run_service_job(job, cmd, playbook=None, action=None):
 
 
 @login_required
-def services_output(request, playbook):
-    """Return the accumulated output of a running/finished action job."""
-    job_id = request.GET.get('job')
-    if not job_id or job_id not in _JOBS:
-        return JsonResponse({'error': 'Unknown job'}, status=404)
-    job = _JOBS[job_id]
-    with job['lock']:
-        out = job['output']
-        done = job['done']
-        success = job['success']
-    return JsonResponse({'output': out, 'done': done, 'success': success})
-
-
-@login_required
 def services_log_tail(request, playbook):
     """Return only the bytes appended to a live log job since ``offset``.
 

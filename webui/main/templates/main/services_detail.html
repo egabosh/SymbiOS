@@ -68,7 +68,7 @@
     {% endif %}
 
     <h4>Output</h4>
-    <pre id="action-output" class="bg-dark text-light p-2 small" style="max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word;"></pre>
+    <p class="text-muted small">Actions run in a live output overlay (click any action button above).</p>
   </div>
   <div class="tab-pane fade" id="pane-logs" role="tabpanel">
     <h4>Logs</h4>
@@ -133,57 +133,30 @@ function loadStatus() {
     });
 }
 loadStatus();
-function setActionRunning(btn) {
-  document.querySelectorAll('[data-action]').forEach(b => { b.disabled = true; });
-  if (!btn.querySelector('.js-spinner')) {
-    const sp = document.createElement('span');
-    sp.className = 'spinner-border spinner-border-sm me-1 js-spinner';
-    sp.setAttribute('role', 'status');
-    sp.setAttribute('aria-hidden', 'true');
-    btn.prepend(sp);
-  }
-}
-function clearActionRunning() {
-  document.querySelectorAll('[data-action]').forEach(b => {
-    b.disabled = false;
-    const sp = b.querySelector('.js-spinner');
-    if (sp) sp.remove();
-  });
-}
 
 document.querySelectorAll('[data-action]').forEach(btn => {
   btn.addEventListener('click', () => {
+    if (SymbiOS.exec.isRunning()) return;
     const action = btn.dataset.action;
-    const out = document.getElementById('action-output');
-    const cmdHeader = '$ ' + action + '\n\n';
-    out.innerHTML = ansiToHtml(cmdHeader + 'starting…');
-    setActionRunning(btn);
     const fd = new FormData();
     fd.append('action', action);
     fetch('/services/' + PLAYBOOK + '/action/', {method: 'POST', body: fd})
       .then(r => r.json())
       .then(d => {
-        if (d.error) { out.innerHTML = ansiToHtml('ERROR: ' + d.error); clearActionRunning(); return; }
-        if (!d.job) { out.innerHTML = ansiToHtml('no job returned'); clearActionRunning(); return; }
-        const header = '$ ' + (d.command || action) + '\n\n';
-        const poll = () => {
-          fetch('/services/' + PLAYBOOK + '/output/?job=' + d.job)
-            .then(r => r.json())
-            .then(o => {
-              appendLogDelta(out, header + (o.output || ''));
-              if (o.done) {
-                out.innerHTML += ansiToHtml('\n[done] ' + (o.success ? 'OK' : 'FAILED') + '\n');
-                clearActionRunning();
-                loadStatus();
-                return;
-              }
-              setTimeout(poll, 1000);
-            })
-            .catch(e => { out.innerHTML += ansiToHtml('\n[error] ' + e + '\n'); clearActionRunning(); });
-         };
-         poll();
-       })
-       .catch(e => { out.innerHTML = ansiToHtml('error: ' + e); clearActionRunning(); });
+        if (d.error) { SymbiOS.exec.showAlert(d.error, 'danger'); return; }
+        if (!d.job) { SymbiOS.exec.showAlert('No job returned', 'danger'); return; }
+        const title = action === '__playbook__' ? 'Installing ' + PLAYBOOK : action.charAt(0).toUpperCase() + action.slice(1) + ' — ' + PLAYBOOK;
+        SymbiOS.exec.start(d.job, title);
+        /* Reload status after modal closes */
+        const origFinish = SymbiOS.exec.start;
+        const checkDone = setInterval(() => {
+          if (!SymbiOS.exec.isRunning()) {
+            clearInterval(checkDone);
+            loadStatus();
+          }
+        }, 1000);
+      })
+      .catch(e => { SymbiOS.exec.showAlert('Request failed: ' + e, 'danger'); });
   });
 });
 
@@ -193,113 +166,6 @@ const unitJobs = {};   // name -> job id
 const unitPre = {};    // name -> <pre> element
 const unitOffsets = {}; // name -> absolute char offset consumed so far
 let logPollTimer = null;
-
-// --- Keep a text selection alive across innerHTML rebuilds -----------------
-// Capture the current selection as plain character offsets into the element's
-// text content (so it survives a full DOM replace), and re-anchor it afterwards.
-// Needed because live output may rewrite tail lines in place (carriage-return
-// progress), so we cannot rely on purely appending a delta.
-function _charOffset(root, node, offset) {
-  if (node === root) return offset;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-  let total = 0, n;
-  while ((n = walker.nextNode())) {
-    if (n === node) return total + offset;
-    total += n.textContent.length;
-  }
-  return total;
-}
-function _locateOffset(root, target) {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
-  let total = 0, n, last = null;
-  while ((n = walker.nextNode())) {
-    const len = n.textContent.length;
-    if (total + len >= target) return { node: n, offset: target - total };
-    total += len;
-    last = n;
-  }
-  return last ? { node: last, offset: last.textContent.length } : { node: root, offset: 0 };
-}
-function getSelectionOffsets(root) {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
-  const range = sel.getRangeAt(0);
-  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
-  return {
-    start: _charOffset(root, range.startContainer, range.startOffset),
-    end: _charOffset(root, range.endContainer, range.endOffset)
-  };
-}
-function setSelectionOffsets(root, start, end) {
-  const len = root.textContent.length;
-  start = Math.max(0, Math.min(start, len));
-  end = Math.max(0, Math.min(end, len));
-  const s = _locateOffset(root, start);
-  const e = _locateOffset(root, end);
-  if (!s || !e) return;
-  const range = document.createRange();
-  range.setStart(s.node, s.offset);
-  range.setEnd(e.node, e.offset);
-  const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-}
-
-// Update a log/output pane like `tail -f`: the selection is anchored to the
-// text characters (re-anchored by offset across a full rebuild) and the pane
-// keeps following the tail, so marked text rides upward as new lines arrive.
-// If the content is unchanged we touch the DOM not at all. If it only grew we
-// append just the new tail via insertAdjacentHTML (selection preserved
-// natively); otherwise we replace innerHTML and re-anchor the selection.
-function updateLogPane(el, html) {
-  const prev = el.dataset.fullText || '';
-  if (html === prev) return;
-  const offsets = getSelectionOffsets(el);
-  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  const prevTop = el.scrollTop;
-  if (prev && html.startsWith(prev)) {
-    el.insertAdjacentHTML('beforeend', html.slice(prev.length));
-  } else {
-    el.innerHTML = html;
-  }
-  if (offsets) setSelectionOffsets(el, offsets.start, offsets.end);
-  // Follow the tail (stick to the end) so the marked text scrolls upward with
-  // incoming lines. Only when the user has scrolled up to read do we leave the
-  // view in place.
-  el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
-  el.dataset.fullText = html;
-}
-
-// Append only the new tail of the raw output as DOM, leaving every existing
-// line/node untouched. Because the browser keeps the original text nodes (and
-// any selection inside them) intact, a marked span rides upward with the text
-// exactly like `tail -f` -- no fragile offset re-anchoring needed. Falls back
-// to a full re-render (with selection re-anchor) if the server trimmed/reset
-// the buffer.
-function appendLogDelta(el, raw) {
-  raw = raw || '';
-  if (el.dataset.rawLen === undefined) {
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    const prevTop = el.scrollTop;
-    el.innerHTML = ansiToHtml(raw);
-    el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
-    el.dataset.rawLen = String(raw.length);
-    return;
-  }
-  const prevLen = parseInt(el.dataset.rawLen, 10);
-  if (raw.length < prevLen) {            // buffer trimmed/reset server-side
-    updateLogPane(el, ansiToHtml(raw));
-    el.dataset.rawLen = String(raw.length);
-    return;
-  }
-  const delta = raw.slice(prevLen);
-  if (!delta) return;
-  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  const prevTop = el.scrollTop;
-  el.insertAdjacentHTML('beforeend', ansiToHtml(delta));
-  el.scrollTop = nearBottom ? el.scrollHeight : prevTop;
-  el.dataset.rawLen = String(raw.length);
-}
 
 // Render one pane per declared log unit (separate output, not a single blob).
 LOG_UNITS.forEach(u => {
