@@ -40,23 +40,41 @@ g_only_playbooks=""
 g_force=false
 
 # Parse arguments
+g_collect_playbooks=false
 while [[ $# -gt 0 ]]
 do
-  case "$1" in
-    --force)
-      g_force=true
+  if [[ "$g_collect_playbooks" == true ]]
+  then
+    # Rest of args are playbook names (stop on flags)
+    if [[ "$1" == --* ]]
+    then
+      # Handle flags mixed in after --only
+      case "$1" in
+        --force) g_force=true ;;
+      esac
       shift
-      ;;
-    --only)
-      shift
-      g_only_playbooks="$*"
-      break
-      ;;
-    *)
-      shift
-      ;;
-  esac
+      continue
+    fi
+    g_only_playbooks=$(printf '%s\n' "$g_only_playbooks" "$1")
+    shift
+  else
+    case "$1" in
+      --force)
+        g_force=true
+        shift
+        ;;
+      --only)
+        g_collect_playbooks=true
+        shift
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  fi
 done
+# Trim leading blank line from multi-line collection
+g_only_playbooks=$(echo "$g_only_playbooks" | sed '/^$/d' | sed '/^[[:space:]]*$/d')
 
 function f_cleanup {
   rm -f "$g_pid_file"
@@ -171,17 +189,27 @@ do
   f_log "RUN [$g_count/$g_total] $g_playbook"
   echo "running:${g_count}/${g_total} ${g_playbook}" > "$g_status_file"
 
+  g_tmp_log=$(mktemp)
   if ansible-playbook --connection=local \
     --inventory "$g_inventory" \
     --limit localhost \
     -e "ansible_python_interpreter=/usr/bin/python3" \
-    "$g_path" >> "$g_log_file" 2>&1
+    "$g_path" 2>&1 | tee "$g_tmp_log"
+  then
+    g_ansible_rc=0
+  else
+    g_ansible_rc=${PIPESTATUS[0]}
+  fi
+  cat "$g_tmp_log" >> "$g_log_file"
+  rm -f "$g_tmp_log"
+
+  if [[ "$g_ansible_rc" -eq 0 ]]
   then
     f_log "OK  [$g_count/$g_total] $g_playbook"
     g_echo_note "OK  [$g_count/$g_total] $g_playbook"
   else
-    f_log "ERR [$g_count/$g_total] $g_playbook (exit code: $?)"
-    g_echo_error "ERR [$g_count/$g_total] $g_playbook (exit code: $?)"
+    f_log "ERR [$g_count/$g_total] $g_playbook (exit code: $g_ansible_rc)"
+    g_echo_error "ERR [$g_count/$g_total] $g_playbook (exit code: $g_ansible_rc)"
     g_exit_code=1
   fi
 done
