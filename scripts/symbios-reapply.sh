@@ -182,7 +182,9 @@ do
 
   if [[ -z "$g_path" ]]
   then
-    f_log "WARN [$g_count/$g_total] Playbook not found: $g_playbook (skipping)"
+    f_log "ERR [$g_count/$g_total] Playbook not found: $g_playbook"
+    g_echo_error "Playbook not found: $g_playbook"
+    g_exit_code=1
     continue
   fi
 
@@ -216,3 +218,4 @@ done
 
 f_log "=== REAPPLY COMPLETE ==="
 g_echo_note "Reapply complete."
+exit "$g_exit_code"
