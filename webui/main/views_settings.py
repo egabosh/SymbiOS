@@ -35,21 +35,22 @@ REAPPLY_STATUS_FILE = '/tmp/symbios-reapply.status'
 
 
 def _start_reapply(playbooks=None):
-    """Start symbios-reapply.sh in the background (non-blocking).
+    """Start symbios-reapply.sh as a tracked job and return the job id.
 
-    Uses setsid to fully detach the process from the SSH session so it
-    survives after the channel closes.
+    The job streams live output to the browser via /exec/output/.
+    Returns a (job_id, title) tuple.
     """
+    from .utils.jobs import create_job
     if playbooks:
         args = ' '.join(playbooks)
         flag = f'--only {args}'
+        title = 'Reapplying: ' + ', '.join(playbooks)
     else:
         flag = ''
-    cmd = f'setsid /usr/local/sbin/symbios-reapply.sh {flag} </dev/null >/dev/null 2>&1'
-    try:
-        run_command(cmd, timeout=5)
-    except Exception:
-        pass  # non-critical
+        title = 'Reapplying all playbooks...'
+    cmd = f'symbios-reapply.sh {flag}'
+    job_id = create_job(cmd, timeout=3600)
+    return job_id, title
 
 
 def _reapply_status():
@@ -78,6 +79,7 @@ def settings_ddns(request):
         current_dns_mode = 'desec' if vars_.get('ddns_host') else ''
 
     if request.method == 'POST':
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         action = request.POST.get('action', 'save')
         dns_mode = request.POST.get('dns_mode', 'desec')
         try:
@@ -91,22 +93,21 @@ def settings_ddns(request):
                 config['all']['vars']['default_domain'] = 'local'
                 config['all']['vars']['base_domain'] = 'symbios.local'
                 _save_inventory_config(config)
+                if is_ajax:
+                    from .utils.jobs import create_job
+                    cmd = 'symbios-reapply.sh'
+                    job_id = create_job(cmd, timeout=3600)
+                    return JsonResponse({'ok': True, 'job': job_id,
+                                         'title': 'Removing DNS config and reapplying...',
+                                         'message': 'DNS configuration removed.'})
                 messages.success(request, 'DNS configuration removed.')
-                if dns_mode == 'desec':
-                    try:
-                        ok, out = run_playbook('base-services/dedyn.yml', timeout=120)
-                        if ok:
-                            messages.success(request, 'DDNS playbook completed successfully.')
-                        else:
-                            messages.warning(request, 'DDNS playbook completed with issues.')
-                    except Exception as e:
-                        messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
-                # Reapply all playbooks with updated domain in the background
                 messages.info(request, 'Reapplying all playbooks in the background...')
                 _start_reapply()
             elif dns_mode == 'self-managed':
                 self_domain = request.POST.get('self_domain', '').strip().lower().rstrip('.')
                 if not self_domain:
+                    if is_ajax:
+                        return JsonResponse({'ok': False, 'error': 'Please enter a domain.'}, status=400)
                     messages.error(request, 'Please enter a domain.')
                     return redirect('settings_ddns')
                 config['all']['vars']['dns_mode'] = 'self-managed'
@@ -116,8 +117,11 @@ def settings_ddns(request):
                 config['all']['vars']['default_domain'] = self_domain
                 config['all']['vars']['base_domain'] = self_domain
                 _save_inventory_config(config)
+                if is_ajax:
+                    job_id, title = _start_reapply()
+                    return JsonResponse({'ok': True, 'job': job_id, 'title': title,
+                                         'message': f'DNS settings saved for {self_domain}.'})
                 messages.success(request, f'DNS settings saved for {self_domain}.')
-                # Reapply all playbooks with updated domain in the background
                 messages.info(request, 'Reapplying all playbooks in the background...')
                 _start_reapply()
             else:
@@ -137,6 +141,14 @@ def settings_ddns(request):
                 config['all']['vars']['default_domain'] = ddns_host
                 config['all']['vars']['base_domain'] = ddns_host
                 _save_inventory_config(config)
+                if is_ajax:
+                    from .utils.jobs import create_job
+                    # Chain: run dedyn playbook, then full reapply
+                    cmd = 'ansible-playbook --connection=local --limit localhost --inventory /home/docker/symbios-ui/config/inventory.yml -e ansible_python_interpreter=/usr/bin/python3 /home/SymbiOS/base-services/dedyn.yml && symbios-reapply.sh'
+                    job_id = create_job(cmd, timeout=3600)
+                    return JsonResponse({'ok': True, 'job': job_id,
+                                         'title': 'Configuring DNS and reapplying...',
+                                         'message': 'DNS settings saved.'})
                 messages.success(request, 'DNS settings saved.')
                 try:
                     ok, out = run_playbook('base-services/dedyn.yml', timeout=120)
@@ -150,6 +162,8 @@ def settings_ddns(request):
                 messages.info(request, 'Reapplying all playbooks in the background...')
                 _start_reapply()
         except Exception as e:
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
             messages.error(request, f'Error: {e}')
         return redirect('settings_ddns')
 
@@ -429,15 +443,23 @@ def settings_localization(request):
         pass
 
     if request.method == 'POST':
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         try:
             vars_['timezone'] = request.POST.get('timezone', '').strip()
             vars_['keyboard'] = request.POST.get('keyboard', '').strip()
             vars_['locale'] = request.POST.get('locale', '').strip()
             _save_inventory_config(config)
+            if is_ajax:
+                job_id, title = _start_reapply(
+                    playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'])
+                return JsonResponse({'ok': True, 'job': job_id, 'title': title,
+                                     'message': 'Localization settings saved.'})
             messages.success(request, 'Localization settings saved.')
             messages.info(request, 'Reapplying localization playbooks in the background...')
             _start_reapply(playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'])
         except Exception as e:
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
             messages.error(request, f'Error: {e}')
         return redirect('settings_localization')
 
@@ -454,16 +476,27 @@ def settings_auth(request):
     vars_ = config.get('all', {}).get('vars', {})
 
     if request.method == 'POST':
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         try:
             twofa_wanted = request.POST.get('twofa_enabled', 'false') == 'true'
             if twofa_wanted:
                 smtp_server = vars_.get('smtp_server', '')
                 smtp_from = vars_.get('smtp_from', '')
                 if not smtp_server or not smtp_from:
+                    if is_ajax:
+                        return JsonResponse({'ok': False,
+                                             'error': 'Cannot enable 2FA: No SMTP server configured.'}, status=400)
                     messages.error(request, 'Cannot enable 2FA: No SMTP server configured. Configure a mailserver first under Settings \u2192 Mailserver (SMTP).')
                     return redirect('settings_auth')
             config['all']['vars']['twofa_enabled'] = twofa_wanted
             _save_inventory_config(config)
+            if is_ajax:
+                from .utils.jobs import create_job
+                cmd = 'ansible-playbook --connection=local --limit localhost --inventory /home/docker/symbios-ui/config/inventory.yml -e ansible_python_interpreter=/usr/bin/python3 /home/SymbiOS/base-services/authelia.yml'
+                job_id = create_job(cmd, timeout=3600)
+                return JsonResponse({'ok': True, 'job': job_id,
+                                     'title': 'Applying auth settings...',
+                                     'message': 'Auth settings saved.'})
             messages.success(request, 'Auth settings saved.')
             try:
                 ok, out = run_playbook('base-services/authelia.yml', timeout=180)
@@ -474,6 +507,8 @@ def settings_auth(request):
             except Exception as e:
                 messages.warning(request, 'Could not run Authelia playbook: ' + str(e))
         except Exception as e:
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
             messages.error(request, f'Error: {e}')
         return redirect('settings_auth')
 
@@ -626,14 +661,21 @@ def settings_config(request):
         raw_yaml = f'# Error reading config: {e}\n'
 
     if request.method == 'POST':
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         content = request.POST.get('config_content', '')
         # Validate YAML before saving
         try:
             parsed = yaml.safe_load(content)
             if not isinstance(parsed, dict):
+                if is_ajax:
+                    return JsonResponse({'ok': False,
+                                         'error': 'Config must be a YAML mapping (dictionary).'}, status=400)
                 messages.error(request, 'Config must be a YAML mapping (dictionary).')
                 return redirect('settings_config')
         except yaml.YAMLError as e:
+            if is_ajax:
+                return JsonResponse({'ok': False,
+                                     'error': f'YAML syntax error: {e}'}, status=400)
             messages.error(request, f'YAML syntax error: {e}')
             return redirect('settings_config')
         try:
@@ -644,10 +686,17 @@ def settings_config(request):
                     with open(bak, 'w') as b:
                         b.write(f.read())
             _safe_write(CONFIG_PATH, content)
+            if is_ajax:
+                job_id, title = _start_reapply()
+                return JsonResponse({'ok': True, 'job': job_id, 'title': title,
+                                     'message': 'Config saved.'})
             messages.success(request, 'Config saved.')
             messages.info(request, 'Reapplying all playbooks in the background...')
             _start_reapply()
         except Exception as e:
+            if is_ajax:
+                return JsonResponse({'ok': False,
+                                     'error': f'Error saving config: {e}'}, status=500)
             messages.error(request, f'Error saving config: {e}')
         return redirect('settings_config')
 
@@ -666,16 +715,23 @@ def settings_backup(request):
     vars_ = config['all']['vars']
 
     if request.method == 'POST':
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         try:
             vars_['backup_server_host'] = request.POST.get('backup_server_host', '').strip()
             vars_['backup_server_port'] = request.POST.get('backup_server_port', '').strip() or '22'
             vars_['backup_server_user'] = request.POST.get('backup_server_user', '').strip() or 'root'
             vars_['backup_server_path'] = request.POST.get('backup_server_path', '').strip()
             _save_inventory_config(config)
+            if is_ajax:
+                job_id, title = _start_reapply(playbooks=['base-services/backup.yml'])
+                return JsonResponse({'ok': True, 'job': job_id, 'title': title,
+                                     'message': 'Backup settings saved.'})
             messages.success(request, 'Backup settings saved.')
             messages.info(request, 'Reapplying backup playbook in the background...')
             _start_reapply(playbooks=['base-services/backup.yml'])
         except Exception as e:
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
             messages.error(request, f'Error: {e}')
         return redirect('settings_backup')
 

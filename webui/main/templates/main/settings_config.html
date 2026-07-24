@@ -21,7 +21,7 @@
         </button>
       </div>
       <div class="card-body p-0">
-        <form method="post" id="config-form">
+        <form method="post" id="config-form" data-exec="true">
           {% csrf_token %}
           <textarea class="form-control border-0 rounded-0 font-monospace"
                     name="config_content"

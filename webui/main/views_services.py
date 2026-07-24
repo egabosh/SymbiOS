@@ -20,11 +20,6 @@ import threading
 import uuid
 import os
 
-# In-memory registry of running action jobs. The WebUI runs a single gunicorn
-# worker, so this is shared across requests. Jobs capture live command output
-# for the browser to poll. (Not for multi-worker scaling.)
-_JOBS = {}
-_JOBS_LOCK = threading.Lock()
 from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from .playbook_catalog import get_catalog, get_playbook
@@ -36,6 +31,7 @@ from .utils.ssh_exec import (
     build_action_command,
     build_log_command,
 )
+from .utils.jobs import _JOBS, _JOBS_LOCK, create_job, get_job_output
 
 # Built-in base-services can be managed but never uninstalled from the WebUI.
 PROTECTED_GROUPS = {'base-services'}
@@ -247,32 +243,19 @@ def services_action(request, playbook):
             _JOBS.pop(old, None)
         _JOBS[job_id] = job
     threading.Thread(
-        target=_run_job, args=(job, cmd, playbook, action), daemon=True
+        target=_run_service_job, args=(job, cmd, playbook, action), daemon=True
     ).start()
     return JsonResponse({'job': job_id, 'action': action, 'command': display_cmd})
 
 
-def _run_job(job, cmd, playbook=None, action=None):
-    """Run the resolved host command, appending output as it arrives."""
-    overall_ok = True
-    try:
-        for kind, text in stream_command(cmd, timeout=900):
-            if kind == 'rc':
-                if text != 0:
-                    overall_ok = False
-                continue
-            with job['lock']:
-                job['output'] += text
-    except Exception as e:  # pragma: no cover - defensive
-        overall_ok = False
-        with job['lock']:
-            job['output'] += '\n[ERROR] ' + str(e) + '\n'
-    with job['lock']:
-        job['done'] = True
-        job['success'] = overall_ok
-
+def _run_service_job(job, cmd, playbook=None, action=None):
+    """Run a service action command, appending output as it arrives."""
+    from .utils.jobs import _run_job
+    _run_job(job, cmd)
     # Update the installed-playbooks state file after a successful (Re)Install
     # or Uninstall so symbios-reapply.sh knows which playbooks to re-run.
+    with job['lock']:
+        overall_ok = job['success']
     if playbook and action in ('__playbook__', 'uninstall') and overall_ok:
         state_action = 'set' if action == '__playbook__' else 'unset'
         state_cmd = (
