@@ -237,7 +237,7 @@
                 - DEFAULT_PROMPT_SUGGESTIONS=[]
                 - OPENAI_API_REQUEST_TIMEOUT=180
                 - ENABLE_CONTEXT_COMPACTION=true
-                - CONTEXT_COMPACTION_TOKEN_THRESHOLD=25000
+                - CONTEXT_COMPACTION_TOKEN_THRESHOLD=200000
                 # Image Generation (ComfyUI)
                 - ENABLE_IMAGE_GENERATION=true
                 - IMAGE_GENERATION_ENGINE=comfyui
