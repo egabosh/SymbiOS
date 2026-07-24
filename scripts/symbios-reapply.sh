@@ -16,15 +16,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# symbios-reapply.sh — Re-run all installed playbooks.
+# symbios-reapply.sh — Re-run installed playbooks.
 #
 # Reads the state file managed by symbios-state.sh and re-executes every
 # registered playbook. Designed to run in the background (nohup) so the
 # WebUI doesn't block.
 #
 # Usage:
-#   symbios-reapply.sh                  # full reapply
-#   symbios-reapply.sh --domain-only    # re-run domain-dependent playbooks only
+#   symbios-reapply.sh                         # full reapply
+#   symbios-reapply.sh --only <pb1> <pb2> ...  # re-run only specific playbooks (must be installed)
 
 source /etc/bash/gaboshlib.include
 
@@ -35,21 +35,13 @@ g_log_dir="/home/docker/symbios-ui/log"
 g_log_file="${g_log_dir}/reapply.log"
 g_status_file="/tmp/symbios-reapply.status"
 g_pid_file="/tmp/symbios-reapply.pid"
-g_domain_only=false
-
-# Domain-dependent playbooks (subset for quick domain changes)
-g_domain_playbooks="
-base-services/traefik.yml
-base-services/authelia.yml
-base-services/acme-pki.yml
-base-services/ldap.yml
-base-services/symbios-ui.yml
-"
+g_only_playbooks=""
 
 # Parse arguments
-if [[ "${1:-}" == "--domain-only" ]]
+if [[ "${1:-}" == "--only" ]]
 then
-  g_domain_only=true
+  shift
+  g_only_playbooks="$*"
 fi
 
 function f_cleanup {
@@ -91,16 +83,24 @@ fi
 # Initialise log
 g_exit_code=0
 echo "" >> "$g_log_file"
-f_log "=== REAPPLY START (domain_only=${g_domain_only}) ==="
+f_log "=== REAPPLY START (only=${g_only_playbooks:-all}) ==="
 echo "running" > "$g_status_file"
 
 # Build list of playbooks to re-run
 g_playbooks=""
 
-if [[ "$g_domain_only" == true ]]
+if [[ -n "$g_only_playbooks" ]]
 then
-  # Only domain-dependent playbooks
-  g_playbooks="$g_domain_playbooks"
+  # Only specific playbooks — check each is installed via symbios-state.sh
+  for g_pb in $g_only_playbooks
+  do
+    if symbios-state.sh is-installed "$g_pb" 2>/dev/null
+    then
+      g_playbooks=$(printf '%s\n' "$g_playbooks" "$g_pb")
+    else
+      f_log "SKIP [$g_pb] — not installed"
+    fi
+  done
 else
   # All playbooks registered in state file
   if [[ -s "$g_state_file" ]]
