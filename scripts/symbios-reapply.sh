@@ -99,6 +99,7 @@ then
       g_playbooks=$(printf '%s\n' "$g_playbooks" "$g_pb")
     else
       f_log "SKIP [$g_pb] — not installed"
+      g_echo_note "SKIP: $g_pb — not installed"
     fi
   done
 else
@@ -123,6 +124,7 @@ fi
 if [[ -z "$g_playbooks" ]]
 then
   f_log "No playbooks to re-run"
+  g_echo_note "Nothing to re-run."
   exit 0
 fi
 
@@ -130,6 +132,7 @@ fi
 g_count=0
 g_total=$(echo "$g_playbooks" | grep -c '[^ ]' || echo 0)
 f_log "Will re-run $g_total playbooks"
+g_echo_note "Re-running $g_total playbook(s)..."
 
 for g_playbook in $g_playbooks
 do
@@ -161,10 +164,13 @@ do
     "$g_path" >> "$g_log_file" 2>&1
   then
     f_log "OK  [$g_count/$g_total] $g_playbook"
+    g_echo_note "OK  [$g_count/$g_total] $g_playbook"
   else
     f_log "ERR [$g_count/$g_total] $g_playbook (exit code: $?)"
+    g_echo_error "ERR [$g_count/$g_total] $g_playbook (exit code: $?)"
     g_exit_code=1
   fi
 done
 
 f_log "=== REAPPLY COMPLETE ==="
+g_echo_note "Reapply complete."
