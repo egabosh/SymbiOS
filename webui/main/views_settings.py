@@ -645,6 +645,8 @@ def settings_config(request):
                         b.write(f.read())
             _safe_write(CONFIG_PATH, content)
             messages.success(request, 'Config saved.')
+            messages.info(request, 'Reapplying all playbooks in the background...')
+            _start_reapply()
         except Exception as e:
             messages.error(request, f'Error saving config: {e}')
         return redirect('settings_config')
@@ -671,6 +673,8 @@ def settings_backup(request):
             vars_['backup_server_path'] = request.POST.get('backup_server_path', '').strip()
             _save_inventory_config(config)
             messages.success(request, 'Backup settings saved.')
+            messages.info(request, 'Reapplying backup playbook in the background...')
+            _start_reapply(playbooks=['base-services/backup.yml'])
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_backup')
