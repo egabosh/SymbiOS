@@ -298,8 +298,9 @@ base-services/authelia.yml: "2025-07-21T12:30:05Z"
 
 ### When reapply runs
 
-- After any DNS settings save (domain change), all playbooks are re-run.
-- The WebUI can trigger a reapply via `symbios-reapply.sh [--domain-only]`.
+- After any settings save, only the relevant playbooks are re-run (e.g. localization
+  only re-runs `localization.yml` and `raspberry.yml`).
+- The WebUI can trigger a reapply via `symbios-reapply.sh [--only <playbook> ...]`.
 - Progress is written to `/tmp/symbios-reapply.status` and polled by the WebUI.
 
 ### Manual equivalents
@@ -308,7 +309,7 @@ base-services/authelia.yml: "2025-07-21T12:30:05Z"
 symbios-state.sh list                        # list installed playbooks
 symbios-state.sh is-installed base-services/traefik.yml  # check if installed
 symbios-reapply.sh                           # full reapply
-symbios-reapply.sh --domain-only             # domain-dependent playbooks only
+symbios-reapply.sh --only base-services/localization.yml base-services/raspberry.yml  # specific playbooks
 cat /home/docker/symbios-ui/log/reapply.log  # view reapply log
 ```
 

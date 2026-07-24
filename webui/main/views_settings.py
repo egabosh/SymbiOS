@@ -34,13 +34,17 @@ import subprocess
 REAPPLY_STATUS_FILE = '/tmp/symbios-reapply.status'
 
 
-def _start_reapply(domain_only=False):
+def _start_reapply(playbooks=None):
     """Start symbios-reapply.sh in the background (non-blocking).
 
     Uses setsid to fully detach the process from the SSH session so it
     survives after the channel closes.
     """
-    flag = '--domain-only' if domain_only else ''
+    if playbooks:
+        args = ' '.join(playbooks)
+        flag = f'--only {args}'
+    else:
+        flag = ''
     cmd = f'setsid /usr/local/sbin/symbios-reapply.sh {flag} </dev/null >/dev/null 2>&1'
     try:
         run_command(cmd, timeout=5)
@@ -99,7 +103,7 @@ def settings_ddns(request):
                         messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
                 # Reapply all playbooks with updated domain in the background
                 messages.info(request, 'Reapplying all playbooks in the background...')
-                _start_reapply(domain_only=False)
+                _start_reapply()
             elif dns_mode == 'self-managed':
                 self_domain = request.POST.get('self_domain', '').strip().lower().rstrip('.')
                 if not self_domain:
@@ -115,7 +119,7 @@ def settings_ddns(request):
                 messages.success(request, f'DNS settings saved for {self_domain}.')
                 # Reapply all playbooks with updated domain in the background
                 messages.info(request, 'Reapplying all playbooks in the background...')
-                _start_reapply(domain_only=False)
+                _start_reapply()
             else:
                 # deSEC mode (existing behavior)
                 ddns_host = request.POST.get('ddns_host', '')
@@ -144,7 +148,7 @@ def settings_ddns(request):
                     messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
                 # Reapply all playbooks with updated domain in the background
                 messages.info(request, 'Reapplying all playbooks in the background...')
-                _start_reapply(domain_only=False)
+                _start_reapply()
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_ddns')
@@ -431,8 +435,8 @@ def settings_localization(request):
             vars_['locale'] = request.POST.get('locale', '').strip()
             _save_inventory_config(config)
             messages.success(request, 'Localization settings saved.')
-            messages.info(request, 'Reapplying all playbooks in the background...')
-            _start_reapply(domain_only=False)
+            messages.info(request, 'Reapplying localization playbooks in the background...')
+            _start_reapply(playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'])
         except Exception as e:
             messages.error(request, f'Error: {e}')
         return redirect('settings_localization')
