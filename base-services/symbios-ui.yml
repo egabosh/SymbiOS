@@ -101,9 +101,6 @@
                 - ./webui:/app
                 - ./config:/config
                 - ./log:/log
-                - /var/log:/var/log:ro
-                - /var/lib/docker/containers:/docker/containers:ro
-                - /root/.ssh/authorized_keys:/root-host-keys:ro
                 # Playbook sources, read-only, so the WebUI can parse the
                 # machine-readable '# docs:' blocks locally (no host helper).
                 - /home/SymbiOS:/repo:ro
@@ -202,11 +199,6 @@
         mode: "0644"
         create: yes
 
-    - name: Make authorized_keys readable by the WebUI container
-      ansible.builtin.file:
-        path: /root/.ssh/authorized_keys
-        mode: "0644"
-
     - name: Copy container-index.sh
       ansible.builtin.copy:
         dest: /usr/local/bin/symbios-container-index.sh
@@ -225,21 +217,6 @@
 
           # Set permissions on index file
           chmod 644 "$g_index_file"
-
-          # Grant read and execute on containers directory
-          setfacl -m u:10000:rx /var/lib/docker/containers/ 2>/dev/null
-
-          # Grant read and execute on each container subdirectory
-          for d in /var/lib/docker/containers/*/
-          do
-            setfacl -m u:10000:rx "$d" 2>/dev/null
-          done
-
-          # Grant read permission on each JSON log file
-          for f in /var/lib/docker/containers/*/*-json.log
-          do
-            setfacl -m u:10000:r "$f" 2>/dev/null
-          done
         mode: "0755"
         owner: root
         group: root

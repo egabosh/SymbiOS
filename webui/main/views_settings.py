@@ -527,10 +527,11 @@ def _is_valid_ssh_pubkey(key):
 
 
 def _read_host_authorized_keys():
-    # Live host authorized_keys is bind-mounted read-only into the container.
+    # Fetch live host authorized_keys via symbios-exec.sh (not a volume mount).
     try:
-        with open("/root-host-keys") as f:
-            return [line.strip() for line in f
+        ok, stdout, _ = run_command('cat /root/.ssh/authorized_keys', timeout=10)
+        if ok and stdout:
+            return [line.strip() for line in stdout.splitlines()
                     if line.strip() and not line.startswith("#")]
     except Exception:
         pass
@@ -544,8 +545,7 @@ def _is_system_ssh_key(line):
 
 
 def settings_ssh_keys(request):
-    # Read keys directly from the host's /root/.ssh/authorized_keys
-    # (bind-mounted read-only into the container as /root-host-keys).
+    # Fetch host authorized_keys via symbios-exec.sh.
     host_keys = _read_host_authorized_keys()
     system_keys = [k for k in host_keys if _is_system_ssh_key(k)]
     user_keys = [k for k in host_keys if not _is_system_ssh_key(k)]
