@@ -35,15 +35,26 @@ def settings_mailserver(request):
     vars_ = config.get('all', {}).get('vars', {})
 
     if request.method == 'POST':
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         try:
             if request.POST.get('action') == 'delete':
                 if vars_.get('twofa_enabled'):
-                    messages.error(request, 'Cannot delete SMTP configuration while 2-Factor Authentication (2FA) is enabled. Disable 2FA under Settings \u2192 Auth first.')
+                    msg = 'Cannot delete SMTP configuration while 2-Factor Authentication (2FA) is enabled. Disable 2FA under Settings \u2192 Auth first.'
+                    if is_ajax:
+                        return JsonResponse({'ok': False, 'error': msg}, status=400)
+                    messages.error(request, msg)
                 else:
                     for key in list(vars_):
                         if key.startswith('smtp_'):
                             del vars_[key]
                     _save_inventory_config(config)
+                    if is_ajax:
+                        from .utils.jobs import create_job
+                        cmd = 'ansible-playbook --connection=local --limit localhost --inventory /home/docker/symbios-ui/config/inventory.yml -e ansible_python_interpreter=/usr/bin/python3 /home/SymbiOS/base-services/smtp.yml'
+                        job_id = create_job(cmd, timeout=3600)
+                        return JsonResponse({'ok': True, 'job': job_id,
+                                             'title': 'Deleting SMTP config...',
+                                             'message': 'SMTP configuration deleted.'})
                     ok, out = run_playbook('base-services/smtp.yml', timeout=180)
                     if ok:
                         messages.success(request, 'SMTP configuration deleted.')
@@ -64,17 +75,25 @@ def settings_mailserver(request):
             if not smtp_password: missing.append('Password')
             if not smtp_from: missing.append('Email Address')
             if missing:
-                messages.error(request, f'Required fields missing: {", ".join(missing)}.')
+                msg = f'Required fields missing: {", ".join(missing)}.'
+                if is_ajax:
+                    return JsonResponse({'ok': False, 'error': msg}, status=400)
+                messages.error(request, msg)
                 return redirect('settings_mailserver')
 
             if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', smtp_from):
-                messages.error(request, 'Invalid email address format. Must be like <strong>user@domain.tld</strong>.')
+                msg = 'Invalid email address format. Must be like <strong>user@domain.tld</strong>.'
+                if is_ajax:
+                    return JsonResponse({'ok': False, 'error': msg}, status=400)
+                messages.error(request, msg)
                 return redirect('settings_mailserver')
 
             smtp_user = smtp_user.replace('%EMAILADDRESS%', smtp_from).replace('%EMAILLOCALPART%', smtp_from.split('@')[0])
 
             ok, err = _test_smtp(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls)
             if not ok:
+                if is_ajax:
+                    return JsonResponse({'ok': False, 'error': err}, status=400)
                 messages.error(request, f'{err}')
                 return redirect('settings_mailserver')
 
@@ -85,6 +104,33 @@ def settings_mailserver(request):
             vars_['smtp_from'] = smtp_from
             vars_['smtp_tls'] = smtp_tls
             _save_inventory_config(config)
+
+            # Build a single chained command for the exec modal:
+            # always run smtp.yml, optionally followed by authelia.yml if 2FA is on
+            smtp_cmd = (
+                'ansible-playbook --connection=local --limit localhost '
+                '--inventory /home/docker/symbios-ui/config/inventory.yml '
+                '-e ansible_python_interpreter=/usr/bin/python3 '
+                '/home/SymbiOS/base-services/smtp.yml'
+            )
+            if vars_.get('twofa_enabled'):
+                authelia_cmd = (
+                    'ansible-playbook --connection=local --limit localhost '
+                    '--inventory /home/docker/symbios-ui/config/inventory.yml '
+                    '-e ansible_python_interpreter=/usr/bin/python3 '
+                    '/home/SymbiOS/base-services/authelia.yml'
+                )
+                cmd = smtp_cmd + ' && ' + authelia_cmd
+            else:
+                cmd = smtp_cmd
+
+            if is_ajax:
+                from .utils.jobs import create_job
+                job_id = create_job(cmd, timeout=3600)
+                return JsonResponse({'ok': True, 'job': job_id,
+                                     'title': 'Applying mailserver settings...',
+                                     'message': 'Mailserver settings saved.'})
+
             ok, out = run_playbook('base-services/smtp.yml', timeout=180)
             if ok and vars_.get('twofa_enabled'):
                 ok, out = run_playbook('base-services/authelia.yml', timeout=180)
@@ -93,6 +139,8 @@ def settings_mailserver(request):
             else:
                 messages.error(request, f'Applied with errors: {out[:500]}')
         except Exception as e:
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
             messages.error(request, f'Error: {e}')
         return redirect('settings_mailserver')
 
