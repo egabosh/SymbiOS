@@ -378,18 +378,36 @@ def settings_localization(request):
             valid_timezones_display = sorted(valid_timezones)
         else:
             # Fallback to static list
-            import pytz
-            timezones = pytz.all_timezones
-            valid_timezones = [tz.replace('_', ' ') for tz in timezones]
-            valid_timezones_display = sorted(valid_timezones)
+            valid_timezones_display = sorted([
+                'Africa/Abidjan', 'Africa/Cairo', 'Africa/Johannesburg', 'Africa/Lagos', 'Africa/Nairobi',
+                'America/Anchorage', 'America/Argentina/Buenos_Aires', 'America/Bogota', 'America/Caracas',
+                'America/Chicago', 'America/Denver', 'America/Halifax', 'America/Lima', 'America/Los_Angeles',
+                'America/Mexico_City', 'America/New_York', 'America/Phoenix', 'America/Sao_Paulo',
+                'America/Toronto', 'America/Vancouver',
+                'Asia/Bangkok', 'Asia/Colombo', 'Asia/Dubai', 'Asia/Hong_Kong', 'Asia/Karachi',
+                'Asia/Kolkata', 'Asia/Kuala_Lumpur', 'Asia/Manila', 'Asia/Seoul', 'Asia/Shanghai',
+                'Asia/Singapore', 'Asia/Taipei', 'Asia/Tehran', 'Asia/Tokyo',
+                'Atlantic/Reykjavik', 'Australia/Melbourne', 'Australia/Perth', 'Australia/Sydney',
+                'Europe/Amsterdam', 'Europe/Berlin', 'Europe/Brussels', 'Europe/Bucharest',
+                'Europe/Copenhagen', 'Europe/Dublin', 'Europe/Helsinki', 'Europe/Istanbul',
+                'Europe/Lisbon', 'Europe/London', 'Europe/Madrid', 'Europe/Moscow', 'Europe/Oslo',
+                'Europe/Paris', 'Europe/Prague', 'Europe/Rome', 'Europe/Stockholm', 'Europe/Vienna',
+                'Europe/Warsaw', 'Europe/Zurich',
+                'Pacific/Auckland', 'Pacific/Fiji', 'Pacific/Honolulu', 'Pacific/Samoa',
+                'UTC',
+            ])
     except Exception:
         # Fallback to static list
-        import pytz
-        timezones = pytz.all_timezones
-        valid_timezones = [tz.replace('_', ' ') for tz in timezones]
-        valid_timezones_display = sorted(valid_timezones)
+        valid_timezones_display = sorted([
+            'UTC',
+            'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+            'Europe/London', 'Europe/Berlin', 'Europe/Paris', 'Europe/Moscow',
+            'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Kolkata', 'Asia/Dubai',
+            'Australia/Sydney', 'Pacific/Auckland', 'Pacific/Honolulu',
+        ])
 
     # Get keyboard layouts from host
+    keyboards = []
     try:
         # Try to get keyboard layouts from host's /etc/default/keyboard or via kbdlist
         keyboards_cmd = 'ls /usr/share/keymaps/ || kbdlist'
@@ -418,6 +436,10 @@ def settings_localization(request):
                             keyboards.append(kb)
     except Exception:
         # Fallback to static list
+        keyboards = ['us', 'gb', 'de', 'fr', 'it', 'es', 'pt', 'nl', 'pl', 'ru', 'ar', 'zh', 'jp', 'kr', 'in']
+
+    # Ensure keyboards is always defined
+    if not keyboards:
         keyboards = ['us', 'gb', 'de', 'fr', 'it', 'es', 'pt', 'nl', 'pl', 'ru', 'ar', 'zh', 'jp', 'kr', 'in']
 
     if request.method == 'POST':
@@ -472,31 +494,6 @@ def settings_auth(request):
     return render(request, 'main/settings_auth.html', {'vars': vars_})
 
 _HOST_IP_FILE = "/config/.host-ip"
-
-
-@login_required
-def settings_localization(request):
-    config = _get_inventory_config()
-    if 'all' not in config:
-        config['all'] = {}
-    if 'vars' not in config['all']:
-        config['all']['vars'] = {}
-    vars_ = config['all']['vars']
-
-    if request.method == 'POST':
-        try:
-            vars_['timezone'] = request.POST.get('timezone', '').strip()
-            vars_['keyboard'] = request.POST.get('keyboard', '').strip()
-            vars_['locale'] = request.POST.get('locale', '').strip()
-            _save_inventory_config(config)
-            messages.success(request, 'Localization settings saved.')
-            messages.info(request, 'Reapplying all playbooks in the background...')
-            _start_reapply(domain_only=False)
-        except Exception as e:
-            messages.error(request, f'Error: {e}')
-        return redirect('settings_localization')
-
-    return render(request, 'main/settings_localization.html', {'vars': vars_})
 
 
 @login_required
