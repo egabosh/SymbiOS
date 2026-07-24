@@ -9,10 +9,9 @@
 <!-- Reapply status banner -->
 <div id="reapply-banner" class="alert alert-info d-none mb-3">
   <div class="d-flex align-items-center">
-    <div id="reapply-spinner" class="spinner-border spinner-border-sm me-2" role="status"></div>
+    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
     <span id="reapply-text">Reapplying playbooks...</span>
   </div>
-  <pre id="reapply-log" class="mt-2 mb-0 small" style="max-height:200px;overflow:auto;display:none;background:rgba(0,0,0,.1);padding:8px;border-radius:4px;"></pre>
 </div>
 
 
@@ -496,40 +495,30 @@ function pollReapplyStatus() {
     .then(data => {
       const banner = document.getElementById('reapply-banner');
       const text = document.getElementById('reapply-text');
-      const logEl = document.getElementById('reapply-log');
-      const spinner = document.getElementById('reapply-spinner');
       if (data.status === 'running') {
         banner.className = 'alert alert-info mb-3';
-        spinner.style.display = '';
         let msg = 'Reapplying playbooks...';
         if (data.progress) msg += ' (' + data.progress + ')';
-        if (data.playbook) msg += ' \u2014 ' + data.playbook;
+        if (data.playbook) msg += ' — ' + data.playbook;
         text.textContent = msg;
-        if (data.log_tail && data.log_tail.length) {
-          logEl.textContent = data.log_tail.join('\n');
-          logEl.style.display = '';
-        }
         banner.classList.remove('d-none');
         setTimeout(pollReapplyStatus, 2000);
       } else if (data.status === 'done') {
-        spinner.style.display = 'none';
         banner.className = data.success
           ? 'alert alert-success mb-3'
           : 'alert alert-warning mb-3';
         text.textContent = data.success
           ? 'Reapply completed successfully.'
           : 'Reapply finished with errors. Check logs.';
-        if (data.log_tail && data.log_tail.length) {
-          logEl.textContent = data.log_tail.join('\n');
-          logEl.style.display = '';
-        }
         banner.classList.remove('d-none');
-        setTimeout(() => banner.classList.add('d-none'), 15000);
+        setTimeout(() => banner.classList.add('d-none'), 10000);
       } else {
         banner.classList.add('d-none');
       }
     })
-    .catch(() => {});
+    .catch(() => {
+      // Ignore errors, just hide banner
+    });
 }
 
 // Start polling on page load

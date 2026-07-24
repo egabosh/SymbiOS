@@ -26,7 +26,7 @@
 #   symbios-reapply.sh                  # full reapply
 #   symbios-reapply.sh --domain-only    # re-run domain-dependent playbooks only
 
-source /etc/bash/gaboshlib.include 2>/dev/null || true
+source /etc/bash/gaboshlib.include
 
 g_state_file="/home/docker/symbios-ui/config/installed-playbooks.yml"
 g_inventory="/home/docker/symbios-ui/config/inventory.yml"

@@ -29,7 +29,6 @@ CONTAINER_INDEX = "/log/docker-containers.tsv"
 ALLOWED_LOG_FILES = {
     "messages": "/var/log/messages",
     "syslog": "/var/log/syslog",
-    "reapply": "/home/docker/symbios-ui/log/reapply.log",
     "dedyn": "/log/dedyn.log",
         "playbook-basics": "/log/playbook-basics.log",
     "playbook-symbios-ui": "/log/playbook-symbios-ui.log",
@@ -49,7 +48,6 @@ ALLOWED_LOG_FILES = {
 LOG_LABELS = {
     "messages": "System Messages",
     "syslog": "Syslog",
-    "reapply": "Reapply Output",
     "dedyn": "DDNS (deSEC)",
         "playbook-basics": "Playbook: Basics",
     "playbook-symbios-ui": "Playbook: WebUI",
