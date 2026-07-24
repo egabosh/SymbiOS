@@ -22,6 +22,7 @@ from . import views_users
 from . import views_logs
 from . import views_change_password
 from . import views_services
+from . import views_exec
 
 urlpatterns = [
     path('health/', views.health, name='health'),
@@ -78,4 +79,6 @@ urlpatterns = [
     path('change-password/', views_change_password.change_password, name='change_password'),
     path('logout/', views.logout_view, name='logout'),
     path('authelia-logout/', views.authelia_logout, name='authelia_logout'),
+    path('exec/start/', views_exec.exec_start, name='exec_start'),
+    path('exec/output/', views_exec.exec_output, name='exec_output'),
 ]
