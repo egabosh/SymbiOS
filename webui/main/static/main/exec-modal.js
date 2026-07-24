@@ -97,9 +97,7 @@ Also intercepts all forms with data-exec="true" attribute:
   /* Close handlers */
   closeBtn.addEventListener('click', close);
   doneBtn.addEventListener('click', close);
-  overlay.addEventListener('click', function (e) {
-    if (e.target === overlay) close();
-  });
+  /* Clicking the backdrop does NOT close the modal — only the X or Close button */
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && !overlay.classList.contains('d-none')) close();
   });
