@@ -509,7 +509,6 @@ def settings_local_ip(request):
         return JsonResponse({"local_ipv4": "", "error": str(e)})
 
 
-@login_required
 def _is_valid_ssh_pubkey(key):
     parts = key.strip().split(None, 2)
     if len(parts) < 2:
