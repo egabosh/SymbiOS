@@ -424,18 +424,6 @@ def settings_localization(request):
     except Exception:
         pass
 
-    # Fallback if host query fails
-    if not keyboards:
-        keyboards = [
-            'us', 'gb', 'de', 'fr', 'it', 'es', 'pt', 'nl', 'be', 'ch',
-            'se', 'no', 'dk', 'fi', 'pl', 'cz', 'hu', 'ro', 'bg', 'hr',
-            'rs', 'sk', 'si', 'lt', 'lv', 'ee', 'ie', 'is', 'gr', 'tr',
-            'ru', 'ua', 'by', 'md', 'am', 'ge', 'il', 'ar', 'fa', 'ur',
-            'in', 'bd', 'pk', 'lk', 'np', 'th', 'vn', 'id', 'ms', 'ph',
-            'jp', 'kr', 'cn', 'tw', 'hk', 'sg', 'au', 'nz', 'za', 'br',
-            'latam', 'mx', 'ca', 'dvorak', 'colemak',
-        ]
-
     if request.method == 'POST':
         try:
             vars_['timezone'] = request.POST.get('timezone', '').strip()
