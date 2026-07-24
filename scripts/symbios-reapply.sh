@@ -23,8 +23,9 @@
 # WebUI doesn't block.
 #
 # Usage:
-#   symbios-reapply.sh                         # full reapply
-#   symbios-reapply.sh --only <pb1> <pb2> ...  # re-run only specific playbooks (must be installed)
+#   symbios-reapply.sh                                    # full reapply
+#   symbios-reapply.sh --only <pb1> <pb2> ...             # re-run only specific playbooks (must be installed)
+#   symbios-reapply.sh --only --force <pb1> <pb2> ...     # same, but skip install check
 
 source /etc/bash/gaboshlib.include
 
@@ -36,13 +37,26 @@ g_log_file="${g_log_dir}/reapply.log"
 g_status_file="/tmp/symbios-reapply.status"
 g_pid_file="/tmp/symbios-reapply.pid"
 g_only_playbooks=""
+g_force=false
 
 # Parse arguments
-if [[ "${1:-}" == "--only" ]]
-then
-  shift
-  g_only_playbooks="$*"
-fi
+while [[ $# -gt 0 ]]
+do
+  case "$1" in
+    --force)
+      g_force=true
+      shift
+      ;;
+    --only)
+      shift
+      g_only_playbooks="$*"
+      break
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
 
 function f_cleanup {
   rm -f "$g_pid_file"
@@ -94,12 +108,12 @@ then
   # Only specific playbooks — check each is installed via symbios-state.sh
   for g_pb in $g_only_playbooks
   do
-    if symbios-state.sh is-installed "$g_pb" 2>/dev/null
+    if [[ "$g_force" == true ]] || symbios-state.sh is-installed "$g_pb" 2>/dev/null
     then
       g_playbooks=$(printf '%s\n' "$g_playbooks" "$g_pb")
     else
       f_log "SKIP [$g_pb] — not installed"
-      g_echo_note "SKIP: $g_pb — not installed"
+      g_echo_note "SKIP: $g_pb — not installed (use --force to override)"
     fi
   done
 else
