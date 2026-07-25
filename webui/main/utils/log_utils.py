@@ -97,31 +97,31 @@ def _resolve_local_log_path(log_name):
 def _fetch_host_log(log_name, offset=0, limit=500):
     """Fetch a system log from the host via symbios-exec.sh."""
     host_path = f"{HOST_LOG_DIR}/{log_name}"
-    if offset > 0:
-        ok, stdout, _ = run_command(
-            f"tail -n +{offset + 1} {host_path} | tail -n {limit}", timeout=15
-        )
-    else:
-        ok, stdout, _ = run_command(f"tail -n {limit} {host_path}", timeout=15)
+    # Single script call: outputs count on first line, then log content
+    ok, stdout, _ = run_command(
+        f"symbios-fetch-log.sh {host_path} {offset} {limit}", timeout=15
+    )
     if not ok or not stdout:
         return [], 0
-    # Get total line count
-    ok_total, stdout_total, _ = run_command(f"wc -l < {host_path}", timeout=10)
-    total = int(stdout_total.strip()) if ok_total and stdout_total.strip().isdigit() else 0
-    lines = stdout.splitlines()
+    lines_raw = stdout.splitlines()
+    if not lines_raw:
+        return [], 0
+    # First line is the total count
+    try:
+        total = int(lines_raw[0])
+    except ValueError:
+        total = 0
+    # Remaining lines are log content
+    lines = lines_raw[1:] if len(lines_raw) > 1 else []
     return lines, total
 
 
 def _fetch_host_docker_log(container_id, offset=0, limit=500):
     """Fetch a Docker container JSON log from the host via symbios-exec.sh."""
-    host_path = f"{HOST_DOCKER_LOG_DIR}/{container_id}/{container_id}-json.log"
-    # Fetch raw JSON log entries
-    if offset > 0:
-        ok, stdout, _ = run_command(
-            f"tail -n +{offset + 1} {host_path} | tail -n {limit}", timeout=15
-        )
-    else:
-        ok, stdout, _ = run_command(f"tail -n {limit} {host_path}", timeout=15)
+    # Single script call: outputs count on first line, then extracted log messages
+    ok, stdout, _ = run_command(
+        f"symbios-fetch-docker-log.sh {container_id} {offset} {limit}", timeout=15
+    )
     if not ok or not stdout:
         return [], 0, container_id
     # Get container name from index
@@ -135,34 +135,16 @@ def _fetch_host_docker_log(container_id, offset=0, limit=500):
                     break
     except FileNotFoundError:
         pass
-    # Parse JSON entries — the json-file log driver writes one JSON object
-    # per entry, but a single entry's "log" field may contain embedded
-    # newlines (multi-line stack traces).
-    decoder = json.JSONDecoder()
-    entries = []
-    idx = 0
-    n = len(stdout)
-    while idx < n:
-        while idx < n and stdout[idx] in " \r\n\t":
-            idx += 1
-        if idx >= n:
-            break
-        try:
-            obj, end = decoder.raw_decode(stdout, idx)
-        except json.JSONDecodeError:
-            entries.append(stdout[idx:])
-            break
-        idx = end
-        msg = obj.get("log", "")
-        if isinstance(msg, str) and msg.endswith("\n"):
-            msg = msg[:-1]
-        entries.append(msg)
-    total = len(entries)
-    # Get total entry count from host
-    ok_total, stdout_total, _ = run_command(
-        f"grep -c '{{' {host_path} 2>/dev/null || echo 0", timeout=10
-    )
-    total_host = int(stdout_total.strip()) if ok_total and stdout_total.strip().isdigit() else total
+    lines_raw = stdout.splitlines()
+    if not lines_raw:
+        return [], 0, container_name
+    # First line is the total count
+    try:
+        total_host = int(lines_raw[0])
+    except ValueError:
+        total_host = 0
+    # Remaining lines are extracted log messages (no JSON parsing needed)
+    entries = lines_raw[1:] if len(lines_raw) > 1 else []
     return entries, total_host, container_name
 
 

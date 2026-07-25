@@ -110,7 +110,17 @@ function f_action_list {
   local f_raw
   f_raw=$(lsblk -J -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,TRAN,RM 2>&1) || \
     f_json_error "lsblk failed: $f_raw"
-  echo "$f_raw"
+  # Filter out loop, ram, sr, zram devices (pure cosmetic noise)
+  echo "$f_raw" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+skip = ('loop', 'ram', 'sr', 'zram')
+data['blockdevices'] = [
+    d for d in data.get('blockdevices', [])
+    if not d.get('name', '').startswith(skip)
+]
+json.dump(data, sys.stdout)
+" 2>/dev/null || echo "$f_raw"
 }
 
 # ---------------------------------------------------------------------------

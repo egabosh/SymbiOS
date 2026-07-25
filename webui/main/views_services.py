@@ -24,14 +24,13 @@ from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from .playbook_catalog import get_catalog, get_playbook
 from .utils.ssh_exec import (
-    stream_command,
     stream_log,
     stop_log,
     run_service_status,
     build_action_command,
     build_log_command,
 )
-from .utils.jobs import _JOBS, _JOBS_LOCK, create_job, get_job_output
+from .utils.jobs import _JOBS, _JOBS_LOCK
 
 # Built-in base-services can be managed but never uninstalled from the WebUI.
 PROTECTED_GROUPS = {'base-services'}

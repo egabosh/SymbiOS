@@ -17,7 +17,6 @@
 import os
 import shlex
 import threading
-import time
 import logging
 
 logger = logging.getLogger(__name__)
@@ -104,8 +103,12 @@ def _wrap(cmd):
     return SSH_GATEWAY_WRAP + shlex.quote(cmd)
 
 
-def _exec(cmd, timeout=300):
-    """Run a gateway command, returning (exit_code, stdout, stderr)."""
+def _exec(cmd, timeout=300, stdin_data=None):
+    """Run a gateway command, returning (exit_code, stdout, stderr).
+
+    If *stdin_data* is provided it is written to the remote process's stdin
+    before reading stdout/stderr (useful for piping data to scripts).
+    """
     global _ssh_client
     client = _get_ssh_client()
     try:
@@ -117,6 +120,11 @@ def _exec(cmd, timeout=300):
         channel = client.get_transport().open_session(timeout=SSH_CONNECT_TIMEOUT)
         channel.settimeout(timeout)
         channel.exec_command(_wrap(cmd))
+        # Write stdin data if provided (e.g. SSH keys for write-authorized-keys.sh).
+        # Small payloads; close to signal EOF so the remote process can proceed.
+        if stdin_data is not None:
+            channel.makefile('w').write(stdin_data)
+            channel.makefile('w').close()
         exit_status = channel.recv_exit_status()
         stdout = channel.makefile('r', -1).read()
         stderr = channel.makefile_stderr('r', -1).read()
@@ -135,8 +143,8 @@ def _exec(cmd, timeout=300):
         return -1, '', str(e)
 
 
-def run_command(cmd, timeout=300):
-    rc, stdout, stderr = _exec(cmd, timeout=timeout)
+def run_command(cmd, timeout=300, stdin_data=None):
+    rc, stdout, stderr = _exec(cmd, timeout=timeout, stdin_data=stdin_data)
     return rc == 0, stdout, stderr
 
 
