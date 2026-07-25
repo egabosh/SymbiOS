@@ -50,7 +50,7 @@ def settings_mailserver(request):
                     _save_inventory_config(config)
                     if is_ajax:
                         from .utils.jobs import create_job
-                        cmd = 'ansible-playbook --connection=local --limit localhost --inventory /home/docker/symbios-ui/config/inventory.yml -e ansible_python_interpreter=/usr/bin/python3 /home/SymbiOS/base-services/smtp.yml'
+                        cmd = 'symbios-run-playbook.sh base-services/smtp.yml'
                         job_id = create_job(cmd, timeout=3600)
                         return JsonResponse({'ok': True, 'job': job_id,
                                              'title': 'Deleting SMTP config...',
@@ -107,19 +107,9 @@ def settings_mailserver(request):
 
             # Build a single chained command for the exec modal:
             # always run smtp.yml, optionally followed by authelia.yml if 2FA is on
-            smtp_cmd = (
-                'ansible-playbook --connection=local --limit localhost '
-                '--inventory /home/docker/symbios-ui/config/inventory.yml '
-                '-e ansible_python_interpreter=/usr/bin/python3 '
-                '/home/SymbiOS/base-services/smtp.yml'
-            )
+            smtp_cmd = 'symbios-run-playbook.sh base-services/smtp.yml'
             if vars_.get('twofa_enabled'):
-                authelia_cmd = (
-                    'ansible-playbook --connection=local --limit localhost '
-                    '--inventory /home/docker/symbios-ui/config/inventory.yml '
-                    '-e ansible_python_interpreter=/usr/bin/python3 '
-                    '/home/SymbiOS/base-services/authelia.yml'
-                )
+                authelia_cmd = 'symbios-run-playbook.sh base-services/authelia.yml'
                 cmd = smtp_cmd + ' && ' + authelia_cmd
             else:
                 cmd = smtp_cmd

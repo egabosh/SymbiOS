@@ -29,9 +29,7 @@ import json
 import yaml
 import os
 import re
-import subprocess
-
-REAPPLY_STATUS_FILE = '/tmp/symbios-reapply.status'
+import shlex
 
 
 def _start_reapply(playbooks=None):
@@ -54,12 +52,14 @@ def _start_reapply(playbooks=None):
 
 
 def _reapply_status():
-    """Read the current reapply status from the status file."""
+    """Read the current reapply status from the host via shell script."""
     try:
-        with open(REAPPLY_STATUS_FILE, 'r') as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return 'idle'
+        ok, stdout, _ = run_command('symbios-reapply-status.sh', timeout=5)
+        if ok and stdout:
+            return stdout.strip()
+    except Exception:
+        pass
+    return 'idle'
 
 
 
@@ -144,7 +144,7 @@ def settings_ddns(request):
                 if is_ajax:
                     from .utils.jobs import create_job
                     # Chain: run dedyn playbook, then full reapply
-                    cmd = 'ansible-playbook --connection=local --limit localhost --inventory /home/docker/symbios-ui/config/inventory.yml -e ansible_python_interpreter=/usr/bin/python3 /home/SymbiOS/base-services/dedyn.yml && symbios-reapply.sh'
+                    cmd = 'symbios-run-playbook.sh base-services/dedyn.yml && symbios-reapply.sh'
                     job_id = create_job(cmd, timeout=3600)
                     return JsonResponse({'ok': True, 'job': job_id,
                                          'title': 'Configuring DNS and reapplying...',
@@ -424,19 +424,10 @@ def settings_localization(request):
             'Australia/Sydney', 'Pacific/Auckland', 'Pacific/Honolulu',
         ])
 
-    # Get keyboard layouts dynamically from host XKB symbols directory.
-    # Filter out modifiers, special keys, and non-layout entries.
+    # Get keyboard layouts dynamically from host via shell script.
     keyboards = []
     try:
-        kb_cmd = (
-            "find /usr/share/X11/xkb/symbols -maxdepth 1 -type f 2>/dev/null "
-            "| xargs -I{} basename {} "
-            "| grep -vE '^(pc|keypad|compose|ctrl|shift|level|capslock|scrolllock"
-            "|terminate|altwin|kpdl|nbsp|srvr|macintosh|olpc|empty|trans|typo"
-            "|group|latin|bqn|brai|inet|rupeesign|eurosign|parens|misc"
-            "|ancient|apl|grab)' | sort"
-        )
-        ok, stdout, stderr = run_command(kb_cmd, timeout=10)
+        ok, stdout, _ = run_command('symbios-list-keyboards.sh', timeout=10)
         if ok and stdout:
             keyboards = [line.strip() for line in stdout.split('\n') if line.strip()]
     except Exception:
@@ -492,7 +483,7 @@ def settings_auth(request):
             _save_inventory_config(config)
             if is_ajax:
                 from .utils.jobs import create_job
-                cmd = 'ansible-playbook --connection=local --limit localhost --inventory /home/docker/symbios-ui/config/inventory.yml -e ansible_python_interpreter=/usr/bin/python3 /home/SymbiOS/base-services/authelia.yml'
+                cmd = 'symbios-run-playbook.sh base-services/authelia.yml'
                 job_id = create_job(cmd, timeout=3600)
                 return JsonResponse({'ok': True, 'job': job_id,
                                      'title': 'Applying auth settings...',
@@ -514,31 +505,11 @@ def settings_auth(request):
 
     return render(request, 'main/settings_auth.html', {'vars': vars_})
 
-_HOST_IP_FILE = "/config/.host-ip"
-
-
 @login_required
 def settings_local_ip(request):
     try:
-        local_ipv4 = ""
-        # Primary: read from file written by host cron
-        try:
-            with open(_HOST_IP_FILE) as f:
-                ip = f.read().strip()
-                if ip:
-                    local_ipv4 = ip
-        except Exception:
-            pass
-
-        if not local_ipv4:
-            # Fallback: hostname -I inside container
-            out = subprocess.check_output(["hostname", "-I"], timeout=5, text=True)
-            ips = out.strip().split()
-            for ip in ips:
-                if ip.startswith(("192.168.", "10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")):
-                    local_ipv4 = ip
-                    break
-
+        ok, stdout, _ = run_command('symbios-get-local-ip.sh', timeout=10)
+        local_ipv4 = stdout.strip() if ok and stdout else ""
         return JsonResponse({"local_ipv4": local_ipv4})
     except Exception as e:
         return JsonResponse({"local_ipv4": "", "error": str(e)})
@@ -608,13 +579,13 @@ def settings_ssh_keys(request):
                 user_keys = new_keys
 
             # Build the complete authorized_keys content: system keys first,
-            # then user keys.  Write directly to /root/.ssh/authorized_keys
-            # on the host via the SSH exec gateway — no inventory intermediary.
+            # then user keys.  Write via symbios-write-authorized-keys.sh
+            # (reads from stdin, no shell-quoting issues).
             all_keys = system_keys + user_keys
-            # Join with actual newlines, wrap in single quotes for shell.
             keys_content = "\n".join(all_keys) + "\n"
-            cmd = "printf '%s' '" + keys_content.replace("'", "'\\''") + "' > /root/.ssh/authorized_keys"
-            ok, stdout, stderr = run_command(cmd, timeout=15)
+            ok, stdout, stderr = run_command(
+                'symbios-write-authorized-keys.sh', timeout=15,
+                stdin_data=keys_content)
             if not ok:
                 raise RuntimeError(f"Failed to write authorized_keys: {stderr}")
 
@@ -761,60 +732,16 @@ def settings_backup_test(request):
     except ValueError:
         return JsonResponse({'ok': False, 'error': 'Port must be a number'})
 
-    # Use the WebUI's own SSH key for the test
-    key_path = '/config/.ssh/id_symbios'
-    known_hosts = '/config/.ssh/known_hosts'
-
-    cmd = [
-        'ssh',
-        '-i', key_path,
-        '-o', 'StrictHostKeyChecking=no',
-        '-o', 'ConnectTimeout=10',
-        '-o', 'BatchMode=yes',
-        '-p', port,
-        f'{user}@{host}',
-        'echo ok',
-    ]
-
+    # Delegate to symbios-test-ssh.sh via the exec gateway
+    cmd = f'symbios-test-ssh.sh {shlex.quote(host)} {shlex.quote(port)} {shlex.quote(user)}'
+    if path:
+        cmd += f' {shlex.quote(path)}'
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        if result.returncode == 0:
-            # Also test the path if provided
-            if path:
-                cmd_path = [
-                    'ssh',
-                    '-i', key_path,
-                    '-o', 'StrictHostKeyChecking=no',
-                    '-o', 'ConnectTimeout=10',
-                    '-o', 'BatchMode=yes',
-                    '-p', port,
-                    f'{user}@{host}',
-                    f'test -d {path} && echo path_ok || echo path_missing',
-                ]
-                result_path = subprocess.run(cmd_path, capture_output=True, text=True, timeout=15)
-                if 'path_ok' in result_path.stdout:
-                    return JsonResponse({'ok': True, 'message': f'Connection successful. Directory {path} exists.'})
-                elif 'path_missing' in result_path.stdout:
-                    return JsonResponse({'ok': False, 'error': f'Connection successful, but directory {path} does not exist on the remote host.'})
-                else:
-                    return JsonResponse({'ok': False, 'error': f'Connection successful, but could not verify path: {result_path.stderr.strip()}'})
-            return JsonResponse({'ok': True, 'message': 'Connection successful.'})
+        ok, stdout, stderr = run_command(cmd, timeout=20)
+        if ok and stdout:
+            return JsonResponse(json.loads(stdout))
         else:
-            stderr = result.stderr.strip()
-            if 'Permission denied' in stderr:
-                return JsonResponse({'ok': False, 'error': 'Connection failed: Permission denied. Check that the SSH key is authorized on the remote host.'})
-            elif 'Connection refused' in stderr:
-                return JsonResponse({'ok': False, 'error': f'Connection refused on port {port}. Is SSH running?'})
-            elif 'timed out' in stderr.lower() or 'timeout' in stderr.lower():
-                return JsonResponse({'ok': False, 'error': f'Connection timed out. Is {host} reachable?'})
-            elif 'No route to host' in stderr:
-                return JsonResponse({'ok': False, 'error': f'No route to host {host}. Is the host reachable?'})
-            else:
-                return JsonResponse({'ok': False, 'error': f'Connection failed: {stderr}'})
-    except subprocess.TimeoutExpired:
-        return JsonResponse({'ok': False, 'error': 'Connection timed out (15s). Is the host reachable?'})
-    except FileNotFoundError:
-        return JsonResponse({'ok': False, 'error': 'SSH client not found on the server.'})
+            return JsonResponse({'ok': False, 'error': stderr or 'SSH test failed'})
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)})
 
@@ -843,11 +770,7 @@ def settings_disk_list(request):
     try:
         data = json.loads(stdout)
         devices = data.get('blockdevices', [])
-        filtered = []
-        for dev in devices:
-            if dev.get('name', '').startswith(('loop', 'ram', 'sr', 'zram')):
-                continue
-            filtered.append(_describe_block(dev))
+        filtered = [_describe_block(dev) for dev in devices]
         return JsonResponse({'ok': True, 'devices': filtered})
     except json.JSONDecodeError as e:
         return JsonResponse({'ok': False, 'error': f'Failed to parse lsblk: {e}'})
