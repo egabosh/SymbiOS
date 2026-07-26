@@ -36,7 +36,7 @@ def _start_reapply(playbooks=None):
     """Start symbios-reapply.sh as a tracked job and return the job id.
 
     The job streams live output to the browser via /exec/output/.
-    Returns a (job_id, title) tuple.
+    Returns a (job_id, title, cmd) tuple.
     """
     from .utils.jobs import create_job
     if playbooks:
@@ -48,7 +48,7 @@ def _start_reapply(playbooks=None):
         title = 'Reapplying all playbooks...'
     cmd = f'symbios-reapply.sh {flag}'
     job_id = create_job(cmd, timeout=3600)
-    return job_id, title
+    return job_id, title, cmd
 
 
 def _reapply_status():
@@ -99,7 +99,8 @@ def settings_ddns(request):
                     job_id = create_job(cmd, timeout=3600)
                     return JsonResponse({'ok': True, 'job': job_id,
                                          'title': 'Removing DNS config and reapplying...',
-                                         'message': 'DNS configuration removed.'})
+                                         'message': 'DNS configuration removed.',
+                                         'command': cmd})
                 messages.success(request, 'DNS configuration removed.')
                 messages.info(request, 'Reapplying all playbooks in the background...')
                 _start_reapply()
@@ -118,9 +119,10 @@ def settings_ddns(request):
                 config['all']['vars']['base_domain'] = self_domain
                 _save_inventory_config(config)
                 if is_ajax:
-                    job_id, title = _start_reapply()
+                    job_id, title, cmd = _start_reapply()
                     return JsonResponse({'ok': True, 'job': job_id, 'title': title,
-                                         'message': f'DNS settings saved for {self_domain}.'})
+                                         'message': f'DNS settings saved for {self_domain}.',
+                                         'command': cmd})
                 messages.success(request, f'DNS settings saved for {self_domain}.')
                 messages.info(request, 'Reapplying all playbooks in the background...')
                 _start_reapply()
@@ -148,7 +150,8 @@ def settings_ddns(request):
                     job_id = create_job(cmd, timeout=3600)
                     return JsonResponse({'ok': True, 'job': job_id,
                                          'title': 'Configuring DNS and reapplying...',
-                                         'message': 'DNS settings saved.'})
+                                         'message': 'DNS settings saved.',
+                                         'command': cmd})
                 messages.success(request, 'DNS settings saved.')
                 try:
                     ok, out = run_playbook('base-services/dedyn.yml', timeout=120)
@@ -441,10 +444,11 @@ def settings_localization(request):
             vars_['locale'] = request.POST.get('locale', '').strip()
             _save_inventory_config(config)
             if is_ajax:
-                job_id, title = _start_reapply(
+                job_id, title, cmd = _start_reapply(
                     playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'])
                 return JsonResponse({'ok': True, 'job': job_id, 'title': title,
-                                     'message': 'Localization settings saved.'})
+                                     'message': 'Localization settings saved.',
+                                     'command': cmd})
             messages.success(request, 'Localization settings saved.')
             messages.info(request, 'Reapplying localization playbooks in the background...')
             _start_reapply(playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'])
@@ -487,7 +491,8 @@ def settings_auth(request):
                 job_id = create_job(cmd, timeout=3600)
                 return JsonResponse({'ok': True, 'job': job_id,
                                      'title': 'Applying auth settings...',
-                                     'message': 'Auth settings saved.'})
+                                     'message': 'Auth settings saved.',
+                                     'command': cmd})
             messages.success(request, 'Auth settings saved.')
             try:
                 ok, out = run_playbook('base-services/authelia.yml', timeout=180)
@@ -557,6 +562,7 @@ def settings_ssh_keys(request):
 
     if request.method == "POST":
         action = request.POST.get("action", "save")
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         try:
             if action == "add":
                 new_key = request.POST.get("new_key", "").strip()
@@ -583,9 +589,18 @@ def settings_ssh_keys(request):
             # (reads from stdin, no shell-quoting issues).
             all_keys = system_keys + user_keys
             keys_content = "\n".join(all_keys) + "\n"
+            cmd = 'symbios-write-authorized-keys.sh'
+
+            if is_ajax:
+                from .utils.jobs import create_job
+                job_id = create_job(cmd, timeout=60, stdin_data=keys_content)
+                return JsonResponse({'ok': True, 'job': job_id,
+                                     'title': 'Saving SSH keys...',
+                                     'message': 'SSH keys saved.',
+                                     'command': cmd})
+
             ok, stdout, stderr = run_command(
-                'symbios-write-authorized-keys.sh', timeout=15,
-                stdin_data=keys_content)
+                cmd, timeout=15, stdin_data=keys_content)
             if not ok:
                 raise RuntimeError(f"Failed to write authorized_keys: {stderr}")
 
@@ -658,9 +673,10 @@ def settings_config(request):
                         b.write(f.read())
             _safe_write(CONFIG_PATH, content)
             if is_ajax:
-                job_id, title = _start_reapply()
+                job_id, title, cmd = _start_reapply()
                 return JsonResponse({'ok': True, 'job': job_id, 'title': title,
-                                     'message': 'Config saved.'})
+                                     'message': 'Config saved.',
+                                     'command': cmd})
             messages.success(request, 'Config saved.')
             messages.info(request, 'Reapplying all playbooks in the background...')
             _start_reapply()
@@ -694,9 +710,10 @@ def settings_backup(request):
             vars_['backup_server_path'] = request.POST.get('backup_server_path', '').strip()
             _save_inventory_config(config)
             if is_ajax:
-                job_id, title = _start_reapply(playbooks=['base-services/backup.yml'])
+                job_id, title, cmd = _start_reapply(playbooks=['base-services/backup.yml'])
                 return JsonResponse({'ok': True, 'job': job_id, 'title': title,
-                                     'message': 'Backup settings saved.'})
+                                     'message': 'Backup settings saved.',
+                                     'command': cmd})
             messages.success(request, 'Backup settings saved.')
             messages.info(request, 'Reapplying backup playbook in the background...')
             _start_reapply(playbooks=['base-services/backup.yml'])
@@ -851,7 +868,8 @@ def settings_disk_setup(request):
         job_id = create_job(cmd, timeout=600)
         return JsonResponse({'ok': True, 'job': job_id,
                              'title': 'Migrating /home to new disk...',
-                             'message': f'Setting up {device} as /home.'})
+                             'message': f'Setting up {device} as /home.',
+                             'command': cmd})
 
     # Fallback: synchronous execution
     ok, stdout, stderr = run_command(cmd, timeout=600)
@@ -882,7 +900,8 @@ def settings_disk_rollback(request):
         job_id = create_job(cmd, timeout=300)
         return JsonResponse({'ok': True, 'job': job_id,
                              'title': 'Rolling back /home migration...',
-                             'message': 'Restoring original /home location.'})
+                             'message': 'Restoring original /home location.',
+                             'command': cmd})
 
     ok, stdout, stderr = run_command(cmd, timeout=300)
     output = stdout
@@ -913,8 +932,17 @@ def settings_disk_umount(request):
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
-    ok, stdout, stderr = run_command(
-        f'{_HOME_PART_SCRIPT} umount', timeout=30)
+    cmd = f'{_HOME_PART_SCRIPT} umount'
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=300)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': 'Unmounting /home...',
+                             'message': '/home unmounted and LUKS volume closed.',
+                             'command': cmd})
+
+    ok, stdout, stderr = run_command(cmd, timeout=30)
     try:
         data = json.loads(stdout)
         return JsonResponse(data)

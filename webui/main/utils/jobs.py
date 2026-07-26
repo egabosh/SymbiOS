@@ -29,12 +29,15 @@ _JOBS = {}
 _JOBS_LOCK = threading.Lock()
 
 
-def create_job(cmd, timeout=900):
+def create_job(cmd, timeout=900, stdin_data=None):
     """Start a command as a background job and return its id.
 
     The command is executed via the SSH exec gateway; output is captured
     incrementally. Returns the job id string for the browser to poll via
     :func:`get_job_output`.
+
+    If stdin_data is provided, it is sent to the remote command's stdin
+    before closing the channel.
     """
     job_id = uuid.uuid4().hex
     job = {'output': '', 'done': False, 'success': False, 'lock': threading.Lock()}
@@ -43,7 +46,7 @@ def create_job(cmd, timeout=900):
         for old in [k for k, v in _JOBS.items() if v['done']]:
             _JOBS.pop(old, None)
         _JOBS[job_id] = job
-    threading.Thread(target=_run_job, args=(job, cmd), daemon=True).start()
+    threading.Thread(target=_run_job, args=(job, cmd, stdin_data), daemon=True).start()
     return job_id
 
 
@@ -56,11 +59,11 @@ def get_job_output(job_id):
         return job['output'], job['done'], job['success']
 
 
-def _run_job(job, cmd):
+def _run_job(job, cmd, stdin_data=None):
     """Run a command via the SSH exec gateway, appending output as it arrives."""
     overall_ok = True
     try:
-        for kind, text in stream_command(cmd, timeout=900):
+        for kind, text in stream_command(cmd, timeout=900, stdin_data=stdin_data):
             if kind == 'rc':
                 if text != 0:
                     overall_ok = False

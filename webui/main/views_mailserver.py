@@ -54,7 +54,8 @@ def settings_mailserver(request):
                         job_id = create_job(cmd, timeout=3600)
                         return JsonResponse({'ok': True, 'job': job_id,
                                              'title': 'Deleting SMTP config...',
-                                             'message': 'SMTP configuration deleted.'})
+                                             'message': 'SMTP configuration deleted.',
+                                             'command': cmd})
                     ok, out = run_playbook('base-services/smtp.yml', timeout=180)
                     if ok:
                         messages.success(request, 'SMTP configuration deleted.')
@@ -119,7 +120,8 @@ def settings_mailserver(request):
                 job_id = create_job(cmd, timeout=3600)
                 return JsonResponse({'ok': True, 'job': job_id,
                                      'title': 'Applying mailserver settings...',
-                                     'message': 'Mailserver settings saved.'})
+                                     'message': 'Mailserver settings saved.',
+                                     'command': cmd})
 
             ok, out = run_playbook('base-services/smtp.yml', timeout=180)
             if ok and vars_.get('twofa_enabled'):

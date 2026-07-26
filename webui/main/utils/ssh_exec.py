@@ -244,11 +244,14 @@ def run_service_status(playbook, name, timeout=120):
     return _exec(cmd, timeout=timeout)
 
 
-def stream_command(cmd, timeout=600):
+def stream_command(cmd, timeout=600, stdin_data=None):
     """Run a gateway command and yield ('out'|'err'|'rc', text) incrementally.
 
     Used by the WebUI SSE endpoint to show live output (e.g. ansible tasks as
     they execute). Blocks reading the SSH channel until the remote process ends.
+
+    If stdin_data is provided, it is sent to the remote command's stdin
+    before closing the channel.
     """
     import time
     global _ssh_client
@@ -271,6 +274,10 @@ def stream_command(cmd, timeout=600):
         except Exception:
             pass
         channel.exec_command(_wrap(cmd))
+        # Send stdin data if provided, then close stdin
+        if stdin_data:
+            channel.sendall(stdin_data.encode('utf-8'))
+            channel.shutdown_write()
         while True:
             if channel.recv_ready():
                 data = channel.recv(4096)
