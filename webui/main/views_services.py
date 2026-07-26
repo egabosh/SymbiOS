@@ -113,6 +113,7 @@ STATE_META = {
     'running': ('Running', 'bg-success'),
     'stopped': ('Stopped', 'bg-danger'),
     'not-installed': ('Not installed', 'bg-secondary'),
+    'inactive': ('Inactive', 'bg-secondary'),
     'error': ('Error', 'bg-warning text-dark'),
 }
 
@@ -127,9 +128,9 @@ def _state_badge(state):
 def _aggregate_state(states):
     """Overall playbook state from its per-service states."""
     if not states:
-        return 'not-installed'
+        return 'inactive'
     if all(s == 'not-installed' for s in states):
-        return 'not-installed'
+        return 'inactive'
     if any(s == 'running' for s in states):
         return 'running'
     return 'stopped'
