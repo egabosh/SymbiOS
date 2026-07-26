@@ -4,22 +4,6 @@
 {% block content %}
 <h2>Services</h2>
 
-<style>
-  .services-docs h1 { font-size: 1.4rem; margin-top: 1.5rem; }
-  .services-docs h2 { font-size: 1.25rem; margin-top: 1.8rem; border-bottom: 1px solid var(--bs-border-color); padding-bottom: 0.3rem; }
-  .services-docs h3 { font-size: 1.1rem; margin-top: 1.4rem; }
-  .services-docs table { width: 100%; margin: 1rem 0; }
-  .services-docs th, .services-docs td { padding: 0.4rem 0.7rem; border: 1px solid var(--bs-border-color); }
-  .services-docs th { background: var(--bs-tertiary-bg); }
-  .services-docs pre { background: var(--bs-dark-bg-subtle); color: var(--bs-body-color); padding: 0.8rem; border-radius: 0.375rem; overflow-x: auto; }
-  .services-docs code { font-size: 0.88em; }
-  .services-docs p code { background: var(--bs-tertiary-bg); padding: 0.15em 0.35em; border-radius: 0.2rem; }
-  .services-docs blockquote { border-left: 3px solid var(--bs-primary); margin: 1rem 0; padding: 0.5rem 1rem; background: var(--bs-tertiary-bg); }
-  .services-docs ul { padding-left: 1.5rem; }
-  .services-docs li { margin-bottom: 0.3rem; }
-  .services-docs hr { margin: 1.5rem 0; }
-</style>
-
 <div class="services-docs">
   {{ docs_md|markdown }}
 </div>

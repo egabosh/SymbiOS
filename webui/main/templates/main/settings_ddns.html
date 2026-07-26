@@ -1,8 +1,5 @@
 {% extends "main/base.html" %}
 {% load static %}
-{% block sidebar %}
-    {% include "main/sidebar_settings.html" %}
-{% endblock %}
 {% block content %}
 <h2><i class="bi bi-globe"></i> DNS</h2>
 
@@ -237,12 +234,6 @@
     </div>
   </div>
 </div>
-
-<style>
-#host-status, #api-key-status {
-  min-height: 1.5em;
-}
-</style>
 
 <script>
 

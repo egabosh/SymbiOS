@@ -27,6 +27,7 @@ from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
 from .views import _get_inventory_config, _save_inventory_config
 from .utils.ssh_exec import run_playbook
+from .utils.http import is_ajax_request
 
 
 @login_required
@@ -35,7 +36,7 @@ def settings_mailserver(request):
     vars_ = config.get('all', {}).get('vars', {})
 
     if request.method == 'POST':
-        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        is_ajax = is_ajax_request(request)
         try:
             if request.POST.get('action') == 'delete':
                 if vars_.get('twofa_enabled'):

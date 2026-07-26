@@ -21,6 +21,7 @@ from django.http import JsonResponse
 from .views import _get_inventory_config, _save_inventory_config, _safe_write
 from .constants import CONFIG_PATH
 from .utils.ssh_exec import run_playbook, run_command
+from .utils.http import is_ajax_request
 
 import urllib.request
 import urllib.error
@@ -66,7 +67,7 @@ def settings_ddns(request):
         current_dns_mode = 'desec' if vars_.get('ddns_host') else ''
 
     if request.method == 'POST':
-        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        is_ajax = is_ajax_request(request)
         action = request.POST.get('action', 'save')
         dns_mode = request.POST.get('dns_mode', 'desec')
         try:
@@ -424,7 +425,7 @@ def settings_localization(request):
         pass
 
     if request.method == 'POST':
-        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        is_ajax = is_ajax_request(request)
         try:
             vars_['timezone'] = request.POST.get('timezone', '').strip()
             vars_['keyboard'] = request.POST.get('keyboard', '').strip()
@@ -458,7 +459,7 @@ def settings_auth(request):
     vars_ = config.get('all', {}).get('vars', {})
 
     if request.method == 'POST':
-        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        is_ajax = is_ajax_request(request)
         try:
             twofa_wanted = request.POST.get('twofa_enabled', 'false') == 'true'
             if twofa_wanted:
@@ -550,7 +551,7 @@ def settings_ssh_keys(request):
 
     if request.method == "POST":
         action = request.POST.get("action", "save")
-        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        is_ajax = is_ajax_request(request)
         try:
             if action == "add":
                 new_key = request.POST.get("new_key", "").strip()
@@ -635,7 +636,7 @@ def settings_config(request):
         raw_yaml = f'# Error reading config: {e}\n'
 
     if request.method == 'POST':
-        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        is_ajax = is_ajax_request(request)
         content = request.POST.get('config_content', '')
         # Validate YAML before saving
         try:
@@ -690,7 +691,7 @@ def settings_backup(request):
     vars_ = config['all']['vars']
 
     if request.method == 'POST':
-        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        is_ajax = is_ajax_request(request)
         try:
             vars_['backup_server_host'] = request.POST.get('backup_server_host', '').strip()
             vars_['backup_server_port'] = request.POST.get('backup_server_port', '').strip() or '22'
@@ -850,7 +851,7 @@ def settings_disk_setup(request):
         cmd_parts.append(f'password={password}')
     cmd = ' '.join(cmd_parts)
 
-    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    is_ajax = is_ajax_request(request)
     if is_ajax:
         from .utils.jobs import create_job
         job_id = create_job(cmd, timeout=600)
@@ -882,7 +883,7 @@ def settings_disk_rollback(request):
 
     cmd = f'{_HOME_PART_SCRIPT} rollback'
 
-    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    is_ajax = is_ajax_request(request)
     if is_ajax:
         from .utils.jobs import create_job
         job_id = create_job(cmd, timeout=300)
@@ -922,7 +923,7 @@ def settings_disk_umount(request):
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
     cmd = f'{_HOME_PART_SCRIPT} umount'
-    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    is_ajax = is_ajax_request(request)
     if is_ajax:
         from .utils.jobs import create_job
         job_id = create_job(cmd, timeout=300)

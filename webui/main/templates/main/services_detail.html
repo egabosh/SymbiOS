@@ -10,10 +10,7 @@
 
 <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
   <div>
-    <h2 class="mb-0">
-      {{ item.title }}
-      {% if item.group == 'base-services' %}<span class="badge bg-info align-middle" style="font-size:0.6rem;">built-in</span>{% endif %}
-    </h2>
+    <h2 class="mb-0">{{ item.title }}</h2>
     <div class="text-muted">{{ item.docs.category }}</div>
   </div>
 </div>
@@ -84,15 +81,6 @@
 {% endblock %}
 
 {% block scripts %}
-<style>
-  #source-output .yk-comment { color: #6a9955; font-style: italic; }
-  #source-output .yk-key     { color: #79c0ff; }
-  #source-output .yk-str     { color: #ce9178; }
-  #source-output .yk-num     { color: #b5cea8; }
-  #source-output .yk-bool    { color: #c586c0; }
-  #source-output .yk-list    { color: #c586c0; }
-  #source-output .yk-jinja   { color: #dcdcaa; }
-</style>
 <script>
 const PLAYBOOK = "{{ item.playbook }}";
 function loadStatus() {
