@@ -421,17 +421,17 @@ def services_status(request, playbook):
     states = [s['state'] for s in out]
     overall = _aggregate_state(states)
 
-    # A service is "installed" if systemd reports any of its units as
-    # running or stopped (not all not-installed), OR if it is tracked in
-    # the state file (for reapply tracking).
-    installed = overall in ('running', 'stopped')
+    # A service is "installed" if the state file tracks it, OR if any
+    # unit is running/stopped (installed outside SymbiOS).
+    installed = False
+    try:
+        from .utils.ssh_exec import run_command as _run_command
+        ok, _, _ = _run_command(f'symbios-state.sh is-installed {playbook}', timeout=5)
+        installed = ok
+    except Exception:
+        pass
     if not installed:
-        try:
-            from .utils.ssh_exec import run_command as _run_command
-            rc, _, _ = _run_command(f'symbios-state.sh is-installed {playbook}', timeout=5)
-            installed = (rc == 0)
-        except Exception:
-            pass  # non-critical, default to False
+        installed = overall in ('running', 'stopped')
 
     return JsonResponse({
         'services': out,
