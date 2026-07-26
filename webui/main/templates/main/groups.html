@@ -29,7 +29,7 @@
                         {% endfor %}
                     </td>
                     <td class="text-end">
-                        <form method="post" action="/groups/{{ group }}/delete/" class="d-inline" onsubmit="return confirm('Really delete group &quot;{{ group }}&quot;? All members will be removed first.')">
+                        <form method="post" action="/groups/{{ group }}/delete/" class="d-inline" onsubmit="return confirm('Really delete group &quot;{{ group }}&quot;? All members will be removed first.')" data-exec="true">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete group">&#128465;</button>
                         </form>
@@ -48,7 +48,7 @@
 <div class="modal fade" id="createGroupModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
-            <form method="post" action="/groups/create/">
+            <form method="post" action="/groups/create/" data-exec="true">
                 {% csrf_token %}
                 <div class="modal-header">
                     <h5 class="modal-title">Create New Group</h5>

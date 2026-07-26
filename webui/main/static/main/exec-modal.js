@@ -26,6 +26,7 @@ Also intercepts all forms with data-exec="true" attribute:
   let running = false;
   let currentJob = null;
   let rawLen = 0;
+  let _needsReload = false;
 
   /* Append only the new tail of raw output as rendered HTML.
      Tracks the previous raw length so we only render the delta. */
@@ -66,6 +67,8 @@ Also intercepts all forms with data-exec="true" attribute:
     /* Remove the spinner from the status line */
     var spinner = statusEl.querySelector('.spinner-border');
     if (spinner) spinner.remove();
+    /* Reload page on close to reflect updated data */
+    _needsReload = true;
   }
 
   function open(title) {
@@ -86,6 +89,10 @@ Also intercepts all forms with data-exec="true" attribute:
     running = false;
     overlay.classList.add('d-none');
     document.body.style.overflow = '';
+    if (_needsReload) {
+      _needsReload = false;
+      window.location.reload();
+    }
   }
 
   function start(jobId, title) {
