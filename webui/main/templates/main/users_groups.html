@@ -22,7 +22,7 @@
                 <tr>
                     <td><strong>{{ user.uid }}</strong></td>
                     <td>
-                        <form method="post" action="/users/{{ user.uid }}/email/" class="d-inline">
+                        <form method="post" action="/users/{{ user.uid }}/email/" class="d-inline" data-exec="true">
                             {% csrf_token %}
                             <div class="input-group input-group-sm" style="width:220px;display:inline-flex">
                                 <input type="email" class="form-control form-control-sm" name="email" value="{{ user.email|default:'' }}" placeholder="email">
@@ -34,7 +34,7 @@
                         {% for g in user.groups %}
                         <span class="badge bg-secondary">
                             {{ g }}
-                            <form method="post" action="/users/group/remove-user/" class="d-inline">
+                            <form method="post" action="/users/group/remove-user/" class="d-inline" data-exec="true">
                                 {% csrf_token %}
                                 <input type="hidden" name="uid" value="{{ user.uid }}">
                                 <input type="hidden" name="group" value="{{ g }}">
@@ -48,7 +48,7 @@
                             <ul class="dropdown-menu">
                                 {% for g in user.available_groups %}
                                 <li>
-                                    <form method="post" action="/users/group/add-user/">
+                                    <form method="post" action="/users/group/add-user/" data-exec="true">
                                         {% csrf_token %}
                                         <input type="hidden" name="uid" value="{{ user.uid }}">
                                         <input type="hidden" name="group" value="{{ g }}">
@@ -61,14 +61,14 @@
                         {% endif %}
                     </td>
                     <td>
-                        <form method="post" action="/users/{{ user.uid }}/password/" class="d-inline">
+                        <form method="post" action="/users/{{ user.uid }}/password/" class="d-inline" data-exec="true">
                             {% csrf_token %}
                             <div class="input-group input-group-sm" style="width:180px;display:inline-flex">
                                 <input type="password" class="form-control form-control-sm" name="password" placeholder="New password">
                                 <button type="submit" class="btn btn-outline-warning btn-sm" title="Change password">&#128273;</button>
                             </div>
                         </form>
-                        <form method="post" action="/users/{{ user.uid }}/delete/" class="d-inline" onsubmit="return confirm('Really delete user?')">
+                        <form method="post" action="/users/{{ user.uid }}/delete/" class="d-inline" onsubmit="return confirm('Really delete user?')" data-exec="true">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">&#128465;</button>
                         </form>
@@ -87,7 +87,7 @@
 <div class="modal fade" id="createUserModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
-            <form method="post" action="/users/create/">
+            <form method="post" action="/users/create/" data-exec="true">
                 {% csrf_token %}
                 <div class="modal-header">
                     <h5 class="modal-title">Create New User</h5>

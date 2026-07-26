@@ -15,10 +15,12 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from django.shortcuts import render, redirect
+from django.http import JsonResponse
 from .decorators import login_required
 from django.contrib import messages
 from .views import _get_ldap_users, _get_ldap_groups
 from .utils.ssh_exec import run_command
+from .utils.jobs import create_job
 
 
 @login_required
@@ -44,7 +46,10 @@ def user_create(request):
         group = request.POST.get('group', 'users')
 
         if not uid or not password:
-            messages.error(request, 'All fields are required.')
+            msg = 'All fields are required.'
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'ok': False, 'error': msg}, status=400)
+            messages.error(request, msg)
             return redirect('users')
 
         cmd = f'symbios-ldap-user.sh --create --uid {uid} --password {password}'
@@ -52,6 +57,13 @@ def user_create(request):
             cmd += f' --email {email}'
         if group:
             cmd += f' --group {group}'
+
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            job_id = create_job(cmd, timeout=300)
+            return JsonResponse({'ok': True, 'job': job_id,
+                                 'title': f'Creating user "{uid}"...',
+                                 'message': f'User "{uid}" created.'})
+
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
         if ok:
@@ -65,6 +77,13 @@ def user_create(request):
 def user_delete(request, uid):
     if request.method == 'POST':
         cmd = f'symbios-ldap-user.sh --delete --uid {uid}'
+
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            job_id = create_job(cmd, timeout=300)
+            return JsonResponse({'ok': True, 'job': job_id,
+                                 'title': f'Deleting user "{uid}"...',
+                                 'message': f'User "{uid}" deleted.'})
+
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
         if ok:
@@ -79,10 +98,20 @@ def user_set_password(request, uid):
     if request.method == 'POST':
         password = request.POST.get('password', '')
         if not password:
-            messages.error(request, 'Password is required.')
+            msg = 'Password is required.'
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'ok': False, 'error': msg}, status=400)
+            messages.error(request, msg)
             return redirect('users')
 
         cmd = f'symbios-ldap-user.sh --modify --uid {uid} --password {password}'
+
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            job_id = create_job(cmd, timeout=300)
+            return JsonResponse({'ok': True, 'job': job_id,
+                                 'title': f'Setting password for "{uid}"...',
+                                 'message': f'Password for "{uid}" changed.'})
+
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
         if ok:
@@ -97,6 +126,13 @@ def user_update_email(request, uid):
     if request.method == 'POST':
         email = request.POST.get('email', '').strip()
         cmd = f'symbios-ldap-user.sh --modify --uid {uid} --email {email}'
+
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            job_id = create_job(cmd, timeout=300)
+            return JsonResponse({'ok': True, 'job': job_id,
+                                 'title': f'Updating email for "{uid}"...',
+                                 'message': f'Email for "{uid}" updated.'})
+
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
         if ok:
@@ -111,10 +147,20 @@ def group_create(request):
     if request.method == 'POST':
         name = request.POST.get('name', '').strip()
         if not name:
-            messages.error(request, 'Name is required.')
+            msg = 'Name is required.'
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'ok': False, 'error': msg}, status=400)
+            messages.error(request, msg)
             return redirect('groups')
 
         cmd = f'symbios-ldap-groups.sh --create --name {name}'
+
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            job_id = create_job(cmd, timeout=300)
+            return JsonResponse({'ok': True, 'job': job_id,
+                                 'title': f'Creating group "{name}"...',
+                                 'message': f'Group "{name}" created.'})
+
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
         if ok:
@@ -128,6 +174,13 @@ def group_create(request):
 def group_delete(request, name):
     if request.method == 'POST':
         cmd = f'symbios-ldap-groups.sh --delete --name {name}'
+
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            job_id = create_job(cmd, timeout=300)
+            return JsonResponse({'ok': True, 'job': job_id,
+                                 'title': f'Deleting group "{name}"...',
+                                 'message': f'Group "{name}" deleted.'})
+
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
         if ok:
@@ -144,6 +197,13 @@ def group_add_user(request):
         group = request.POST.get('group', '')
         if uid and group:
             cmd = f'symbios-ldap-groups.sh --add-user --name {group} --uid {uid}'
+
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                job_id = create_job(cmd, timeout=300)
+                return JsonResponse({'ok': True, 'job': job_id,
+                                     'title': f'Adding "{uid}" to "{group}"...',
+                                     'message': f'"{uid}" added to "{group}".'})
+
             ok, stdout, stderr = run_command(cmd, timeout=30)
             output = (stdout + '\n' + stderr).strip()
             if ok:
@@ -160,6 +220,13 @@ def group_remove_user(request):
         group = request.POST.get('group', '')
         if uid and group:
             cmd = f'symbios-ldap-groups.sh --remove-user --name {group} --uid {uid}'
+
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                job_id = create_job(cmd, timeout=300)
+                return JsonResponse({'ok': True, 'job': job_id,
+                                     'title': f'Removing "{uid}" from "{group}"...',
+                                     'message': f'"{uid}" removed from "{group}".'})
+
             ok, stdout, stderr = run_command(cmd, timeout=30)
             output = (stdout + '\n' + stderr).strip()
             if ok:
