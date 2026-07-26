@@ -1,7 +1,12 @@
 {% extends "main/base.html" %}
+{% load markdown_extras %}
 {% block sidebar %}{% include "main/sidebar_services.html" %}{% endblock %}
 {% block content %}
-<h2><i class="bi bi-file-earmark-code"></i> Playbooks</h2>
+<h2><i class="bi bi-file-earmark-code"></i> Custom Playbooks</h2>
+
+<div class="services-docs mb-4">
+  {{ playbooks_md|markdown }}
+</div>
 
 <div class="row mb-3">
   <div class="col-md-12">
