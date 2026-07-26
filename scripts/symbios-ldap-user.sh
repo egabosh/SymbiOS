@@ -285,9 +285,7 @@ changetype: modify"
     if [[ -n "${f_email}" ]]
     then
       f_ldif="${f_ldif}
-delete: mail
--
-add: mail
+replace: mail
 mail: ${f_email}"
       f_need_sep=1
     fi
