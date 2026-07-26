@@ -30,21 +30,6 @@ Also intercepts all forms with data-exec="true" attribute:
   let rawLen = 0;
   let _needsReload = false;
 
-  /* Read CSRF token from cookie for fetch() POST requests */
-  function getCsrfToken() {
-    var name = 'csrftoken';
-    if (document.cookie && document.cookie !== '') {
-      var cookies = document.cookie.split(';');
-      for (var i = 0; i < cookies.length; i++) {
-        var cookie = cookies[i].trim();
-        if (cookie.substring(0, name.length + 1) === (name + '=')) {
-          return decodeURIComponent(cookie.substring(name.length + 1));
-        }
-      }
-    }
-    return '';
-  }
-
   /* Append only the new tail of raw output as rendered HTML.
      Tracks the previous raw length so we only render the delta. */
   function appendDelta(raw) {

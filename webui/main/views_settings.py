@@ -15,7 +15,6 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from django.shortcuts import render, redirect
-from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
@@ -981,7 +980,6 @@ def settings_playbooks(request):
     })
 
 
-@csrf_exempt
 @login_required
 def settings_playbooks_upload(request):
     """AJAX POST — upload one or more .yml playbook files."""
@@ -1012,7 +1010,6 @@ def settings_playbooks_upload(request):
     return JsonResponse({'ok': True, 'saved': saved, 'errors': errors})
 
 
-@csrf_exempt
 @login_required
 def settings_playbooks_delete(request):
     """AJAX POST — delete a user-uploaded playbook."""

@@ -21,12 +21,10 @@ with live output streamed to a modal overlay in the browser.
 """
 
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from .utils.jobs import create_job, get_job_output
 
 
-@csrf_exempt
 @login_required
 def exec_start(request):
     """Start a command as a background job and return its id.
