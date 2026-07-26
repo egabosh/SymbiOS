@@ -219,7 +219,7 @@ def services_detail(request, playbook):
         'item': item,
         'action_list': action_list,
         'log_units': log_units,
-        'all_services': all_catalog,
+        'all_services': _order_catalog(all_catalog),
         **_sidebar_context(all_catalog),
     })
     # Never cache: the inline JS/logic changes frequently during development
