@@ -247,7 +247,7 @@ function loadDisks() {
         return;
       }
 
-      /* Build simplified table */
+      /* Build simplified table — physical disks only, no partitions */
       var html = '<div class="table-responsive"><table class="table table-sm align-middle">';
       html += '<thead><tr><th>Disk</th><th>Size</th><th>Status</th></tr></thead><tbody>';
 
@@ -255,7 +255,7 @@ function loadDisks() {
       select.innerHTML = '<option value="">-- select a disk --</option>';
 
       diskData.forEach(function(dev) {
-        html += renderDevice(dev, 0);
+        html += renderDevice(dev);
         addDeviceOptions(dev, select);
       });
 
@@ -316,63 +316,58 @@ function doRollback() {
     });
 }
 
-/* Render a single disk row in the "Available Disks" table */
-function renderDevice(dev, indent) {
-  var html = '';
-  var pad = 'padding-left: ' + (indent * 20) + 'px;';
-  var isRoot = dev.mountpoint === '/';
-  var isBoot = dev.mountpoint === '/boot/firmware';
-  var isHome = dev.mountpoint === '/home';
+/* Render a disk row — only physical disks, skip partitions */
+function renderDevice(dev) {
+  /* Only show physical disks (skip partitions, loops, etc.) */
+  if (dev.type !== 'disk') return '';
+
+  /* Determine status from this disk or its children */
+  var status = getStatus(dev);
   var rowClass = '';
-  if (isRoot) rowClass = 'table-danger';
-  else if (isHome) rowClass = 'table-success';
-  else if (dev.mountpoint) rowClass = 'table-warning';
+  if (status === 'system') rowClass = 'table-danger';
+  else if (status === 'data') rowClass = 'table-success';
 
-  /* Disk name: model if available, otherwise a friendly label */
   var diskLabel = dev.model || dev.name;
-  if (isRoot) diskLabel += ' (system disk)';
 
-  html += '<tr class="' + rowClass + '">';
-  html += '<td style="' + pad + '">' + diskLabel + '</td>';
+  var html = '<tr class="' + rowClass + '">';
+  html += '<td>' + diskLabel + '</td>';
   html += '<td>' + dev.size + '</td>';
   html += '<td>';
-  if (isRoot) html += '<span class="badge bg-danger">System disk</span>';
-  else if (isHome) html += '<span class="badge bg-success">Data disk</span>';
-  else if (isBoot) html += '<span class="badge bg-info">Boot</span>';
-  else if (dev.mountpoint) html += '<span class="badge bg-warning text-dark">In use</span>';
-  else if (dev.type === 'disk') html += '<span class="badge bg-secondary">Available</span>';
-  else html += '<span class="text-muted">-</span>';
+  if (status === 'system') html += '<span class="badge bg-danger">System disk</span>';
+  else if (status === 'data') html += '<span class="badge bg-success">Data disk</span>';
+  else html += '<span class="badge bg-secondary">Available</span>';
   html += '</td>';
   html += '</tr>';
-
-  (dev.children || []).forEach(function(child) {
-    html += renderDevice(child, indent + 1);
-  });
   return html;
 }
 
-/* Add options to the target disk select — only unmounted disks */
-function addDeviceOptions(dev, select, prefix) {
-  prefix = prefix || '';
-  if (dev.type === 'part' || dev.type === 'disk') {
-    var hasMountedChild = hasMountedChildren(dev);
-    if (dev.mountpoint !== '/' && dev.mountpoint !== '/boot/firmware' &&
-        dev.mountpoint !== '/home' && !dev.mountpoint && !hasMountedChild) {
-      var opt = document.createElement('option');
-      opt.value = dev.path;
-      /* Show only size and model — no /dev/ path */
-      var label = dev.size;
-      if (dev.model) label += ' — ' + dev.model;
-      else label += ' — ' + dev.name;
-      opt.textContent = prefix + label;
-      opt.dataset.model = dev.model || '';
-      opt.dataset.size = dev.size || '';
-      select.appendChild(opt);
-    }
+/* Determine disk status from mount points (this disk or any child) */
+function getStatus(dev) {
+  if (dev.mountpoint === '/') return 'system';
+  if (dev.mountpoint === '/home') return 'data';
+  for (var i = 0; i < (dev.children || []).length; i++) {
+    var child = dev.children[i];
+    if (child.mountpoint === '/') return 'system';
+    if (child.mountpoint === '/home') return 'data';
   }
-  (dev.children || []).forEach(function(child) {
-    addDeviceOptions(child, select, '  ');
-  });
+  return 'available';
+}
+
+/* Add options to the target disk select — only unmounted disks */
+function addDeviceOptions(dev, select) {
+  if (dev.type !== 'disk') return;
+  var hasMountedChild = hasMountedChildren(dev);
+  if (dev.mountpoint || hasMountedChild) return;
+
+  var opt = document.createElement('option');
+  opt.value = dev.path;
+  var label = dev.size;
+  if (dev.model) label += ' — ' + dev.model;
+  else label += ' — ' + dev.name;
+  opt.textContent = label;
+  opt.dataset.model = dev.model || '';
+  opt.dataset.size = dev.size || '';
+  select.appendChild(opt);
 }
 
 function hasMountedChildren(dev) {
