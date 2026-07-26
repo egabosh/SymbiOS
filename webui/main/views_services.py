@@ -20,7 +20,6 @@ import threading
 import uuid
 import os
 
-from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from .playbook_catalog import get_catalog, get_playbook
 from .utils.ssh_exec import (
@@ -203,7 +202,6 @@ def services_detail(request, playbook):
     return response
 
 
-@csrf_exempt
 @login_required
 def services_action(request, playbook):
     """Start an action as a background job and return a job id.
@@ -310,7 +308,6 @@ def services_log_tail(request, playbook):
     })
 
 
-@csrf_exempt
 @login_required
 def services_log_start(request, playbook):
     """Start a live (follow) log stream for one unit and return its job id.
@@ -349,7 +346,6 @@ def services_log_start(request, playbook):
     return JsonResponse({'job': job_id, 'unit': unit})
 
 
-@csrf_exempt
 @login_required
 def services_log_stop(request, playbook):
     """Stop a live log stream started by services_log_start."""
