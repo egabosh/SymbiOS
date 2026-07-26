@@ -81,10 +81,35 @@ def _get_healthcheck_status():
     return status
 
 
+def _get_running_containers():
+    """Return a set of running Docker container names on the host."""
+    from .utils.ssh_exec import run_command
+    try:
+        ok, stdout, _ = run_command('docker ps --format {{.Names}}', timeout=5)
+        if ok and stdout:
+            return set(stdout.strip().splitlines())
+    except Exception:
+        pass
+    return set()
+
+
 def _sidebar_context(catalog):
     """Build context data for the sidebar: installed set and healthcheck status."""
+    installed = _get_installed_playbooks()
+    running_names = _get_running_containers()
+    for item in catalog:
+        pb = item.get('playbook', '')
+        if pb in installed:
+            continue
+        svc_names = set()
+        for svc in (item.get('docs') or {}).get('service_control', {}).get('services', []):
+            name = svc.get('name')
+            if name:
+                svc_names.add(name)
+        if svc_names & running_names:
+            installed.add(pb)
     return {
-        'installed_playbooks': _get_installed_playbooks(),
+        'installed_playbooks': installed,
         'healthcheck_status': _get_healthcheck_status(),
     }
 
