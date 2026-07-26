@@ -114,6 +114,10 @@ function loadStatus() {
         ib.textContent = 'Not installed';
       }
       const area = document.getElementById('status-area');
+      if (!d.installed) {
+        area.innerHTML = '<div class="text-muted small">Service not installed — no managed units.</div>';
+        return;
+      }
       if (!d.services || !d.services.length) {
         area.innerHTML = '<div class="text-muted small">no managed units</div>';
         return;
