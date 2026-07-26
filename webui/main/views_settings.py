@@ -51,18 +51,6 @@ def _start_reapply(playbooks=None):
     return job_id, title, cmd
 
 
-def _reapply_status():
-    """Read the current reapply status from the host via shell script."""
-    try:
-        ok, stdout, _ = run_command('symbios-reapply-status.sh', timeout=5)
-        if ok and stdout:
-            return stdout.strip()
-    except Exception:
-        pass
-    return 'idle'
-
-
-
 @login_required
 def settings_ddns(request):
     config = _get_inventory_config()
@@ -973,12 +961,12 @@ def _safe_playbook_name(name):
 @login_required
 def settings_playbooks(request):
     """Show list of user-uploaded playbooks with upload form."""
+    from .playbook_catalog import parse_docs
     _ensure_user_playbooks_dir()
     files = sorted(f for f in os.listdir(USER_PLAYBOOKS_DIR)
                    if f.endswith('.yml') and f != 'inventory.yml')
     playbooks = []
     for fn in files:
-        from .playbook_catalog import parse_docs
         path = os.path.join(USER_PLAYBOOKS_DIR, fn)
         docs = parse_docs(path)
         playbooks.append({
@@ -1037,32 +1025,3 @@ def settings_playbooks_delete(request):
     get_catalog(force=True)
     return JsonResponse({'ok': True, 'message': f'Deleted {fn}'})
 
-
-@login_required
-def settings_reapply_status(request):
-    """AJAX GET — return current reapply progress.
-
-    Status file values:
-      idle                     — not running
-      running                  — in progress (no detail)
-      running:<n>/<total> <pb> — in progress with detail
-      done:<exit_code>         — finished (0 = success)
-    """
-    raw = _reapply_status()
-    if raw.startswith('running:'):
-        parts = raw.split(' ', 2)
-        progress = parts[0].replace('running:', '')
-        playbook = parts[1] if len(parts) > 1 else ''
-        return JsonResponse({
-            'status': 'running',
-            'progress': progress,
-            'playbook': playbook,
-        })
-    elif raw.startswith('done:'):
-        code = raw.replace('done:', '')
-        return JsonResponse({
-            'status': 'done',
-            'success': code == '0',
-        })
-    else:
-        return JsonResponse({'status': 'idle'})

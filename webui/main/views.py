@@ -52,21 +52,6 @@ def _save_inventory_config(config):
     _safe_write(CONFIG_PATH, dumped)
 
 
-def _get_ldap_vars():
-    config = _get_inventory_config()
-    vars_ = config.get('all', {}).get('vars', {})
-    base_dn = vars_.get('ldap_basedn', 'dc=openldap,dc=local')
-    admin_pw = vars_.get('ldap_admin_password', 'changeme')
-    try:
-        with open('/config/.ldap_admin_pw') as f:
-            pw = f.read().strip()
-            if pw:
-                admin_pw = pw
-    except Exception:
-        pass
-    return {'base_dn': base_dn, 'admin_pw': admin_pw}
-
-
 def _get_ldap_groups():
     """Get all LDAP groups by calling symbios-ldap-list.sh via symbios-exec.sh."""
     from .utils.ssh_exec import run_command
