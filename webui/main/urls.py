@@ -23,6 +23,7 @@ from . import views_logs
 from . import views_change_password
 from . import views_services
 from . import views_exec
+from .utils.log_utils import logs_stream
 
 urlpatterns = [
     path('health/', views.health, name='health'),
@@ -65,7 +66,7 @@ urlpatterns = [
     path('settings/playbooks/delete/', views_settings.settings_playbooks_delete, name='settings_playbooks_delete'),
     path('settings/reapply/status/', views_settings.settings_reapply_status, name='settings_reapply_status'),
     path('logs/', views_logs.logs, name='logs'),
-    path('logs/stream/', views.logs_stream, name='logs_stream'),
+    path('logs/stream/', logs_stream, name='logs_stream'),
     path('logs/containers/', views.container_list, name='logs_containers'),
     path('users/', views_users.users, name='users'),
     path('users/create/', views_users.user_create, name='user_create'),
