@@ -21,6 +21,8 @@ Also intercepts all forms with data-exec="true" attribute:
   const statusEl = document.getElementById('execStatus');
   const closeBtn = document.getElementById('execClose');
   const doneBtn = document.getElementById('execDone');
+  const commandWrap = document.getElementById('execCommandWrap');
+  const commandEl = document.getElementById('execCommand');
 
   let pollTimer = null;
   let running = false;
@@ -71,11 +73,17 @@ Also intercepts all forms with data-exec="true" attribute:
     _needsReload = true;
   }
 
-  function open(title) {
+  function open(title, command) {
     outputEl.innerHTML = '';
     outputEl.dataset.rawLen = '0';
     rawLen = 0;
     titleEl.innerHTML = '<i class="bi bi-terminal me-2"></i>' + escapeHtml(title || 'Running command...');
+    if (command) {
+      commandEl.textContent = command;
+      commandWrap.classList.remove('d-none');
+    } else {
+      commandWrap.classList.add('d-none');
+    }
     statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Executing...';
     doneBtn.classList.add('d-none');
     overlay.classList.remove('d-none');
@@ -95,8 +103,8 @@ Also intercepts all forms with data-exec="true" attribute:
     }
   }
 
-  function start(jobId, title) {
-    open(title);
+  function start(jobId, title, command) {
+    open(title, command);
     currentJob = jobId;
     poll();
   }
@@ -142,7 +150,7 @@ Also intercepts all forms with data-exec="true" attribute:
           return;
         }
         if (d.job) {
-          start(d.job, d.title || 'Running...');
+          start(d.job, d.title || 'Running...', d.command);
           if (d.message) showAlert(d.message, 'success');
         } else if (d.redirect) {
           window.location.href = d.redirect;

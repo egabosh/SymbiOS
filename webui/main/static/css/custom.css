@@ -46,6 +46,18 @@
     border-bottom: 1px solid #444;
     border-radius: 8px 8px 0 0;
 }
+.exec-command {
+    background: #161b22;
+    color: #7ee787;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #30363d;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
 .exec-modal-body {
     flex: 1;
     overflow: hidden;

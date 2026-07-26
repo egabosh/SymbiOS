@@ -62,7 +62,8 @@ def user_create(request):
             job_id = create_job(cmd, timeout=300)
             return JsonResponse({'ok': True, 'job': job_id,
                                  'title': f'Creating user "{uid}"...',
-                                 'message': f'User "{uid}" created.'})
+                                 'message': f'User "{uid}" created.',
+                                 'command': cmd})
 
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
@@ -82,7 +83,8 @@ def user_delete(request, uid):
             job_id = create_job(cmd, timeout=300)
             return JsonResponse({'ok': True, 'job': job_id,
                                  'title': f'Deleting user "{uid}"...',
-                                 'message': f'User "{uid}" deleted.'})
+                                 'message': f'User "{uid}" deleted.',
+                                 'command': cmd})
 
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
@@ -110,7 +112,8 @@ def user_set_password(request, uid):
             job_id = create_job(cmd, timeout=300)
             return JsonResponse({'ok': True, 'job': job_id,
                                  'title': f'Setting password for "{uid}"...',
-                                 'message': f'Password for "{uid}" changed.'})
+                                 'message': f'Password for "{uid}" changed.',
+                                 'command': cmd})
 
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
@@ -131,7 +134,8 @@ def user_update_email(request, uid):
             job_id = create_job(cmd, timeout=300)
             return JsonResponse({'ok': True, 'job': job_id,
                                  'title': f'Updating email for "{uid}"...',
-                                 'message': f'Email for "{uid}" updated.'})
+                                 'message': f'Email for "{uid}" updated.',
+                                 'command': cmd})
 
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
@@ -159,7 +163,8 @@ def group_create(request):
             job_id = create_job(cmd, timeout=300)
             return JsonResponse({'ok': True, 'job': job_id,
                                  'title': f'Creating group "{name}"...',
-                                 'message': f'Group "{name}" created.'})
+                                 'message': f'Group "{name}" created.',
+                                 'command': cmd})
 
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
@@ -179,7 +184,8 @@ def group_delete(request, name):
             job_id = create_job(cmd, timeout=300)
             return JsonResponse({'ok': True, 'job': job_id,
                                  'title': f'Deleting group "{name}"...',
-                                 'message': f'Group "{name}" deleted.'})
+                                 'message': f'Group "{name}" deleted.',
+                                 'command': cmd})
 
         ok, stdout, stderr = run_command(cmd, timeout=30)
         output = (stdout + '\n' + stderr).strip()
@@ -202,7 +208,8 @@ def group_add_user(request):
                 job_id = create_job(cmd, timeout=300)
                 return JsonResponse({'ok': True, 'job': job_id,
                                      'title': f'Adding "{uid}" to "{group}"...',
-                                     'message': f'"{uid}" added to "{group}".'})
+                                     'message': f'"{uid}" added to "{group}".',
+                                     'command': cmd})
 
             ok, stdout, stderr = run_command(cmd, timeout=30)
             output = (stdout + '\n' + stderr).strip()
@@ -225,7 +232,8 @@ def group_remove_user(request):
                 job_id = create_job(cmd, timeout=300)
                 return JsonResponse({'ok': True, 'job': job_id,
                                      'title': f'Removing "{uid}" from "{group}"...',
-                                     'message': f'"{uid}" removed from "{group}".'})
+                                     'message': f'"{uid}" removed from "{group}".',
+                                     'command': cmd})
 
             ok, stdout, stderr = run_command(cmd, timeout=30)
             output = (stdout + '\n' + stderr).strip()

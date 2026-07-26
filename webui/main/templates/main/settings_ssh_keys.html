@@ -40,7 +40,7 @@
                         {% endif %}
                     </div>
                 </div>
-                <form method="post" class="flex-shrink-0">
+                <form method="post" class="flex-shrink-0" data-exec="true">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="remove">
                     <input type="hidden" name="index" value="{{ forloop.counter0 }}">
@@ -79,7 +79,7 @@
 <div class="card mb-3">
     <div class="card-header"><i class="bi bi-plus-circle"></i> Add New Key</div>
     <div class="card-body">
-        <form method="post">
+        <form method="post" data-exec="true">
             {% csrf_token %}
             <input type="hidden" name="action" value="add">
             <div class="mb-3">
