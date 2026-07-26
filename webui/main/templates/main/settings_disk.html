@@ -261,7 +261,7 @@ function doRollback() {
     .then(r => r.json())
     .then(data => {
       if (data.job) {
-        SymbiOS.exec.start(data.job, data.title || 'Rolling back...');
+        SymbiOS.exec.start(data.job, data.title || 'Rolling back...', data.command);
         if (data.message) SymbiOS.exec.showAlert(data.message, 'info');
       } else if (data.error) {
         SymbiOS.exec.showAlert(data.error, 'danger');
