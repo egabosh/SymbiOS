@@ -963,7 +963,8 @@ def _safe_playbook_name(name):
 @login_required
 def settings_playbooks(request):
     """Show list of user-uploaded playbooks with upload form."""
-    from .playbook_catalog import parse_docs
+    from .playbook_catalog import parse_docs, get_catalog
+    from .views_services import _sidebar_context
     _ensure_user_playbooks_dir()
     files = sorted(f for f in os.listdir(USER_PLAYBOOKS_DIR)
                    if f.endswith('.yml') and f != 'inventory.yml')
@@ -976,8 +977,11 @@ def settings_playbooks(request):
             'title': (docs or {}).get('short_description', fn[:-4]) if docs else fn[:-4],
             'has_docs': docs is not None,
         })
+    all_catalog = get_catalog()
     return render(request, 'main/settings_playbooks.html', {
         'playbooks': playbooks,
+        'all_services': all_catalog,
+        **_sidebar_context(all_catalog),
     })
 
 
