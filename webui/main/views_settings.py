@@ -753,7 +753,7 @@ def settings_backup_test(request):
 
 
 # ---------------------------------------------------------------------------
-# Disk / Home partition management
+# Data Disk — move /home to a separate disk
 # ---------------------------------------------------------------------------
 
 _HOME_PART_SCRIPT = '/usr/local/sbin/symbios-home-partition.sh'

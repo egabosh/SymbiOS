@@ -1,19 +1,19 @@
 {% extends "main/base.html" %}
 {% block content %}
-<h2><i class="bi bi-device-hdd"></i> Disk / Home</h2>
+<h2><i class="bi bi-device-hdd"></i> Data Disk</h2>
 
-<!-- Current /home status -->
+<!-- Current status -->
 <div class="row mb-3">
   <div class="col-md-12">
     <div class="card" id="home-status-card">
       <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-hdd"></i> Current /home</span>
+        <span><i class="bi bi-hdd"></i> Where is my data?</span>
         <button class="btn btn-outline-secondary btn-sm" onclick="refreshAll()">
           <i class="bi bi-arrow-clockwise"></i>
         </button>
       </div>
       <div class="card-body" id="home-status">
-        <span class="spinner-border spinner-border-sm"></span> Loading...
+        <span class="spinner-border spinner-border-sm"></span> Checking...
       </div>
     </div>
   </div>
@@ -24,7 +24,7 @@
   <div class="col-md-12">
     <div class="card">
       <div class="card-header">
-        <i class="bi bi-disc"></i> Available Disks / Partitions
+        <i class="bi bi-disc"></i> Available Disks
       </div>
       <div class="card-body" id="disk-list">
         <span class="spinner-border spinner-border-sm"></span> Scanning...
@@ -33,7 +33,7 @@
   </div>
 </div>
 
-<!-- Rollback banner (hidden by default, shown if rollback is possible) -->
+<!-- Rollback banner (hidden by default) -->
 <div class="row mb-3" id="rollback-section" style="display:none">
   <div class="col-md-12"></div>
 </div>
@@ -43,21 +43,22 @@
   <div class="col-md-8">
     <div class="card">
       <div class="card-header">
-        <i class="bi bi-gear"></i> Setup /home Partition
+        <i class="bi bi-gear"></i> Move Data to a New Disk
       </div>
       <div class="card-body">
         <div class="alert alert-info small">
           <i class="bi bi-info-circle"></i>
-          Select an unused disk or partition to format and mount as <code>/home</code>.
-          Existing data from the current <code>/home</code> will be copied automatically.
+          Select a disk to use for your data. All existing data from the
+          current location will be copied automatically. The new disk will
+          be formatted — <strong>all data on it will be erased</strong>.
         </div>
 
         <form id="setup-form" data-exec="true" method="POST" action="{% url "settings_disk_setup" %}">
           {% csrf_token %}
           <div class="mb-3">
-            <label class="form-label fw-semibold">Target Device</label>
+            <label class="form-label fw-semibold">Target Disk</label>
             <select class="form-select" id="setup-device" name="device" required>
-              <option value="">-- select a device --</option>
+              <option value="">-- select a disk --</option>
             </select>
             <div id="device-info" class="form-text"></div>
           </div>
@@ -68,12 +69,12 @@
                      id="setup-encrypt" name="encrypt" value="yes"
                      onchange="toggleEncrypt()">
               <label class="form-check-label" for="setup-encrypt">
-                <strong>Enable LUKS encryption</strong>
+                <strong>Encrypt disk</strong>
               </label>
             </div>
             <div class="small text-muted">
-              The partition will be encrypted with LUKS. You will need to enter
-              the passphrase at each boot via this WebUI.
+              Protects your data with a passphrase. You will need to enter
+              the passphrase after each reboot via this WebUI.
             </div>
           </div>
 
@@ -83,7 +84,7 @@
               <strong>If you forget this passphrase, your data is permanently unrecoverable.</strong>
               Write it down and store it somewhere safe.
             </div>
-            <label class="form-label">Encryption Passphrase</label>
+            <label class="form-label">Passphrase</label>
             <input type="password" class="form-control mb-2" id="setup-password"
                    name="password"
                    placeholder="Choose a strong passphrase"
@@ -99,7 +100,7 @@
 
           <div class="d-flex gap-2">
             <button type="submit" class="btn btn-primary" id="setup-btn">
-              <i class="bi bi-play-fill"></i> Setup Disk
+              <i class="bi bi-play-fill"></i> Move Data
             </button>
             <span id="setup-result" class="align-self-center"></span>
           </div>
@@ -111,25 +112,24 @@
   <div class="col-md-4">
     <div class="card">
       <div class="card-header">
-        <i class="bi bi-info-circle"></i> About
+        <i class="bi bi-info-circle"></i> How it works
       </div>
       <div class="card-body small">
         <p class="card-text">
-          Move <code>/home</code> to a dedicated disk for better performance
-          and more storage. Supports optional LUKS encryption.
+          By default, your data lives on the same disk as the operating system.
+          Moving it to a separate disk gives you more space and better performance.
         </p>
-        <h6>How it works:</h6>
         <ol class="ps-3 mb-2">
-          <li>Select an unused disk</li>
+          <li>Plug in or connect a new disk</li>
+          <li>Select it from the list above</li>
           <li>Optionally enable encryption</li>
-          <li>Click "Setup Disk"</li>
-          <li>Data is copied automatically</li>
-          <li><code>/home</code> is remounted on the new disk</li>
+          <li>Click "Move Data"</li>
+          <li>Your data is copied automatically</li>
         </ol>
         <div class="alert alert-warning small py-2 px-3 mb-0">
           <i class="bi bi-exclamation-triangle-fill"></i>
-          <strong>Important:</strong> Back up your data before proceeding.
-          The target device will be <strong>completely erased</strong>.
+          <strong>Important:</strong> Back up your data first.
+          The target disk will be <strong>completely erased</strong>.
         </div>
       </div>
     </div>
@@ -149,32 +149,79 @@ function refreshAll() {
   loadRollbackStatus();
 }
 
+/* Find model name for a device path from the diskData cache */
+function findModelForDevice(devPath) {
+  if (!devPath) return '';
+  function search(devs) {
+    for (var i = 0; i < devs.length; i++) {
+      if (devs[i].path === devPath && devs[i].model) return devs[i].model;
+      if (devs[i].children) {
+        var found = search(devs[i].children);
+        if (found) return found;
+      }
+    }
+    return '';
+  }
+  return search(diskData);
+}
+
 function loadStatus() {
   fetch('{% url "settings_disk_status" %}')
-    .then(r => r.json())
-    .then(data => {
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
       var el = document.getElementById('home-status');
 
+      /* LUKS locked — needs boot unlock */
       if (data.luks_name && !data.luks_open) {
-        el.innerHTML = '<div class="text-warning"><i class="bi bi-lock-fill"></i> /home is on an encrypted volume that is <strong>locked</strong>. Reboot and unlock via the boot screen.</div>';
+        el.innerHTML =
+          '<div class="d-flex align-items-center gap-3">' +
+            '<i class="bi bi-lock-fill fs-3 text-warning"></i>' +
+            '<div>' +
+              '<strong>Data disk is locked</strong>' +
+              '<div class="small text-muted">Reboot and unlock via the boot screen to access your data.</div>' +
+            '</div>' +
+          '</div>';
         return;
       }
 
       if (data.home_device) {
         window._homeSize = data.home_size;
-        var html = '<div class="row">';
-        html += '<div class="col-md-3"><strong>Device:</strong><br><code>' + data.home_device + '</code></div>';
-        html += '<div class="col-md-2"><strong>Size:</strong><br>' + data.home_size + '</div>';
-        html += '<div class="col-md-2"><strong>Used:</strong><br>' + data.home_used + '</div>';
-        html += '<div class="col-md-2"><strong>Available:</strong><br>' + data.home_avail + '</div>';
-        html += '<div class="col-md-3"><strong>Filesystem:</strong><br>' + data.home_fstype + '</div>';
-        html += '</div>';
+
+        /* Determine if data is on the system disk or a separate disk */
+        var isOnRoot = data.home_device.indexOf('mmcblk') !== -1 ||
+                       data.home_device.indexOf('nvme0n1') !== -1 ||
+                       data.home_fstype === 'rootfs';
+        var model = findModelForDevice(data.home_device);
+
+        var html = '<div class="d-flex align-items-center gap-3">';
+        if (isOnRoot) {
+          html += '<i class="bi bi-info-circle fs-3 text-muted"></i>';
+          html += '<div>';
+          html += '<strong>Data is on the system disk</strong>';
+          html += '<div class="small text-muted">' + data.home_size + ' total, ' + data.home_used + ' used, ' + data.home_avail + ' free</div>';
+        } else {
+          html += '<i class="bi bi-check-circle-fill fs-3 text-success"></i>';
+          html += '<div>';
+          html += '<strong>Data is on a separate disk</strong>';
+          html += '<div class="small text-muted">';
+          if (model) html += model + ' &middot; ';
+          html += data.home_size + ' &middot; ' + data.home_used + ' used, ' + data.home_avail + ' free';
+          html += '</div>';
+        }
+        html += '</div></div>';
         el.innerHTML = html;
       } else {
-        el.innerHTML = '<div class="text-muted">No /home partition detected (using root filesystem)</div>';
+        el.innerHTML =
+          '<div class="d-flex align-items-center gap-3">' +
+            '<i class="bi bi-info-circle fs-3 text-muted"></i>' +
+            '<div>' +
+              '<strong>Data is on the system disk</strong>' +
+              '<div class="small text-muted">Using the root partition for all data.</div>' +
+            '</div>' +
+          '</div>';
       }
     })
-    .catch(err => {
+    .catch(function(err) {
       document.getElementById('home-status').innerHTML =
         '<div class="text-danger">Failed to load status: ' + err.message + '</div>';
     });
@@ -182,8 +229,8 @@ function loadStatus() {
 
 function loadDisks() {
   fetch('{% url "settings_disk_list" %}')
-    .then(r => r.json())
-    .then(data => {
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
       var el = document.getElementById('disk-list');
       var select = document.getElementById('setup-device');
 
@@ -196,16 +243,16 @@ function loadDisks() {
       window._diskData = diskData;
 
       if (diskData.length === 0) {
-        el.innerHTML = '<div class="text-muted">No block devices found</div>';
+        el.innerHTML = '<div class="text-muted">No disks found</div>';
         return;
       }
 
-      // Build table
+      /* Build simplified table */
       var html = '<div class="table-responsive"><table class="table table-sm align-middle">';
-      html += '<thead><tr><th>Device</th><th>Size</th><th>Type</th><th>Filesystem</th><th>Mount</th><th>Model</th><th></th></tr></thead><tbody>';
+      html += '<thead><tr><th>Disk</th><th>Size</th><th>Status</th></tr></thead><tbody>';
 
-      // Build select options
-      select.innerHTML = '<option value="">-- select a device --</option>';
+      /* Build select options */
+      select.innerHTML = '<option value="">-- select a disk --</option>';
 
       diskData.forEach(function(dev) {
         html += renderDevice(dev, 0);
@@ -215,7 +262,7 @@ function loadDisks() {
       html += '</tbody></table></div>';
       el.innerHTML = html;
     })
-    .catch(err => {
+    .catch(function(err) {
       document.getElementById('disk-list').innerHTML =
         '<div class="text-danger">Failed to load disks: ' + err.message + '</div>';
     });
@@ -223,28 +270,28 @@ function loadDisks() {
 
 function loadRollbackStatus() {
   fetch('{% url "settings_disk_rollback_status" %}')
-    .then(r => r.json())
-    .then(data => {
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
       var el = document.getElementById('rollback-section');
       if (data.can_rollback) {
         el.innerHTML = '<div class="alert alert-warning d-flex align-items-center">' +
           '<i class="bi bi-arrow-counterclockwise me-2"></i>' +
-          '<span>A previous migration can be undone.</span>' +
+          '<span>A previous disk change can be undone.</span>' +
           '<button class="btn btn-outline-warning btn-sm ms-auto" onclick="doRollback()">' +
-          '<i class="bi bi-arrow-counterclockwise"></i> Rollback</button>' +
+          '<i class="bi bi-arrow-counterclockwise"></i> Undo</button>' +
           '</div>';
         el.style.display = '';
       } else {
         el.style.display = 'none';
       }
     })
-    .catch(() => {
+    .catch(function() {
       document.getElementById('rollback-section').style.display = 'none';
     });
 }
 
 function doRollback() {
-  if (!confirm('Rollback the last /home migration?\n\nThis will:\n1. Unmount current /home\n2. Restore the original /home location\n3. Close LUKS volume (if encrypted)\n\nContinue?')) {
+  if (!confirm('Undo the last disk change?\n\nThis will move your data back to where it was before.\n\nContinue?')) {
     return;
   }
   var formData = new FormData();
@@ -255,20 +302,21 @@ function doRollback() {
     credentials: 'same-origin',
     headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': getCsrfToken() }
   })
-    .then(r => r.json())
-    .then(data => {
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
       if (data.job) {
-        SymbiOS.exec.start(data.job, data.title || 'Rolling back...', data.command);
+        SymbiOS.exec.start(data.job, data.title || 'Undoing disk change...', data.command);
         if (data.message) SymbiOS.exec.showAlert(data.message, 'info');
       } else if (data.error) {
         SymbiOS.exec.showAlert(data.error, 'danger');
       }
     })
-    .catch(err => {
+    .catch(function(err) {
       SymbiOS.exec.showAlert('Network error: ' + err, 'danger');
     });
 }
 
+/* Render a single disk row in the "Available Disks" table */
 function renderDevice(dev, indent) {
   var html = '';
   var pad = 'padding-left: ' + (indent * 20) + 'px;';
@@ -280,18 +328,20 @@ function renderDevice(dev, indent) {
   else if (isHome) rowClass = 'table-success';
   else if (dev.mountpoint) rowClass = 'table-warning';
 
+  /* Disk name: model if available, otherwise a friendly label */
+  var diskLabel = dev.model || dev.name;
+  if (isRoot) diskLabel += ' (system disk)';
+
   html += '<tr class="' + rowClass + '">';
-  html += '<td style="' + pad + '"><code>' + dev.path + '</code></td>';
+  html += '<td style="' + pad + '">' + diskLabel + '</td>';
   html += '<td>' + dev.size + '</td>';
-  html += '<td>' + dev.type + '</td>';
-  html += '<td>' + (dev.fstype || '<span class="text-muted">-</span>') + '</td>';
-  html += '<td>' + (dev.mountpoint || '<span class="text-muted">-</span>') + '</td>';
-  html += '<td>' + (dev.model || '<span class="text-muted">-</span>') + '</td>';
   html += '<td>';
-  if (isRoot) html += '<span class="badge bg-danger">root</span> ';
-  if (isBoot) html += '<span class="badge bg-info">boot</span> ';
-  if (isHome) html += '<span class="badge bg-success">home</span> ';
-  if (dev.fstype === 'crypto_LUKS') html += '<span class="badge bg-warning text-dark">LUKS</span> ';
+  if (isRoot) html += '<span class="badge bg-danger">System disk</span>';
+  else if (isHome) html += '<span class="badge bg-success">Data disk</span>';
+  else if (isBoot) html += '<span class="badge bg-info">Boot</span>';
+  else if (dev.mountpoint) html += '<span class="badge bg-warning text-dark">In use</span>';
+  else if (dev.type === 'disk') html += '<span class="badge bg-secondary">Available</span>';
+  else html += '<span class="text-muted">-</span>';
   html += '</td>';
   html += '</tr>';
 
@@ -301,16 +351,22 @@ function renderDevice(dev, indent) {
   return html;
 }
 
+/* Add options to the target disk select — only unmounted disks */
 function addDeviceOptions(dev, select, prefix) {
   prefix = prefix || '';
-  // Only offer disks/partitions that are not root, not mounted, and not boot
   if (dev.type === 'part' || dev.type === 'disk') {
-    // Skip if this device or any child is mounted
     var hasMountedChild = hasMountedChildren(dev);
-    if (dev.mountpoint !== '/' && dev.mountpoint !== '/boot/firmware' && dev.mountpoint !== '/home' && !dev.mountpoint && !hasMountedChild) {
+    if (dev.mountpoint !== '/' && dev.mountpoint !== '/boot/firmware' &&
+        dev.mountpoint !== '/home' && !dev.mountpoint && !hasMountedChild) {
       var opt = document.createElement('option');
       opt.value = dev.path;
-      opt.textContent = prefix + dev.path + ' (' + dev.size + ') ' + (dev.fstype || 'empty') + (dev.model ? ' - ' + dev.model : '');
+      /* Show only size and model — no /dev/ path */
+      var label = dev.size;
+      if (dev.model) label += ' — ' + dev.model;
+      else label += ' — ' + dev.name;
+      opt.textContent = prefix + label;
+      opt.dataset.model = dev.model || '';
+      opt.dataset.size = dev.size || '';
       select.appendChild(opt);
     }
   }
@@ -380,13 +436,13 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
 
   if (!device) {
     e.preventDefault();
-    SymbiOS.exec.showAlert('Select a device first.', 'danger');
+    SymbiOS.exec.showAlert('Please select a disk.', 'danger');
     return;
   }
 
   if (encrypt && !password) {
     e.preventDefault();
-    SymbiOS.exec.showAlert('Enter an encryption passphrase.', 'danger');
+    SymbiOS.exec.showAlert('Please enter a passphrase.', 'danger');
     return;
   }
 
@@ -399,22 +455,29 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
     }
   }
 
-  // Frontend size check
+  /* Frontend size check */
   var devInfo = findDeviceByPath(window._diskData || [], device);
   if (devInfo) {
     var devBytes = parseSizeBytes(devInfo.size);
     var homeBytes = parseSizeBytes(window._homeSize || '0');
     if (devBytes > 0 && homeBytes > 0 && devBytes < homeBytes * 1.1) {
       e.preventDefault();
-      SymbiOS.exec.showAlert('Disk (' + devInfo.size + ') may be too small for /home (' + window._homeSize + ').', 'warning');
+      var devLabel = devInfo.model ? devInfo.model + ' (' + devInfo.size + ')' : devInfo.size;
+      SymbiOS.exec.showAlert('Disk (' + devLabel + ') may be too small for your data (' + window._homeSize + ').', 'warning');
       return;
     }
   }
 
-  if (!confirm('WARNING: All data on ' + device + ' will be erased!\n\nThis will:\n1. Format ' + device + ' as ext4' +
-      (encrypt ? '\n2. Encrypt with LUKS' : '') +
-      '\n' + (encrypt ? '3' : '2') + '. Copy data from current /home' +
-      '\n' + (encrypt ? '4' : '3') + '. Mount as /home\n\nA rollback option will be available after migration.\n\nContinue?')) {
+  /* Get friendly label for the selected disk */
+  var devLabel = device;
+  if (devInfo) {
+    devLabel = devInfo.model ? devInfo.model + ' (' + devInfo.size + ')' : devInfo.size;
+  }
+
+  if (!confirm('WARNING: All data on ' + devLabel + ' will be erased!\n\nThis will:\n1. Format the disk' +
+      (encrypt ? '\n2. Encrypt with a passphrase' : '') +
+      '\n' + (encrypt ? '3' : '2') + '. Copy your data to the new disk' +
+      '\n' + (encrypt ? '4' : '3') + '. Switch to the new disk\n\nAn undo option will be available afterward.\n\nContinue?')) {
     e.preventDefault();
   }
 });
