@@ -6,12 +6,26 @@
     {% if g.grouper == 'user-playbooks' %}
       <li class="svc-group-header"><i class="bi bi-journal-plus"></i> Custom User Services</li>
       {% for svc in g.list %}
+        {% with svc_hc=svc.playbook|hc_name %}
         <li>
           <a class="svc-item" href="/services/{{ svc.playbook }}/">
             <i class="bi bi-box svc-icon"></i>
             <span class="svc-label">{{ svc.menu_label }}</span>
+            <span class="svc-badges">
+              {% if svc.playbook in installed_playbooks %}
+                <i class="bi bi-check-circle-fill text-success" title="Installed"></i>
+              {% endif %}
+              {% with hc_status=healthcheck_status|dict_get:svc_hc %}
+                {% if hc_status == "ok" %}
+                  <i class="bi bi-heart-pulse text-success" title="Healthcheck OK"></i>
+                {% elif hc_status == "error" %}
+                  <i class="bi bi-exclamation-triangle-fill text-danger" title="Healthcheck error"></i>
+                {% endif %}
+              {% endwith %}
+            </span>
           </a>
         </li>
+        {% endwith %}
       {% endfor %}
 
     {% elif g.grouper == 'services' %}
