@@ -51,7 +51,6 @@ def _start_reapply(playbooks=None):
     return job_id, title, cmd
 
 
-@csrf_exempt
 @login_required
 def settings_ddns(request):
     config = _get_inventory_config()
@@ -368,7 +367,6 @@ def settings_ddns_check_ip(request):
 
     return JsonResponse(result)
 
-@csrf_exempt
 @login_required
 def settings_localization(request):
     config = _get_inventory_config()
@@ -455,7 +453,6 @@ def settings_localization(request):
     })
 
 
-@csrf_exempt
 @login_required
 def settings_auth(request):
     config = _get_inventory_config()
@@ -545,7 +542,6 @@ def _is_system_ssh_key(line):
     return "symbios-webui" in line
 
 
-@csrf_exempt
 @login_required
 def settings_ssh_keys(request):
     # Fetch host authorized_keys via symbios-exec.sh.
@@ -628,7 +624,6 @@ def settings_ssh_keys(request):
     })
 
 
-@csrf_exempt
 @login_required
 def settings_config(request):
     raw_yaml = ''
@@ -686,7 +681,6 @@ def settings_config(request):
     })
 
 
-@csrf_exempt
 @login_required
 def settings_backup(request):
     config = _get_inventory_config()
@@ -834,7 +828,6 @@ def settings_disk_status(request):
         })
 
 
-@csrf_exempt
 @login_required
 def settings_disk_setup(request):
     """AJAX POST — format, optionally encrypt, and mount a disk as /home.
@@ -882,7 +875,6 @@ def settings_disk_setup(request):
         return JsonResponse({'ok': False, 'error': f'Setup failed:\n{output[-2000:]}'})
 
 
-@csrf_exempt
 @login_required
 def settings_disk_rollback(request):
     """AJAX POST — rollback last /home migration via exec modal."""
@@ -923,7 +915,7 @@ def settings_disk_rollback_status(request):
         return JsonResponse({'ok': True, 'can_rollback': data.get('can_rollback', False)})
     except Exception:
         return JsonResponse({'ok': True, 'can_rollback': False})
-@csrf_exempt
+
 @login_required
 def settings_disk_umount(request):
     """AJAX POST — unmount and close a LUKS /home volume."""

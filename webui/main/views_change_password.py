@@ -16,13 +16,11 @@
 
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from django.contrib import messages
 from .utils.ssh_exec import run_command
 
 
-@csrf_exempt
 @login_required
 def change_password(request):
     if request.method == "POST":

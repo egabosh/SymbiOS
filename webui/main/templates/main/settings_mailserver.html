@@ -168,7 +168,8 @@ function sendTestEmail() {
 
     fetch('/settings/mailserver/test-email/', {
         method: 'POST',
-        headers: {'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value},
+        credentials: 'same-origin',
+        headers: {'X-CSRFToken': getCsrfToken()},
         body: data
     })
     .then(r => r.json())

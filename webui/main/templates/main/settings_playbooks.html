@@ -106,7 +106,8 @@ document.getElementById('upload-form').addEventListener('submit', async function
   try {
     const resp = await fetch('/settings/playbooks/upload/', {
       method: 'POST', body: fd,
-      headers: { 'X-CSRFToken': csrfToken }
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': getCsrfToken() }
     });
     const data = await resp.json();
     if (data.ok) {
@@ -137,7 +138,8 @@ async function deletePlaybook(filename) {
   try {
     const resp = await fetch('/settings/playbooks/delete/', {
       method: 'POST', body: fd,
-      headers: { 'X-CSRFToken': csrfToken }
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': getCsrfToken() }
     });
     const data = await resp.json();
     if (data.ok) location.reload();

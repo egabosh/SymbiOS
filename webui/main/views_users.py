@@ -16,7 +16,6 @@
 
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 from .decorators import login_required
 from django.contrib import messages
 from .views import _get_ldap_users, _get_ldap_groups
@@ -38,7 +37,6 @@ def groups(request):
     return render(request, 'main/groups.html', {'groups': groups, 'group_members': users})
 
 
-@csrf_exempt
 @login_required
 def user_create(request):
     if request.method == 'POST':
@@ -76,7 +74,6 @@ def user_create(request):
     return redirect('users')
 
 
-@csrf_exempt
 @login_required
 def user_delete(request, uid):
     if request.method == 'POST':
@@ -98,7 +95,6 @@ def user_delete(request, uid):
     return redirect('users')
 
 
-@csrf_exempt
 @login_required
 def user_set_password(request, uid):
     if request.method == 'POST':
@@ -128,7 +124,6 @@ def user_set_password(request, uid):
     return redirect('users')
 
 
-@csrf_exempt
 @login_required
 def user_update_email(request, uid):
     if request.method == 'POST':
@@ -151,7 +146,6 @@ def user_update_email(request, uid):
     return redirect('users')
 
 
-@csrf_exempt
 @login_required
 def group_create(request):
     if request.method == 'POST':
@@ -181,7 +175,6 @@ def group_create(request):
     return redirect('groups')
 
 
-@csrf_exempt
 @login_required
 def group_delete(request, name):
     if request.method == 'POST':
@@ -203,7 +196,6 @@ def group_delete(request, name):
     return redirect('groups')
 
 
-@csrf_exempt
 @login_required
 def group_add_user(request):
     if request.method == 'POST':
@@ -228,7 +220,6 @@ def group_add_user(request):
     return redirect('users')
 
 
-@csrf_exempt
 @login_required
 def group_remove_user(request):
     if request.method == 'POST':

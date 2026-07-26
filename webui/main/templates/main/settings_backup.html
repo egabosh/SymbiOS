@@ -111,7 +111,9 @@ function testConnection() {
 
   fetch('{% url "settings_backup_test" %}', {
     method: 'POST',
-    body: formData
+    body: formData,
+    credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken() }
   })
     .then(r => r.json())
     .then(data => {
