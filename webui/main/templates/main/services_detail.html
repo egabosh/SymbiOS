@@ -140,7 +140,7 @@ document.querySelectorAll('[data-action]').forEach(btn => {
     const action = btn.dataset.action;
     const fd = new FormData();
     fd.append('action', action);
-    fetch('/services/' + PLAYBOOK + '/action/', {method: 'POST', body: fd})
+    fetch('/services/' + PLAYBOOK + '/action/', {method: 'POST', body: fd, credentials: 'same-origin', headers: {'X-CSRFToken': getCsrfToken()}})
       .then(r => r.json())
       .then(d => {
         if (d.error) { SymbiOS.exec.showAlert(d.error, 'danger'); return; }
@@ -189,7 +189,7 @@ function startLog(name) {
   if (unitPre[name]) { unitPre[name].innerHTML = ''; unitPre[name].dataset.rawLen = undefined; }
   const fd = new FormData();
   fd.append('unit', name);
-  fetch('/services/' + PLAYBOOK + '/log-start/', {method: 'POST', body: fd})
+  fetch('/services/' + PLAYBOOK + '/log-start/', {method: 'POST', body: fd, credentials: 'same-origin', headers: {'X-CSRFToken': getCsrfToken()}})
     .then(r => {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
@@ -206,7 +206,7 @@ function stopLog(name) {
   if (!job) return;
   const fd = new FormData();
   fd.append('job', job);
-  fetch('/services/' + PLAYBOOK + '/log-stop/', {method: 'POST', body: fd}).catch(() => {});
+  fetch('/services/' + PLAYBOOK + '/log-stop/', {method: 'POST', body: fd, credentials: 'same-origin', headers: {'X-CSRFToken': getCsrfToken()}}).catch(() => {});
   delete unitJobs[name];
 }
 

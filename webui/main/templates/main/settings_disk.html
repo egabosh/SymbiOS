@@ -255,7 +255,8 @@ function doRollback() {
   fetch('{% url "settings_disk_rollback" %}', {
     method: 'POST',
     body: formData,
-    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    credentials: 'same-origin',
+    headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': getCsrfToken() }
   })
     .then(r => r.json())
     .then(data => {

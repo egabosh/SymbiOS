@@ -458,7 +458,9 @@ function testApiKey() {
 
   fetch('{% url "settings_ddns_test_api" %}', {
     method: 'POST',
-    body: formData
+    body: formData,
+    credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken() }
   })
     .then(r => r.json())
     .then(data => {
