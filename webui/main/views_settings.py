@@ -977,9 +977,17 @@ def settings_playbooks(request):
             'title': (docs or {}).get('short_description', fn[:-4]) if docs else fn[:-4],
             'has_docs': docs is not None,
         })
+    playbooks_md = ''
+    docs_path = os.path.join(os.path.dirname(__file__), 'docs', 'playbooks.md')
+    try:
+        with open(docs_path) as fh:
+            playbooks_md = fh.read()
+    except FileNotFoundError:
+        pass
     all_catalog = get_catalog()
     return render(request, 'main/settings_playbooks.html', {
         'playbooks': playbooks,
+        'playbooks_md': playbooks_md,
         'all_services': _order_catalog(all_catalog),
         **_sidebar_context(all_catalog),
     })
