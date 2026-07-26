@@ -1,38 +1,6 @@
 {% load markdown_extras %}
 {% regroup all_services by group as groups %}
 {% with user_pbs="" %}
-<style>
-  .svc-group-header {
-    text-transform: uppercase;
-    font-weight: 700;
-    font-size: 0.7rem;
-    letter-spacing: 0.05em;
-    color: var(--bs-muted);
-    padding: 0.5rem 0.75rem 0.25rem;
-  }
-  .svc-group-header i { font-size: 0.75rem; margin-right: 0.3rem; }
-  .svc-item {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.35rem 0.75rem 0.35rem 1rem;
-    font-size: 0.85rem;
-    text-decoration: none;
-    color: var(--bs-body-color);
-    border-left: 3px solid transparent;
-    transition: border-color 0.15s, background-color 0.15s;
-  }
-  .svc-item:hover {
-    background: rgba(var(--bs-body-color-rgb), 0.04);
-    border-left-color: var(--bs-primary);
-  }
-  .svc-item .svc-icon { font-size: 0.85rem; opacity: 0.7; flex-shrink: 0; }
-  .svc-item .svc-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .svc-item .svc-badges { display: flex; gap: 0.25rem; flex-shrink: 0; }
-  .svc-item .svc-badges i { font-size: 0.6rem; }
-  .svc-item .svc-badge-text { font-size: 0.5rem; }
-</style>
-
 <ul class="nav flex-column mb-2">
   {% for g in groups %}
     {% if g.grouper == 'user-playbooks' %}
@@ -80,7 +48,6 @@
             <i class="bi bi-box svc-icon"></i>
             <span class="svc-label">{{ svc.menu_label }}</span>
             <span class="svc-badges">
-              <span class="badge bg-info svc-badge-text">built-in</span>
               {% if svc.playbook in installed_playbooks %}
                 <i class="bi bi-check-circle-fill text-success" title="Installed"></i>
               {% endif %}

@@ -50,67 +50,6 @@
 
 <div id="log-container" class="border rounded bg-dark"></div>
 
-<style>
-  #log-container {
-    font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas", monospace;
-    font-size: 0.8rem;
-    line-height: 1.5;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    word-break: break-all;
-    padding: 0.75rem;
-    color: #e0e0e0;
-  }
-  #log-container .log-line {
-    display: flex;
-    gap: 0.5rem;
-    padding: 0 0.25rem;
-    border-radius: 2px;
-    min-height: 1.35em;
-  }
-  #log-container .log-line:nth-child(even) {
-    background: rgba(255,255,255,0.03);
-  }
-  #log-container .log-line:hover {
-    background: rgba(255,255,255,0.08);
-  }
-  #log-container .log-line .line-num {
-    color: #6c757d;
-    user-select: none;
-    min-width: 3.5rem;
-    text-align: right;
-    flex-shrink: 0;
-  }
-  #log-container .log-line .line-content {
-    flex: 1;
-  }
-  #log-container .log-line .line-content .timestamp {
-    color: #6ea8fe;
-  }
-  #log-container .log-line .line-content .level-error {
-    color: #f87171;
-    font-weight: bold;
-  }
-  #log-container .log-line .line-content .level-warning {
-    color: #fbbf24;
-  }
-  #log-container .log-line .line-content .level-info {
-    color: #60a5fa;
-  }
-  #log-container .empty-state {
-    color: #6c757d;
-    text-align: center;
-    padding: 3rem 1rem;
-    font-family: system-ui, sans-serif;
-  }
-  #log-container .empty-state i {
-    font-size: 2rem;
-    display: block;
-    margin-bottom: 0.5rem;
-  }
-  #log-meta { min-height: 1.5em; }
-</style>
-
 <script>
     let currentLogName = "{{ default_log_name|default:'messages' }}";
     let currentOffset = 0;

@@ -19,6 +19,7 @@ from django.http import JsonResponse
 from .decorators import login_required
 from django.contrib import messages
 from .utils.ssh_exec import run_command
+from .utils.http import is_ajax_request
 
 
 @login_required
@@ -30,28 +31,28 @@ def change_password(request):
 
         if not new_password:
             msg = "Password is required."
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            if is_ajax_request(request):
                 return JsonResponse({'ok': False, 'error': msg}, status=400)
             messages.error(request, msg)
             return redirect("change_password")
 
         if new_password == "admin":
             msg = "Password cannot be 'admin'."
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            if is_ajax_request(request):
                 return JsonResponse({'ok': False, 'error': msg}, status=400)
             messages.error(request, msg)
             return redirect("change_password")
 
         if new_password != confirm_password:
             msg = "Passwords do not match."
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            if is_ajax_request(request):
                 return JsonResponse({'ok': False, 'error': msg}, status=400)
             messages.error(request, msg)
             return redirect("change_password")
 
         cmd = f'symbios-ldap-user.sh --modify --uid {uid} --password {new_password}'
 
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        if is_ajax_request(request):
             from .utils.jobs import create_job
             job_id = create_job(cmd, timeout=60)
             return JsonResponse({'ok': True, 'job': job_id,
