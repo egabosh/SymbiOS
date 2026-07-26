@@ -140,7 +140,7 @@ document.querySelectorAll('[data-action]').forEach(btn => {
         if (d.error) { SymbiOS.exec.showAlert(d.error, 'danger'); return; }
         if (!d.job) { SymbiOS.exec.showAlert('No job returned', 'danger'); return; }
         const title = action === '__playbook__' ? 'Installing ' + PLAYBOOK : action.charAt(0).toUpperCase() + action.slice(1) + ' — ' + PLAYBOOK;
-        SymbiOS.exec.start(d.job, title);
+        SymbiOS.exec.start(d.job, title, d.command);
         /* Reload status after modal closes */
         const origFinish = SymbiOS.exec.start;
         const checkDone = setInterval(() => {
