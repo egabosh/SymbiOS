@@ -62,6 +62,7 @@ urlpatterns = [
     path('settings/localization/', views_settings.settings_localization, name='settings_localization'),
     path('settings/local-ip/', views_settings.settings_local_ip, name='settings_local_ip'),
     path('settings/playbooks/', views_settings.settings_playbooks, name='settings_playbooks'),
+    path('services/playbooks/', views_settings.settings_playbooks, name='services_playbooks'),
     path('settings/playbooks/upload/', views_settings.settings_playbooks_upload, name='settings_playbooks_upload'),
     path('settings/playbooks/delete/', views_settings.settings_playbooks_delete, name='settings_playbooks_delete'),
     path('logs/', views_logs.logs, name='logs'),
