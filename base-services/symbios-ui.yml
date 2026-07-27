@@ -315,7 +315,7 @@
 
     - name: Copy boot unlock server script
       ansible.builtin.copy:
-        src: /home/SymbiOS/webui/main/boot_unlock.py
+        src: /home/SymbiOS/scripts/symbios-boot-unlock/unlock.py
         dest: /usr/local/sbin/symbios-boot-unlock/unlock.py
         owner: root
         group: root
@@ -333,17 +333,25 @@
         content: |
           [Unit]
           Description=SymbiOS boot unlock for encrypted /home
-          Before=docker.service
           After=network.target local-fs.target ssh.service sshd.service
           DefaultDependencies=no
 
           [Service]
-          Type=simple
+          Type=oneshot
+          RemainAfterExit=yes
+          # Stop and mask Docker/containerd/socket before unlock.
+          # /var/lib/docker and /var/lib/containerd are symlinks into /home,
+          # so they MUST NOT start before /home is mounted.
+          ExecStartPre=-/usr/bin/systemctl stop docker.socket containerd.service docker.service
+          ExecStartPre=-/usr/bin/systemctl mask docker.socket containerd.service docker.service
           ExecStart=/usr/bin/python3 /usr/local/sbin/symbios-boot-unlock/unlock.py
+          # Unmask after unlock so Docker can start
+          ExecStop=-/usr/bin/systemctl unmask docker.socket containerd.service docker.service
           # Allow binding to privileged ports 80/443
           AmbientCapabilities=CAP_NET_BIND_SERVICE
-          # When unlock-server stops itself, Docker can take over 80/443
-          Restart=no
+          # Provide TTY for console unlock prompt
+          StandardInput=tty
+          TTYPath=/dev/tty1
 
           [Install]
           WantedBy=multi-user.target
@@ -354,6 +362,10 @@
         enabled: yes
         state: started
 
+    - name: Set default target to multi-user (text mode at boot)
+      ansible.builtin.command:
+        cmd: systemctl set-default multi-user.target
+
     - name: Copy LE cert extraction script
       ansible.builtin.copy:
         src: /home/SymbiOS/scripts/symbios-extract-le-cert.sh
@@ -362,11 +374,10 @@
         group: root
         mode: "0755"
 
-    - name: "Cron: extract LE cert for boot unlock (every 6h)"
+    - name: "Cron: extract LE cert for boot unlock (every 5min)"
       ansible.builtin.cron:
         name: "symbios-extract-le-cert"
-        minute: "0"
-        hour: "*/6"
+        minute: "*/5"
         job: "/usr/local/sbin/symbios-boot-unlock/extract-le-cert.sh"
         user: root
 

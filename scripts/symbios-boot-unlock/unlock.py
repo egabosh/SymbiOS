@@ -15,18 +15,19 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Minimal boot unlock web server for LUKS-encrypted /home.
+"""Minimal boot unlock server for LUKS-encrypted /home.
 
-Listens on 80 (HTTP redirect) and 443 (HTTPS) with a self-signed cert.
-After successful unlock, stops itself and starts Docker/Traefik which
-takes over ports 80/443.
+Provides two ways to unlock:
+  1. Web interface on HTTPS :443 (Let's Encrypt cert, extracted by cron)
+  2. Console/TTY prompt on the attached screen/keyboard
 
-The self-signed cert is generated once and stored on the root partition
-at /etc/symbios-boot-unlock/. After first unlock, Traefik provides
-proper certs (Let's Encrypt or local CA).
+After successful unlock (by either method), starts Docker and all
+compose services, then stops this service so Traefik can take over
+ports 80/443.
 """
 
 import http.server
+import getpass
 import json
 import os
 import signal
@@ -37,11 +38,30 @@ import sys
 import threading
 import time
 
+LOG_FILE = "/var/log/symbios-boot-unlock.log"
+
 HTTPS_PORT = 443
 HTTP_PORT = 80
 CERT_DIR = "/usr/local/sbin/symbios-boot-unlock"
 CERT_FILE = os.path.join(CERT_DIR, "cert.pem")
 KEY_FILE = os.path.join(CERT_DIR, "key.pem")
+
+def log(msg):
+    """Append a timestamped line to the log file."""
+    import datetime
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}\n"
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(line)
+            f.flush()
+    except Exception:
+        pass
+
+# Shared state: set when unlock succeeds so both web and console threads
+# know to stop and hand off to Docker.
+_unlock_done = threading.Event()
+_unlock_lock = threading.Lock()
 
 HTML_UNLOCK = """<!DOCTYPE html>
 <html lang="en">
@@ -112,7 +132,7 @@ HTML_UNLOCK = """<!DOCTYPE html>
         document.getElementById('spinner').classList.remove('active');
         document.getElementById('btn-unlock').disabled = false;
         if (data.ok) {
-          document.getElementById('success-box').textContent = data.message + ' Starting Traefik...';
+          document.getElementById('success-box').textContent = data.message + ' Starting services...';
           document.getElementById('success-box').style.display = '';
           document.getElementById('unlock-form').style.display = 'none';
           setTimeout(function() { location.reload(); }, 5000);
@@ -131,6 +151,44 @@ HTML_UNLOCK = """<!DOCTYPE html>
       });
     }
   </script>
+</body>
+</html>"""
+
+HTML_HTTP_HELP = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SymbiOS - Unlock /home</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <style>
+    body { background: #1a1d23; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; }
+    .help-card { max-width: 480px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="help-card">
+      <div class="text-center mb-4">
+        <h1 class="mb-2"><i class="bi bi-shield-lock"></i> SymbiOS</h1>
+        <p class="text-muted">Encrypted /home requires unlock</p>
+      </div>
+      <div class="card" style="background:#2a2d35; border-color:#444;">
+        <div class="card-body p-4 text-center">
+          <p>The unlock page is served over <strong>HTTPS</strong>.</p>
+          <a href="https://__HOSTNAME__/"
+             class="btn btn-primary btn-lg">
+            <i class="bi bi-lock"></i> Open unlock page (HTTPS)
+          </a>
+          <div class="alert alert-info small mt-3 mb-0 text-start">
+            <i class="bi bi-info-circle"></i>
+            After unlock, Traefik takes over with a proper Let's Encrypt certificate.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>"""
 
@@ -192,18 +250,25 @@ def generate_self_signed_cert():
 
 
 def check_home_encrypted():
-    """Check if /home is a LUKS device that needs unlocking."""
+    """Check if /home is a LUKS device that needs unlocking.
+
+    Returns True if there is an unopened LUKS device (i.e. a crypto_LUKS
+    device whose mapper child is NOT mounted).
+    """
     try:
         r = subprocess.run(
-            ["lsblk", "-o", "FSTYPE,MOUNTPOINT", "-J"],
+            ["lsblk", "-o", "NAME,FSTYPE,MOUNTPOINT,TYPE", "-J"],
             capture_output=True, text=True, timeout=5
         )
         data = json.loads(r.stdout)
         for dev in data.get("blockdevices", []):
-            if dev.get("fstype") == "crypto_LUKS" and not dev.get("mountpoint"):
-                return True
-            for child in dev.get("children", []):
-                if child.get("fstype") == "crypto_LUKS" and not child.get("mountpoint"):
+            if dev.get("fstype") == "crypto_LUKS":
+                # Check if any child (mapper) is mounted
+                children = dev.get("children", [])
+                has_mounted_child = any(
+                    c.get("mountpoint") for c in children
+                )
+                if not has_mounted_child:
                     return True
     except Exception:
         pass
@@ -230,56 +295,172 @@ def find_luks_device():
 
 
 def do_unlock(passphrase):
-    """Unlock LUKS device and mount /home."""
-    luks_dev = find_luks_device()
-    if not luks_dev:
-        return False, "No LUKS device found"
+    """Unlock LUKS device and mount /home. Thread-safe via _unlock_lock."""
+    with _unlock_lock:
+        if _unlock_done.is_set():
+            return True, "Already unlocked"
+        luks_dev = find_luks_device()
+        if not luks_dev:
+            return False, "No LUKS device found"
 
-    luks_name = "home-luks"
-    try:
+        luks_name = "home-luks"
+        try:
+            r = subprocess.run(
+                ["cryptsetup", "open", luks_dev, luks_name],
+                input=passphrase, capture_output=True, text=True, timeout=30
+            )
+            if r.returncode != 0:
+                return False, "Wrong passphrase or device error"
+        except Exception as e:
+            return False, f"cryptsetup failed: {e}"
+
+        os.makedirs("/home", exist_ok=True)
         r = subprocess.run(
-            ["cryptsetup", "open", luks_dev, luks_name],
-            input=passphrase, capture_output=True, text=True, timeout=30
+            ["mount", "/dev/mapper/" + luks_name, "/home"],
+            capture_output=True, text=True, timeout=30
         )
         if r.returncode != 0:
-            return False, "Wrong passphrase or device error"
-    except Exception as e:
-        return False, f"cryptsetup failed: {e}"
+            return False, f"Mount failed: {r.stderr}"
 
-    os.makedirs("/home", exist_ok=True)
-    r = subprocess.run(
-        ["mount", "/dev/mapper/" + luks_name, "/home"],
-        capture_output=True, text=True, timeout=30
-    )
-    if r.returncode != 0:
-        return False, f"Mount failed: {r.stderr}"
-
-    return True, "/home unlocked successfully"
+        _unlock_done.set()
+        return True, "/home unlocked successfully"
 
 
 def start_docker():
-    """Start Docker and bring up WebUI + Traefik containers."""
-    subprocess.Popen(
+    """Unmask and start containerd + Docker after /home is unlocked.
+
+    The unlock service masks docker.socket, containerd.service, and
+    docker.service via ExecStartPre to prevent them from starting
+    before /home is mounted (Docker and containerd data live on /home).
+    After unlock we unmask them, then start containerd and Docker
+    so Docker can restore all unless-stopped containers.
+
+    Returns True if Docker is fully operational, False otherwise.
+    """
+    log("start_docker: unmasking services")
+
+    # Unmask all three services so systemd can manage them again.
+    r = subprocess.run(
+        ["systemctl", "unmask", "containerd.service",
+         "docker.service", "docker.socket"],
+        capture_output=True, text=True, timeout=10
+    )
+    log(f"unmask rc={r.returncode} stderr={r.stderr.strip()}")
+
+    # Start containerd first — Docker needs it.
+    log("starting containerd...")
+    r = subprocess.run(
+        ["systemctl", "start", "containerd"],
+        capture_output=True, text=True, timeout=60
+    )
+    log(f"containerd start rc={r.returncode} stderr={r.stderr.strip()}")
+    if r.returncode != 0:
+        log("ERROR: containerd failed to start, aborting")
+        return False
+
+    # Wait for containerd socket to appear.
+    log("waiting for containerd socket...")
+    for i in range(30):
+        if os.path.exists("/run/containerd/containerd.sock"):
+            log(f"socket found after {i}s")
+            break
+        time.sleep(1)
+    else:
+        log("ERROR: containerd socket timeout")
+        return False
+
+    # Give containerd a moment to become fully ready.
+    time.sleep(2)
+
+    # Start Docker.
+    log("starting Docker...")
+    r = subprocess.run(
         ["systemctl", "start", "docker"],
+        capture_output=True, text=True, timeout=120
+    )
+    log(f"docker start rc={r.returncode} stderr={r.stderr.strip()}")
+    if r.returncode != 0:
+        log("ERROR: docker start command failed")
+        return False
+
+    # Wait for Docker to be fully operational (socket + daemon ready).
+    log("waiting for Docker daemon...")
+    for i in range(60):
+        r2 = subprocess.run(
+            ["systemctl", "is-active", "docker"],
+            capture_output=True, text=True, timeout=5
+        )
+        if r2.stdout.strip() == "active":
+            # Also verify Docker API is responsive.
+            r3 = subprocess.run(
+                ["docker", "info", "--format", "{{.ServerVersion}}"],
+                capture_output=True, text=True, timeout=10
+            )
+            if r3.returncode == 0:
+                log(f"Docker daemon ready after {i+1}s (v{r3.stdout.strip()})")
+                return True
+        time.sleep(1)
+
+    log("ERROR: Docker daemon did not become ready within 60s")
+    return False
+
+
+def start_graphical():
+    """Start the graphical desktop (LightDM) after unlock.
+
+    The default target is multi-user.target so the boot pauses in
+    text mode until the user unlocks.  After unlock we switch to
+    graphical.target so LightDM and the desktop session start.
+    """
+    subprocess.Popen(
+        ["systemctl", "start", "graphical.target"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
-    time.sleep(3)
-    for compose_dir in ["/home/docker/symbios-ui", "/home/docker/traefik"]:
-        if os.path.isdir(compose_dir):
-            subprocess.Popen(
-                ["docker", "compose", "up", "-d"],
-                cwd=compose_dir,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
 
 
 def shutdown_self():
     """Stop this service after unlock so Docker/Traefik can bind 80/443."""
-    time.sleep(2)
+    # Wait a moment for Docker to stabilize.
+    time.sleep(5)
+    log("shutting down unlock service")
     subprocess.Popen(
         ["systemctl", "stop", "symbios-boot-unlock.service"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
+
+
+def console_unlock_thread():
+    """Prompt for LUKS passphrase on the physical console (TTY).
+
+    Runs only when stdin is a real terminal (i.e. the service runs on a
+    TTY or via systemd with StandardInput=tty).  Uses getpass so the
+    passphrase is not echoed.
+    """
+    if not sys.stdin.isatty():
+        return
+    print("\n=== SymbiOS LUKS Unlock ===")
+    print("Enter the LUKS passphrase to unlock /home.")
+    print("Alternatively, open https://<this-host>/ on another device.\n")
+    while not _unlock_done.is_set():
+        try:
+            passphrase = getpass.getpass("LUKS passphrase: ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nSkipping console unlock.\n")
+            return
+        if not passphrase:
+            continue
+        ok, msg = do_unlock(passphrase)
+        if ok:
+            log(f"Console unlock: {msg}")
+            docker_ok = start_docker()
+            if docker_ok:
+                log("Docker operational (console), starting graphical + shutdown")
+            else:
+                log("WARNING: Docker not fully operational (console)")
+            start_graphical()
+            threading.Thread(target=shutdown_self, daemon=True).start()
+            return
+        print(f"Unlock failed: {msg}. Try again or use the web interface.\n")
 
 
 def handle_signal(signum, frame):
@@ -334,7 +515,12 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             if ok:
-                start_docker()
+                docker_ok = start_docker()
+                if docker_ok:
+                    log("Docker operational, starting graphical + shutdown")
+                else:
+                    log("WARNING: Docker not fully operational")
+                start_graphical()
                 threading.Thread(target=shutdown_self, daemon=True).start()
                 self.wfile.write(json.dumps({"ok": True, "message": msg}).encode())
             else:
@@ -370,34 +556,52 @@ def main():
         sys.exit(1)
 
     def watchdog():
-        """Exit if /home gets mounted by something else."""
+        """Exit if /home gets mounted by something else.
+
+        Does NOT exit if we did the unlock ourselves (_unlock_done),
+        because start_docker() may still be running.
+        """
         time.sleep(10)
         while True:
             if not check_home_encrypted():
-                print("/home is now mounted, shutting down", flush=True)
-                os._exit(0)
+                if _unlock_done.is_set():
+                    log("watchdog: /home mounted (our unlock), skipping exit")
+                else:
+                    log("watchdog: /home mounted externally, shutting down")
+                    os._exit(0)
             time.sleep(30)
 
     threading.Thread(target=watchdog, daemon=True).start()
 
-    print(f"SymbiOS boot unlock: HTTPS on :{HTTPS_PORT}, HTTP redirect on :{HTTP_PORT}")
+    print(f"SymbiOS boot unlock: HTTPS on :{HTTPS_PORT}, HTTP help on :{HTTP_PORT}")
+
+    # Start the console TTY unlock thread (if stdin is a terminal).
+    threading.Thread(target=console_unlock_thread, daemon=True).start()
 
     https_server = create_https_server(HTTPS_PORT, UnlockHandler)
 
-    class HTTPRedirectHandler(http.server.BaseHTTPRequestHandler):
+    # HTTP server on port 80 shows a help page explaining how to accept
+    # the self-signed cert.  The passphrase is NEVER sent over HTTP.
+    hostname = get_hostname()
+    http_help_page = HTML_HTTP_HELP.replace("__HOSTNAME__", hostname)
+
+    class HTTPHelpHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
-            hostname = get_hostname()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(http_help_page.encode())
+
+        def do_POST(self):
+            # Accept POST on HTTP too — redirect to HTTPS.
             self.send_response(301)
             self.send_header("Location", f"https://{hostname}{self.path}")
             self.end_headers()
 
-        def do_POST(self):
-            self.do_GET()
-
         def log_message(self, fmt, *args):
             pass
 
-    http_server = http.server.HTTPServer(("0.0.0.0", HTTP_PORT), HTTPRedirectHandler)
+    http_server = http.server.HTTPServer(("0.0.0.0", HTTP_PORT), HTTPHelpHandler)
 
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     http_thread.start()

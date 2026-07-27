@@ -43,9 +43,15 @@ then
   exit 0
 fi
 
-# Audit every invocation: syslog and a local log file.
-g_logger "client=${g_client_ip} cmd=${g_cmd}"
-echo "$(date -Iseconds) client=${g_client_ip} cmd=${g_cmd}" >> /var/log/symbios-exec.log 2>/dev/null || true
+# Redact sensitive data from the audit log (passwords, tokens).
+g_cmd_safe="${g_cmd}"
+g_cmd_safe="$(echo "$g_cmd_safe" | sed -E 's/(password[=: \"])[^ \"]+/\1***REDACTED***/gi')"
+g_cmd_safe="$(echo "$g_cmd_safe" | sed -E 's/--passphrase [^ ]+ /--passphrase ***REDACTED***/g')"
+g_cmd_safe="$(echo "$g_cmd_safe" | sed -E 's/cryptsetup luksFormat [^ ]+ /cryptsetup luksFormat ***REDACTED*** /g')"
+g_cmd_safe="$(echo "$g_cmd_safe" | sed -E 's/(symbios-home-partition\.sh setup [^ ]+ [^ ]+ )[^ ]+/\1***REDACTED***/g')"
+
+g_logger "client=${g_client_ip} cmd=${g_cmd_safe}"
+echo "$(date -Iseconds) client=${g_client_ip} cmd=${g_cmd_safe}" >> /var/log/symbios-exec.log 2>/dev/null || true
 
 # Run the command as-is.
 exec bash -c "${g_cmd}"
