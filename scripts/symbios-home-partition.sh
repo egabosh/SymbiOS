@@ -392,14 +392,14 @@ function f_action_setup {
   sed -i '\#.*[[:space:]]/home[[:space:]]#d' /etc/fstab
   if [[ "$f_encrypt" == "yes" ]]
   then
-    echo "/dev/mapper/$f_luks_name /home ext4 defaults,noatime 0 2" >> /etc/fstab
+    echo "/dev/mapper/$f_luks_name /home ext4 defaults,noatime,noauto 0 2" >> /etc/fstab
   else
     local f_uuid
     f_uuid=$(blkid -s UUID -o value "$f_device" 2>/dev/null) || {
       f_log_error "blkid failed"
       f_json_error "blkid failed"
     }
-    echo "UUID=$f_uuid /home ext4 defaults,noatime 0 2" >> /etc/fstab
+    echo "UUID=$f_uuid /home ext4 defaults,noatime,noauto 0 2" >> /etc/fstab
   fi
   f_log_ok "fstab updated"
 
@@ -417,9 +417,41 @@ function f_action_setup {
     echo "$f_luks_name" > /config/.luks-name 2>/dev/null || true
   fi
 
+  # ---- Step 10: Clean up ----
+  umount /home.new 2>/dev/null || true
+  rm -rf /home.new 2>/dev/null || true
+
+  # ---- Step 11: Reboot ----
+  # Schedule a safety-net reboot (30 min) in case the script is interrupted.
+  # The short reboot (1 min) is scheduled after Docker stops.
+  shutdown -r +30 "Disk migration safety-net reboot" 2>/dev/null || true
+
+  # Output the JSON response NOW — before Docker stops — so the WebUI
+  # exec-modal receives the success message and can show it to the user.
   f_log_step "Migration complete!"
   f_log_ok "/home is now on $f_device"
-  f_json_ok '"message":"Disk setup complete. /home is now on the new partition.","can_rollback":true'
+  f_log "Server will reboot in 1 minute to finalize. All services will restart automatically."
+  if [[ "$f_encrypt" == "yes" ]]
+  then
+    f_log "You will need to enter your LUKS passphrase at the boot screen."
+  fi
+
+  # Stop Docker services.  This kills the WebUI container (and the exec-modal
+  # connection), but the script continues on the host since it runs via SSH
+  # exec.  The JSON response above was already sent before this point.
+  f_log_step "Stopping Docker services for reboot"
+  if command -v docker &>/dev/null
+  then
+    docker stop $(docker ps -q) 2>/dev/null || true
+    f_log_ok "Docker services stopped"
+  fi
+
+  # Cancel the safety-net and schedule the real reboot (1 minute)
+  shutdown -c 2>/dev/null || true
+  shutdown -r +1 "Disk migration complete — rebooting." 2>/dev/null || true
+  f_log_ok "Reboot scheduled in 1 minute"
+
+  f_json_ok '"message":"Disk migration complete. The server will reboot in about 1 minute. All services will restart automatically. You will need to enter your LUKS passphrase at the boot screen.","can_rollback":true'
 }
 
 # ---------------------------------------------------------------------------

@@ -848,7 +848,7 @@ def settings_disk_setup(request):
 
     cmd_parts = [f'{_HOME_PART_SCRIPT} setup', device, encrypt]
     if encrypt == 'yes':
-        cmd_parts.append(f'password={password}')
+        cmd_parts.append(password)
     cmd = ' '.join(cmd_parts)
 
     is_ajax = is_ajax_request(request)

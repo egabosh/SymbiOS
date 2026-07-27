@@ -93,9 +93,18 @@
       when: smtp_user is defined and smtp_user | length > 0 and smtp_password is defined and smtp_password | length > 0
       notify: Restart postfix
 
-    - name: Configure SASL password map
+    - name: Ensure postfix secrets directory exists on encrypted /home
+      ansible.builtin.file:
+        path: /home/docker/_defaults/postfix
+        state: directory
+        mode: '0700'
+        owner: root
+        group: root
+      when: smtp_user is defined and smtp_user | length > 0 and smtp_password is defined and smtp_password | length > 0
+
+    - name: Configure SASL password map (stored on encrypted /home)
       ansible.builtin.lineinfile:
-        path: /etc/postfix/sasl_passwd
+        path: /home/docker/_defaults/postfix/sasl_passwd
         line: "[{{ smtp_server }}]:{{ smtp_port | default('587') }} {{ smtp_user }}:{{ smtp_password }}"
         create: yes
         mode: '0600'
@@ -106,13 +115,13 @@
 
     - name: Generate SASL password DB
       ansible.builtin.command:
-        cmd: postmap /etc/postfix/sasl_passwd
+        cmd: postmap /home/docker/_defaults/postfix/sasl_passwd
       when: smtp_user is defined and smtp_user | length > 0 and smtp_password is defined and smtp_password | length > 0
       notify: Restart postfix
 
     - name: Set SASL password map config
       ansible.builtin.command:
-        cmd: "postconf -e 'smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd'"
+        cmd: "postconf -e 'smtp_sasl_password_maps = hash:/home/docker/_defaults/postfix/sasl_passwd'"
       when: smtp_user is defined and smtp_user | length > 0 and smtp_password is defined and smtp_password | length > 0
       notify: Restart postfix
 
@@ -189,6 +198,8 @@
       loop:
         - /etc/postfix/sasl_passwd
         - /etc/postfix/sasl_passwd.db
+        - /home/docker/_defaults/postfix/sasl_passwd
+        - /home/docker/_defaults/postfix/sasl_passwd.db
       when: smtp_server is not defined or smtp_server | length == 0
 
     - name: Disable SASL auth if SMTP not configured

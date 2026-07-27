@@ -54,8 +54,16 @@ for c in certs:
 if not target:
     sys.exit(0)
 
-cert_pem = target.get("certificate", "").replace("\\n", "\n")
-key_pem = target.get("key", "").replace("\\n", "\n")
+cert_pem = target.get("certificate", "")
+key_pem = target.get("key", "")
+
+# acme.json stores cert/key as base64-encoded PEM.
+import base64 as _b64
+try:
+    cert_pem = _b64.b64decode(cert_pem).decode()
+    key_pem = _b64.b64decode(key_pem).decode()
+except Exception:
+    sys.exit(0)
 
 cert_path = os.path.join(cert_dir, "cert.pem")
 key_path = os.path.join(cert_dir, "key.pem")
