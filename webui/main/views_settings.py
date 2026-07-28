@@ -530,7 +530,7 @@ def _read_host_authorized_keys():
         ok, stdout, _ = run_command('cat /root/.ssh/authorized_keys', timeout=10)
         if ok and stdout:
             return [line.strip() for line in stdout.splitlines()
-                    if line.strip() and not line.startswith("#")]
+                    if line.strip()]
     except Exception:
         pass
     return []
@@ -567,8 +567,10 @@ def settings_ssh_keys(request):
                         user_keys.pop(idx)
             elif action == "save":
                 keys_text = request.POST.get("keys", "").strip()
-                new_keys = [k.strip() for k in keys_text.split("\n") if k.strip() and not k.strip().startswith("#")]
-                invalid = [k for k in new_keys if not _is_valid_ssh_pubkey(k)]
+                new_keys = [k.strip() for k in keys_text.split("\n") if k.strip()]
+                invalid = [k for k in new_keys
+                           if not k.startswith("#")
+                           and not _is_valid_ssh_pubkey(k)]
                 if invalid:
                     raise ValueError(f"{len(invalid)} invalid SSH key(s) found")
                 user_keys = new_keys
