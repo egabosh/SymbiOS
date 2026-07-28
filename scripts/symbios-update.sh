@@ -193,6 +193,7 @@ else
     for g_playbook in "${g_updated_playbooks[@]}"
     do
       g_echo_note "Running ${g_playbook}"
+      g_echo "ansible-playbook --connection=local --limit localhost --inventory \"${g_inventory}\" \"${g_playbook}\""
       if ansible-playbook --connection=local --limit localhost --inventory "${g_inventory}" "${g_playbook}"
       then
         g_echo_note "  Successfully ran ${g_playbook}"
