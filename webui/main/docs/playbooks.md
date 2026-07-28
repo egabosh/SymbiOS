@@ -133,7 +133,7 @@ to know: title, description, available actions, status checks, and log streams.
 - **Never use `traefik.*` Docker labels** — the Docker provider is disabled. Use a file-provider snippet instead.
 - Pick a unique subdomain: `{{ service_name }}.{{ base_domain }}`
 - Protect the route with `authelia@file` unless it must be public. Public routes still get `secHeaders@file`.
-- Use `{{ acme_resolver }}` so the playbook works in both local and public modes.
+- Use `{{ acme_resolver }}` to select the Let's Encrypt resolver.
 - For non-HTTP services (SFTP, TCP/UDP relays), just publish the port in Compose and open it with `ufw`.
 
 ---

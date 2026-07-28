@@ -136,11 +136,6 @@
                 - --certificatesResolvers.letsencrypt.acme.httpChallenge.entryPoint=http
                 - --certificatesresolvers.letsencrypt.acme.email=ssl@{{ default_domain }}
                 - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
-                # ACME PKI (SymbiOS local CA)
-                - --certificatesresolvers.symbios-pki.acme.caServer=https://acme-pki-stepca:9000/acme/acme/directory
-                - --certificatesresolvers.symbios-pki.acme.httpChallenge.entryPoint=http
-                - --certificatesresolvers.symbios-pki.acme.email=admin@local
-                - --certificatesresolvers.symbios-pki.acme.storage=/acme-pki/acme.json
                 # non-docker services
                 - --providers.file=true
                 - --providers.file.directory=/etc/traefik/providers.local
@@ -164,8 +159,6 @@
                 - ./letsencrypt:/letsencrypt
                 - ./providers:/etc/traefik/providers.local
                 - ./log:/log
-                - /home/docker/acme-pki/data/acme:/acme-pki
-                - ./ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
           networks:
             traefik:
               external: true
@@ -176,15 +169,6 @@
         group: docker
       notify: Restart traefik
 
-
-    - name: Create empty ca-bundle for Traefik
-      ansible.builtin.copy:
-        content: ""
-        dest: /home/docker/traefik/ca-bundle.crt
-        force: no
-        owner: root
-        group: docker
-        mode: "0644"
 
     - name: Create traefik dir
       ansible.builtin.file:
@@ -322,15 +306,12 @@
         mode: '0700'
       loop:
         - /home/docker/traefik/letsencrypt
-        - /home/docker/acme-pki/data/acme
 
     - name: Ensure ACME account files are not group/world readable
       # Traefik refuses to load acme.json unless its mode is 0600
       # ("permissions ... are too open, please use 600"). The files are written
       # at runtime with the host umask (0027 -> 0640), so this breaks TLS after
-      # every Traefik restart. Re-assert 0600 as a safety net. The PKI file is
-      # owned by the step-ca user; 0600 keeps it readable for root (Traefik) and
-      # writable for its owner (step-ca).
+      # every Traefik restart. Re-assert 0600 as a safety net.
       ansible.builtin.file:
         path: "{{ item }}"
         state: touch
@@ -339,7 +320,6 @@
         mode: '0600'
       loop:
         - /home/docker/traefik/letsencrypt/acme.json
-        - /home/docker/acme-pki/data/acme/acme.json
 
 
     - name: Register playbook as installed

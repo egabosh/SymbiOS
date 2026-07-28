@@ -81,11 +81,6 @@ ghcr.io/ldapaccountmanager/lam:stable
   Copyright: Copyright (c) 2004-2024 LAM Contributors
   Source: https://github.com/LDAPAccountManager/lam
 
-smallstep/step-ca:latest
-  License: Apache-2.0
-  Copyright: Copyright (c) 2020 Smallstep Labs, Inc.
-  Source: https://github.com/smallstep/certificates
-
 openldap (via Bitnami)
   License: OLIVER Public License (OPL)
   Copyright: Copyright (c) 1994-2024 The OpenLDAP Foundation

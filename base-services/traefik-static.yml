@@ -55,13 +55,6 @@ certificatesResolvers:
         entryPoint: http
       email: "ssl@SymbiOS"
       storage: "/letsencrypt/acme.json"
-  symbios-pki:
-    acme:
-      caServer: "https://acme-pki-stepca:9000/acme/acme/directory"
-      email: "admin@localhost"
-      storage: "/letsencrypt/symbios-pki-acme.json"
-      httpChallenge:
-        entryPoint: http
 
 accessLog:
   filePath: "/log/access.log"
