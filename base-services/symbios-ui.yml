@@ -340,12 +340,27 @@
           Type=oneshot
           RemainAfterExit=yes
           ExecStart=/usr/bin/python3 /usr/local/sbin/symbios-boot-unlock/unlock.py
-          ExecStartPost=-/usr/bin/systemctl start graphical.target
           # Allow binding to privileged ports 80/443
           AmbientCapabilities=CAP_NET_BIND_SERVICE
           # Provide TTY for console unlock prompt
           StandardInput=tty
           TTYPath=/dev/tty1
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Start graphical.target after Docker is ready
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-graphical.service
+        content: |
+          [Unit]
+          Description=Start graphical target after Docker
+          After=docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/bin/systemctl start graphical.target
 
           [Install]
           WantedBy=multi-user.target
