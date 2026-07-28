@@ -18,6 +18,7 @@ import subprocess
 import os
 import socket
 import struct
+import yaml
 from django.shortcuts import redirect
 
 from .auth_user import SymbiosUser, AnonymousUser
@@ -122,5 +123,37 @@ class AutheliaMiddleware:
                 and request.session.get('force_password_change')
                 and request.path not in ('/change-password/', '/logout/', '/authelia-logout/')):
             return redirect('/change-password/')
+
+        return self.get_response(request)
+
+
+class SetupRequiredMiddleware:
+    _bypass_paths = frozenset((
+        '/settings/ddns/',
+        '/logout/',
+        '/authelia-logout/',
+        '/change-password/',
+        '/static/',
+        '/favicon.ico',
+    ))
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        path = request.path.rstrip('/') or '/'
+        if any(path.startswith(p) or path == p.rstrip('/') for p in self._bypass_paths):
+            return self.get_response(request)
+
+        config_path = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
+        try:
+            with open(config_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            base_domain = cfg.get('all', {}).get('vars', {}).get('base_domain', '')
+        except Exception:
+            base_domain = ''
+
+        if not base_domain or base_domain in ('none', '0'):
+            return redirect('/settings/ddns/')
 
         return self.get_response(request)
