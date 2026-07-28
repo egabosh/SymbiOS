@@ -63,6 +63,7 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          SHELL=/bin/bash
           ## Auto-Update
           5 6 * * * root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/autoupdate.sh ]] && autoupdate.sh
         backup: yes

@@ -69,6 +69,7 @@
         group: root
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          SHELL=/bin/bash
           5 0 * * * root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/backup.sh ]] && backup.sh
         backup: yes
 

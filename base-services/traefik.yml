@@ -278,6 +278,7 @@
         group: root
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          SHELL=/bin/bash
           @daily root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/traefik-qualys-ssl-labs-check.sh ]] && traefik-qualys-ssl-labs-check.sh
         backup: yes
 
