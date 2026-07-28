@@ -795,6 +795,7 @@ def _describe_block(dev):
         'mountpoint': dev.get('mountpoint') or '',
         'model': (dev.get('model') or '').strip(),
         'uuid': dev.get('uuid') or '',
+        'label': (dev.get('label') or '').strip(),
         'tran': dev.get('tran') or '',
         'rm': dev.get('rm', False),
         'children': [],
@@ -940,6 +941,46 @@ def settings_disk_umount(request):
         return JsonResponse(data)
     except json.JSONDecodeError:
         return JsonResponse({'ok': True, 'message': '/home unmounted and LUKS volume closed.'})
+
+
+@login_required
+def settings_disk_change_password(request):
+    """AJAX POST — change LUKS passphrase for an encrypted /home device."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    current_password = request.POST.get('current_password', '').strip()
+    new_password = request.POST.get('new_password', '').strip()
+
+    if not current_password:
+        return JsonResponse({'ok': False, 'error': 'Current password is required'})
+    if not new_password:
+        return JsonResponse({'ok': False, 'error': 'New password is required'})
+    if current_password == new_password:
+        return JsonResponse({'ok': False, 'error': 'New password must differ from current password'})
+
+    cmd = f'{_HOME_PART_SCRIPT} change-password {shlex.quote(current_password)} {shlex.quote(new_password)}'
+
+    is_ajax = is_ajax_request(request)
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=60)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': 'Changing LUKS passphrase...',
+                             'message': 'Updating encryption key.',
+                             'command': cmd})
+
+    ok, stdout, stderr = run_command(cmd, timeout=60)
+    output = stdout
+    if stderr:
+        output = output + '\n' + stderr
+    try:
+        data = json.loads(output)
+        return JsonResponse(data)
+    except json.JSONDecodeError:
+        if ok:
+            return JsonResponse({'ok': True, 'message': 'LUKS passphrase changed.'})
+        return JsonResponse({'ok': False, 'error': f'Password change failed:\n{output[-2000:]}'})
 
 
 # ---------------------------------------------------------------------------
