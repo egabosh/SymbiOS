@@ -139,20 +139,7 @@
         directory_mode: "0770"
       notify: Restart {{ service_name }}
 
-    - name: Remove obsolete WebUI files (DB-free auth refactor)
-      ansible.builtin.file:
-        path: "{{ docker_path }}/webui/{{ item }}"
-        state: absent
-      loop:
-        - main/backends.py
-        - main/management/commands/initial_setup.py
-        - main/templates/main/login.html
-
     - name: Set permissions
-      # Add others-read to files only. Recursing into directories would flip
-      # their mode (e.g. 0770 -> 0774) and make the "Create required
-      # directories" webui assertion report changed on every run. The container
-      # user (uid 10000) traverses via the group rwx bits, so dirs are left alone.
       ansible.builtin.command:
         cmd: "find {{ docker_path }}/webui -type f -exec chmod o+r {} +"
       changed_when: false
@@ -197,51 +184,6 @@
         mode: "0644"
         create: yes
 
-    - name: Copy container-index.sh
-      ansible.builtin.copy:
-        dest: /usr/local/bin/symbios-container-index.sh
-        content: |
-          #!/bin/bash
-
-          # Index file storing Docker container information
-          g_index_file=/home/docker/symbios-ui/log/docker-containers.tsv
-          g_temp_file="${g_index_file}.tmp"
-
-          # Write current container list to temp file
-          docker ps --no-trunc --format '{% raw %}{{.ID}}\t{{.Names}}{% endraw %}' > "$g_temp_file" 2>/dev/null
-
-          # Atomically replace index file
-          mv "$g_temp_file" "$g_index_file"
-
-          # Set permissions on index file
-          chmod 644 "$g_index_file"
-        mode: "0755"
-        owner: root
-        group: root
-
-    - name: Copy service-status.sh
-      ansible.builtin.copy:
-        dest: /usr/local/bin/symbios-service-status.sh
-        content: |
-          #!/bin/bash
-
-          # File storing system service statuses
-          g_file=/home/docker/symbios-ui/log/symbios-services.tsv
-          g_tmp="${g_file}.tmp"
-
-          # Write status for each service to temp file
-          # No system services to track currently
-          echo -e "" > "$g_tmp"
-
-          # Set permissions on temp file
-          chmod 644 "$g_tmp"
-
-          # Atomically replace status file
-          mv "$g_tmp" "$g_file"
-        mode: "0755"
-        owner: root
-        group: root
-
     - name: Install container-index systemd service
       ansible.builtin.copy:
         dest: /etc/systemd/system/symbios-container-index.service
@@ -271,38 +213,6 @@
           [Install]
           WantedBy=timers.target
 
-    - name: Install service-status systemd service
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/symbios-service-status.service
-        content: |
-          [Unit]
-          Description=Write system service statuses to /var/run
-
-          [Service]
-          Type=oneshot
-          ExecStart=/usr/local/bin/symbios-service-status.sh
-          User=root
-          Group=root
-
-    - name: Install service-status systemd timer
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/symbios-service-status.timer
-        content: |
-          [Unit]
-          Description=Update service statuses every 60s
-
-          [Timer]
-          OnBootSec=35
-          OnUnitActiveSec=60
-          Unit=symbios-service-status.service
-
-          [Install]
-          WantedBy=timers.target
-
-    - name: Reload systemd (for boot unlock service)
-      ansible.builtin.systemd:
-        daemon_reload: yes
-
     - name: Create /usr/local/sbin/symbios-boot-unlock
       ansible.builtin.file:
         path: /usr/local/sbin/symbios-boot-unlock
@@ -318,12 +228,6 @@
         owner: root
         group: root
         mode: "0755"
-
-    - name: Create /etc/symbios-boot-unlock symlink
-      ansible.builtin.file:
-        src: /usr/local/sbin/symbios-boot-unlock
-        dest: /etc/symbios-boot-unlock
-        state: link
 
     - name: Install symbios-boot-unlock systemd service
       ansible.builtin.copy:
@@ -412,50 +316,12 @@
         enabled: yes
         state: started
 
-    - name: Enable service-status timer
-      ansible.builtin.systemd:
-        name: symbios-service-status.timer
-        enabled: yes
-        state: started
-
     - name: Inventory must be owned by the WebUI user so the UI can read/write it
       ansible.builtin.file:
         path: "{{ docker_path }}/config/inventory.yml"
         owner: "10000"
         group: "10000"
         mode: "0640"
-
-    - name: Remove LAN-only 8080 firewall (port now bound to loopback only)
-      # The published port is restricted to 127.0.0.1, so the DOCKER-USER
-      # rules are no longer needed. Flush any stale rules left from earlier.
-      ansible.builtin.shell: |
-        nft flush chain ip filter DOCKER-USER 2>/dev/null || true
-        nft flush chain ip6 filter DOCKER-USER 2>/dev/null || true
-      changed_when: false
-
-    - name: Disable LAN restriction service
-      # Do NOT mask here: masking creates a /dev/null symlink at the unit path,
-      # which the "Remove LAN restriction unit file" task then deletes every run,
-      # causing a non-idempotent changed loop. The unit file itself is removed below.
-      ansible.builtin.systemd:
-        name: symbios-lan-8080.service
-        enabled: no
-        state: stopped
-      failed_when: false
-
-    - name: Remove LAN restriction unit file
-      ansible.builtin.file:
-        path: /etc/systemd/system/symbios-lan-8080.service
-        state: absent
-
-    - name: Reload systemd after unit removal
-      ansible.builtin.systemd:
-        daemon_reload: yes
-
-    - name: Remove LAN restriction script
-      ansible.builtin.file:
-        path: /usr/local/sbin/symbios-lan-8080.sh
-        state: absent
 
     - name: Ensure symbios-ui container is running
       ansible.builtin.shell: docker compose up -d
@@ -591,8 +457,4 @@
         fi
       args:
         chdir: "{{ docker_path }}"
-
-    - name: Reload systemd
-      ansible.builtin.systemd:
-        daemon_reload: yes
 
