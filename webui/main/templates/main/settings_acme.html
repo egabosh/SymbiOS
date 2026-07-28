@@ -1,0 +1,68 @@
+{% extends "main/base.html" %}
+{% load static %}
+{% block content %}
+<h2><i class="bi bi-patch-check"></i> ACME (TLS Certificates)</h2>
+
+<div class="row">
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-body">
+
+        <div class="alert alert-info border-2 border-info mb-4" role="alert">
+          <i class="bi bi-info-circle-fill me-2"></i>
+          By default SymbiOS uses <strong>Let's Encrypt</strong> to obtain TLS certificates for all services.
+          If you run your own ACME-compatible CA (e.g. <code>smallstep/step-ca</code>,
+          <code>acme.sh</code>, or a private <code>cert-manager</code>), enter its
+          <strong>ACME directory URL</strong> below.
+        </div>
+
+        <form method="post" data-exec="true">
+          {% csrf_token %}
+
+          <div class="mb-3">
+            <label class="form-label">ACME Server URL</label>
+            <input type="text" class="form-control font-monospace" name="acme_server" id="acme_server"
+                   value="{{ vars.acme_server|default:'' }}"
+                   placeholder="https://acme-v02.api.letsencrypt.org/directory">
+            <div class="form-text">
+              Leave empty to use the Let's Encrypt production server.
+              Example for a custom CA: <code>https://ca.example.com:9000/acme/acme/directory</code>
+            </div>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-save"></i> Save
+            </button>
+            {% if vars.acme_server %}
+            <button type="submit" name="action" value="remove" class="btn btn-outline-danger"
+                    onclick="return confirm('Reset to Let\u2019s Encrypt (default)?')">
+              <i class="bi bi-arrow-counterclockwise"></i> Reset to Let's Encrypt
+            </button>
+            {% endif %}
+          </div>
+        </form>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-body">
+        <h6 class="card-title"><i class="bi bi-question-circle"></i> What is this?</h6>
+        <p class="card-text small text-muted">
+          Traefik automatically requests and renews TLS certificates for all your
+          services. The default ACME provider is
+          <a href="https://letsencrypt.org/">Let's Encrypt</a>, a free and
+          automated certificate authority trusted by every browser.
+        </p>
+        <p class="card-text small text-muted mb-0">
+          If you need certificates from a different ACME CA (e.g. for internal-only
+          services or testing), enter the full directory URL above.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

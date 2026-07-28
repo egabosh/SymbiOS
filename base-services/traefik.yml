@@ -136,6 +136,8 @@
                 - --certificatesResolvers.letsencrypt.acme.httpChallenge.entryPoint=http
                 - --certificatesresolvers.letsencrypt.acme.email=ssl@{{ base_domain }}
                 - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+                {% if acme_server %}- --certificatesresolvers.letsencrypt.acme.caServer={{ acme_server }}
+                {% endif %}
                 # non-docker services
                 - --providers.file=true
                 - --providers.file.directory=/etc/traefik/providers.local

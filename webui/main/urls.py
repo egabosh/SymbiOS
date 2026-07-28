@@ -48,6 +48,7 @@ urlpatterns = [
     path('settings/mailserver/test-email/', views_mailserver.settings_mailserver_test_email, name='settings_mailserver_test_email'),
     path('settings/mailserver/autoconfig.xml', views_mailserver.autoconfig_xml, name='autoconfig_xml'),
     path('settings/auth/', views_settings.settings_auth, name='settings_auth'),
+    path('settings/acme/', views_settings.settings_acme, name='settings_acme'),
     path('settings/ssh-keys/', views_settings.settings_ssh_keys, name='settings_ssh_keys'),
     path('settings/config/', views_settings.settings_config, name='settings_config'),
     path('settings/backup/', views_settings.settings_backup, name='settings_backup'),

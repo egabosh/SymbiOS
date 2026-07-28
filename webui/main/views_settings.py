@@ -495,6 +495,49 @@ def settings_auth(request):
 
     return render(request, 'main/settings_auth.html', {'vars': vars_})
 
+
+@login_required
+def settings_acme(request):
+    config = _get_inventory_config()
+    vars_ = config.get('all', {}).get('vars', {})
+
+    if request.method == 'POST':
+        is_ajax = is_ajax_request(request)
+        action = request.POST.get('action', 'save')
+        try:
+            if action == 'remove':
+                config['all']['vars']['acme_server'] = ''
+                _save_inventory_config(config)
+            else:
+                acme_server = request.POST.get('acme_server', '').strip()
+                config['all']['vars']['acme_server'] = acme_server
+                _save_inventory_config(config)
+            if is_ajax:
+                from .utils.jobs import create_job
+                cmd = 'symbios-run-playbook.sh base-services/traefik.yml'
+                job_id = create_job(cmd, timeout=3600)
+                return JsonResponse({'ok': True, 'job': job_id,
+                                     'title': 'Applying ACME settings...',
+                                     'message': 'ACME settings saved.',
+                                     'command': cmd})
+            messages.success(request, 'ACME settings saved.')
+            try:
+                ok, out = run_playbook('base-services/traefik.yml', timeout=180)
+                if ok:
+                    messages.success(request, 'Traefik playbook completed successfully.')
+                else:
+                    messages.warning(request, 'Traefik playbook completed with issues.')
+            except Exception as e:
+                messages.warning(request, 'Could not run Traefik playbook: ' + str(e))
+        except Exception as e:
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+            messages.error(request, f'Error: {e}')
+        return redirect('settings_acme')
+
+    return render(request, 'main/settings_acme.html', {'vars': vars_})
+
+
 @login_required
 def settings_local_ip(request):
     try:
