@@ -38,6 +38,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'main.middleware.AutheliaMiddleware',
+    'main.middleware.SetupRequiredMiddleware',
 ]
 
 ROOT_URLCONF = 'webui.urls'
