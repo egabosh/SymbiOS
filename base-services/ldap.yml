@@ -47,7 +47,7 @@
 
   vars:
     service_name: "ldap"
-    service_domain: "{{ service_name }}.{{ default_domain }}"
+    service_domain: "{{ service_name }}.{{ base_domain }}"
     docker_path: "/home/docker/{{ service_name }}"
 
 
@@ -531,7 +531,7 @@
           uid nslcd
           gid nslcd
            
-          uri ldaps://openldap.{{default_domain}}:389
+          uri ldaps://openldap.{{base_domain}}:389
           base {{ldap_basedn}}
           base passwd ou=users,{{ldap_basedn}}
           base group ou=groups,{{ldap_basedn}}
@@ -593,7 +593,7 @@
         mode: '0644'
         content: |
           BASE {{ldap_basedn}}
-          URI ldaps://openldap.{{ default_domain }}:389
+          URI ldaps://openldap.{{ base_domain }}:389
           #TLS_REQCERT demand
           #TLS_CACERT /etc/ssl/certs/ca-certificates.crt
           NETWORK_TIMEOUT 3

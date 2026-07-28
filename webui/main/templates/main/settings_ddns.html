@@ -90,7 +90,7 @@
               </button>
               {% if vars.ddns_host %}
               <button type="submit" name="action" value="remove" class="btn btn-outline-danger"
-                      onclick="return confirm('Remove DNS configuration? This will reset default_domain to local.')">
+                      onclick="return confirm('Remove DNS configuration? This will reset base_domain to local.')">
                 <i class="bi bi-trash"></i> Remove
               </button>
               {% endif %}
@@ -147,7 +147,7 @@
               </button>
               {% if dns_mode == 'self-managed' %}
               <button type="submit" name="action" value="remove" class="btn btn-outline-danger"
-                      onclick="return confirm('Remove DNS configuration? This will reset default_domain to local.')">
+                      onclick="return confirm('Remove DNS configuration? This will reset base_domain to local.')">
                 <i class="bi bi-trash"></i> Remove
               </button>
               {% endif %}

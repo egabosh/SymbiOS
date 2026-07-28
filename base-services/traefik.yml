@@ -134,7 +134,7 @@
                 # Staging Server - uncomment when testing
                 #- --certificatesResolvers.letsencrypt.acme.caServer=https://acme-staging-v02.api.letsencrypt.org/directory
                 - --certificatesResolvers.letsencrypt.acme.httpChallenge.entryPoint=http
-                - --certificatesresolvers.letsencrypt.acme.email=ssl@{{ default_domain }}
+                - --certificatesresolvers.letsencrypt.acme.email=ssl@{{ base_domain }}
                 - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
                 # non-docker services
                 - --providers.file=true

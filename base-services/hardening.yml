@@ -65,7 +65,7 @@
           AllowAgentForwarding no
           AllowTcpForwarding yes
           Subsystem sftp internal-sftp -f AUTH -l INFO -u 0007
-          ## Ciphers Check https://sshcheck.com/server/{{ default_domain }}/
+          ## Ciphers Check https://sshcheck.com/server/{{ base_domain }}/
           # nmap -p22 -n -sV --script ssh2-enum-algos localhost
           KexAlgorithms curve25519-sha256@libssh.org
           HostKeyAlgorithms ssh-ed25519
