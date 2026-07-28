@@ -62,6 +62,7 @@
         group: root
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          SHELL=/bin/bash
           */5 * * * * root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/dedyn.sh ]] && dedyn.sh >/dev/null 2>&1
         backup: yes
 
@@ -74,6 +75,7 @@
         group: root
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          SHELL=/bin/bash
           */5 * * * * root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/update_host_ip.sh ]] && update_host_ip.sh
         backup: yes
 
