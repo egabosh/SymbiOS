@@ -131,17 +131,21 @@
         mode: '0755'
 
     - name: lightdm config
-      copy:
-        dest: /etc/lightdm/lightdm.conf
-        content: |
-          [Seat:*]
-          autologin-user=symbios
-          autologin-user-timeout=0
-          user-session=cinnamon
-          greeter-session=lightdm-gtk-greeter
-          greeter-hide-users=false
-          greeter-show-manual-login=true
-          allow-guest=false
+      community.general.ini_file:
+        path: /etc/lightdm/lightdm.conf
+        section: "Seat:*"
+        option: "{{ item.option }}"
+        value: "{{ item.value }}"
+        mode: "0644"
+        create: yes
+      loop:
+        - { option: autologin-user, value: symbios }
+        - { option: autologin-user-timeout, value: "0" }
+        - { option: user-session, value: cinnamon }
+        - { option: greeter-session, value: lightdm-gtk-greeter }
+        - { option: greeter-hide-users, value: "false" }
+        - { option: greeter-show-manual-login, value: "true" }
+        - { option: allow-guest, value: "false" }
       changed_when: false
 
     - name: check if kodi is present/used
