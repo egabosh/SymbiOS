@@ -575,13 +575,23 @@ if not scan(data.get('blockdevices', [])):
 
   f_log_step "Changing LUKS passphrase on $f_luks_dev"
 
-  # luksChangeKey: read current password from /dev/stdin, new password via --new-key-file
+  # Write current key to a temp file (cryptsetup needs a seekable fd).
+  local f_tmp_key
+  f_tmp_key=$(mktemp /tmp/.symbios-key.XXXXXX)
+  chmod 600 "$f_tmp_key"
+  printf '%s' "$f_current_password" > "$f_tmp_key"
+
   echo "$f_new_password" | cryptsetup luksChangeKey \
-    --key-file <(echo "$f_current_password") \
-    "$f_luks_dev" 2>&1 || {
+    --key-file "$f_tmp_key" \
+    "$f_luks_dev" 2>&1
+  local f_rc=$?
+  rm -f "$f_tmp_key"
+
+  if [[ "$f_rc" -ne 0 ]]
+  then
     f_log_error "Failed to change LUKS passphrase (wrong current password?)"
     f_json_error "Failed to change LUKS passphrase. Is the current password correct?"
-  }
+  fi
 
   f_log_ok "LUKS passphrase changed successfully"
   f_json_ok '"message":"LUKS passphrase changed successfully."'
