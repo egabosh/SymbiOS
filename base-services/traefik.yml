@@ -45,6 +45,7 @@
   vars:
     authelia_domain: "auth.{{ base_domain }}"
     traefik_domain: "traefik.{{ base_domain }}"
+    acme_server: ""
 
   tasks:
 
@@ -131,8 +132,6 @@
                 - --api.dashboard=true
                 - --api.insecure=false
                 # LetsEncrypt 
-                # Staging Server - uncomment when testing
-                #- --certificatesResolvers.letsencrypt.acme.caServer=https://acme-staging-v02.api.letsencrypt.org/directory
                 - --certificatesResolvers.letsencrypt.acme.httpChallenge.entryPoint=http
                 - --certificatesresolvers.letsencrypt.acme.email=ssl@{{ base_domain }}
                 - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
