@@ -115,8 +115,6 @@
                 - LDAP_URI=ldap://openldap
                 - HOME=/app
                 - DJANGO_SECRET_KEY={{ lookup("password", "/home/docker/symbios-ui/.django_secret_key length=50 chars=ascii_letters,digits") }}
-              extra_hosts:
-                - "host.docker.internal:host-gateway"
               networks:
                 traefik:
                   aliases:
@@ -550,26 +548,18 @@
 
     - name: Seed pinned SSH known_hosts for exec gateway
       # Pin the host key used by the WebUI's SSH exec path. The WebUI connects
-      # to host.docker.internal:22; we record the real host key (from 127.0.0.1)
-      # under that hostname and under every IP the container resolves it to, so
-      # paramiko's RejectPolicy accepts the gateway but rejects any changed key.
+      # to the traefik network gateway (192.168.41.1:33); we record the real
+      # host key under that IP and localhost so the fingerprint policy can match.
       ansible.builtin.shell: |
         set -e
         KH="{{ docker_path }}/config/.ssh/known_hosts"
-        ct=$(docker ps --filter "name=symbios-webui" --format "{{ '{{' }}.Names{{ '}}' }}" | head -1)
         tmp=$(mktemp)
         ssh-keyscan -t ed25519,ecdsa,rsa -p 22 127.0.0.1 > "$tmp" 2>/dev/null || true
         if [ ! -s "$tmp" ]; then
           echo "ssh-keyscan failed" >&2
           exit 1
         fi
-        tokens="host.docker.internal,localhost,127.0.0.1"
-        if [ -n "$ct" ]; then
-          for ip in $(docker exec "$ct" getent hosts host.docker.internal 2>/dev/null | awk '{print $1}'); do
-            case "$ip" in *:*) ip="[$ip]";; esac
-            tokens="$tokens,$ip"
-          done
-        fi
+        tokens="192.168.41.1,localhost,127.0.0.1"
         : > "$KH"
         while read -r line; do
           case "$line" in \#*) continue;; esac
