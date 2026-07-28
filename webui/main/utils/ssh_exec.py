@@ -24,6 +24,7 @@ import paramiko
 logger = logging.getLogger(__name__)
 
 SSH_KEY_PATH = '/config/.ssh/id_symbios'
+SSH_HOST = '192.168.41.1'
 SSH_USER = 'root'
 SSH_PORT = 33
 SSH_CONNECT_TIMEOUT = 15
@@ -40,23 +41,6 @@ SSH_GATEWAY_WRAP = 'bash /home/SymbiOS/scripts/symbios-exec.sh '
 
 _ssh_client = None
 _client_lock = threading.Lock()
-
-
-def _detect_host_ip():
-    """Detect the host IP from the container's default gateway route."""
-    try:
-        with open('/proc/net/route') as f:
-            for line in f:
-                parts = line.strip().split()
-                # Default route: destination == 00000000
-                if len(parts) >= 3 and parts[1] == '00000000':
-                    gw = int(parts[2], 16)
-                    return '{}.{}.{}.{}'.format(
-                        gw & 0xff, (gw >> 8) & 0xff,
-                        (gw >> 16) & 0xff, (gw >> 24) & 0xff)
-    except Exception:
-        pass
-    return 'host.docker.internal'
 
 
 class _FingerprintPolicy(paramiko.MissingHostKeyPolicy):
@@ -135,7 +119,7 @@ def _get_ssh_client():
         client.set_missing_host_key_policy(
             _FingerprintPolicy(SSH_KNOWN_HOSTS))
         client.connect(
-            _detect_host_ip(), port=SSH_PORT, username=SSH_USER,
+            SSH_HOST, port=SSH_PORT, username=SSH_USER,
             pkey=key, timeout=SSH_CONNECT_TIMEOUT,
             allow_agent=False, look_for_keys=False,
         )
