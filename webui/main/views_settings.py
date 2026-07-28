@@ -78,7 +78,6 @@ def settings_ddns(request):
                 config['all']['vars']['dns_mode'] = ''
                 # Reset domains to the local fallback (shared base_domain so the
                 # Authelia session cookie can span all service subdomains)
-                config['all']['vars']['default_domain'] = 'local'
                 config['all']['vars']['base_domain'] = 'symbios.local'
                 _save_inventory_config(config)
                 if is_ajax:
@@ -103,7 +102,6 @@ def settings_ddns(request):
                 config['all']['vars']['ddns_apikey'] = ''
                 config['all']['vars']['ddns_host'] = ''
                 config['all']['vars']['ddns_ipv6'] = ''
-                config['all']['vars']['default_domain'] = self_domain
                 config['all']['vars']['base_domain'] = self_domain
                 _save_inventory_config(config)
                 if is_ajax:
@@ -128,7 +126,6 @@ def settings_ddns(request):
                 config['all']['vars']['ddns_ipv6'] = request.POST.get('ddns_ipv6', '')
                 # The DDNS host becomes the shared parent domain (base_domain) so
                 # the Authelia session cookie can span all service subdomains.
-                config['all']['vars']['default_domain'] = ddns_host
                 config['all']['vars']['base_domain'] = ddns_host
                 _save_inventory_config(config)
                 if is_ajax:

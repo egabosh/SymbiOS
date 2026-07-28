@@ -276,7 +276,7 @@ sudo bash install.sh
    -> ldap -> authelia -> symbios-ui).
 5. On a Raspberry Pi, also apply `raspberry.yml` and the desktop playbook.
 
-After install, edit the inventory to set `base_domain` / `default_domain` and
+After install, edit the inventory to set `base_domain` and
 (optionally) deSEC credentials, then apply them via the WebUI (which runs the
 matching playbook over SSH, see section 8).
 

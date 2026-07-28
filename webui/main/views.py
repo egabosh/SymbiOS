@@ -104,10 +104,10 @@ def container_list(request):
 def logout_view(request):
     config = _get_inventory_config()
     vars_ = config.get("all", {}).get("vars", {})
-    default_domain = vars_.get("default_domain", "")
+    base_domain = vars_.get("base_domain", "")
     request.session.flush()
-    if default_domain:
-        return redirect(f"https://auth.{default_domain}/logout")
+    if base_domain:
+        return redirect(f"https://auth.{base_domain}/logout")
     return redirect("/authelia-logout/")
 
 
