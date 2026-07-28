@@ -348,61 +348,18 @@ def do_unlock(passphrase):
         return True, "/home unlocked successfully"
 
 
-def start_docker():
-    """Unmask and start Docker via systemd after /home is unlocked.
-
-    The unlock service masks docker.socket, containerd.service, and
-    docker.service via ExecStartPre to prevent them from starting
-    before /home is mounted (Docker and containerd data live on /home).
-    After unlock we unmask them and let systemd handle the startup
-    including all dependency ordering (containerd → docker).
-
-    Returns True if Docker started successfully.
-    """
-    log("start_docker: unmasking services")
-    r = subprocess.run(
-        ["systemctl", "unmask", "docker.socket",
-         "containerd.service", "docker.service"],
-        capture_output=True, text=True, timeout=10
-    )
-    log(f"unmask rc={r.returncode} stderr={r.stderr.strip()}")
-
-    log("starting docker.service via systemd...")
-    r = subprocess.run(
-        ["systemctl", "start", "docker.service"],
-        capture_output=True, text=True, timeout=120
-    )
-    log(f"docker start rc={r.returncode} stderr={r.stderr.strip()}")
-    if r.returncode != 0:
-        log("ERROR: docker.service failed to start")
-        return False
-
-    log("docker.service started successfully")
-    return True
+def stop_servers():
+    """Shut down the HTTPS and HTTP servers, releasing ports 80/443."""
+    global _https_server, _http_server
+    log("stopping servers to release ports 80/443")
+    if _https_server:
+        threading.Thread(target=_https_server.shutdown, daemon=True).start()
+    if _http_server:
+        threading.Thread(target=_http_server.shutdown, daemon=True).start()
 
 
-def start_graphical():
-    """Start the graphical desktop (LightDM) after unlock.
-
-    The default target is multi-user.target so the boot pauses in
-    text mode until the user unlocks.  After unlock we switch to
-    graphical.target so LightDM and the desktop session start.
-    """
-    subprocess.Popen(
-        ["systemctl", "start", "graphical.target"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
-
-
-def shutdown_self():
-    """Stop this service after unlock so Docker/Traefik can bind 80/443."""
-    # Wait a moment for Docker to stabilize and bind ports.
-    time.sleep(5)
-    log("shutting down unlock service")
-    subprocess.Popen(
-        ["systemctl", "stop", "symbios-boot-unlock.service"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
+_https_server = None
+_http_server = None
 
 
 def console_unlock_thread():
@@ -428,13 +385,7 @@ def console_unlock_thread():
         ok, msg = do_unlock(passphrase)
         if ok:
             log(f"Console unlock: {msg}")
-            docker_ok = start_docker()
-            if docker_ok:
-                log("Docker operational (console), starting graphical + shutdown")
-            else:
-                log("WARNING: Docker not fully operational (console)")
-            start_graphical()
-            threading.Thread(target=shutdown_self, daemon=True).start()
+            stop_servers()
             return
         print(f"Unlock failed: {msg}. Try again or use the web interface.\n")
 
@@ -491,13 +442,8 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             if ok:
-                docker_ok = start_docker()
-                if docker_ok:
-                    log("Docker operational, starting graphical + shutdown")
-                else:
-                    log("WARNING: Docker not fully operational")
-                start_graphical()
-                threading.Thread(target=shutdown_self, daemon=True).start()
+                log(f"unlock OK: {msg}")
+                stop_servers()
                 self.wfile.write(json.dumps({"ok": True, "message": msg}).encode())
             else:
                 self.wfile.write(json.dumps({"ok": False, "error": msg}).encode())
@@ -524,8 +470,7 @@ def main():
     signal.signal(signal.SIGINT, handle_signal)
 
     if not check_home_encrypted():
-        log("/home is not encrypted or already unlocked, starting Docker")
-        start_docker()
+        log("/home is not encrypted or already unlocked, nothing to do")
         return
 
     if not generate_self_signed_cert():
@@ -556,6 +501,7 @@ def main():
     threading.Thread(target=console_unlock_thread, daemon=True).start()
 
     https_server = create_https_server(HTTPS_PORT, UnlockHandler)
+    _https_server = https_server
 
     # HTTP server on port 80 shows a help page explaining how to accept
     # the self-signed cert.  The passphrase is NEVER sent over HTTP.
@@ -579,6 +525,7 @@ def main():
             pass
 
     http_server = http.server.HTTPServer(("0.0.0.0", HTTP_PORT), HTTPHelpHandler)
+    _http_server = http_server
 
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     http_thread.start()

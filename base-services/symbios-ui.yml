@@ -339,12 +339,8 @@
           [Service]
           Type=oneshot
           RemainAfterExit=yes
-          # Stop and mask Docker/containerd/socket before unlock.
-          # /var/lib/docker and /var/lib/containerd are symlinks into /home,
-          # so they MUST NOT start before /home is mounted.
-          ExecStartPre=-/usr/bin/systemctl stop docker.socket containerd.service docker.service
-          ExecStartPre=-/usr/bin/systemctl mask docker.socket containerd.service docker.service
           ExecStart=/usr/bin/python3 /usr/local/sbin/symbios-boot-unlock/unlock.py
+          ExecStartPost=-/usr/bin/systemctl start graphical.target
           # Allow binding to privileged ports 80/443
           AmbientCapabilities=CAP_NET_BIND_SERVICE
           # Provide TTY for console unlock prompt
@@ -353,6 +349,20 @@
 
           [Install]
           WantedBy=multi-user.target
+
+    - name: Docker waits for boot unlock before starting
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/docker.service.d/symbios-unlock.conf
+        content: |
+          [Unit]
+          After=symbios-boot-unlock.service
+
+    - name: Containerd waits for boot unlock before starting
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/containerd.service.d/symbios-unlock.conf
+        content: |
+          [Unit]
+          After=symbios-boot-unlock.service
 
     - name: Enable symbios-boot-unlock service
       ansible.builtin.systemd:
