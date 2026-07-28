@@ -38,6 +38,55 @@
   <div class="col-md-12"></div>
 </div>
 
+<!-- LUKS password change (hidden by default) -->
+<div class="row mb-3" id="luks-password-section" style="display:none">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-key"></i> Change Encryption Passphrase
+      </div>
+      <div class="card-body">
+        <div class="alert alert-info small py-2 px-3 mb-3">
+          <i class="bi bi-info-circle"></i>
+          Change the passphrase for your encrypted data disk.
+          You must enter the current passphrase first.
+        </div>
+        <form id="luks-password-form" data-exec="true" method="POST" action="{% url "settings_disk_change_password" %}">
+          {% csrf_token %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Current Passphrase</label>
+            <input type="password" class="form-control" id="luks-current-password"
+                   name="current_password" required
+                   placeholder="Enter current passphrase">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">New Passphrase</label>
+            <input type="password" class="form-control mb-2" id="luks-new-password"
+                   name="new_password" required
+                   placeholder="Choose a new passphrase"
+                   oninput="checkLukspasswords()">
+            <label class="form-label">Confirm New Passphrase</label>
+            <input type="password" class="form-control" id="luks-new-password-confirm"
+                   placeholder="Repeat the new passphrase"
+                   oninput="checkLukspasswords()">
+            <div id="luks-password-mismatch" class="form-text text-danger" style="display:none">
+              Passphrases do not match.
+            </div>
+          </div>
+          <div class="alert alert-danger small py-2 px-3 mb-3">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <strong>If you forget the new passphrase, your data is permanently unrecoverable.</strong>
+            Write it down and store it somewhere safe.
+          </div>
+          <button type="submit" class="btn btn-warning">
+            <i class="bi bi-key"></i> Change Passphrase
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Setup form -->
 <div class="row">
   <div class="col-md-8">
@@ -181,7 +230,15 @@ function loadStatus() {
               '<div class="small text-muted">Reboot and unlock via the boot screen to access your data.</div>' +
             '</div>' +
           '</div>';
+        document.getElementById('luks-password-section').style.display = 'none';
         return;
+      }
+
+      /* Show LUKS password change section when encrypted device is open */
+      if (data.luks_name && data.luks_open) {
+        document.getElementById('luks-password-section').style.display = '';
+      } else {
+        document.getElementById('luks-password-section').style.display = 'none';
       }
 
       if (data.home_device) {
@@ -249,7 +306,7 @@ function loadDisks() {
 
       /* Build simplified table — physical disks only, no partitions */
       var html = '<div class="table-responsive"><table class="table table-sm align-middle">';
-      html += '<thead><tr><th>Disk</th><th>Size</th><th>Status</th></tr></thead><tbody>';
+      html += '<thead><tr><th>Disk</th><th>UUID</th><th>LABEL</th><th>Size</th><th>Status</th></tr></thead><tbody>';
 
       /* Build select options */
       select.innerHTML = '<option value="">-- select a disk --</option>';
@@ -331,6 +388,8 @@ function renderDevice(dev) {
 
   var html = '<tr class="' + rowClass + '">';
   html += '<td>' + diskLabel + '</td>';
+  html += '<td class="text-muted small"><code>' + (dev.uuid || '—') + '</code></td>';
+  html += '<td>' + (dev.label || '—') + '</td>';
   html += '<td>' + dev.size + '</td>';
   html += '<td>';
   if (status === 'system') html += '<span class="badge bg-danger">System disk</span>';
@@ -422,6 +481,40 @@ function checkPasswords() {
     mismatch.style.display = 'none';
   }
 }
+
+function checkLukspasswords() {
+  var pw = document.getElementById('luks-new-password').value;
+  var pw2 = document.getElementById('luks-new-password-confirm').value;
+  var mismatch = document.getElementById('luks-password-mismatch');
+  if (pw2 && pw !== pw2) {
+    mismatch.style.display = '';
+  } else {
+    mismatch.style.display = 'none';
+  }
+}
+
+/* Frontend validation for LUKS password change form */
+document.getElementById('luks-password-form').addEventListener('submit', function(e) {
+  var current = document.getElementById('luks-current-password').value;
+  var newPw = document.getElementById('luks-new-password').value;
+  var newPw2 = document.getElementById('luks-new-password-confirm').value;
+
+  if (!current) {
+    e.preventDefault();
+    SymbiOS.exec.showAlert('Please enter the current passphrase.', 'danger');
+    return;
+  }
+  if (!newPw) {
+    e.preventDefault();
+    SymbiOS.exec.showAlert('Please enter a new passphrase.', 'danger');
+    return;
+  }
+  if (newPw !== newPw2) {
+    e.preventDefault();
+    SymbiOS.exec.showAlert('New passphrases do not match.', 'danger');
+    return;
+  }
+});
 
 /* Frontend validation before the exec-modal interceptor fires */
 document.getElementById('setup-form').addEventListener('submit', function(e) {

@@ -59,6 +59,7 @@ urlpatterns = [
     path('settings/disk/rollback/', views_settings.settings_disk_rollback, name='settings_disk_rollback'),
     path('settings/disk/rollback-status/', views_settings.settings_disk_rollback_status, name='settings_disk_rollback_status'),
     path('settings/disk/umount/', views_settings.settings_disk_umount, name='settings_disk_umount'),
+    path('settings/disk/change-password/', views_settings.settings_disk_change_password, name='settings_disk_change_password'),
     path('settings/localization/', views_settings.settings_localization, name='settings_localization'),
     path('settings/local-ip/', views_settings.settings_local_ip, name='settings_local_ip'),
     path('settings/playbooks/', views_settings.settings_playbooks, name='settings_playbooks'),

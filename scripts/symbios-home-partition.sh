@@ -24,6 +24,7 @@
 #   setup <device> [encrypt=yes] [password=pw]   Migrate /home to new disk
 #   rollback                      Undo last migration, restore original /home
 #   umount                        Unmount /home and close LUKS
+#   change-password               Change LUKS passphrase
 #
 # State file for rollback: /home/.symbios-home-migration.state
 
@@ -108,7 +109,7 @@ function f_clear_state {
 
 function f_action_list {
   local f_raw
-  f_raw=$(lsblk -J -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,TRAN,RM 2>&1) || \
+  f_raw=$(lsblk -J -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,LABEL,TRAN,RM 2>&1) || \
     f_json_error "lsblk failed: $f_raw"
   # Filter out loop, ram, sr, zram devices (pure cosmetic noise)
   echo "$f_raw" | python3 -c "
@@ -537,6 +538,56 @@ function f_action_umount {
 }
 
 # ---------------------------------------------------------------------------
+# action: change-password
+# ---------------------------------------------------------------------------
+
+function f_action_change_password {
+  local f_current_password="${1:-}"
+  local f_new_password="${2:-}"
+
+  [[ -z "$f_current_password" ]] && f_json_error "Current password is required"
+  [[ -z "$f_new_password" ]] && f_json_error "New password is required"
+  [[ "$f_current_password" == "$f_new_password" ]] && f_json_error "New password must differ from current password"
+
+  # Find LUKS device
+  local f_lsblk_out
+  f_lsblk_out=$(lsblk -J -o NAME,TYPE,FSTYPE 2>/dev/null) || true
+  local f_luks_dev
+  f_luks_dev=$(echo "$f_lsblk_out" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+
+def scan(devs):
+    for d in devs:
+        if d.get('fstype') == 'crypto_LUKS':
+            print('/dev/' + d['name'])
+            return True
+        children = d.get('children') or []
+        if scan(children):
+            return True
+    return False
+
+if not scan(data.get('blockdevices', [])):
+    sys.exit(1)
+" 2>/dev/null) || true
+
+  [[ -z "$f_luks_dev" ]] && f_json_error "No LUKS device found"
+
+  f_log_step "Changing LUKS passphrase on $f_luks_dev"
+
+  # luksChangeKey: read current password from /dev/stdin, new password via --new-key-file
+  echo "$f_new_password" | cryptsetup luksChangeKey \
+    --key-file <(echo "$f_current_password") \
+    "$f_luks_dev" 2>&1 || {
+    f_log_error "Failed to change LUKS passphrase (wrong current password?)"
+    f_json_error "Failed to change LUKS passphrase. Is the current password correct?"
+  }
+
+  f_log_ok "LUKS passphrase changed successfully"
+  f_json_ok '"message":"LUKS passphrase changed successfully."'
+}
+
+# ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
 
@@ -561,7 +612,10 @@ case "$g_action" in
   umount)
     f_action_umount
     ;;
+  change-password)
+    f_action_change_password "$@"
+    ;;
   *)
-    f_json_error "Usage: $0 {list|status|setup|rollback|umount}"
+    f_json_error "Usage: $0 {list|status|setup|rollback|umount|change-password}"
     ;;
 esac
