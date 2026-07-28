@@ -218,7 +218,7 @@ HTML_DONE = """<!DOCTYPE html>
   <div class="text-center w-100">
     <h2><i class="bi bi-check-circle text-success"></i> /home unlocked</h2>
     <p id="status" class="text-muted">Waiting for Traefik...</p>
-    <p><a href="https://%s/" class="btn btn-primary">Open WebUI now</a></p>
+    <p><a href="https://__HOSTNAME__/" class="btn btn-primary">Open WebUI now</a></p>
   </div>
   <script>
     var dots = 0;
@@ -407,7 +407,7 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
 
         hostname = get_hostname()
         if not check_home_encrypted():
-            page = HTML_DONE % hostname
+            page = HTML_DONE.replace("__HOSTNAME__", hostname)
         else:
             page = HTML_UNLOCK
 
