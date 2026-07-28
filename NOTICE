@@ -76,11 +76,6 @@ authelia/authelia:latest
   Copyright: Copyright (c) 2022 Authelia Contributors
   Source: https://github.com/authelia/authelia
 
-ghcr.io/ldapaccountmanager/lam:stable
-  License: GPL-2.0
-  Copyright: Copyright (c) 2004-2024 LAM Contributors
-  Source: https://github.com/LDAPAccountManager/lam
-
 openldap (via Bitnami)
   License: OLIVER Public License (OPL)
   Copyright: Copyright (c) 1994-2024 The OpenLDAP Foundation
