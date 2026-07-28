@@ -398,11 +398,37 @@ def start_docker():
             )
             if r3.returncode == 0:
                 log(f"Docker daemon ready after {i+1}s (v{r3.stdout.strip()})")
+                _compose_up_all()
                 return True
         time.sleep(1)
 
     log("ERROR: Docker daemon did not become ready within 60s")
     return False
+
+
+def _compose_up_all():
+    """Run 'docker compose up -d' for all compose stacks under /home/docker/.
+
+    'unless-stopped' only restarts containers that were running before Docker
+    was stopped.  Containers in 'created' (never started) state are ignored.
+    Running compose up ensures every service is actually started.
+    """
+    import glob as _glob
+
+    stacks = sorted(_glob.glob("/home/docker/*/docker-compose.yml"))
+    for compose_file in stacks:
+        stack_dir = os.path.dirname(compose_file)
+        stack_name = os.path.basename(stack_dir)
+        log(f"compose up: {stack_name} ({stack_dir})")
+        r = subprocess.run(
+            ["docker", "compose", "-f", compose_file, "up", "-d"],
+            capture_output=True, text=True, timeout=120
+        )
+        if r.returncode != 0:
+            log(f"  WARN: compose up failed rc={r.returncode} stderr={r.stderr.strip()[:200]}")
+        else:
+            out = r.stdout.strip().replace("\n", " | ")[:150]
+            log(f"  OK: {out}")
 
 
 def start_graphical():
