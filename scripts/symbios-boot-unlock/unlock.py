@@ -135,7 +135,17 @@ HTML_UNLOCK = """<!DOCTYPE html>
           document.getElementById('success-box').textContent = data.message + ' Starting services...';
           document.getElementById('success-box').style.display = '';
           document.getElementById('unlock-form').style.display = 'none';
-          setTimeout(function() { location.reload(); }, 5000);
+          var dots = 0;
+          var statusEl = document.getElementById('success-box');
+          var target = 'https://' + location.hostname + '/';
+          function pollReady() {
+            dots = (dots + 1) % 4;
+            statusEl.textContent = data.message + ' Starting services' + '.'.repeat(dots + 1);
+            fetch(target, {mode: 'no-cors'})
+              .then(function() { location.href = target; })
+              .catch(function() { setTimeout(pollReady, 2000); });
+          }
+          setTimeout(pollReady, 3000);
         } else {
           document.getElementById('error-box').textContent = data.error;
           document.getElementById('error-box').style.display = '';
@@ -197,7 +207,6 @@ HTML_DONE = """<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="5;url=https://%s/">
   <title>SymbiOS - Starting...</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
@@ -208,9 +217,22 @@ HTML_DONE = """<!DOCTYPE html>
 <body>
   <div class="text-center w-100">
     <h2><i class="bi bi-check-circle text-success"></i> /home unlocked</h2>
-    <p class="text-muted">Traefik is starting... Redirecting in 5 seconds.</p>
+    <p id="status" class="text-muted">Waiting for Traefik...</p>
     <p><a href="https://%s/" class="btn btn-primary">Open WebUI now</a></p>
   </div>
+  <script>
+    var dots = 0;
+    var el = document.getElementById('status');
+    var target = 'https://' + location.hostname + '/';
+    function poll() {
+      dots = (dots + 1) % 4;
+      el.textContent = 'Waiting for Traefik' + '.'.repeat(dots + 1);
+      fetch(target, {mode: 'no-cors'})
+        .then(function() { location.href = target; })
+        .catch(function() { setTimeout(poll, 2000); });
+    }
+    setTimeout(poll, 2000);
+  </script>
 </body>
 </html>"""
 
@@ -327,108 +349,36 @@ def do_unlock(passphrase):
 
 
 def start_docker():
-    """Unmask and start containerd + Docker after /home is unlocked.
+    """Unmask and start Docker via systemd after /home is unlocked.
 
     The unlock service masks docker.socket, containerd.service, and
     docker.service via ExecStartPre to prevent them from starting
     before /home is mounted (Docker and containerd data live on /home).
-    After unlock we unmask them, then start containerd and Docker
-    so Docker can restore all unless-stopped containers.
+    After unlock we unmask them and let systemd handle the startup
+    including all dependency ordering (containerd → docker).
 
-    Returns True if Docker is fully operational, False otherwise.
+    Returns True if Docker started successfully.
     """
     log("start_docker: unmasking services")
-
-    # Unmask all three services so systemd can manage them again.
     r = subprocess.run(
-        ["systemctl", "unmask", "containerd.service",
-         "docker.service", "docker.socket"],
+        ["systemctl", "unmask", "docker.socket",
+         "containerd.service", "docker.service"],
         capture_output=True, text=True, timeout=10
     )
     log(f"unmask rc={r.returncode} stderr={r.stderr.strip()}")
 
-    # Start containerd first — Docker needs it.
-    log("starting containerd...")
+    log("starting docker.service via systemd...")
     r = subprocess.run(
-        ["systemctl", "start", "containerd"],
-        capture_output=True, text=True, timeout=60
-    )
-    log(f"containerd start rc={r.returncode} stderr={r.stderr.strip()}")
-    if r.returncode != 0:
-        log("ERROR: containerd failed to start, aborting")
-        return False
-
-    # Wait for containerd socket to appear.
-    log("waiting for containerd socket...")
-    for i in range(30):
-        if os.path.exists("/run/containerd/containerd.sock"):
-            log(f"socket found after {i}s")
-            break
-        time.sleep(1)
-    else:
-        log("ERROR: containerd socket timeout")
-        return False
-
-    # Give containerd a moment to become fully ready.
-    time.sleep(2)
-
-    # Start Docker.
-    log("starting Docker...")
-    r = subprocess.run(
-        ["systemctl", "start", "docker"],
+        ["systemctl", "start", "docker.service"],
         capture_output=True, text=True, timeout=120
     )
     log(f"docker start rc={r.returncode} stderr={r.stderr.strip()}")
     if r.returncode != 0:
-        log("ERROR: docker start command failed")
+        log("ERROR: docker.service failed to start")
         return False
 
-    # Wait for Docker to be fully operational (socket + daemon ready).
-    log("waiting for Docker daemon...")
-    for i in range(60):
-        r2 = subprocess.run(
-            ["systemctl", "is-active", "docker"],
-            capture_output=True, text=True, timeout=5
-        )
-        if r2.stdout.strip() == "active":
-            # Also verify Docker API is responsive.
-            r3 = subprocess.run(
-                ["docker", "info", "--format", "{{.ServerVersion}}"],
-                capture_output=True, text=True, timeout=10
-            )
-            if r3.returncode == 0:
-                log(f"Docker daemon ready after {i+1}s (v{r3.stdout.strip()})")
-                _compose_up_all()
-                return True
-        time.sleep(1)
-
-    log("ERROR: Docker daemon did not become ready within 60s")
-    return False
-
-
-def _compose_up_all():
-    """Run 'docker compose up -d' for all compose stacks under /home/docker/.
-
-    'unless-stopped' only restarts containers that were running before Docker
-    was stopped.  Containers in 'created' (never started) state are ignored.
-    Running compose up ensures every service is actually started.
-    """
-    import glob as _glob
-
-    stacks = sorted(_glob.glob("/home/docker/*/docker-compose.yml"))
-    for compose_file in stacks:
-        stack_dir = os.path.dirname(compose_file)
-        stack_name = os.path.basename(stack_dir)
-        log(f"compose up: {stack_name} ({stack_dir})")
-        r = subprocess.run(
-            ["docker", "compose", "-f", compose_file, "up", "-d"],
-            capture_output=True, text=True, timeout=120
-        )
-        if r.returncode != 0:
-            log(f"  WARN: compose up failed rc={r.returncode} stderr={r.stderr.strip()[:200]}")
-        else:
-            out = r.stdout.strip().replace("\n", " | ")[:150]
-            log(f"  OK: {out}")
+    log("docker.service started successfully")
+    return True
 
 
 def start_graphical():
@@ -446,7 +396,7 @@ def start_graphical():
 
 def shutdown_self():
     """Stop this service after unlock so Docker/Traefik can bind 80/443."""
-    # Wait a moment for Docker to stabilize.
+    # Wait a moment for Docker to stabilize and bind ports.
     time.sleep(5)
     log("shutting down unlock service")
     subprocess.Popen(
@@ -506,7 +456,7 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
 
         hostname = get_hostname()
         if not check_home_encrypted():
-            page = HTML_DONE % (hostname, hostname)
+            page = HTML_DONE % hostname
         else:
             page = HTML_UNLOCK
 
@@ -574,7 +524,8 @@ def main():
     signal.signal(signal.SIGINT, handle_signal)
 
     if not check_home_encrypted():
-        print("/home is not encrypted or already unlocked, nothing to do")
+        log("/home is not encrypted or already unlocked, starting Docker")
+        start_docker()
         return
 
     if not generate_self_signed_cert():
@@ -585,7 +536,7 @@ def main():
         """Exit if /home gets mounted by something else.
 
         Does NOT exit if we did the unlock ourselves (_unlock_done),
-        because start_docker() may still be running.
+        because Docker may still be starting.
         """
         time.sleep(10)
         while True:
