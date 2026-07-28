@@ -21,9 +21,9 @@ Provides two ways to unlock:
   1. Web interface on HTTPS :443 (Let's Encrypt cert, extracted by cron)
   2. Console/TTY prompt on the attached screen/keyboard
 
-After successful unlock (by either method), starts Docker and all
-compose services, then stops this service so Traefik can take over
-ports 80/443.
+After successful unlock, releases ports 80/443 so Traefik can take over.
+Docker, containerd, and graphical.target are started by systemd after this
+service finishes (via After= dependencies in drop-in units).
 """
 
 import http.server
@@ -59,7 +59,7 @@ def log(msg):
         pass
 
 # Shared state: set when unlock succeeds so both web and console threads
-# know to stop and hand off to Docker.
+# know to exit cleanly and release ports for Traefik.
 _unlock_done = threading.Event()
 _unlock_lock = threading.Lock()
 
@@ -481,7 +481,7 @@ def main():
         """Exit if /home gets mounted by something else.
 
         Does NOT exit if we did the unlock ourselves (_unlock_done),
-        because Docker may still be starting.
+        to avoid killing the process before servers are shut down.
         """
         time.sleep(10)
         while True:
