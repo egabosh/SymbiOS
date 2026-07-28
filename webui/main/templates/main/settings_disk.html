@@ -33,11 +33,6 @@
   </div>
 </div>
 
-<!-- Rollback banner (hidden by default) -->
-<div class="row mb-3" id="rollback-section" style="display:none">
-  <div class="col-md-12"></div>
-</div>
-
 <!-- LUKS password change (hidden by default) -->
 <div class="row mb-3" id="luks-password-section" style="display:none">
   <div class="col-md-6">
@@ -195,7 +190,6 @@ document.addEventListener('DOMContentLoaded', function() {
 function refreshAll() {
   loadStatus();
   loadDisks();
-  loadRollbackStatus();
 }
 
 /* Find model name for a device path from the diskData cache */
@@ -322,54 +316,6 @@ function loadDisks() {
     .catch(function(err) {
       document.getElementById('disk-list').innerHTML =
         '<div class="text-danger">Failed to load disks: ' + err.message + '</div>';
-    });
-}
-
-function loadRollbackStatus() {
-  fetch('{% url "settings_disk_rollback_status" %}')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      var el = document.getElementById('rollback-section');
-      if (data.can_rollback) {
-        el.innerHTML = '<div class="alert alert-warning d-flex align-items-center">' +
-          '<i class="bi bi-arrow-counterclockwise me-2"></i>' +
-          '<span>A previous disk change can be undone.</span>' +
-          '<button class="btn btn-outline-warning btn-sm ms-auto" onclick="doRollback()">' +
-          '<i class="bi bi-arrow-counterclockwise"></i> Undo</button>' +
-          '</div>';
-        el.style.display = '';
-      } else {
-        el.style.display = 'none';
-      }
-    })
-    .catch(function() {
-      document.getElementById('rollback-section').style.display = 'none';
-    });
-}
-
-function doRollback() {
-  if (!confirm('Undo the last disk change?\n\nThis will move your data back to where it was before.\n\nContinue?')) {
-    return;
-  }
-  var formData = new FormData();
-  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
-  fetch('{% url "settings_disk_rollback" %}', {
-    method: 'POST',
-    body: formData,
-    credentials: 'same-origin',
-    headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': getCsrfToken() }
-  })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.job) {
-        SymbiOS.exec.start(data.job, data.title || 'Undoing disk change...', data.command);
-        if (data.message) SymbiOS.exec.showAlert(data.message, 'info');
-      } else if (data.error) {
-        SymbiOS.exec.showAlert(data.error, 'danger');
-      }
-    })
-    .catch(function(err) {
-      SymbiOS.exec.showAlert('Network error: ' + err, 'danger');
     });
 }
 
@@ -565,7 +511,7 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
   if (!confirm('WARNING: All data on ' + devLabel + ' will be erased!\n\nThis will:\n1. Format the disk' +
       (encrypt ? '\n2. Encrypt with a passphrase' : '') +
       '\n' + (encrypt ? '3' : '2') + '. Copy your data to the new disk' +
-      '\n' + (encrypt ? '4' : '3') + '. Switch to the new disk\n\nAn undo option will be available afterward.\n\nContinue?')) {
+      '\n' + (encrypt ? '4' : '3') + '. Switch to the new disk\n\nContinue?')) {
     e.preventDefault();
   }
 });
