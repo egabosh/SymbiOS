@@ -57,7 +57,6 @@ urlpatterns = [
     path('settings/disk/status/', views_settings.settings_disk_status, name='settings_disk_status'),
     path('settings/disk/setup/', views_settings.settings_disk_setup, name='settings_disk_setup'),
     path('settings/disk/rollback/', views_settings.settings_disk_rollback, name='settings_disk_rollback'),
-    path('settings/disk/rollback-status/', views_settings.settings_disk_rollback_status, name='settings_disk_rollback_status'),
     path('settings/disk/umount/', views_settings.settings_disk_umount, name='settings_disk_umount'),
     path('settings/disk/change-password/', views_settings.settings_disk_change_password, name='settings_disk_change_password'),
     path('settings/localization/', views_settings.settings_localization, name='settings_localization'),

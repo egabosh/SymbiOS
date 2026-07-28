@@ -909,17 +909,6 @@ def settings_disk_rollback(request):
 
 
 @login_required
-def settings_disk_rollback_status(request):
-    """AJAX GET — check if rollback is possible."""
-    ok, stdout, stderr = run_command(
-        f'{_HOME_PART_SCRIPT} status', timeout=15)
-    try:
-        data = json.loads(stdout)
-        return JsonResponse({'ok': True, 'can_rollback': data.get('can_rollback', False)})
-    except Exception:
-        return JsonResponse({'ok': True, 'can_rollback': False})
-
-@login_required
 def settings_disk_umount(request):
     """AJAX POST — unmount and close a LUKS /home volume."""
     if request.method != 'POST':

@@ -66,6 +66,17 @@ function f_log_step {
   f_log "--- STEP: $* ---"
 }
 
+# Error handler for setup: automatically rolls back before exiting.
+# Only valid after f_save_state has been called.
+function f_setup_error {
+  local f_msg="$1"
+  f_log_error "$f_msg"
+  f_log "Attempting automatic rollback..."
+  # Redirect rollback stdout — it emits JSON which we don't want here.
+  f_action_rollback >/dev/null 2>&1 || f_log_error "Rollback also failed"
+  f_json_error "$f_msg (rolled back)"
+}
+
 # State file for rollback
 f_state_file="/home/.symbios-home-migration.state"
 
@@ -335,15 +346,13 @@ function f_action_setup {
   then
     f_log_step "Formatting device with LUKS encryption"
     echo "$f_password" | cryptsetup luksFormat --batch-mode "$f_device" || {
-      f_log_error "LUKS format failed"
-      f_json_error "LUKS format failed"
+      f_setup_error "LUKS format failed"
     }
     f_log_ok "LUKS format complete"
 
     f_log_step "Opening LUKS volume"
     echo "$f_password" | cryptsetup open "$f_device" "$f_luks_name" || {
-      f_log_error "LUKS open failed"
-      f_json_error "LUKS open failed"
+      f_setup_error "LUKS open failed"
     }
     f_log_ok "LUKS volume opened as $f_luks_name"
     f_target="/dev/mapper/$f_luks_name"
@@ -354,8 +363,7 @@ function f_action_setup {
   # ---- Step 3: Format as ext4 ----
   f_log_step "Formatting $f_device as ext4"
   mkfs.ext4 -F "$f_target" 2>&1 || {
-    f_log_error "mkfs.ext4 failed"
-    f_json_error "mkfs.ext4 failed"
+    f_setup_error "mkfs.ext4 failed"
   }
   f_log_ok "ext4 filesystem created"
 
@@ -363,8 +371,7 @@ function f_action_setup {
   f_log_step "Mounting temporary partition"
   mkdir -p /home.new
   mount "$f_target" /home.new || {
-    f_log_error "Mount /home.new failed"
-    f_json_error "Mount /home.new failed"
+    f_setup_error "Mount /home.new failed"
   }
   f_log_ok "Temporary mount at /home.new"
 
@@ -373,8 +380,7 @@ function f_action_setup {
   rsync -av --progress --exclude=docker/var-lib-docker --exclude=docker/var-lib-containerd \
     --exclude='.trashed-*' /home/ /home.new/ 2>&1 || {
     umount /home.new 2>/dev/null || true
-    f_log_error "rsync failed"
-    f_json_error "rsync failed"
+    f_setup_error "rsync failed"
   }
   f_log_ok "Data copy complete"
 
@@ -397,8 +403,7 @@ function f_action_setup {
   else
     local f_uuid
     f_uuid=$(blkid -s UUID -o value "$f_device" 2>/dev/null) || {
-      f_log_error "blkid failed"
-      f_json_error "blkid failed"
+      f_setup_error "blkid failed"
     }
     echo "UUID=$f_uuid /home ext4 defaults,noatime,noauto 0 2" >> /etc/fstab
   fi
@@ -407,8 +412,7 @@ function f_action_setup {
   # ---- Step 8: Mount new /home ----
   f_log_step "Mounting new /home"
   mount /home || {
-    f_log_error "Mount /home failed"
-    f_json_error "Mount /home failed"
+    f_setup_error "Mount /home failed"
   }
   f_log_ok "/home is now on new partition"
 
