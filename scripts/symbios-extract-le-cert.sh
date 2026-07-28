@@ -79,6 +79,4 @@ if cert_pem != old_cert:
         f.write(key_pem)
     os.chmod(key_path, 0o600)
     print("LE cert updated for", domain)
-else:
-    print("LE cert unchanged for", domain)
 PYEOF
