@@ -89,11 +89,11 @@ then
   git stash push --include-untracked -m "symbios-update auto-stash" 2>/dev/null
 fi
 
-if ! git pull
+if ! git pull --rebase
 then
   # If pull still fails, try checkout and pull
   git checkout -- . 2>/dev/null
-  git pull
+  git pull --rebase
 fi
 
 # Restore stashed changes
