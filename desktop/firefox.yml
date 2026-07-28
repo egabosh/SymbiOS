@@ -39,23 +39,6 @@
         - "/etc/firefox/policies"
         - "/etc/librewolf/policies"
 
-    - name: Ensure SymbiOS CA directory exists
-      ansible.builtin.file:
-        path: /usr/local/share/symbios-ca
-        state: directory
-        owner: root
-        group: root
-        mode: '0755'
-
-    - name: Install SymbiOS Root CA for Firefox policy trust
-      ansible.builtin.copy:
-        src: /home/docker/acme-pki/pki/ca/root-ca.pem
-        dest: /usr/local/share/symbios-ca/root-ca.pem
-        remote_src: yes
-        owner: root
-        group: root
-        mode: '0444'
-
     - name: Firefox/LibreWolf policy (local)
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/firefox-policies.json"

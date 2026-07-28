@@ -4,7 +4,6 @@
         "DisplayMenuBar": true,
         "DontCheckDefaultBrowser": true,
         "Certificates": {
-            "Install": ["/usr/local/share/symbios-ca/root-ca.pem"]
         },
         "Cookies": {
             "AcceptThirdParty": "never",

@@ -4,11 +4,11 @@ all:
     timezone: "America/New_York"
     keyboard: "us"
     locale: "en_US.UTF-8"
-    default_domain: "local"
+    default_domain: "none"
     # base_domain is the shared parent for all service subdomains and the
     # Authelia session cookie scope (e.g. symbios.local or myhost.dedyn.io).
-    base_domain: "symbios.local"
-    acme_resolver: "{{ 'symbios-pki' if default_domain == 'local' else 'letsencrypt' }}"
+    base_domain: "none"
+    acme_server: ""
     instance: "default"
     ldap_basedn: "dc=openldap,dc=local"
     # ddns (desec.io)

@@ -30,17 +30,6 @@ http:
       service: api@internal
       tls:
         certResolver: "{{ acme_resolver }}"
-{% if default_domain == 'local' %}
-    ldap-lam:
-      rule: "Host(`ldap.local`)"
-      entryPoints:
-        - https
-      middlewares:
-        - secHeaders@file
-      service: ldap-lam
-      tls:
-        certResolver: "symbios-pki"
-{% endif %}
   services:
     authelia:
       loadBalancer:
@@ -50,25 +39,3 @@ http:
       loadBalancer:
         servers:
           - url: "http://symbios-ui:8080"
-{% if default_domain == 'local' %}
-    ldap-lam:
-      loadBalancer:
-        servers:
-          - url: "http://ldapam:80"
-{% endif %}
-{% if default_domain == 'local' %}
-tcp:
-  routers:
-    ldap-ldaps:
-      rule: "HostSNI(`openldap.local`)"
-      entryPoints:
-        - ldaps
-      service: ldap-ldaps
-      tls:
-        certResolver: "symbios-pki"
-  services:
-    ldap-ldaps:
-      loadBalancer:
-        servers:
-          - address: "openldap:389"
-{% endif %}
