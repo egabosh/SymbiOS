@@ -144,14 +144,6 @@
         cmd: "find {{ docker_path }}/webui -type f -exec chmod o+r {} +"
       changed_when: false
 
-    - name: Copy symbios-exec.sh wrapper
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/symbios-exec.sh
-        dest: /usr/local/sbin/symbios-exec.sh
-        owner: root
-        group: root
-        mode: "0755"
-
     - name: Generate SSH key for webui remote execution
       ansible.builtin.command:
         cmd: ssh-keygen -t ed25519 -f /home/docker/symbios-ui/config/.ssh/id_symbios -N "" -C "symbios-webui"
@@ -194,7 +186,8 @@
 
           [Service]
           Type=oneshot
-          ExecStart=/usr/local/bin/symbios-container-index.sh
+          Environment=PATH=/home/SymbiOS/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+          ExecStart=/home/SymbiOS/scripts/symbios-container-index.sh
           User=root
           Group=root
 

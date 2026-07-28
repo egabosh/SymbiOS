@@ -39,7 +39,7 @@
 #   actions:
 #     enable: sed -i 's/^#//' /etc/cron.d/autoupdate_local
 #     disable: sed -i 's/^/#/' /etc/cron.d/autoupdate_local
-#     run now: /usr/local/sbin/autoupdate.sh
+#     run now: autoupdate.sh
 
 ---
 - name: Autoupdate
@@ -54,15 +54,6 @@
         state: directory
         mode: "0700"
 
-    - name: /usr/local/sbin/autoupdate.sh
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/autoupdate.sh
-        dest: /usr/local/sbin/autoupdate.sh
-        mode: "0500"
-        owner: root
-        group: root
-        backup: yes
-
     - name: /etc/cron.d/autoupdate_local
       blockinfile:
         path: /etc/cron.d/autoupdate_local
@@ -73,7 +64,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           ## Auto-Update
-          5 6 * * * root /usr/local/sbin/autoupdate.sh
+          5 6 * * * root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/autoupdate.sh ]] && autoupdate.sh
         backup: yes
 
     - name: Register playbook as installed

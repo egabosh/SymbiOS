@@ -65,19 +65,9 @@
         state: directory
         mode: '0700'
 
-    - name: /usr/local/sbin/runchecks.sh
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/runchecks.sh
-        dest: /usr/local/sbin/runchecks.sh
-        mode: "0500"
-        owner: root
-        group: root
-      notify:
-      - Restart runchecks
-
-    - name: /usr/local/sbin/runchecks.d/services
+    - name: /home/SymbiOS/scripts/runchecks.d/services
       lineinfile:
-        path: /usr/local/sbin/runchecks.d/services
+        path: /home/SymbiOS/scripts/runchecks.d/services
         create: yes
         insertbefore: EOF
         line: "cron rsyslog sshd"
@@ -96,7 +86,8 @@
           [Service]
           Type=simple
           User=root
-          ExecStart=/bin/bash /usr/local/sbin/runchecks.sh
+          Environment=PATH=/home/SymbiOS/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+          ExecStart=/home/SymbiOS/scripts/runchecks.sh
           Restart=on-abort
           
           [Install]

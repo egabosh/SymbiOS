@@ -605,29 +605,6 @@
           nss_reconnect_maxsleeptime 2
           nss_reconnect_maxconntries 1
 
-    - name: "/usr/local/bin/symbios-ldapsearch"
-      ansible.builtin.copy:
-        dest: "/usr/local/bin/symbios-ldapsearch"
-        mode: 0750
-        owner: root
-        group: root
-        content: |
-          #!/bin/bash
-
-          # Source LDAP credentials from environment file
-          . /home/docker/ldap/env.openldap
-
-          # Use docker exec to bypass Traefik TLS (Step-CA may be unhealthy)
-          docker compose -f /home/docker/ldap/docker-compose.yml exec -T openldap \
-            ldapsearch -x -H ldap://localhost -D "cn=readuser,{{ldap_basedn}}" -w "$LDAP_READUSER_PASSWORD" -b "{{ldap_basedn}}" "$@"
-          f_rc=$?
-
-          # Clear credentials from environment
-          unset LDAP_ADMIN_PASSWORD LDAP_READUSER_PASSWORD
-
-          exit $f_rc
-        backup: yes
-
 
     - name: Flush handlers to ensure LDAP container is started
       ansible.builtin.meta: flush_handlers
