@@ -335,15 +335,6 @@
           #innodb_log_buffer_size=512K
         backup: yes
 
-    - name: docker-compose command/alias for backward compatibility - now docker compose
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/docker-compose
-        dest: /usr/local/sbin/docker-compose
-        mode: "0755"
-        owner: root
-        group: root
-        backup: yes
-
     - name: Create traefik network
       community.docker.docker_network:
         name: traefik

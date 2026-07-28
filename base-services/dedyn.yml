@@ -39,7 +39,7 @@
 #   actions:
 #     enable: sed -i 's/^#//' /etc/cron.d/dedyn_local
 #     disable: sed -i 's/^/#/' /etc/cron.d/dedyn_local
-#     run now: /usr/local/sbin/dedyn.sh
+#     run now: dedyn.sh
 #
 
 ---
@@ -53,15 +53,6 @@
         update_cache: no
         install_recommends: no
 
-    - name: /usr/local/sbin/dedyn.sh
-      ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/dedyn.sh
-        dest: /usr/local/sbin/dedyn.sh
-        mode: "0500"
-        owner: root
-        group: root
-        backup: yes
-
     - name: /etc/cron.d/dedyn_local
       blockinfile:
         path: /etc/cron.d/dedyn_local
@@ -71,7 +62,7 @@
         group: root
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          */5 * * * * root /usr/local/sbin/dedyn.sh >/dev/null 2>&1
+          */5 * * * * root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/dedyn.sh ]] && dedyn.sh >/dev/null 2>&1
         backup: yes
 
     - name: /etc/cron.d/host-ip
@@ -83,18 +74,9 @@
         group: root
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          */5 * * * * root /usr/local/sbin/update_host_ip.sh
+          */5 * * * * root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/update_host_ip.sh ]] && update_host_ip.sh
         backup: yes
 
-    - name: /usr/local/sbin/update_host_ip.sh
-      ansible.builtin.copy:
-        dest: /usr/local/sbin/update_host_ip.sh
-        mode: "0755"
-        content: |
-          #!/bin/bash
-          # Write host primary LAN IP for webui container
-          ip route get 1.1.1.1 2>/dev/null | grep -oP "src \K[0-9.]+" > /home/docker/symbios-ui/config/.host-ip
- 
     - name: /usr/local/etc/dedyn.conf
       blockinfile:
         path: /usr/local/etc/dedyn.conf
