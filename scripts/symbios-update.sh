@@ -81,26 +81,10 @@ git remote set-url origin "${g_repo_url}"
 # Save pre-pull HEAD for diff
 g_head_before=$(git rev-parse HEAD 2>/dev/null)
 
-# Stash untracked files that would conflict with incoming changes, then pull
-g_stash_needed=false
-if ! git diff --quiet HEAD 2>/dev/null || [[ -n "$(git ls-files --others --exclude-standard 2>/dev/null)" ]]
-then
-  g_stash_needed=true
-  git stash push --include-untracked -m "symbios-update auto-stash" 2>/dev/null
-fi
-
-if ! git pull --rebase
-then
-  # If pull still fails, try checkout and pull
-  git checkout -- . 2>/dev/null
-  git pull --rebase
-fi
-
-# Restore stashed changes
-if [[ "${g_stash_needed}" == true ]]
-then
-  git stash pop 2>/dev/null || true
-fi
+# Discard any local changes and sync to GitHub
+git fetch origin
+git reset --hard origin/main
+git clean -fd
 
 g_head_after=$(git rev-parse HEAD 2>/dev/null)
 
