@@ -286,8 +286,8 @@
 
     - name: Copy LE cert extraction script
       ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/symbios-extract-le-cert.sh
-        dest: /usr/local/sbin/symbios-boot-unlock/extract-le-cert.sh
+        src: /home/SymbiOS/scripts/symbios-boot-unlock/extract-le-cert.py
+        dest: /usr/local/sbin/symbios-boot-unlock/extract-le-cert.py
         owner: root
         group: root
         mode: "0755"
@@ -296,7 +296,7 @@
       ansible.builtin.cron:
         name: "symbios-extract-le-cert"
         minute: "*/5"
-        job: "/usr/local/sbin/symbios-boot-unlock/extract-le-cert.sh"
+        job: "/usr/local/sbin/symbios-boot-unlock/extract-le-cert.py"
         user: root
 
     - name: Copy restart-docker-services script
