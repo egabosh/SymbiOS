@@ -348,20 +348,6 @@ def do_unlock(passphrase):
         return True, "/home unlocked successfully"
 
 
-def stop_servers():
-    """Shut down the HTTPS and HTTP servers, releasing ports 80/443."""
-    global _https_server, _http_server
-    log("stopping servers to release ports 80/443")
-    if _https_server:
-        threading.Thread(target=_https_server.shutdown, daemon=True).start()
-    if _http_server:
-        threading.Thread(target=_http_server.shutdown, daemon=True).start()
-
-
-_https_server = None
-_http_server = None
-
-
 def console_unlock_thread():
     """Prompt for LUKS passphrase on the physical console (TTY).
 
@@ -385,8 +371,7 @@ def console_unlock_thread():
         ok, msg = do_unlock(passphrase)
         if ok:
             log(f"Console unlock: {msg}")
-            stop_servers()
-            return
+            os._exit(0)
         print(f"Unlock failed: {msg}. Try again or use the web interface.\n")
 
 
@@ -443,8 +428,11 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             if ok:
                 log(f"unlock OK: {msg}")
-                stop_servers()
                 self.wfile.write(json.dumps({"ok": True, "message": msg}).encode())
+                self.wfile.flush()
+                # Exit so systemd can start Docker/graphical.target
+                # via ExecStartPost and After= dependencies.
+                os._exit(0)
             else:
                 self.wfile.write(json.dumps({"ok": False, "error": msg}).encode())
             return
@@ -481,7 +469,7 @@ def main():
         """Exit if /home gets mounted by something else.
 
         Does NOT exit if we did the unlock ourselves (_unlock_done),
-        to avoid killing the process before servers are shut down.
+        because we exit explicitly via os._exit() after unlock.
         """
         time.sleep(10)
         while True:
@@ -501,7 +489,6 @@ def main():
     threading.Thread(target=console_unlock_thread, daemon=True).start()
 
     https_server = create_https_server(HTTPS_PORT, UnlockHandler)
-    _https_server = https_server
 
     # HTTP server on port 80 shows a help page explaining how to accept
     # the self-signed cert.  The passphrase is NEVER sent over HTTP.
@@ -525,7 +512,6 @@ def main():
             pass
 
     http_server = http.server.HTTPServer(("0.0.0.0", HTTP_PORT), HTTPHelpHandler)
-    _http_server = http_server
 
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     http_thread.start()
