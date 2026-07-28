@@ -52,6 +52,14 @@
     service_path: "/home/docker/{{ service_name }}"
     ldap_service_path: "/home/docker/ldap"
 
+  pre_tasks:
+    - name: Fail if base_domain is not configured
+      ansible.builtin.fail:
+        msg: >-
+          base_domain is not set. Configure a domain first via
+          the WebUI at /settings/ddns/ or edit inventory.yml directly.
+      when: base_domain is not defined or base_domain == '' or base_domain == 'none'
+
   tasks:
 
 

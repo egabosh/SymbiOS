@@ -7,7 +7,7 @@ fi
 date > "$g_check_file"
 
 g_missing=""
-for g_container in traefik symbios-webui openldap ldapam
+for g_container in traefik symbios-webui openldap
 do
   if ! docker ps --format '{{.Names}}' | grep -q "^${g_container}$"
   then

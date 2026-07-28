@@ -50,6 +50,13 @@
     service_domain: "{{ service_name }}.{{ base_domain }}"
     docker_path: "/home/docker/{{ service_name }}"
 
+  pre_tasks:
+    - name: Fail if base_domain is not configured
+      ansible.builtin.fail:
+        msg: >-
+          base_domain is not set. Configure a domain first via
+          the WebUI at /settings/ddns/ or edit inventory.yml directly.
+      when: base_domain is not defined or base_domain == '' or base_domain == 'none'
 
   tasks:
 
@@ -74,137 +81,9 @@
         - { path: '', owner: root, group: docker, mode: '0550' }
         - { path: 'ldap-config', owner: 10001, group: 10001, mode: '0770' }
         - { path: 'ldap-db', owner: 10001, group: 10001, mode: '0770' }
-        - { path: 'lam-data', owner: 33, group: 33, mode: '0755' }
-        - { path: 'lam-data/etc-ldap-account-manager', owner: 33, group: 33, mode: '0775' }
 
-    - name: Check if lam-data/config exists
-      stat:
-        path: "{{ docker_path }}/lam-data/config"
-      register: lam_config_status
 
-    - name: Generate initial config for lam
-      when: not lam_config_status.stat.exists
-      block:
 
-        - name: Clone lam git repository to /tmp/lam-temp
-          ansible.builtin.git:
-            repo: https://github.com/LDAPAccountManager/lam.git
-            dest: /tmp/lam-temp
-            update: no
-
-        - name: Copy lam/config from clone to {{ docker_path }}/lam-data/config
-          ansible.builtin.copy:
-            src: /tmp/lam-temp/lam/config/
-            dest: "{{ docker_path }}/lam-data/config/"
-
-        - name: Download default customized lam.conf
-          ansible.builtin.get_url:
-            url: https://raw.githubusercontent.com/egabosh/linux-setups/refs/heads/main/debian/ldap.server/lam.conf
-            dest: "{{ docker_path }}/lam-data/config/lam.conf"
-
-        - name: Link lam config.cfg
-          ansible.builtin.file:
-            src: /etc/ldap-account-manager/config.cfg
-            dest: "{{ docker_path }}/lam-data/config/config.cfg"
-            state: link
-            force: yes
-
-    - name: default user config
-      blockinfile:
-        path: "{{ docker_path }}/lam-data/config/profiles/lam/default.user"
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          ldap_suffix: -
-          ldap_rdn: uid
-          inetOrgPerson_description:
-          inetOrgPerson_mail:
-          posixAccount_primaryGroup: {{ service_name }}-users
-          posixAccount_additionalGroup: {{ service_name }}-users
-          posixAccount_cn:
-          posixAccount_gecos: $firstname $lastname
-          posixAccount_homeDirectory: /home/$user
-          posixAccount_loginShell: /bin/false
-          shadowAccount_addExt: false
-          shadowAccount_shadowWarning: 10
-          shadowAccount_shadowInactive: 10
-          shadowAccount_shadowMin: 1
-          shadowAccount_shadowMax: 365
-          shadowAccount_shadowExpire_day: -
-          shadowAccount_shadowExpire_mon: -
-          shadowAccount_shadowExpire_yea: -
-
-    - name: Check if lam-data/etc-ldap-account-manager exists
-      stat:
-        path: "{{ docker_path }}/lam-data/etc-ldap-account-manager/config.cfg"
-      register: lam_etc_ldap_account_manager
-
-    - name: Generate initial config for lam in /etc
-      when: not lam_etc_ldap_account_manager.stat.exists
-      block:
-
-        - name: Clone lam git repository to /tmp/lam-temp
-          ansible.builtin.git:
-            repo: https://github.com/LDAPAccountManager/lam.git
-            dest: /tmp/lam-temp
-            update: no
-
-        - name: Copy LAM config.cfg
-          ansible.builtin.copy:
-            src: /tmp/lam-temp/lam/config/config.cfg.sample
-            dest: "{{ docker_path }}/lam-data/etc-ldap-account-manager/config.cfg"
-
-        - name: Set passwordMinLength to 0
-          ansible.builtin.replace:
-            path: "{{ docker_path }}/lam-data/etc-ldap-account-manager/config.cfg"
-            regexp: '"passwordMinLength": *"10"'
-            replace: '"passwordMinLength": "0"'
-            backup: yes
-
-        - name: Copy LAM nginx.conf
-          ansible.builtin.copy:
-            src: /tmp/lam-temp/lam-packaging/debian/lam.nginx.conf
-            dest: "{{ docker_path }}/lam-data/etc-ldap-account-manager/nginx.conf"
-
-        - name: Copy LAM apache.conf
-          ansible.builtin.copy:
-            src: /tmp/lam-temp/lam-packaging/debian/lam.apache.conf
-            dest: "{{ docker_path }}/lam-data/etc-ldap-account-manager/apache.conf"
-
-    - name: Remove the cloned /tmp/lam-temp directory
-      ansible.builtin.file:
-        path: /tmp/lam-temp
-        state: absent
-
-    - name: Check if env.ldap exists
-      stat:
-        path: "{{ docker_path }}/env.ldap"
-      register: env_ldap
-
-    - name: Generate initial env.ldap
-      when: not env_ldap.stat.exists
-      block:
-
-        # Generate a random password for LDAP Account Manager
-        - name: Generate lam_password
-          command: pwgen -s 32 1
-          register: lam_password
-
-        - name: Save plaintext lam_password password to env.ldap file
-          copy:
-            content: |
-              LAM_PASSWORD={{ lam_password.stdout }}
-            dest: "{{ docker_path }}/env.ldap"
-            mode: '0440'
-            owner: docker
-            group: root
-
-    - name: Recursively change owner and group to 33:33
-      ansible.builtin.file:
-        path: "{{ docker_path }}/lam-data"
-        recurse: yes
-        owner: '33'
-        group: '33'
 
     - name: Check if slapd.conf.ldif exists
       stat:
@@ -476,32 +355,6 @@
                 - ldap
                 - traefik
 
-            ldapam:
-              image: ghcr.io/ldapaccountmanager/lam:stable
-              container_name: ldapam
-              volumes:
-                - /etc/localtime:/etc/localtime:ro
-                - /etc/hosts:/etc/hosts:ro
-                - ./lam-data/config:/var/lib/ldap-account-manager/config:rw
-                - ./lam-data/etc-ldap-account-manager:/etc/ldap-account-manager:rw
-              env_file:
-                - env.ldap
-                - env.openldap
-              environment:
-                LDAP_SERVER: "ldap://openldap"
-                LDAP_BASE_DN: "{{ldap_basedn}}"
-                LDAP_USER: "cn=head-of-ldap,{{ldap_basedn}}"
-                LDAP_GROUPS_DN: "ou=groups,{{ldap_basedn}}"
-                LDAP_USERS_DN: "ou=users,{{ldap_basedn}}"
-                LDAP_ORGANISATION: "{{service_domain}}"
-                LAM_CONFIGURATION_DATABASE: "files"
-                LAM_SKIP_PRECONFIGURE: false
-              depends_on:
-                - openldap
-              restart: unless-stopped
-              networks:
-                - ldap
-                - traefik
 
           networks:
             ldap:
