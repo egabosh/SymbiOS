@@ -347,5 +347,5 @@
   handlers:
 
     - name: Restart traefik
-      ansible.builtin.shell: docker-compose up -d --force-recreate
+      ansible.builtin.shell: docker compose down && docker compose up -d
       args: { chdir: /home/docker/traefik }
