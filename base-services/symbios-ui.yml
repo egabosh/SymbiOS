@@ -299,6 +299,35 @@
         job: "/usr/local/sbin/symbios-boot-unlock/extract-le-cert.sh"
         user: root
 
+    - name: Copy restart-docker-services script
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/symbios-restart-docker-services.sh
+        dest: /usr/local/sbin/symbios-restart-docker-services.sh
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install symbios-restart-docker-services systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-restart-docker-services.service
+        content: |
+          [Unit]
+          Description=Restart all Docker Compose services after boot
+          After=docker.service network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/symbios-restart-docker-services.sh
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable restart-docker-services service
+      ansible.builtin.systemd:
+        name: symbios-restart-docker-services.service
+        enabled: yes
+
     - name: Reload systemd
       ansible.builtin.systemd:
         daemon_reload: yes
