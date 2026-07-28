@@ -959,7 +959,12 @@ def settings_disk_change_password(request):
     if current_password == new_password:
         return JsonResponse({'ok': False, 'error': 'New password must differ from current password'})
 
-    cmd = f'{_HOME_PART_SCRIPT} change-password {shlex.quote(current_password)} {shlex.quote(new_password)}'
+    cmd_parts = [
+        f'{_HOME_PART_SCRIPT} change-password',
+        shlex.quote(current_password),
+        shlex.quote(new_password),
+    ]
+    cmd = ' '.join(cmd_parts)
 
     is_ajax = is_ajax_request(request)
     if is_ajax:
@@ -968,7 +973,7 @@ def settings_disk_change_password(request):
         return JsonResponse({'ok': True, 'job': job_id,
                              'title': 'Changing LUKS passphrase...',
                              'message': 'Updating encryption key.',
-                             'command': cmd})
+                             'command': f'{_HOME_PART_SCRIPT} change-password'})
 
     ok, stdout, stderr = run_command(cmd, timeout=60)
     output = stdout
