@@ -1,6 +1,10 @@
 {% extends "main/base.html" %}
 {% load static %}
 {% block content %}
+<style>
+.text-hidden { filter: blur(4px); user-select: none; cursor: pointer; }
+.text-hidden:hover { filter: blur(3px); }
+</style>
 <h2><i class="bi bi-globe"></i> DNS</h2>
 
 {% if not vars.base_domain or vars.base_domain == 'none' or vars.base_domain == '0' %}
@@ -67,6 +71,10 @@
                 <input type="password" class="form-control" name="ddns_apikey" id="ddns_apikey"
                        value="{{ vars.ddns_apikey|default:'' }}"
                        placeholder="deSEC API token">
+                <button type="button" class="btn btn-outline-secondary" id="toggle-apikey-vis"
+                        onclick="toggleFieldVisibility('ddns_apikey', this)" title="Show/hide API key">
+                  <i class="bi bi-eye"></i>
+                </button>
                 <button type="button" class="btn btn-outline-secondary" id="test-api-btn"
                         onclick="testApiKey()">
                   <i class="bi bi-shield-check"></i> Test
@@ -251,6 +259,184 @@
         <i class="bi bi-globe"></i> Host Status
       </div>
       <div class="card-body" id="host-status-info">
+      </div>
+    </div>
+
+    <!-- Create deSEC Account -->
+    <div class="card mt-3" id="register-card" {% if dns_mode == 'self-managed' %}style="display:none"{% endif %}>
+      <div class="card-header">
+        <i class="bi bi-person-plus"></i> deSEC Account
+      </div>
+      <div class="card-body small" id="register-body">
+
+        <div id="register-not-started">
+          <div class="alert alert-info py-2 px-3 mb-2">
+            <i class="bi bi-info-circle-fill"></i>
+            <strong>Noch keinen deSEC-Account?</strong>
+            Hier kannst du direkt einen erstellen — ohne die deSEC-Website besuchen zu müssen.
+          </div>
+          <p class="mb-1"><strong>Was passiert?</strong></p>
+          <ul class="ps-3 mb-2">
+            <li>Es wird ein <strong>kostenloser Account</strong> bei
+              <a href="https://desec.io" target="_blank">desec.io</a> erstellt.</li>
+            <li>Du bekommst eine Bestätigungs-E-Mail — du musst den Link darin klicken.</li>
+            <li>Anschließend wird ein <strong>dauerhafter API-Key</strong> generiert
+              und in der SymbiOS-Konfiguration gespeichert.</li>
+            <li>Der gewünschte Hostname (<code>.dedyn.io</code>) kann optional sofort
+              angelegt werden.</li>
+          </ul>
+          <div class="alert alert-warning py-2 px-3 mb-2">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <strong>Wichtige Hinweise:</strong>
+            <ul class="ps-3 mb-0 mt-1">
+              <li><strong>Passwort und API-Key merken!</strong>
+                Notiere sie und bewahre sie an einem sicheren Ort auf (z.B. Passwortmanager).
+                Nach der Einrichtung werden sie dir nur noch hier angezeigt.</li>
+              <li>Richte nach der Erstellung <strong>2-Faktor-Authentifizierung (2FA)</strong>
+                im deSEC-Webinterface unter
+                <a href="https://desec.io" target="_blank">desec.io</a> ein,
+                um deinen Account zusätzlich zu schützen.</li>
+              <li>Der Account ist kostenlos — für bis zu <strong>15 Domains</strong> pro Account.</li>
+            </ul>
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="reg-consent">
+            <label class="form-check-label" for="reg-consent">
+              Ich bin einverstanden, dass ein deSEC-Account mit meiner E-Mail-Adresse erstellt wird
+              und dass SymbiOS einen API-Key für die DNS-Verwaltung generiert.
+            </label>
+          </div>
+          <button type="button" class="btn btn-outline-primary btn-sm w-100" id="reg-start-btn"
+                  onclick="startRegistration()" disabled>
+            <i class="bi bi-person-plus"></i> Create Account
+          </button>
+        </div>
+
+        <div id="register-form" style="display:none">
+          <div class="mb-2">
+            <label class="form-label">E-Mail</label>
+            <input type="email" class="form-control form-control-sm" id="reg-email"
+                   placeholder="deine@email.de">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Passwort</label>
+            <div class="input-group input-group-sm">
+              <input type="password" class="form-control" id="reg-password"
+                     placeholder="mindestens 8 Zeichen">
+              <button type="button" class="btn btn-outline-secondary" onclick="toggleFieldVisibility('reg-password', this)">
+                <i class="bi bi-eye"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Passwort bestätigen</label>
+            <div class="input-group input-group-sm">
+              <input type="password" class="form-control" id="reg-password2"
+                     placeholder="Passwort wiederholen">
+              <button type="button" class="btn btn-outline-secondary" onclick="toggleFieldVisibility('reg-password2', this)">
+                <i class="bi bi-eye"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Wunsch-Hostname</label>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control" id="reg-domain"
+                     placeholder="myserver">
+              <span class="input-group-text">.dedyn.io</span>
+            </div>
+            <div class="form-text">Optional — die Domain wird dann sofort angelegt.</div>
+          </div>
+
+          <!-- Captcha area (shown only if needed) -->
+          <div id="captcha-area" style="display:none">
+            <div class="mb-2">
+              <img id="captcha-image" class="img-fluid border rounded" alt="Captcha">
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Captcha-Lösung</label>
+              <input type="text" class="form-control form-control-sm" id="reg-captcha-solution"
+                     placeholder="Captcha-Text eingeben">
+            </div>
+          </div>
+
+          <div id="register-status" class="mb-2"></div>
+          <button type="button" class="btn btn-primary btn-sm w-100" id="reg-submit-btn"
+                  onclick="submitRegistration()">
+            <i class="bi bi-person-check"></i> Account erstellen
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm w-100 mt-1"
+                  onclick="cancelRegistration()">Abbrechen</button>
+        </div>
+
+        <div id="register-verify" style="display:none">
+          <div class="alert alert-success py-2 px-3 mb-2">
+            <i class="bi bi-check-circle-fill"></i>
+            Registrierung erfolgreich gestartet!
+          </div>
+          <p class="mb-2">
+            deSEC hat eine E-Mail an <strong id="verify-email-display"></strong> gesendet.
+            Bitte prüfe dein E-Mail-Postfach (auch den Spam-Ordner) und klicke auf den
+            Bestätigungslink von deSEC. Erst dann ist der Account aktiv.
+          </p>
+          <p class="mb-2 small text-muted">
+            <i class="bi bi-clock"></i> Der Link läuft nach 12 Stunden ab.
+            Sobald du ihn geklickt hast, klicke hier auf "Weiter".
+          </p>
+          <button type="button" class="btn btn-success btn-sm w-100" id="verify-continue-btn"
+                  onclick="finalizeRegistration()">
+            <i class="bi bi-arrow-right-circle"></i> E-Mail bestätigt — Weiter
+          </button>
+          <div id="finalize-status" class="mt-2"></div>
+          <button type="button" class="btn btn-outline-secondary btn-sm w-100 mt-1"
+                  onclick="cancelRegistration()">Abbrechen</button>
+        </div>
+
+        <div id="register-done" style="display:none">
+          <div class="alert alert-success py-2 px-3 mb-2">
+            <i class="bi bi-check-circle-fill"></i>
+            deSEC-Account eingerichtet!
+          </div>
+          <p class="mb-1"><strong>Zugangsdaten — bitte notieren!</strong></p>
+          <div class="bg-body rounded border p-2 mb-2 font-monospace small">
+            <div class="mb-1">
+              <span class="text-muted">E-Mail:</span>
+              <span id="done-email"></span>
+            </div>
+            <div class="mb-1">
+              <span class="text-muted">Passwort:</span>
+              <span id="done-password"></span>
+              <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1"
+                      onclick="toggleFieldVisibility('done-password', this)">
+                <i class="bi bi-eye"></i>
+              </button>
+            </div>
+            <div class="mb-1">
+              <span class="text-muted">API-Key:</span>
+              <span id="done-api-token"></span>
+              <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1"
+                      onclick="toggleFieldVisibility('done-api-token', this)">
+                <i class="bi bi-eye"></i>
+              </button>
+            </div>
+            <div id="done-domain-line" style="display:none" class="mb-1">
+              <span class="text-muted">Domain:</span>
+              <span id="done-domain"></span>
+            </div>
+          </div>
+          <div class="alert alert-warning py-2 px-3 mb-2">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <strong>Wichtig:</strong> Speichere diese Zugangsdaten sicher (z.B. Passwortmanager).
+            Ohne das Passwort kannst du dich nicht mehr bei deSEC anmelden.
+            Richte außerdem <strong>2FA</strong> ein unter
+            <a href="https://desec.io" target="_blank">desec.io</a> .
+          </div>
+          <button type="button" class="btn btn-primary btn-sm w-100"
+                  onclick="useRegisteredAccount()">
+            <i class="bi bi-arrow-right"></i> Account verwenden &amp; Konfiguration speichern
+          </button>
+        </div>
+
       </div>
     </div>
   </div>
@@ -491,6 +677,218 @@ function testApiKey() {
       btn.disabled = false;
       btn.innerHTML = '<i class="bi bi-shield-check"></i> Test';
     });
+}
+
+// Toggle password/API key field visibility
+function toggleFieldVisibility(fieldId, btn) {
+  var el = document.getElementById(fieldId);
+  if (!el) return;
+  if (el.type === 'password' || el.tagName === 'SPAN') {
+    if (el.tagName === 'SPAN') {
+      // For display spans: show/hide raw text
+      if (el.classList.contains('text-hidden')) {
+        el.classList.remove('text-hidden');
+        btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+      } else {
+        el.classList.add('text-hidden');
+        btn.innerHTML = '<i class="bi bi-eye"></i>';
+      }
+    } else {
+      el.type = 'text';
+      btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+    }
+  } else {
+    el.type = 'password';
+    btn.innerHTML = '<i class="bi bi-eye"></i>';
+  }
+}
+
+// --- deSEC Account Registration ---
+var regData = {};
+
+function startRegistration() {
+  if (!document.getElementById('reg-consent').checked) {
+    return;
+  }
+  document.getElementById('register-not-started').style.display = 'none';
+  document.getElementById('register-form').style.display = '';
+  document.getElementById('register-verify').style.display = 'none';
+  document.getElementById('register-done').style.display = 'none';
+  regData = {};
+}
+
+// Enable start button when consent is checked
+document.addEventListener('DOMContentLoaded', function() {
+  var consentCheck = document.getElementById('reg-consent');
+  if (consentCheck) {
+    consentCheck.addEventListener('change', function() {
+      document.getElementById('reg-start-btn').disabled = !this.checked;
+    });
+  }
+});
+
+function cancelRegistration() {
+  document.getElementById('register-not-started').style.display = '';
+  document.getElementById('register-form').style.display = 'none';
+  document.getElementById('register-verify').style.display = 'none';
+  document.getElementById('register-done').style.display = 'none';
+}
+
+function submitRegistration() {
+  var email = document.getElementById('reg-email').value.trim();
+  var password = document.getElementById('reg-password').value;
+  var password2 = document.getElementById('reg-password2').value;
+  var domain = document.getElementById('reg-domain').value.trim();
+  var captchaSolution = document.getElementById('reg-captcha-solution').value.trim();
+  var captchaId = regData.captcha_id || '';
+
+  if (!email) { setRegStatus('Bitte E-Mail-Adresse eingeben.', 'danger'); return; }
+  if (!password) { setRegStatus('Bitte ein Passwort eingeben.', 'danger'); return; }
+  if (password.length < 8) { setRegStatus('Passwort muss mindestens 8 Zeichen lang sein.', 'danger'); return; }
+  if (password !== password2) { setRegStatus('Passwörter stimmen nicht überein.', 'danger'); return; }
+
+  setRegStatus('Creating account...', 'info');
+  var btn = document.getElementById('reg-submit-btn');
+  btn.disabled = true;
+
+  var formData = new FormData();
+  formData.append('email', email);
+  formData.append('password', password);
+  if (captchaId && captchaSolution) {
+    formData.append('captcha_id', captchaId);
+    formData.append('captcha_solution', captchaSolution);
+  }
+  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+
+  fetch('{% url "settings_ddns_register" %}', {
+    method: 'POST',
+    body: formData,
+    credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken() }
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        regData.email = email;
+        regData.password = password;
+        regData.domain = domain;
+        document.getElementById('register-form').style.display = 'none';
+        document.getElementById('verify-email-display').textContent = email;
+        document.getElementById('register-verify').style.display = '';
+        setRegStatus('', '');  // clear any status
+      } else {
+        // Check if error mentions captcha — if so, fetch one
+        if (data.error && data.error.toLowerCase().includes('captcha')) {
+          fetchCaptchaAndShow();
+        }
+        setRegStatus(data.error || 'Registration failed.', 'danger');
+        btn.disabled = false;
+      }
+    })
+    .catch(err => {
+      setRegStatus('Connection error: ' + err.message, 'danger');
+      btn.disabled = false;
+    });
+}
+
+function setRegStatus(msg, type) {
+  var el = document.getElementById('register-status');
+  if (!msg) { el.innerHTML = ''; return; }
+  var icon = type === 'danger' ? 'bi-x-circle-fill' : type === 'success' ? 'bi-check-circle-fill' : 'bi-info-circle-fill';
+  el.innerHTML = '<div class="alert alert-' + type + ' py-1 px-2 mb-0 small"><i class="bi ' + icon + '"></i> ' + msg + '</div>';
+}
+
+function fetchCaptchaAndShow() {
+  setRegStatus('Fetching captcha...', 'info');
+  fetch('{% url "settings_ddns_captcha" %}')
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        regData.captcha_id = data.captcha_id;
+        document.getElementById('captcha-image').src = data.image_data_uri;
+        document.getElementById('captcha-area').style.display = '';
+        setRegStatus('Please solve the captcha above.', 'info');
+      } else {
+        setRegStatus('Could not fetch captcha: ' + (data.error || 'unknown error'), 'danger');
+      }
+    })
+    .catch(err => {
+      setRegStatus('Error fetching captcha: ' + err.message, 'danger');
+    });
+}
+
+function finalizeRegistration() {
+  var btn = document.getElementById('verify-continue-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking...';
+  var statusEl = document.getElementById('finalize-status');
+  statusEl.innerHTML = '';
+
+  var formData = new FormData();
+  formData.append('email', regData.email);
+  formData.append('password', regData.password);
+  if (regData.domain) {
+    formData.append('domain', regData.domain);
+  }
+  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
+
+  fetch('{% url "settings_ddns_finalize" %}', {
+    method: 'POST',
+    body: formData,
+    credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken() }
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        document.getElementById('register-verify').style.display = 'none';
+        document.getElementById('register-done').style.display = '';
+        regData.api_token = data.api_token;
+        // Show credentials
+        document.getElementById('done-email').textContent = regData.email;
+        var pwSpan = document.getElementById('done-password');
+        pwSpan.textContent = regData.password;
+        pwSpan.classList.add('text-hidden');
+        var tokenSpan = document.getElementById('done-api-token');
+        tokenSpan.textContent = data.api_token;
+        tokenSpan.classList.add('text-hidden');
+        if (data.domain) {
+          document.getElementById('done-domain').textContent = data.domain;
+          document.getElementById('done-domain-line').style.display = '';
+        }
+      } else if (data.not_verified) {
+        statusEl.innerHTML = '<div class="alert alert-warning py-1 px-2 mb-0 small"><i class="bi bi-exclamation-triangle-fill"></i> ' + data.error + '</div>';
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> I\'ve verified — Continue';
+      } else {
+        statusEl.innerHTML = '<div class="alert alert-danger py-1 px-2 mb-0 small"><i class="bi bi-x-circle-fill"></i> ' + (data.error || 'Finalization failed') + '</div>';
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> I\'ve verified — Continue';
+      }
+    })
+    .catch(err => {
+      statusEl.innerHTML = '<div class="alert alert-danger py-1 px-2 mb-0 small"><i class="bi bi-x-circle-fill"></i> Connection error: ' + err.message + '</div>';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> I\'ve verified — Continue';
+    });
+}
+
+function useRegisteredAccount() {
+  // Fill the main form with the new API key and domain
+  var apiKeyField = document.getElementById('ddns_apikey');
+  var hostField = document.getElementById('ddns_host');
+  if (regData.api_token) {
+    apiKeyField.value = regData.api_token;
+  }
+  if (regData.domain) {
+    var hostname = regData.domain.replace('.dedyn.io', '');
+    hostField.value = hostname;
+  }
+  cancelRegistration();
+  // Run host status check
+  checkHostStatus();
+  // Auto-detect IPs
+  detectIPs();
 }
 </script>
 {% endblock %}

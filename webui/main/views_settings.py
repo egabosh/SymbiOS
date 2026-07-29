@@ -364,6 +364,166 @@ def settings_ddns_check_ip(request):
 
     return JsonResponse(result)
 
+DESEC_API = 'https://desec.io/api/v1'
+
+
+def _desec_request(method, path, data=None, token=None, timeout=15):
+    url = f'{DESEC_API}/{path.lstrip("/")}'
+    headers = {'Content-Type': 'application/json'}
+    if token:
+        headers['Authorization'] = f'Token {token}'
+    body = json.dumps(data).encode() if data else None
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp_body = resp.read().decode()
+            return {'status': resp.status, 'body': json.loads(resp_body) if resp_body else {}}
+    except urllib.error.HTTPError as e:
+        resp_body = e.read().decode()
+        try:
+            err_data = json.loads(resp_body)
+        except Exception:
+            err_data = {'detail': resp_body}
+        return {'status': e.code, 'body': err_data}
+    except urllib.error.URLError as e:
+        return {'status': 0, 'body': {'detail': f'Connection error: {e.reason}'}}
+
+
+@login_required
+def settings_ddns_register(request):
+    """AJAX POST — Register a new deSEC account."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    email = request.POST.get('email', '').strip()
+    password = request.POST.get('password', '')
+    captcha_id = request.POST.get('captcha_id', '').strip()
+    captcha_solution = request.POST.get('captcha_solution', '').strip()
+
+    if not email or not password:
+        return JsonResponse({'ok': False, 'error': 'Email and password are required'})
+
+    data = {'email': email, 'password': password}
+    if captcha_id and captcha_solution:
+        data['captcha'] = {'id': captcha_id, 'solution': captcha_solution}
+
+    result = _desec_request('POST', '/auth/', data=data, timeout=20)
+    if result['status'] == 202:
+        return JsonResponse({'ok': True, 'message': 'Registration initiated. Check your email for the verification link.'})
+    else:
+        err = result['body']
+        if isinstance(err, dict):
+            msgs = []
+            for k, v in err.items():
+                if isinstance(v, list):
+                    msgs.append(f'{k}: {", ".join(str(x) for x in v)}')
+                else:
+                    msgs.append(f'{k}: {v}')
+            detail = '; '.join(msgs)
+        else:
+            detail = str(err)
+        return JsonResponse({'ok': False, 'error': detail})
+
+
+@login_required
+def settings_ddns_finalize(request):
+    """AJAX POST — Login, create API token, optionally create domain, save to inventory."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    email = request.POST.get('email', '').strip()
+    password = request.POST.get('password', '')
+    domain = request.POST.get('domain', '').strip().lower()
+    if domain.endswith('.dedyn.io'):
+        domain = domain[:-len('.dedyn.io')]
+    if domain:
+        domain = domain + '.dedyn.io'
+
+    if not email or not password:
+        return JsonResponse({'ok': False, 'error': 'Email and password are required'})
+
+    # Step 1: Login
+    login_result = _desec_request('POST', '/auth/login/',
+                                  data={'email': email, 'password': password}, timeout=15)
+    if login_result['status'] != 200:
+        if login_result['status'] == 403:
+            return JsonResponse({'ok': False, 'error': 'Account not yet verified. Please check your email and click the verification link, then try again.',
+                                 'not_verified': True})
+        return JsonResponse({'ok': False, 'error': f'Login failed (HTTP {login_result["status"]})'})
+
+    login_token = login_result['body'].get('token', '')
+    if not login_token:
+        return JsonResponse({'ok': False, 'error': 'No token in login response'})
+
+    # Step 2: Create permanent API token
+    token_data = {
+        'name': 'symbios-ddns',
+        'perm_create_domain': True,
+        'perm_delete_domain': True,
+        'perm_manage_tokens': False,
+        'max_unused_period': '36500 00:00:00',
+    }
+    token_result = _desec_request('POST', '/auth/tokens/', data=token_data, token=login_token, timeout=15)
+    if token_result['status'] != 201:
+        return JsonResponse({'ok': False, 'error': f'Failed to create API token: {token_result["body"]}'})
+
+    api_token = token_result['body'].get('token', '')
+    if not api_token:
+        return JsonResponse({'ok': False, 'error': 'No token in create-token response'})
+
+    # Step 3: Create domain if requested
+    domain_created = False
+    if domain:
+        domain_result = _desec_request('POST', '/domains/', data={'name': domain}, token=api_token, timeout=15)
+        if domain_result['status'] == 201:
+            domain_created = True
+        elif domain_result['status'] == 409:
+            # Domain already exists — that's fine
+            domain_created = True
+        # If domain creation fails for other reasons, continue anyway (user can create manually)
+
+    # Step 4: Save to inventory
+    config = _get_inventory_config()
+    if 'all' not in config:
+        config['all'] = {}
+    if 'vars' not in config['all']:
+        config['all']['vars'] = {}
+    vars_ = config['all']['vars']
+    vars_['dns_mode'] = 'desec'
+    vars_['ddns_apikey'] = api_token
+    if domain:
+        vars_['ddns_host'] = domain
+        vars_['base_domain'] = domain
+    vars_['ddns_ipv6'] = request.POST.get('ipv6_mode', '')
+    _save_inventory_config(config)
+
+    return JsonResponse({
+        'ok': True,
+        'message': 'deSEC account configured successfully!',
+        'api_token': api_token,
+        'password': password,
+        'domain': domain,
+        'domain_created': domain_created,
+    })
+
+
+@login_required
+def settings_ddns_captcha(request):
+    """AJAX GET — Fetch a captcha from deSEC (for registration)."""
+    result = _desec_request('POST', '/captcha/', timeout=15)
+    if result['status'] == 201:
+        captcha_id = result['body'].get('id', '')
+        challenge_b64 = result['body'].get('challenge', '')
+        return JsonResponse({
+            'ok': True,
+            'captcha_id': captcha_id,
+            'challenge': challenge_b64,
+            'image_data_uri': f'data:image/png;base64,{challenge_b64}',
+        })
+    else:
+        return JsonResponse({'ok': False, 'error': f'Failed to get captcha: {result["body"]}'})
+
+
 @login_required
 def settings_localization(request):
     config = _get_inventory_config()
