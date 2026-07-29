@@ -61,12 +61,34 @@
       </div>
     </div>
   </div>
+
+  <!-- Port Forwarding -->
+  <div class="col-md-6 col-lg-4 mb-3">
+    <div class="card h-100">
+      <div class="card-body">
+        <h5 class="card-title"><i class="bi bi-diagram-3 text-primary"></i> Port Forwarding</h5>
+        <p class="card-text small">
+          Manage port forwarding rules on your router via <strong>UPnP IGD</strong>
+          (WANIPConnection standard, supported by FRITZ!Box and most routers).
+          Detect your router, list mappings, add or delete rules.
+        </p>
+        <p class="card-text small text-muted">
+          Supports IPv4 TCP/UDP port forwarding. Some routers (e.g. FRITZ!Box)
+          require UPnP credentials; others need no authentication.
+        </p>
+        <a href="/settings/port-forwarding/" class="btn btn-outline-primary btn-sm">Manage</a>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Port Forwarding Guide -->
 <div class="card mt-2">
-  <div class="card-header">
-    <i class="bi bi-diagram-3"></i> Port Forwarding Guide
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-diagram-3"></i> Port Forwarding Guide</span>
+    <a href="/settings/port-forwarding/" class="btn btn-sm btn-outline-primary">
+      <i class="bi bi-gear"></i> Manage automatically
+    </a>
   </div>
   <div class="card-body small">
     <p>
@@ -75,6 +97,14 @@
       <strong>TCP ports 80 (HTTP) and 443 (HTTPS)</strong> to the internal
       IP of the Symbios server.
     </p>
+
+    <div class="alert alert-info py-2 px-3 mb-3">
+      <i class="bi bi-info-circle-fill"></i>
+      <strong>UPnP IGD capable router?</strong> You can manage port forwarding
+      automatically from SymbiOS at
+      <a href="/settings/port-forwarding/"><strong>Settings → Port Forwarding</strong></a>.
+      Enter your router's UPnP credentials (if required) and add/delete rules directly.
+    </div>
 
     <h6 class="fw-bold mt-3 mb-1"><i class="bi bi-globe2"></i> IPv4</h6>
     <ol class="ps-3 mb-1">

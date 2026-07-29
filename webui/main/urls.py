@@ -23,6 +23,7 @@ from . import views_logs
 from . import views_change_password
 from . import views_services
 from . import views_exec
+from . import views_port_forwarding
 from .utils.log_utils import logs_stream
 
 urlpatterns = [
@@ -65,6 +66,10 @@ urlpatterns = [
     path('settings/disk/change-password/', views_settings.settings_disk_change_password, name='settings_disk_change_password'),
     path('settings/localization/', views_settings.settings_localization, name='settings_localization'),
     path('settings/local-ip/', views_settings.settings_local_ip, name='settings_local_ip'),
+    path('settings/port-forwarding/', views_port_forwarding.settings_port_forwarding, name='settings_port_forwarding'),
+    path('settings/port-forwarding/detect/', views_port_forwarding.settings_port_forwarding_detect, name='settings_port_forwarding_detect'),
+    path('settings/port-forwarding/list/', views_port_forwarding.settings_port_forwarding_list, name='settings_port_forwarding_list'),
+    path('settings/port-forwarding/config/', views_port_forwarding.settings_port_forwarding_config, name='settings_port_forwarding_config'),
     path('settings/playbooks/', views_settings.settings_playbooks, name='settings_playbooks'),
     path('services/playbooks/', views_settings.settings_playbooks, name='services_playbooks'),
     path('settings/playbooks/upload/', views_settings.settings_playbooks_upload, name='settings_playbooks_upload'),
