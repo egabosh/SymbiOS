@@ -390,7 +390,7 @@ function f_add_mapping {
     return 1
   fi
 
-  local f_inner="<NewRemoteHost></NewRemoteHost><NewExternalPort>${f_ext_port}</NewExternalPort><NewProtocol>${f_proto_upper}</NewProtocol><NewInternalPort>${f_int_port}</NewInternalPort><NewInternalClient>${f_int_client}</NewInternalClient><NewEnabled>1</NewEnabled><NewPortMappingDescription>${f_desc}</NewPortMappingDescription><NewLeaseDuration>0</NewLeaseDuration>"
+  local f_inner="<NewRemoteHost>0.0.0.0</NewRemoteHost><NewExternalPort>${f_ext_port}</NewExternalPort><NewProtocol>${f_proto_upper}</NewProtocol><NewInternalPort>${f_int_port}</NewInternalPort><NewInternalClient>${f_int_client}</NewInternalClient><NewEnabled>1</NewEnabled><NewPortMappingDescription>${f_desc}</NewPortMappingDescription><NewLeaseDuration>0</NewLeaseDuration>"
 
   local f_result
   f_result=$(f_soap_call "$f_host" "$f_user" "$f_pass" "AddPortMapping" "$f_inner") || {
@@ -423,7 +423,7 @@ function f_delete_mapping {
   local f_proto_upper
   f_proto_upper=$(echo "$f_proto" | tr '[:lower:]' '[:upper:]')
 
-  local f_inner="<NewRemoteHost></NewRemoteHost><NewExternalPort>${f_ext_port}</NewExternalPort><NewProtocol>${f_proto_upper}</NewProtocol>"
+  local f_inner="<NewRemoteHost>0.0.0.0</NewRemoteHost><NewExternalPort>${f_ext_port}</NewExternalPort><NewProtocol>${f_proto_upper}</NewProtocol>"
 
   local f_result
   f_result=$(f_soap_call "$f_host" "$f_user" "$f_pass" "DeletePortMapping" "$f_inner") || {
