@@ -212,8 +212,8 @@
         </ul>
         <p class="mb-0 small text-muted">
           <i class="bi bi-info-circle"></i>
-          Need help with port forwarding? See the guide at
-          <a href="/settings/">Settings &rarr; Port Forwarding Guide</a>.
+          Need help with port forwarding?
+          <a href="/settings/port-forwarding/">Manage it automatically &rarr;</a>
         </p>
       </div>
     </div>
@@ -236,8 +236,8 @@
         </ul>
         <p class="mb-0 small text-muted">
           <i class="bi bi-info-circle"></i>
-          Need help with port forwarding? See the guide at
-          <a href="/settings/">Settings &rarr; Port Forwarding Guide</a>.
+          Need help with port forwarding?
+          <a href="/settings/port-forwarding/">Manage it automatically &rarr;</a>
         </p>
       </div>
     </div>
@@ -272,38 +272,38 @@
         <div id="register-not-started">
           <div class="alert alert-info py-2 px-3 mb-2">
             <i class="bi bi-info-circle-fill"></i>
-            <strong>Noch keinen deSEC-Account?</strong>
-            Hier kannst du direkt einen erstellen — ohne die deSEC-Website besuchen zu müssen.
+            <strong>No deSEC account yet?</strong>
+            Create one directly here — no need to visit the deSEC website.
           </div>
-          <p class="mb-1"><strong>Was passiert?</strong></p>
+          <p class="mb-1"><strong>What will happen?</strong></p>
           <ul class="ps-3 mb-2">
-            <li>Es wird ein <strong>kostenloser Account</strong> bei
-              <a href="https://desec.io" target="_blank">desec.io</a> erstellt.</li>
-            <li>Du bekommst eine Bestätigungs-E-Mail — du musst den Link darin klicken.</li>
-            <li>Anschließend wird ein <strong>dauerhafter API-Key</strong> generiert
-              und in der SymbiOS-Konfiguration gespeichert.</li>
-            <li>Der gewünschte Hostname (<code>.dedyn.io</code>) kann optional sofort
-              angelegt werden.</li>
+            <li>A <strong>free account</strong> at
+              <a href="https://desec.io" target="_blank">desec.io</a> will be created.</li>
+            <li>A confirmation email will be sent — you must click the link in it.</li>
+            <li>After verification, a <strong>permanent API key</strong> is generated
+              and saved in the SymbiOS configuration.</li>
+            <li>The desired hostname (<code>.dedyn.io</code>) can optionally be created
+              right away.</li>
           </ul>
           <div class="alert alert-warning py-2 px-3 mb-2">
             <i class="bi bi-exclamation-triangle-fill"></i>
-            <strong>Wichtige Hinweise:</strong>
+            <strong>Important:</strong>
             <ul class="ps-3 mb-0 mt-1">
-              <li><strong>Passwort und API-Key merken!</strong>
-                Notiere sie und bewahre sie an einem sicheren Ort auf (z.B. Passwortmanager).
-                Nach der Einrichtung werden sie dir nur noch hier angezeigt.</li>
-              <li>Richte nach der Erstellung <strong>2-Faktor-Authentifizierung (2FA)</strong>
-                im deSEC-Webinterface unter
-                <a href="https://desec.io" target="_blank">desec.io</a> ein,
-                um deinen Account zusätzlich zu schützen.</li>
-              <li>Der Account ist kostenlos — für bis zu <strong>15 Domains</strong> pro Account.</li>
+              <li><strong>Save your password and API key!</strong>
+                Write them down and store them securely (e.g. password manager).
+                They will only be shown here once.</li>
+              <li>After creation, enable <strong>2-Factor Authentication (2FA)</strong>
+                in the deSEC web interface at
+                <a href="https://desec.io" target="_blank">desec.io</a>
+                to protect your account.</li>
+              <li>The account is free — up to <strong>15 domains</strong> per account.</li>
             </ul>
           </div>
           <div class="form-check mb-2">
             <input class="form-check-input" type="checkbox" id="reg-consent">
             <label class="form-check-label" for="reg-consent">
-              Ich bin einverstanden, dass ein deSEC-Account mit meiner E-Mail-Adresse erstellt wird
-              und dass SymbiOS einen API-Key für die DNS-Verwaltung generiert.
+              I agree that a deSEC account will be created with my email address
+              and that SymbiOS will generate an API key for DNS management.
             </label>
           </div>
           <button type="button" class="btn btn-outline-primary btn-sm w-100" id="reg-start-btn"
@@ -314,38 +314,38 @@
 
         <div id="register-form" style="display:none">
           <div class="mb-2">
-            <label class="form-label">E-Mail</label>
+            <label class="form-label">Email</label>
             <input type="email" class="form-control form-control-sm" id="reg-email"
-                   placeholder="deine@email.de">
+                   placeholder="your@email.com">
           </div>
           <div class="mb-2">
-            <label class="form-label">Passwort</label>
+            <label class="form-label">Password</label>
             <div class="input-group input-group-sm">
               <input type="password" class="form-control" id="reg-password"
-                     placeholder="mindestens 8 Zeichen">
+                     placeholder="at least 8 characters">
               <button type="button" class="btn btn-outline-secondary" onclick="toggleFieldVisibility('reg-password', this)">
                 <i class="bi bi-eye"></i>
               </button>
             </div>
           </div>
           <div class="mb-2">
-            <label class="form-label">Passwort bestätigen</label>
+            <label class="form-label">Confirm Password</label>
             <div class="input-group input-group-sm">
               <input type="password" class="form-control" id="reg-password2"
-                     placeholder="Passwort wiederholen">
+                     placeholder="repeat password">
               <button type="button" class="btn btn-outline-secondary" onclick="toggleFieldVisibility('reg-password2', this)">
                 <i class="bi bi-eye"></i>
               </button>
             </div>
           </div>
           <div class="mb-2">
-            <label class="form-label">Wunsch-Hostname</label>
+            <label class="form-label">Desired Hostname</label>
             <div class="input-group input-group-sm">
               <input type="text" class="form-control" id="reg-domain"
                      placeholder="myserver">
               <span class="input-group-text">.dedyn.io</span>
             </div>
-            <div class="form-text">Optional — die Domain wird dann sofort angelegt.</div>
+            <div class="form-text">Optional — the domain will be created right away.</div>
           </div>
 
           <!-- Captcha area (shown only if needed) -->
@@ -354,57 +354,57 @@
               <img id="captcha-image" class="img-fluid border rounded" alt="Captcha">
             </div>
             <div class="mb-2">
-              <label class="form-label">Captcha-Lösung</label>
+              <label class="form-label">Captcha Solution</label>
               <input type="text" class="form-control form-control-sm" id="reg-captcha-solution"
-                     placeholder="Captcha-Text eingeben">
+                     placeholder="enter the text shown above">
             </div>
           </div>
 
           <div id="register-status" class="mb-2"></div>
           <button type="button" class="btn btn-primary btn-sm w-100" id="reg-submit-btn"
                   onclick="submitRegistration()">
-            <i class="bi bi-person-check"></i> Account erstellen
+            <i class="bi bi-person-check"></i> Create Account
           </button>
           <button type="button" class="btn btn-outline-secondary btn-sm w-100 mt-1"
-                  onclick="cancelRegistration()">Abbrechen</button>
+                  onclick="cancelRegistration()">Cancel</button>
         </div>
 
         <div id="register-verify" style="display:none">
           <div class="alert alert-success py-2 px-3 mb-2">
             <i class="bi bi-check-circle-fill"></i>
-            Registrierung erfolgreich gestartet!
+            Registration initiated successfully!
           </div>
           <p class="mb-2">
-            deSEC hat eine E-Mail an <strong id="verify-email-display"></strong> gesendet.
-            Bitte prüfe dein E-Mail-Postfach (auch den Spam-Ordner) und klicke auf den
-            Bestätigungslink von deSEC. Erst dann ist der Account aktiv.
+            deSEC has sent an email to <strong id="verify-email-display"></strong>.
+            Please check your inbox (and spam folder) and click the verification link
+            from deSEC. Your account will be activated once you do.
           </p>
           <p class="mb-2 small text-muted">
-            <i class="bi bi-clock"></i> Der Link läuft nach 12 Stunden ab.
-            Sobald du ihn geklickt hast, klicke hier auf "Weiter".
+            <i class="bi bi-clock"></i> The link expires after 12 hours.
+            Once you have clicked it, click "Continue" below.
           </p>
           <button type="button" class="btn btn-success btn-sm w-100" id="verify-continue-btn"
                   onclick="finalizeRegistration()">
-            <i class="bi bi-arrow-right-circle"></i> E-Mail bestätigt — Weiter
+            <i class="bi bi-arrow-right-circle"></i> Email verified — Continue
           </button>
           <div id="finalize-status" class="mt-2"></div>
           <button type="button" class="btn btn-outline-secondary btn-sm w-100 mt-1"
-                  onclick="cancelRegistration()">Abbrechen</button>
+                  onclick="cancelRegistration()">Cancel</button>
         </div>
 
         <div id="register-done" style="display:none">
           <div class="alert alert-success py-2 px-3 mb-2">
             <i class="bi bi-check-circle-fill"></i>
-            deSEC-Account eingerichtet!
+            deSEC account set up!
           </div>
-          <p class="mb-1"><strong>Zugangsdaten — bitte notieren!</strong></p>
+          <p class="mb-1"><strong>Credentials — save them now!</strong></p>
           <div class="bg-body rounded border p-2 mb-2 font-monospace small">
             <div class="mb-1">
-              <span class="text-muted">E-Mail:</span>
+              <span class="text-muted">Email:</span>
               <span id="done-email"></span>
             </div>
             <div class="mb-1">
-              <span class="text-muted">Passwort:</span>
+              <span class="text-muted">Password:</span>
               <span id="done-password"></span>
               <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1"
                       onclick="toggleFieldVisibility('done-password', this)">
@@ -412,7 +412,7 @@
               </button>
             </div>
             <div class="mb-1">
-              <span class="text-muted">API-Key:</span>
+              <span class="text-muted">API Key:</span>
               <span id="done-api-token"></span>
               <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1"
                       onclick="toggleFieldVisibility('done-api-token', this)">
@@ -426,14 +426,14 @@
           </div>
           <div class="alert alert-warning py-2 px-3 mb-2">
             <i class="bi bi-exclamation-triangle-fill"></i>
-            <strong>Wichtig:</strong> Speichere diese Zugangsdaten sicher (z.B. Passwortmanager).
-            Ohne das Passwort kannst du dich nicht mehr bei deSEC anmelden.
-            Richte außerdem <strong>2FA</strong> ein unter
+            <strong>Important:</strong> Store these credentials securely (e.g. password manager).
+            Without the password, you cannot log in to deSEC again.
+            Also enable <strong>2FA</strong> at
             <a href="https://desec.io" target="_blank">desec.io</a> .
           </div>
           <button type="button" class="btn btn-primary btn-sm w-100"
                   onclick="useRegisteredAccount()">
-            <i class="bi bi-arrow-right"></i> Account verwenden &amp; Konfiguration speichern
+            <i class="bi bi-arrow-right"></i> Use this account &amp; save configuration
           </button>
         </div>
 
@@ -742,10 +742,10 @@ function submitRegistration() {
   var captchaSolution = document.getElementById('reg-captcha-solution').value.trim();
   var captchaId = regData.captcha_id || '';
 
-  if (!email) { setRegStatus('Bitte E-Mail-Adresse eingeben.', 'danger'); return; }
-  if (!password) { setRegStatus('Bitte ein Passwort eingeben.', 'danger'); return; }
-  if (password.length < 8) { setRegStatus('Passwort muss mindestens 8 Zeichen lang sein.', 'danger'); return; }
-  if (password !== password2) { setRegStatus('Passwörter stimmen nicht überein.', 'danger'); return; }
+  if (!email) { setRegStatus('Please enter your email.', 'danger'); return; }
+  if (!password) { setRegStatus('Please enter a password.', 'danger'); return; }
+  if (password.length < 8) { setRegStatus('Password must be at least 8 characters.', 'danger'); return; }
+  if (password !== password2) { setRegStatus('Passwords do not match.', 'danger'); return; }
 
   setRegStatus('Creating account...', 'info');
   var btn = document.getElementById('reg-submit-btn');

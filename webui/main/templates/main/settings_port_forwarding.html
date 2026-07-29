@@ -1,0 +1,447 @@
+{% extends "main/base.html" %}
+{% load static %}
+{% block content %}
+<h2><i class="bi bi-diagram-3"></i> Port Forwarding</h2>
+
+{% if detect_error %}
+<div class="alert alert-warning py-2 px-3 mt-3 mb-3">
+  <i class="bi bi-exclamation-triangle-fill"></i>
+  <strong>Router detection failed:</strong> {{ detect_error }}
+</div>
+{% endif %}
+
+<div class="row mt-3">
+  <!-- Router Detection Card -->
+  <div class="col-md-6 mb-3">
+    <div class="card h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-router"></i> Router Detection</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="detectRouter()" id="detect-btn">
+          <i class="bi bi-arrow-repeat"></i> Refresh
+        </button>
+      </div>
+      <div class="card-body small" id="router-info-body">
+        {% if router_info and router_info.available %}
+        <div class="mb-2">
+          <span class="text-muted">Manufacturer:</span>
+          <strong>{{ router_info.manufacturer|default:"Unknown" }}</strong>
+        </div>
+        <div class="mb-2">
+          <span class="text-muted">Model:</span>
+          <strong>{{ router_info.model|default:"Unknown" }}</strong>
+          {% if router_info.model_number %}
+          <span class="text-muted">({{ router_info.model_number }})</span>
+          {% endif %}
+        </div>
+        <div class="mb-2">
+          <span class="text-muted">Firmware:</span>
+          <strong>{{ router_info.firmware_version|default:"Unknown" }}</strong>
+        </div>
+        <div class="mb-2">
+          <span class="text-muted">Gateway:</span>
+          <code>{{ router_info.gateway|default:"Unknown" }}</code>
+        </div>
+        <div class="mb-2">
+          <span class="text-muted">Friendly Name:</span>
+          <strong>{{ router_info.friendly_name|default:"N/A" }}</strong>
+        </div>
+        {% if router_info.presentation_url %}
+        <div class="mb-2">
+          <span class="text-muted">Web UI:</span>
+          <a href="http://{{ router_info.presentation_url }}" target="_blank">{{ router_info.presentation_url }}</a>
+        </div>
+        {% endif %}
+        <div class="mt-2">
+          {% if credentials_configured %}
+          <span class="badge bg-success"><i class="bi bi-check-circle"></i> Credentials configured</span>
+          {% else %}
+          <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> No credentials</span>
+          {% endif %}
+        </div>
+        {% elif router_info and router_info.available == false %}
+        <p class="text-muted mb-0">
+          <i class="bi bi-info-circle"></i>
+          No TR-064/UPnP response from gateway {{ router_info.gateway|default:"(unknown)" }} on port 49000.
+        </p>
+        <p class="text-muted mb-0 mt-1 small">
+          Port forwarding management requires a router with
+          <strong>UPnP IGD (WANIPConnection)</strong> enabled.
+        </p>
+        {% else %}
+        <div id="detect-pending">
+          <span class="spinner-border spinner-border-sm" role="status"></span>
+          Detecting router...
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Credentials Card -->
+  <div class="col-md-6 mb-3">
+    <div class="card h-100">
+      <div class="card-header">
+        <i class="bi bi-key"></i> Router UPnP Credentials
+      </div>
+      <div class="card-body small">
+        {% if credentials_configured %}
+        <div class="alert alert-success py-2 px-3 mb-2">
+          <i class="bi bi-check-circle-fill"></i>
+          Credentials are configured.
+        </div>
+        <form method="post" data-exec="true" class="mb-0">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="save-credentials">
+          <div class="mb-2">
+            <label class="form-label">Username (UPnP user)</label>
+            <input type="text" class="form-control form-control-sm" name="username"
+                   placeholder="Router UPnP username"
+                   value="">
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Password</label>
+            <div class="input-group input-group-sm">
+              <input type="password" class="form-control" name="password" id="cred-password"
+                     placeholder="TR-064 user password">
+              <button type="button" class="btn btn-outline-secondary"
+                      onclick="toggleFieldVisibility('cred-password', this)">
+                <i class="bi bi-eye"></i>
+              </button>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm w-100">
+            <i class="bi bi-save"></i> Update Credentials
+          </button>
+        </form>
+        {% else %}
+        <p class="text-muted mb-2">
+          Enter your router's <strong>UPnP IGD</strong> credentials.
+          Some routers (e.g. FRITZ!Box) require Digest authentication;
+          others allow open access (leave blank). If your router supports UPnP
+          without auth, you only need to enable UPnP in its web interface.
+        </p>
+        <form method="post" data-exec="true" class="mb-0">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="save-credentials">
+          <div class="mb-2">
+            <label class="form-label">Username</label>
+            <input type="text" class="form-control form-control-sm" name="username"
+                   placeholder="UPnP username (leave blank if no auth)"
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Password</label>
+            <div class="input-group input-group-sm">
+              <input type="password" class="form-control" name="password" id="cred-password-new"
+                     placeholder="UPnP password (leave blank if no auth)">
+              <button type="button" class="btn btn-outline-secondary"
+                      onclick="toggleFieldVisibility('cred-password-new', this)">
+                <i class="bi bi-eye"></i>
+              </button>
+            </div>
+          </div>
+          <div class="alert alert-info py-2 px-3 mb-2">
+            <i class="bi bi-info-circle-fill"></i>
+            Credentials are stored encrypted at-rest on the SymbiOS server.
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm w-100">
+            <i class="bi bi-save"></i> Save Credentials
+          </button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Port Mappings Card -->
+<div class="card mt-2">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-list-columns"></i> Port Mappings</span>
+    <div>
+      <button type="button" class="btn btn-sm btn-outline-secondary me-1" onclick="refreshMappings()">
+        <i class="bi bi-arrow-repeat"></i> Refresh
+      </button>
+      {% if credentials_configured and router_info.available %}
+      <button type="button" class="btn btn-sm btn-primary" onclick="showAddForm()">
+        <i class="bi bi-plus-circle"></i> Add
+      </button>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card-body small" id="mappings-body">
+    {% if not credentials_configured %}
+    <p class="text-muted mb-0">
+      <i class="bi bi-info-circle"></i>
+      Enter router UPnP credentials above to manage port mappings.
+    </p>
+    {% elif list_error %}
+    <div class="alert alert-warning py-2 px-3 mb-0">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      {{ list_error }}
+    </div>
+    {% elif mappings %}
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead>
+          <tr>
+            <th>External Port</th>
+            <th>Protocol</th>
+            <th>Internal IP</th>
+            <th>Internal Port</th>
+            <th>Description</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in mappings %}
+          <tr>
+            <td><code>{{ m.external_port }}</code></td>
+            <td>
+              <span class="badge {% if m.protocol == 'TCP' %}bg-primary{% else %}bg-success{% endif %}">
+                {{ m.protocol }}
+              </span>
+            </td>
+            <td><code>{{ m.internal_client }}</code></td>
+            <td><code>{{ m.internal_port }}</code></td>
+            <td class="text-muted">{{ m.description|default:"-" }}</td>
+            <td>
+              {% if m.enabled %}
+              <span class="badge bg-success">Active</span>
+              {% else %}
+              <span class="badge bg-secondary">Disabled</span>
+              {% endif %}
+            </td>
+            <td>
+              <form method="post" data-exec="true" class="d-inline"
+                    onsubmit="return confirm('Delete port forwarding {{ m.protocol }}/{{ m.external_port }}?')">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="ext_port" value="{{ m.external_port }}">
+                <input type="hidden" name="protocol" value="{{ m.protocol }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">
+      <i class="bi bi-info-circle"></i>
+      No port mappings found. Click <strong>Add</strong> to create one.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Add Port Mapping Form (hidden, slides in) -->
+<div id="add-form-card" class="card mt-3" style="display:none">
+  <div class="card-header">
+    <i class="bi bi-plus-circle"></i> Add Port Forwarding
+  </div>
+  <div class="card-body small">
+    <form method="post" data-exec="true" id="add-form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add">
+
+      <div class="row mb-2">
+        <div class="col-md-3">
+          <label class="form-label">External Port</label>
+          <input type="number" class="form-control form-control-sm" name="ext_port"
+                 min="1" max="65535" required
+                 placeholder="e.g. 80">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Protocol</label>
+          <select class="form-select form-select-sm" name="protocol">
+            <option value="TCP">TCP</option>
+            <option value="UDP">UDP</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Internal Port</label>
+          <input type="number" class="form-control form-control-sm" name="int_port"
+                 min="1" max="65535" required
+                 placeholder="e.g. 80" value="80">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Internal IP</label>
+          <input type="text" class="form-control form-control-sm" name="int_client"
+                 required pattern="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
+                 placeholder="e.g. 192.168.41.100"
+                 value="{{ local_ip }}">
+        </div>
+      </div>
+
+      <div class="mb-2">
+        <label class="form-label">Description <span class="text-muted">(optional)</span></label>
+        <input type="text" class="form-control form-control-sm" name="description"
+               placeholder="e.g. SymbiOS WebUI"
+               value="SymbiOS">
+      </div>
+
+      <div class="mb-2">
+        <label class="form-label">Suggested rules for SymbiOS</label>
+        <div class="alert alert-info py-2 px-3 mb-0 small">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="preset-http"
+                   onchange="presetRule('preset-http', 80, 80, '{{ local_ip }}', 'SymbiOS HTTP')">
+            <label class="form-check-label">TCP 80 → {{ local_ip }}:80 (HTTP)</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="preset-https"
+                   onchange="presetRule('preset-https', 443, 443, '{{ local_ip }}', 'SymbiOS HTTPS')">
+            <label class="form-check-label">TCP 443 → {{ local_ip }}:443 (HTTPS)</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="preset-ssh"
+                   onchange="presetRule('preset-ssh', 33, 22, '{{ local_ip }}', 'SymbiOS SSH')">
+            <label class="form-check-label">TCP 33 → {{ local_ip }}:22 (SSH alt port)</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i class="bi bi-plus-circle"></i> Add Rule
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="hideAddForm()">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// Toggle field visibility (password/API key show/hide)
+function toggleFieldVisibility(fieldId, btn) {
+  var el = document.getElementById(fieldId);
+  if (!el) return;
+  if (el.type === 'password') {
+    el.type = 'text';
+    btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+  } else {
+    el.type = 'password';
+    btn.innerHTML = '<i class="bi bi-eye"></i>';
+  }
+}
+
+// Router detection
+function detectRouter() {
+  var btn = document.getElementById('detect-btn');
+  var body = document.getElementById('router-info-body');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Detecting...';
+  body.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Probing router...';
+
+  fetch('{% url "settings_port_forwarding_detect" %}')
+    .then(r => r.json())
+    .then(data => {
+      if (data.available) {
+        var html = '';
+        html += '<div class="mb-2"><span class="text-muted">Manufacturer:</span> <strong>' + (data.manufacturer || 'Unknown') + '</strong></div>';
+        html += '<div class="mb-2"><span class="text-muted">Model:</span> <strong>' + (data.model || 'Unknown') + '</strong>' + (data.model_number ? ' <span class="text-muted">(' + data.model_number + ')</span>' : '') + '</div>';
+        html += '<div class="mb-2"><span class="text-muted">Firmware:</span> <strong>' + (data.firmware_version || 'Unknown') + '</strong></div>';
+        html += '<div class="mb-2"><span class="text-muted">Gateway:</span> <code>' + (data.gateway || 'Unknown') + '</code></div>';
+        html += '<div class="mb-2"><span class="text-muted">Friendly Name:</span> <strong>' + (data.friendly_name || 'N/A') + '</strong></div>';
+        if (data.presentation_url) {
+          html += '<div class="mb-2"><span class="text-muted">Web UI:</span> <a href="http://' + data.presentation_url + '" target="_blank">' + data.presentation_url + '</a></div>';
+        }
+        body.innerHTML = html;
+      } else {
+        body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> No UPnP IGD response from gateway ' + (data.gateway || '(unknown)') + ' on port 49000.</p>' +
+          '<p class="text-muted mb-0 mt-1 small">Port forwarding management requires a router with <strong>UPnP IGD (WANIPConnection)</strong> enabled.</p>';
+      }
+    })
+    .catch(err => {
+      body.innerHTML = '<div class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> Detection error: ' + err.message + '</div>';
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh';
+    });
+}
+
+// Show/hide add form
+function showAddForm() {
+  document.getElementById('add-form-card').style.display = '';
+  document.getElementById('add-form-card').scrollIntoView({ behavior: 'smooth' });
+}
+
+function hideAddForm() {
+  document.getElementById('add-form-card').style.display = 'none';
+}
+
+// Preset rule helper
+function presetRule(checkboxId, extPort, intPort, intClient, desc) {
+  var cb = document.getElementById(checkboxId);
+  if (cb.checked) {
+    document.querySelector('input[name="ext_port"]').value = extPort;
+    document.querySelector('input[name="int_port"]').value = intPort;
+    document.querySelector('input[name="int_client"]').value = intClient;
+    document.querySelector('input[name="description"]').value = desc;
+    document.querySelector('select[name="protocol"]').value = 'TCP';
+  }
+}
+
+// Refresh mappings (AJAX)
+function refreshMappings() {
+  var body = document.getElementById('mappings-body');
+  body.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Refreshing...';
+
+  fetch('{% url "settings_port_forwarding_list" %}')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) {
+        body.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0"><i class="bi bi-exclamation-triangle-fill"></i> ' + (data.error || 'Failed to list mappings') + '</div>';
+        return;
+      }
+      var mappings = data.mappings || [];
+      if (mappings.length === 0) {
+        body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> No port mappings found. Click <strong>Add</strong> to create one.</p>';
+        return;
+      }
+      var html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead><tr><th>External Port</th><th>Protocol</th><th>Internal IP</th><th>Internal Port</th><th>Description</th><th>Status</th><th></th></tr></thead><tbody>';
+      for (var i = 0; i < mappings.length; i++) {
+        var m = mappings[i];
+        var protoClass = m.protocol === 'TCP' ? 'bg-primary' : 'bg-success';
+        var statusClass = m.enabled ? 'bg-success' : 'bg-secondary';
+        var statusText = m.enabled ? 'Active' : 'Disabled';
+        html += '<tr>' +
+          '<td><code>' + m.external_port + '</code></td>' +
+          '<td><span class="badge ' + protoClass + '">' + m.protocol + '</span></td>' +
+          '<td><code>' + m.internal_client + '</code></td>' +
+          '<td><code>' + m.internal_port + '</code></td>' +
+          '<td class="text-muted">' + (m.description || '-') + '</td>' +
+          '<td><span class="badge ' + statusClass + '">' + statusText + '</span></td>' +
+          '<td>' +
+          '<form method="post" data-exec="true" class="d-inline" onsubmit="return confirm(\'Delete port forwarding ' + m.protocol + '/' + m.external_port + '?\')">' +
+          '<input type="hidden" name="csrfmiddlewaretoken" value="' + document.querySelector('[name=csrfmiddlewaretoken]').value + '">' +
+          '<input type="hidden" name="action" value="delete">' +
+          '<input type="hidden" name="ext_port" value="' + m.external_port + '">' +
+          '<input type="hidden" name="protocol" value="' + m.protocol + '">' +
+          '<button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1"><i class="bi bi-trash"></i></button>' +
+          '</form>' +
+          '</td></tr>';
+      }
+      html += '</tbody></table></div>';
+      body.innerHTML = html;
+    })
+    .catch(err => {
+      body.innerHTML = '<div class="alert alert-danger py-2 px-3 mb-0"><i class="bi bi-x-circle-fill"></i> Error: ' + err.message + '</div>';
+    });
+}
+
+// Auto-detect on page load
+document.addEventListener('DOMContentLoaded', function() {
+  {% if not router_info and not detect_error %}
+  detectRouter();
+  {% endif %}
+});
+</script>
+{% endblock %}
