@@ -55,6 +55,9 @@ then
     git pull
 fi
 
+# expand PATH to SymbiOS scripts
+export PATH="/home/SymbiOS/scripts:$PATH"
+
 # Create initial inventory if it does not exist
 g_inventory_path="/home/docker/symbios-ui/config"
 g_inventory="${g_inventory_path}/inventory.yml"
