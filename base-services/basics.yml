@@ -152,7 +152,6 @@
         shell: /bin/bash
         home: /home/symbios
         create_home: true
-        password: "!"
         groups:
           - root
           - sudo
