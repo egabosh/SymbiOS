@@ -73,10 +73,23 @@ fi
 # Run base-services playbooks
 f_run_playbook /home/SymbiOS/base-services/basics.yml
 
-# optional set password for symbios user
+# optional set password for symbios user (interactive on physical console)
+# Systemd's rc-local.service sets stdin=/dev/null, so we redirect from
+# the actual console TTY to make passwd read keyboard input correctly.
 g_wait=60
 echo "Optional set password for symbios user - Waiting $g_wait seconds"
-timeout -k $g_wait $g_wait passwd symbios
+if [ -c /dev/tty1 ]
+then
+  echo "/dev/tty1"
+  timeout -k $g_wait $g_wait passwd symbios < /dev/tty1 > /dev/tty1 2>&1
+elif [ -c /dev/console ] 
+then
+  echo "/dev/console"
+  timeout -k $g_wait $g_wait passwd symbios < /dev/console > /dev/console 2>&1
+else
+  echo "NORMAL"
+  timeout -k $g_wait $g_wait passwd symbios
+fi
 
 # continue running playbooks
 f_run_playbook /home/SymbiOS/base-services/localization.yml
