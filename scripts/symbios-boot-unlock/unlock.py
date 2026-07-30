@@ -462,6 +462,15 @@ def main():
 
     if not check_home_encrypted():
         log("/home is not encrypted or already unlocked, nothing to do")
+        if not find_luks_device():
+            msg = (
+                "WARNING: No LUKS device found. If you expect encrypted /home,\n"
+                "         check that your disk (SSD/NVMe) is connected.\n"
+                "         Docker and containerd may fail because /var/lib/docker\n"
+                "         and /var/lib/containerd point to non-existent targets."
+            )
+            print(msg, file=sys.stderr)
+            log("No LUKS device found at all — /home not encrypted")
         return
 
     if not generate_self_signed_cert():

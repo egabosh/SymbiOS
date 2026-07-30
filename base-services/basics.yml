@@ -275,6 +275,12 @@
         path: /usr/bin/wayfire-pi
       register: pios
 
+    - name: Remove Raspberry Pi OS SSH rename_user banner if present
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/rename_user.conf
+        state: absent
+      when: pios.stat.exists
+
     - name: Set a hostname
       ansible.builtin.hostname:
         name: "SymbiOS"
