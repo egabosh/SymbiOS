@@ -30,18 +30,27 @@
 
 set -euo pipefail
 
-# Label used when creating a LUKS partition and its ext4 data filesystem.
+# Labels used when creating LUKS partition and ext4 data filesystem.
 # Scripts and WebUI identify disks by these labels (robust even with
 # multiple storage devices attached).
 g_luks_label="CRYPT_LUKS_SYMBIOS_DATA"
 g_data_label="SYMBIOS_DATA"
+
+f_state_file="/home/.symbios-home-migration.state"
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 function f_json_escape {
-  python3 -c "import json,sys; print(json.dumps(sys.stdin.read().strip()))" 2>/dev/null
+  local f_s
+  IFS= read -r f_s
+  f_s="${f_s//\\/\\\\}"
+  f_s="${f_s//\"/\\\"}"
+  f_s="${f_s//$'\t'/\\t}"
+  f_s="${f_s//$'\n'/\\n}"
+  f_s="${f_s//$'\r'/\\r}"
+  printf '"%s"' "$f_s"
 }
 
 function f_json_error {
@@ -56,7 +65,6 @@ function f_json_ok {
 }
 
 function f_log {
-  # Output a line of text progress (shown in exec modal)
   echo "[$(date '+%H:%M:%S')] $*"
 }
 
@@ -72,28 +80,13 @@ function f_log_step {
   f_log "--- STEP: $* ---"
 }
 
-# Error handler for setup: automatically rolls back before exiting.
-# Only valid after f_save_state has been called.
-function f_setup_error {
-  local f_msg="$1"
-  f_log_error "$f_msg"
-  f_log "Attempting automatic rollback..."
-  # Redirect rollback stdout — it emits JSON which we don't want here.
-  f_action_rollback >/dev/null 2>&1 || f_log_error "Rollback also failed"
-  f_json_error "$f_msg (rolled back)"
-}
-
-# State file for rollback
-f_state_file="/home/.symbios-home-migration.state"
+# ---------------------------------------------------------------------------
+# State file helpers (used only in setup / rollback)
+# ---------------------------------------------------------------------------
 
 function f_save_state {
-  # Save migration state so we can rollback later
-  local f_old_device="$1"
-  local f_old_fstype="$2"
-  local f_new_device="$3"
-  local f_encrypt="$4"
-  local f_luks_name="$5"
-  local f_old_fstab_line="$6"
+  local f_old_device="$1" f_old_fstype="$2" f_new_device="$3"
+  local f_encrypt="$4" f_luks_name="$5" f_old_fstab_line="$6"
   cat > "${f_state_file}" <<EOF
 old_device=${f_old_device}
 old_fstype=${f_old_fstype}
@@ -107,7 +100,6 @@ EOF
 }
 
 function f_load_state {
-  # Load state file into variables. Returns 1 if no state file.
   if [[ ! -f "${f_state_file}" ]]
   then
     return 1
@@ -121,366 +113,12 @@ function f_clear_state {
 }
 
 # ---------------------------------------------------------------------------
-# action: list
+# Shared rollback logic (called from rollback action AND setup error handler)
 # ---------------------------------------------------------------------------
 
-function f_action_list {
-  local f_raw
-  f_raw=$(lsblk -J -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,LABEL,TRAN,RM 2>&1) || \
-    f_json_error "lsblk failed: $f_raw"
-  # Filter out loop, ram, sr, zram devices (pure cosmetic noise)
-  echo "$f_raw" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-skip = ('loop', 'ram', 'sr', 'zram')
-data['blockdevices'] = [
-    d for d in data.get('blockdevices', [])
-    if not d.get('name', '').startswith(skip)
-]
-json.dump(data, sys.stdout)
-" 2>/dev/null || echo "$f_raw"
-}
-
-# ---------------------------------------------------------------------------
-# action: status
-# ---------------------------------------------------------------------------
-
-function f_action_status {
-  local f_home_device="" f_home_fstype="" f_home_size="" f_home_used="" f_home_avail=""
-  local f_luks_name="" f_luks_device="" f_luks_open="false" f_needs_unlock="false"
-  local f_can_rollback="false"
-
-  # Check if rollback is possible
-  if [[ -f "${f_state_file}" ]]
-  then
-    f_can_rollback="true"
-  fi
-
-  # What is /home mounted on?
-  local f_df_out
-  f_df_out=$(df -hT /home 2>/dev/null | tail -1) || true
-  if [[ -n "$f_df_out" ]]
-  then
-    local f_parts
-    f_parts=($f_df_out)
-    if [[ ${#f_parts[@]} -ge 7 ]]
-    then
-      f_home_device="${f_parts[0]}"
-      f_home_fstype="${f_parts[1]}"
-      f_home_size="${f_parts[2]}"
-      f_home_used="${f_parts[3]}"
-      f_home_avail="${f_parts[4]}"
-    fi
-  fi
-
-  # Check LUKS in block device tree
-  local f_lsblk_out
-  f_lsblk_out=$(lsblk -J -o NAME,TYPE,FSTYPE,MOUNTPOINT,UUID 2>/dev/null) || true
-  if [[ -n "$f_lsblk_out" ]]
-  then
-    local f_found
-    f_found=$(echo "$f_lsblk_out" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-label = '${g_luks_label}'
-
-def scan(devs):
-    for d in devs:
-        ft = d.get('fstype') or ''
-        lab = d.get('label') or ''
-        if ft == 'crypto_LUKS' and (not label or lab == label):
-            return (d.get('name',''), d.get('uuid',''))
-        children = d.get('children') or []
-        if children:
-            r = scan(children)
-            if r:
-                return r
-    return None
-
-# First try by label, fallback to any crypto_LUKS
-result = scan(data.get('blockdevices', []))
-if not result and label:
-    def scan_any(devs):
-        for d in devs:
-            if d.get('fstype') == 'crypto_LUKS':
-                return (d.get('name',''), d.get('uuid',''))
-            children = d.get('children') or []
-            if children:
-                r = scan_any(children)
-                if r:
-                    return r
-        return None
-    result = scan_any(data.get('blockdevices', []))
-if result:
-    print(result[0])
-    print(result[1])
-" 2>/dev/null) || true
-    if [[ -n "$f_found" ]]
-    then
-      f_luks_name=$(echo "$f_found" | head -1)
-      local f_luks_uuid
-      f_luks_uuid=$(echo "$f_found" | tail -1)
-      f_luks_device="/dev/$f_luks_name"
-
-      # Check if LUKS is open
-      local f_cs_out
-      f_cs_out=$(cryptsetup status "$f_luks_name" 2>/dev/null | head -1) || true
-      if echo "$f_cs_out" | grep -q "is active"
-      then
-        f_luks_open="true"
-      elif echo "$f_cs_out" | grep -qi "not found"
-      then
-        f_needs_unlock="true"
-      fi
-    fi
-  fi
-
-  # Also check mapper for open LUKS
-  if [[ "$f_luks_open" == "false" ]]
-  then
-    if ls /dev/mapper/ 2>/dev/null | grep -qE 'home|luks'
-    then
-      f_luks_open="true"
-    fi
-  fi
-
-  cat <<EOF
-"home_device":"$f_home_device",
-"home_fstype":"$f_home_fstype",
-"home_size":"$f_home_size",
-"home_used":"$f_home_used",
-"home_avail":"$f_home_avail",
-"luks_name":"$f_luks_name",
-"luks_device":"$f_luks_device",
-"luks_open":$f_luks_open,
-"needs_unlock":$f_needs_unlock,
-"can_rollback":$f_can_rollback
-EOF
-}
-
-# ---------------------------------------------------------------------------
-# action: setup
-# ---------------------------------------------------------------------------
-
-function f_action_setup {
-  local f_device="${1:-}"
-  local f_encrypt="${2:-no}"
-  local f_password="${3:-}"
-
-  # Validation
-  [[ -z "$f_device" ]] && f_json_error "No device selected"
-  [[ "$f_device" == /dev/* ]] || f_json_error "Invalid device path"
-  [[ "$f_encrypt" == "yes" ]] && [[ -z "$f_password" ]] && f_json_error "Password required for LUKS encryption"
-
-  # Safety: not the root device
-  local f_root_dev
-  f_root_dev=$(findmnt -n -o SOURCE / 2>/dev/null) || true
-  if [[ -n "$f_root_dev" ]]
-  then
-    if [[ "$f_device" == *"$f_root_dev"* ]] || [[ "$f_root_dev" == *"$f_device"* ]]
-    then
-      f_json_error "Cannot format the root device!"
-    fi
-  fi
-
-  # Safety: not mounted (except as /home itself)
-  local f_cur_mount
-  f_cur_mount=$(findmnt -n -o TARGET "$f_device" 2>/dev/null) || true
-  if [[ -n "$f_cur_mount" ]]
-  then
-    if [[ "$f_cur_mount" == "/home" ]]
-    then
-      f_json_error "This device is already mounted as /home"
-    fi
-    f_json_error "Device is mounted at $f_cur_mount. Unmount it first."
-  fi
-
-  # Size check
-  local f_home_size f_disk_size
-  f_home_size=$(du -sb /home/ 2>/dev/null | awk '{print $1}') || f_home_size=0
-  f_disk_size=$(blockdev --getsize64 "$f_device" 2>/dev/null) || f_disk_size=0
-
-  if [[ "$f_home_size" -eq 0 ]] 2>/dev/null
-  then
-    f_json_error "Could not determine /home size"
-  fi
-  if [[ "$f_disk_size" -eq 0 ]] 2>/dev/null
-  then
-    f_json_error "Could not determine disk size"
-  fi
-
-  # LUKS metadata overhead ~16MB, ext4 ~1%, add 5% safety margin
-  local f_overhead=$(( 16 * 1024 * 1024 ))
-  local f_home_margin=$(( f_home_size / 20 ))
-  [[ "$f_home_margin" -gt "$f_overhead" ]] && f_overhead=$f_home_margin
-  local f_needed=$(( f_home_size + f_overhead ))
-
-  if [[ "$f_disk_size" -lt "$f_needed" ]]
-  then
-    local f_home_gb f_disk_gb f_needed_gb
-    f_home_gb=$(python3 -c "print(f'{$f_home_size/1024**3:.1f}')")
-    f_disk_gb=$(python3 -c "print(f'{$f_disk_size/1024**3:.1f}')")
-    f_needed_gb=$(python3 -c "print(f'{$f_needed/1024**3:.1f}')")
-    f_json_error "Disk too small! /home is ${f_home_gb}G but disk is only ${f_disk_gb}G. Need at least ${f_needed_gb}G."
-  fi
-
-  # ---- Save state for rollback ----
-  f_log_step "Saving state for rollback"
-
-  # Capture current fstab /home line
-  local f_old_fstab_line
-  f_old_fstab_line=$(grep -E '[[:space:]]/home[[:space:]]' /etc/fstab 2>/dev/null || echo "")
-
-  # Get current /home device info for rollback
-  local f_old_home_device=""
-  local f_old_home_fstype=""
-  if [[ -n "$f_root_dev" ]]
-  then
-    # /home is on root filesystem
-    f_old_home_device="$f_root_dev"
-    f_old_home_fstype="rootfs"
-  else
-    # /home is on a separate device
-    f_old_home_device=$(findmnt -n -o SOURCE /home 2>/dev/null || echo "")
-    f_old_home_fstype=$(findmnt -n -o FSTYPE /home 2>/dev/null || echo "")
-  fi
-
-  # Save state
-  f_save_state "$f_old_home_device" "$f_old_home_fstype" "$f_device" "$f_encrypt" "home-luks" "$f_old_fstab_line"
-  f_log_ok "State saved (can rollback later)"
-
-  # ---- Step 1: Unmount if mounted anywhere ----
-  f_log_step "Preparing device"
-  umount "$f_device" 2>/dev/null || true
-
-  # ---- Step 2: LUKS format (if encrypting) ----
-  local f_luks_name="home-luks"
-  local f_target
-
-  if [[ "$f_encrypt" == "yes" ]]
-  then
-    f_log_step "Formatting device with LUKS encryption"
-    echo "$f_password" | cryptsetup luksFormat --label "$g_luks_label" --batch-mode "$f_device" || {
-      f_setup_error "LUKS format failed"
-    }
-    f_log_ok "LUKS format complete"
-
-    f_log_step "Opening LUKS volume"
-    echo "$f_password" | cryptsetup open "$f_device" "$f_luks_name" || {
-      f_setup_error "LUKS open failed"
-    }
-    f_log_ok "LUKS volume opened as $f_luks_name"
-    f_target="/dev/mapper/$f_luks_name"
-  else
-    f_target="$f_device"
-  fi
-
-  # ---- Step 3: Format as ext4 ----
-  f_log_step "Formatting $f_device as ext4"
-  mkfs.ext4 -F -L "$g_data_label" "$f_target" 2>&1 || {
-    f_setup_error "mkfs.ext4 failed"
-  }
-  f_log_ok "ext4 filesystem created"
-
-  # ---- Step 4: Mount temporarily and copy data ----
-  f_log_step "Mounting temporary partition"
-  mkdir -p /home.new
-  mount "$f_target" /home.new || {
-    f_setup_error "Mount /home.new failed"
-  }
-  f_log_ok "Temporary mount at /home.new"
-
-  f_log_step "Copying data from /home to new partition (rsync)"
-  f_log "This may take a while for large /home directories..."
-  rsync -av --progress --exclude=docker/var-lib-docker --exclude=docker/var-lib-containerd \
-    --exclude='.trashed-*' /home/ /home.new/ 2>&1 || {
-    umount /home.new 2>/dev/null || true
-    f_setup_error "rsync failed"
-  }
-  f_log_ok "Data copy complete"
-
-  # ---- Step 5: Unmount old /home ----
-  f_log_step "Unmounting old /home"
-  umount /home 2>/dev/null || true
-  f_log_ok "Old /home unmounted"
-
-  # ---- Step 6: Clean old /home (if it was on root fs) ----
-  f_log_step "Cleaning old /home mount point"
-  rm -rf /home/* 2>/dev/null || true
-  f_log_ok "Old /home cleaned"
-
-  # ---- Step 7: Update fstab ----
-  f_log_step "Updating /etc/fstab"
-  sed -i '\#.*[[:space:]]/home[[:space:]]#d' /etc/fstab
-  if [[ "$f_encrypt" == "yes" ]]
-  then
-    echo "/dev/mapper/$f_luks_name /home ext4 defaults,noatime,noauto 0 2" >> /etc/fstab
-  else
-    local f_uuid
-    f_uuid=$(blkid -s UUID -o value "$f_device" 2>/dev/null) || {
-      f_setup_error "blkid failed"
-    }
-    echo "UUID=$f_uuid /home ext4 defaults,noatime,noauto 0 2" >> /etc/fstab
-  fi
-  f_log_ok "fstab updated"
-
-  # ---- Step 8: Mount new /home ----
-  f_log_step "Mounting new /home"
-  mount /home || {
-    f_setup_error "Mount /home failed"
-  }
-  f_log_ok "/home is now on new partition"
-
-  # ---- Step 9: Store LUKS name for boot unlock ----
-  if [[ "$f_encrypt" == "yes" ]]
-  then
-    echo "$f_luks_name" > /config/.luks-name 2>/dev/null || true
-  fi
-
-  # ---- Step 10: Clean up ----
-  umount /home.new 2>/dev/null || true
-  rm -rf /home.new 2>/dev/null || true
-
-  # ---- Step 11: Reboot ----
-  # Schedule a safety-net reboot (30 min) in case the script is interrupted.
-  # The short reboot (1 min) is scheduled after Docker stops.
-  shutdown -r +30 "Disk migration safety-net reboot" 2>/dev/null || true
-
-  # Output the JSON response NOW — before Docker stops — so the WebUI
-  # exec-modal receives the success message and can show it to the user.
-  f_log_step "Migration complete!"
-  f_log_ok "/home is now on $f_device"
-  f_log "Server will reboot in 1 minute to finalize. All services will restart automatically."
-  if [[ "$f_encrypt" == "yes" ]]
-  then
-    f_log "You will need to enter your LUKS passphrase at the boot screen."
-  fi
-
-  # Stop Docker services.  This kills the WebUI container (and the exec-modal
-  # connection), but the script continues on the host since it runs via SSH
-  # exec.  The JSON response above was already sent before this point.
-  f_log_step "Stopping Docker services for reboot"
-  if command -v docker &>/dev/null
-  then
-    docker stop $(docker ps -q) 2>/dev/null || true
-    f_log_ok "Docker services stopped"
-  fi
-
-  # Cancel the safety-net and schedule the real reboot (1 minute)
-  shutdown -c 2>/dev/null || true
-  shutdown -r +1 "Disk migration complete — rebooting." 2>/dev/null || true
-  f_log_ok "Reboot scheduled in 1 minute"
-
-  f_json_ok '"message":"Disk migration complete. The server will reboot in about 1 minute. All services will restart automatically. You will need to enter your LUKS passphrase at the boot screen.","can_rollback":true'
-}
-
-# ---------------------------------------------------------------------------
-# action: rollback
-# ---------------------------------------------------------------------------
-
-function f_action_rollback {
-  # Load saved state
-  local f_old_device="" f_old_fstype="" f_new_device="" f_encrypt="" f_luks_name="" f_old_fstab_line=""
+function f_do_rollback {
+  local f_old_device="" f_old_fstype="" f_new_device="" f_encrypt=""
+  local f_luks_name="" f_old_fstab_line=""
 
   if ! f_load_state
   then
@@ -491,12 +129,9 @@ function f_action_rollback {
   f_log "Original device: ${f_old_device} (${f_old_fstype})"
   f_log "New device: ${f_new_device}"
 
-  # ---- Step 1: Unmount current /home ----
-  f_log_step "Unmounting current /home"
   umount /home 2>/dev/null || true
   f_log_ok "Current /home unmounted"
 
-  # ---- Step 2: Close LUKS if the new device was encrypted ----
   if [[ "${f_encrypt}" == "yes" ]] && [[ -n "${f_luks_name}" ]]
   then
     f_log_step "Closing LUKS volume ${f_luks_name}"
@@ -504,7 +139,6 @@ function f_action_rollback {
     f_log_ok "LUKS volume closed"
   fi
 
-  # ---- Step 3: Restore fstab ----
   f_log_step "Restoring /etc/fstab"
   sed -i '\#.*[[:space:]]/home[[:space:]]#d' /etc/fstab
   if [[ -n "${f_old_fstab_line}" ]]
@@ -512,15 +146,12 @@ function f_action_rollback {
     echo "${f_old_fstab_line}" >> /etc/fstab
     f_log_ok "fstab restored from backup"
   else
-    # No previous /home entry — /home was on root fs, nothing to add
     f_log_ok "No previous /home fstab entry (was on root filesystem)"
   fi
 
-  # ---- Step 4: Mount original /home ----
   f_log_step "Mounting original /home"
   if [[ "${f_old_fstype}" == "rootfs" ]]
   then
-    # /home was on root fs, just remount root if needed
     f_log_ok "/home returns to root filesystem"
   else
     mount /home 2>/dev/null || {
@@ -530,15 +161,8 @@ function f_action_rollback {
     f_log_ok "Original /home mounted"
   fi
 
-  # ---- Step 5: Clean up /home.new if it exists ----
-  f_log_step "Cleaning up temporary files"
   rm -rf /home.new 2>/dev/null || true
-  f_log_ok "Cleanup complete"
-
-  # ---- Step 6: Remove LUKS config ----
   rm -f /config/.luks-name 2>/dev/null || true
-
-  # ---- Step 7: Clear state ----
   f_clear_state
 
   f_log_step "Rollback complete!"
@@ -546,119 +170,327 @@ function f_action_rollback {
   f_json_ok '"message":"Rollback complete. /home restored to original location.","can_rollback":false'
 }
 
-# ---------------------------------------------------------------------------
-# action: umount
-# ---------------------------------------------------------------------------
-
-function f_action_umount {
-  umount /home 2>/dev/null || true
-  cryptsetup close home-luks 2>/dev/null || true
-  f_json_ok '"message":"/home unmounted and LUKS volume closed."'
+# Error handler for setup — rolls back and exits.
+function f_setup_error {
+  local f_msg="$1"
+  f_log_error "$f_msg"
+  f_log "Attempting automatic rollback..."
+  f_do_rollback >/dev/null 2>&1 || f_log_error "Rollback also failed"
+  f_json_error "$f_msg (rolled back)"
 }
 
 # ---------------------------------------------------------------------------
-# action: change-password
+# Helper: find LUKS device by label (with fallback to any crypto_LUKS)
 # ---------------------------------------------------------------------------
 
-function f_action_change_password {
-  local f_current_password="${1:-}"
-  local f_new_password="${2:-}"
-
-  [[ -z "$f_current_password" ]] && f_json_error "Current password is required"
-  [[ -z "$f_new_password" ]] && f_json_error "New password is required"
-  [[ "$f_current_password" == "$f_new_password" ]] && f_json_error "New password must differ from current password"
-
-  # Find LUKS device
-  local f_lsblk_out
-  f_lsblk_out=$(lsblk -J -o NAME,TYPE,FSTYPE 2>/dev/null) || true
-  local f_luks_dev
-  f_luks_dev=$(echo "$f_lsblk_out" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-label = '${g_luks_label}'
-
-def scan(devs):
-    for d in devs:
-        lab = d.get('label') or ''
-        if d.get('fstype') == 'crypto_LUKS' and (not label or lab == label):
-            print('/dev/' + d['name'])
-            return True
-        children = d.get('children') or []
-        if scan(children):
-            return True
-    return False
-
-if not scan(data.get('blockdevices', [])):
-    if label:
-        def scan_any(devs):
-            for d in devs:
-                if d.get('fstype') == 'crypto_LUKS':
-                    print('/dev/' + d['name'])
-                    return True
-                children = d.get('children') or []
-                if scan_any(children):
-                    return True
-            return False
-        if not scan_any(data.get('blockdevices', [])):
-            sys.exit(1)
-    else:
-        sys.exit(1)
-" 2>/dev/null) || true
-
-  [[ -z "$f_luks_dev" ]] && f_json_error "No LUKS device found"
-
-  f_log_step "Changing LUKS passphrase on $f_luks_dev"
-
-  # Write current key to a temp file (cryptsetup needs a seekable fd).
-  local f_tmp_key
-  f_tmp_key=$(mktemp /tmp/.symbios-key.XXXXXX)
-  chmod 600 "$f_tmp_key"
-  printf '%s' "$f_current_password" > "$f_tmp_key"
-
-  echo "$f_new_password" | cryptsetup luksChangeKey \
-    --key-file "$f_tmp_key" \
-    "$f_luks_dev" 2>&1
-  local f_rc=$?
-  rm -f "$f_tmp_key"
-
-  if [[ "$f_rc" -ne 0 ]]
+function f_find_luks {
+  # Prints device name (e.g. sda1) or empty string
+  local f_dev
+  f_dev=$(lsblk -n -l -o FSTYPE,LABEL,NAME 2>/dev/null | \
+    awk -v label="$g_luks_label" \
+      '$1 == "crypto_LUKS" && ($2 == label || $2 == "") {print $3; exit}')
+  if [[ -z "$f_dev" ]]
   then
-    f_log_error "Failed to change LUKS passphrase (wrong current password?)"
-    f_json_error "Failed to change LUKS passphrase. Is the current password correct?"
+    f_dev=$(lsblk -n -l -o FSTYPE,NAME 2>/dev/null | \
+      awk '$1 == "crypto_LUKS" {print $2; exit}')
   fi
-
-  f_log_ok "LUKS passphrase changed successfully"
-  f_json_ok '"message":"LUKS passphrase changed successfully."'
+  echo "$f_dev"
 }
 
 # ---------------------------------------------------------------------------
-# Main dispatch
+# Dispatch (flat — each action lives directly in its case branch)
 # ---------------------------------------------------------------------------
 
 g_action="${1:-}"
 shift 2>/dev/null || true
 
 case "$g_action" in
+
+  # ------------------------------------------------------------------
   list)
-    f_action_list
+    lsblk -e 1,7,11,252 -J \
+      -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,LABEL,TRAN,RM 2>&1 || \
+      f_json_error "lsblk failed"
     ;;
+
+  # ------------------------------------------------------------------
   status)
-    printf '{'
-    f_action_status
-    printf '}\n'
+    local f_home_device="" f_home_fstype="" f_home_size=""
+    local f_home_used="" f_home_avail=""
+    local f_luks_name="" f_luks_device="" f_luks_open="false"
+    local f_needs_unlock="false" f_can_rollback="false"
+
+    [[ -f "${f_state_file}" ]] && f_can_rollback="true"
+
+    local f_df_out
+    f_df_out=$(df -hT /home 2>/dev/null | tail -1) || true
+    if [[ -n "$f_df_out" ]]
+    then
+      set -- $f_df_out
+      if [[ $# -ge 7 ]]
+      then
+        f_home_device="$1"
+        f_home_fstype="$2"
+        f_home_size="$3"
+        f_home_used="$4"
+        f_home_avail="$5"
+      fi
+    fi
+
+    f_luks_name=$(f_find_luks)
+    if [[ -n "$f_luks_name" ]]
+    then
+      f_luks_device="/dev/$f_luks_name"
+      local f_cs_out
+      f_cs_out=$(cryptsetup status "$f_luks_name" 2>/dev/null | head -1) || true
+      if echo "$f_cs_out" | grep -q "is active"
+      then
+        f_luks_open="true"
+      elif echo "$f_cs_out" | grep -qi "not found"
+      then
+        f_needs_unlock="true"
+      fi
+    fi
+
+    if [[ "$f_luks_open" == "false" ]]
+    then
+      ls /dev/mapper/ 2>/dev/null | grep -qE 'home|luks' && f_luks_open="true"
+    fi
+
+    cat <<EOF
+{"ok":true,"home_device":"$f_home_device","home_fstype":"$f_home_fstype","home_size":"$f_home_size","home_used":"$f_home_used","home_avail":"$f_home_avail","luks_name":"$f_luks_name","luks_device":"$f_luks_device","luks_open":$f_luks_open,"needs_unlock":$f_needs_unlock,"can_rollback":$f_can_rollback}
+EOF
     ;;
+
+  # ------------------------------------------------------------------
   setup)
-    f_action_setup "$@"
+    local f_device="${1:-}" f_encrypt="${2:-no}" f_password="${3:-}"
+
+    [[ -z "$f_device" ]] && f_json_error "No device selected"
+    [[ "$f_device" == /dev/* ]] || f_json_error "Invalid device path"
+    [[ "$f_encrypt" == "yes" ]] && [[ -z "$f_password" ]] && \
+      f_json_error "Password required for LUKS encryption"
+
+    local f_root_dev
+    f_root_dev=$(findmnt -n -o SOURCE / 2>/dev/null) || true
+    if [[ -n "$f_root_dev" ]]
+    then
+      if [[ "$f_device" == *"$f_root_dev"* ]] || [[ "$f_root_dev" == *"$f_device"* ]]
+      then
+        f_json_error "Cannot format the root device!"
+      fi
+    fi
+
+    local f_cur_mount
+    f_cur_mount=$(findmnt -n -o TARGET "$f_device" 2>/dev/null) || true
+    if [[ -n "$f_cur_mount" ]]
+    then
+      if [[ "$f_cur_mount" == "/home" ]]
+      then
+        f_json_error "This device is already mounted as /home"
+      fi
+      f_json_error "Device is mounted at $f_cur_mount. Unmount it first."
+    fi
+
+    local f_home_size f_disk_size
+    f_home_size=$(du -sb /home/ 2>/dev/null | awk '{print $1}') || f_home_size=0
+    f_disk_size=$(blockdev --getsize64 "$f_device" 2>/dev/null) || f_disk_size=0
+
+    [[ "$f_home_size" -eq 0 ]] 2>/dev/null && \
+      f_json_error "Could not determine /home size"
+    [[ "$f_disk_size" -eq 0 ]] 2>/dev/null && \
+      f_json_error "Could not determine disk size"
+
+    local f_overhead=$(( 16 * 1024 * 1024 ))
+    local f_home_margin=$(( f_home_size / 20 ))
+    [[ "$f_home_margin" -gt "$f_overhead" ]] && f_overhead=$f_home_margin
+    local f_needed=$(( f_home_size + f_overhead ))
+
+    if [[ "$f_disk_size" -lt "$f_needed" ]]
+    then
+      local f_home_gb f_disk_gb f_needed_gb
+      f_home_gb=$(awk "BEGIN {printf \"%.1f\", $f_home_size/1073741824}")
+      f_disk_gb=$(awk "BEGIN {printf \"%.1f\", $f_disk_size/1073741824}")
+      f_needed_gb=$(awk "BEGIN {printf \"%.1f\", $f_needed/1073741824}")
+      f_json_error "Disk too small! /home is ${f_home_gb}G but disk is only ${f_disk_gb}G. Need at least ${f_needed_gb}G."
+    fi
+
+    f_log_step "Saving state for rollback"
+
+    local f_old_fstab_line
+    f_old_fstab_line=$(grep -E '[[:space:]]/home[[:space:]]' /etc/fstab 2>/dev/null || echo "")
+    local f_old_home_device="" f_old_home_fstype=""
+    if [[ -n "$f_root_dev" ]]
+    then
+      f_old_home_device="$f_root_dev"
+      f_old_home_fstype="rootfs"
+    else
+      f_old_home_device=$(findmnt -n -o SOURCE /home 2>/dev/null || echo "")
+      f_old_home_fstype=$(findmnt -n -o FSTYPE /home 2>/dev/null || echo "")
+    fi
+
+    f_save_state "$f_old_home_device" "$f_old_home_fstype" "$f_device" \
+      "$f_encrypt" "home-luks" "$f_old_fstab_line"
+    f_log_ok "State saved (can rollback later)"
+
+    f_log_step "Preparing device"
+    umount "$f_device" 2>/dev/null || true
+
+    local f_luks_name="home-luks" f_target
+
+    if [[ "$f_encrypt" == "yes" ]]
+    then
+      f_log_step "Formatting device with LUKS encryption"
+      echo "$f_password" | cryptsetup luksFormat --label "$g_luks_label" \
+        --batch-mode "$f_device" || {
+        f_setup_error "LUKS format failed"
+      }
+      f_log_ok "LUKS format complete"
+
+      f_log_step "Opening LUKS volume"
+      echo "$f_password" | cryptsetup open "$f_device" "$f_luks_name" || {
+        f_setup_error "LUKS open failed"
+      }
+      f_log_ok "LUKS volume opened as $f_luks_name"
+      f_target="/dev/mapper/$f_luks_name"
+    else
+      f_target="$f_device"
+    fi
+
+    f_log_step "Formatting $f_device as ext4"
+    mkfs.ext4 -F -L "$g_data_label" "$f_target" 2>&1 || {
+      f_setup_error "mkfs.ext4 failed"
+    }
+    f_log_ok "ext4 filesystem created"
+
+    f_log_step "Mounting temporary partition"
+    mkdir -p /home.new
+    mount "$f_target" /home.new || {
+      f_setup_error "Mount /home.new failed"
+    }
+    f_log_ok "Temporary mount at /home.new"
+
+    f_log_step "Copying data from /home to new partition (rsync)"
+    f_log "This may take a while for large /home directories..."
+    rsync -av --progress \
+      --exclude=docker/var-lib-docker \
+      --exclude=docker/var-lib-containerd \
+      --exclude='.trashed-*' \
+      /home/ /home.new/ 2>&1 || {
+      umount /home.new 2>/dev/null || true
+      f_setup_error "rsync failed"
+    }
+    f_log_ok "Data copy complete"
+
+    f_log_step "Unmounting old /home"
+    umount /home 2>/dev/null || true
+    f_log_ok "Old /home unmounted"
+
+    f_log_step "Cleaning old /home mount point"
+    rm -rf /home/* 2>/dev/null || true
+    f_log_ok "Old /home cleaned"
+
+    f_log_step "Updating /etc/fstab"
+    sed -i '\#.*[[:space:]]/home[[:space:]]#d' /etc/fstab
+    if [[ "$f_encrypt" == "yes" ]]
+    then
+      echo "/dev/mapper/$f_luks_name /home ext4 defaults,noatime,noauto 0 2" >> /etc/fstab
+    else
+      local f_uuid
+      f_uuid=$(blkid -s UUID -o value "$f_device" 2>/dev/null) || {
+        f_setup_error "blkid failed"
+      }
+      echo "UUID=$f_uuid /home ext4 defaults,noatime,noauto 0 2" >> /etc/fstab
+    fi
+    f_log_ok "fstab updated"
+
+    f_log_step "Mounting new /home"
+    mount /home || {
+      f_setup_error "Mount /home failed"
+    }
+    f_log_ok "/home is now on new partition"
+
+    if [[ "$f_encrypt" == "yes" ]]
+    then
+      echo "$f_luks_name" > /config/.luks-name 2>/dev/null || true
+    fi
+
+    umount /home.new 2>/dev/null || true
+    rm -rf /home.new 2>/dev/null || true
+
+    shutdown -r +30 "Disk migration safety-net reboot" 2>/dev/null || true
+
+    f_log_step "Migration complete!"
+    f_log_ok "/home is now on $f_device"
+    f_log "Server will reboot in 1 minute to finalize. All services will restart automatically."
+    if [[ "$f_encrypt" == "yes" ]]
+    then
+      f_log "You will need to enter your LUKS passphrase at the boot screen."
+    fi
+
+    f_log_step "Stopping Docker services for reboot"
+    if command -v docker &>/dev/null
+    then
+      docker stop $(docker ps -q) 2>/dev/null || true
+      f_log_ok "Docker services stopped"
+    fi
+
+    shutdown -c 2>/dev/null || true
+    shutdown -r +1 "Disk migration complete — rebooting." 2>/dev/null || true
+    f_log_ok "Reboot scheduled in 1 minute"
+
+    f_json_ok '"message":"Disk migration complete. The server will reboot in about 1 minute. All services will restart automatically. You will need to enter your LUKS passphrase at the boot screen.","can_rollback":true'
     ;;
+
+  # ------------------------------------------------------------------
   rollback)
-    f_action_rollback
+    f_do_rollback
     ;;
+
+  # ------------------------------------------------------------------
   umount)
-    f_action_umount
+    umount /home 2>/dev/null || true
+    cryptsetup close home-luks 2>/dev/null || true
+    f_json_ok '"message":"/home unmounted and LUKS volume closed."'
     ;;
+
+  # ------------------------------------------------------------------
   change-password)
-    f_action_change_password "$@"
+    local f_current_password="${1:-}" f_new_password="${2:-}"
+
+    [[ -z "$f_current_password" ]] && f_json_error "Current password is required"
+    [[ -z "$f_new_password" ]] && f_json_error "New password is required"
+    [[ "$f_current_password" == "$f_new_password" ]] && \
+      f_json_error "New password must differ from current password"
+
+    local f_luks_dev
+    f_luks_dev=$(f_find_luks)
+    [[ -z "$f_luks_dev" ]] && f_json_error "No LUKS device found"
+    f_luks_dev="/dev/$f_luks_dev"
+
+    f_log_step "Changing LUKS passphrase on $f_luks_dev"
+
+    local f_tmp_key
+    f_tmp_key=$(mktemp /tmp/.symbios-key.XXXXXX)
+    chmod 600 "$f_tmp_key"
+    printf '%s' "$f_current_password" > "$f_tmp_key"
+
+    echo "$f_new_password" | cryptsetup luksChangeKey \
+      --key-file "$f_tmp_key" \
+      "$f_luks_dev" 2>&1
+    local f_rc=$?
+    rm -f "$f_tmp_key"
+
+    if [[ "$f_rc" -ne 0 ]]
+    then
+      f_log_error "Failed to change LUKS passphrase (wrong current password?)"
+      f_json_error "Failed to change LUKS passphrase. Is the current password correct?"
+    fi
+
+    f_log_ok "LUKS passphrase changed successfully"
+    f_json_ok '"message":"LUKS passphrase changed successfully."'
     ;;
+
   *)
     f_json_error "Usage: $0 {list|status|setup|rollback|umount|change-password}"
     ;;
