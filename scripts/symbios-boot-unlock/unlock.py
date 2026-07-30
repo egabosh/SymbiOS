@@ -17,13 +17,8 @@
 
 """Minimal boot unlock server for LUKS-encrypted /home.
 
-Provides two ways to unlock:
-  1. Web interface on HTTPS :443 (Let's Encrypt cert, extracted by cron)
-  2. Console/TTY prompt on the attached screen/keyboard
-
-After successful unlock, releases ports 80/443 so Traefik can take over.
-Docker, containerd, and graphical.target are started by systemd after this
-service finishes (via After= dependencies in drop-in units).
+LUKS operations are delegated to symbios-boot-unlock-luks.sh.
+This script only handles the web server (HTTPS) and console prompt.
 """
 
 import http.server
@@ -45,15 +40,10 @@ HTTP_PORT = 80
 CERT_DIR = "/usr/local/sbin/symbios-boot-unlock"
 CERT_FILE = os.path.join(CERT_DIR, "cert.pem")
 KEY_FILE = os.path.join(CERT_DIR, "key.pem")
+LUKS_SCRIPT = os.path.join(CERT_DIR, "symbios-boot-unlock-luks.sh")
 
-# LUKS label set during partition setup (symbios-home-partition.sh).
-# Scripts identify the encrypted disk by this label, making detection
-# robust even with multiple storage devices attached.
-LUKS_LABEL = "CRYPT_LUKS_SYMBIOS_DATA"
-DATA_LABEL = "SYMBIOS_DATA"
 
 def log(msg):
-    """Append a timestamped line to the log file."""
     import datetime
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {msg}\n"
@@ -64,10 +54,23 @@ def log(msg):
     except Exception:
         pass
 
+
+def call_luks(action, passphrase=""):
+    """Run the LUKS helper script and return parsed JSON dict."""
+    try:
+        r = subprocess.run(
+            [LUKS_SCRIPT, action],
+            input=passphrase,
+            capture_output=True, text=True, timeout=30
+        )
+        return json.loads(r.stdout)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # Shared state: set when unlock succeeds so both web and console threads
-# know to exit cleanly and release ports for Traefik.
+# know to exit and release ports for Traefik.
 _unlock_done = threading.Event()
-_unlock_lock = threading.Lock()
 
 HTML_UNLOCK = """<!DOCTYPE html>
 <html lang="en">
@@ -244,7 +247,6 @@ HTML_DONE = """<!DOCTYPE html>
 
 
 def get_hostname():
-    """Get the system hostname for the self-signed cert."""
     try:
         return socket.gethostname()
     except Exception:
@@ -252,21 +254,16 @@ def get_hostname():
 
 
 def generate_self_signed_cert():
-    """Generate a self-signed cert on the root partition if not exists."""
     if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
         return True
-
     os.makedirs(CERT_DIR, exist_ok=True)
     hostname = get_hostname()
-
     try:
         subprocess.run(
-            [
-                "openssl", "req", "-x509", "-newkey", "rsa:2048",
-                "-keyout", KEY_FILE, "-out", CERT_FILE,
-                "-days", "3650", "-nodes",
-                "-subj", f"/CN={hostname}/O=SymbiOS/C=DE",
-            ],
+            ["openssl", "req", "-x509", "-newkey", "rsa:2048",
+             "-keyout", KEY_FILE, "-out", CERT_FILE,
+             "-days", "3650", "-nodes",
+             "-subj", f"/CN={hostname}/O=SymbiOS/C=DE"],
             capture_output=True, text=True, timeout=30
         )
         os.chmod(KEY_FILE, 0o600)
@@ -277,121 +274,24 @@ def generate_self_signed_cert():
         return False
 
 
-def _find_crypto_luks(blockdevices, label=""):
-    """Find a crypto_LUKS device, optionally matching label.
-
-    Returns (dev_dict, children) or None.  Tries exact label match first;
-    falls back to any crypto_LUKS if label not found.
-    """
-    def scan(devs):
-        for d in devs:
-            if d.get("fstype") == "crypto_LUKS":
-                if not label or d.get("label") == label:
-                    return d, d.get("children", [])
-            children = d.get("children", [])
-            if children:
-                r = scan(children)
-                if r:
-                    return r
-        return None
-    result = scan(blockdevices)
-    if not result and label:
-        def scan_any(devs):
-            for d in devs:
-                if d.get("fstype") == "crypto_LUKS":
-                    return d, d.get("children", [])
-                children = d.get("children", [])
-                if children:
-                    r = scan_any(children)
-                    if r:
-                        return r
-            return None
-        result = scan_any(blockdevices)
-    return result
-
-
-def check_home_encrypted():
-    """Check if /home is a LUKS device that needs unlocking.
-
-    Returns True if there is an unopened LUKS device (i.e. a crypto_LUKS
-    device whose mapper child is NOT mounted).
-    Also returns False early if no LUKS devices exist at all.
-    """
-    try:
-        r = subprocess.run(
-            ["lsblk", "-o", "NAME,FSTYPE,MOUNTPOINT,TYPE,LABEL", "-J"],
-            capture_output=True, text=True, timeout=5
-        )
-        data = json.loads(r.stdout)
-        found = _find_crypto_luks(data.get("blockdevices", []), LUKS_LABEL)
-        if found:
-            dev, children = found
-            has_mounted_child = any(
-                c.get("mountpoint") for c in children
-            )
-            if not has_mounted_child:
-                return True
-    except Exception:
-        pass
-    return False
-
-
-def find_luks_device():
-    """Find the LUKS device path for /home."""
-    try:
-        r = subprocess.run(
-            ["lsblk", "-o", "NAME,FSTYPE,MOUNTPOINT,TYPE,LABEL", "-J"],
-            capture_output=True, text=True, timeout=5
-        )
-        data = json.loads(r.stdout)
-        found = _find_crypto_luks(data.get("blockdevices", []), LUKS_LABEL)
-        if found:
-            dev, _ = found
-            return "/dev/" + dev["name"]
-    except Exception:
-        pass
-    return ""
+def needs_unlock():
+    """Check via bash helper whether /home LUKS needs unlocking."""
+    result = call_luks("check")
+    return result.get("needs_unlock", False), result
 
 
 def do_unlock(passphrase):
-    """Unlock LUKS device and mount /home. Thread-safe via _unlock_lock."""
-    with _unlock_lock:
-        if _unlock_done.is_set():
-            return True, "Already unlocked"
-        luks_dev = find_luks_device()
-        if not luks_dev:
-            return False, "No LUKS device found"
-
-        luks_name = "home-luks"
-        try:
-            r = subprocess.run(
-                ["cryptsetup", "open", luks_dev, luks_name],
-                input=passphrase, capture_output=True, text=True, timeout=30
-            )
-            if r.returncode != 0:
-                return False, "Wrong passphrase or device error"
-        except Exception as e:
-            return False, f"cryptsetup failed: {e}"
-
-        os.makedirs("/home", exist_ok=True)
-        r = subprocess.run(
-            ["mount", "/dev/mapper/" + luks_name, "/home"],
-            capture_output=True, text=True, timeout=30
-        )
-        if r.returncode != 0:
-            return False, f"Mount failed: {r.stderr}"
-
+    """Unlock via bash helper. Returns (ok, message)."""
+    if _unlock_done.is_set():
+        return True, "Already unlocked"
+    result = call_luks("unlock", passphrase)
+    if result.get("ok"):
         _unlock_done.set()
-        return True, "/home unlocked successfully"
+        return True, result.get("message", "/home unlocked")
+    return False, result.get("error", "Unlock failed")
 
 
 def console_unlock_thread():
-    """Prompt for LUKS passphrase on the physical console (TTY).
-
-    Runs only when stdin is a real terminal (i.e. the service runs on a
-    TTY or via systemd with StandardInput=tty).  Uses getpass so the
-    passphrase is not echoed.
-    """
     if not sys.stdin.isatty():
         return
     print("\n=== SymbiOS LUKS Unlock ===")
@@ -413,7 +313,6 @@ def console_unlock_thread():
 
 
 def handle_signal(signum, frame):
-    """Handle SIGTERM/SIGINT for clean shutdown."""
     print("Received shutdown signal, exiting...", flush=True)
     os._exit(0)
 
@@ -428,10 +327,9 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
             return
 
         hostname = get_hostname()
-        if not check_home_encrypted():
-            page = HTML_DONE.replace("__HOSTNAME__", hostname)
-        else:
-            page = HTML_UNLOCK
+        must_unlock, result = needs_unlock()
+        page = HTML_UNLOCK if must_unlock else HTML_DONE
+        page = page.replace("__HOSTNAME__", hostname)
 
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -467,13 +365,10 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
                 log(f"unlock OK: {msg}")
                 self.wfile.write(json.dumps({"ok": True, "message": msg}).encode())
                 self.wfile.flush()
-                # Exit so systemd can start Docker/graphical.target
-                # via ExecStartPost and After= dependencies.
                 os._exit(0)
             else:
                 self.wfile.write(json.dumps({"ok": False, "error": msg}).encode())
             return
-
         self.send_response(404)
         self.end_headers()
 
@@ -482,7 +377,6 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
 
 
 def create_https_server(port, handler):
-    """Create an HTTPS server with the self-signed cert."""
     server = http.server.HTTPServer(("0.0.0.0", port), handler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(CERT_FILE, KEY_FILE)
@@ -494,13 +388,13 @@ def main():
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
 
-    if not check_home_encrypted():
+    must_unlock, result = needs_unlock()
+    if not must_unlock:
         log("/home is not encrypted or already unlocked, nothing to do")
-        if not find_luks_device():
+        if not result.get("device"):
             msg = (
                 "WARNING: No LUKS device found. If you expect encrypted /home,\n"
                 "         check that your disk (SSD/NVMe) is connected.\n"
-                f"         Expected LUKS label: {LUKS_LABEL}, data label: {DATA_LABEL}.\n"
                 "         Docker and containerd may fail because /var/lib/docker\n"
                 "         and /var/lib/containerd point to non-existent targets."
             )
@@ -513,14 +407,10 @@ def main():
         sys.exit(1)
 
     def watchdog():
-        """Exit if /home gets mounted by something else.
-
-        Does NOT exit if we did the unlock ourselves (_unlock_done),
-        because we exit explicitly via os._exit() after unlock.
-        """
         time.sleep(10)
         while True:
-            if not check_home_encrypted():
+            must_unlock, _ = needs_unlock()
+            if not must_unlock:
                 if _unlock_done.is_set():
                     log("watchdog: /home mounted (our unlock), skipping exit")
                 else:
@@ -532,13 +422,10 @@ def main():
 
     print(f"SymbiOS boot unlock: HTTPS on :{HTTPS_PORT}, HTTP help on :{HTTP_PORT}")
 
-    # Start the console TTY unlock thread (if stdin is a terminal).
     threading.Thread(target=console_unlock_thread, daemon=True).start()
 
     https_server = create_https_server(HTTPS_PORT, UnlockHandler)
 
-    # HTTP server on port 80 shows a help page explaining how to accept
-    # the self-signed cert.  The passphrase is NEVER sent over HTTP.
     hostname = get_hostname()
     http_help_page = HTML_HTTP_HELP.replace("__HOSTNAME__", hostname)
 
@@ -550,7 +437,6 @@ def main():
             self.wfile.write(http_help_page.encode())
 
         def do_POST(self):
-            # Accept POST on HTTP too — redirect to HTTPS.
             self.send_response(301)
             self.send_header("Location", f"https://{hostname}{self.path}")
             self.end_headers()
@@ -559,7 +445,6 @@ def main():
             pass
 
     http_server = http.server.HTTPServer(("0.0.0.0", HTTP_PORT), HTTPHelpHandler)
-
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     http_thread.start()
 

@@ -225,10 +225,18 @@
         state: directory
         mode: '0755'
 
-    - name: Copy boot unlock server script
+    - name: Install boot unlock Python server
       ansible.builtin.copy:
         src: /home/SymbiOS/scripts/symbios-boot-unlock/unlock.py
         dest: /usr/local/sbin/symbios-boot-unlock/unlock.py
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install boot unlock LUKS helper
+      ansible.builtin.copy:
+        src: /home/SymbiOS/scripts/symbios-boot-unlock/symbios-boot-unlock-luks.sh
+        dest: /usr/local/sbin/symbios-boot-unlock/symbios-boot-unlock-luks.sh
         owner: root
         group: root
         mode: "0755"
