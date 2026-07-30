@@ -72,6 +72,13 @@ fi
 
 # Run base-services playbooks
 f_run_playbook /home/SymbiOS/base-services/basics.yml
+
+# optional set password for symbios user
+g_wait=60
+echo "Optional set password for symbios user - Waiting $g_wait seconds"
+timeout -k $g_wait $g_wait passwd symbios
+
+# continue running playbooks
 f_run_playbook /home/SymbiOS/base-services/localization.yml
 f_run_playbook /home/SymbiOS/base-services/hardening.yml
 f_run_playbook /home/SymbiOS/base-services/firewall.yml
