@@ -244,7 +244,6 @@ then
     then
       echo "Starting installation..."
       bash /tmp/symbios-install.sh && date > /var/lib/symbios-install.done
-      rm -f /tmp/symbios-install.sh
       break
     fi
     sleep 10
