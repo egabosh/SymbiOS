@@ -22,15 +22,16 @@ set -x
 g_failed=""
 
 function f_run_playbook {
-    local f_playbook="${1}"
-    echo ">>> Running: $(basename "${f_playbook}")"
-    if ansible-playbook --limit localhost --inventory "${g_inventory}" "${f_playbook}"
-    then
-        echo ">>> OK: $(basename "${f_playbook}")"
-    else
-        echo ">>> FAILED: $(basename "${f_playbook}") (exit $?)"
-        g_failed="${g_failed} $(basename "${f_playbook}")"
-    fi
+  local f_playbook="${1}"
+  echo ">>> Running: $(basename "${f_playbook}")"
+  if ansible-playbook --limit localhost --inventory "${g_inventory}" "${f_playbook}"
+  then
+    echo ">>> OK: $(basename "${f_playbook}")"
+  else
+    echo ">>> FAILED: $(basename "${f_playbook}") (exit $?)"
+    g_failed="${g_failed} $(basename "${f_playbook}")"
+    /bin/bash
+  fi
 }
 
 # Fix interrupted dpkg state (can happen after image expansion / e2fsck)
@@ -39,9 +40,9 @@ dpkg --configure -a 2>/dev/null || true
 # Install ansible and git if not already present
 if ! which ansible >/dev/null 2>&1
 then
-    DEBIAN_FRONTEND=noninteractive apt-get -y update --allow-releaseinfo-change
-    DEBIAN_FRONTEND=noninteractive apt-get -y install ansible git
-    ansible-galaxy collection install community.general
+  DEBIAN_FRONTEND=noninteractive apt-get -y update --allow-releaseinfo-change
+  DEBIAN_FRONTEND=noninteractive apt-get -y install ansible git
+  ansible-galaxy collection install community.general
 fi
 
 # Clone or update SymbiOS from GitHub
@@ -51,8 +52,8 @@ cd SymbiOS
 git remote set-url origin https://github.com/egabosh/SymbiOS.git
 if ! git pull
 then
-    git stash
-    git pull
+  git stash
+  git pull
 fi
 
 # expand PATH to SymbiOS scripts
@@ -63,10 +64,10 @@ g_inventory_path="/home/docker/symbios-ui/config"
 g_inventory="${g_inventory_path}/inventory.yml"
 if ! [[ -s ${g_inventory} ]]
 then
-    mkdir -p "${g_inventory_path}"
-    chmod 700 "${g_inventory_path}"
-    cp /home/SymbiOS/inventory.yml "${g_inventory}"
-    chmod 600 "${g_inventory}"
+  mkdir -p "${g_inventory_path}"
+  chmod 700 "${g_inventory_path}"
+  cp /home/SymbiOS/inventory.yml "${g_inventory}"
+  chmod 600 "${g_inventory}"
 fi
 
 # Run base-services playbooks
@@ -86,8 +87,8 @@ f_run_playbook /home/SymbiOS/base-services/authelia.yml
 # Detect Raspberry Pi and install platform-specific playbooks
 if [ -f /proc/device-tree/model ] && grep -qi "raspberry" /proc/device-tree/model
 then
-    f_run_playbook /home/SymbiOS/base-services/raspberry.yml
-    f_run_playbook /home/SymbiOS/desktop/firefox.yml
+  f_run_playbook /home/SymbiOS/base-services/raspberry.yml
+  f_run_playbook /home/SymbiOS/desktop/firefox.yml
 fi
 
 f_run_playbook /home/SymbiOS/base-services/symbios-ui.yml
@@ -97,10 +98,10 @@ echo ""
 echo "=== Installation summary ==="
 if [ -n "${g_failed}" ]
 then
-    echo "FAILED playbooks:${g_failed}"
-    echo "Fix the issues and run again, or reboot to retry."
-    exit 1
+  echo "FAILED playbooks:${g_failed}"
+  echo "Fix the issues and run again, or reboot to retry."
+  exit 1
 else
-    echo "All playbooks completed successfully."
-    exit 0
+  echo "All playbooks completed successfully."
+  exit 0
 fi
