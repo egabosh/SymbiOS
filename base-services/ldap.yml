@@ -47,16 +47,7 @@
 
   vars:
     service_name: "ldap"
-    service_domain: "{{ service_name }}.{{ base_domain }}"
     docker_path: "/home/docker/{{ service_name }}"
-
-  pre_tasks:
-    - name: Fail if base_domain is not configured
-      ansible.builtin.fail:
-        msg: >-
-          base_domain is not set. Configure a domain first via
-          the WebUI at /settings/ddns/ or edit inventory.yml directly.
-      when: base_domain is not defined or base_domain == '' or base_domain == 'none'
 
   tasks:
 
@@ -152,7 +143,7 @@
               objectClass: top
               objectClass: dcObject
               objectClass: organization
-              o: {{service_domain}}
+              o: symbios
               dc: openldap
 
               dn: cn=readuser,{{ldap_basedn}}
@@ -346,6 +337,8 @@
                 context: .
                 dockerfile: Dockerfile
               container_name: openldap
+              ports:
+                - "127.0.0.1:389:389"
               volumes:
                 - ./ldap-db:/var/lib/ldap:rw
                 - ./ldap-config:/ldap-config:rw
@@ -384,7 +377,7 @@
           uid nslcd
           gid nslcd
            
-          uri ldaps://openldap.{{base_domain}}:389
+          uri ldap://localhost:389
           base {{ldap_basedn}}
           base passwd ou=users,{{ldap_basedn}}
           base group ou=groups,{{ldap_basedn}}
@@ -446,9 +439,7 @@
         mode: '0644'
         content: |
           BASE {{ldap_basedn}}
-          URI ldaps://openldap.{{ base_domain }}:389
-          #TLS_REQCERT demand
-          #TLS_CACERT /etc/ssl/certs/ca-certificates.crt
+          URI ldap://localhost:389
           NETWORK_TIMEOUT 3
           timeout 3
           timelimit 3
