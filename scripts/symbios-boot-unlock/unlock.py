@@ -276,6 +276,7 @@ def check_home_encrypted():
 
     Returns True if there is an unopened LUKS device (i.e. a crypto_LUKS
     device whose mapper child is NOT mounted).
+    Also returns False early if no LUKS devices exist at all.
     """
     try:
         r = subprocess.run(
@@ -284,14 +285,16 @@ def check_home_encrypted():
         )
         data = json.loads(r.stdout)
         for dev in data.get("blockdevices", []):
-            if dev.get("fstype") == "crypto_LUKS":
-                # Check if any child (mapper) is mounted
-                children = dev.get("children", [])
-                has_mounted_child = any(
-                    c.get("mountpoint") for c in children
-                )
-                if not has_mounted_child:
-                    return True
+            # LUKS can be on the device itself or on a partition (child)
+            for d in [dev] + dev.get("children", []):
+                if d.get("fstype") == "crypto_LUKS":
+                    # Check if any child (mapper) is mounted
+                    children = d.get("children", [])
+                    has_mounted_child = any(
+                        c.get("mountpoint") for c in children
+                    )
+                    if not has_mounted_child:
+                        return True
     except Exception:
         pass
     return False
