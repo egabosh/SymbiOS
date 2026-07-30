@@ -97,6 +97,7 @@
           - strace
           - net-tools
           - vim
+          - hd-idle
           - git
           - netcat-traditional
           - debconf-utils
