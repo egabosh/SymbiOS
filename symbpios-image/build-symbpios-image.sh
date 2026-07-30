@@ -227,9 +227,7 @@ echo "Root partition mounted at ${g_mount_point_root}"
 echo "Writing rc.local with inline SymbiOS installer..."
 cat > "${g_mount_point_root}/etc/rc.local" << 'RCLOCALEOF'
 #!/bin/bash
-# SymbiOS — first-boot installer + boot sequence placeholder
-# First half: download and run install.sh (once).
-# Second half: boot sequence (injected by playbook).
+# SymbiOS boot sequence
 
 exec > >(tee -a /var/log/symbios-boot.log) 2>&1
 echo "=== SymbiOS Installer ==="
@@ -248,6 +246,12 @@ then
     fi
     sleep 10
   done
+fi
+
+# Print the IP address
+_IP=$(hostname -I) || true
+if [ "$_IP" ]; then
+  printf "My IP address is %s\n" "$_IP"
 fi
 
 exit 0
