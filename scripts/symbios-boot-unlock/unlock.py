@@ -46,6 +46,12 @@ CERT_DIR = "/usr/local/sbin/symbios-boot-unlock"
 CERT_FILE = os.path.join(CERT_DIR, "cert.pem")
 KEY_FILE = os.path.join(CERT_DIR, "key.pem")
 
+# LUKS label set during partition setup (symbios-home-partition.sh).
+# Scripts identify the encrypted disk by this label, making detection
+# robust even with multiple storage devices attached.
+LUKS_LABEL = "CRYPT_LUKS_SYMBIOS_DATA"
+DATA_LABEL = "SYMBIOS_DATA"
+
 def log(msg):
     """Append a timestamped line to the log file."""
     import datetime
@@ -271,6 +277,39 @@ def generate_self_signed_cert():
         return False
 
 
+def _find_crypto_luks(blockdevices, label=""):
+    """Find a crypto_LUKS device, optionally matching label.
+
+    Returns (dev_dict, children) or None.  Tries exact label match first;
+    falls back to any crypto_LUKS if label not found.
+    """
+    def scan(devs):
+        for d in devs:
+            if d.get("fstype") == "crypto_LUKS":
+                if not label or d.get("label") == label:
+                    return d, d.get("children", [])
+            children = d.get("children", [])
+            if children:
+                r = scan(children)
+                if r:
+                    return r
+        return None
+    result = scan(blockdevices)
+    if not result and label:
+        def scan_any(devs):
+            for d in devs:
+                if d.get("fstype") == "crypto_LUKS":
+                    return d, d.get("children", [])
+                children = d.get("children", [])
+                if children:
+                    r = scan_any(children)
+                    if r:
+                        return r
+            return None
+        result = scan_any(blockdevices)
+    return result
+
+
 def check_home_encrypted():
     """Check if /home is a LUKS device that needs unlocking.
 
@@ -280,21 +319,18 @@ def check_home_encrypted():
     """
     try:
         r = subprocess.run(
-            ["lsblk", "-o", "NAME,FSTYPE,MOUNTPOINT,TYPE", "-J"],
+            ["lsblk", "-o", "NAME,FSTYPE,MOUNTPOINT,TYPE,LABEL", "-J"],
             capture_output=True, text=True, timeout=5
         )
         data = json.loads(r.stdout)
-        for dev in data.get("blockdevices", []):
-            # LUKS can be on the device itself or on a partition (child)
-            for d in [dev] + dev.get("children", []):
-                if d.get("fstype") == "crypto_LUKS":
-                    # Check if any child (mapper) is mounted
-                    children = d.get("children", [])
-                    has_mounted_child = any(
-                        c.get("mountpoint") for c in children
-                    )
-                    if not has_mounted_child:
-                        return True
+        found = _find_crypto_luks(data.get("blockdevices", []), LUKS_LABEL)
+        if found:
+            dev, children = found
+            has_mounted_child = any(
+                c.get("mountpoint") for c in children
+            )
+            if not has_mounted_child:
+                return True
     except Exception:
         pass
     return False
@@ -304,16 +340,14 @@ def find_luks_device():
     """Find the LUKS device path for /home."""
     try:
         r = subprocess.run(
-            ["lsblk", "-o", "NAME,FSTYPE,MOUNTPOINT,TYPE", "-J"],
+            ["lsblk", "-o", "NAME,FSTYPE,MOUNTPOINT,TYPE,LABEL", "-J"],
             capture_output=True, text=True, timeout=5
         )
         data = json.loads(r.stdout)
-        for dev in data.get("blockdevices", []):
-            if dev.get("fstype") == "crypto_LUKS":
-                return "/dev/" + dev["name"]
-            for child in dev.get("children", []):
-                if child.get("fstype") == "crypto_LUKS":
-                    return "/dev/" + child["name"]
+        found = _find_crypto_luks(data.get("blockdevices", []), LUKS_LABEL)
+        if found:
+            dev, _ = found
+            return "/dev/" + dev["name"]
     except Exception:
         pass
     return ""
@@ -466,6 +500,7 @@ def main():
             msg = (
                 "WARNING: No LUKS device found. If you expect encrypted /home,\n"
                 "         check that your disk (SSD/NVMe) is connected.\n"
+                f"         Expected LUKS label: {LUKS_LABEL}, data label: {DATA_LABEL}.\n"
                 "         Docker and containerd may fail because /var/lib/docker\n"
                 "         and /var/lib/containerd point to non-existent targets."
             )

@@ -30,6 +30,12 @@
 
 set -euo pipefail
 
+# Label used when creating a LUKS partition and its ext4 data filesystem.
+# Scripts and WebUI identify disks by these labels (robust even with
+# multiple storage devices attached).
+g_luks_label="CRYPT_LUKS_SYMBIOS_DATA"
+g_data_label="SYMBIOS_DATA"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -176,26 +182,35 @@ function f_action_status {
     f_found=$(echo "$f_lsblk_out" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
+label = '${g_luks_label}'
 
 def scan(devs):
-    name = ''
-    fstype = ''
-    uuid = ''
     for d in devs:
         ft = d.get('fstype') or ''
-        if ft == 'crypto_LUKS':
-            name = d.get('name','')
-            uuid = d.get('uuid','')
-            break
+        lab = d.get('label') or ''
+        if ft == 'crypto_LUKS' and (not label or lab == label):
+            return (d.get('name',''), d.get('uuid',''))
         children = d.get('children') or []
         if children:
             r = scan(children)
             if r:
-                name, uuid = r
-                break
-    return (name, uuid) if name else None
+                return r
+    return None
 
+# First try by label, fallback to any crypto_LUKS
 result = scan(data.get('blockdevices', []))
+if not result and label:
+    def scan_any(devs):
+        for d in devs:
+            if d.get('fstype') == 'crypto_LUKS':
+                return (d.get('name',''), d.get('uuid',''))
+            children = d.get('children') or []
+            if children:
+                r = scan_any(children)
+                if r:
+                    return r
+        return None
+    result = scan_any(data.get('blockdevices', []))
 if result:
     print(result[0])
     print(result[1])
@@ -345,7 +360,7 @@ function f_action_setup {
   if [[ "$f_encrypt" == "yes" ]]
   then
     f_log_step "Formatting device with LUKS encryption"
-    echo "$f_password" | cryptsetup luksFormat --batch-mode "$f_device" || {
+    echo "$f_password" | cryptsetup luksFormat --label "$g_luks_label" --batch-mode "$f_device" || {
       f_setup_error "LUKS format failed"
     }
     f_log_ok "LUKS format complete"
@@ -362,7 +377,7 @@ function f_action_setup {
 
   # ---- Step 3: Format as ext4 ----
   f_log_step "Formatting $f_device as ext4"
-  mkfs.ext4 -F "$f_target" 2>&1 || {
+  mkfs.ext4 -F -L "$g_data_label" "$f_target" 2>&1 || {
     f_setup_error "mkfs.ext4 failed"
   }
   f_log_ok "ext4 filesystem created"
@@ -560,10 +575,12 @@ function f_action_change_password {
   f_luks_dev=$(echo "$f_lsblk_out" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
+label = '${g_luks_label}'
 
 def scan(devs):
     for d in devs:
-        if d.get('fstype') == 'crypto_LUKS':
+        lab = d.get('label') or ''
+        if d.get('fstype') == 'crypto_LUKS' and (not label or lab == label):
             print('/dev/' + d['name'])
             return True
         children = d.get('children') or []
@@ -572,7 +589,20 @@ def scan(devs):
     return False
 
 if not scan(data.get('blockdevices', [])):
-    sys.exit(1)
+    if label:
+        def scan_any(devs):
+            for d in devs:
+                if d.get('fstype') == 'crypto_LUKS':
+                    print('/dev/' + d['name'])
+                    return True
+                children = d.get('children') or []
+                if scan_any(children):
+                    return True
+            return False
+        if not scan_any(data.get('blockdevices', [])):
+            sys.exit(1)
+    else:
+        sys.exit(1)
 " 2>/dev/null) || true
 
   [[ -z "$f_luks_dev" ]] && f_json_error "No LUKS device found"
