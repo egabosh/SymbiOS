@@ -144,9 +144,13 @@ def settings_port_forwarding(request):
             return redirect('settings_port_forwarding')
 
     # GET: list current mappings
+    # FRITZ!Box requires credentials; generic UPnP does not
+    should_list = credentials_configured
+    if router_info and router_info.get('router_type') == 'generic_upnp':
+        should_list = True
     mappings = []
     list_error = None
-    if credentials_configured:
+    if should_list:
         try:
             list_result = _run_upnp('list', timeout=15)
             if list_result.get('ok'):
