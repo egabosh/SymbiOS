@@ -74,7 +74,7 @@
         state: directory
       loop:
         - { path: "/etc/systemd/system/docker.service.d", owner: root, group: root, mode: "0755" }
-        - { path: "/etc/systemd/system/containderd.service.d", owner: root, group: root, mode: "0755" }
+        - { path: "/etc/systemd/system/containerd.service.d", owner: root, group: root, mode: "0755" }
 
     - name: Dockerfile
       ansible.builtin.copy:
