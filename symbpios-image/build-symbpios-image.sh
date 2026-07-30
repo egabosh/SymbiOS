@@ -68,7 +68,7 @@ function f_cleanup {
   fi
 }
 
-#trap f_cleanup EXIT
+trap f_cleanup EXIT
 
 # Defaults
 g_image_arg=""
@@ -232,7 +232,7 @@ cat > "${g_mount_point_root}/etc/rc.local" << 'RCLOCALEOF'
 # Second half: boot sequence (injected by playbook).
 
 exec > >(tee -a /var/log/symbios-boot.log) 2>&1
-echo "=== SymbiOS First Boot Installer ==="
+echo "=== SymbiOS Installer ==="
 echo "Started at: $(date)"
 
 if [ ! -s /var/lib/symbios-install.done ]
