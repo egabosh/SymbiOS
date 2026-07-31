@@ -63,7 +63,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           SHELL=/bin/bash
-          */5 * * * * root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/dedyn.sh ]] && dedyn.sh >/dev/null 2>&1
+          */5 * * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/dedyn.sh ]] && dedyn.sh >/dev/null 2>&1
         backup: yes
 
     - name: /etc/cron.d/host-ip
@@ -76,7 +76,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           SHELL=/bin/bash
-          */5 * * * * root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/update_host_ip.sh ]] && update_host_ip.sh
+          */5 * * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/update_host_ip.sh ]] && update_host_ip.sh
         backup: yes
 
     - name: /usr/local/etc/dedyn.conf

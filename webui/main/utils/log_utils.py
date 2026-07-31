@@ -32,7 +32,7 @@ LOCAL_LOG_BASE = "/log"
 HOST_LOG_DIR = "/var/log"
 
 # Docker container logs on the host — fetched via symbios-exec.sh.
-HOST_DOCKER_LOG_DIR = "/var/lib/docker/containers"
+HOST_DOCKER_LOG_DIR = "/symbios/docker/containers"
 
 CONTAINER_INDEX = "/log/docker-containers.tsv"
 

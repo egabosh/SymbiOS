@@ -116,7 +116,7 @@ then
 fi
 
 # Read LDAP connection details from inventory
-f_config_path="${CONFIG_PATH:-/home/docker/symbios-ui/config/inventory.yml}"
+f_config_path="${CONFIG_PATH:-/symbios/base-services/symbios-ui/config/inventory.yml}"
 f_ldap_uri="${LDAP_URI:-ldap://openldap}"
 
 f_base_dn="$(python3 -c "
@@ -127,7 +127,7 @@ try:
 except: print('dc=openldap,dc=local')
 " 2>/dev/null)"
 
-f_admin_pw="$(cat /home/docker/symbios-ui/config/.ldap_admin_pw 2>/dev/null || echo 'changeme')"
+f_admin_pw="$(cat /symbios/base-services/symbios-ui/config/.ldap_admin_pw 2>/dev/null || echo 'changeme')"
 f_bind_dn="cn=head-of-ldap,${f_base_dn}"
 f_group_dn="cn=${f_name},ou=groups,${f_base_dn}"
 

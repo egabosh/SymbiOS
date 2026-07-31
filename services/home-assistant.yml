@@ -31,17 +31,17 @@
 #     services:
 #     - name: home-assistant
 #       type: docker
-#       compose_file: /home/docker/home-assistant/docker-compose.yml
-#       status: test -d /home/docker/home-assistant || exit 2; docker compose -f /home/docker/home-assistant/docker-compose.yml ps | grep -q "Up "
+#       compose_file: /symbios/services/home-assistant/docker-compose.yml
+#       status: test -d /symbios/services/home-assistant || exit 2; docker compose -f /symbios/services/home-assistant/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: home-assistant
-#       command: docker compose -f /home/docker/home-assistant/docker-compose.yml logs -f --tail=100
+#       command: docker compose -f /symbios/services/home-assistant/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/home-assistant/docker-compose.yml down
-#     start: docker compose -f /home/docker/home-assistant/docker-compose.yml up -d
-#     stop: docker compose -f /home/docker/home-assistant/docker-compose.yml down
-#     restart: docker compose -f /home/docker/home-assistant/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/home-assistant/docker-compose.yml up -d
+#     uninstall: docker compose -f /symbios/services/home-assistant/docker-compose.yml down
+#     start: docker compose -f /symbios/services/home-assistant/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/home-assistant/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/home-assistant/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/home-assistant/docker-compose.yml up -d
 #
 
 ---
@@ -70,25 +70,25 @@
       ansible.builtin.set_fact:
         home_assistant_ip: "{{ ha_ip_result.stdout }}"
 
-    - name: Create /home/docker/home-assistant dir
+    - name: Create /symbios/services/home-assistant dir
       ansible.builtin.file:
-        path: /home/docker/home-assistant
+        path: /symbios/services/home-assistant
         owner: root
         group: docker
         state: directory
         mode: '0550'
 
-    - name: Create /home/docker/home-assistant/config dir
+    - name: Create /symbios/services/home-assistant/config dir
       ansible.builtin.file:
-        path: /home/docker/home-assistant/config
+        path: /symbios/services/home-assistant/config
         owner: 3000
         group: 3000
         state: directory
         mode: '0750'
 
-    - name: Create /home/docker/home-assistant/ha_pingcheck_data dir
+    - name: Create /symbios/services/home-assistant/ha_pingcheck_data dir
       ansible.builtin.file:
-        path: /home/docker/home-assistant/ha_pingcheck_data
+        path: /symbios/services/home-assistant/ha_pingcheck_data
         state: directory
         owner: root
         group: docker
@@ -96,13 +96,13 @@
 
     - name: Create oidc client secret
       ansible.builtin.shell: |
-        /home/docker/authelia/gen-oidc-client-secret.sh /home/docker/home-assistant
+        /symbios/services/authelia/gen-oidc-client-secret.sh /symbios/services/home-assistant
       changed_when: false
       failed_when: false
 
     - name: Edit Home Assistant config
       blockinfile:
-        path: /home/docker/home-assistant/config/configuration.yaml
+        path: /symbios/services/home-assistant/config/configuration.yaml
         create: yes
         mode: 0444
         owner: root
@@ -152,7 +152,7 @@
           
           auth_oidc:
             client_id: 'home-assistant'
-            client_secret: '{{ lookup('file', '/home/docker/home-assistant/oidc_password') }}'
+            client_secret: '{{ lookup('file', '/symbios/services/home-assistant/oidc_password') }}'
             discovery_url: 'https://auth.{{ base_domain }}/.well-known/openid-configuration'
             display_name: 'Authelia'
             claims:
@@ -166,7 +166,7 @@
 
     - name: Touch HA config files
       ansible.builtin.file:
-        path: "/home/docker/home-assistant/config/{{ item }}"
+        path: "/symbios/services/home-assistant/config/{{ item }}"
         state: touch
         access_time: preserve
         modification_time: preserve
@@ -175,9 +175,9 @@
         - scripts.yaml
         - automations.yaml
 
-    - name: /home/docker/home-assistant/genpw.sh (generate Random PW for Home Assistant)
+    - name: /symbios/services/home-assistant/genpw.sh (generate Random PW for Home Assistant)
       blockinfile:
-        path: /home/docker/home-assistant/genpw.sh
+        path: /symbios/services/home-assistant/genpw.sh
         create: yes
         mode: 0550
         owner: root
@@ -185,7 +185,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # Change to service directory
-          cd /home/docker/home-assistant
+          cd /symbios/services/home-assistant
 
           # Generate random admin password
           g_homeassistantadminpassword=$(pwgen -s 32 1)
@@ -204,21 +204,21 @@
         validate: /bin/bash -n %s
       notify: run genpw.sh
 
-    - name: /home/docker/home-assistant/genpw.sh shebang
+    - name: /symbios/services/home-assistant/genpw.sh shebang
       lineinfile:
-        path: /home/docker/home-assistant/genpw.sh
+        path: /symbios/services/home-assistant/genpw.sh
         insertbefore: BOF
         line: "#!/bin/bash -e"
 
     - name: Gen initial passwords if not exists
       ansible.builtin.shell: ./genpw.sh
       args:
-        chdir: /home/docker/home-assistant
-        creates: /home/docker/home-assistant/env
+        chdir: /symbios/services/home-assistant
+        creates: /symbios/services/home-assistant/env
 
-    - name: /home/docker/home-assistant/docker-compose.yml Container Configuration
+    - name: /symbios/services/home-assistant/docker-compose.yml Container Configuration
       blockinfile:
-        path: /home/docker/home-assistant/docker-compose.yml
+        path: /symbios/services/home-assistant/docker-compose.yml
         create: yes
         mode: 0440
         owner: root
@@ -263,7 +263,7 @@
               ports:
                 - "8889:80"
               volumes:
-                - /home/docker/home-assistant/ha_pingcheck_data:/usr/share/nginx/html/pingcheck:ro
+                - /symbios/services/home-assistant/ha_pingcheck_data:/usr/share/nginx/html/pingcheck:ro
                 - /etc/localtime:/etc/localtime:ro
               networks:
                 traefik: null
@@ -274,9 +274,9 @@
         backup: yes
       notify: Restart home-assistant
 
-    - name: /home/docker/traefik/providers/home-assistant.yml Home-Assistant<->Traefik provider
+    - name: /symbios/services/traefik/providers/home-assistant.yml Home-Assistant<->Traefik provider
       blockinfile:
-        path: /home/docker/traefik/providers/home-assistant.yml
+        path: /symbios/services/traefik/providers/home-assistant.yml
         create: yes
         mode: 0444
         owner: root
@@ -334,7 +334,7 @@
 
     - name: Create custom_components dir
       file:
-        path: "/home/docker/home-assistant/config/custom_components"
+        path: "/symbios/services/home-assistant/config/custom_components"
         state: directory
         owner: root
         group: root
@@ -343,7 +343,7 @@
     - name: Copy hass_oidc_auth component
       copy:
         src: "/tmp/hass-oidc-auth/custom_components/auth_oidc"
-        dest: "/home/docker/home-assistant/config/custom_components"
+        dest: "/symbios/services/home-assistant/config/custom_components"
         owner: root
         group: root
         mode: "0644"
@@ -351,17 +351,17 @@
 
     - name: write OIDC config in authelias configuration.yml
       ansible.builtin.blockinfile:
-        path: /home/docker/authelia/authelia-data/configuration.yml
+        path: /symbios/services/authelia/authelia-data/configuration.yml
         marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC home-assistant"
         block: |2
                 # home-assistant
                 - client_id: 'home-assistant'
                   client_name: 'Home Assistant'
-                  client_secret: '{{ lookup('file', '/home/docker/home-assistant/oidc_digest') }}'
+                  client_secret: '{{ lookup('file', '/symbios/services/home-assistant/oidc_digest') }}'
                   public: false
                   require_pkce: true
                   pkce_challenge_method: 'S256'
-                  authorization_policy: '{{ lookup('file', '/home/docker/authelia/authorization_policy') }}'
+                  authorization_policy: '{{ lookup('file', '/symbios/services/authelia/authorization_policy') }}'
                   consent_mode: 'implicit'
                   redirect_uris:
                     - 'https://home-assistant.{{ base_domain }}/auth/oidc/callback'
@@ -383,16 +383,16 @@
     - name: Start home-assistant
       ansible.builtin.shell: docker compose up -d
       args:
-        chdir: /home/docker/home-assistant
-        creates: /home/docker/home-assistant/config/home-assistant_v2.db
+        chdir: /symbios/services/home-assistant
+        creates: /symbios/services/home-assistant/config/home-assistant_v2.db
      
     - name: Wait until home-assistant install is finished
       wait_for:
-        path: /home/docker/home-assistant/config/home-assistant_v2.db
+        path: /symbios/services/home-assistant/config/home-assistant_v2.db
      
-    - name: /home/docker/home-assistant/home-assistant.init.sh
+    - name: /symbios/services/home-assistant/home-assistant.init.sh
       blockinfile:
-        path: /home/docker/home-assistant/home-assistant.init.sh
+        path: /symbios/services/home-assistant/home-assistant.init.sh
         mode: "0500"
         owner: root
         group: root
@@ -403,7 +403,7 @@
           sleep 30
 
           # Change to service directory
-          if ! cd /home/docker/home-assistant
+          if ! cd /symbios/services/home-assistant
           then
             exit 1
           fi
@@ -416,18 +416,18 @@
             \"username\": \"haadmin\",
             \"password\": \"${HA_ADMIN_PASSWORD}\",
             \"language\": \"de\"
-          }" >>/home/docker/home-assistant/home-assistant.init.log 2>&1
+          }" >>/symbios/services/home-assistant/home-assistant.init.log 2>&1
           # install home assistant community store (hacs)
-          docker compose exec -ti home-assistant wget -O - https://get.hacs.xyz | bash - >>/home/docker/home-assistant/home-assistant.init.log 2>&1
+          docker compose exec -ti home-assistant wget -O - https://get.hacs.xyz | bash - >>/symbios/services/home-assistant/home-assistant.init.log 2>&1
         backup: yes
         validate: /bin/bash -n %s
       #notify: run home-assistant.init
     
     - name: Run home-assistant.init after install
-      ansible.builtin.shell: bash /home/docker/home-assistant/home-assistant.init.sh
+      ansible.builtin.shell: bash /symbios/services/home-assistant/home-assistant.init.sh
       args:
-        chdir: /home/docker/home-assistant
-        creates: /home/docker/home-assistant/home-assistant.init.log
+        chdir: /symbios/services/home-assistant
+        creates: /symbios/services/home-assistant/home-assistant.init.log
 
     - name: Allow port 8123/tcp on iot0 interface for healthchecks for example for shelly switches
       community.general.ufw:
@@ -454,7 +454,7 @@
           #set -o pipefail
           HOME=/tmp
           . /etc/bash/gaboshlib.include
-          DIR="/home/docker/home-assistant/ha_pingcheck_data"
+          DIR="/symbios/services/home-assistant/ha_pingcheck_data"
           ROUTER="router"
           INTERVAL=2
 
@@ -582,16 +582,16 @@
     - name: run genpw.sh
       ansible.builtin.shell: ./genpw.sh
       args:
-        chdir: /home/docker/home-assistant
+        chdir: /symbios/services/home-assistant
       notify: Restart home-assistant
 
     #- name: run home-assistant.init
-    #  ansible.builtin.shell: bash /home/docker/home-assistant/home-assistant.init.sh
+    #  ansible.builtin.shell: bash /symbios/services/home-assistant/home-assistant.init.sh
 
     - name: Restart home-assistant
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
-        chdir: /home/docker/home-assistant
+        chdir: /symbios/services/home-assistant
 
     - name: Restart authelia
       ansible.builtin.shell: |
@@ -600,7 +600,7 @@
           docker compose up -d
         fi
       args:
-        chdir: /home/docker/authelia
+        chdir: /symbios/services/authelia
 
     - name: Restart ha_pingcheck
       ansible.builtin.systemd:
@@ -611,6 +611,6 @@
     - name: Restart traefik
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
-        chdir: /home/docker/traefik
+        chdir: /symbios/services/traefik
 
 

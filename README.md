@@ -3,7 +3,7 @@
 Debian-based distribution for self-hosted servers. SymbiOS turns a plain
 Debian machine into a managed, containerized home/server platform: a reverse
 proxy with automatic TLS, single sign-on with two-factor auth, an LDAP
-directory, a local fallback CA, and a web UI to manage it all. On top of the
+directory, and a web UI to manage it all. On top of the
 base system you can drop in your own services through the `services/`
 subdirectory.
 
@@ -28,14 +28,15 @@ the WebUI — each one stronger together than alone. SymbiOS stands for
 3. [Repository layout](#3-repository-layout)
 4. [The base services](#4-the-base-services)
 5. [Domains, TLS and certificates](#5-domains-tls-and-certificates)
-6. [Networking and Traefik routing](#6-networking-and-traefik-routing)
-7. [Installation](#7-installation)
-8. [Managing the system (WebUI / SSH)](#8-managing-the-system-webui--ssh)
+6. [External services and network access](#6-external-services-and-network-access)
+7. [Networking and Traefik routing](#7-networking-and-traefik-routing)
+8. [Installation](#8-installation)
+9. [Managing the system (WebUI / SSH)](#9-managing-the-system-webui--ssh)
    - [State-file install tracking](#state-file-install-tracking)
-9. [Adding your own service](#9-adding-your-own-service)
-10. [User-uploaded playbooks](#10-user-uploaded-playbooks)
-11. [License](#license)
-12. [Disclaimer](#disclaimer)
+10. [Adding your own service](#10-adding-your-own-service)
+11. [User-uploaded playbooks](#11-user-uploaded-playbooks)
+12. [License](#license)
+13. [Disclaimer](#disclaimer)
 
 ---
 
@@ -99,7 +100,7 @@ daemon is required.
 
 Key idea: **Traefik does not use the Docker provider and has no access to the
 Docker socket.** Routing is declared as *file-provider* snippets in
-`/home/docker/traefik/providers/`, which Traefik watches at runtime. A service
+`/symbios/base-services/traefik/providers/`, which Traefik watches at runtime. A service
 becomes reachable by (a) joining the external `traefik` Docker network and
 (b) dropping a provider snippet that points a `Host(...)` rule at the
 container's IP/port.
@@ -112,25 +113,44 @@ container's IP/port.
 SymbiOS/
 ├── install.sh            # Bootstrap: install ansible, clone repo, run base-services
 ├── inventory.yml         # Template inventory (copied to the host on first install)
-├── symbios-exec.sh       # Minimal audit-logging SSH executor used by the WebUI
-├── base-services/          # Core Ansible playbooks (the "Basisservices")
+├── base-services/        # Core Ansible playbooks (the "Basisservices")
 │   ├── *.yml             # One playbook per concern (see section 4)
-│   ├── traefik-services.j2   # Template -> /home/docker/traefik/providers/symbios-services.yml
+│   ├── traefik-services.j2   # Template -> /symbios/base-services/traefik/providers/symbios-services.yml
 │   ├── authelia-access-control.j2  # Template -> Authelia access_control block
 │   └── traefik-static.yml# Traefik static config (entrypoints, etc.)
+├── scripts/              # Helper scripts deployed to /usr/local/sbin/ and the WebUI
+│   ├── runchecks.d/      # Health-check scripts (run by runchecks.sh)
+│   ├── autoupdate.d/     # Update dispatchers (debian / docker / symbios)
+│   └── backup.d/         # Backup modules (docker, ldap-docker, …)
 ├── services/             # OPTIONAL user services (each = one playbook)
 │   ├── home-assistant.yml# Example service (canonical Traefik file-provider pattern)
 │   ├── nextcloud.yml     # Example service
 │   └── sftp-share.yml    # Example service (exposes a raw port, not via Traefik)
 ├── webui/                # Django management UI (shipped as the symbios-ui container)
 ├── desktop/              # Optional desktop environment playbooks (Raspberry Pi)
+├── symbpios-image/       # Raspberry Pi OS image builder (first-boot installer via rc.local)
 └── LICENSE
 ```
 
-On the target host the repo lives at `/home/SymbiOS`, and generated service
-state lives under `/home/docker/<service>/`. The live inventory is at
-`/home/docker/symbios-ui/config/inventory.yml`. User-uploaded playbooks are
-stored in `/home/docker/symbios-ui/config/user-playbooks/` (see section 10).
+On the target host all data lives under the `/symbios` data root (which may
+itself be a LUKS-encrypted disk, see `scripts/symbios-data-partition.sh`):
+
+```
+/symbios/
+├── git/SymbiOS/                  # The repository itself (mounted read-only into the WebUI)
+├── base-services/                # Core stacks (symbios-ui, traefik, ldap, authelia, …)
+├── services/                     # User service stacks (one dir per installed service)
+├── docker/                       # Docker data root (daemon.json "data-root")
+├── containerd/                   # containerd data root (containerd config.toml)
+├── backups/                      # SymbiOS backups
+└── home/symbios                  # symlink target of /home (only if /home was empty)
+```
+
+`/home` becomes a symlink to `/symbios/home` on first install (the playbook
+skips this if `/home` already contains user data). The live inventory is at
+`/symbios/base-services/symbios-ui/config/inventory.yml`. User-uploaded playbooks
+are stored in `/symbios/base-services/symbios-ui/config/user-playbooks/`
+(see section 11). `/var/log` stays on the root filesystem.
 
 ---
 
@@ -143,6 +163,7 @@ concern and is idempotent, so it is safe to re-run any of them.
 | Playbook             | Purpose                                                                 |
 |----------------------|-------------------------------------------------------------------------|
 | `basics.yml`         | Base OS setup: apt upgrade, locale/timezone, hostname, essentials.      |
+| `localization.yml`   | Timezone, keyboard layout and system locale.                            |
 | `hardening.yml`      | SSHd hardening, kernel/sysctl and permission hardening.                 |
 | `firewall.yml`       | `ufw` firewall; opens SSH (port 33), and the ports services need.      |
 | `backup.yml`         | Installs `rsync` and `/usr/local/sbin/backup.d/` backup hooks.          |
@@ -151,6 +172,7 @@ concern and is idempotent, so it is safe to re-run any of them.
 | `docker.yml`         | Installs Docker, creates the `docker` user/group.                       |
 | `dedyn.yml`          | deSEC (dedyn.io) dynamic-DNS client (`/usr/local/sbin/dedyn.sh`).       |
 | `traefik.yml`        | Deploys the Traefik reverse proxy (file provider, no Docker socket).   |
+| `traefik-static.yml` | Traefik static config template (entrypoints, ACME resolver).            |
 | `ldap.yml`           | Deploys OpenLDAP.                         |
 | `authelia.yml`       | Deploys Authelia (SSO/2FA/OIDC) and its access-control rules.          |
 | `smtp.yml`           | Writes an SMTP client marker file when mail is configured.             |
@@ -165,7 +187,7 @@ concern and is idempotent, so it is safe to re-run any of them.
 - One certificate resolver: `letsencrypt` — public ACME (HTTP-01 challenge).
 - Middlewares are defined in `providers/_default.yml`: `secHeaders@file`,
   `authelia@file` (forward auth to Authelia), and `default-basic-auth@file`.
-- Routing is loaded from `providers/` (see section 6).
+- Routing is loaded from `providers/` (see section 7).
 
 ### Authelia (`authelia.yml`)
 
@@ -198,7 +220,46 @@ base_domain:     "symbios-dev.dedyn.io"   # shared parent for all services
 
 ---
 
-## 6. Networking and Traefik routing
+## 6. External services and network access
+
+For transparency, SymbiOS communicates with the following external services
+during normal operation. Everything marked *optional* is only contacted when
+the matching feature is configured or installed.
+
+| Service | Purpose | Contacted |
+|---------|---------|-----------|
+| **Let's Encrypt** (`acme-v02.api.letsencrypt.org`) | Issues the TLS certificates for `*.{{ base_domain }}` (ACME HTTP-01 challenge). Only during issuance/renewal. | always (Traefik) |
+| **deSEC** (`desec.io` API) | Dynamic-DNS updates and domain/rrsets management. | when DDNS is configured |
+| **deSEC echo services** (`checkipv4.dedyn.io`, `checkipv6.dedyn.io`) | Determine the current public IP (DynDNS and external-reachability check). | when DDNS is configured |
+| **Debian apt repositories** (`deb.debian.org`, `security.debian.org`) | Base system package updates. | always |
+| **Docker apt repository** (`download.docker.com`) | Installs/updates the Docker engine. | `docker.yml` |
+| **PyPI** (`pypi.org`) | Downloads Python dependencies when building the WebUI container. | WebUI build |
+| **Docker Hub** (`docker.io`) | Pulls the `traefik` and `authelia` images (and any user-installed service images). | always / per service |
+| **GitHub Container Registry** (`ghcr.io`) | Optional service images (`paperless-ngx`, `home-assistant`, …). | per service |
+| **GitHub** (`github.com/egabosh/SymbiOS`, `raw.githubusercontent.com`) | Clones/pulls the SymbiOS repo during install and automatic updates. | install/update |
+| **GitHub** (`github.com/egabosh/gaboshlib`) | Installs the shared bash library. | `basics.yml` |
+| **Raspberry Pi** (`downloads.raspberrypi.com`) | Downloads the base Raspberry Pi OS image. | image builder only |
+| **Digitalcourage DNS** (`dns3.digitalcourage.de`) | Internet-connectivity ping in the health checks. | every 5 min |
+| **YouGetSignal** (`ports.yougetsignal.com`) | External port-reachability probe (is a port reachable from the internet). | manual / WebUI check |
+| **Qualys SSL Labs** (`ssllabs.com`) | TLS grade scan of hosted services. | optional script |
+
+The host resolves DNS through its locally configured resolver (systemd-resolved
+/ router DHCP), so every domain lookup also reaches the configured upstream
+nameserver.
+
+When enabled, the following **user-configurable** connections are made:
+
+- **SMTP relay** (`smtp_server`) — sends notification mails.
+- **Backup server** (`backup_server_host`) — `rsync`/SSH off-site backups.
+- **deSEC API token** (`ddns_apikey`) — required for DynDNS updates.
+
+Services installed via `services/` are free to contact their own external
+endpoints (e.g. Matrix federation, map tiles) and pull their container images
+from public registries. See each service playbook for details.
+
+---
+
+## 7. Networking and Traefik routing
 
 All proxyable containers attach to one external Docker network named
 **`traefik`** (bridge `br-traefik`, Traefik itself has the static IP
@@ -206,7 +267,7 @@ All proxyable containers attach to one external Docker network named
 that network.
 
 Routing is **file-provider based**. Traefik watches
-`/home/docker/traefik/providers/` (mounted as `/etc/traefik/providers.local`).
+`/symbios/base-services/traefik/providers/` (mounted as `/etc/traefik/providers.local`).
 Files there:
 
 - `_default.yml` — shared middlewares (`secHeaders@file`, `authelia@file`, …).
@@ -245,7 +306,7 @@ Traefik with no restart.
 
 ---
 
-## 7. Installation
+## 8. Installation
 
 ### Raspberry Pi image
 
@@ -266,21 +327,24 @@ sudo bash install.sh
 `install.sh` will:
 
 1. Install Ansible + `community.general`.
-2. Clone this repo to `/home/SymbiOS` (or pull updates).
-3. Create `/home/docker/symbios-ui/config/inventory.yml` from the bundled
+2. Clone this repo to `/symbios/git/SymbiOS` (or pull updates).
+3. Create `/symbios/base-services/symbios-ui/config/inventory.yml` from the bundled
    template on first run.
-4. Run the base-services playbooks in order (basics -> hardening -> firewall ->
-   backup -> autoupdate -> runchecks -> docker -> dedyn -> traefik
-   -> ldap -> authelia -> symbios-ui).
-5. On a Raspberry Pi, also apply `raspberry.yml` and the desktop playbook.
+4. Run the base-services playbooks in order (basics -> localization ->
+   hardening -> firewall -> backup -> autoupdate -> runchecks -> docker ->
+   dedyn -> ldap -> symbios-ui). The `traefik.yml` and `authelia.yml`
+   playbooks are kept commented out at install time — they require
+   `base_domain` and are applied from the WebUI after configuration.
+5. On a Raspberry Pi, also apply `raspberry.yml` and the
+   `desktop/firefox.yml` desktop playbook.
 
 After install, edit the inventory to set `base_domain` and
 (optionally) deSEC credentials, then apply them via the WebUI (which runs the
-matching playbook over SSH, see section 8).
+matching playbook over SSH, see section 9).
 
 ---
 
-## 8. Managing the system (WebUI / SSH)
+## 9. Managing the system (WebUI / SSH)
 
 - **symbios-ui** is a Django web app (container `symbios-webui`) that reads the
   inventory and lets you change settings, add/remove services, and start/stop
@@ -303,7 +367,7 @@ matching playbook over SSH, see section 8).
 - **Secrets stay on the host.** The WebUI container mounts the playbook repo
   read-only at `/repo` (see `base-services/symbios-ui.yml`); the repo only ever
   contains runtime-generated placeholders (`!...!`), never real credentials.
-  Real secrets live in each service's `/home/docker/<name>/env` and are never
+  Real secrets live in each service's `/symbios/services/<name>/env` and are never
   mounted into the WebUI.
 
 Manual equivalents:
@@ -311,20 +375,20 @@ Manual equivalents:
 ```bash
 # re-apply a base-services playbook
 ansible-playbook --limit localhost \
-  --inventory /home/docker/symbios-ui/config/inventory.yml \
-  /home/SymbiOS/base-services/traefik.yml
+  --inventory /symbios/base-services/symbios-ui/config/inventory.yml \
+  /symbios/git/SymbiOS/base-services/traefik.yml
 
 # run a service playbook
 ansible-playbook --connection=local \
-  --inventory /home/docker/symbios-ui/config/inventory.yml \
+  --inventory /symbios/base-services/symbios-ui/config/inventory.yml \
   --limit localhost \
   -e ansible_python_interpreter=/usr/bin/python3 \
-  /home/SymbiOS/services/home-assistant.yml
+  /symbios/git/SymbiOS/services/home-assistant.yml
 ```
 
 ---
 
-## 9. Adding your own service
+## 10. Adding your own service
 
 Full documentation for creating service playbooks, the `# docs:` block format,
 healthcheck scripts, and user-uploaded playbooks is available in the WebUI at
@@ -334,25 +398,25 @@ healthcheck scripts, and user-uploaded playbooks is available in the WebUI at
 Summary of the workflow:
 
 1. Create `services/<name>.yml` with a `# docs:` header and Ansible tasks.
-2. The playbook creates a Docker Compose stack under `/home/docker/<name>/`
+2. The playbook creates a Docker Compose stack under `/symbios/services/<name>/`
    and (optionally) a Traefik provider snippet for HTTP routing.
 3. The WebUI discovers it via the `# docs:` block and presents install/stop/restart
    buttons, live logs, and health status.
 4. Deploy from the WebUI or manually:
    ```bash
    ansible-playbook --connection=local \
-     --inventory /home/docker/symbios-ui/config/inventory.yml \
+     --inventory /symbios/base-services/symbios-ui/config/inventory.yml \
      --limit localhost \
      -e ansible_python_interpreter=/usr/bin/python3 \
-     /home/SymbiOS/services/<name>.yml
+     /symbios/git/SymbiOS/services/<name>.yml
    ```
 
 ---
 
-## 10. User-uploaded playbooks
+## 11. User-uploaded playbooks
 
 Upload custom Ansible playbooks through **Settings > Playbooks** in the WebUI.
-They are stored on the host at `/home/docker/symbios-ui/config/user-playbooks/`
+They are stored on the host at `/symbios/base-services/symbios-ui/config/user-playbooks/`
 and appear in the Services section under **Custom Playbooks**. See the WebUI
 documentation for the required `# docs:` format and upload workflow.
 

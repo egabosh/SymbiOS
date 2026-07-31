@@ -1,13 +1,13 @@
 #!/bin/bash
 # SymbiOS - Run an Ansible playbook with standard flags
 # Usage: symbios-run-playbook.sh <playbook_path>
-# The playbook_path is relative to /home/SymbiOS/ (e.g. base-services/smtp.yml)
+# The playbook_path is relative to /symbios/git/SymbiOS/ (e.g. base-services/smtp.yml)
 
 source /etc/bash/gaboshlib.include
 
 g_playbook="${1:-}"
-g_inventory="/home/docker/symbios-ui/config/inventory.yml"
-g_repo="/home/SymbiOS"
+g_inventory="/symbios/base-services/symbios-ui/config/inventory.yml"
+g_repo="/symbios/git/SymbiOS"
 
 if [[ -z "$g_playbook" ]]
 then

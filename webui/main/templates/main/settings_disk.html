@@ -235,28 +235,28 @@ function loadStatus() {
         document.getElementById('luks-password-section').style.display = 'none';
       }
 
-      if (data.home_device) {
-        window._homeSize = data.home_size;
+      if (data.data_device) {
+        window._dataSize = data.data_size;
 
         /* Determine if data is on the system disk or a separate disk */
-        var isOnRoot = data.home_device.indexOf('mmcblk') !== -1 ||
-                       data.home_device.indexOf('nvme0n1') !== -1 ||
-                       data.home_fstype === 'rootfs';
-        var model = findModelForDevice(data.home_device);
+        var isOnRoot = data.data_device.indexOf('mmcblk') !== -1 ||
+                       data.data_device.indexOf('nvme0n1') !== -1 ||
+                       data.data_fstype === 'rootfs';
+        var model = findModelForDevice(data.data_device);
 
         var html = '<div class="d-flex align-items-center gap-3">';
         if (isOnRoot) {
           html += '<i class="bi bi-info-circle fs-3 text-muted"></i>';
           html += '<div>';
           html += '<strong>Data is on the system disk</strong>';
-          html += '<div class="small text-muted">' + data.home_size + ' total, ' + data.home_used + ' used, ' + data.home_avail + ' free</div>';
+          html += '<div class="small text-muted">' + data.data_size + ' total, ' + data.data_used + ' used, ' + data.data_avail + ' free</div>';
         } else {
           html += '<i class="bi bi-check-circle-fill fs-3 text-success"></i>';
           html += '<div>';
           html += '<strong>Data is on a separate disk</strong>';
           html += '<div class="small text-muted">';
           if (model) html += model + ' &middot; ';
-          html += data.home_size + ' &middot; ' + data.home_used + ' used, ' + data.home_avail + ' free';
+          html += data.data_size + ' &middot; ' + data.data_used + ' used, ' + data.data_avail + ' free';
           html += '</div>';
         }
         html += '</div></div>';
@@ -349,11 +349,11 @@ function renderDevice(dev) {
 /* Determine disk status from mount points (this disk or any child) */
 function getStatus(dev) {
   if (dev.mountpoint === '/') return 'system';
-  if (dev.mountpoint === '/home') return 'data';
+  if (dev.mountpoint === '/symbios') return 'data';
   for (var i = 0; i < (dev.children || []).length; i++) {
     var child = dev.children[i];
     if (child.mountpoint === '/') return 'system';
-    if (child.mountpoint === '/home') return 'data';
+    if (child.mountpoint === '/symbios') return 'data';
   }
   return 'available';
 }
@@ -493,11 +493,11 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
   var devInfo = findDeviceByPath(window._diskData || [], device);
   if (devInfo) {
     var devBytes = parseSizeBytes(devInfo.size);
-    var homeBytes = parseSizeBytes(window._homeSize || '0');
+    var homeBytes = parseSizeBytes(window._dataSize || '0');
     if (devBytes > 0 && homeBytes > 0 && devBytes < homeBytes * 1.1) {
       e.preventDefault();
       var devLabel = devInfo.model ? devInfo.model + ' (' + devInfo.size + ')' : devInfo.size;
-      SymbiOS.exec.showAlert('Disk (' + devLabel + ') may be too small for your data (' + window._homeSize + ').', 'warning');
+      SymbiOS.exec.showAlert('Disk (' + devLabel + ') may be too small for your data (' + window._dataSize + ').', 'warning');
       return;
     }
   }

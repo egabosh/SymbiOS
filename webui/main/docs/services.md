@@ -5,7 +5,7 @@
 A **service** in SymbiOS is a single Ansible playbook that deploys and manages a Docker
 container on the host. Each service creates:
 
-- A Docker Compose stack under `/home/docker/<name>/`
+- A Docker Compose stack under `/symbios/services/<name>/`
 - A Traefik provider snippet for HTTP routing (optional)
 - Status checks, log streams, and lifecycle actions the WebUI can control
 

@@ -36,7 +36,7 @@ fi
 if [[ -f /usr/local/bin/ssllabs-scan ]]
 then
   # Collect all hostnames from docker-compose files
-  find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "\.del$|\.bak$|\.old$|var-lib-docker$" | while read g_dir
+  find /symbios/base-services /symbios/services -maxdepth 1 -mindepth 1 -type d | grep -E -v "\.del$|\.bak$|\.old$|var-lib-docker$" | while read g_dir
   do
     if grep -q Host "$g_dir"/docker-compose.override.yml >/dev/null 2>&1
     then
@@ -48,7 +48,7 @@ then
       fi
     fi
   done
-  grep Host /home/docker/traefik/providers/*.yml >>"$g_tmp/hosts"
+  grep Host /symbios/base-services/traefik/providers/*.yml >>"$g_tmp/hosts"
 
   # Iterate over unique hostnames and run ssllabs-scan
   cat "$g_tmp/hosts" | cut -d '`' -f2 | sort -u | while read g_host

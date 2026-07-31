@@ -31,15 +31,15 @@
 #     services:
 #     - name: ldap
 #       type: docker
-#       compose_file: /home/docker/ldap/docker-compose.yml
-#       status: test -d /home/docker/ldap || exit 2; docker compose -f /home/docker/ldap/docker-compose.yml ps | grep -q "Up "
+#       compose_file: {{ docker_path }}/docker-compose.yml
+#       status: test -d {{ docker_path }} || exit 2; docker compose -f {{ docker_path }}/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: ldap
-#       command: docker compose -f /home/docker/ldap/docker-compose.yml logs -f --tail=1000
+#       command: docker compose -f {{ docker_path }}/docker-compose.yml logs -f --tail=1000
 #   actions:
-#     start: docker compose -f /home/docker/ldap/docker-compose.yml up -d
-#     stop: docker compose -f /home/docker/ldap/docker-compose.yml down
-#     restart: docker compose -f /home/docker/ldap/docker-compose.yml restart
+#     start: docker compose -f {{ docker_path }}/docker-compose.yml up -d
+#     stop: docker compose -f {{ docker_path }}/docker-compose.yml down
+#     restart: docker compose -f {{ docker_path }}/docker-compose.yml restart
 
 ---
 - name: ldap
@@ -47,7 +47,7 @@
 
   vars:
     service_name: "ldap"
-    docker_path: "/home/docker/{{ service_name }}"
+    docker_path: "{{ base_services_root }}/{{ service_name }}"
 
   tasks:
 
@@ -470,7 +470,7 @@
     # Set initial admin user password in LDAP directory (only on first run)
     - name: Check if admin password was already initialized
       ansible.builtin.stat:
-        path: /home/docker/symbios-ui/config/.admin_initialized
+        path: "{{ base_services_root }}/symbios-ui/config/.admin_initialized"
       register: admin_init_flag
 
     - name: Ensure admin user password is admin in LDAP
@@ -483,7 +483,7 @@
 
     - name: Create admin initialization flag
       ansible.builtin.file:
-        path: /home/docker/symbios-ui/config/.admin_initialized
+        path: "{{ base_services_root }}/symbios-ui/config/.admin_initialized"
         state: touch
         mode: "0640"
         owner: "10000"
@@ -491,7 +491,7 @@
       when: not admin_init_flag.stat.exists
     - name: Write ldap_admin_password to .ldap_admin_pw for webui
       ansible.builtin.copy:
-        dest: /home/docker/symbios-ui/config/.ldap_admin_pw
+        dest: "{{ base_services_root }}/symbios-ui/config/.ldap_admin_pw"
         content: "{{ ldap_admin_password.stdout }}"
         mode: "0400"
         owner: "10000"

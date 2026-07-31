@@ -31,17 +31,17 @@
 #     services:
 #     - name: opencode
 #       type: docker
-#       compose_file: /home/docker/opencode/docker-compose.yml
-#       status: test -d /home/docker/opencode || exit 2; docker compose -f /home/docker/opencode/docker-compose.yml ps | grep -q "Up "
+#       compose_file: /symbios/services/opencode/docker-compose.yml
+#       status: test -d /symbios/services/opencode || exit 2; docker compose -f /symbios/services/opencode/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: opencode
-#       command: docker compose -f /home/docker/opencode/docker-compose.yml logs -f --tail=100
+#       command: docker compose -f /symbios/services/opencode/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/opencode/docker-compose.yml down
-#     start: docker compose -f /home/docker/opencode/docker-compose.yml up -d
-#     stop: docker compose -f /home/docker/opencode/docker-compose.yml down
-#     restart: docker compose -f /home/docker/opencode/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/opencode/docker-compose.yml up -d
+#     uninstall: docker compose -f /symbios/services/opencode/docker-compose.yml down
+#     start: docker compose -f /symbios/services/opencode/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/opencode/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/opencode/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/opencode/docker-compose.yml up -d
 #
 ---
 - name: opencode
@@ -51,17 +51,17 @@
     service_domain: "{{ service_name }}.{{ base_domain }}"
   tasks:
 
-    - name: Create /home/docker/opencode dir
+    - name: Create /symbios/services/opencode dir
       ansible.builtin.file:
-        path: /home/docker/opencode
+        path: /symbios/services/opencode
         owner: root
         group: docker
         state: directory
         mode: '0550'
 
-    - name: /home/docker/opencode/docker-compose.yml Container Configuration
+    - name: /symbios/services/opencode/docker-compose.yml Container Configuration
       blockinfile:
-        path: /home/docker/opencode/docker-compose.yml
+        path: /symbios/services/opencode/docker-compose.yml
         create: yes
         mode: 0440
         owner: root
@@ -99,9 +99,9 @@
         backup: yes
       notify: Restart opencode
 
-    - name: /home/docker/traefik/providers/opencode.yml Traefik Routing Configuration
+    - name: /symbios/services/traefik/providers/opencode.yml Traefik Routing Configuration
       blockinfile:
-        path: /home/docker/traefik/providers/opencode.yml
+        path: /symbios/services/traefik/providers/opencode.yml
         create: yes
         mode: 0444
         owner: root
@@ -128,9 +128,9 @@
         backup: yes
       notify: Restart traefik
 
-    - name: /home/docker/opencode/Dockerfile
+    - name: /symbios/services/opencode/Dockerfile
       blockinfile:
-        path: /home/docker/opencode/Dockerfile
+        path: /symbios/services/opencode/Dockerfile
         create: yes
         mode: 0440
         owner: root
@@ -149,9 +149,9 @@
         backup: yes
       notify: Restart opencode
 
-    - name: Create /home/docker/opencode/ssh dir
+    - name: Create /symbios/services/opencode/ssh dir
       ansible.builtin.file:
-        path: /home/docker/opencode/ssh
+        path: /symbios/services/opencode/ssh
         owner: root
         group: root
         state: directory
@@ -160,13 +160,13 @@
     - name: Generate ssh ed25519 keypair
       ansible.builtin.shell: ssh-keygen -q -N "" -t ed25519 -f id_ed25519 -C opencode
       args:
-        chdir: /home/docker/opencode/ssh
-        creates: /home/docker/opencode/ssh/id_ed25519
+        chdir: /symbios/services/opencode/ssh
+        creates: /symbios/services/opencode/ssh/id_ed25519
       notify: Restart opencode
 
-    - name: Create /home/docker/opencode/opencode-config dir
+    - name: Create /symbios/services/opencode/opencode-config dir
       ansible.builtin.file:
-        path: /home/docker/opencode/opencode-config
+        path: /symbios/services/opencode/opencode-config
         owner: root
         group: root
         state: directory
@@ -181,11 +181,11 @@
           - All comments and variable names are in English
           - Use gaboshlib (/etc/bash/gaboshlib) whenever sensible and available
           - Use Ansible playbooks for installations and configurations by default
-        dest: "/home/docker/opencode/opencode-config/AGENTS.md"
+        dest: "/symbios/services/opencode/opencode-config/AGENTS.md"
         mode: "0644"
         force: false
 
-    - name: /home/docker/opencode/opencode-config/opencode.json
+    - name: /symbios/services/opencode/opencode-config/opencode.json
       copy:
         content: |
           {
@@ -222,13 +222,13 @@
               "tail_turns": 10
             }
           }
-        dest: /home/docker/opencode/opencode-config/opencode.json
+        dest: /symbios/services/opencode/opencode-config/opencode.json
         mode: 0440
         owner: root
         group: root
         #backup: yes
       #args:
-      #  creates: /home/docker/opencode/opencode-config/opencode.json
+      #  creates: /symbios/services/opencode/opencode-config/opencode.json
       notify: Restart opencode
 
     - name: Add opencode to WoL hosts file
@@ -252,7 +252,7 @@
 
     - name: write OIDC config in authelias configuration.yml
       ansible.builtin.blockinfile:
-        path: /home/docker/authelia/authelia-data/configuration.yml
+        path: /symbios/services/authelia/authelia-data/configuration.yml
         marker: "# {mark} ANSIBLE MANAGED BLOCK opencode ACCESS CONTROL"
         block: |2
               - domain: "opencode.{{ base_domain }}"
@@ -294,14 +294,14 @@
     - name: Restart opencode
       ansible.builtin.shell: docker compose build --pull --no-cache --force-rm && docker compose up -d --force-recreate
       args:
-        chdir: /home/docker/opencode
+        chdir: /symbios/services/opencode
 
     - name: Restart authelia
       ansible.builtin.shell: docker compose down && docker compose up -d
       args:
-        chdir: /home/docker/authelia
+        chdir: /symbios/services/authelia
 
     - name: Restart traefik
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
-        chdir: /home/docker/traefik
+        chdir: /symbios/services/traefik

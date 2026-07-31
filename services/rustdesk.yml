@@ -30,17 +30,17 @@
 #     services:
 #     - name: rustdesk
 #       type: docker
-#       compose_file: /home/docker/rustdesk/docker-compose.yml
-#       status: test -d /home/docker/rustdesk || exit 2; docker compose -f /home/docker/rustdesk/docker-compose.yml ps | grep -q "Up "
+#       compose_file: /symbios/services/rustdesk/docker-compose.yml
+#       status: test -d /symbios/services/rustdesk || exit 2; docker compose -f /symbios/services/rustdesk/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: rustdesk
-#       command: docker compose -f /home/docker/rustdesk/docker-compose.yml logs -f --tail=100
+#       command: docker compose -f /symbios/services/rustdesk/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/rustdesk/docker-compose.yml down
-#     start: docker compose -f /home/docker/rustdesk/docker-compose.yml up -d
-#     stop: docker compose -f /home/docker/rustdesk/docker-compose.yml down
-#     restart: docker compose -f /home/docker/rustdesk/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/rustdesk/docker-compose.yml up -d
+#     uninstall: docker compose -f /symbios/services/rustdesk/docker-compose.yml down
+#     start: docker compose -f /symbios/services/rustdesk/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/rustdesk/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/rustdesk/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/rustdesk/docker-compose.yml up -d
 #
 ---
 - name: rustdesk setup
@@ -65,9 +65,9 @@
         port: '21116'
         proto: udp
 
-    - name: /home/docker/{{ service_name }}/docker-compose.yml Container Configuration
+    - name: /symbios/services/{{ service_name }}/docker-compose.yml Container Configuration
       blockinfile:
-        path: /home/docker/{{ service_name }}/docker-compose.yml
+        path: /symbios/services/{{ service_name }}/docker-compose.yml
         create: yes
         mode: 0440
         owner: root
@@ -137,5 +137,5 @@
     - name: Restart rustdesk
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
-        chdir: /home/docker/{{ service_name }}
+        chdir: /symbios/services/{{ service_name }}
 

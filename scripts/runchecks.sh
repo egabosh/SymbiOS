@@ -8,7 +8,7 @@ g_all-to-syslog
 g_echo_ok "Starting $0"
 g_staleumount
 
-g_json_file="/home/docker/symbios-ui/log/runchecks-results.json"
+g_json_file="/symbios/base-services/symbios-ui/log/runchecks-results.json"
 
 # Override g_echo_error to capture failures for JSON output
 function g_echo_error {
@@ -31,7 +31,7 @@ do
   g_json_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   # Iterate over all .check scripts sorted alphabetically
-  for g_check in $(find /usr/local/sbin/runchecks.d /home/SymbiOS/scripts/runchecks.d  -name "*.check" -type f | sort)
+  for g_check in $(find /usr/local/sbin/runchecks.d /symbios/git/SymbiOS/scripts/runchecks.d  -name "*.check" -type f | sort)
   do
     g_current_check_failed=0
     g_current_check_error=""

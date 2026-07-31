@@ -955,10 +955,10 @@ def settings_backup_test(request):
 
 
 # ---------------------------------------------------------------------------
-# Data Disk — move /home to a separate disk
+# Data Disk — move /symbios data root to a separate disk
 # ---------------------------------------------------------------------------
 
-_HOME_PART_SCRIPT = '/usr/local/sbin/symbios-home-partition.sh'
+_DATA_PART_SCRIPT = '/usr/local/sbin/symbios-data-partition.sh'
 
 
 @login_required
@@ -972,7 +972,7 @@ def settings_disk(request):
 def settings_disk_list(request):
     """AJAX GET — list block devices via shell script."""
     ok, stdout, stderr = run_command(
-        f'{_HOME_PART_SCRIPT} list', timeout=10)
+        f'{_DATA_PART_SCRIPT} list', timeout=10)
     if not ok:
         return JsonResponse({'ok': False, 'error': stderr or 'lsblk failed'})
     try:
@@ -1007,14 +1007,14 @@ def _describe_block(dev):
 
 @login_required
 def settings_disk_status(request):
-    """AJAX GET — check /home mount status and LUKS status."""
+    """AJAX GET — check /symbios mount status and LUKS status."""
     ok, stdout, stderr = run_command(
-        f'{_HOME_PART_SCRIPT} status', timeout=15)
+        f'{_DATA_PART_SCRIPT} status', timeout=15)
     if not ok:
         return JsonResponse({
             'ok': False, 'error': stderr or 'status check failed',
-            'home_device': '', 'home_fstype': '', 'home_size': '',
-            'home_used': '', 'home_avail': '',
+            'data_device': '', 'data_fstype': '', 'data_size': '',
+            'data_used': '', 'data_avail': '',
             'luks_name': '', 'luks_device': '',
             'luks_open': False, 'needs_unlock': False,
         })
@@ -1024,8 +1024,8 @@ def settings_disk_status(request):
     except json.JSONDecodeError:
         return JsonResponse({
             'ok': False, 'error': f'Invalid JSON from script: {stdout[:500]}',
-            'home_device': '', 'home_fstype': '', 'home_size': '',
-            'home_used': '', 'home_avail': '',
+            'data_device': '', 'data_fstype': '', 'data_size': '',
+            'data_used': '', 'data_avail': '',
             'luks_name': '', 'luks_device': '',
             'luks_open': False, 'needs_unlock': False,
         })
@@ -1033,7 +1033,7 @@ def settings_disk_status(request):
 
 @login_required
 def settings_disk_setup(request):
-    """AJAX POST — format, optionally encrypt, and mount a disk as /home.
+    """AJAX POST — format, optionally encrypt, and mount a disk as /symbios.
     Returns a job_id for the exec modal (streams live output)."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
@@ -1049,7 +1049,7 @@ def settings_disk_setup(request):
     if encrypt == 'yes' and not password:
         return JsonResponse({'ok': False, 'error': 'Password required for LUKS encryption'})
 
-    cmd_parts = [f'{_HOME_PART_SCRIPT} setup', device, encrypt]
+    cmd_parts = [f'{_DATA_PART_SCRIPT} setup', device, encrypt]
     if encrypt == 'yes':
         cmd_parts.append(password)
     cmd = ' '.join(cmd_parts)
@@ -1059,8 +1059,8 @@ def settings_disk_setup(request):
         from .utils.jobs import create_job
         job_id = create_job(cmd, timeout=600)
         return JsonResponse({'ok': True, 'job': job_id,
-                             'title': 'Migrating /home to new disk...',
-                             'message': f'Setting up {device} as /home.',
+                             'title': 'Migrating /symbios to new disk...',
+                             'message': f'Setting up {device} as /symbios.',
                              'command': cmd})
 
     # Fallback: synchronous execution
@@ -1080,19 +1080,19 @@ def settings_disk_setup(request):
 
 @login_required
 def settings_disk_rollback(request):
-    """AJAX POST — rollback last /home migration via exec modal."""
+    """AJAX POST — rollback last /symbios migration via exec modal."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
-    cmd = f'{_HOME_PART_SCRIPT} rollback'
+    cmd = f'{_DATA_PART_SCRIPT} rollback'
 
     is_ajax = is_ajax_request(request)
     if is_ajax:
         from .utils.jobs import create_job
         job_id = create_job(cmd, timeout=300)
         return JsonResponse({'ok': True, 'job': job_id,
-                             'title': 'Rolling back /home migration...',
-                             'message': 'Restoring original /home location.',
+                             'title': 'Rolling back /symbios migration...',
+                             'message': 'Restoring original /symbios location.',
                              'command': cmd})
 
     ok, stdout, stderr = run_command(cmd, timeout=300)
@@ -1110,18 +1110,18 @@ def settings_disk_rollback(request):
 
 @login_required
 def settings_disk_umount(request):
-    """AJAX POST — unmount and close a LUKS /home volume."""
+    """AJAX POST — unmount and close a LUKS /symbios volume."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
-    cmd = f'{_HOME_PART_SCRIPT} umount'
+    cmd = f'{_DATA_PART_SCRIPT} umount'
     is_ajax = is_ajax_request(request)
     if is_ajax:
         from .utils.jobs import create_job
         job_id = create_job(cmd, timeout=300)
         return JsonResponse({'ok': True, 'job': job_id,
-                             'title': 'Unmounting /home...',
-                             'message': '/home unmounted and LUKS volume closed.',
+                             'title': 'Unmounting /symbios...',
+                             'message': '/symbios unmounted and LUKS volume closed.',
                              'command': cmd})
 
     ok, stdout, stderr = run_command(cmd, timeout=30)
@@ -1129,12 +1129,12 @@ def settings_disk_umount(request):
         data = json.loads(stdout)
         return JsonResponse(data)
     except json.JSONDecodeError:
-        return JsonResponse({'ok': True, 'message': '/home unmounted and LUKS volume closed.'})
+        return JsonResponse({'ok': True, 'message': '/symbios unmounted and LUKS volume closed.'})
 
 
 @login_required
 def settings_disk_change_password(request):
-    """AJAX POST — change LUKS passphrase for an encrypted /home device."""
+    """AJAX POST — change LUKS passphrase for an encrypted /symbios device."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
@@ -1149,7 +1149,7 @@ def settings_disk_change_password(request):
         return JsonResponse({'ok': False, 'error': 'New password must differ from current password'})
 
     cmd_parts = [
-        f'{_HOME_PART_SCRIPT} change-password',
+        f'{_DATA_PART_SCRIPT} change-password',
         shlex.quote(current_password),
         shlex.quote(new_password),
     ]
@@ -1162,7 +1162,7 @@ def settings_disk_change_password(request):
         return JsonResponse({'ok': True, 'job': job_id,
                              'title': 'Changing LUKS passphrase...',
                              'message': 'Updating encryption key.',
-                             'command': f'{_HOME_PART_SCRIPT} change-password'})
+                             'command': f'{_DATA_PART_SCRIPT} change-password'})
 
     ok, stdout, stderr = run_command(cmd, timeout=60)
     output = stdout

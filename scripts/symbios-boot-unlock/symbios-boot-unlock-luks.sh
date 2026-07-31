@@ -3,11 +3,11 @@
 #
 # Actions:
 #   check       — JSON status: needs_unlock, device, error
-#   unlock      — read passphrase from stdin, unlock LUKS, mount /home
-#   close       — unmount /home, close LUKS
+#   unlock      — read passphrase from stdin, unlock LUKS, mount /symbios
+#   close       — unmount /symbios, close LUKS
 
 g_luks_label="CRYPT_LUKS_SYMBIOS_DATA"
-g_mapper_name="home-luks"
+g_mapper_name="symbios-luks"
 
 function f_find_luks {
   local f_dev
@@ -82,20 +82,20 @@ case "$g_action" in
       f_json_error "Wrong passphrase or device error"
     }
 
-    mkdir -p /home
-    mount "/dev/mapper/$g_mapper_name" /home 2>&1 || {
+    mkdir -p /symbios
+    mount "/dev/mapper/$g_mapper_name" /symbios 2>&1 || {
       cryptsetup close "$g_mapper_name" 2>/dev/null || true
       f_json_error "Mount failed"
     }
 
-    printf '{"ok":true,"message":"/home unlocked successfully"}\n'
+    printf '{"ok":true,"message":"/symbios unlocked successfully"}\n'
     ;;
 
   # ------------------------------------------------------------------
   close)
-    umount /home 2>/dev/null || true
+    umount /symbios 2>/dev/null || true
     cryptsetup close "$g_mapper_name" 2>/dev/null || true
-    printf '{"ok":true,"message":"/home unmounted and LUKS closed"}\n'
+    printf '{"ok":true,"message":"/symbios unmounted and LUKS closed"}\n'
     ;;
 
   *)

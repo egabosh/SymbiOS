@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Minimal boot unlock server for LUKS-encrypted /home.
+"""Minimal boot unlock server for LUKS-encrypted /symbios data root.
 
 LUKS operations are delegated to symbios-boot-unlock-luks.sh.
 This script only handles the web server (HTTPS) and console prompt.
@@ -77,7 +77,7 @@ HTML_UNLOCK = """<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SymbiOS - Unlock /home</title>
+  <title>SymbiOS - Unlock /symbios</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <style>
@@ -95,7 +95,7 @@ HTML_UNLOCK = """<!DOCTYPE html>
     <div class="unlock-card">
       <div class="text-center mb-4">
         <h1 class="mb-2"><i class="bi bi-shield-lock"></i> SymbiOS</h1>
-        <p class="text-muted">Encrypted /home requires unlock</p>
+        <p class="text-muted">Encrypted /symbios requires unlock</p>
       </div>
       <div class="card" style="background:#2a2d35; border-color:#444;">
         <div class="card-body p-4">
@@ -107,7 +107,7 @@ HTML_UNLOCK = """<!DOCTYPE html>
               <input type="password" id="passphrase" class="form-control" required autofocus autocomplete="off">
             </div>
             <button type="submit" class="btn btn-primary w-100" id="btn-unlock">
-              <i class="bi bi-unlock"></i> Unlock /home
+              <i class="bi bi-unlock"></i> Unlock /symbios
             </button>
           </form>
         </div>
@@ -120,7 +120,7 @@ HTML_UNLOCK = """<!DOCTYPE html>
   <div id="spinner" class="spinner-overlay">
     <div class="spinner-box">
       <div class="spinner-border text-primary mb-3" style="width:3rem;height:3rem;"></div>
-      <div>Unlocking /home...</div>
+      <div>Unlocking /symbios...</div>
     </div>
   </div>
   <script>
@@ -178,7 +178,7 @@ HTML_HTTP_HELP = """<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SymbiOS - Unlock /home</title>
+  <title>SymbiOS - Unlock /symbios</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <style>
@@ -191,7 +191,7 @@ HTML_HTTP_HELP = """<!DOCTYPE html>
     <div class="help-card">
       <div class="text-center mb-4">
         <h1 class="mb-2"><i class="bi bi-shield-lock"></i> SymbiOS</h1>
-        <p class="text-muted">Encrypted /home requires unlock</p>
+        <p class="text-muted">Encrypted /symbios requires unlock</p>
       </div>
       <div class="card" style="background:#2a2d35; border-color:#444;">
         <div class="card-body p-4 text-center">
@@ -225,7 +225,7 @@ HTML_DONE = """<!DOCTYPE html>
 </head>
 <body>
   <div class="text-center w-100">
-    <h2><i class="bi bi-check-circle text-success"></i> /home unlocked</h2>
+    <h2><i class="bi bi-check-circle text-success"></i> /symbios unlocked</h2>
     <p id="status" class="text-muted">Waiting for Traefik...</p>
     <p><a href="https://__HOSTNAME__/" class="btn btn-primary">Open WebUI now</a></p>
   </div>
@@ -275,7 +275,7 @@ def generate_self_signed_cert():
 
 
 def needs_unlock():
-    """Check via bash helper whether /home LUKS needs unlocking."""
+    """Check via bash helper whether /symbios LUKS needs unlocking."""
     result = call_luks("check")
     return result.get("needs_unlock", False), result
 
@@ -287,7 +287,7 @@ def do_unlock(passphrase):
     result = call_luks("unlock", passphrase)
     if result.get("ok"):
         _unlock_done.set()
-        return True, result.get("message", "/home unlocked")
+        return True, result.get("message", "/symbios unlocked")
     return False, result.get("error", "Unlock failed")
 
 
@@ -295,7 +295,7 @@ def console_unlock_thread():
     if not sys.stdin.isatty():
         return
     print("\n=== SymbiOS LUKS Unlock ===")
-    print("Enter the LUKS passphrase to unlock /home.")
+    print("Enter the LUKS passphrase to unlock /symbios.")
     print("Alternatively, open https://<this-host>/ on another device.\n")
     while not _unlock_done.is_set():
         try:
@@ -390,16 +390,16 @@ def main():
 
     must_unlock, result = needs_unlock()
     if not must_unlock:
-        log("/home is not encrypted or already unlocked, nothing to do")
+        log("/symbios is not encrypted or already unlocked, nothing to do")
         if not result.get("device"):
             msg = (
-                "WARNING: No LUKS device found. If you expect encrypted /home,\n"
+                "WARNING: No LUKS device found. If you expect encrypted /symbios,\n"
                 "         check that your disk (SSD/NVMe) is connected.\n"
-                "         Docker and containerd may fail because /var/lib/docker\n"
-                "         and /var/lib/containerd point to non-existent targets."
+                "         Docker and containerd may fail because /symbios/docker\n"
+                "         and /symbios/containerd point to non-existent targets."
             )
             print(msg, file=sys.stderr)
-            log("No LUKS device found at all — /home not encrypted")
+            log("No LUKS device found at all — /symbios not encrypted")
         return
 
     if not generate_self_signed_cert():
@@ -412,9 +412,9 @@ def main():
             must_unlock, _ = needs_unlock()
             if not must_unlock:
                 if _unlock_done.is_set():
-                    log("watchdog: /home mounted (our unlock), skipping exit")
+                    log("watchdog: /symbios mounted (our unlock), skipping exit")
                 else:
-                    log("watchdog: /home mounted externally, shutting down")
+                    log("watchdog: /symbios mounted externally, shutting down")
                     os._exit(0)
             time.sleep(30)
 

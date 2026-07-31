@@ -37,7 +37,7 @@ SSH_KNOWN_HOSTS = '/config/.ssh/known_hosts'
 # symbios-exec.sh, which audit-logs and runs it. The host key is still pinned
 # (fail-closed). Commands are shell-quoted so the remote shell does not
 # interpret metacharacters (|, ;, &&) before the executor runs them.
-SSH_GATEWAY_WRAP = 'bash /home/SymbiOS/scripts/symbios-exec.sh '
+SSH_GATEWAY_WRAP = 'bash /symbios/git/SymbiOS/scripts/symbios-exec.sh '
 
 _ssh_client = None
 _client_lock = threading.Lock()
@@ -229,12 +229,12 @@ def _log_command(playbook, unit):
 
 def _playbook_command(playbook):
     if playbook.startswith("user-playbooks/"):
-        path = "/home/docker/symbios-ui/config/user-playbooks/" + playbook.split("/", 1)[-1]
+        path = "/symbios/base-services/symbios-ui/config/user-playbooks/" + playbook.split("/", 1)[-1]
     else:
-        path = "/home/SymbiOS/" + playbook
+        path = "/symbios/git/SymbiOS/" + playbook
     return (
         "ansible-playbook --connection=local "
-        "--inventory /home/docker/symbios-ui/config/inventory.yml "
+        "--inventory /symbios/base-services/symbios-ui/config/inventory.yml "
         "--limit localhost "
         "-e ansible_python_interpreter=/usr/bin/python3 "
         + path

@@ -16,7 +16,7 @@
 
 # docs:
 #   short_description: Configure the mail client defaults
-#   description: Deploys the shared mail-client configuration (/home/docker/_defaults/mailclient) used by containers to send mail. Also configures Postfix as a local mail relay so system commands like mail(1) work.
+#   description: Deploys the shared mail-client configuration ({{ base_services_root }}/_defaults/mailclient) used by containers to send mail. Also configures Postfix as a local mail relay so system commands like mail(1) work.
 #   author: Oliver Bohlen
 #   version: '1.1'
 #   license: GPLv3
@@ -50,7 +50,7 @@
     # --- Mailclient marker (used by containers / Authelia) ---
     - name: Create mailclient marker file if SMTP is configured
       ansible.builtin.copy:
-        dest: /home/docker/_defaults/mailclient
+        dest: "{{ base_services_root }}/_defaults/mailclient"
         content: |
           smtp_server={{ smtp_server }}
           smtp_user={{ smtp_user }}
@@ -60,7 +60,7 @@
 
     - name: Remove mailclient marker file if SMTP is not configured
       ansible.builtin.file:
-        path: /home/docker/_defaults/mailclient
+        path: "{{ base_services_root }}/_defaults/mailclient"
         state: absent
       when: smtp_server is not defined or smtp_server | length == 0
 
@@ -103,7 +103,7 @@
 
     - name: Ensure postfix secrets directory exists on encrypted /home
       ansible.builtin.file:
-        path: /home/docker/_defaults/postfix
+        path: "{{ base_services_root }}/_defaults/postfix"
         state: directory
         mode: '0700'
         owner: root
@@ -112,7 +112,7 @@
 
     - name: Configure SASL password map (stored on encrypted /home)
       ansible.builtin.lineinfile:
-        path: /home/docker/_defaults/postfix/sasl_passwd
+        path: "{{ base_services_root }}/_defaults/postfix/sasl_passwd"
         line: "[{{ smtp_server }}]:{{ smtp_port | default('587') }} {{ smtp_user }}:{{ smtp_password }}"
         create: yes
         mode: '0600'
@@ -123,13 +123,13 @@
 
     - name: Generate SASL password DB
       ansible.builtin.command:
-        cmd: postmap /home/docker/_defaults/postfix/sasl_passwd
+        cmd: postmap {{ base_services_root }}/_defaults/postfix/sasl_passwd
       when: smtp_user is defined and smtp_user | length > 0 and smtp_password is defined and smtp_password | length > 0
       notify: Restart postfix
 
     - name: Set SASL password map config
       ansible.builtin.command:
-        cmd: "postconf -e 'smtp_sasl_password_maps = hash:/home/docker/_defaults/postfix/sasl_passwd'"
+        cmd: "postconf -e 'smtp_sasl_password_maps = hash:{{ base_services_root }}/_defaults/postfix/sasl_passwd'"
       when: smtp_user is defined and smtp_user | length > 0 and smtp_password is defined and smtp_password | length > 0
       notify: Restart postfix
 
@@ -206,8 +206,8 @@
       loop:
         - /etc/postfix/sasl_passwd
         - /etc/postfix/sasl_passwd.db
-        - /home/docker/_defaults/postfix/sasl_passwd
-        - /home/docker/_defaults/postfix/sasl_passwd.db
+        - "{{ base_services_root }}/_defaults/postfix/sasl_passwd"
+        - "{{ base_services_root }}/_defaults/postfix/sasl_passwd.db"
       when: smtp_server is not defined or smtp_server | length == 0
 
     - name: Disable SASL auth if SMTP not configured

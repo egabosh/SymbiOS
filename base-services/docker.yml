@@ -78,25 +78,33 @@
           SystemAccount=true          
         backup: no
 
-    - name: Create docker dir
+    - name: Create base-services root dir
       ansible.builtin.file:
-        path: /home/docker
+        path: "{{ base_services_root }}"
         owner: docker
         group: docker
         state: directory
         mode: '0750'
 
-    - name: Create docker-data dir
+    - name: Create services root dir
       ansible.builtin.file:
-        path: /home/docker/var-lib-docker
+        path: "{{ services_root }}"
+        owner: docker
+        group: docker
+        state: directory
+        mode: '0750'
+
+    - name: Create docker data dir
+      ansible.builtin.file:
+        path: "{{ docker_root }}"
         owner: root
         group: root
         state: directory
         mode: '0710'
 
-    - name: Create docker-data dir
+    - name: Create containerd data dir
       ansible.builtin.file:
-        path: /home/docker/var-lib-containerd
+        path: "{{ containerd_root }}"
         owner: root
         group: root
         state: directory
@@ -104,27 +112,11 @@
 
     - name: Create dir for container defaults
       ansible.builtin.file:
-        path: /home/docker/_defaults
+        path: "{{ base_services_root }}/_defaults"
         owner: root
         group: docker
         state: directory
         mode: '0750'
-
-    - name: Create /var/lib/docker -> /home/docker/var-lib-docker symlink
-      ansible.builtin.file:
-        src: /home/docker/var-lib-docker
-        dest: /var/lib/docker
-        owner: root
-        group: root
-        state: link
-
-    - name: Create /var/lib/docker -> /home/docker/var-lib-containerd symlink
-      ansible.builtin.file:
-        src: /home/docker/var-lib-containerd
-        dest: /var/lib/containerd
-        owner: root
-        group: root
-        state: link
 
     - name: Set Docker distro to Ubuntu for Linux Mint
       ansible.builtin.set_fact:
@@ -194,7 +186,7 @@
 
     - name: Check if Docker data dir has containers
       ansible.builtin.stat:
-        path: /home/docker/var-lib-docker/containers
+        path: "{{ docker_root }}/containers"
       register: data_dir_stat
 
     - name: Packages for docker
@@ -213,18 +205,48 @@
         install_recommends: no
 
     # https://github.com/nextcloud/docker/issues/1103
-    - name: writing daemon.json (ipv6 settings + data-root) 
+    - name: writing daemon.json (ipv6 settings + data-root)
       copy:
         dest: "/etc/docker/daemon.json"
         content: |
           {
-            "data-root": "/home/docker/var-lib-docker",
+            "data-root": "{{ docker_root }}",
             "ipv6": true,
             "fixed-cidr-v6": "fdab::/64",
-            "experimental": true, 
+            "experimental": true,
             "ip6tables": true
           }
       register: daemon_json
+
+    - name: Write containerd config.toml (data root)
+      ansible.builtin.copy:
+        dest: "/etc/containerd/config.toml"
+        content: |
+          version = 2
+          root = "{{ containerd_root }}"
+          state = "/run/containerd"
+
+          [grpc]
+          address = "/run/containerd/containerd.sock"
+          uid = 0
+          gid = 0
+        mode: "0644"
+      register: containerd_config
+
+    - name: Remove old /var/lib/docker and /var/lib/containerd symlinks
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/lib/docker
+        - /var/lib/containerd
+      when: (item | is_link)
+
+    - name: Restart containerd if config changed
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted
+      when: containerd_config.changed
 
     - name: Restart Docker if daemon.json changed or data dir missing
       block:
@@ -240,16 +262,16 @@
         state: started
 
 
-    - name: /home/docker/_defaults/mariadb/genrootpw
+    - name: "{{ base_services_root }}/_defaults/mariadb/genrootpw"
       blockinfile:
-        path: /home/docker/_defaults/mariadb/genrootpw
+        path: "{{ base_services_root }}/_defaults/mariadb/genrootpw"
         create: yes
         mode: 0550
         owner: root
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          cd /home/docker/_defaults/mariadb
+          cd {{ base_services_root }}/_defaults/mariadb
 
           # Generate a random MySQL root password
           f_mysqlpassword=$(pwgen -s 32 1)
@@ -277,9 +299,9 @@
         backup: yes
         validate: /bin/bash -n %s
 
-    - name: /home/docker/_defaults/mariadb/genrootpw shebang
+    - name: "{{ base_services_root }}/_defaults/mariadb/genrootpw shebang"
       lineinfile:
-        path: /home/docker/_defaults/mariadb/genrootpw
+        path: "{{ base_services_root }}/_defaults/mariadb/genrootpw"
         insertbefore: BOF
         line: "#!/bin/bash -e"
 
@@ -287,12 +309,12 @@
     - name: Gen initial passwords if not exists
       ansible.builtin.shell: ./genrootpw
       args:
-        chdir: /home/docker/_defaults/mariadb
-        creates: /home/docker/_defaults/mariadb/envroot.db
+        chdir: "{{ base_services_root }}/_defaults/mariadb"
+        creates: "{{ base_services_root }}/_defaults/mariadb/envroot.db"
 
     - name: mariadb env defaults
       blockinfile:
-        path: /home/docker/_defaults/mariadb/mariadb.env
+        path: "{{ base_services_root }}/_defaults/mariadb/mariadb.env"
         mode: "0444"
         owner: root
         group: root
@@ -314,7 +336,7 @@
 
     - name: mariadb server config defaults
       blockinfile:
-        path: /home/docker/_defaults/mariadb/99-server.cnf
+        path: "{{ base_services_root }}/_defaults/mariadb/99-server.cnf"
         mode: "0444"
         owner: root
         group: root

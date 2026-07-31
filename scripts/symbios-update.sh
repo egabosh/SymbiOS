@@ -26,10 +26,10 @@
 source /etc/bash/gaboshlib.include
 g_lockfile
 
-g_symbios_dir="${SYMBIOS_DIR:-/home/SymbiOS}"
+g_symbios_dir="${SYMBIOS_DIR:-/symbios/git/SymbiOS}"
 g_repo_url="https://github.com/egabosh/SymbiOS.git"
-g_inventory="${g_inventory:-/home/docker/symbios-ui/config/inventory.yml}"
-g_state_file="/home/docker/symbios-ui/config/installed-playbooks.yml"
+g_inventory="${g_inventory:-/symbios/base-services/symbios-ui/config/inventory.yml}"
+g_state_file="/symbios/base-services/symbios-ui/config/installed-playbooks.yml"
 g_failed=""
 g_dry_run=false
 
@@ -73,9 +73,12 @@ fi
 g_echo_note "Starting SymbiOS update at $(date)"
 
 # Clone or update SymbiOS from GitHub
-cd /home
-[[ -d SymbiOS ]] || git clone "${g_repo_url}"
-cd SymbiOS
+if [[ ! -d "${g_symbios_dir}/.git" ]]
+then
+  mkdir -p "$(dirname "${g_symbios_dir}")"
+  git clone "${g_repo_url}" "${g_symbios_dir}"
+fi
+cd "${g_symbios_dir}"
 git remote set-url origin "${g_repo_url}"
 
 # Save pre-pull HEAD for diff

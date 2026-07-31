@@ -4,7 +4,7 @@
 
 source /etc/bash/gaboshlib.include
 
-g_host_ip_file="/home/docker/symbios-ui/config/.host-ip"
+g_host_ip_file="/symbios/base-services/symbios-ui/config/.host-ip"
 
 # Primary: read from file written by host cron
 if [[ -r "$g_host_ip_file" ]]
