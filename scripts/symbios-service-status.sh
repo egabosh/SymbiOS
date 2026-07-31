@@ -1,6 +1,6 @@
 #!/bin/bash
 # File storing system service statuses
-g_file=/home/docker/symbios-ui/log/symbios-services.tsv
+g_file=/symbios/base-services/symbios-ui/log/symbios-services.tsv
 g_tmp="${g_file}.tmp"
 
 # Write status for each service to temp file

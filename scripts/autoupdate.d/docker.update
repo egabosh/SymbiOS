@@ -12,7 +12,7 @@ g_echo_ok "check for updates"
 docker system prune -af
 
 # Find all Docker compose directories excluding special ones
-find /home/docker -maxdepth 1 -mindepth 1 -type d | grep -E -v "mailcow-dockerized$|.del$|.bak$|.old$|var-lib-docker$|var-lib-containerd$" | while read g_docker_dir
+find /symbios/base-services /symbios/services -maxdepth 1 -mindepth 1 -type d | grep -E -v "mailcow-dockerized$|.del$|.bak$|.old$|var-lib-docker$|var-lib-containerd$" | while read g_docker_dir
 do
   # Skip directories without a compose file
   if [ ! -f "$g_docker_dir/docker-compose.yml" ]

@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 import re
 
 SCRIPT_NAME = os.path.basename(__file__)
-CONFIG_PATH = '/home/docker/symbios-ui/config/router-upnp.conf'
+CONFIG_PATH = '/symbios/base-services/symbios-ui/config/router-upnp.conf'
 
 
 def load_config():

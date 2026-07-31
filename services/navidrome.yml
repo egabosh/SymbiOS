@@ -30,17 +30,17 @@
 #     services:
 #     - name: navidrome
 #       type: docker
-#       compose_file: /home/docker/navidrome/docker-compose.yml
-#       status: test -d /home/docker/navidrome || exit 2; docker compose -f /home/docker/navidrome/docker-compose.yml ps | grep -q "Up "
+#       compose_file: /symbios/services/navidrome/docker-compose.yml
+#       status: test -d /symbios/services/navidrome || exit 2; docker compose -f /symbios/services/navidrome/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: navidrome
-#       command: docker compose -f /home/docker/navidrome/docker-compose.yml logs -f --tail=100
+#       command: docker compose -f /symbios/services/navidrome/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/navidrome/docker-compose.yml down
-#     start: docker compose -f /home/docker/navidrome/docker-compose.yml up -d
-#     stop: docker compose -f /home/docker/navidrome/docker-compose.yml down
-#     restart: docker compose -f /home/docker/navidrome/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/navidrome/docker-compose.yml up -d
+#     uninstall: docker compose -f /symbios/services/navidrome/docker-compose.yml down
+#     start: docker compose -f /symbios/services/navidrome/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/navidrome/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/navidrome/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/navidrome/docker-compose.yml up -d
 #
 ---
 - name: navidrome
@@ -50,26 +50,26 @@
     service_domain: "{{ service_name }}.{{ base_domain }}"
   tasks:
 
-    - name: Create /home/docker/navidrome dir
+    - name: Create /symbios/services/navidrome dir
       ansible.builtin.file:
-        path: /home/docker/navidrome
+        path: /symbios/services/navidrome
         owner: root
         group: docker
         state: directory
         mode: '0550'
 
-    - name: Create /home/docker/navidrome/navidrome-data dir
+    - name: Create /symbios/services/navidrome/navidrome-data dir
       ansible.builtin.file:
-        path: /home/docker/navidrome/navidrome-data
+        path: /symbios/services/navidrome/navidrome-data
         owner: 33
         group: docker
         state: directory
         mode: '0750'
 
 
-    - name: /home/docker/navidrome/docker-compose.yml Container Configuration
+    - name: /symbios/services/navidrome/docker-compose.yml Container Configuration
       blockinfile:
-        path: /home/docker/navidrome/docker-compose.yml
+        path: /symbios/services/navidrome/docker-compose.yml
         create: yes
         mode: 0440
         owner: root
@@ -107,9 +107,9 @@
         backup: yes
       notify: Restart navidrome
 
-    - name: /home/docker/traefik/providers/navidrome.yml Navidrome<->Traefik provider
+    - name: /symbios/services/traefik/providers/navidrome.yml Navidrome<->Traefik provider
       blockinfile:
-        path: /home/docker/traefik/providers/navidrome.yml
+        path: /symbios/services/traefik/providers/navidrome.yml
         create: yes
         mode: 0444
         owner: root
@@ -166,10 +166,10 @@
     - name: Restart navidrome
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
-        chdir: /home/docker/navidrome
+        chdir: /symbios/services/navidrome
 
     - name: Restart traefik
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
-        chdir: /home/docker/traefik
+        chdir: /symbios/services/traefik
 

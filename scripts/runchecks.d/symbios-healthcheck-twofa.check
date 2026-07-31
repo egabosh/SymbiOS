@@ -6,5 +6,5 @@ then
 fi
 date > "$g_check_file"
 
-g_twofa_status=$(python3 -c "import yaml; c=yaml.safe_load(open('/home/docker/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print('enabled' if v.get('twofa_enabled') else 'disabled')")
+g_twofa_status=$(python3 -c "import yaml; c=yaml.safe_load(open('/symbios/base-services/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print('enabled' if v.get('twofa_enabled') else 'disabled')")
 # 2FA is optional — no error if disabled

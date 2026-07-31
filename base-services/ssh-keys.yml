@@ -54,7 +54,7 @@
 
     - name: Read webui SSH public key
       ansible.builtin.slurp:
-        src: /home/docker/symbios-ui/config/.ssh/id_symbios.pub
+        src: "{{ base_services_root }}/symbios-ui/config/.ssh/id_symbios.pub"
       register: symbios_ssh_pubkey_raw
 
     - name: Re-assert webui exec-gateway key (never removed by key edits)

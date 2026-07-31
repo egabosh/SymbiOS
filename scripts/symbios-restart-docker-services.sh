@@ -21,7 +21,7 @@
 source /etc/bash/gaboshlib.include
 g_lockfile
 
-for f_compose in $(find /home/docker -maxdepth 2 -name docker-compose.yml | sort)
+for f_compose in $(find /symbios/base-services /symbios/services -maxdepth 2 -name docker-compose.yml | sort)
 do
   f_dir=$(dirname "$f_compose")
   cd "$f_dir" || continue

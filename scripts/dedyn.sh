@@ -5,7 +5,7 @@
 g_lockfile
 
 # Log to shared log file
-g_dedyn_log="/home/docker/symbios-ui/log/dedyn.log"
+g_dedyn_log="/symbios/base-services/symbios-ui/log/dedyn.log"
 exec > >(tee -a "$g_dedyn_log") 2>&1
 
 # deDyn/deSEC-Settings
@@ -136,15 +136,15 @@ do
         g_echo_ok "DynDNS IP ${g_ip} for ${g_dynaddr} renewed"
         g_changed=1
         # Restart Traefik if ACME errors detected
-        if [[ -f /home/docker/traefik/docker-compose.yml ]]
+        if [[ -f /symbios/base-services/traefik/docker-compose.yml ]]
         then
-          if docker compose -f /home/docker/traefik/docker-compose.yml logs 2>/dev/null | grep -q "error.*acme-challenge"
+          if docker compose -f /symbios/base-services/traefik/docker-compose.yml logs 2>/dev/null | grep -q "error.*acme-challenge"
           then
-            docker compose -f /home/docker/traefik/docker-compose.yml up -d --force-recreate
+            docker compose -f /symbios/base-services/traefik/docker-compose.yml up -d --force-recreate
           fi
         fi
         # Trigger TURN server IP update
-        [[ -x /home/docker/turn/newip.sh ]] && /home/docker/turn/newip.sh
+        [[ -x /symbios/services/turn/newip.sh ]] && /symbios/services/turn/newip.sh
       else
         g_echo_error "Failed to update DynDNS IP ${g_ip} for ${g_dynaddr} (HTTP ${g_response})"
       fi

@@ -31,11 +31,11 @@
 #     services:
 #     - name: symbios-ui
 #       type: docker
-#       compose_file: /home/docker/symbios-ui/docker-compose.yml
-#       status: test -d /home/docker/symbios-ui || exit 2; docker compose -f /home/docker/symbios-ui/docker-compose.yml ps | grep -q "Up "
+#       compose_file: {{ base_services_root }}/symbios-ui/docker-compose.yml
+#       status: test -d {{ base_services_root }}/symbios-ui || exit 2; docker compose -f {{ base_services_root }}/symbios-ui/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: symbios-ui
-#       command: docker compose -f /home/docker/symbios-ui/docker-compose.yml logs -f --tail=1000
+#       command: docker compose -f {{ base_services_root }}/symbios-ui/docker-compose.yml logs -f --tail=1000
 #   actions:
 
 ---
@@ -47,7 +47,7 @@
     authelia_domain: "auth.{{ base_domain }}"
     traefik_domain: "traefik.{{ base_domain }}"
     service_domain: "{{ base_domain }}"
-    docker_path: "/home/docker/{{ service_name }}"
+    docker_path: "{{ base_services_root }}/{{ service_name }}"
 
   tasks:
 
@@ -78,7 +78,7 @@
 
     - name: Dockerfile
       ansible.builtin.copy:
-        src: /home/SymbiOS/webui/Dockerfile
+        src: "{{ git_root }}/webui/Dockerfile"
         dest: "{{ docker_path }}/Dockerfile"
         owner: root
         group: docker
@@ -114,7 +114,7 @@
                 - ./log:/log
                 # Playbook sources, read-only, so the WebUI can parse the
                 # machine-readable '# docs:' blocks locally (no host helper).
-                - /home/SymbiOS:/repo:ro
+                - {{ git_root }}:/repo:ro
                 - type: tmpfs
                   target: /app/db
                   tmpfs:
@@ -125,7 +125,7 @@
                 - CONFIG_PATH=/config/inventory.yml
                 - LDAP_URI=ldap://openldap
                 - HOME=/app
-                - DJANGO_SECRET_KEY={{ lookup("password", "/home/docker/symbios-ui/.django_secret_key length=50 chars=ascii_letters,digits") }}
+                - DJANGO_SECRET_KEY={{ lookup("password", docker_path ~ "/.django_secret_key length=50 chars=ascii_letters,digits") }}
               networks:
                 traefik:
                   aliases:
@@ -139,7 +139,7 @@
 
     - name: Sync webui source
       ansible.builtin.copy:
-        src: /home/SymbiOS/webui/
+        src: "{{ git_root }}/webui/"
         dest: "{{ docker_path }}/webui/"
         mode: preserve
         owner: "10000"
@@ -157,12 +157,12 @@
 
     - name: Generate SSH key for webui remote execution
       ansible.builtin.command:
-        cmd: ssh-keygen -t ed25519 -f /home/docker/symbios-ui/config/.ssh/id_symbios -N "" -C "symbios-webui"
-        creates: /home/docker/symbios-ui/config/.ssh/id_symbios
+        cmd: ssh-keygen -t ed25519 -f {{ base_services_root }}/symbios-ui/config/.ssh/id_symbios -N "" -C "symbios-webui"
+        creates: "{{ base_services_root }}/symbios-ui/config/.ssh/id_symbios"
 
     - name: Fix permissions on SSH key
       ansible.builtin.file:
-        path: /home/docker/symbios-ui/config/.ssh/{{ item.path }}
+        path: "{{ base_services_root }}/symbios-ui/config/.ssh/{{ item.path }}"
         owner: root
         group: "10000"
         mode: "{{ item.mode }}"
@@ -172,7 +172,7 @@
 
     - name: Read SSH public key
       ansible.builtin.slurp:
-        src: /home/docker/symbios-ui/config/.ssh/id_symbios.pub
+        src: "{{ base_services_root }}/symbios-ui/config/.ssh/id_symbios.pub"
       register: symbios_ssh_pubkey_raw
 
     - name: Set webserver SSH pubkey fact
@@ -197,8 +197,8 @@
 
           [Service]
           Type=oneshot
-          Environment=PATH=/home/SymbiOS/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
-          ExecStart=/home/SymbiOS/scripts/symbios-container-index.sh
+          Environment=PATH={{ git_root }}/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+          ExecStart={{ git_root }}/scripts/symbios-container-index.sh
           User=root
           Group=root
 
@@ -227,7 +227,7 @@
 
     - name: Install boot unlock Python server
       ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/symbios-boot-unlock/unlock.py
+        src: "{{ git_root }}/scripts/symbios-boot-unlock/unlock.py"
         dest: /usr/local/sbin/symbios-boot-unlock/unlock.py
         owner: root
         group: root
@@ -235,7 +235,7 @@
 
     - name: Install boot unlock LUKS helper
       ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/symbios-boot-unlock/symbios-boot-unlock-luks.sh
+        src: "{{ git_root }}/scripts/symbios-boot-unlock/symbios-boot-unlock-luks.sh"
         dest: /usr/local/sbin/symbios-boot-unlock/symbios-boot-unlock-luks.sh
         owner: root
         group: root
@@ -297,7 +297,7 @@
 
     - name: Copy LE cert extraction script
       ansible.builtin.copy:
-        src: /home/SymbiOS/scripts/symbios-boot-unlock/extract-le-cert.sh
+        src: "{{ git_root }}/scripts/symbios-boot-unlock/extract-le-cert.sh"
         dest: /usr/local/sbin/symbios-boot-unlock/extract-le-cert.sh
         owner: root
         group: root
@@ -335,7 +335,7 @@
 
     - name: Install SymbiOS desktop icon
       ansible.builtin.copy:
-        src: /home/SymbiOS/webui/main/static/main/img/symbios.svg
+        src: "{{ git_root }}/webui/main/static/main/img/symbios.svg"
         dest: /usr/share/icons/hicolor/scalable/apps/symbios.svg
         owner: root
         group: root

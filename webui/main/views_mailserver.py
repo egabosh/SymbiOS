@@ -18,7 +18,6 @@ import re
 import smtplib
 import ssl
 import urllib.request
-import urllib.error
 import xml.etree.ElementTree as ET
 from email.message import EmailMessage
 from django.shortcuts import render, redirect
@@ -217,9 +216,8 @@ def settings_mailserver_discover(request):
 
     found = False
 
-    # Try autoconfig sources in order
+    # Try standard autoconfig paths (the domain owner publishes its own config)
     autoconfig_urls = [
-        f'https://autoconfig.thunderbird.net/v1.1/{domain}',
         f'https://autoconfig.{domain}/mail/config-v1.1.xml',
         f'https://{domain}/.well-known/autoconfig/mail/config-v1.1.xml',
     ]
@@ -254,6 +252,20 @@ def settings_mailserver_discover(request):
                         break
         except Exception:
             pass
+
+    # Fallback: use our own SMTP configuration if the domain is ours
+    if not found:
+        vars_ = _get_inventory_config().get('all', {}).get('vars', {})
+        smtp_server = vars_.get('smtp_server', '')
+        smtp_from = vars_.get('smtp_from', '')
+        our_domain = smtp_from.split('@')[-1] if '@' in smtp_from else ''
+        if smtp_server and our_domain and domain == our_domain:
+            result['server'] = smtp_server
+            result['port'] = str(vars_.get('smtp_port', '587'))
+            smtp_tls = vars_.get('smtp_tls', 'starttls')
+            result['tls'] = {'tls': 'tls', 'starttls': 'starttls'}.get(smtp_tls, '')
+            result['user'] = vars_.get('smtp_user', '%EMAILADDRESS%')
+            found = True
 
     if not found:
         port_guess = {'587': 'starttls', '465': 'tls', '25': ''}

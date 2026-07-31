@@ -31,17 +31,17 @@
 #     services:
 #     - name: sftp-share
 #       type: docker
-#       compose_file: /home/docker/sftp-share/docker-compose.yml
-#       status: test -d /home/docker/sftp-share || exit 2; docker compose -f /home/docker/sftp-share/docker-compose.yml ps | grep -q "Up "
+#       compose_file: /symbios/services/sftp-share/docker-compose.yml
+#       status: test -d /symbios/services/sftp-share || exit 2; docker compose -f /symbios/services/sftp-share/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: sftp-share
-#       command: docker compose -f /home/docker/sftp-share/docker-compose.yml logs -f --tail=100
+#       command: docker compose -f /symbios/services/sftp-share/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/sftp-share/docker-compose.yml down
-#     start: docker compose -f /home/docker/sftp-share/docker-compose.yml up -d
-#     stop: docker compose -f /home/docker/sftp-share/docker-compose.yml down
-#     restart: docker compose -f /home/docker/sftp-share/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/sftp-share/docker-compose.yml up -d
+#     uninstall: docker compose -f /symbios/services/sftp-share/docker-compose.yml down
+#     start: docker compose -f /symbios/services/sftp-share/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/sftp-share/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/sftp-share/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/sftp-share/docker-compose.yml up -d
 #
 
 ---
@@ -55,17 +55,17 @@
       port: '28'
       proto: tcp
 
-  - name: Create /home/docker/sftp-share dir
+  - name: Create /symbios/services/sftp-share dir
     ansible.builtin.file:
-      path: /home/docker/sftp-share
+      path: /symbios/services/sftp-share
       owner: root
       group: docker
       state: directory
       mode: '0550'
 
-  - name: Create Data-Directory /home/docker/sftp-share/data
+  - name: Create Data-Directory /symbios/services/sftp-share/data
     ansible.builtin.file:
-      path: /home/docker/sftp-share/data
+      path: /symbios/services/sftp-share/data
       owner: root
       group: 28
       state: directory
@@ -74,12 +74,12 @@
   - name: Gen sshd ed25519 host-keys
     ansible.builtin.shell: ssh-keygen -q -N "" -t ed25519 -f ssh_host_ed25519_key
     args:
-      chdir: /home/docker/sftp-share
-      creates: /home/docker/sftp-share/ssh_host_ed25519_key
+      chdir: /symbios/services/sftp-share
+      creates: /symbios/services/sftp-share/ssh_host_ed25519_key
 
-  - name: /home/docker/sftp-share/docker-compose.yml
+  - name: /symbios/services/sftp-share/docker-compose.yml
     blockinfile:
-      path: /home/docker/sftp-share/docker-compose.yml
+      path: /symbios/services/sftp-share/docker-compose.yml
       mode: "0440"
       owner: root
       group: root
@@ -117,9 +117,9 @@
     notify:
     - Restart sftp-share
 
-  - name: /home/docker/sftp-share/Dockerfile
+  - name: /symbios/services/sftp-share/Dockerfile
     blockinfile:
-      path: /home/docker/sftp-share/Dockerfile
+      path: /symbios/services/sftp-share/Dockerfile
       mode: "0440"
       owner: root
       group: root
@@ -141,7 +141,7 @@
   - name: Create env file
     copy:
       content: ""
-      dest: /home/docker/sftp-share/env
+      dest: /symbios/services/sftp-share/env
       force: no
       group: root
       owner: root
@@ -150,15 +150,15 @@
   - name: Create additional Config sftp-share-user.conf
     copy:
       content: ""
-      dest: /home/docker/sftp-share/sftp-share-user.conf
+      dest: /symbios/services/sftp-share/sftp-share-user.conf
       force: no
       group: root
       owner: root
       mode: 0600
 
-  - name: /home/docker/sftp-share/docker-entrypoint.sh
+  - name: /symbios/services/sftp-share/docker-entrypoint.sh
     blockinfile:
-      path: /home/docker/sftp-share/docker-entrypoint.sh
+      path: /symbios/services/sftp-share/docker-entrypoint.sh
       mode: "0555"
       owner: root
       group: root
@@ -192,15 +192,15 @@
     notify:
     - Restart sftp-share
 
-  - name: /home/docker/sftp-share/docker-entrypoint.sh shebang
+  - name: /symbios/services/sftp-share/docker-entrypoint.sh shebang
     lineinfile:
-      path: /home/docker/sftp-share/docker-entrypoint.sh
+      path: /symbios/services/sftp-share/docker-entrypoint.sh
       insertbefore: BOF
       line: "#!/bin/bash"
 
-  - name: /home/docker/sftp-share/sftp-share.conf
+  - name: /symbios/services/sftp-share/sftp-share.conf
     blockinfile:
-      path: /home/docker/sftp-share/sftp-share.conf
+      path: /symbios/services/sftp-share/sftp-share.conf
       mode: "0500"
       owner: root
       group: root
@@ -269,5 +269,5 @@
         docker compose up -d
       fi
     args:
-      chdir: /home/docker/sftp-share
+      chdir: /symbios/services/sftp-share
 

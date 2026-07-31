@@ -30,17 +30,17 @@
 #     services:
 #     - name: kodidb
 #       type: docker
-#       compose_file: /home/docker/kodidb/docker-compose.yml
-#       status: test -d /home/docker/kodidb || exit 2; docker compose -f /home/docker/kodidb/docker-compose.yml ps | grep -q "Up "
+#       compose_file: /symbios/services/kodidb/docker-compose.yml
+#       status: test -d /symbios/services/kodidb || exit 2; docker compose -f /symbios/services/kodidb/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: kodidb
-#       command: docker compose -f /home/docker/kodidb/docker-compose.yml logs -f --tail=100
+#       command: docker compose -f /symbios/services/kodidb/docker-compose.yml logs -f --tail=100
 #   actions:
-#     uninstall: docker compose -f /home/docker/kodidb/docker-compose.yml down
-#     start: docker compose -f /home/docker/kodidb/docker-compose.yml up -d
-#     stop: docker compose -f /home/docker/kodidb/docker-compose.yml down
-#     restart: docker compose -f /home/docker/kodidb/docker-compose.yml restart
-#     reload: docker compose -f /home/docker/kodidb/docker-compose.yml up -d
+#     uninstall: docker compose -f /symbios/services/kodidb/docker-compose.yml down
+#     start: docker compose -f /symbios/services/kodidb/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/kodidb/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/kodidb/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/kodidb/docker-compose.yml up -d
 #
 ---
 - name: kodidb
@@ -50,9 +50,9 @@
     service_domain: "kodidb.{{ base_domain }}"
   tasks:
 
-    - name: Create /home/docker/kodidb dir
+    - name: Create /symbios/services/kodidb dir
       ansible.builtin.file:
-        path: /home/docker/kodidb
+        path: /symbios/services/kodidb
         owner: root
         group: docker
         state: directory
@@ -67,7 +67,7 @@
         group: root
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          cd /home/docker/kodidb
+          cd /symbios/services/kodidb
 
           # start phpmyadmin (if not) to force traefik to get a letsencrypt certificate
           docker compose up -d kodidb--phpmyadmin
@@ -83,7 +83,7 @@
             # wait if no cert is available
             until [ -s "ssl/${ssl}.pem.new" ]
             do
-              cat /home/docker/traefik/letsencrypt/acme.json  | jq -r ".letsencrypt.Certificates[] | select(.domain.main==\"kodidb.{{ base_domain }}\") | .${ssl}" | base64 -d >ssl/${ssl}.pem.new
+              cat /symbios/services/traefik/letsencrypt/acme.json  | jq -r ".letsencrypt.Certificates[] | select(.domain.main==\"kodidb.{{ base_domain }}\") | .${ssl}" | base64 -d >ssl/${ssl}.pem.new
               sleep 5
             done
             old=$(shasum ssl/${ssl}.pem)
@@ -127,7 +127,7 @@
             echo "db_user_pw=$(pwgen -s 32 1)" >env.kodidb
             . ./env.kodidb
             db_host=localhost
-            . /home/docker/_defaults/mariadb/envroot.db
+            . /symbios/services/_defaults/mariadb/envroot.db
             
             echo "grant all privileges on *.* TO '${db_user}'@'%' identified by '${db_user_pw}';" \
              | mariadb -u root -h $db_host --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD}
@@ -170,9 +170,9 @@
         insertbefore: BOF
         line: "#!/bin/bash -e"
 
-    - name: /home/docker/kodidb/ssl.cnf (use ssl in mariadb)
+    - name: /symbios/services/kodidb/ssl.cnf (use ssl in mariadb)
       blockinfile:
-        path: /home/docker/kodidb/ssl.cnf
+        path: /symbios/services/kodidb/ssl.cnf
         create: yes
         mode: 0444
         owner: root
@@ -185,9 +185,9 @@
           ssl-key=/etc/mysql/key.pem
         backup: yes
 
-    - name: /home/docker/kodidb/phpmyadmin-config.user.inc.php (use ssl in phpmyadmin)
+    - name: /symbios/services/kodidb/phpmyadmin-config.user.inc.php (use ssl in phpmyadmin)
       blockinfile:
-        path: /home/docker/kodidb/phpmyadmin-config.user.inc.php
+        path: /symbios/services/kodidb/phpmyadmin-config.user.inc.php
         create: yes
         mode: 0444
         owner: root
@@ -202,9 +202,9 @@
           $cfg['Servers'][$i]['ssl_verify'] = false;
         backup: yes
 
-    - name: /home/docker/kodidb/docker-compose.yml Container Configuration
+    - name: /symbios/services/kodidb/docker-compose.yml Container Configuration
       blockinfile:
-        path: /home/docker/kodidb/docker-compose.yml
+        path: /symbios/services/kodidb/docker-compose.yml
         create: yes
         mode: 0440
         owner: root
@@ -227,13 +227,13 @@
               volumes:
                 - ./db-data:/var/lib/mysql
                 - /etc/localtime:/etc/localtime:ro
-                - /home/docker/_defaults/mariadb/99-server.cnf:/etc/mysql/mariadb.conf.d/99-server.cnf:ro
+                - /symbios/services/_defaults/mariadb/99-server.cnf:/etc/mysql/mariadb.conf.d/99-server.cnf:ro
                 - ./ssl.cnf:/etc/mysql/mariadb.conf.d/99-ssl.cnf:ro
                 - ./ssl/certificate.pem:/etc/mysql/certificate.pem:ro
                 - ./ssl/key.pem:/etc/mysql/key.pem:ro
               env_file:
-                - /home/docker/_defaults/mariadb/envroot.db
-                - /home/docker/_defaults/mariadb/mariadb.env
+                - /symbios/services/_defaults/mariadb/envroot.db
+                - /symbios/services/_defaults/mariadb/mariadb.env
               ports:
                 - 0.0.0.0:3307:3306
 
@@ -241,7 +241,7 @@
               image: phpmyadmin:latest
               container_name: kodidb--phpmyadmin
               restart: unless-stopped
-              env_file: /home/docker/_defaults/mariadb/env.rootphpmyadmin
+              env_file: /symbios/services/_defaults/mariadb/env.rootphpmyadmin
               environment:
                 - PMA_ARBITRARY=0
                 - PMA_HOST=kodidb
@@ -265,9 +265,9 @@
         - Restart mariadb
         - Restart traefik
 
-    - name: /home/docker/traefik/providers/kodidb.yml Traefik File Provider
+    - name: /symbios/services/traefik/providers/kodidb.yml Traefik File Provider
       blockinfile:
-        path: /home/docker/traefik/providers/kodidb.yml
+        path: /symbios/services/traefik/providers/kodidb.yml
         create: yes
         mode: 0440
         owner: root
@@ -296,8 +296,8 @@
     - name: Get letsencrypt cert from traefik
       ansible.builtin.shell: /usr/local/sbin/autoupdate.d/kodidb-ssl.update
       args:
-        chdir: /home/docker/kodidb
-        creates: /home/docker/kodidb/ssl/certificate.pem
+        chdir: /symbios/services/kodidb
+        creates: /symbios/services/kodidb/ssl/certificate.pem
 
     - name: /usr/local/sbin/backup.d/kodidb-docker.backup
       blockinfile:
@@ -308,7 +308,7 @@
         group: root 
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          . /home/docker/_defaults/mariadb/envroot.db
+          . /symbios/services/_defaults/mariadb/envroot.db
 
           DAYS=7
           TIMESTAMP=$(date +"%Y%m%d%H%M")
@@ -368,10 +368,10 @@
     - name: Restart mariadb
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
-        chdir: /home/docker/kodidb
+        chdir: /symbios/services/kodidb
 
     - name: Restart traefik
       ansible.builtin.shell: docker compose restart traefik
       args:
-        chdir: /home/docker/traefik
+        chdir: /symbios/services/traefik
 

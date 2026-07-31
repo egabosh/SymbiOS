@@ -24,16 +24,16 @@ to know: title, description, available actions, status checks, and log streams.
 #     services:
 #       - name: nextcloud
 #         type: docker
-#         compose_file: /home/docker/nextcloud/docker-compose.yml
-#         status: test -d /home/docker/nextcloud || exit 2; docker compose -f /home/docker/nextcloud/docker-compose.yml ps | grep -q "Up "
+#         compose_file: /symbios/services/nextcloud/docker-compose.yml
+#         status: test -d /symbios/services/nextcloud || exit 2; docker compose -f /symbios/services/nextcloud/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #       - name: nextcloud
-#         command: docker compose -f /home/docker/nextcloud/docker-compose.yml logs -f --tail=100
+#         command: docker compose -f /symbios/services/nextcloud/docker-compose.yml logs -f --tail=100
 #   actions:
-#     start:    docker compose -f /home/docker/nextcloud/docker-compose.yml up -d
-#     stop:     docker compose -f /home/docker/nextcloud/docker-compose.yml down
-#     restart:  docker compose -f /home/docker/nextcloud/docker-compose.yml restart
-#     uninstall: docker compose -f /home/docker/nextcloud/docker-compose.yml down
+#     start:    docker compose -f /symbios/services/nextcloud/docker-compose.yml up -d
+#     stop:     docker compose -f /symbios/services/nextcloud/docker-compose.yml down
+#     restart:  docker compose -f /symbios/services/nextcloud/docker-compose.yml restart
+#     uninstall: docker compose -f /symbios/services/nextcloud/docker-compose.yml down
 ```
 
 #### Fields
@@ -64,16 +64,16 @@ to know: title, description, available actions, status checks, and log streams.
     # Create the service directory
     - name: Create service directory
       ansible.builtin.file:
-        path: /home/docker/{{ service_name }}
+        path: {{ services_root }}/{{ service_name }}
         owner: root
         group: docker
         state: directory
         mode: '0550'
 
     # Write the Docker Compose file
-    - name: /home/docker/{{ service_name }}/docker-compose.yml
+    - name: {{ services_root }}/{{ service_name }}/docker-compose.yml
       ansible.builtin.blockinfile:
-        path: /home/docker/{{ service_name }}/docker-compose.yml
+        path: {{ services_root }}/{{ service_name }}/docker-compose.yml
         create: yes
         mode: "0440"
         owner: root
@@ -95,7 +95,7 @@ to know: title, description, available actions, status checks, and log streams.
     # Traefik routing via the FILE PROVIDER
     - name: Traefik provider snippet for {{ service_name }}
       ansible.builtin.blockinfile:
-        path: /home/docker/traefik/providers/{{ service_name }}.yml
+        path: /symbios/base-services/traefik/providers/{{ service_name }}.yml
         create: yes
         mode: "0444"
         owner: root
@@ -122,7 +122,7 @@ to know: title, description, available actions, status checks, and log streams.
     - name: Restart {{ service_name }}
       ansible.builtin.shell: docker compose up -d
       args:
-        chdir: /home/docker/{{ service_name }}
+        chdir: {{ services_root }}/{{ service_name }}
 ```
 
 ---
@@ -209,7 +209,7 @@ over all `*.check` files every 5 minutes.
 
 Besides built-in playbooks, you can upload custom Ansible playbooks through the
 WebUI. Uploaded playbooks are stored on the host at
-`/home/docker/symbios-ui/config/user-playbooks/` and appear in the Services
+`/symbios/base-services/symbios-ui/config/user-playbooks/` and appear in the Services
 section under **Custom Playbooks**.
 
 ### How it works
@@ -245,7 +245,7 @@ section under **Custom Playbooks**.
 ## State-file install tracking
 
 SymbiOS keeps a persistent record of which playbooks are currently installed in
-`/home/docker/symbios-ui/config/installed-playbooks.yml`. Each line contains a
+`/symbios/base-services/symbios-ui/config/installed-playbooks.yml`. Each line contains a
 playbook path and an ISO timestamp:
 
 ```yaml
@@ -280,7 +280,7 @@ symbios-state.sh list                        # list installed playbooks
 symbios-state.sh is-installed base-services/traefik.yml  # check if installed
 symbios-reapply.sh                           # full reapply
 symbios-reapply.sh --only base-services/localization.yml base-services/raspberry.yml  # specific playbooks
-cat /home/docker/symbios-ui/log/reapply.log  # view reapply log
+cat /symbios/base-services/symbios-ui/log/reapply.log  # view reapply log
 ```
 
 ---
@@ -295,13 +295,13 @@ cat /home/docker/symbios-ui/log/reapply.log  # view reapply log
 - For a **manual** run on the host:
   ```bash
   ansible-playbook --connection=local \
-    --inventory /home/docker/symbios-ui/config/inventory.yml \
+    --inventory /symbios/base-services/symbios-ui/config/inventory.yml \
     --limit localhost \
     -e ansible_python_interpreter=/usr/bin/python3 \
     /home/SymbiOS/services/<name>.yml
   ```
-  Or manage the container directly with `docker compose` in `/home/docker/<name>/`.
+  Or manage the container directly with `docker compose` in `/symbios/services/<name>/`.
 
 > **Secrets**: only runtime-generated placeholders (`!...!`) ever appear in a
-> playbook. Real credentials live in `/home/docker/<name>/env` and are never
+> playbook. Real credentials live in `/symbios/services/<name>/env` and are never
 > part of the repo or the `# docs:` block.

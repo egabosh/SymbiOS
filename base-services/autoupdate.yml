@@ -65,7 +65,7 @@
         block: |
           SHELL=/bin/bash
           ## Auto-Update
-          5 6 * * * root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/autoupdate.sh ]] && autoupdate.sh
+          5 6 * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/autoupdate.sh ]] && autoupdate.sh
         backup: yes
 
     - name: Register playbook as installed

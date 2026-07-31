@@ -30,7 +30,7 @@
 
 source /etc/bash/gaboshlib.include 2>/dev/null || true
 
-g_state_file="/home/docker/symbios-ui/config/installed-playbooks.yml"
+g_state_file="/symbios/base-services/symbios-ui/config/installed-playbooks.yml"
 
 # Ensure state file exists
 if [[ ! -f "$g_state_file" ]]

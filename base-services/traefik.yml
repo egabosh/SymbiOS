@@ -31,11 +31,11 @@
 #     services:
 #     - name: traefik
 #       type: docker
-#       compose_file: /home/docker/traefik/docker-compose.yml
-#       status: test -d /home/docker/traefik || exit 2; docker compose -f /home/docker/traefik/docker-compose.yml ps | grep -q "Up "
+#       compose_file: {{ docker_path }}/docker-compose.yml
+#       status: test -d {{ docker_path }} || exit 2; docker compose -f {{ docker_path }}/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: traefik
-#       command: docker compose -f /home/docker/traefik/docker-compose.yml logs -f --tail=1000
+#       command: docker compose -f {{ docker_path }}/docker-compose.yml logs -f --tail=1000
 #   actions:
 
 ---
@@ -43,6 +43,7 @@
   hosts: all
 
   vars:
+    docker_path: "{{ base_services_root }}/traefik"
     authelia_domain: "auth.{{ base_domain }}"
     traefik_domain: "traefik.{{ base_domain }}"
     acme_server: ""
@@ -57,9 +58,9 @@
 
   tasks:
 
-    - name: /home/docker/traefik/default-basic-auth-genpw.sh (generate Random PW for default-basic-auth)
+    - name: "{{ docker_path }}/default-basic-auth-genpw.sh (generate Random PW for default-basic-auth)"
       blockinfile:
-        path: /home/docker/traefik/default-basic-auth-genpw.sh
+        path: "{{ docker_path }}/default-basic-auth-genpw.sh"
         create: yes
         mode: 0550
         owner: root
@@ -67,7 +68,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # Change to traefik configuration directory
-          cd /home/docker/traefik
+          cd {{ docker_path }}
           # Set default admin username
           f_user=admin
           # Generate a random 32-character password
@@ -96,9 +97,9 @@
         backup: yes
         validate: /bin/bash -n %s
 
-    - name: /home/docker/traefik/default-basic-auth-genpw.sh shebang
+    - name: "{{ docker_path }}/default-basic-auth-genpw.sh shebang"
       lineinfile:
-        path: /home/docker/traefik/default-basic-auth-genpw.sh
+        path: "{{ docker_path }}/default-basic-auth-genpw.sh"
         insertbefore: BOF
         line: "#!/bin/bash -e"
 
@@ -106,10 +107,10 @@
     - name: Gen initial password if not exists
       ansible.builtin.shell: ./default-basic-auth-genpw.sh
       args:
-        chdir: /home/docker/traefik
-        creates: /home/docker/traefik/providers/default-basic-auth.usersfile
+        chdir: "{{ docker_path }}"
+        creates: "{{ docker_path }}/providers/default-basic-auth.usersfile"
 
-    - name: /home/docker/traefik/docker-compose.yml Traefik Container Configuration
+    - name: "{{ docker_path }}/docker-compose.yml Traefik Container Configuration"
       ansible.builtin.copy:
         content: |
           # BEGIN ANSIBLE MANAGED BLOCK
@@ -172,7 +173,7 @@
             traefik:
               external: true
           # END ANSIBLE MANAGED BLOCK
-        dest: /home/docker/traefik/docker-compose.yml
+        dest: "{{ docker_path }}/docker-compose.yml"
         mode: '0440'
         owner: root
         group: docker
@@ -181,7 +182,7 @@
 
     - name: Create traefik dir
       ansible.builtin.file:
-        path: /home/docker/traefik/providers
+        path: "{{ docker_path }}/providers"
         owner: root
         group: docker
         state: directory
@@ -189,7 +190,7 @@
 
     - name: Defaults for TLS,...
       blockinfile:
-        path: /home/docker/traefik/providers/_default.yml
+        path: "{{ docker_path }}/providers/_default.yml"
         create: yes
         mode: 0444
         owner: root
@@ -253,10 +254,10 @@
                     ipv6Subnet: 64
       notify: Restart traefik
 
-    - name: /home/docker/traefik/providers/symbios-services.yml Routing Configuration
+    - name: "{{ docker_path }}/providers/symbios-services.yml Routing Configuration"
       ansible.builtin.template:
         src: traefik-services.j2
-        dest: /home/docker/traefik/providers/symbios-services.yml
+        dest: "{{ docker_path }}/providers/symbios-services.yml"
         mode: "0444"
         owner: root
         group: docker
@@ -272,7 +273,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           SHELL=/bin/bash
-          @daily root PATH=/home/SymbiOS/scripts:$PATH && [[ -s /home/SymbiOS/scripts/traefik-qualys-ssl-labs-check.sh ]] && traefik-qualys-ssl-labs-check.sh
+          @daily root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/traefik-qualys-ssl-labs-check.sh ]] && traefik-qualys-ssl-labs-check.sh
         backup: yes
 
     - name: Allow http from all clients
@@ -298,7 +299,7 @@
         dest: /etc/logrotate.d/traefik
         mode: '0644' 
         content: |
-          /home/docker/traefik/log/access.log {
+          {{ docker_path }}/log/access.log {
               daily
               rotate 7
               compress
@@ -314,7 +315,7 @@
         state: directory
         mode: '0700'
       loop:
-        - /home/docker/traefik/letsencrypt
+        - "{{ docker_path }}/letsencrypt"
 
     - name: Ensure ACME account files are not group/world readable
       # Traefik refuses to load acme.json unless its mode is 0600
@@ -328,7 +329,7 @@
         access_time: preserve
         mode: '0600'
       loop:
-        - /home/docker/traefik/letsencrypt/acme.json
+        - "{{ docker_path }}/letsencrypt/acme.json"
 
 
     - name: Register playbook as installed
@@ -338,4 +339,5 @@
 
     - name: Restart traefik
       ansible.builtin.shell: docker compose down && docker compose up -d
-      args: { chdir: /home/docker/traefik }
+      args:
+        chdir: "{{ docker_path }}"

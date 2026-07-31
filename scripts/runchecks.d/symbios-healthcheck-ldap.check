@@ -6,7 +6,7 @@ then
 fi
 date > "$g_check_file"
 g_ldap_ip=$(docker inspect openldap --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' 2>/dev/null | grep '^192\.168\.' | head -1)
-g_ldap_pw=$(cat /home/docker/symbios-ui/config/.ldap_admin_pw 2>/dev/null)
+g_ldap_pw=$(cat /symbios/base-services/symbios-ui/config/.ldap_admin_pw 2>/dev/null)
 if [[ -z "$g_ldap_ip" ]]
 then
   g_echo_error "Healthcheck failed for ldap: cannot determine container IP"

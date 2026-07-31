@@ -9,7 +9,7 @@ g_host="${1:-}"
 g_port="${2:-22}"
 g_user="${3:-root}"
 g_path="${4:-}"
-g_key="/home/docker/symbios-ui/config/.ssh/id_symbios"
+g_key="/symbios/base-services/symbios-ui/config/.ssh/id_symbios"
 
 function f_json_str {
   # Escape a string for safe embedding in JSON

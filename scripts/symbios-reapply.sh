@@ -29,10 +29,10 @@
 
 source /etc/bash/gaboshlib.include
 
-g_state_file="/home/docker/symbios-ui/config/installed-playbooks.yml"
-g_inventory="/home/docker/symbios-ui/config/inventory.yml"
-g_repo="/home/SymbiOS"
-g_log_dir="/home/docker/symbios-ui/log"
+g_state_file="/symbios/base-services/symbios-ui/config/installed-playbooks.yml"
+g_inventory="/symbios/base-services/symbios-ui/config/inventory.yml"
+g_repo="/symbios/git/SymbiOS"
+g_log_dir="/symbios/base-services/symbios-ui/log"
 g_log_file="${g_log_dir}/reapply.log"
 g_status_file="/tmp/symbios-reapply.status"
 g_pid_file="/tmp/symbios-reapply.pid"
@@ -143,7 +143,7 @@ else
 fi
 
 # Also include any user-playbooks (always re-run all)
-g_user_dir="/home/docker/symbios-ui/config/user-playbooks"
+g_user_dir="/symbios/base-services/symbios-ui/config/user-playbooks"
 if [[ -d "$g_user_dir" ]]
 then
   for g_user_file in "$g_user_dir"/*.yml
@@ -175,9 +175,9 @@ do
   if [[ -f "$g_repo/$g_playbook" ]]
   then
     g_path="$g_repo/$g_playbook"
-  elif [[ -f "/home/docker/symbios-ui/config/user-playbooks/$(basename "$g_playbook")" ]]
+  elif [[ -f "/symbios/base-services/symbios-ui/config/user-playbooks/$(basename "$g_playbook")" ]]
   then
-    g_path="/home/docker/symbios-ui/config/user-playbooks/$(basename "$g_playbook")"
+    g_path="/symbios/base-services/symbios-ui/config/user-playbooks/$(basename "$g_playbook")"
   fi
 
   if [[ -z "$g_path" ]]

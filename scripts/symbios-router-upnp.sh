@@ -7,7 +7,7 @@
 #   Generic UPnP      → internal bash SOAP functions (curl + temp files)
 
 SCRIPT_NAME="$(basename "$0")"
-UPNP_CONFIG_DIR="/home/docker/symbios-ui/config"
+UPNP_CONFIG_DIR="/symbios/base-services/symbios-ui/config"
 UPNP_CONFIG_FILE="${UPNP_CONFIG_DIR}/router-upnp.conf"
 ROUTER_UPNP_USER=""
 ROUTER_UPNP_PASS=""

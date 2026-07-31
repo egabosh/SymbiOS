@@ -31,15 +31,15 @@
 #     services:
 #     - name: authelia
 #       type: docker
-#       compose_file: /home/docker/authelia/docker-compose.yml
-#       status: test -d /home/docker/authelia || exit 2; docker compose -f /home/docker/authelia/docker-compose.yml ps | grep -q "Up "
+#       compose_file: {{ service_path }}/docker-compose.yml
+#       status: test -d {{ service_path }} || exit 2; docker compose -f {{ service_path }}/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: authelia
-#       command: docker compose -f /home/docker/authelia/docker-compose.yml logs -f --tail=100
+#       command: docker compose -f {{ service_path }}/docker-compose.yml logs -f --tail=100
 #   actions:
-#     start: docker compose -f /home/docker/authelia/docker-compose.yml up -d
-#     stop: docker compose -f /home/docker/authelia/docker-compose.yml down
-#     restart: docker compose -f /home/docker/authelia/docker-compose.yml restart
+#     start: docker compose -f {{ service_path }}/docker-compose.yml up -d
+#     stop: docker compose -f {{ service_path }}/docker-compose.yml down
+#     restart: docker compose -f {{ service_path }}/docker-compose.yml restart
 
 - name: authelia
   hosts: all
@@ -49,8 +49,8 @@
     authelia_domain: "auth.{{ base_domain }}"
     traefik_domain: "traefik.{{ base_domain }}"
     service_domain: "{{ authelia_domain }}"
-    service_path: "/home/docker/{{ service_name }}"
-    ldap_service_path: "/home/docker/ldap"
+    service_path: "{{ base_services_root }}/{{ service_name }}"
+    ldap_service_path: "{{ base_services_root }}/ldap"
 
   pre_tasks:
     - name: Fail if base_domain is not configured
@@ -201,7 +201,7 @@
 
     - name: Check if mail settings are given (needed by 2FA)
       stat:
-        path: /home/docker/_defaults/mailclient
+        path: "{{ base_services_root }}/_defaults/mailclient"
       register: authelia_mail
 
     - name: generate authelia notifier dummy to notifications.txt
@@ -276,7 +276,7 @@
         group: root
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK ACCESS CONTROL"
-        block: "{{ lookup('template', '/home/SymbiOS/base-services/authelia-access-control.j2') }}"
+        block: "{{ lookup('template', '{{ git_root }}/base-services/authelia-access-control.j2') }}"
 
         backup: yes
       notify: Restart authelia

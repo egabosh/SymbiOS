@@ -8,7 +8,7 @@ source /etc/bash/gaboshlib.include
 g_container="${1:-}"
 g_offset="${2:-0}"
 g_limit="${3:-500}"
-g_log_base="/var/lib/docker/containers"
+g_log_base="/symbios/docker/containers"
 
 if [[ -z "$g_container" ]]
 then

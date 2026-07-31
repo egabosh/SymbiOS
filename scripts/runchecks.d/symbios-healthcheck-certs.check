@@ -6,7 +6,7 @@ then
 fi
 date > "$g_check_file"
 
-g_base_domain=$(python3 -c "import yaml; c=yaml.safe_load(open('/home/docker/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print(v.get('base_domain','symbios.local'))")
+g_base_domain=$(python3 -c "import yaml; c=yaml.safe_load(open('/symbios/base-services/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print(v.get('base_domain','symbios.local'))")
 g_trae_ip=$(docker inspect traefik --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null)
 if [[ -z "$g_trae_ip" ]]
 then

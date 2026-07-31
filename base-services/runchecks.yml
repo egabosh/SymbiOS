@@ -65,9 +65,9 @@
         state: directory
         mode: '0700'
 
-    - name: /home/SymbiOS/scripts/runchecks.d/services
+    - name: "{{ git_root }}/scripts/runchecks.d/services"
       lineinfile:
-        path: /home/SymbiOS/scripts/runchecks.d/services
+        path: "{{ git_root }}/scripts/runchecks.d/services"
         create: yes
         insertbefore: EOF
         line: "cron rsyslog sshd"
@@ -86,8 +86,8 @@
           [Service]
           Type=simple
           User=root
-          Environment=PATH=/home/SymbiOS/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
-          ExecStart=/home/SymbiOS/scripts/runchecks.sh
+          Environment=PATH={{ git_root }}/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+          ExecStart={{ git_root }}/scripts/runchecks.sh
           Restart=on-abort
           
           [Install]

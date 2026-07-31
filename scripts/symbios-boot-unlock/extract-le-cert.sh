@@ -4,7 +4,7 @@
 # Reads Traefik's acme.json, finds the cert for the configured domain,
 # and writes PEM files to the symbios-boot-unlock directory.
 
-acme_json="/home/docker/traefik/letsencrypt/acme.json"
+acme_json="/symbios/base-services/traefik/letsencrypt/acme.json"
 cert_dir="/usr/local/sbin/symbios-boot-unlock"
 domain="${SYMBIOS_BOOT_CERT_DOMAIN:-symbios-dev.dedyn.io}"
 

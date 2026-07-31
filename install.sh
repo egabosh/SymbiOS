@@ -34,21 +34,34 @@ function f_run_playbook {
   fi
 }
 
+# Filesystem layout
+g_data_root="/symbios"
+g_git_root="${g_data_root}/git/SymbiOS"
+g_base_services_root="${g_data_root}/base-services"
+
 # Fix interrupted dpkg state (can happen after image expansion / e2fsck)
 dpkg --configure -a 2>/dev/null || true
 
 # Install ansible and git if not already present
 if ! which ansible >/dev/null 2>&1
 then
-  DEBIAN_FRONTEND=noninteractive apt-get -y update --allow-releaseinfo-change
+  DEBIAN_FRONTEND=noninteractive apt-get -y update --allowreleaseinfo-change
   DEBIAN_FRONTEND=noninteractive apt-get -y install ansible git
   ansible-galaxy collection install community.general
 fi
 
+# Create the /symbios data root (optional LUKS partition may overlay it later)
+mkdir -p "${g_data_root}"
+chmod 750 "${g_data_root}"
+mkdir -p "${g_base_services_root}"
+
 # Clone or update SymbiOS from GitHub
-cd /home
-[[ -d SymbiOS ]] || git clone https://github.com/egabosh/SymbiOS.git
-cd SymbiOS
+if [[ ! -d "${g_git_root}/.git" ]]
+then
+  mkdir -p "$(dirname "${g_git_root}")"
+  git clone https://github.com/egabosh/SymbiOS.git "${g_git_root}"
+fi
+cd "${g_git_root}"
 git remote set-url origin https://github.com/egabosh/SymbiOS.git
 if ! git pull
 then
@@ -57,21 +70,21 @@ then
 fi
 
 # expand PATH to SymbiOS scripts
-export PATH="/home/SymbiOS/scripts:$PATH"
+export PATH="${g_git_root}/scripts:$PATH"
 
 # Create initial inventory if it does not exist
-g_inventory_path="/home/docker/symbios-ui/config"
+g_inventory_path="${g_base_services_root}/symbios-ui/config"
 g_inventory="${g_inventory_path}/inventory.yml"
 if ! [[ -s ${g_inventory} ]]
 then
   mkdir -p "${g_inventory_path}"
   chmod 700 "${g_inventory_path}"
-  cp /home/SymbiOS/inventory.yml "${g_inventory}"
+  cp "${g_git_root}/inventory.yml" "${g_inventory}"
   chmod 600 "${g_inventory}"
 fi
 
 # Run base-services playbooks
-f_run_playbook /home/SymbiOS/base-services/basics.yml
+f_run_playbook "${g_git_root}/base-services/basics.yml"
 
 # optional set password for symbios user (interactive on physical console)
 # Systemd's rc-local.service sets stdin=/dev/null, so we redirect from
@@ -92,26 +105,26 @@ else
 fi
 
 # continue running playbooks
-f_run_playbook /home/SymbiOS/base-services/localization.yml
-f_run_playbook /home/SymbiOS/base-services/hardening.yml
-f_run_playbook /home/SymbiOS/base-services/firewall.yml
-f_run_playbook /home/SymbiOS/base-services/backup.yml
-f_run_playbook /home/SymbiOS/base-services/autoupdate.yml
-f_run_playbook /home/SymbiOS/base-services/runchecks.yml
-f_run_playbook /home/SymbiOS/base-services/docker.yml
-f_run_playbook /home/SymbiOS/base-services/dedyn.yml
-#f_run_playbook /home/SymbiOS/base-services/traefik.yml
-f_run_playbook /home/SymbiOS/base-services/ldap.yml
-#f_run_playbook /home/SymbiOS/base-services/authelia.yml
+f_run_playbook ${g_git_root}/base-services/localization.yml
+f_run_playbook ${g_git_root}/base-services/hardening.yml
+f_run_playbook ${g_git_root}/base-services/firewall.yml
+f_run_playbook ${g_git_root}/base-services/backup.yml
+f_run_playbook ${g_git_root}/base-services/autoupdate.yml
+f_run_playbook ${g_git_root}/base-services/runchecks.yml
+f_run_playbook ${g_git_root}/base-services/docker.yml
+f_run_playbook ${g_git_root}/base-services/dedyn.yml
+#f_run_playbook ${g_git_root}/base-services/traefik.yml
+f_run_playbook ${g_git_root}/base-services/ldap.yml
+#f_run_playbook ${g_git_root}/base-services/authelia.yml
 
 # Detect Raspberry Pi and install platform-specific playbooks
 if [ -f /proc/device-tree/model ] && grep -qi "raspberry" /proc/device-tree/model
 then
-  f_run_playbook /home/SymbiOS/base-services/raspberry.yml
-  f_run_playbook /home/SymbiOS/desktop/firefox.yml
+  f_run_playbook ${g_git_root}/base-services/raspberry.yml
+  f_run_playbook ${g_git_root}/desktop/firefox.yml
 fi
 
-f_run_playbook /home/SymbiOS/base-services/symbios-ui.yml
+f_run_playbook ${g_git_root}/base-services/symbios-ui.yml
 
 # Report results
 echo ""
