@@ -257,9 +257,17 @@
         insertbefore: 'exit 0'
         marker: "# {mark} SymbiOS boot sequence"
         block: |
-          /usr/local/sbin/symbios-boot-unlock/unlock.py
+          # Start the boot unlock server only if a LUKS device exists
+          if blkid | grep -q 'LABEL="CRYPT_LUKS_SYMBIOS_DATA"'
+          then
+            /usr/local/sbin/symbios-boot-unlock/unlock.py
+            # Mount /symbios (no passphrase needed once LUKS is open, fstab entry is noauto)
+            mount /symbios 2>/dev/null || true
+          else
+            echo "WARNING: No LUKS device (CRYPT_LUKS_SYMBIOS_DATA) found - /symbios not encrypted. Docker and containerd may fail."
+          fi
           systemctl start docker
-          systemctl start lightdm
+          [[ -x /usr/sbin/lightdm ]] && systemctl start lightdm
 
     - name: Enable rc-local service
       ansible.builtin.systemd:
