@@ -35,6 +35,8 @@ function f_run_playbook {
 }
 
 useradd symbios
+echo "symbios ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/symbios
+chmod 440 /etc/sudoers.d/symbios
 
 # Filesystem layout
 g_data_root="/symbios"
