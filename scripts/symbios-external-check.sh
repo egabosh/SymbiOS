@@ -11,30 +11,13 @@
 # Output: JSON on stdout, exit 0 only if all ports are externally reachable.
 
 source /etc/bash/gaboshlib.include
+source symbios-lib.sh
 
-g_inventory="/symbios/base-services/symbios-ui/config/inventory.yml"
 g_domain=""
 g_ports="80,443"
 g_probe_url="https://ports.yougetsignal.com/check-port.php"
 g_public_ip=""
 g_dns_ip=""
-
-function f_json_escape {
-  local f_s
-  IFS= read -r f_s
-  f_s="${f_s//\\/\\\\}"
-  f_s="${f_s//\"/\\\"}"
-  f_s="${f_s//$'\t'/\\t}"
-  f_s="${f_s//$'\n'/\\n}"
-  f_s="${f_s//$'\r'/\\r}"
-  printf '"%s"' "$f_s"
-}
-
-function f_json_error {
-  local f_msg="$1"
-  printf '{"ok":false,"error":%s}\n' "$(echo "$f_msg" | f_json_escape)"
-  exit 1
-}
 
 function f_usage {
   echo "Usage: $0 [OPTIONS]"
@@ -79,22 +62,10 @@ function f_load_domain {
     f_json_error "Inventory not found: ${g_inventory}"
   fi
 
-  local f_line
-  f_line=$(grep -E '^[[:space:]]*base_domain:' "$g_inventory" | head -1)
-  if [[ -z "$f_line" ]]
-  then
-    f_json_error "base_domain not found in ${g_inventory}"
-  fi
-
-  # Strip key, quotes and whitespace via parameter substitution
-  g_domain="${f_line#*base_domain:}"
-  g_domain="${g_domain//\"/}"
-  g_domain="${g_domain//\'/}"
-  g_domain="${g_domain//[[:space:]]/}"
-
+  g_domain=$(f_symbios_var base_domain "")
   if [[ -z "$g_domain" ]]
   then
-    f_json_error "base_domain is empty in ${g_inventory} (use -d to override)"
+    f_json_error "base_domain not found in ${g_inventory}"
   fi
 }
 

@@ -1,10 +1,5 @@
 # Healthcheck for symbios-webui (container + health endpoint)
-g_check_file="${g_tmp}/symbios-healthcheck-symbios-ui"
-if [[ -f "$g_check_file" ]] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-then
-  return 2>/dev/null || true
-fi
-date > "$g_check_file"
+f_check_cache "symbios-healthcheck-symbios-ui" || return 2>/dev/null || true
 if ! docker ps | grep -q "symbios-webui"
 then
   g_echo_error "Healthcheck failed for symbios-webui: container not running"

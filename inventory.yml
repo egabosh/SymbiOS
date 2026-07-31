@@ -10,12 +10,12 @@ all:
     ldap_basedn: "dc=openldap,dc=local"
     # filesystem layout (all data lives under the /symbios data root)
     data_root: "/symbios"
-    git_root: "{{ data_root }}/git/SymbiOS"
-    base_services_root: "{{ data_root }}/base-services"
-    services_root: "{{ data_root }}/services"
-    docker_root: "{{ data_root }}/docker"
-    containerd_root: "{{ data_root }}/containerd"
-    backup_root: "{{ data_root }}/backups"
+    git_root: "/symbios/git/SymbiOS"
+    base_services_root: "/symbios/base-services"
+    services_root: "/symbios/services"
+    docker_root: "/symbios/docker"
+    containerd_root: "/symbios/containerd"
+    backup_root: "/symbios/backups"
     # ddns (desec.io)
     ddns_apikey: ''
     ddns_host: ''

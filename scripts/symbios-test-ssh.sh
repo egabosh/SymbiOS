@@ -4,17 +4,13 @@
 # Output: JSON with ok, message/error
 
 source /etc/bash/gaboshlib.include
+source symbios-lib.sh
 
 g_host="${1:-}"
 g_port="${2:-22}"
 g_user="${3:-root}"
 g_path="${4:-}"
-g_key="/symbios/base-services/symbios-ui/config/.ssh/id_symbios"
-
-function f_json_str {
-  # Escape a string for safe embedding in JSON
-  printf '%s' "$1" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()), end="")'
-}
+g_key="${g_config_dir}/.ssh/id_symbios"
 
 if [[ -z "$g_host" ]]
 then
@@ -55,14 +51,14 @@ then
     if [[ "$g_path_output" == *"path_ok"* ]]
     then
       g_msg="Connection successful. Directory ${g_path} exists."
-      echo "{\"ok\":true,\"message\":$(f_json_str "$g_msg")}"
+      echo "{\"ok\":true,\"message\":$(echo "$g_msg" | f_json_escape)}"
     elif [[ "$g_path_output" == *"path_missing"* ]]
     then
       g_err="Connection successful, but directory ${g_path} does not exist on the remote host."
-      echo "{\"ok\":false,\"error\":$(f_json_str "$g_err")}"
+      echo "{\"ok\":false,\"error\":$(echo "$g_err" | f_json_escape)}"
     else
       g_err="Connection successful, but could not verify path: ${g_path_output}"
-      echo "{\"ok\":false,\"error\":$(f_json_str "$g_err")}"
+      echo "{\"ok\":false,\"error\":$(echo "$g_err" | f_json_escape)}"
     fi
   else
     echo '{"ok":true,"message":"Connection successful."}'
@@ -75,18 +71,18 @@ else
   elif [[ "$g_output" == *"Connection refused"* ]]
   then
     g_err="Connection refused on port ${g_port}. Is SSH running?"
-    echo "{\"ok\":false,\"error\":$(f_json_str "$g_err")}"
+    echo "{\"ok\":false,\"error\":$(echo "$g_err" | f_json_escape)}"
   elif [[ "${g_output,,}" == *"timed out"* ]] || [[ "${g_output,,}" == *"timeout"* ]]
   then
     g_err="Connection timed out. Is ${g_host} reachable?"
-    echo "{\"ok\":false,\"error\":$(f_json_str "$g_err")}"
+    echo "{\"ok\":false,\"error\":$(echo "$g_err" | f_json_escape)}"
   elif [[ "$g_output" == *"No route to host"* ]]
   then
     g_err="No route to host ${g_host}. Is the host reachable?"
-    echo "{\"ok\":false,\"error\":$(f_json_str "$g_err")}"
+    echo "{\"ok\":false,\"error\":$(echo "$g_err" | f_json_escape)}"
   else
     g_err="Connection failed: ${g_output}"
-    echo "{\"ok\":false,\"error\":$(f_json_str "$g_err")}"
+    echo "{\"ok\":false,\"error\":$(echo "$g_err" | f_json_escape)}"
   fi
   exit 1
 fi

@@ -2,10 +2,11 @@
 
 # Source gaboshlib for utility functions
 . /etc/bash/gaboshlib.include
+source symbios-lib.sh
 g_lockfile
 
 # Log to shared log file
-g_dedyn_log="/symbios/base-services/symbios-ui/log/dedyn.log"
+g_dedyn_log="${g_log_dir}/dedyn.log"
 exec > >(tee -a "$g_dedyn_log") 2>&1
 
 # deDyn/deSEC-Settings
@@ -136,15 +137,14 @@ do
         g_echo_ok "DynDNS IP ${g_ip} for ${g_dynaddr} renewed"
         g_changed=1
         # Restart Traefik if ACME errors detected
-        if [[ -f /symbios/base-services/traefik/docker-compose.yml ]]
+        if [[ -f "${g_base_services_root}/traefik/docker-compose.yml" ]]
         then
-          if docker compose -f /symbios/base-services/traefik/docker-compose.yml logs 2>/dev/null | grep -q "error.*acme-challenge"
+          if docker compose -f "${g_base_services_root}/traefik/docker-compose.yml" logs 2>/dev/null | grep -q "error.*acme-challenge"
           then
-            docker compose -f /symbios/base-services/traefik/docker-compose.yml up -d --force-recreate
+            docker compose -f "${g_base_services_root}/traefik/docker-compose.yml" up -d --force-recreate
           fi
         fi
-        # Trigger TURN server IP update
-        [[ -x /symbios/services/turn/newip.sh ]] && /symbios/services/turn/newip.sh
+        [[ -x "${g_services_root}/turn/newip.sh" ]] && "${g_services_root}/turn/newip.sh"
       else
         g_echo_error "Failed to update DynDNS IP ${g_ip} for ${g_dynaddr} (HTTP ${g_response})"
       fi

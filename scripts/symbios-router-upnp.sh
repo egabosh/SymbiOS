@@ -7,7 +7,8 @@
 #   Generic UPnP      → internal bash SOAP functions (curl + temp files)
 
 SCRIPT_NAME="$(basename "$0")"
-UPNP_CONFIG_DIR="/symbios/base-services/symbios-ui/config"
+source symbios-lib.sh
+UPNP_CONFIG_DIR="${g_config_dir}"
 UPNP_CONFIG_FILE="${UPNP_CONFIG_DIR}/router-upnp.conf"
 ROUTER_UPNP_USER=""
 ROUTER_UPNP_PASS=""
@@ -18,16 +19,7 @@ then
   source "$UPNP_CONFIG_FILE"
 fi
 
-# ============================================================
-#  JSON field extraction via bash parameter substitution
-# ============================================================
-
-function f_json_str {
-  local f_json="$1" f_key="$2"
-  local f_tmp="${f_json#*\"${f_key}\":\"}"
-  [[ "$f_tmp" == "$f_json" ]] && { echo ""; return 1; }
-  echo "${f_tmp%%\"*}"
-}
+# JSON field extraction helpers (f_json_get/f_json_bool in symbios-lib.sh)
 
 function f_json_bool {
   local f_json="$1" f_key="$2"
@@ -260,12 +252,12 @@ EOF
 
     if [[ "$AVAILABLE" != "true" ]]
     then
-      ERR=$(f_json_str "$DETECT" "error")
+      ERR=$(f_json_get "$DETECT" "error")
       echo "{\"ok\":false,\"error\":\"Router not available: ${ERR}\",\"gateway\":\"${GATEWAY}\"}"
       exit 1
     fi
 
-    ROUTER_TYPE=$(f_json_str "$DETECT" "router_type")
+    ROUTER_TYPE=$(f_json_get "$DETECT" "router_type")
 
     # FRITZ!Box → Python backend
     if [[ "$ROUTER_TYPE" == "fritzbox" ]]
@@ -285,7 +277,7 @@ EOF
     fi
 
     # Generic UPnP → bash SOAP handlers
-    CONTROL_URL=$(f_json_str "$DETECT" "control_url")
+    CONTROL_URL=$(f_json_get "$DETECT" "control_url")
 
     if [[ -z "$CONTROL_URL" ]]
     then

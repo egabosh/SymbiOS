@@ -1,10 +1,11 @@
 # Check: Verify two-factor authentication status in inventory config
-g_check_file="${g_tmp}/symbios-healthcheck-twofa"
-if [[ -f "$g_check_file" ]] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-then
-  return 2>/dev/null || true
-fi
-date > "$g_check_file"
+f_check_cache "symbios-healthcheck-twofa" || return 2>/dev/null || true
 
-g_twofa_status=$(python3 -c "import yaml; c=yaml.safe_load(open('/symbios/base-services/symbios-ui/config/inventory.yml')); v=c.get('all',{}).get('vars',{}); print('enabled' if v.get('twofa_enabled') else 'disabled')")
+g_twofa=$(f_symbios_var twofa_enabled "")
+if [[ "${g_twofa}" == "true" || "${g_twofa}" == "yes" || "${g_twofa}" == "1" ]]
+then
+  g_twofa_status="enabled"
+else
+  g_twofa_status="disabled"
+fi
 # 2FA is optional — no error if disabled

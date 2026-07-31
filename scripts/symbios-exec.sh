@@ -28,6 +28,16 @@
 # Redirect to stderr so helper messages don't corrupt JSON output on stdout.
 source /etc/bash/gaboshlib.include 1>&2
 
+# Ensure the SymbiOS scripts directory is on PATH for every command we run.
+# SSH non-interactive shells do not read /etc/profile.d, so without this the
+# WebUI's unqualified script names (e.g. symbios-run-playbook.sh) would not
+# resolve. Self-location works regardless of how this script was invoked.
+f_exec_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "${PATH}" != *"${f_exec_dir}"* ]]
+then
+  export PATH="${f_exec_dir}:${PATH}"
+fi
+
 # Client IP for the audit trail (from the SSH connection metadata).
 g_client_ip="${SSH_CONNECTION%% *}"
 

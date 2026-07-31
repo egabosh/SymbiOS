@@ -1,10 +1,5 @@
 # Check: Verify deDyn DDNS cron job and configuration are present
-g_check_file="${g_tmp}/symbios-healthcheck-ddns"
-if [[ -f "$g_check_file" ]] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-then
-  return 2>/dev/null || true
-fi
-date > "$g_check_file"
+f_check_cache "symbios-healthcheck-ddns" || return 2>/dev/null || true
 
 # Check if dedyn cron job exists
 if ! [[ -f /etc/cron.d/dedyn_local ]]

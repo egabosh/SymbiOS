@@ -1,6 +1,7 @@
 #!/bin/bash
 # File storing system service statuses
-g_file=/symbios/base-services/symbios-ui/log/symbios-services.tsv
+source symbios-lib.sh
+g_file="${g_log_dir}/symbios-services.tsv"
 g_tmp="${g_file}.tmp"
 
 # Write status for each service to temp file

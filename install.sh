@@ -34,6 +34,7 @@ function f_run_playbook {
   fi
 }
 
+ntpdate time.fu-berlin.de
 useradd symbios
 echo "symbios ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/symbios
 chmod 440 /etc/sudoers.d/symbios

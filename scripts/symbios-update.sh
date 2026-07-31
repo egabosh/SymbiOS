@@ -24,12 +24,11 @@
 
 # Source gaboshlib if available
 source /etc/bash/gaboshlib.include
+source symbios-lib.sh
 g_lockfile
 
-g_symbios_dir="${SYMBIOS_DIR:-/symbios/git/SymbiOS}"
+g_symbios_dir="${SYMBIOS_DIR:-${g_git_root}}"
 g_repo_url="https://github.com/egabosh/SymbiOS.git"
-g_inventory="${g_inventory:-/symbios/base-services/symbios-ui/config/inventory.yml}"
-g_state_file="/symbios/base-services/symbios-ui/config/installed-playbooks.yml"
 g_failed=""
 g_dry_run=false
 
