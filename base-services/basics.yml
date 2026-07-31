@@ -72,7 +72,7 @@
         path: /lib/systemd/systemd
       register: nocontainer
 
-    - name: Replace empty /home with symlink to data root
+    - name: Replace /home with symlink
       ansible.builtin.shell: |
         [[ -d "{{ data_root }}/home" ]] && exit 0
         mv /home "{{ data_root }}"/home
@@ -82,6 +82,42 @@
       register: home_symlink
       changed_when: home_symlink.rc == 0
       failed_when: home_symlink.rc != 0
+      when: nocontainer.stat.exists
+
+    - name: Replace /root with symlink
+      ansible.builtin.shell: |
+        [[ -d "{{ data_root }}/home/root" ]] && exit 0
+        mv /root "{{ data_root }}"/home/root
+        ln -s "{{ data_root }}"/home/root /root
+      args:
+        executable: /bin/bash
+      register: home_symlink
+      changed_when: home_symlink.rc == 0
+      failed_when: home_symlink.rc != 0
+      when: nocontainer.stat.exists
+
+    - name: Create symbios user
+      ansible.builtin.user:
+        name: symbios
+        uid: 1000
+        shell: /bin/bash
+        home: "{{ data_root }}/home/symbios"
+        create_home: true
+        groups:
+          - root
+          - sudo
+          - adm
+        append: true
+        state: present
+      when: nocontainer.stat.exists
+
+    - name: Allow symbios passwordless sudo
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers.d/symbios
+        line: "symbios ALL=(ALL) NOPASSWD:ALL"
+        create: true
+        mode: '0440'
+        validate: "visudo -cf %s"
       when: nocontainer.stat.exists
 
     - name: apt update
