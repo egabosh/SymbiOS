@@ -34,6 +34,8 @@ function f_run_playbook {
   fi
 }
 
+useradd symbios
+
 # Filesystem layout
 g_data_root="/symbios"
 g_git_root="${g_data_root}/git/SymbiOS"
