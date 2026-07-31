@@ -233,15 +233,6 @@
         mode: "0644"
       register: containerd_config
 
-    - name: Remove old /var/lib/docker and /var/lib/containerd symlinks
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /var/lib/docker
-        - /var/lib/containerd
-      when: (item | is_link)
-
     - name: Restart containerd if config changed
       ansible.builtin.systemd:
         name: containerd
