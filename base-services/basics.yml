@@ -133,11 +133,26 @@
         cache_valid_time: 3600
       changed_when: false
 
-    - name: apt dist-upgrade
+    - name: Set initramfs MODULES=most (fixes kernel postinst on Pi)
+      ansible.builtin.lineinfile:
+        path: /etc/initramfs-tools/initramfs.conf
+        regexp: '^MODULES='
+        line: 'MODULES=most'
+        create: yes
+        mode: "0644"
+
+    - name: apt dist-upgrade (does not abort playbook on failure)
       apt:
         upgrade: dist
         autoremove: yes
         clean: yes
+      register: apt_dist_upgrade
+      failed_when: false
+
+    - name: Report apt dist-upgrade failure if any
+      debug:
+        msg: "apt dist-upgrade failed but continuing: {{ apt_dist_upgrade.msg }}"
+      when: apt_dist_upgrade is failed
 
     - name: Install Basic Packages
       apt:

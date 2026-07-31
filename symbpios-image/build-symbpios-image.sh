@@ -283,7 +283,7 @@ chroot "${g_mount_point_root}" /bin/bash -c "
   apt-get -y update --allow-releaseinfo-change
   apt-get -y remove --purge plymouth cloud-guest-utils cloud-init rpi-cloud-init-mods
   apt-get -y install --no-install-recommends ${g_packages}
-  apt-get -y dist-upgrade
+  apt-get -y dist-upgrade || echo 'WARNING: dist-upgrade failed in chroot, continuing'
   apt-get -y autoremove
   apt-get -y cleana
   rm -rf /var/lib/apt/lists/*
