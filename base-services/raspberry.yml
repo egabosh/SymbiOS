@@ -47,6 +47,7 @@
           # desktop specific
           - cinnamon-desktop-environment
           - cinnamon-l10n
+          - lightdm-gtk-greeter
           - gnome-terminal
           - dconf-cli
           - dphys-swapfile
@@ -141,12 +142,25 @@
       loop:
         - { option: autologin-user, value: symbios }
         - { option: autologin-user-timeout, value: "0" }
+        - { option: autologin-session, value: cinnamon }
         - { option: user-session, value: cinnamon }
         - { option: greeter-session, value: lightdm-gtk-greeter }
         - { option: greeter-hide-users, value: "false" }
         - { option: greeter-show-manual-login, value: "true" }
         - { option: allow-guest, value: "false" }
       changed_when: false
+
+    - name: Xorg vc4 OutputClass for X11 on Pi 5 (missing in Lite image)
+      copy:
+        dest: /etc/X11/xorg.conf.d/99-vc4.conf
+        content: |
+          Section "OutputClass"
+            Identifier "vc4"
+            MatchDriver "vc4"
+            Driver "modesetting"
+            Option "PrimaryGPU" "true"
+          EndSection
+        mode: "0644"
 
     - name: Disable first-run wizard (language/user dialog)
       ansible.builtin.file:

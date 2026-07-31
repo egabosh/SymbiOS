@@ -390,16 +390,10 @@ def main():
 
     must_unlock, result = needs_unlock()
     if not must_unlock:
-        log("/symbios is not encrypted or already unlocked, nothing to do")
-        if not result.get("device"):
-            msg = (
-                "WARNING: No LUKS device found. If you expect encrypted /symbios,\n"
-                "         check that your disk (SSD/NVMe) is connected.\n"
-                "         Docker and containerd may fail because /symbios/docker\n"
-                "         and /symbios/containerd point to non-existent targets."
-            )
-            print(msg, file=sys.stderr)
-            log("No LUKS device found at all — /symbios not encrypted")
+        if result.get("device"):
+            log("/symbios already unlocked, nothing to do")
+        else:
+            log("/symbios is not encrypted, nothing to do")
         return
 
     if not generate_self_signed_cert():
