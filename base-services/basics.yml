@@ -140,7 +140,6 @@
         mode: '0750'
       loop:
         - "{{ data_root }}"
-        - "{{ data_root }}/home"
         - "{{ data_root }}/backups"
         - "{{ git_root }}"
         - "{{ base_services_root }}"
@@ -149,19 +148,9 @@
 
     - name: Replace empty /home with symlink to data root
       ansible.builtin.shell: |
-        set -e
-        if [ -L /home ] && [ "$(readlink /home)" = "{{ data_root }}/home" ]
-        then
-          exit 0
-        fi
-        if [ ! -e /home ] || [ -z "$(ls -A /home 2>/dev/null)" ]
-        then
-          rm -rf /home
-          ln -s "{{ data_root }}/home" /home
-        else
-          echo "/home is not empty - leaving as-is" >&2
-          exit 1
-        fi
+        [[ -d "{{ data_root }}/home" ]] && exit 0
+        mv /home "{{ data_root }}"/home
+        ln -s "{{ data_root }}"/home /home
       args:
         executable: /bin/bash
       register: home_symlink
