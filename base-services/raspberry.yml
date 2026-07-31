@@ -148,24 +148,6 @@
         - { option: allow-guest, value: "false" }
       changed_when: false
 
-    - name: check if kodi is present/used
-      stat:
-        path: /usr/local/sbin/switch-kodi-desk.sh
-      register: kodisetup
-
-    - name: Enable lightdm
-      ansible.builtin.systemd:
-        name: lightdm.service
-        enabled: true
-        masked: false
-      when: not kodisetup.stat.exists
-
-    - name: Disable lightdm
-      ansible.builtin.systemd:
-        name: lightdm.service
-        enabled: false
-      when: kodisetup.stat.exists == true
-
     - name: Disable first-run wizard (language/user dialog)
       ansible.builtin.file:
         path: "{{ item }}"
