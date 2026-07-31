@@ -4,7 +4,7 @@
 g_days=7
 g_timestamp=$(date +"%Y%m%d%H%M")
 
-cd /symbios/base-services/ldap
+cd "${g_base_services_root}/ldap"
 
 # Export LDAP database using slapcat
 if docker compose exec -ti openldap.ldap.local slapcat -F /ldap-config/slapd.d >$g_backupdir/openldap.ldap.local-$g_timestamp.ldif 2>"${g_tmp}/ldaperr"

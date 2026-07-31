@@ -1,10 +1,5 @@
 # Check: Verify all required Docker containers are running
-g_check_file="${g_tmp}/symbios-healthcheck-containers"
-if [[ -f "$g_check_file" ]] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-then
-  return 2>/dev/null || true
-fi
-date > "$g_check_file"
+f_check_cache "symbios-healthcheck-containers" || return 2>/dev/null || true
 
 g_missing=""
 for g_container in traefik symbios-webui openldap

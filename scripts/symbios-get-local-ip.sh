@@ -3,8 +3,9 @@
 # Checks .host-ip file first (written by host cron), falls back to hostname -I
 
 source /etc/bash/gaboshlib.include
+source symbios-lib.sh
 
-g_host_ip_file="/symbios/base-services/symbios-ui/config/.host-ip"
+g_host_ip_file="${g_config_dir}/.host-ip"
 
 # Primary: read from file written by host cron
 if [[ -r "$g_host_ip_file" ]]

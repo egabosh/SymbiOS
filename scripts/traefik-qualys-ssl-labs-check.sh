@@ -1,5 +1,6 @@
 #!/bin/bash
 . /etc/bash/gaboshlib.include
+source symbios-lib.sh
 g_lockfile
 g_nice
 g_all-to-syslog
@@ -36,19 +37,7 @@ fi
 if [[ -f /usr/local/bin/ssllabs-scan ]]
 then
   # Collect all hostnames from docker-compose files
-  find /symbios/base-services /symbios/services -maxdepth 1 -mindepth 1 -type d | grep -E -v "\.del$|\.bak$|\.old$|var-lib-docker$" | while read g_dir
-  do
-    if grep -q Host "$g_dir"/docker-compose.override.yml >/dev/null 2>&1
-    then
-      grep Host "$g_dir"/docker-compose.override.yml >>"$g_tmp/hosts"
-    else
-      if [[ -f "$g_dir"/docker-compose.yml ]]
-      then
-        grep Host "$g_dir"/docker-compose.yml >>"$g_tmp/hosts"
-      fi
-    fi
-  done
-  grep Host /symbios/base-services/traefik/providers/*.yml >>"$g_tmp/hosts"
+  f_symbios_traefik_hosts
 
   # Iterate over unique hostnames and run ssllabs-scan
   cat "$g_tmp/hosts" | cut -d '`' -f2 | sort -u | while read g_host

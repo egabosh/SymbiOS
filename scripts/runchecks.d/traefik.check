@@ -1,25 +1,6 @@
 # Healthcheck for traefik host reachability
-# Truncate hosts file and collect all hostnames from docker-compose
->"$g_tmp/hosts"
-find /symbios/base-services /symbios/services -maxdepth 1 -mindepth 1 -type d | grep -E -v "\.del$|\.bak$|\.old$|var-lib-docker$" | while read f_dir
-do
-  # Skip directories marked as down
-  if [[ -s "$f_dir/.downok" ]]
-  then
-    continue
-  fi
-  # Extract Host labels from docker-compose files
-  if grep -q Host "$f_dir/docker-compose.override.yml" >/dev/null 2>&1
-  then
-    grep Host "$f_dir/docker-compose.override.yml" >>"$g_tmp/hosts"
-  else
-    if [[ -f "$f_dir/docker-compose.yml" ]]
-    then
-      grep Host "$f_dir/docker-compose.yml" >>"$g_tmp/hosts"
-    fi
-  fi
-done
-grep Host /symbios/base-services/traefik/providers/*.yml >>"$g_tmp/hosts"
+# Collect all hostnames from docker-compose files
+f_symbios_traefik_hosts
 
 # Ensure each host has a local /etc/hosts entry
 cat "$g_tmp/hosts" | cut -d '`' -f2 | sort -u | while read f_host

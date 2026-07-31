@@ -28,6 +28,7 @@
 #   symbios-ldap-groups.sh --list-members --name <group>
 
 source /etc/bash/gaboshlib.include 1>/dev/null 2>&1 || true
+source symbios-lib.sh 1>/dev/null 2>&1 || true
 
 function f_usage {
   cat << EOF
@@ -116,29 +117,8 @@ then
 fi
 
 # Read LDAP connection details from inventory
-f_config_path="${CONFIG_PATH:-/symbios/base-services/symbios-ui/config/inventory.yml}"
-f_ldap_uri="${LDAP_URI:-ldap://openldap}"
-
-f_base_dn="$(python3 -c "
-import yaml, sys
-try:
-    cfg = yaml.safe_load(open('${f_config_path}')) or {}
-    print(cfg.get('all',{}).get('vars',{}).get('ldap_basedn','dc=openldap,dc=local'))
-except: print('dc=openldap,dc=local')
-" 2>/dev/null)"
-
-f_admin_pw="$(cat /symbios/base-services/symbios-ui/config/.ldap_admin_pw 2>/dev/null || echo 'changeme')"
-f_bind_dn="cn=head-of-ldap,${f_base_dn}"
+f_symbios_ldap_init
 f_group_dn="cn=${f_name},ou=groups,${f_base_dn}"
-
-# Run LDAP command inside the webui container (has network access to openldap)
-function f_ldap_exec {
-  docker exec symbios-webui "$@"
-}
-
-function f_ldap_ldif {
-  docker exec -i symbios-webui "$@"
-}
 
 case "${f_action}" in
 

@@ -1,14 +1,10 @@
 # Check: Verify remote SSH key exists and host 192.168.41.1 is reachable on port 22
-g_check_file="${g_tmp}/symbios-healthcheck-remote-ssh"
-if [[ -f "$g_check_file" ]] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-then
-  return 2>/dev/null || true
-fi
-date > "$g_check_file"
+f_check_cache "symbios-healthcheck-remote-ssh" || return 2>/dev/null || true
 
-if [[ ! -f "/symbios/base-services/symbios-ui/config/.ssh/id_symbios" ]]
+g_ssh_key="${g_config_dir}/.ssh/id_symbios"
+if [[ ! -f "$g_ssh_key" ]]
 then
-  g_echo_error "Remote SSH exec key missing at /symbios/base-services/symbios-ui/config/.ssh/id_symbios"
+  g_echo_error "Remote SSH exec key missing at $g_ssh_key"
 fi
 
 if ! timeout 3 bash -c 'echo > /dev/tcp/192.168.41.1/22' >/dev/null 2>&1

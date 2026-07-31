@@ -1,12 +1,7 @@
 # Check: Detect failed Ansible playbook runs in log files
-g_check_file="${g_tmp}/symbios-healthcheck-playbooks"
-if [[ -f "$g_check_file" ]] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-then
-  return 2>/dev/null || true
-fi
-date > "$g_check_file"
+f_check_cache "symbios-healthcheck-playbooks" || return 2>/dev/null || true
 
-g_playbook_failures=$(grep -l 'failed=1\|FAILED' /symbios/base-services/symbios-ui/log/playbook-*.log 2>/dev/null)
+g_playbook_failures=$(grep -l 'failed=1\|FAILED' "${g_log_dir}/playbook-*.log" 2>/dev/null)
 if [[ -n "$g_playbook_failures" ]]
 then
   for g_logfile in $g_playbook_failures

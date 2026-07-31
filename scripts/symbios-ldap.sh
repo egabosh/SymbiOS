@@ -27,24 +27,18 @@
 
 set -euo pipefail
 
+# Source the central config library. Inside the WebUI container it lives under
+# /repo/scripts/ (mounted read-only); the container's CONFIG_PATH=/config/inventory.yml
+# makes the library resolve g_config_dir=/config and g_log_dir=/log.
+source /repo/scripts/symbios-lib.sh 2>/dev/null || source symbios-lib.sh 2>/dev/null || true
+
 # Read LDAP connection details from inventory and password file
 function f_read_ldap_vars {
-  g_config_path="${CONFIG_PATH:-/config/inventory.yml}"
-  g_ldap_uri="${LDAP_URI:-ldap://openldap}"
-
-  # Parse base_dn from inventory
-  g_base_dn="$(python3 -c "
-import yaml, sys
-try:
-    cfg = yaml.safe_load(open('${g_config_path}')) or {}
-    print(cfg.get('all',{}).get('vars',{}).get('ldap_basedn','dc=openldap,dc=local'))
-except: print('dc=openldap,dc=local')
-" 2>/dev/null)"
-
-  # Read admin password from file
-  g_admin_pw="$(cat /config/.ldap_admin_pw 2>/dev/null || echo 'changeme')"
-
-  g_bind_dn="cn=head-of-ldap,${g_base_dn}"
+  f_symbios_ldap_init
+  g_ldap_uri="${f_ldap_uri}"
+  g_base_dn="${f_base_dn}"
+  g_admin_pw="${f_admin_pw}"
+  g_bind_dn="${f_bind_dn}"
 }
 
 # Search LDAP directory

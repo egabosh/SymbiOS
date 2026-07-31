@@ -4,11 +4,12 @@
 # Output: first line = total count, remaining lines = extracted log messages
 
 source /etc/bash/gaboshlib.include
+source symbios-lib.sh
 
 g_container="${1:-}"
 g_offset="${2:-0}"
 g_limit="${3:-500}"
-g_log_base="/symbios/docker/containers"
+g_log_base="${g_docker_root}/containers"
 
 if [[ -z "$g_container" ]]
 then

@@ -2,18 +2,19 @@
 
 # SymbiOS backup dispatcher - runs all .check scripts from backup.d/
 . /etc/bash/gaboshlib.include
+source symbios-lib.sh
 g_lockfile
 g_nice
 g_all-to-syslog
 g_echo_ok "Starting $0"
 set -o pipefail
 
-g_backupdir=/symbios/backups
+g_backupdir="${g_backup_root}"
 mkdir -p ${g_backupdir}
 chmod 700 ${g_backupdir}
 chown root:root ${g_backupdir}
 
-for g_backup in $(find /usr/local/sbin/backup.d /symbios/git/SymbiOS/scripts/backup.d -name "*.backup" -type f | sort)
+for g_backup in $(find /usr/local/sbin/backup.d ${g_git_root}/scripts/backup.d -name "*.backup" -type f | sort)
 do
   if bash -n "$g_backup" >$g_tmp/backup_error 2>&1
   then

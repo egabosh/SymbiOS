@@ -1,10 +1,8 @@
 #!/bin/bash
 # Index file storing Docker container information
-g_index_file=/symbios/base-services/symbios-ui/log/docker-containers.tsv
+source symbios-lib.sh
+g_index_file="${g_log_dir}/docker-containers.tsv"
 g_temp_file="${g_index_file}.tmp"
-
-# Docker data root (matches daemon.json data-root)
-g_docker_root=/symbios/docker
 
 # Write current container list to temp file
 docker ps --no-trunc --format '{{.ID}}	{{.Names}}' > "$g_temp_file" 2>/dev/null
