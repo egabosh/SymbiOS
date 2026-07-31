@@ -245,17 +245,6 @@
       ansible.builtin.command:
         cmd: systemctl set-default multi-user.target
 
-    - name: Remove old boot systemd units (migrated to rc.local)
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /etc/systemd/system/symbios-boot-unlock.service
-        - /etc/systemd/system/symbios-graphical.service
-        - /etc/systemd/system/symbios-restart-docker-services.service
-        - /etc/systemd/system/docker.service.d/symbios-unlock.conf
-        - /etc/systemd/system/containerd.service.d/symbios-unlock.conf
-
     - name: Disable docker and containerd auto-start (handled by rc.local)
       ansible.builtin.systemd:
         name: "{{ item }}"
