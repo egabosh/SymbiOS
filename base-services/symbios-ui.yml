@@ -187,35 +187,18 @@
         mode: "0644"
         create: yes
 
-    - name: Install container-index systemd service
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/symbios-container-index.service
-        content: |
-          [Unit]
-          Description=Write Docker container index to /var/run
-          After=docker.service
-
-          [Service]
-          Type=oneshot
-          Environment=PATH={{ git_root }}/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
-          ExecStart={{ git_root }}/scripts/symbios-container-index.sh
-          User=root
-          Group=root
-
-    - name: Install container-index systemd timer
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/symbios-container-index.timer
-        content: |
-          [Unit]
-          Description=Update Docker container index every 60s
-
-          [Timer]
-          OnBootSec=30
-          OnUnitActiveSec=60
-          Unit=symbios-container-index.service
-
-          [Install]
-          WantedBy=timers.target
+    - name: /etc/cron.d/container-index_local
+      ansible.builtin.blockinfile:
+        path: /etc/cron.d/container-index_local
+        create: yes
+        mode: 0644
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          SHELL=/bin/bash
+          * * * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/symbios-container-index.sh ]] && symbios-container-index.sh >/dev/null 2>&1
+        backup: yes
 
     - name: Create /usr/local/sbin/symbios-boot-unlock
       ansible.builtin.file:
@@ -298,16 +281,6 @@
         minute: "*/5"
         job: "/usr/local/sbin/symbios-boot-unlock/extract-le-cert.sh"
         user: root
-
-    - name: Reload systemd
-      ansible.builtin.systemd:
-        daemon_reload: yes
-
-    - name: Enable container-index timer
-      ansible.builtin.systemd:
-        name: symbios-container-index.timer
-        enabled: yes
-        state: started
 
     - name: Inventory must be owned by the WebUI user so the UI can read/write it
       ansible.builtin.file:
