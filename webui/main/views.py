@@ -17,6 +17,7 @@
 import yaml
 import os
 from django.shortcuts import render, redirect
+from django.contrib import messages
 from .decorators import login_required
 from .constants import CONFIG_PATH
 
@@ -84,8 +85,73 @@ def settings(request):
     return render(request, 'main/settings.html')
 
 
+@login_required
+def setup(request):
+    """Guided setup assistant — orchestrates the settings pages (no duplicate forms)."""
+    from .setup_status import setup_steps, is_setup_complete, network_type_label
+    config = _get_inventory_config()
+    vars_ = config.get('all', {}).get('vars', {})
+
+    if request.method == 'POST':
+        from .utils.http import is_ajax_request
+        from django.http import JsonResponse
+        is_ajax = is_ajax_request(request)
+        network_type = request.POST.get('network_type', '').strip()
+        if network_type in ('home', 'root'):
+            vars_['network_type'] = network_type
+            _save_inventory_config(config)
+            if is_ajax:
+                return JsonResponse({'ok': True})
+            messages.success(request, 'Server location saved.')
+            return redirect('setup')
+        if is_ajax:
+            return JsonResponse({'ok': False, 'error': 'Invalid network type'}, status=400)
+
+    steps = setup_steps(vars_)
+    pending = [s for s in steps if not s['optional'] and s['status'] != 'done']
+    complete = is_setup_complete(vars_)
+
+    return render(request, 'main/setup.html', {
+        'vars': vars_,
+        'steps': steps,
+        'pending_count': len(pending),
+        'complete': complete,
+        'network_type': vars_.get('network_type', ''),
+        'network_type_label': network_type_label(vars_.get('network_type', '')),
+    })
+
+
+@login_required
+def setup_reachability(request):
+    """AJAX GET — run the external reachability probe and return JSON."""
+    from .utils.ssh_exec import run_command
+    from django.http import JsonResponse
+    config = _get_inventory_config()
+    vars_ = config.get('all', {}).get('vars', {})
+    base_domain = vars_.get('base_domain', '')
+    if not base_domain:
+        return JsonResponse({'ok': False, 'error': 'Noch keine Domain konfiguriert. Richte zuerst DNS ein.'})
+    ok, stdout, stderr = run_command(
+        f'symbios-external-check.sh -d {base_domain} -p 80,443', timeout=60)
+    if ok:
+        try:
+            import json as _json
+            return JsonResponse(_json.loads(stdout))
+        except Exception:
+            return JsonResponse({'ok': False, 'error': stdout or 'Pruefung fehlgeschlagen'})
+    return JsonResponse({'ok': False, 'error': (stderr or stdout) or 'Pruefung fehlgeschlagen'})
+
+
 def health(request):
-    return render(request, 'main/health.html')
+    from .setup_status import setup_steps, is_setup_complete
+    config = _get_inventory_config()
+    vars_ = config.get('all', {}).get('vars', {})
+    steps = setup_steps(vars_)
+    pending = [s for s in steps if not s['optional'] and s['status'] != 'done']
+    return render(request, 'main/health.html', {
+        'setup_incomplete': not is_setup_complete(vars_),
+        'setup_pending': len(pending),
+    })
 
 def health_data(request):
     from .health import run_all

@@ -22,6 +22,7 @@ from .views import _get_inventory_config, _save_inventory_config, _safe_write
 from .constants import CONFIG_PATH
 from .utils.ssh_exec import run_playbook, run_command
 from .utils.http import is_ajax_request
+from .setup_status import get_page_badge, PAGE_EXPLAIN
 
 import urllib.request
 import urllib.error
@@ -155,11 +156,57 @@ def settings_ddns(request):
             messages.error(request, f'Error: {e}')
         return redirect('settings_ddns')
 
+    badge = get_page_badge('ddns', vars_)
     return render(request, 'main/settings_ddns.html', {
         'vars': vars_,
         'dns_mode': current_dns_mode,
         'self_domain': vars_.get('base_domain', '') if current_dns_mode == 'self-managed' else '',
+        'page_key': 'ddns',
+        'page_icon': 'bi-globe',
+        'page_title': 'DNS',
+        'page_explain': PAGE_EXPLAIN['ddns'],
+        'page_status': badge[0],
+        'page_status_label': badge[1],
+        'page_status_text': badge[2],
     })
+
+
+@login_required
+def settings_ddns_check_domain(request):
+    """AJAX GET — check if a .dedyn.io hostname is still available (before registration)."""
+    hostname = request.GET.get('hostname', '').strip().lower()
+    if not hostname:
+        return JsonResponse({'ok': False, 'error': 'No hostname provided'})
+
+    if hostname.endswith('.dedyn.io'):
+        hostname = hostname[:-len('.dedyn.io')]
+
+    try:
+        # deSEC offers a public availability check on the dedyn.io page.
+        # Use DNS resolution first (fast, no API key needed): a resolved
+        # hostname is almost certainly taken.
+        try:
+            import socket
+            socket.getaddrinfo(hostname + '.dedyn.io', None, socket.AF_UNSPEC)
+            return JsonResponse({'available': False, 'hostname': hostname})
+        except socket.gaierror:
+            pass
+
+        # Fallback: probe deSEC API without auth - a 404 means free, 200/409 means taken.
+        req = urllib.request.Request(
+            f'https://desec.io/api/v1/domains/{hostname}.dedyn.io/')
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return JsonResponse({'available': resp.status == 200 and False,
+                                     'hostname': hostname})
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return JsonResponse({'available': True, 'hostname': hostname})
+            return JsonResponse({'available': None, 'hostname': hostname,
+                                 'note': f'Probe returned HTTP {e.code}'})
+    except Exception as e:
+        return JsonResponse({'available': None, 'hostname': hostname,
+                             'error': str(e)})
 
 
 @login_required
@@ -607,6 +654,13 @@ def settings_localization(request):
         'vars': vars_,
         'all_timezones': valid_timezones_display,
         'all_keyboards': keyboards,
+        'page_key': 'localization',
+        'page_icon': 'bi-clock-history',
+        'page_title': 'Sprache & Zeitzone',
+        'page_explain': PAGE_EXPLAIN['localization'],
+        'page_status': get_page_badge('localization', vars_)[0],
+        'page_status_label': get_page_badge('localization', vars_)[1],
+        'page_status_text': get_page_badge('localization', vars_)[2],
     })
 
 
@@ -653,7 +707,17 @@ def settings_auth(request):
             messages.error(request, f'Error: {e}')
         return redirect('settings_auth')
 
-    return render(request, 'main/settings_auth.html', {'vars': vars_})
+    badge = get_page_badge('auth', vars_)
+    return render(request, 'main/settings_auth.html', {
+        'vars': vars_,
+        'page_key': 'auth',
+        'page_icon': 'bi-shield-lock',
+        'page_title': 'Anmeldung & 2FA',
+        'page_explain': PAGE_EXPLAIN['auth'],
+        'page_status': badge[0],
+        'page_status_label': badge[1],
+        'page_status_text': badge[2],
+    })
 
 
 @login_required
@@ -695,7 +759,17 @@ def settings_acme(request):
             messages.error(request, f'Error: {e}')
         return redirect('settings_acme')
 
-    return render(request, 'main/settings_acme.html', {'vars': vars_})
+    badge = get_page_badge('acme', vars_)
+    return render(request, 'main/settings_acme.html', {
+        'vars': vars_,
+        'page_key': 'acme',
+        'page_icon': 'bi-patch-check',
+        'page_title': 'Sicherheits-Zertifikate (TLS)',
+        'page_explain': PAGE_EXPLAIN['acme'],
+        'page_status': badge[0],
+        'page_status_label': badge[1],
+        'page_status_text': badge[2],
+    })
 
 
 @login_required
@@ -965,7 +1039,17 @@ _DATA_PART_SCRIPT = '/usr/local/sbin/symbios-data-partition.sh'
 def settings_disk(request):
     config = _get_inventory_config()
     vars_ = config.get('all', {}).get('vars', {})
-    return render(request, 'main/settings_disk.html', {'vars': vars_})
+    badge = get_page_badge('disk', vars_)
+    return render(request, 'main/settings_disk.html', {
+        'vars': vars_,
+        'page_key': 'disk',
+        'page_icon': 'bi-device-hdd',
+        'page_title': 'Daten-Platte',
+        'page_explain': PAGE_EXPLAIN['disk'],
+        'page_status': badge[0],
+        'page_status_label': badge[1],
+        'page_status_text': badge[2],
+    })
 
 
 @login_required

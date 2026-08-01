@@ -17,7 +17,9 @@ g_domain=""
 g_ports="80,443"
 g_probe_url="https://ports.yougetsignal.com/check-port.php"
 g_public_ip=""
+g_public_ip6=""
 g_dns_ip=""
+g_dns_ip6=""
 
 function f_usage {
   echo "Usage: $0 [OPTIONS]"
@@ -83,6 +85,7 @@ function f_get_public_ip {
 }
 
 # Resolve the domain via the host's configured DNS resolver (systemd-resolved)
+# IPv4 first (matches checkipv4), IPv6 as fallback.
 function f_resolve_dns {
   local f_domain="$1"
   local f_line
@@ -99,6 +102,27 @@ function f_resolve_dns {
     return 1
   fi
   echo "${f_line%% *}"
+}
+
+# Resolve the domain's IPv6 address (AAAA record) only.
+function f_resolve_dns6 {
+  local f_domain="$1"
+  local f_line
+  f_line=$(getent ahostsv6 "${f_domain}" 2>/dev/null | head -1)
+  if [[ -z "$f_line" ]]
+  then
+    return 1
+  fi
+  echo "${f_line%% *}"
+}
+
+# Fetch the current public IPv6 address (returns empty if not IPv6 capable).
+function f_get_public_ip6 {
+  g_public_ip6=$(curl -s -m 10 https://checkipv6.dedyn.io/ 2>/dev/null | tr -d '[:space:]')
+  if ! [[ "$g_public_ip6" =~ ^[0-9a-fA-F:]+$ ]]
+  then
+    g_public_ip6=""
+  fi
 }
 
 # Probe a port from outside (external service connects to domain:port)
@@ -138,7 +162,9 @@ g_lockfile
 
 f_load_domain
 f_get_public_ip
+f_get_public_ip6
 g_dns_ip=$(f_resolve_dns "$g_domain")
+g_dns_ip6=$(f_resolve_dns6 "$g_domain")
 
 # Run checks for every requested port
 g_ports_json=""
@@ -185,6 +211,19 @@ then
   fi
 fi
 
+# DNS match over IPv6 (AAAA record vs current global IPv6 address).
+# Only meaningful when the host actually has IPv6.
+g_dns_match6="unknown"
+if [[ -n "$g_public_ip6" ]]
+then
+  if [[ -n "$g_dns_ip6" ]] && [[ "$g_public_ip6" == "$g_dns_ip6" ]]
+  then
+    g_dns_match6="true"
+  else
+    g_dns_match6="false"
+  fi
+fi
+
 # Build human-readable summary
 g_summary=""
 if [[ "$g_unknown_count" -eq "$g_port_count" ]]
@@ -199,7 +238,12 @@ fi
 
 if [[ "$g_dns_match" == false ]]
 then
-  g_summary+=" DNS resolves to ${g_dns_ip}, but the current public IP is ${g_public_ip} (DynDNS may be outdated)."
+  g_summary+=" DNS (IPv4) resolves to ${g_dns_ip}, but the current public IP is ${g_public_ip} (DynDNS may be outdated)."
+fi
+
+if [[ -n "$g_public_ip6" ]] && [[ "$g_dns_match6" == false ]]
+then
+  g_summary+=" DNS (IPv6) resolves to ${g_dns_ip6}, but the current public IPv6 is ${g_public_ip6}."
 fi
 
 # Assemble final JSON
@@ -210,12 +254,15 @@ else
   g_ok="false"
 fi
 
-printf '{"ok":%s,"domain":%s,"public_ip":%s,"dns_resolved":%s,"dns_match":%s,"ports":%s,"summary":%s}\n' \
+printf '{"ok":%s,"domain":%s,"public_ip":%s,"dns_resolved":%s,"dns_match":%s,"public_ip6":%s,"dns_resolved6":%s,"dns_match6":%s,"ports":%s,"summary":%s}\n' \
   "$g_ok" \
   "$(echo "$g_domain" | f_json_escape)" \
   "$(echo "$g_public_ip" | f_json_escape)" \
   "$(echo "$g_dns_ip" | f_json_escape)" \
   "$g_dns_match" \
+  "$(echo "$g_public_ip6" | f_json_escape)" \
+  "$(echo "$g_dns_ip6" | f_json_escape)" \
+  "$g_dns_match6" \
   "$g_ports_json" \
   "$(echo "$g_summary" | f_json_escape)"
 

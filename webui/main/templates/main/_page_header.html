@@ -1,0 +1,39 @@
+{% comment %}
+SymbiOS settings page header pattern.
+
+Expects in context (provided by each settings view):
+  page_icon       - bootstrap icon name without the "bi bi-" prefix
+  page_title      - headline
+  page_explain    - plain-language "why does this page exist" (may contain HTML)
+  page_status     - 'ok' | 'warn' | 'error' | 'missing' | 'none'
+  page_status_label - short badge text
+  page_status_text  - longer explanation shown in the collapse
+
+Optional:
+  page_status_href - link target of the badge (default: none)
+{% endcomment %}
+<div class="settings-header">
+  <div class="settings-header-title">
+    <h2 class="mb-0"><i class="bi {{ page_icon }}"></i> {{ page_title }}</h2>
+    {% if page_status and page_status != 'none' %}
+    <span class="settings-badge badge {{ page_status|slugify }}">
+      <i class="bi {% if page_status == 'ok' %}bi-check-circle-fill{% elif page_status == 'warn' %}bi-exclamation-triangle-fill{% elif page_status == 'error' %}bi-x-circle-fill{% else %}bi-question-circle-fill{% endif %}"></i>
+      {{ page_status_label|default:"Status" }}
+    </span>
+    {% endif %}
+  </div>
+
+  <div class="settings-why">
+    <a class="btn btn-sm btn-link p-0 text-muted" data-bs-toggle="collapse" href="#why-{{ page_key }}" role="button" aria-expanded="false" aria-controls="why-{{ page_key }}">
+      <i class="bi bi-question-circle"></i> Wozu dient diese Seite?
+    </a>
+    <div class="collapse mt-2" id="why-{{ page_key }}">
+      <div class="settings-why-body">
+        {{ page_explain|default:""|safe }}
+        {% if page_status_text %}
+        <div class="mt-1 text-muted small">{{ page_status_text }}</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,150 @@
+{% extends "main/base.html" %}
+{% load static %}
+{% block content %}
+
+<div class="settings-header">
+  <div class="settings-header-title">
+    <h2 class="mb-0"><i class="bi bi-magic"></i> Ersteinrichtung</h2>
+    {% if complete %}
+    <span class="settings-badge badge ok"><i class="bi bi-check-circle-fill"></i> Alles eingerichtet</span>
+    {% else %}
+    <span class="settings-badge badge warn"><i class="bi bi-exclamation-triangle-fill"></i> {{ pending_count }} Schritt{{ pending_count|pluralize }} offen</span>
+    {% endif %}
+  </div>
+  <div class="settings-why">
+    <div class="settings-why-body">
+      Dies ist eine Schritt-f&uuml;r-Schritt-Anleitung, damit dein Server
+      nach der Installation sicher und von au&szlig;en erreichbar ist.
+      Jeder Schritt f&uuml;hrt dich zu einer Einstellungs-Seite.
+      Erledigte Schritte werden automatisch als erledigt markiert.
+    </div>
+  </div>
+</div>
+
+<!-- Server location (network type) -->
+<div class="card mt-3" id="step-network">
+  <div class="card-header"><i class="bi bi-house-gear"></i> Schritt: Standort des Servers</div>
+  <div class="card-body small">
+    <p class="mb-2">Wo l&auml;uft dein SymbiOS-Server?</p>
+    <form method="post" data-exec="true">
+      {% csrf_token %}
+      <div class="row g-2">
+        <div class="col-md-6">
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="network_type" id="nt-home" value="home"
+                   {% if network_type == 'home' %}checked{% endif %}>
+            <label class="form-check-label" for="nt-home">
+              <strong>Heimanschluss</strong> &mdash; hinter meinem Router (FRITZ!Box, ...)
+            </label>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="network_type" id="nt-root" value="root"
+                   {% if network_type == 'root' %}checked{% endif %}>
+            <label class="form-check-label" for="nt-root">
+              <strong>Root-Server</strong> &mdash; z.&nbsp;B. VPS mit eigener &ouml;ffentlicher IP
+            </label>
+          </div>
+        </div>
+      </div>
+      {% if not network_type %}
+      <div class="alert alert-warning py-2 px-3 mt-2 mb-0">
+        <i class="bi bi-info-circle-fill"></i>
+        Das bestimmt, welche Schritte n&ouml;tig sind: Bei einem Heimanschluss
+        m&uuml;ssen Ports im Router freigegeben werden, bei einem Root-Server nicht.
+      </div>
+      {% else %}
+      <div class="text-muted mt-2 mb-0">
+        Gespeichert: {{ network_type_label }}
+      </div>
+      {% endif %}
+      <button type="submit" class="btn btn-primary btn-sm mt-2">
+        <i class="bi bi-save"></i> Speichern
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- Reachability check -->
+<div class="card mt-3" id="step-reachability">
+  <div class="card-header"><i class="bi bi-globe-americas"></i> Schritt: Erreichbarkeit pr&uuml;fen</div>
+  <div class="card-body small">
+    <p class="mb-2">
+      Pr&uuml;ft, ob der Server von au&szlig;en unter deiner Domain erreichbar ist
+      (Ports 80 und 443). Richte zuerst DNS und Port-Weiterleitung ein.
+    </p>
+    <button type="button" class="btn btn-outline-primary btn-sm" id="reach-btn" onclick="runReachability()">
+      <i class="bi bi-arrow-repeat"></i> Jetzt pr&uuml;fen
+    </button>
+    <div id="reach-result" class="mt-2"></div>
+  </div>
+</div>
+
+<!-- Step list -->
+<div class="card mt-3">
+  <div class="card-header"><i class="bi bi-list-check"></i> Einrichtungs-Schritte</div>
+  <div class="card-body p-0">
+    <table class="table table-sm align-middle mb-0">
+      <tbody>
+        {% for step in steps %}
+        <tr>
+          <td class="ps-3" style="width:36px">
+            {% if step.status == 'done' %}
+            <i class="bi bi-check-circle-fill text-success fs-5"></i>
+            {% elif step.optional %}
+            <i class="bi bi-circle text-secondary fs-5"></i>
+            {% else %}
+            <i class="bi bi-exclamation-circle text-warning fs-5"></i>
+            {% endif %}
+          </td>
+          <td>
+            <a href="{{ step.url }}" class="text-decoration-none">
+              <strong>{{ step.title|safe }}</strong>
+            </a>
+            <div class="text-muted small">{{ step.subtitle|safe }}</div>
+          </td>
+          <td class="text-end pe-3">
+            {% if step.status == 'done' %}
+            <span class="badge bg-success">Erledigt</span>
+            {% elif step.optional %}
+            <span class="badge bg-secondary">Optional</span>
+            {% else %}
+            <a href="{{ step.url }}" class="btn btn-sm btn-outline-primary">Jetzt einrichten</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function runReachability() {
+  var btn = document.getElementById('reach-btn');
+  var res = document.getElementById('reach-result');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Pr&uuml;fe...';
+  res.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Pr&uuml;fe von au&szlig;en...';
+
+  fetch('{% url "setup_reachability" %}')
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        res.innerHTML = '<div class="alert alert-success py-2 px-3 mb-0"><i class="bi bi-check-circle-fill"></i> ' + (data.summary || 'Alles erreichbar.') + '</div>';
+      } else {
+        var msg = data.error || data.summary || 'Server ist nicht erreichbar.';
+        res.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0"><i class="bi bi-exclamation-triangle-fill"></i> ' + msg + '</div>';
+      }
+    })
+    .catch(err => {
+      res.innerHTML = '<div class="alert alert-danger py-2 px-3 mb-0"><i class="bi bi-x-circle-fill"></i> ' + err.message + '</div>';
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Jetzt pr&uuml;fen';
+    });
+}
+</script>
+{% endblock %}

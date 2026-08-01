@@ -4,6 +4,18 @@
 {% block sidebar %}{% endblock %}
 {% block sidebar_col_class %}d-none{% endblock %}
 {% block content %}
+{% if setup_incomplete %}
+<div class="alert alert-warning d-flex align-items-center gap-3 mb-3">
+  <i class="bi bi-magic fs-4"></i>
+  <div class="flex-grow-1">
+    <strong>Dein Server ist noch nicht vollst&auml;ndig eingerichtet.</strong>
+    <span class="small text-muted">{{ setup_pending }} Schritt{{ setup_pending|pluralize }} offen &mdash; in wenigen Minuten erreichbar.</span>
+  </div>
+  <a href="/setup/" class="btn btn-warning btn-sm">
+    <i class="bi bi-arrow-right-circle"></i> Jetzt einrichten
+  </a>
+</div>
+{% endif %}
 <h2><i class="bi bi-heart-pulse"></i> System Health</h2>
 
 <div id="health-container" class="row g-3 mt-2">
