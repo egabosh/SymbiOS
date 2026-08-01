@@ -27,6 +27,12 @@ from django.http import JsonResponse, HttpResponse
 from .views import _get_inventory_config, _save_inventory_config
 from .utils.ssh_exec import run_playbook
 from .utils.http import is_ajax_request
+from .setup_status import get_page_badge, PAGE_EXPLAIN
+
+
+def _badge(key, vars_):
+    """Small helper: compute the page status badge (status, label, text)."""
+    return get_page_badge(key, vars_)
 
 
 @login_required
@@ -136,7 +142,14 @@ def settings_mailserver(request):
             messages.error(request, f'Error: {e}')
         return redirect('settings_mailserver')
 
-    return render(request, 'main/settings_mailserver.html', {'vars': vars_})
+    return render(request, 'main/settings_mailserver.html', {'vars': vars_,
+                                                             'page_key': 'mailserver',
+                                                             'page_icon': 'bi-envelope',
+                                                             'page_title': 'E-Mail-Versand (SMTP)',
+                                                             'page_explain': PAGE_EXPLAIN['mailserver'],
+                                                             'page_status': _badge('mailserver', vars_)[0],
+                                                             'page_status_label': _badge('mailserver', vars_)[1],
+                                                             'page_status_text': _badge('mailserver', vars_)[2]})
 
 
 def _test_smtp(server, port, user, password, sender, tls_mode):

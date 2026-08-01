@@ -1,7 +1,7 @@
 {% extends "main/base.html" %}
 {% load static %}
 {% block content %}
-<h2><i class="bi bi-globe2"></i> Localization</h2>
+{% include "main/_page_header.html" %}
 
 <div class="row">
   <!-- Main form -->
@@ -13,9 +13,9 @@
 
           <!-- Timezone -->
           <div class="mb-4">
-            <label class="form-label fw-semibold">Timezone</label>
+            <label class="form-label fw-semibold">Zeitzone</label>
             <select class="form-select" name="timezone" required>
-              <option value="" disabled {% if not vars.timezone %}selected{% endif %} hidden>Select timezone...</option>
+              <option value="" disabled {% if not vars.timezone %}selected{% endif %} hidden>Zeitzone w&auml;hlen...</option>
               {% for tz in all_timezones %}
                 <option value="{{ tz }}" {% if vars.timezone == tz %}selected{% endif %}>{{ tz }}</option>
               {% endfor %}
@@ -24,9 +24,9 @@
 
           <!-- Keyboard Layout -->
           <div class="mb-4">
-            <label class="form-label fw-semibold">Keyboard Layout</label>
+            <label class="form-label fw-semibold">Tastatur-Layout</label>
             <select class="form-select" name="keyboard">
-              <option value="" disabled {% if not vars.keyboard %}selected{% endif %} hidden>Select layout...</option>
+              <option value="" disabled {% if not vars.keyboard %}selected{% endif %} hidden>Layout w&auml;hlen...</option>
               {% for kb in all_keyboards %}
                 <option value="{{ kb }}" {% if vars.keyboard == kb %}selected{% endif %}>{{ kb }}</option>
               {% endfor %}
@@ -35,13 +35,13 @@
 
           <!-- Locale -->
           <div class="mb-4">
-            <label class="form-label fw-semibold">Locale</label>
-            <input type="text" class="form-control" name="locale" placeholder="e.g. en_US.UTF-8"
+            <label class="form-label fw-semibold">Sprache</label>
+            <input type="text" class="form-control" name="locale" placeholder="z. B. en_US.UTF-8"
                    value="{% if vars.locale %}{{ vars.locale }}{% endif %}"
                    required>
           </div>
 
-          <button type="submit" class="btn btn-primary">Save localization</button>
+          <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Speichern</button>
         </form>
       </div>
     </div>

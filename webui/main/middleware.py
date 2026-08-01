@@ -129,6 +129,9 @@ class AutheliaMiddleware:
 
 class SetupRequiredMiddleware:
     _bypass_paths = frozenset((
+        '/setup/',
+        '/health/',
+        '/health/data/',
         '/settings/ddns/',
         '/logout/',
         '/authelia-logout/',
@@ -154,6 +157,6 @@ class SetupRequiredMiddleware:
             base_domain = ''
 
         if not base_domain or base_domain in ('none', '0'):
-            return redirect('/settings/ddns/')
+            return redirect('/setup/')
 
         return self.get_response(request)

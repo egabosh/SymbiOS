@@ -1,19 +1,19 @@
 {% extends "main/base.html" %}
 {% block content %}
-<h2>Auth Settings</h2>
+{% include "main/_page_header.html" %}
 
 {% if not vars.twofa_enabled %}
 <div class="row">
   <div class="col-md-8">
     <div class="alert alert-warning">
       <i class="bi bi-shield-exclamation"></i>
-      <strong>Recommendation:</strong> 2-Factor Authentication (2FA) is currently
-      disabled. Enabling 2FA adds a second factor (TOTP or email verification) on
-      top of the LDAP password and is strongly recommended, especially since the
-      WebUI is also reachable directly on port 8080.
+      <strong>Empfehlung:</strong> 2-Faktor-Anmeldung (2FA) ist derzeit deaktiviert.
+      Mit 2FA wird beim Anmelden zus&auml;tzlich ein Code oder TOTP-Token verlangt
+      &mdash; das sch&uuml;tzt auch bei gestohlenem Passwort.
       {% if not vars.smtp_server %}
-      A mailserver must be configured first under
-      <a href="/settings/mailserver/">Settings &rarr; Mailserver (SMTP)</a>.
+      Zuvor muss unter
+      <a href="/settings/mailserver/">Einstellungen &rarr; E-Mail-Versand (SMTP)</a>
+      ein Mailserver eingerichtet werden.
       {% endif %}
     </div>
   </div>
@@ -22,19 +22,9 @@
 
 <div class="row">
   <div class="col-md-8">
-    <div class="alert alert-info">
-        <i class="bi bi-info-circle"></i>
-        For 2-Factor Authentication (2FA) via Authelia, a mailserver must be configured
-        under <a href="/settings/mailserver/">Settings &rarr; Mailserver (SMTP)</a>.
-    </div>
-  </div>
-</div>
-
-<div class="row">
-  <div class="col-md-8">
 
 <div class="card">
-    <div class="card-header">Authentication (Authelia)</div>
+    <div class="card-header"><i class="bi bi-shield-lock"></i> Anmeldung (Authelia)</div>
     <div class="card-body">
         <form method="post" data-exec="true">
             {% csrf_token %}
@@ -46,13 +36,13 @@
                                id="twofa_enabled"
                                {% if vars.twofa_enabled %}checked{% endif %}>
                         <label class="form-check-label" for="twofa_enabled">
-                            <strong>2-Factor Authentication (2FA)</strong>
+                            <strong>2-Faktor-Anmeldung (2FA)</strong>
                         </label>
                     </div>
-                    <small class="text-muted">Requires a configured mailserver. Users will need TOTP or email verification on login.</small>
+                    <small class="text-muted">Ben&ouml;tigt einen eingerichteten Mailserver. Benutzer m&uuml;ssen sich dann zus&auml;tzlich per Code oder TOTP best&auml;tigen.</small>
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary">Save</button>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Speichern</button>
         </form>
     </div>
 </div>
@@ -60,21 +50,21 @@
   </div>
   <div class="col-md-4">
     <div class="card">
-      <div class="card-header"><i class="bi bi-info-circle"></i> About</div>
+      <div class="card-header"><i class="bi bi-info-circle"></i> Info</div>
       <div class="card-body small">
         <p>
-          <strong>Authelia</strong> is an open-source authentication server that
-          integrates with Traefik as a forward-auth middleware. Once enabled:
+          <strong>Authelia</strong> ist ein Open-Source-Anmeldeserver, der in Traefik
+          als Forward-Auth-Middleware eingebunden ist. Nach dem Aktivieren:
         </p>
         <ul class="ps-3 mb-2">
-          <li>All web services behind Traefik require login</li>
-          <li>Users authenticate against the local LDAP directory</li>
-          <li>Optional 2FA (email or TOTP) adds a second factor</li>
+          <li>Alle Web-Dienste hinter Traefik verlangen eine Anmeldung</li>
+          <li>Benutzer melden sich gegen das lokale LDAP-Verzeichnis an</li>
+          <li>Optional 2FA (E-Mail oder TOTP) als zweiter Faktor</li>
         </ul>
         <p class="mb-0 text-muted">
-          Manage users in <a href="/users/">Users</a> and groups in
-          <a href="/groups/">Groups</a>. Without 2FA, only a
-          username/password is required.
+          Benutzer unter <a href="/users/">Benutzer</a> und Gruppen unter
+          <a href="/groups/">Gruppen</a> verwalten. Ohne 2FA gen&uuml;gt
+          Benutzername/Passwort.
         </p>
       </div>
     </div>

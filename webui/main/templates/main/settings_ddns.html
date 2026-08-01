@@ -5,62 +5,240 @@
 .text-hidden { filter: blur(4px); user-select: none; cursor: pointer; }
 .text-hidden:hover { filter: blur(3px); }
 </style>
-<h2><i class="bi bi-globe"></i> DNS</h2>
 
-{% if not vars.base_domain or vars.base_domain == 'none' or vars.base_domain == '0' %}
-<div class="alert alert-warning border-2 border-warning mb-4" role="alert">
-  <h5 class="alert-heading"><i class="bi bi-info-circle-fill me-2"></i>Welcome to SymbiOS — let's get started!</h5>
-  <p class="mb-2">
-    SymbiOS needs a <strong>domain name</strong> to set up your services. This domain
-    is the basis for all URLs, certificates (Let's Encrypt), and authentication.
-    Choose one of the options below:
-  </p>
-  <ul class="mb-2">
-    <li><strong>deSEC Dynamic DNS</strong> — enter your deSEC API key and get a free
-      <code>yourname.dedyn.io</code> domain with automatic IP updates.</li>
-    <li><strong>Self-managed DNS</strong> — use your own domain (e.g.
-      <code>server.example.com</code>). Make sure its A/AAAA records point to
-      this server's public IP.</li>
-  </ul>
-  <p class="mb-0">
-    You won't be able to use the WebUI for anything else until you set this up.
-  </p>
-</div>
-{% endif %}
+{% include "main/_page_header.html" %}
 
 <div class="row">
   <!-- Main form -->
   <div class="col-md-8">
     <div class="card">
+      <div class="card-header">
+        <i class="bi bi-globe"></i> Schritt 1: Name f&uuml;r deinen Server w&auml;hlen
+      </div>
       <div class="card-body">
 
-        <!-- DNS Mode selector -->
-        <div class="mb-4">
-          <label class="form-label fw-semibold">DNS Mode</label>
-          <div class="d-flex gap-3">
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="dns_mode" id="mode-desec"
-                     value="desec" {% if dns_mode != 'self-managed' %}checked{% endif %}
-                     onchange="switchMode('desec')">
-              <label class="form-check-label" for="mode-desec">
-                <i class="bi bi-arrow-repeat"></i> Dynamic DNS (deSEC)
-                <div class="small text-muted">Automatic IP updates via cron</div>
-              </label>
+        {% if not vars.base_domain or vars.base_domain == 'none' or vars.base_domain == '0' %}
+        <div class="alert alert-warning border-2 border-warning" role="alert">
+          <p class="mb-1"><strong>Noch kein Name vergeben.</strong></p>
+          <p class="mb-0 small">
+            Ohne Namen ist der Server nur im lokalen Netz erreichbar. W&auml;hle unten
+            eine der beiden M&ouml;glichkeiten aus.
+          </p>
+        </div>
+        {% endif %}
+
+        <!-- Simple choice: new deSEC account vs existing API key -->
+        <div class="d-flex flex-column gap-2 mb-3">
+          <button type="button" class="btn btn-outline-primary text-start" id="choice-register"
+                  onclick="choosePath('register')">
+            <div class="d-flex align-items-center gap-3">
+              <i class="bi bi-person-plus fs-4"></i>
+              <div>
+                <strong>Neu bei deSEC &mdash; Konto hier anlegen (empfohlen)</strong>
+                <div class="small text-muted">Kostenloser Name wie <code>mein-server.dedyn.io</code>. E-Mail-Verifikation n&ouml;tig.</div>
+              </div>
             </div>
-            <div class="form-check">
-              <input class="form-check-input" type="radio" name="dns_mode" id="mode-self"
-                     value="self-managed" {% if dns_mode == 'self-managed' %}checked{% endif %}
-                     onchange="switchMode('self-managed')">
-              <label class="form-check-label" for="mode-self">
-                <i class="bi bi-globe2"></i> Self-managed DNS
-                <div class="small text-muted">Bring your own domain</div>
-              </label>
+          </button>
+          <button type="button" class="btn btn-outline-secondary text-start" id="choice-apikey"
+                  onclick="choosePath('apikey')">
+            <div class="d-flex align-items-center gap-3">
+              <i class="bi bi-key fs-4"></i>
+              <div>
+                <strong>Ich habe schon einen deSEC-API-Key</strong>
+                <div class="small text-muted">Du hast bereits ein deSEC-Konto bzw. einen Namen.</div>
+              </div>
             </div>
+          </button>
+          <button type="button" class="btn btn-outline-secondary text-start" id="choice-self"
+                  onclick="choosePath('self')">
+            <div class="d-flex align-items-center gap-3">
+              <i class="bi bi-globe2 fs-4"></i>
+              <div>
+                <strong>Eigene Domain (fortgeschritten)</strong>
+                <div class="small text-muted">Du verwaltest deine Domain selbst, z.&nbsp;B. bei deinem Registrar.</div>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        <!-- Create deSEC Account -->
+        <div class="card mt-3 border-0 bg-light" id="register-card" style="display:none">
+          <div class="card-body small" id="register-body">
+
+            <div id="register-not-started">
+              <div class="alert alert-info py-2 px-3 mb-2">
+                <i class="bi bi-info-circle-fill"></i>
+                <strong>No deSEC account yet?</strong>
+                Create one directly here &mdash; no need to visit the deSEC website.
+              </div>
+              <p class="mb-1"><strong>What will happen?</strong></p>
+              <ul class="ps-3 mb-2">
+                <li>A <strong>free account</strong> at
+                  <a href="https://desec.io" target="_blank">desec.io</a> will be created.</li>
+                <li>A confirmation email will be sent &mdash; you must click the link in it.</li>
+                <li>After verification, a <strong>permanent API key</strong> is generated
+                  and saved in the SymbiOS configuration.</li>
+                <li>The desired hostname (<code>.dedyn.io</code>) can optionally be created
+                  right away.</li>
+              </ul>
+              <div class="alert alert-warning py-2 px-3 mb-2">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+                <strong>Important:</strong>
+                <ul class="ps-3 mb-0 mt-1">
+                  <li><strong>Save your password and API key!</strong>
+                    Write them down and store them securely (e.g. password manager).
+                    They will only be shown here once.</li>
+                  <li>After creation, enable <strong>2-Factor Authentication (2FA)</strong>
+                    in the deSEC web interface at
+                    <a href="https://desec.io" target="_blank">desec.io</a>
+                    to protect your account.</li>
+                  <li>The account is free &mdash; up to <strong>15 domains</strong> per account.</li>
+                </ul>
+              </div>
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="reg-consent">
+                <label class="form-check-label" for="reg-consent">
+                  I agree that a deSEC account will be created with my email address
+                  and that SymbiOS will generate an API key for DNS management.
+                </label>
+              </div>
+              <button type="button" class="btn btn-outline-primary btn-sm w-100" id="reg-start-btn"
+                      onclick="startRegistration()" disabled>
+                <i class="bi bi-person-plus"></i> Create Account
+              </button>
+            </div>
+
+            <div id="register-form" style="display:none">
+              <div class="mb-2">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-control form-control-sm" id="reg-email"
+                       placeholder="your@email.com">
+              </div>
+              <div class="mb-2">
+                <label class="form-label">Password</label>
+                <div class="input-group input-group-sm">
+                  <input type="password" class="form-control" id="reg-password"
+                         placeholder="at least 8 characters">
+                  <button type="button" class="btn btn-outline-secondary" onclick="toggleFieldVisibility('reg-password', this)">
+                    <i class="bi bi-eye"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">Confirm Password</label>
+                <div class="input-group input-group-sm">
+                  <input type="password" class="form-control" id="reg-password2"
+                         placeholder="repeat password">
+                  <button type="button" class="btn btn-outline-secondary" onclick="toggleFieldVisibility('reg-password2', this)">
+                    <i class="bi bi-eye"></i>
+                  </button>
+                </div>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">Desired Hostname</label>
+                <div class="input-group input-group-sm">
+                  <input type="text" class="form-control" id="reg-domain"
+                         placeholder="myserver" oninput="checkRegDomainAvailability()">
+                  <span class="input-group-text">.dedyn.io</span>
+                </div>
+                <div class="form-text">Optional &mdash; the domain will be created right away.</div>
+                <div id="reg-domain-status" class="form-text"></div>
+              </div>
+
+              <!-- Captcha area (shown only if needed) -->
+              <div id="captcha-area" style="display:none">
+                <div class="mb-2">
+                  <img id="captcha-image" class="img-fluid border rounded" alt="Captcha">
+                </div>
+                <div class="mb-2">
+                  <label class="form-label">Captcha Solution</label>
+                  <input type="text" class="form-control form-control-sm" id="reg-captcha-solution"
+                         placeholder="enter the text shown above">
+                </div>
+              </div>
+
+              <div id="register-status" class="mb-2"></div>
+              <button type="button" class="btn btn-primary btn-sm w-100" id="reg-submit-btn"
+                      onclick="submitRegistration()">
+                <i class="bi bi-person-check"></i> Create Account
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm w-100 mt-1"
+                      onclick="cancelRegistration()">Cancel</button>
+            </div>
+
+            <div id="register-verify" style="display:none">
+              <div class="alert alert-success py-2 px-3 mb-2">
+                <i class="bi bi-check-circle-fill"></i>
+                Registration initiated successfully!
+              </div>
+              <p class="mb-2">
+                deSEC has sent an email to <strong id="verify-email-display"></strong>.
+                Please check your inbox (and spam folder) and click the verification link
+                from deSEC. Your account will be activated once you do.
+              </p>
+              <p class="mb-2 small text-muted">
+                <i class="bi bi-clock"></i> The link expires after 12 hours.
+                Once you have clicked it, click "Continue" below.
+              </p>
+              <button type="button" class="btn btn-success btn-sm w-100" id="verify-continue-btn"
+                      onclick="finalizeRegistration()">
+                <i class="bi bi-arrow-right-circle"></i> Email verified &mdash; Continue
+              </button>
+              <div id="finalize-status" class="mt-2"></div>
+              <button type="button" class="btn btn-outline-secondary btn-sm w-100 mt-1"
+                      onclick="cancelRegistration()">Cancel</button>
+            </div>
+
+            <div id="register-done" style="display:none">
+              <div class="alert alert-success py-2 px-3 mb-2">
+                <i class="bi bi-check-circle-fill"></i>
+                deSEC account set up!
+              </div>
+              <p class="mb-1"><strong>Credentials &mdash; save them now!</strong></p>
+              <div class="bg-body rounded border p-2 mb-2 font-monospace small">
+                <div class="mb-1">
+                  <span class="text-muted">Email:</span>
+                  <span id="done-email"></span>
+                </div>
+                <div class="mb-1">
+                  <span class="text-muted">Password:</span>
+                  <span id="done-password"></span>
+                  <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1"
+                          onclick="toggleFieldVisibility('done-password', this)">
+                    <i class="bi bi-eye"></i>
+                  </button>
+                </div>
+                <div class="mb-1">
+                  <span class="text-muted">API Key:</span>
+                  <span id="done-api-token"></span>
+                  <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1"
+                          onclick="toggleFieldVisibility('done-api-token', this)">
+                    <i class="bi bi-eye"></i>
+                  </button>
+                </div>
+                <div id="done-domain-line" style="display:none" class="mb-1">
+                  <span class="text-muted">Domain:</span>
+                  <span id="done-domain"></span>
+                </div>
+              </div>
+              <div class="alert alert-warning py-2 px-3 mb-2">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+                <strong>Important:</strong> Store these credentials securely (e.g. password manager).
+                Without the password, you cannot log in to deSEC again.
+                Also enable <strong>2FA</strong> at
+                <a href="https://desec.io" target="_blank">desec.io</a> .
+              </div>
+              <button type="button" class="btn btn-primary btn-sm w-100"
+                      onclick="useRegisteredAccount()">
+                <i class="bi bi-arrow-right"></i> Use this account &amp; save configuration
+              </button>
+            </div>
+
           </div>
         </div>
 
         <!-- deSEC form -->
-        <div id="desec-section" {% if dns_mode == 'self-managed' %}style="display:none"{% endif %}>
+        <div id="desec-section" style="display:none">
           <form method="post" id="ddns-form" data-exec="true">
             {% csrf_token %}
             <input type="hidden" name="dns_mode" value="desec">
@@ -137,7 +315,7 @@
         </div>
 
         <!-- Self-managed DNS form -->
-        <div id="self-section" {% if dns_mode != 'self-managed' %}style="display:none"{% endif %}>
+        <div id="self-section" style="display:none">
           <form method="post" id="self-managed-form" data-exec="true">
             {% csrf_token %}
             <input type="hidden" name="dns_mode" value="self-managed">
@@ -191,8 +369,28 @@
   <!-- Info / Guide column -->
   <div class="col-md-4">
 
+    <!-- Current IPs -->
+    <div class="card" id="current-ip-card" style="display:none">
+      <div class="card-header">
+        <i class="bi bi-ethernet"></i> Current IPs
+      </div>
+      <div class="card-body" id="ip-info">
+        <div class="spinner-border spinner-border-sm" role="status"></div>
+        Detecting...
+      </div>
+    </div>
+
+    <!-- Host Status -->
+    <div class="card mt-3" id="host-status-card" style="display:none">
+      <div class="card-header">
+        <i class="bi bi-globe"></i> Host Status
+      </div>
+      <div class="card-body" id="host-status-info">
+      </div>
+    </div>
+
     <!-- About deSEC -->
-    <div class="card" id="about-desec" {% if dns_mode == 'self-managed' %}style="display:none"{% endif %}>
+    <div class="card mt-3" id="about-desec" style="display:none">
       <div class="card-header">
         <i class="bi bi-info-circle"></i> About deSEC
       </div>
@@ -201,7 +399,7 @@
           <strong>deSEC</strong> is a free Dynamic DNS provider. Your server
           periodically (<em>cron, every 5 min</em>) updates the DNS A/AAAA
           records for your hostname so it always points to your current public
-          IP — even when your ISP changes it.
+          IP &mdash; even when your ISP changes it.
         </p>
         <ul class="mb-2 ps-3">
           <li>Get an API Token at <a href="https://desec.io" target="_blank">desec.io</a></li>
@@ -219,7 +417,7 @@
     </div>
 
     <!-- About self-managed -->
-    <div class="card" id="about-self" {% if dns_mode != 'self-managed' %}style="display:none"{% endif %}>
+    <div class="card mt-3" id="about-self" style="display:none">
       <div class="card-header">
         <i class="bi bi-info-circle"></i> About self-managed DNS
       </div>
@@ -242,240 +440,43 @@
       </div>
     </div>
 
-    <!-- Current IPs (deSEC only) -->
-    <div class="card mt-3" id="current-ip-card" {% if dns_mode == 'self-managed' %}style="display:none"{% endif %}>
-      <div class="card-header">
-        <i class="bi bi-ethernet"></i> Current IPs
-      </div>
-      <div class="card-body" id="ip-info">
-        <div class="spinner-border spinner-border-sm" role="status"></div>
-        Detecting...
-      </div>
-    </div>
-
-    <!-- Host Status (deSEC only) -->
-    <div class="card mt-3" id="host-status-card" style="display:none">
-      <div class="card-header">
-        <i class="bi bi-globe"></i> Host Status
-      </div>
-      <div class="card-body" id="host-status-info">
-      </div>
-    </div>
-
-    <!-- Create deSEC Account -->
-    <div class="card mt-3" id="register-card" {% if dns_mode == 'self-managed' %}style="display:none"{% endif %}>
-      <div class="card-header">
-        <i class="bi bi-person-plus"></i> deSEC Account
-      </div>
-      <div class="card-body small" id="register-body">
-
-        <div id="register-not-started">
-          <div class="alert alert-info py-2 px-3 mb-2">
-            <i class="bi bi-info-circle-fill"></i>
-            <strong>No deSEC account yet?</strong>
-            Create one directly here — no need to visit the deSEC website.
-          </div>
-          <p class="mb-1"><strong>What will happen?</strong></p>
-          <ul class="ps-3 mb-2">
-            <li>A <strong>free account</strong> at
-              <a href="https://desec.io" target="_blank">desec.io</a> will be created.</li>
-            <li>A confirmation email will be sent — you must click the link in it.</li>
-            <li>After verification, a <strong>permanent API key</strong> is generated
-              and saved in the SymbiOS configuration.</li>
-            <li>The desired hostname (<code>.dedyn.io</code>) can optionally be created
-              right away.</li>
-          </ul>
-          <div class="alert alert-warning py-2 px-3 mb-2">
-            <i class="bi bi-exclamation-triangle-fill"></i>
-            <strong>Important:</strong>
-            <ul class="ps-3 mb-0 mt-1">
-              <li><strong>Save your password and API key!</strong>
-                Write them down and store them securely (e.g. password manager).
-                They will only be shown here once.</li>
-              <li>After creation, enable <strong>2-Factor Authentication (2FA)</strong>
-                in the deSEC web interface at
-                <a href="https://desec.io" target="_blank">desec.io</a>
-                to protect your account.</li>
-              <li>The account is free — up to <strong>15 domains</strong> per account.</li>
-            </ul>
-          </div>
-          <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" id="reg-consent">
-            <label class="form-check-label" for="reg-consent">
-              I agree that a deSEC account will be created with my email address
-              and that SymbiOS will generate an API key for DNS management.
-            </label>
-          </div>
-          <button type="button" class="btn btn-outline-primary btn-sm w-100" id="reg-start-btn"
-                  onclick="startRegistration()" disabled>
-            <i class="bi bi-person-plus"></i> Create Account
-          </button>
-        </div>
-
-        <div id="register-form" style="display:none">
-          <div class="mb-2">
-            <label class="form-label">Email</label>
-            <input type="email" class="form-control form-control-sm" id="reg-email"
-                   placeholder="your@email.com">
-          </div>
-          <div class="mb-2">
-            <label class="form-label">Password</label>
-            <div class="input-group input-group-sm">
-              <input type="password" class="form-control" id="reg-password"
-                     placeholder="at least 8 characters">
-              <button type="button" class="btn btn-outline-secondary" onclick="toggleFieldVisibility('reg-password', this)">
-                <i class="bi bi-eye"></i>
-              </button>
-            </div>
-          </div>
-          <div class="mb-2">
-            <label class="form-label">Confirm Password</label>
-            <div class="input-group input-group-sm">
-              <input type="password" class="form-control" id="reg-password2"
-                     placeholder="repeat password">
-              <button type="button" class="btn btn-outline-secondary" onclick="toggleFieldVisibility('reg-password2', this)">
-                <i class="bi bi-eye"></i>
-              </button>
-            </div>
-          </div>
-          <div class="mb-2">
-            <label class="form-label">Desired Hostname</label>
-            <div class="input-group input-group-sm">
-              <input type="text" class="form-control" id="reg-domain"
-                     placeholder="myserver">
-              <span class="input-group-text">.dedyn.io</span>
-            </div>
-            <div class="form-text">Optional — the domain will be created right away.</div>
-          </div>
-
-          <!-- Captcha area (shown only if needed) -->
-          <div id="captcha-area" style="display:none">
-            <div class="mb-2">
-              <img id="captcha-image" class="img-fluid border rounded" alt="Captcha">
-            </div>
-            <div class="mb-2">
-              <label class="form-label">Captcha Solution</label>
-              <input type="text" class="form-control form-control-sm" id="reg-captcha-solution"
-                     placeholder="enter the text shown above">
-            </div>
-          </div>
-
-          <div id="register-status" class="mb-2"></div>
-          <button type="button" class="btn btn-primary btn-sm w-100" id="reg-submit-btn"
-                  onclick="submitRegistration()">
-            <i class="bi bi-person-check"></i> Create Account
-          </button>
-          <button type="button" class="btn btn-outline-secondary btn-sm w-100 mt-1"
-                  onclick="cancelRegistration()">Cancel</button>
-        </div>
-
-        <div id="register-verify" style="display:none">
-          <div class="alert alert-success py-2 px-3 mb-2">
-            <i class="bi bi-check-circle-fill"></i>
-            Registration initiated successfully!
-          </div>
-          <p class="mb-2">
-            deSEC has sent an email to <strong id="verify-email-display"></strong>.
-            Please check your inbox (and spam folder) and click the verification link
-            from deSEC. Your account will be activated once you do.
-          </p>
-          <p class="mb-2 small text-muted">
-            <i class="bi bi-clock"></i> The link expires after 12 hours.
-            Once you have clicked it, click "Continue" below.
-          </p>
-          <button type="button" class="btn btn-success btn-sm w-100" id="verify-continue-btn"
-                  onclick="finalizeRegistration()">
-            <i class="bi bi-arrow-right-circle"></i> Email verified — Continue
-          </button>
-          <div id="finalize-status" class="mt-2"></div>
-          <button type="button" class="btn btn-outline-secondary btn-sm w-100 mt-1"
-                  onclick="cancelRegistration()">Cancel</button>
-        </div>
-
-        <div id="register-done" style="display:none">
-          <div class="alert alert-success py-2 px-3 mb-2">
-            <i class="bi bi-check-circle-fill"></i>
-            deSEC account set up!
-          </div>
-          <p class="mb-1"><strong>Credentials — save them now!</strong></p>
-          <div class="bg-body rounded border p-2 mb-2 font-monospace small">
-            <div class="mb-1">
-              <span class="text-muted">Email:</span>
-              <span id="done-email"></span>
-            </div>
-            <div class="mb-1">
-              <span class="text-muted">Password:</span>
-              <span id="done-password"></span>
-              <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1"
-                      onclick="toggleFieldVisibility('done-password', this)">
-                <i class="bi bi-eye"></i>
-              </button>
-            </div>
-            <div class="mb-1">
-              <span class="text-muted">API Key:</span>
-              <span id="done-api-token"></span>
-              <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1"
-                      onclick="toggleFieldVisibility('done-api-token', this)">
-                <i class="bi bi-eye"></i>
-              </button>
-            </div>
-            <div id="done-domain-line" style="display:none" class="mb-1">
-              <span class="text-muted">Domain:</span>
-              <span id="done-domain"></span>
-            </div>
-          </div>
-          <div class="alert alert-warning py-2 px-3 mb-2">
-            <i class="bi bi-exclamation-triangle-fill"></i>
-            <strong>Important:</strong> Store these credentials securely (e.g. password manager).
-            Without the password, you cannot log in to deSEC again.
-            Also enable <strong>2FA</strong> at
-            <a href="https://desec.io" target="_blank">desec.io</a> .
-          </div>
-          <button type="button" class="btn btn-primary btn-sm w-100"
-                  onclick="useRegisteredAccount()">
-            <i class="bi bi-arrow-right"></i> Use this account &amp; save configuration
-          </button>
-        </div>
-
-      </div>
-    </div>
   </div>
 </div>
 
 <script>
+// The main deSEC/self sections only show after the user picks a path.
+var currentMode = '{{ dns_mode }}';
 
-// Switch between DNS modes
-function switchMode(mode) {
-  var desecSection = document.getElementById('desec-section');
-  var selfSection = document.getElementById('self-section');
-  var aboutDesec = document.getElementById('about-desec');
-  var aboutSelf = document.getElementById('about-self');
-  var ipCard = document.getElementById('current-ip-card');
-  var hostCard = document.getElementById('host-status-card');
+function choosePath(path) {
+  document.getElementById('register-card').style.display = (path === 'register') ? '' : 'none';
+  document.getElementById('desec-section').style.display = (path === 'apikey') ? '' : 'none';
+  document.getElementById('self-section').style.display = (path === 'self') ? '' : 'none';
+  document.getElementById('current-ip-card').style.display = (path === 'apikey') ? '' : 'none';
+  document.getElementById('about-desec').style.display = (path === 'apikey') ? '' : 'none';
+  document.getElementById('about-self').style.display = (path === 'self') ? '' : 'none';
 
-  if (mode === 'self-managed') {
-    desecSection.style.display = 'none';
-    selfSection.style.display = '';
-    aboutDesec.style.display = 'none';
-    aboutSelf.style.display = '';
-    ipCard.style.display = 'none';
-    hostCard.style.display = 'none';
-  } else {
-    desecSection.style.display = '';
-    selfSection.style.display = 'none';
-    aboutDesec.style.display = '';
-    aboutSelf.style.display = 'none';
-    ipCard.style.display = '';
-    checkHostStatus();
+  var choiceButtons = ['choice-register', 'choice-apikey', 'choice-self'];
+  choiceButtons.forEach(function(id) {
+    var el = document.getElementById(id);
+    var active = (id === 'choice-' + path);
+    el.classList.toggle('btn-primary', active);
+    el.classList.toggle('btn-outline-primary', active);
+    el.classList.toggle('btn-outline-secondary', !active);
+  });
+
+  if (path === 'apikey') {
+    detectIPs();
+    setupHostValidation();
   }
 }
 
-// Auto-detect IPs on load
+// On load: restore the last saved mode, or show the choice list.
 document.addEventListener('DOMContentLoaded', function() {
-  var mode = document.querySelector('input[name="dns_mode"]:checked').value;
-  if (mode === 'desec') {
-    detectIPs();
-    setupHostValidation();
+  if (currentMode === 'self-managed' && '{{ self_domain }}') {
+    choosePath('self');
+  } else if (currentMode === 'desec' && '{{ vars.ddns_apikey }}') {
+    choosePath('apikey');
+    checkHostStatus();
   }
 });
 
@@ -513,9 +514,9 @@ function detectIPs() {
 
       let recHtml = '<i class="bi bi-lightbulb"></i> Recommendation: ';
       if (recommended === 'yes') {
-        recHtml += '<strong>Dual-Stack</strong> (IPv4 + IPv6) — <code>yes</code>';
+        recHtml += '<strong>Dual-Stack</strong> (IPv4 + IPv6) \u2014 <code>yes</code>';
       } else if (recommended === 'only') {
-        recHtml += '<strong>IPv6 only</strong> — <code>only</code>';
+        recHtml += '<strong>IPv6 only</strong> \u2014 <code>only</code>';
       } else {
         recHtml += '<strong>IPv4 only</strong> (no public IPv6 detected)';
       }
@@ -580,7 +581,7 @@ function checkHostStatus() {
       } else if (data.domain_exists_check === 'no_api_key') {
         html += '<div><i class="bi bi-question-circle-fill text-secondary"></i> Domain status unknown (no API key set)</div>';
       } else if (data.domain_exists_check === 'invalid_api_key') {
-        html += '<div><i class="bi bi-x-circle-fill text-danger"></i> Invalid API key — cannot check domain</div>';
+        html += '<div><i class="bi bi-x-circle-fill text-danger"></i> Invalid API key \u2014 cannot check domain</div>';
       }
 
       // DNS records
@@ -817,6 +818,30 @@ function fetchCaptchaAndShow() {
     });
 }
 
+function checkRegDomainAvailability() {
+  var domain = document.getElementById('reg-domain').value.trim().toLowerCase();
+  var statusEl = document.getElementById('reg-domain-status');
+  if (!domain) { statusEl.innerHTML = ''; return; }
+  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(domain) && !/^[a-z0-9]$/.test(domain)) {
+    statusEl.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> Invalid hostname (letters, digits, hyphens only)</span>';
+    return;
+  }
+  fetch('{% url "settings_ddns_check_domain" %}?hostname=' + encodeURIComponent(domain + '.dedyn.io'))
+    .then(r => r.json())
+    .then(data => {
+      if (data.available === true) {
+        statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + domain + '.dedyn.io is available</span>';
+      } else if (data.available === false) {
+        statusEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + domain + '.dedyn.io is already taken - try another name</span>';
+      } else {
+        statusEl.innerHTML = '';
+      }
+    })
+    .catch(() => {
+      statusEl.innerHTML = '';
+    });
+}
+
 function finalizeRegistration() {
   var btn = document.getElementById('verify-continue-btn');
   btn.disabled = true;
@@ -859,17 +884,17 @@ function finalizeRegistration() {
       } else if (data.not_verified) {
         statusEl.innerHTML = '<div class="alert alert-warning py-1 px-2 mb-0 small"><i class="bi bi-exclamation-triangle-fill"></i> ' + data.error + '</div>';
         btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> I\'ve verified — Continue';
+        btn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> I\'ve verified \u2014 Continue';
       } else {
         statusEl.innerHTML = '<div class="alert alert-danger py-1 px-2 mb-0 small"><i class="bi bi-x-circle-fill"></i> ' + (data.error || 'Finalization failed') + '</div>';
         btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> I\'ve verified — Continue';
+        btn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> I\'ve verified \u2014 Continue';
       }
     })
     .catch(err => {
       statusEl.innerHTML = '<div class="alert alert-danger py-1 px-2 mb-0 small"><i class="bi bi-x-circle-fill"></i> Connection error: ' + err.message + '</div>';
       btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> I\'ve verified — Continue';
+      btn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> I\'ve verified \u2014 Continue';
     });
 }
 
@@ -885,6 +910,8 @@ function useRegisteredAccount() {
     hostField.value = hostname;
   }
   cancelRegistration();
+  // Show the API key path so the user can save
+  choosePath('apikey');
   // Run host status check
   checkHostStatus();
   // Auto-detect IPs

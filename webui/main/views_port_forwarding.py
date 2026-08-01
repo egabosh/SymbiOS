@@ -20,6 +20,7 @@ from django.contrib import messages
 from .decorators import login_required
 from .utils.ssh_exec import run_command
 from .utils.http import is_ajax_request
+from .setup_status import get_page_badge, PAGE_EXPLAIN
 
 import json
 
@@ -41,6 +42,10 @@ def _run_upnp(args, timeout=15):
 @login_required
 def settings_port_forwarding(request):
     """Main port forwarding settings page with router detection."""
+    from .views import _get_inventory_config
+    config = _get_inventory_config()
+    vars_ = (config.get('all', {}).get('vars', {}) if isinstance(config, dict) else {})
+
     router_info = None
     detect_error = None
     try:
@@ -81,6 +86,25 @@ def settings_port_forwarding(request):
                                          'title': 'Saving router UPnP credentials...',
                                          'message': 'Credentials saved successfully.'})
                 messages.success(request, 'Router UPnP credentials saved.')
+                return redirect('settings_port_forwarding')
+
+            elif action == 'quick-enable':
+                # One-click: add all preset rules (HTTP 80, HTTPS 443, SSH 33)
+                # Runs via the exec modal job so the user sees live output.
+                from .utils.jobs import create_job
+                cmd = (f'{SCRIPT} add 80 TCP 80 {_shell_quote(local_ip)} "SymbiOS HTTP" && '
+                       f'{SCRIPT} add 443 TCP 443 {_shell_quote(local_ip)} "SymbiOS HTTPS" && '
+                       f'{SCRIPT} add 33 TCP 22 {_shell_quote(local_ip)} "SymbiOS SSH"')
+                if is_ajax:
+                    job_id = create_job(cmd, timeout=90)
+                    return JsonResponse({'ok': True, 'job': job_id,
+                                         'title': 'Enabling port forwarding...',
+                                         'message': 'Opening ports 80, 443 and 33 on the router.'})
+                ok, stdout, stderr = run_command(cmd, timeout=90)
+                if ok:
+                    messages.success(request, 'Port forwarding rules added.')
+                else:
+                    messages.error(request, f'Failed: {stderr or stdout}')
                 return redirect('settings_port_forwarding')
 
             elif action == 'add':
@@ -167,6 +191,13 @@ def settings_port_forwarding(request):
         'local_ip': local_ip,
         'mappings': mappings,
         'list_error': list_error,
+        'page_key': 'port-forwarding',
+        'page_icon': 'bi-diagram-3',
+        'page_title': 'Port Forwarding',
+        'page_explain': PAGE_EXPLAIN['port-forwarding'],
+        'page_status': get_page_badge('port-forwarding', vars_)[0],
+        'page_status_label': get_page_badge('port-forwarding', vars_)[1],
+        'page_status_text': get_page_badge('port-forwarding', vars_)[2],
     })
 
 

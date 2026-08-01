@@ -205,3 +205,53 @@
   line-height: 1.5;
   tab-size: 2;
 }
+
+/* Settings page header pattern */
+.settings-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1.25rem;
+}
+.settings-header-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.settings-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.settings-badge.ok { background: var(--bs-success); color: #fff; }
+.settings-badge.warn { background: var(--bs-warning); color: #000; }
+.settings-badge.error { background: var(--bs-danger); color: #fff; }
+.settings-badge.missing { background: var(--bs-secondary); color: #fff; }
+.settings-badge.none { background: var(--bs-secondary); color: #fff; }
+.settings-why-body {
+  background: var(--bs-tertiary-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.375rem;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.9rem;
+}
+
+/* Advanced options collapsible block */
+.advanced-collapse {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--bs-border-color);
+}
+.advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--bs-secondary);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.advanced-toggle:hover { color: var(--bs-body-color); }
