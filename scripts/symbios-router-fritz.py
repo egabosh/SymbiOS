@@ -6,6 +6,7 @@
 
 import sys
 import os
+import time
 import json
 import hashlib
 import binascii
@@ -97,6 +98,19 @@ def login_sid(host, user, password):
     return {'ok': True, 'sid': sid}
 
 
+def load_page(host, sid, lp, extra_params=''):
+    """Load a UI page so subsequent data.lua calls return that page's data."""
+    url = f'http://{host}/?sid={sid}&lp={lp}'
+    if extra_params:
+        url += '&' + extra_params
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            resp.read()
+        return {'ok': True}
+    except Exception as e:
+        return {'ok': False, 'error': f'HTTP error: {e}'}
+
+
 def data_lua(host, sid, page, extra_params=''):
     params = {'sid': sid, 'xhr': '1', 'page': page}
     if extra_params:
@@ -119,6 +133,7 @@ def data_lua(host, sid, page, extra_params=''):
 
 
 def get_device_uid(host, sid):
+    load_page(host, sid, 'portoverview')
     data = data_lua(host, sid, 'portoverview')
     local_ip = get_local_ip()
 
@@ -131,6 +146,91 @@ def get_device_uid(host, sid):
             return dev.get('UID', '')
 
     return ''
+
+
+def get_all_devices(host, sid):
+    """Return the list of active devices from the netDev overview."""
+    load_page(host, sid, 'netDev')
+    data = data_lua(host, sid, 'netDev', 'xhrId=all')
+    return data.get('data', {}).get('active', [])
+
+
+def get_device_static_state(host, sid, uid):
+    """Read the edit_device dialog data for a device.
+
+    Returns dict with 'static' (bool: alwaysSameIp), 'ip' (current IPv4),
+    or {'error': ...} on failure.
+    """
+    params = (
+        f'xhrId=all&backToPage=netDev&dev={uid}&initalRefreshParamsSaved=true'
+    )
+    data = data_lua(host, sid, 'edit_device', params)
+    if data.get('pid') != 'edit_device':
+        return {'error': data.get('error', 'Could not read device dialog')}
+    dev = data.get('data', {}).get('vars', {}).get('dev', {})
+    ipv4 = dev.get('ipv4', {})
+    return {
+        'static': ipv4.get('dhcp', {}).get('alwaysSameIp') is True,
+        'ip': ipv4.get('current', {}).get('ip', ''),
+    }
+
+
+def ensure_static_ip(host, sid, uid, ip):
+    """Idempotently enable 'always same IPv4' for a device.
+
+    Reads the current dialog state first; only writes when needed.
+    Returns {'ok': True, 'message': ...} or {'ok': False, 'error': ...}.
+    """
+    state = get_device_static_state(host, sid, uid)
+    if 'error' in state:
+        return state
+    if state['static'] and state['ip'] == ip:
+        return {'ok': True, 'changed': False,
+                'message': f'Static IP already set: {ip}'}
+    if state['static'] and state['ip'] != ip:
+        return {'ok': False, 'error':
+                f'Device already has static IP {state["ip"]} '
+                f'(requested {ip}) - change manually'}
+
+    load_page(host, sid, 'edit_device',
+              f'dev={uid}&dev_node={uid}&backToPage=netDev')
+    params = (
+        f'page=edit_device&dev={uid}&dev_node={uid}&backToPage=netDev'
+        f'&apply=ok&dev_ip={ip}&static_dhcp=on'
+    )
+    result = data_lua(host, sid, 'edit_device', params)
+    if result.get('pid') != 'edit_device':
+        return {'ok': False, 'error':
+                'Failed to enable static IP (unexpected response)'}
+    return {'ok': True, 'changed': True,
+            'message': f'Static IP enabled: {ip}'}
+
+
+def unset_static_ip(host, sid, uid, ip=''):
+    """Disable 'always same IPv4' for a device (returns device to DHCP)."""
+    state = get_device_static_state(host, sid, uid)
+    if 'error' in state:
+        return state
+    if not state['static']:
+        return {'ok': True, 'changed': False,
+                'message': 'Static IP already disabled'}
+    if ip and state['ip'] and state['ip'] != ip:
+        return {'ok': False, 'error':
+                f'Device static IP is {state["ip"]}, not {ip} - aborting'}
+
+    load_page(host, sid, 'edit_device',
+              f'dev={uid}&dev_node={uid}&backToPage=netDev')
+    current_ip = state['ip'] or ip
+    params = (
+        f'page=edit_device&dev={uid}&dev_node={uid}&backToPage=netDev'
+        f'&apply=ok&dev_ip={current_ip}&static_dhcp=off'
+    )
+    result = data_lua(host, sid, 'edit_device', params)
+    if result.get('pid') != 'edit_device':
+        return {'ok': False, 'error':
+                'Failed to disable static IP (unexpected response)'}
+    return {'ok': True, 'changed': True,
+            'message': 'Static IP disabled (device uses DHCP)'}
 
 
 def fb_login(host, user, password):
@@ -163,13 +263,17 @@ def fb_list(host, user, password):
         }))
         return 1
 
+    load_page(host, sid, 'portoverview')
     port_data = data_lua(host, sid, 'portoverview')
+    ipv6_active = port_data.get('data', {}).get('ipv6_activ', False)
     for dev in port_data.get('data', {}).get('devices', []):
         if dev.get('UID') == dev_uid:
             rules = dev.get('rules', [])
             result = {
                 'ok': True,
                 'router_type': 'fritzbox',
+                'ipv6_activ': ipv6_active,
+                'interface_id': dev.get('interface_id', ''),
                 'allow_pcp_and_upnp': dev.get('allow_pcp_and_upnp', False),
                 'device_name': dev.get('devicename', ''),
                 'device_uid': dev.get('UID', ''),
@@ -180,6 +284,7 @@ def fb_list(host, user, password):
             for r in rules:
                 app_name = r.get('app', '')
                 desc = r.get('description', '')
+                accesstype = r.get('accesstype', 'ipv4')
                 rule = {
                     'UID': r.get('UID', ''),
                     'app': app_name,
@@ -187,7 +292,7 @@ def fb_list(host, user, password):
                     'fwport': r.get('fwport', ''),
                     'fwendport': r.get('fwendport', ''),
                     'protocol': r.get('protocol', ''),
-                    'accesstype': r.get('accesstype', ''),
+                    'accesstype': accesstype,
                     'type': r.get('type', ''),
                     'activated': r.get('activated', False) in [True, '1', 1],
                     'state': r.get('state', '0'),
@@ -203,6 +308,7 @@ def fb_list(host, user, password):
                     'internal_port': r.get('fwport', ''),
                     'description': app_name or desc,
                     'enabled': r.get('state', '') == '2',
+                    'accesstype': accesstype,
                 }
                 result['mappings'].append(mapping)
 
@@ -218,7 +324,14 @@ def fb_upnp_enable(host, sid, dev_uid):
              f'autoShar_{dev_uid}=1&apply=%C3%9Cbernehmen')
 
 
-def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc):
+def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc,
+           accesstype='ipv4'):
+    """Add a port forwarding rule.
+
+    accesstype: 'ipv4', 'ipv6' or 'ipv4_ipv6'. FRITZ!Box rules are bound to
+    the device (landevice + interface_id), so the box adapts the target
+    address automatically when the WAN IPv6 prefix changes.
+    """
     login = login_sid(host, user, password)
     if not login.get('ok'):
         print(json.dumps(login))
@@ -236,11 +349,13 @@ def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc):
 
     fb_upnp_enable(host, sid, dev_uid)
 
+    load_page(host, sid, 'portoverview')
+
     # Build rule params — semi-colon separated fields as FRITZ!Box expects
     uid_rule = f'newRule{os.getpid()}'
     desc_safe = desc.replace(';', '')
     rule = (
-        f'UID={uid_rule};accesstype=ipv4;app={desc_safe};'
+        f'UID={uid_rule};accesstype={accesstype};app={desc_safe};'
         f'description=other;directory=;activated=1;'
         f'fwport={int_port};fwendport={int_port};port={ext_port};'
         f'myfritz_adr=;scheme=;protocol={proto};'
@@ -253,22 +368,70 @@ def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc):
         f'&device={dev_uid}&edify=ok'
     )
 
+    # IPv6 rules are device-bound: pass interface_id and ipv6_rulenode so the
+    # box resolves the target from the current prefix + device interface ID
+    if accesstype in ('ipv6', 'ipv4_ipv6'):
+        dev = None
+        for d in data_lua(host, sid, 'portoverview').get('data', {}).get(
+                'devices', []):
+            if d.get('UID') == dev_uid:
+                dev = d
+                break
+        if dev:
+            extra += (
+                f'&ipv6_rulenode={dev.get("ipv6_rulenode", "")}'
+                f'&ifaceid={dev.get("interface_id", "")}'
+                f'&isIpv6Active=true'
+            )
+
     result = data_lua(host, sid, 'portoverview', extra)
-    if result.get('pid') == 'portoverview':
-        print(json.dumps({
-            'ok': True,
-            'router_type': 'fritzbox',
-            'message': f'Port forwarding added: {proto}/{ext_port} '
-                       f'\u2192 {int_client}:{int_port}',
-        }))
-        return 0
-    else:
+    if result.get('pid') != 'portoverview':
         print(json.dumps({
             'ok': False,
             'router_type': 'fritzbox',
             'error': 'Failed to create port forwarding',
         }))
         return 1
+
+    # Verify the rule actually appeared. FRITZ!Box silently drops rules it
+    # cannot fulfil (e.g. IPv6 rules without a global prefix), while still
+    # returning pid=portoverview, so a false-positive must be caught here.
+    time.sleep(1)
+    fresh = data_lua(host, sid, 'portoverview').get('data', {}).get(
+        'devices', [])
+    found = False
+    for dev in fresh:
+        if dev.get('UID') != dev_uid:
+            continue
+        for r in dev.get('rules', []):
+            if (str(r.get('port', '')) == str(ext_port)
+                    and r.get('protocol', '').upper() == proto.upper()
+                    and r.get('accesstype', '') == accesstype
+                    and r.get('state', '') == '2'):
+                found = True
+                break
+        break
+
+    if not found:
+        print(json.dumps({
+            'ok': False,
+            'router_type': 'fritzbox',
+            'error': (f'Rule not activated. FRITZ!Box dropped the '
+                      f'{accesstype}/{proto}/{ext_port} rule (the box may '
+                      f'not support IPv6 forwardings without a global '
+                      f'IPv6 prefix).'),
+            'warning': 'Check the FRITZ!Box port forwarding list.',
+        }))
+        return 1
+
+    print(json.dumps({
+        'ok': True,
+        'router_type': 'fritzbox',
+        'message': f'Port forwarding added: {proto}/{ext_port} '
+                   f'\u2192 {int_client}:{int_port}',
+        'accesstype': accesstype,
+    }))
+    return 0
 
 
 def fb_delete(host, user, password, ext_port, proto):
@@ -287,6 +450,7 @@ def fb_delete(host, user, password, ext_port, proto):
         }))
         return 1
 
+    load_page(host, sid, 'portoverview')
     port_data = data_lua(host, sid, 'portoverview')
 
     # Find rule UID matching port+protocol
@@ -328,6 +492,143 @@ def fb_delete(host, user, password, ext_port, proto):
     return 0
 
 
+def fb_staticip(host, user, password, ip, dev_uid=''):
+    login = login_sid(host, user, password)
+    if not login.get('ok'):
+        print(json.dumps(login))
+        return 1
+
+    sid = login['sid']
+    if not dev_uid:
+        dev_uid = get_device_uid(host, sid)
+    if not dev_uid:
+        print(json.dumps({
+            'ok': False,
+            'router_type': 'fritzbox',
+            'error': 'Could not determine device UID',
+        }))
+        return 1
+
+    result = ensure_static_ip(host, sid, dev_uid, ip)
+    if result.get('ok'):
+        print(json.dumps({
+            'ok': True,
+            'router_type': 'fritzbox',
+            'message': result.get('message'),
+            'changed': result.get('changed', False),
+            'device_uid': dev_uid,
+        }))
+        return 0
+    print(json.dumps({
+        'ok': False,
+        'router_type': 'fritzbox',
+        'error': result.get('error'),
+    }))
+    return 1
+
+
+def fb_unset_staticip(host, user, password, ip, dev_uid=''):
+    login = login_sid(host, user, password)
+    if not login.get('ok'):
+        print(json.dumps(login))
+        return 1
+
+    sid = login['sid']
+    if not dev_uid:
+        dev_uid = get_device_uid(host, sid)
+    if not dev_uid:
+        print(json.dumps({
+            'ok': False,
+            'router_type': 'fritzbox',
+            'error': 'Could not determine device UID',
+        }))
+        return 1
+
+    result = unset_static_ip(host, sid, dev_uid, ip)
+    if result.get('ok'):
+        print(json.dumps({
+            'ok': True,
+            'router_type': 'fritzbox',
+            'message': result.get('message'),
+            'changed': result.get('changed', False),
+            'device_uid': dev_uid,
+        }))
+        return 0
+    print(json.dumps({
+        'ok': False,
+        'router_type': 'fritzbox',
+        'error': result.get('error'),
+    }))
+    return 1
+
+
+def fb_ipv6info(host, user, password):
+    """Report IPv6 state of the router and per-device IPv6 addresses.
+
+    FRITZ!Box does not assign static IPv6 addresses per device (SLAAC only);
+    port forwardings are device-bound (landevice + interface_id) and follow
+    the current WAN prefix automatically.
+    """
+    login = login_sid(host, user, password)
+    if not login.get('ok'):
+        print(json.dumps(login))
+        return 1
+
+    sid = login['sid']
+    load_page(host, sid, 'portoverview')
+    port_data = data_lua(host, sid, 'portoverview')
+    ipv6_active = port_data.get('data', {}).get('ipv6_activ', False)
+
+    devices = []
+    for dev in port_data.get('data', {}).get('devices', []):
+        devices.append({
+            'UID': dev.get('UID', ''),
+            'name': dev.get('devicename', ''),
+            'interface_id': dev.get('interface_id', ''),
+            'local_ipv4': dev.get('local_ipv4', ''),
+            'forwarding_activ': dev.get('forwarding_activ', False),
+        })
+
+    # Current IPv6 address of the SymbiOS device (from the edit dialog)
+    dev_uid = get_device_uid(host, sid)
+    current_ipv6 = ''
+    if dev_uid:
+        params = (
+            f'xhrId=all&backToPage=netDev&dev={dev_uid}'
+            f'&initalRefreshParamsSaved=true'
+        )
+        dlg = data_lua(host, sid, 'edit_device', params)
+        dev = dlg.get('data', {}).get('vars', {}).get('dev', {})
+        ipv6 = dev.get('ipv6', {})
+        current_ipv6 = ipv6.get('current', {}).get('ip', '')
+        lst = ipv6.get('ipList', [])
+        if not current_ipv6 or current_ipv6.startswith('fe80:'):
+            for entry in lst:
+                addr = entry.get('ip', '')
+                if addr and not addr.startswith('fe80:'):
+                    current_ipv6 = addr
+                    break
+        if not current_ipv6:
+            for entry in lst:
+                addr = entry.get('ip', '')
+                if addr:
+                    current_ipv6 = addr
+                    break
+
+    print(json.dumps({
+        'ok': True,
+        'router_type': 'fritzbox',
+        'ipv6_activ': ipv6_active,
+        'note': ('FRITZ!Box assigns IPv6 via SLAAC only. Rules are device-'
+                 'bound (interface_id) and adapt automatically when the WAN '
+                 'prefix changes.'),
+        'static_ipv6_supported': False,
+        'current_device_ipv6': current_ipv6,
+        'devices': devices,
+    }))
+    return 0
+
+
 def main():
     host = '192.168.188.1'
     action = sys.argv[1] if len(sys.argv) > 1 else 'help'
@@ -339,12 +640,15 @@ def main():
     elif action == 'list':
         return fb_list(host, user, password)
 
+    elif action == 'ipv6info':
+        return fb_ipv6info(host, user, password)
+
     elif action == 'add':
         if len(sys.argv) < 6:
             print(json.dumps({
                 'ok': False,
                 'error': 'Usage: add <ext_port> <protocol> '
-                         '<int_port> <int_client> [description]',
+                         '<int_port> <int_client> [description] [accesstype]',
             }))
             return 1
         ext_port = sys.argv[2]
@@ -352,8 +656,16 @@ def main():
         int_port = sys.argv[4]
         int_client = sys.argv[5]
         desc = sys.argv[6] if len(sys.argv) > 6 else 'SymbiOS'
+        accesstype = sys.argv[7] if len(sys.argv) > 7 else 'ipv4'
+        if accesstype not in ('ipv4', 'ipv6', 'ipv4_ipv6'):
+            print(json.dumps({
+                'ok': False,
+                'error': f'Invalid accesstype: {accesstype} '
+                         '(use ipv4, ipv6 or ipv4_ipv6)',
+            }))
+            return 1
         return fb_add(host, user, password, ext_port, proto,
-                       int_port, int_client, desc)
+                       int_port, int_client, desc, accesstype)
 
     elif action == 'delete':
         if len(sys.argv) < 3:
@@ -366,6 +678,28 @@ def main():
         proto = sys.argv[3].upper() if len(sys.argv) > 3 else 'TCP'
         return fb_delete(host, user, password, ext_port, proto)
 
+    elif action == 'staticip':
+        if len(sys.argv) < 3:
+            print(json.dumps({
+                'ok': False,
+                'error': 'Usage: staticip <ip> [device_uid]  '
+                         '(sets static IPv4 for this device)',
+            }))
+            return 1
+        uid = sys.argv[3] if len(sys.argv) > 3 else ''
+        return fb_staticip(host, user, password, sys.argv[2], uid)
+
+    elif action == 'unset-staticip':
+        if len(sys.argv) < 3:
+            print(json.dumps({
+                'ok': False,
+                'error': 'Usage: unset-staticip <ip> [device_uid]  '
+                         '(removes static IPv4 for this device)',
+            }))
+            return 1
+        uid = sys.argv[3] if len(sys.argv) > 3 else ''
+        return fb_unset_staticip(host, user, password, sys.argv[2], uid)
+
     elif action in ('help', '--help', '-h'):
         print(f'Usage: {SCRIPT_NAME} <action> [args...]')
         print()
@@ -374,8 +708,13 @@ def main():
         print('Actions:')
         print('  login                           Test authentication')
         print('  list                            List port forwarding rules')
-        print('  add <ext> <proto> <int> <client> [desc]   Add rule')
+        print('  add <ext> <proto> <int> <client> [desc] [accesstype]   Add rule')
+        print('                                    accesstype: ipv4|ipv6|ipv4_ipv6')
         print('  delete <ext> [proto]            Delete rule')
+        print('  staticip <ip>                   Ensure static IPv4 for this device')
+        print('  unset-staticip <ip>             Remove static IPv4 for this device')
+        print('  ipv6info                        Report IPv6 state and device')
+        print('                                    addresses (read-only)')
         return 0
 
     else:
