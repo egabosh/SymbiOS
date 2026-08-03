@@ -102,6 +102,51 @@
   </div>
 </div>
 
+{% if ipv6_info %}
+<!-- IPv6 status (FRITZ!Box, read-only) -->
+<div class="card mt-3">
+  <div class="card-header">
+    <span><i class="bi bi-globe2"></i> IPv6-Status</span>
+  </div>
+  <div class="card-body small">
+    {% if ipv6_info.ipv6_activ %}
+    <div class="mb-2">
+      <span class="badge bg-success"><i class="bi bi-check-circle"></i> IPv6 ist auf der FRITZ!Box aktiv</span>
+    </div>
+    {% else %}
+    <div class="mb-2">
+      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> IPv6 ist auf der FRITZ!Box deaktiviert</span>
+    </div>
+    {% endif %}
+    <div class="mb-2">
+      <span class="text-muted">Aktuelle IPv6-Adresse des Servers:</span>
+      <code>{{ ipv6_info.current_device_ipv6|default:"-" }}</code>
+    </div>
+    {% for d in ipv6_info.devices %}
+    {% if d.forwarding_activ %}
+    <div class="mb-2">
+      <span class="text-muted">IPv6-Freigabe f&uuml;r {{ d.name }}:</span>
+      <span class="badge bg-success">Aktiv</span>
+    </div>
+    {% endif %}
+    {% endfor %}
+    {% if ipv6_info.static_ipv6_supported %}
+    <p class="text-muted mb-0">
+      <i class="bi bi-info-circle"></i>
+      Die FRITZ!Box kann dem Server eine feste IPv6-Adresse zuweisen.
+    </p>
+    {% else %}
+    <p class="text-muted mb-0">
+      <i class="bi bi-info-circle"></i>
+      {{ ipv6_info.note|default:"Die FRITZ!Box vergibt IPv6-Adressen per SLAAC." }}
+      IPv6-Freigaben sind ger&auml;tegebunden und passen sich automatisch an,
+      wenn sich das IPv6-Pr&auml;fix des Anschlusses &auml;ndert.
+    </p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 <!-- Advanced options -->
 <div class="mt-4">
   <a class="advanced-toggle" data-bs-toggle="collapse" href="#advanced-portforward" role="button" aria-expanded="false">
@@ -219,6 +264,7 @@
                     <th>Interne IP</th>
                     <th>Interner Port</th>
                     <th>Beschreibung</th>
+                    <th>IP-Version</th>
                     <th>Status</th>
                     <th></th>
                   </tr>
@@ -235,6 +281,15 @@
                     <td><code>{{ m.internal_client }}</code></td>
                     <td><code>{{ m.internal_port }}</code></td>
                     <td class="text-muted">{{ m.description|default:"-" }}</td>
+                    <td>
+                      {% if m.accesstype == 'ipv6' %}
+                      <span class="badge bg-info text-dark">IPv6</span>
+                      {% elif m.accesstype == 'ipv4_ipv6' %}
+                      <span class="badge bg-info text-dark">IPv4+IPv6</span>
+                      {% else %}
+                      <span class="badge bg-secondary">IPv4</span>
+                      {% endif %}
+                    </td>
                     <td>
                       {% if m.enabled %}
                       <span class="badge bg-success">Aktiv</span>
@@ -336,6 +391,24 @@
             <label class="form-label">Beschreibung <span class="text-muted">(optional)</span></label>
             <input type="text" class="form-control form-control-sm" name="description"
                    placeholder="z. B. SymbiOS WebUI" value="SymbiOS">
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label">IP-Version</label>
+            <select class="form-select form-select-sm" name="accesstype" id="accesstype-select">
+              <option value="ipv4">Nur IPv4</option>
+              {% if ipv6_info %}
+              <option value="ipv6">Nur IPv6 (ger&auml;tegebunden)</option>
+              <option value="ipv4_ipv6">IPv4 + IPv6</option>
+              {% endif %}
+            </select>
+            {% if ipv6_info %}
+            <div class="form-text">
+              IPv6-Freigaben sind ger&auml;tegebunden: Die FRITZ!Box leitet auf
+              die aktuelle IPv6-Adresse des Servers weiter und passt die Regel
+              automatisch an, wenn sich das IPv6-Pr&auml;fix &auml;ndert.
+            </div>
+            {% endif %}
           </div>
 
           <div class="mb-2">
@@ -459,18 +532,23 @@ function refreshMappings() {
         body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> Keine Weiterleitungen gefunden.</p>';
         return;
       }
-      var html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead><tr><th>Externer Port</th><th>Protokoll</th><th>Interne IP</th><th>Interner Port</th><th>Beschreibung</th><th>Status</th><th></th></tr></thead><tbody>';
+      var html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead><tr><th>Externer Port</th><th>Protokoll</th><th>Interne IP</th><th>Interner Port</th><th>Beschreibung</th><th>IP-Version</th><th>Status</th><th></th></tr></thead><tbody>';
       for (var i = 0; i < mappings.length; i++) {
         var m = mappings[i];
         var protoClass = m.protocol === 'TCP' ? 'bg-primary' : 'bg-success';
         var statusClass = m.enabled ? 'bg-success' : 'bg-secondary';
         var statusText = m.enabled ? 'Aktiv' : 'Deaktiviert';
+        var ipv6Class = 'bg-secondary';
+        var ipv6Text = 'IPv4';
+        if (m.accesstype === 'ipv6') { ipv6Class = 'bg-info text-dark'; ipv6Text = 'IPv6'; }
+        else if (m.accesstype === 'ipv4_ipv6') { ipv6Class = 'bg-info text-dark'; ipv6Text = 'IPv4+IPv6'; }
         html += '<tr>' +
           '<td><code>' + m.external_port + '</code></td>' +
           '<td><span class="badge ' + protoClass + '">' + m.protocol + '</span></td>' +
           '<td><code>' + m.internal_client + '</code></td>' +
           '<td><code>' + m.internal_port + '</code></td>' +
           '<td class="text-muted">' + (m.description || '-') + '</td>' +
+          '<td><span class="badge ' + ipv6Class + '">' + ipv6Text + '</span></td>' +
           '<td><span class="badge ' + statusClass + '">' + statusText + '</span></td>' +
           '<td>' +
           '<form method="post" data-exec="true" class="d-inline" onsubmit="return confirm(\'Weiterleitung ' + m.protocol + '/' + m.external_port + ' l&ouml;schen?\')">' +

@@ -31,12 +31,18 @@ SCRIPT = 'symbios-router-upnp.sh'
 def _run_upnp(args, timeout=15):
     cmd = f'{SCRIPT} {args}'
     ok, stdout, stderr = run_command(cmd, timeout=timeout)
-    if not ok:
-        raise RuntimeError(stderr or 'Command failed')
+    # The router script always emits a single JSON line on stdout, even for
+    # expected failures (e.g. a rule the router refuses), which it signals
+    # with exit code 1. Parse stdout first and let the caller see the real
+    # error; the raw stderr only carries shell-banner noise and must not
+    # shadow the structured answer.
     try:
         return json.loads(stdout)
-    except (json.JSONDecodeError, ValueError) as e:
-        raise RuntimeError(f'Invalid JSON from script: {stdout[:500]}') from e
+    except (json.JSONDecodeError, ValueError):
+        pass
+    if not ok:
+        raise RuntimeError(stderr or 'Command failed')
+    raise RuntimeError(f'Invalid JSON from script: {stdout[:500]}')
 
 
 @login_required
@@ -70,6 +76,14 @@ def settings_port_forwarding(request):
     except Exception:
         pass
 
+    # IPv6 state (FRITZ!Box only, read-only)
+    ipv6_info = None
+    try:
+        if router_info and router_info.get('router_type') == 'fritzbox':
+            ipv6_info = _run_upnp('ipv6info', timeout=20)
+    except Exception:
+        ipv6_info = None
+
     if request.method == 'POST':
         is_ajax = is_ajax_request(request)
         action = request.POST.get('action', '')
@@ -89,17 +103,22 @@ def settings_port_forwarding(request):
                 return redirect('settings_port_forwarding')
 
             elif action == 'quick-enable':
-                # One-click: add all preset rules (HTTP 80, HTTPS 443, SSH 33)
+                # One-click: ensure static IP (FRITZ!Box), then add all
+                # preset rules (HTTP 80, HTTPS 443, SSH 33).
                 # Runs via the exec modal job so the user sees live output.
                 from .utils.jobs import create_job
-                cmd = (f'{SCRIPT} add 80 TCP 80 {_shell_quote(local_ip)} "SymbiOS HTTP" && '
+                static_ip_cmd = ''
+                if router_info and router_info.get('router_type') == 'fritzbox' and local_ip:
+                    static_ip_cmd = (f'{SCRIPT} staticip {_shell_quote(local_ip)} && ')
+                cmd = (static_ip_cmd +
+                       f'{SCRIPT} add 80 TCP 80 {_shell_quote(local_ip)} "SymbiOS HTTP" && '
                        f'{SCRIPT} add 443 TCP 443 {_shell_quote(local_ip)} "SymbiOS HTTPS" && '
                        f'{SCRIPT} add 33 TCP 22 {_shell_quote(local_ip)} "SymbiOS SSH"')
                 if is_ajax:
                     job_id = create_job(cmd, timeout=90)
                     return JsonResponse({'ok': True, 'job': job_id,
                                          'title': 'Enabling port forwarding...',
-                                         'message': 'Opening ports 80, 443 and 33 on the router.'})
+                                         'message': 'Ensuring static IP and opening ports 80, 443 and 33 on the router.'})
                 ok, stdout, stderr = run_command(cmd, timeout=90)
                 if ok:
                     messages.success(request, 'Port forwarding rules added.')
@@ -113,6 +132,10 @@ def settings_port_forwarding(request):
                 int_port = request.POST.get('int_port', '').strip()
                 int_client = request.POST.get('int_client', '').strip()
                 description = request.POST.get('description', 'SymbiOS').strip()
+                accesstype = request.POST.get('accesstype', 'ipv4').strip()
+
+                if accesstype not in ('ipv4', 'ipv6', 'ipv4_ipv6'):
+                    accesstype = 'ipv4'
 
                 if not ext_port or not int_port or not int_client:
                     if is_ajax:
@@ -120,7 +143,8 @@ def settings_port_forwarding(request):
                     messages.error(request, 'All port fields are required.')
                     return redirect('settings_port_forwarding')
 
-                args = f'add {ext_port} {protocol} {int_port} {int_client} {_shell_quote(description)}'
+                args = (f'add {ext_port} {protocol} {int_port} {int_client} '
+                        f'{_shell_quote(description)} {accesstype}')
                 result = _run_upnp(args, timeout=15)
                 if result.get('ok'):
                     if is_ajax:
@@ -191,6 +215,7 @@ def settings_port_forwarding(request):
         'local_ip': local_ip,
         'mappings': mappings,
         'list_error': list_error,
+        'ipv6_info': ipv6_info,
         'page_key': 'port-forwarding',
         'page_icon': 'bi-diagram-3',
         'page_title': 'Port Forwarding',

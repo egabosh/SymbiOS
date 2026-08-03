@@ -10,8 +10,8 @@ SCRIPT_NAME="$(basename "$0")"
 source symbios-lib.sh
 UPNP_CONFIG_DIR="${g_config_dir}"
 UPNP_CONFIG_FILE="${UPNP_CONFIG_DIR}/router-upnp.conf"
-ROUTER_UPNP_USER=""
-ROUTER_UPNP_PASS=""
+ROUTER_UPNP_USER="${ROUTER_UPNP_USER:-}"
+ROUTER_UPNP_PASS="${ROUTER_UPNP_PASS:-}"
 
 # Load config if present
 if [[ -f "$UPNP_CONFIG_FILE" ]]
@@ -245,7 +245,7 @@ EOF
     ;;
 
   # ------------------------------------------------------------------
-  login|list|add|delete)
+  login|list|add|delete|staticip|unset-staticip|ipv6info)
     # Detect router type
     DETECT=$(symbios-router-detect.sh 2>/dev/null)
     AVAILABLE=$(f_json_bool "$DETECT" "available")
@@ -325,10 +325,13 @@ Actions:
   detect                          Probe router and show type, model
   login                           Test auth (FRITZ!Box) or show UPnP status
   list                            List port forwarding rules
-  add <ext_port> <proto> <int_port> <int_client> [desc]
+  add <ext_port> <proto> <int_port> <int_client> [desc] [accesstype]
                                   Add a port forwarding rule
+                                  (accesstype: ipv4|ipv6|ipv4_ipv6)
   delete <ext_port> [protocol]    Delete a port forwarding rule
   config [username] [password]    Show or save router credentials
+  ipv6info                        Show IPv6 state and device addresses
+                                  (FRITZ!Box, read-only)
 
 Router types:
   fritzbox (AVM Berlin)
