@@ -269,11 +269,41 @@ EOF
       fi
 
       SCRIPT_DIR="$(dirname "$0")"
-      ROUTER_UPNP_USER="$ROUTER_UPNP_USER" \
+      RESULT=$(ROUTER_UPNP_USER="$ROUTER_UPNP_USER" \
         ROUTER_UPNP_PASS="$ROUTER_UPNP_PASS" \
         python3 "${SCRIPT_DIR}/symbios-router-fritz.py" \
-        "$ACTION" "$@"
-      exit $?
+        "$ACTION" "$@")
+      RC=$?
+
+      # Manage UFW allow rules for IPv6 port forwards.
+      # FRITZ!Box IPv6 forwards connect directly to the host's GUA, so
+      # the host firewall must explicitly allow forwarded traffic on the port.
+      if [[ $RC -eq 0 ]]; then
+        OK=$(f_json_bool "$RESULT" "ok")
+        if [[ "$OK" == "true" ]]; then
+          case "$ACTION" in
+            add)
+              ACCESSTYPE=$(f_json_get "$RESULT" "accesstype")
+              if [[ "$ACCESSTYPE" == "ipv6" ]] || [[ "$ACCESSTYPE" == "ipv4_ipv6" ]]; then
+                # Comment marks script-created rules so delete only removes them,
+                # never rules managed by firewall.yml (e.g. direct SSH on port 33).
+                ufw allow "$1/${2,,}" comment 'symbios-upnp' 2>/dev/null || true
+              fi
+              ;;
+            delete)
+              DEL_ACCESSTYPE=$(f_json_get "$RESULT" "accesstype")
+              # Only remove UFW rule for IPv6 forwards. Rules for ports that are
+              # also direct host services (e.g. SSH) are managed by firewall.yml.
+              if [[ "$DEL_ACCESSTYPE" == "ipv6" ]] || [[ "$DEL_ACCESSTYPE" == "ipv4_ipv6" ]]; then
+                ufw delete allow "$1/${2,,}" comment 'symbios-upnp' 2>/dev/null || true
+              fi
+              ;;
+          esac
+        fi
+      fi
+
+      echo "$RESULT"
+      exit $RC
     fi
 
     # Generic UPnP → bash SOAP handlers

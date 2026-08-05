@@ -134,10 +134,18 @@ function f_json_error {
 }
 
 # Extract a string value for <key> from a JSON document.
+# Handles both compact ("key":"value") and pretty-printed
+# ("key": "value") JSON as produced by json.dumps().
 function f_json_get {
   local f_json="$1" f_key="$2"
-  local f_tmp="${f_json#*\"${f_key}\":\"}"
+  local f_tmp="${f_json#*\"${f_key}\":}"
   [[ "$f_tmp" == "$f_json" ]] && { echo ""; return 1; }
+  f_tmp="${f_tmp## }"
+  if [[ "${f_tmp:0:1}" != '"' ]]; then
+    echo ""
+    return 1
+  fi
+  f_tmp="${f_tmp:1}"
   echo "${f_tmp%%\"*}"
 }
 

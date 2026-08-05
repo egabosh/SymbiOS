@@ -27,6 +27,9 @@ all:
     smtp_from: ''
     smtp_tls: ''
     smtp_port: ''
+    # port forwarding — extra inbound UFW rules for IPv6 forwards,
+    # kept in sync by the WebUI (settings → port forwarding)
+    ufw_extra_inbound: []
     # ansible defaults
     ansible_user: "root"
     ansible_python_interpreter: "/usr/bin/python3"
