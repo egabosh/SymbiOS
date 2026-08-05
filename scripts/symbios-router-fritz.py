@@ -331,6 +331,9 @@ def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc,
     accesstype: 'ipv4', 'ipv6' or 'ipv4_ipv6'. FRITZ!Box rules are bound to
     the device (landevice + interface_id), so the box adapts the target
     address automatically when the WAN IPv6 prefix changes.
+
+    Note: FRITZ!Box only accepts IPv6 port forwards when ext_port equals
+    int_port (no IPv6 port mapping); different ports are silently dropped.
     """
     login = login_sid(host, user, password)
     if not login.get('ok'):
@@ -368,8 +371,35 @@ def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc,
         f'&device={dev_uid}&edify=ok'
     )
 
-    # IPv6 rules are device-bound: pass interface_id and ipv6_rulenode so the
-    # box resolves the target from the current prefix + device interface ID
+    # FRITZ!Box only supports IPv6 port forwards when the external port equals
+    # the internal port; different ports are silently dropped (verified
+    # against FRITZ!Box 7430, OS 7.57). Report this up front instead of
+    # letting the box swallow the rule.
+    if accesstype == 'ipv6' and int_port != ext_port:
+        print(json.dumps({
+            'ok': False,
+            'router_type': 'fritzbox',
+            'error': ('FRITZ!Box only supports IPv6 port forwards with the '
+                      'same external and internal port (port mapping is IPv4 '
+                      f'only). Use an internal port of {ext_port} or choose '
+                      'accesstype "ipv4".'),
+        }))
+        return 1
+    if accesstype == 'ipv4_ipv6' and int_port != ext_port:
+        print(json.dumps({
+            'ok': False,
+            'router_type': 'fritzbox',
+            'error': ('FRITZ!Box only supports IPv6 port forwards with the '
+                      'same external and internal port. The rule would be '
+                      'created as IPv4 only; use an internal port of '
+                      f'{ext_port} or accesstype "ipv4".'),
+        }))
+        return 1
+
+    # IPv6 rules are device-bound: pass interface_id, ipv6_rulenode and the
+    # four split interface_id fields so the box resolves the target from the
+    # current prefix + device interface ID. Without the split fields the box
+    # silently drops IPv6 rules (verified against FRITZ!Box 7430, OS 7.57).
     if accesstype in ('ipv6', 'ipv4_ipv6'):
         dev = None
         for d in data_lua(host, sid, 'portoverview').get('data', {}).get(
@@ -378,9 +408,15 @@ def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc,
                 dev = d
                 break
         if dev:
+            iid = dev.get('interface_id', '')
+            groups = [g for g in iid.split(':') if g][:4]
+            while len(groups) < 4:
+                groups.append('')
             extra += (
                 f'&ipv6_rulenode={dev.get("ipv6_rulenode", "")}'
-                f'&ifaceid={dev.get("interface_id", "")}'
+                f'&ifaceid={iid}'
+                f'&interface_id1={groups[0]}&interface_id2={groups[1]}'
+                f'&interface_id3={groups[2]}&interface_id4={groups[3]}'
                 f'&isIpv6Active=true'
             )
 
@@ -417,9 +453,10 @@ def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc,
             'ok': False,
             'router_type': 'fritzbox',
             'error': (f'Rule not activated. FRITZ!Box dropped the '
-                      f'{accesstype}/{proto}/{ext_port} rule (the box may '
-                      f'not support IPv6 forwardings without a global '
-                      f'IPv6 prefix).'),
+                      f'{accesstype}/{proto}/{ext_port} rule. For IPv6 the '
+                      f'external port must equal the internal port; also '
+                      f'check that the device has a correct IPv6 '
+                      f'interface_id.'),
             'warning': 'Check the FRITZ!Box port forwarding list.',
         }))
         return 1
@@ -455,12 +492,18 @@ def fb_delete(host, user, password, ext_port, proto):
 
     # Find rule UID matching port+protocol
     rule_uid = ''
+    rule_accesstype = ''
+    target_dev = {}
+    target_rule = {}
     for dev in port_data.get('data', {}).get('devices', []):
         if dev.get('UID') == dev_uid:
+            target_dev = dev
             for r in dev.get('rules', []):
                 if (str(r.get('port', '')) == ext_port
                         and r.get('protocol', '').upper() == proto.upper()):
                     rule_uid = r.get('UID', '')
+                    rule_accesstype = r.get('accesstype', '')
+                    target_rule = r
                     break
             break
 
@@ -472,22 +515,83 @@ def fb_delete(host, user, password, ext_port, proto):
         }))
         return 1
 
+    # Build the delete submit exactly like the FRITZ!Box UI (port_edit.js):
+    # the target rule is kept in the list marked rulestate=delete and committed
+    # via edify=ok together with the device context fields. This removes only
+    # this one rule — the box wipes the whole IPv6 rule set when a delete is
+    # submitted with delete=ok and the IPv6 device fields instead (verified
+    # against FRITZ!Box 7430, OS 7.31).
+    app = str(target_rule.get('app', '')).replace(';', '')
+    desc = str(target_rule.get('description', '') or '').replace(';', '')
+    if not desc:
+        desc = app
+    activated = '1' if target_rule.get('activated') else '0'
     del_rule = (
-        f'UID={rule_uid};accesstype=ipv4;type=port;'
+        f'UID={rule_uid};'
+        f'accesstype={rule_accesstype};'
+        f'app={app};description={desc};directory=;'
+        f'activated={activated};'
+        f'fwport={target_rule.get("fwport", "")};'
+        f'fwendport={target_rule.get("fwendport", "")};'
+        f'port={target_rule.get("port", "")};'
+        f'myfritz_adr=;scheme=;'
+        f'protocol={target_rule.get("protocol", "")};'
+        f'rulestate=delete;type=port;'
         f'myfritzdevice_uid=;myfritzservice_uid=;'
     )
+
+    iid = target_dev.get('interface_id', '')
+    groups = [g for g in iid.split(':') if g][:4]
+    while len(groups) < 4:
+        groups.append('')
+    ipv6_active = port_data.get('data', {}).get('ipv6_activ', False)
     extra = (
         f'rulecount=1&rule1={del_rule}'
+        f'&ipv4exposedhost_count=0&exposed_ipv4_node='
+        f'&device={dev_uid}&local_ipv4={target_dev.get("local_ipv4", "")}'
         f'&landevice={dev_uid}'
-        f'&exposed_ipv4_node=&delete=ok'
+        f'&ipv6_rulenode={target_dev.get("ipv6_rulenode", "")}'
+        f'&isIpv6Active={"true" if ipv6_active else "false"}'
+        f'&ifaceid={iid}'
+        f'&interface_id1={groups[0]}&interface_id2={groups[1]}'
+        f'&interface_id3={groups[2]}&interface_id4={groups[3]}'
+        f'&edify=ok'
     )
 
     data_lua(host, sid, 'portoverview', extra)
+
+    # Verify the rule is actually gone (the box silently ignores invalid
+    # delete submits while still returning pid=portoverview).
+    time.sleep(1)
+    fresh = data_lua(host, sid, 'portoverview').get('data', {}).get(
+        'devices', [])
+    still_there = False
+    for dev in fresh:
+        if dev.get('UID') != dev_uid:
+            continue
+        for r in dev.get('rules', []):
+            if (str(r.get('port', '')) == str(ext_port)
+                    and r.get('protocol', '').upper() == proto.upper()
+                    and r.get('UID', '') == rule_uid):
+                still_there = True
+                break
+        break
+
+    if still_there:
+        print(json.dumps({
+            'ok': False,
+            'router_type': 'fritzbox',
+            'error': (f'Failed to delete {proto}/{ext_port} rule '
+                      f'(UID={rule_uid}).'),
+            'warning': 'Check the FRITZ!Box port forwarding list.',
+        }))
+        return 1
 
     print(json.dumps({
         'ok': True,
         'router_type': 'fritzbox',
         'message': f'Port forwarding deleted: {proto}/{ext_port}',
+        'accesstype': rule_accesstype,
     }))
     return 0
 

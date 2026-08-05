@@ -45,6 +45,39 @@ def _run_upnp(args, timeout=15):
     raise RuntimeError(f'Invalid JSON from script: {stdout[:500]}')
 
 
+def _add_ufw_extra_inbound(ext_port, protocol):
+    """Record an IPv6 port forward in inventory so a reapply re-opens UFW."""
+    try:
+        port = int(ext_port)
+    except (TypeError, ValueError):
+        return
+    proto = protocol.lower()
+    if proto not in ('tcp', 'udp'):
+        return
+    from .views import _get_inventory_config, _save_inventory_config
+    config = _get_inventory_config()
+    vars_ = config.setdefault('all', {}).setdefault('vars', {})
+    entries = vars_.setdefault('ufw_extra_inbound', [])
+    entry = {'port': port, 'proto': proto}
+    if entry not in entries:
+        entries.append(entry)
+        _save_inventory_config(config)
+
+
+def _remove_ufw_extra_inbound(ext_port, protocol):
+    """Remove a recorded IPv6 port forward from inventory."""
+    from .views import _get_inventory_config, _save_inventory_config
+    config = _get_inventory_config()
+    vars_ = config.setdefault('all', {}).setdefault('vars', {})
+    entries = vars_.get('ufw_extra_inbound', [])
+    kept = [e for e in entries
+            if str(e.get('port', '')) != str(ext_port)
+            or str(e.get('proto', '')).lower() != protocol.lower()]
+    if len(kept) != len(entries):
+        vars_['ufw_extra_inbound'] = kept
+        _save_inventory_config(config)
+
+
 @login_required
 def settings_port_forwarding(request):
     """Main port forwarding settings page with router detection."""
@@ -145,18 +178,21 @@ def settings_port_forwarding(request):
 
                 args = (f'add {ext_port} {protocol} {int_port} {int_client} '
                         f'{_shell_quote(description)} {accesstype}')
+                # IPv6 forwards connect directly to the host's GUA, so an
+                # extra UFW allow rule is needed on the host. Keep the
+                # inventory in sync so a reapply re-creates it.
+                if accesstype in ('ipv6', 'ipv4_ipv6'):
+                    _add_ufw_extra_inbound(ext_port, protocol)
+                if is_ajax:
+                    from .utils.jobs import create_job
+                    job_id = create_job(f'{SCRIPT} {args}', timeout=15)
+                    return JsonResponse({'ok': True, 'job': job_id,
+                                         'title': 'Adding port forwarding...',
+                                         'message': 'Port forwarding added.'})
                 result = _run_upnp(args, timeout=15)
                 if result.get('ok'):
-                    if is_ajax:
-                        from .utils.jobs import create_job
-                        job_id = create_job(f'{SCRIPT} {args}', timeout=15)
-                        return JsonResponse({'ok': True, 'job': job_id,
-                                             'title': 'Adding port forwarding...',
-                                             'message': result.get('message', 'Port forwarding added.')})
                     messages.success(request, result.get('message', 'Port forwarding added.'))
                 else:
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': result.get('error', 'Failed to add')}, status=400)
                     messages.error(request, result.get('error', 'Failed to add port forwarding.'))
                 return redirect('settings_port_forwarding')
 
@@ -170,18 +206,18 @@ def settings_port_forwarding(request):
                     return redirect('settings_port_forwarding')
 
                 args = f'delete {ext_port} {protocol}'
+                if is_ajax:
+                    from .utils.jobs import create_job
+                    job_id = create_job(f'{SCRIPT} {args}', timeout=15)
+                    _remove_ufw_extra_inbound(ext_port, protocol)
+                    return JsonResponse({'ok': True, 'job': job_id,
+                                         'title': 'Deleting port forwarding...',
+                                         'message': 'Port forwarding deleted.'})
                 result = _run_upnp(args, timeout=15)
                 if result.get('ok'):
-                    if is_ajax:
-                        from .utils.jobs import create_job
-                        job_id = create_job(f'{SCRIPT} {args}', timeout=15)
-                        return JsonResponse({'ok': True, 'job': job_id,
-                                             'title': 'Deleting port forwarding...',
-                                             'message': result.get('message', 'Port forwarding deleted.')})
+                    _remove_ufw_extra_inbound(ext_port, protocol)
                     messages.success(request, result.get('message', 'Port forwarding deleted.'))
                 else:
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': result.get('error', 'Failed to delete')}, status=400)
                     messages.error(request, result.get('error', 'Failed to delete port forwarding.'))
                 return redirect('settings_port_forwarding')
 
