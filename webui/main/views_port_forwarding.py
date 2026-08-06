@@ -78,6 +78,17 @@ def _remove_ufw_extra_inbound(ext_port, protocol):
         _save_inventory_config(config)
 
 
+def _get_local_ip():
+    """Get the host's primary LAN IP for the default forwarding target."""
+    try:
+        ok, stdout, _ = run_command('symbios-get-local-ip.sh', timeout=10)
+        if ok and stdout:
+            return stdout.strip()
+    except Exception:
+        pass
+    return ''
+
+
 @login_required
 def settings_port_forwarding(request):
     """Main port forwarding settings page with router detection."""
@@ -85,40 +96,12 @@ def settings_port_forwarding(request):
     config = _get_inventory_config()
     vars_ = (config.get('all', {}).get('vars', {}) if isinstance(config, dict) else {})
 
-    router_info = None
-    detect_error = None
-    try:
-        router_info = _run_upnp('detect', timeout=10)
-    except Exception as e:
-        detect_error = str(e)
+    is_ajax = is_ajax_request(request)
 
-    # Check if credentials are stored
-    credentials_configured = False
-    try:
-        cfg = _run_upnp('config', timeout=10)
-        credentials_configured = cfg.get('configured', False)
-    except Exception:
-        pass
-
-    # Get local IP for default suggestion
-    local_ip = ''
-    try:
-        ok, stdout, _ = run_command('symbios-get-local-ip.sh', timeout=10)
-        if ok and stdout:
-            local_ip = stdout.strip()
-    except Exception:
-        pass
-
-    # IPv6 state (FRITZ!Box only, read-only)
-    ipv6_info = None
-    try:
-        if router_info and router_info.get('router_type') == 'fritzbox':
-            ipv6_info = _run_upnp('ipv6info', timeout=20)
-    except Exception:
-        ipv6_info = None
-
+    # Change actions must not repeat the expensive GET-time router introspection
+    # (IPv6 status ~9s, mapping list ~7s). Resolve only what each action needs
+    # so the exec-modal gets the job id immediately.
     if request.method == 'POST':
-        is_ajax = is_ajax_request(request)
         action = request.POST.get('action', '')
 
         try:
@@ -140,6 +123,12 @@ def settings_port_forwarding(request):
                 # preset rules (HTTP 80, HTTPS 443, SSH 33).
                 # Runs via the exec modal job so the user sees live output.
                 from .utils.jobs import create_job
+                local_ip = _get_local_ip()
+                router_info = None
+                try:
+                    router_info = _run_upnp('detect', timeout=10)
+                except Exception:
+                    router_info = None
                 static_ip_cmd = ''
                 if router_info and router_info.get('router_type') == 'fritzbox' and local_ip:
                     static_ip_cmd = (f'{SCRIPT} staticip {_shell_quote(local_ip)} && ')
@@ -226,6 +215,33 @@ def settings_port_forwarding(request):
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)
             messages.error(request, f'Error: {e}')
             return redirect('settings_port_forwarding')
+
+    # --- GET: full page render ---
+    router_info = None
+    detect_error = None
+    try:
+        router_info = _run_upnp('detect', timeout=10)
+    except Exception as e:
+        detect_error = str(e)
+
+    # Check if credentials are stored
+    credentials_configured = False
+    try:
+        cfg = _run_upnp('config', timeout=10)
+        credentials_configured = cfg.get('configured', False)
+    except Exception:
+        pass
+
+    # Get local IP for default suggestion
+    local_ip = _get_local_ip()
+
+    # IPv6 state (FRITZ!Box only, read-only)
+    ipv6_info = None
+    try:
+        if router_info and router_info.get('router_type') == 'fritzbox':
+            ipv6_info = _run_upnp('ipv6info', timeout=20)
+    except Exception:
+        ipv6_info = None
 
     # GET: list current mappings
     # FRITZ!Box requires credentials; generic UPnP does not

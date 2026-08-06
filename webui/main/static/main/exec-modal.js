@@ -127,6 +127,11 @@ Also intercepts all forms with data-exec="true" attribute:
     if (running) return;  /* prevent double-execution */
     e.preventDefault();
 
+    /* Show the modal immediately so the click gives feedback while the
+       request is in flight: views with slow host introspection (e.g. router
+       detection) can take several seconds before they return the job id. */
+    open('Starting...');
+
     var fd = new FormData(form);
     var url = form.action || window.location.href;
     var method = form.method || 'POST';
@@ -149,6 +154,7 @@ Also intercepts all forms with data-exec="true" attribute:
       .then(function (res) {
         var d = res.data;
         if (res.status >= 400) {
+          close();
           /* Show error in a Bootstrap alert instead of the modal */
           showAlert(d.error || 'An error occurred', 'danger');
           return;
@@ -157,13 +163,16 @@ Also intercepts all forms with data-exec="true" attribute:
           start(d.job, d.title || 'Running...', d.command);
           if (d.message) showAlert(d.message, 'success');
         } else if (d.redirect) {
+          close();
           window.location.href = d.redirect;
         } else {
+          close();
           /* No job — just reload the page to show Django messages */
           window.location.reload();
         }
       })
       .catch(function (err) {
+        close();
         showAlert('Network error: ' + err, 'danger');
       });
   });
