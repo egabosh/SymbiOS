@@ -149,8 +149,11 @@ Also intercepts all forms with data-exec="true" attribute:
     open('Starting...');
 
     var fd = new FormData(form);
-    var url = form.action || window.location.href;
-    var method = form.method || 'POST';
+    /* form.action is shadowed by a form control named "action" (every change
+       form here carries a hidden <input name="action">), which turns it into
+       the input element instead of the URL. Read the content attribute. */
+    var url = form.getAttribute('action') || window.location.href;
+    var method = (form.getAttribute('method') || 'POST').toUpperCase();
 
     /* Add headers so the view returns JSON and CSRF validation passes */
     fetch(url, {
