@@ -215,6 +215,21 @@ def settings_port_forwarding(request):
                     messages.error(request, result.get('error', 'Failed to delete port forwarding.'))
                 return redirect('settings_port_forwarding')
 
+            elif action == 'remove-credentials':
+                # Drop the stored router UPnP/TR-064 credentials entirely.
+                if is_ajax:
+                    from .utils.jobs import create_job
+                    job_id = create_job(f'{SCRIPT} config remove', timeout=10)
+                    return JsonResponse({'ok': True, 'job': job_id,
+                                         'title': 'Removing router credentials...',
+                                         'message': 'Router credentials removed.'})
+                result = _run_upnp('config remove', timeout=10)
+                if result.get('ok'):
+                    messages.success(request, 'Router credentials removed.')
+                else:
+                    messages.error(request, result.get('error', 'Failed to remove router credentials.'))
+                return redirect('settings_port_forwarding')
+
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)
@@ -284,6 +299,18 @@ def settings_port_forwarding(request):
                             'open': bool(match),
                             'internal_client': match.get('internal_client', '') if match else ''})
     port_status_known = bool(should_list) and not list_error
+
+    # Persist whether the standard web forwards (80/443) are present so the
+    # setup assistant and the page badge reflect real router state without
+    # needing host execution there. Only written when the rules were actually
+    # fetched, and only on change.
+    if port_status_known:
+        status_by_port = {p['port']: p['open'] for p in port_status}
+        configured = bool(status_by_port.get(80) and status_by_port.get(443))
+        if bool(vars_.get('port_forwarding_configured')) != configured:
+            from .views import _save_inventory_config
+            vars_['port_forwarding_configured'] = configured
+            _save_inventory_config(config)
 
     return render(request, 'main/settings_port_forwarding.html', {
         'router_info': router_info,

@@ -116,10 +116,13 @@ def get_page_badge(page_key, inventory_vars):
                 'Timezone and keyboard are not set up yet.')
 
     if page_key == 'port-forwarding':
-        base_domain = inventory_vars.get('base_domain', '')
-        if base_domain:
+        if inventory_vars.get('port_forwarding_configured'):
+            return ('ok', 'All good',
+                    'Ports 80/443 are forwarded to the server.')
+        if inventory_vars.get('base_domain'):
             return ('warn', 'Configured',
-                    'DNS is set up. Check reachability on the Reachability page.')
+                    'DNS is set up. Open ports 80/443 on the router '
+                    '(Port Forwarding page).')
         return ('missing', 'DNS required',
                 'First set up a name under DNS.')
 
@@ -192,12 +195,20 @@ def setup_steps(inventory_vars):
     })
 
     # Step: Port forwarding (only relevant for home)
+    ports_relevant = bool(network_type and network_type != 'root')
+    ports_configured = bool(inventory_vars.get('port_forwarding_configured'))
+    if not ports_relevant:
+        ports_status = 'optional'
+    elif ports_configured:
+        ports_status = 'done'
+    else:
+        ports_status = 'pending'
     steps.append({
         'key': 'ports',
         'title': 'Open Ports',
         'subtitle': 'Forward ports 80/443 from the router to the server.',
-        'optional': False,
-        'status': 'pending' if (network_type and network_type != 'root') else 'optional',
+        'optional': not ports_relevant,
+        'status': ports_status,
         'url': '/settings/port-forwarding/',
     })
 

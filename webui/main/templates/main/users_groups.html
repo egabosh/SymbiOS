@@ -68,7 +68,7 @@
                                 <button type="submit" class="btn btn-outline-warning btn-sm" title="Change password">&#128273;</button>
                             </div>
                         </form>
-                        <form method="post" action="/users/{{ user.uid }}/delete/" class="d-inline" onsubmit="return confirm('Really delete user?')" data-exec="true">
+                        <form method="post" action="/users/{{ user.uid }}/delete/" class="d-inline" data-exec-confirm="Really delete user?" data-exec="true">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">&#128465;</button>
                         </form>
