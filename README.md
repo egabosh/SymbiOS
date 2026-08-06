@@ -217,7 +217,7 @@ acme_resolver: "letsencrypt"
 Subdomains are derived from `base_domain`:
 
 ```yaml
-base_domain:     "symbios-dev.dedyn.io"   # shared parent for all services
+base_domain:     "<your-domain>"   # shared parent for all services
 ```
 
 ---

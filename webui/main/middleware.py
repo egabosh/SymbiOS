@@ -116,12 +116,16 @@ class AutheliaMiddleware:
                 if remote_user == 'admin' and 'force_password_change' not in request.session:
                     if _admin_password_is_default():
                         request.session['force_password_change'] = True
+            elif request.session.get('lan_admin'):
+                # LAN break-glass: password-authenticated against LDAP on the
+                # login page (no Authelia/Traefik in the path).
+                user = SymbiosUser('admin', is_staff=True, is_superuser=True)
 
         request.user = user if user is not None else AnonymousUser()
 
         if (request.user.is_authenticated
                 and request.session.get('force_password_change')
-                and request.path not in ('/change-password/', '/logout/', '/authelia-logout/')):
+                and request.path not in ('/change-password/', '/logout/', '/authelia-logout/', '/login/')):
             return redirect('/change-password/')
 
         return self.get_response(request)
@@ -130,6 +134,7 @@ class AutheliaMiddleware:
 class SetupRequiredMiddleware:
     _bypass_paths = frozenset((
         '/setup/',
+        '/login/',
         '/health/',
         '/health/data/',
         '/settings/ddns/',

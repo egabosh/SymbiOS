@@ -91,6 +91,7 @@ urlpatterns = [
     path('groups/create/', views_users.group_create, name='group_create'),
     path('groups/<str:name>/delete/', views_users.group_delete, name='group_delete'),
     path('change-password/', views_change_password.change_password, name='change_password'),
+    path('login/', views.login_view, name='login'),
     path('logout/', views.logout_view, name='logout'),
     path('authelia-logout/', views.authelia_logout, name='authelia_logout'),
     path('exec/start/', views_exec.exec_start, name='exec_start'),

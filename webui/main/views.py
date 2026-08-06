@@ -67,6 +67,43 @@ def _get_ldap_groups():
     return ['users']
 
 
+def _ldap_admin_bind(password):
+    """Return True if the given password authenticates the LDAP admin user."""
+    import subprocess
+    from .constants import LDAP_URI
+    config = _get_inventory_config()
+    base_dn = config.get('all', {}).get('vars', {}).get('ldap_basedn', 'dc=openldap,dc=local')
+    admin_dn = f'uid=admin,ou=users,{base_dn}'
+    proc = subprocess.run(
+        ['ldapwhoami', '-x', '-H', LDAP_URI, '-D', admin_dn, '-w', password],
+        capture_output=True, text=True, timeout=10,
+    )
+    return proc.returncode == 0
+
+
+def login_view(request):
+    """LAN break-glass login: password checked directly against LDAP.
+
+    This is used when the WebUI is reached on the LAN IP (http://<local-ip>:8080)
+    without Traefik/Authelia. The host-local path on 127.0.0.1 stays passwordless.
+    """
+    if getattr(request.user, 'is_authenticated', False):
+        return redirect('/')
+    if request.method == 'POST':
+        username = request.POST.get('username', '').strip()
+        password = request.POST.get('password', '')
+        if username != 'admin':
+            messages.error(request, 'Only the admin user may log in here.')
+        elif not _ldap_admin_bind(password):
+            messages.error(request, 'Invalid credentials.')
+        else:
+            request.session['lan_admin'] = True
+            if _ldap_admin_bind('admin'):
+                request.session['force_password_change'] = True
+            return redirect('/')
+    return render(request, 'main/login.html')
+
+
 def _get_ldap_users():
     """Get all LDAP users with groups by calling symbios-ldap-list.sh via symbios-exec.sh."""
     from .utils.ssh_exec import run_command
@@ -168,10 +205,14 @@ def container_list(request):
 
 
 def logout_view(request):
+    lan_admin = request.session.get('lan_admin')
     config = _get_inventory_config()
     vars_ = config.get("all", {}).get("vars", {})
     base_domain = vars_.get("base_domain", "")
     request.session.flush()
+    if lan_admin:
+        # LAN break-glass session (LDAP login) ends on the login page.
+        return redirect('/login/')
     if base_domain:
         return redirect(f"https://auth.{base_domain}/logout")
     return redirect("/authelia-logout/")

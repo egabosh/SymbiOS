@@ -100,4 +100,4 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 MESSAGE_TAGS = {'error': 'danger'}
 
 
-LOGIN_URL = '/'
+LOGIN_URL = '/login/'
