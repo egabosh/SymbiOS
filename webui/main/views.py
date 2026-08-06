@@ -181,12 +181,16 @@ def setup_reachability(request):
         return JsonResponse({'ok': False, 'error': 'No domain configured yet. Set up DNS first.'})
     ok, stdout, stderr = run_command(
         f'symbios-external-check.sh -d {base_domain} -p 80,443', timeout=60)
-    if ok:
-        try:
-            import json as _json
-            return JsonResponse(_json.loads(stdout))
-        except Exception:
-            return JsonResponse({'ok': False, 'error': stdout or 'Check failed'})
+    # The script always emits valid JSON on stdout, even when a check fails
+    # (exit 1). Return that JSON directly so the template can show the summary
+    # instead of a raw JSON blob in the error field.
+    import json as _json
+    try:
+        data = _json.loads(stdout)
+        if isinstance(data, dict):
+            return JsonResponse(data)
+    except Exception:
+        pass
     return JsonResponse({'ok': False, 'error': (stderr or stdout) or 'Check failed'})
 
 

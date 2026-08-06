@@ -84,36 +84,80 @@ function f_get_public_ip {
   fi
 }
 
-# Resolve the domain via the host's configured DNS resolver (systemd-resolved)
-# IPv4 first (matches checkipv4), IPv6 as fallback.
-function f_resolve_dns {
-  local f_domain="$1"
-  local f_line
+# DynDNS fallback resolution is only available for deSEC-hosted domains: the
+# deSEC DynDNS config must exist and the domain must be managed by deSEC
+# (dedyn.io/desec.io suffix or listed in dedynhosts). No third-party resolvers
+# (Google/Cloudflare) are ever used.
+function f_ddns_active {
+  [[ -f /usr/local/etc/dedyn.conf ]] || return 1
+  case "${g_domain}" in
+    *.dedyn.io|*.desec.io)
+      return 0
+      ;;
+  esac
+  grep -q "${g_domain}" /usr/local/etc/dedyn.conf 2>/dev/null
+}
 
-  # IPv4 first (matches checkipv4), IPv6 as fallback
-  f_line=$(getent ahostsv4 "${f_domain}" 2>/dev/null | head -1)
-  if [[ -z "$f_line" ]]
-  then
-    f_line=$(getent ahostsv6 "${f_domain}" 2>/dev/null | head -1)
-  fi
-
-  if [[ -z "$f_line" ]]
+# Query deSEC's authoritative nameservers for a record type. Used when the
+# host's own resolver does not answer for a deSEC-managed domain (e.g. home
+# routers that filter AAAA answers or fail DNSSEC validation).
+function f_resolve_public {
+  local f_type="$1" f_domain="$2" f_line
+  if ! command -v dig >/dev/null 2>&1
   then
     return 1
   fi
-  echo "${f_line%% *}"
+  f_ddns_active || return 1
+  for f_resolver in ns2.desec.org ns1.desec.io
+  do
+    f_line=$(dig +short @${f_resolver} ${f_type} "${f_domain}" 2>/dev/null | head -1)
+    if [[ -n "$f_line" ]]
+    then
+      echo "$f_line"
+      return 0
+    fi
+  done
+  return 1
 }
 
-# Resolve the domain's IPv6 address (AAAA record) only.
+# Resolve the domain's IPv4 (A) address: host resolver first, then public
+# resolvers. AAAA records are reported separately via f_resolve_dns6.
+function f_resolve_dns {
+  local f_domain="$1"
+  local f_line
+  f_line=$(getent ahostsv4 "${f_domain}" 2>/dev/null | head -1)
+  if [[ -n "$f_line" ]]
+  then
+    echo "${f_line%% *}"
+    return 0
+  fi
+  f_line=$(f_resolve_public A "${f_domain}")
+  if [[ -n "$f_line" ]]
+  then
+    echo "$f_line"
+    return 0
+  fi
+  return 1
+}
+
+# Resolve the domain's IPv6 address (AAAA record) only: host resolver first,
+# then public resolvers.
 function f_resolve_dns6 {
   local f_domain="$1"
   local f_line
   f_line=$(getent ahostsv6 "${f_domain}" 2>/dev/null | head -1)
-  if [[ -z "$f_line" ]]
+  if [[ -n "$f_line" ]]
   then
-    return 1
+    echo "${f_line%% *}"
+    return 0
   fi
-  echo "${f_line%% *}"
+  f_line=$(f_resolve_public AAAA "${f_domain}")
+  if [[ -n "$f_line" ]]
+  then
+    echo "$f_line"
+    return 0
+  fi
+  return 1
 }
 
 # Fetch the current public IPv6 address (returns empty if not IPv6 capable).
@@ -216,11 +260,14 @@ fi
 g_dns_match6="unknown"
 if [[ -n "$g_public_ip6" ]]
 then
-  if [[ -n "$g_dns_ip6" ]] && [[ "$g_public_ip6" == "$g_dns_ip6" ]]
+  if [[ -n "$g_dns_ip6" ]]
   then
-    g_dns_match6="true"
-  else
-    g_dns_match6="false"
+    if [[ "$g_public_ip6" == "$g_dns_ip6" ]]
+    then
+      g_dns_match6="true"
+    else
+      g_dns_match6="false"
+    fi
   fi
 fi
 
@@ -246,6 +293,13 @@ then
   g_summary+=" DNS (IPv6) resolves to ${g_dns_ip6}, but the current public IPv6 is ${g_public_ip6}."
 fi
 
+# No IPv4 A record but a matching AAAA record: explain the IPv6-only setup so
+# the missing dns_match is not mistaken for a DynDNS problem.
+if [[ "$g_dns_match" == unknown ]] && [[ "$g_dns_match6" == true ]]
+then
+  g_summary+=" The domain is IPv6-only (no IPv4 A record) and the AAAA record matches."
+fi
+
 # Assemble final JSON
 if [[ "$g_all_open" == true ]]
 then
@@ -254,7 +308,7 @@ else
   g_ok="false"
 fi
 
-printf '{"ok":%s,"domain":%s,"public_ip":%s,"dns_resolved":%s,"dns_match":%s,"public_ip6":%s,"dns_resolved6":%s,"dns_match6":%s,"ports":%s,"summary":%s}\n' \
+printf '{"ok":%s,"domain":%s,"public_ip":%s,"dns_resolved":%s,"dns_match":"%s","public_ip6":%s,"dns_resolved6":%s,"dns_match6":"%s","ports":%s,"summary":%s}\n' \
   "$g_ok" \
   "$(echo "$g_domain" | f_json_escape)" \
   "$(echo "$g_public_ip" | f_json_escape)" \
