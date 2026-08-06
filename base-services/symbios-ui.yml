@@ -104,10 +104,11 @@
                 dockerfile: Dockerfile
               container_name: symbios-webui
               ports:
-                # Published only on the loopback interface. The WebUI is reached
-                # externally only through Traefik + Authelia on :443; 127.0.0.1:8080
-                # is the host-local break-glass (e.g. via SSH tunnel).
-                - "127.0.0.1:8080:8080"
+                # Published on all interfaces. Access is restricted to private
+                # IPv4/IPv6 networks by UFW (firewall.yml) and DOCKER-USER
+                # iptables rules (docker.yml); 0.0.0.0:8080 stays reachable
+                # as host-local break-glass (e.g. via SSH tunnel).
+                - "0.0.0.0:8080:8080"
               volumes:
                 - ./webui:/app
                 - ./config:/config
