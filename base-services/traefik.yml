@@ -333,7 +333,7 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: symbios-state.sh set base-services/traefik.yml
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/traefik.yml"
       changed_when: false
   handlers:
 

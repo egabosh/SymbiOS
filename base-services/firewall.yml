@@ -99,5 +99,5 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: symbios-state.sh set base-services/firewall.yml
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/firewall.yml"
       changed_when: false

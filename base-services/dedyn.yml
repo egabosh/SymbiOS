@@ -124,5 +124,5 @@
       when: ansible_facts['os_family'] == 'Debian'
 
     - name: Register playbook as installed
-      ansible.builtin.command: symbios-state.sh set base-services/dedyn.yml
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/dedyn.yml"
       changed_when: false

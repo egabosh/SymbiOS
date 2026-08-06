@@ -303,6 +303,10 @@
         backup: yes
         validate: /bin/bash -n %s
 
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/paperless.yml"
+      changed_when: false
+
   handlers:
     - name: run genpw.sh
       ansible.builtin.shell: ./genpw.sh
