@@ -135,6 +135,11 @@ Also intercepts all forms with data-exec="true" attribute:
   document.addEventListener('submit', function (e) {
     var form = e.target;
     if (!form.dataset.exec) return;
+    /* Confirmations must live here, not in an inline onsubmit: returning
+       false from onsubmit cancels the default form submission but the
+       submit event still bubbles to this listener, which would run the
+       action anyway (even when the user pressed "Cancel"). */
+    if (form.dataset.execConfirm && !window.confirm(form.dataset.execConfirm)) return;
     if (running) return;  /* prevent double-execution */
     e.preventDefault();
 

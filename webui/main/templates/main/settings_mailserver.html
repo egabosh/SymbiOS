@@ -89,7 +89,7 @@
 
 {% if vars.smtp_server or vars.smtp_port or vars.smtp_user or vars.smtp_from %}
 <hr class="mt-4">
-<form method="post" data-exec="true" onsubmit="return confirm('Delete the entire SMTP configuration? This cannot be undone.')" class="d-inline">
+<form method="post" data-exec="true" data-exec-confirm="Delete the entire SMTP configuration? This cannot be undone." class="d-inline">
     {% csrf_token %}
     <input type="hidden" name="action" value="delete">
     <button type="submit" class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i> Delete SMTP configuration</button>

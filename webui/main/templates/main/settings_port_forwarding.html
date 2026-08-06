@@ -248,6 +248,14 @@
                 <i class="bi bi-save"></i> Update credentials
               </button>
             </form>
+            <form method="post" data-exec="true" class="mb-0 mt-2"
+                  data-exec-confirm="Remove the stored router credentials?">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="remove-credentials">
+              <button type="submit" class="btn btn-outline-danger btn-sm w-100">
+                <i class="bi bi-trash"></i> Remove credentials
+              </button>
+            </form>
             {% else %}
             <p class="text-muted mb-2">
               Some routers (e.g. FRITZ!Box) require a login, others
@@ -274,7 +282,8 @@
               </div>
               <div class="alert alert-info py-2 px-3 mb-2">
                 <i class="bi bi-info-circle-fill"></i>
-                Credentials are stored encrypted on the server.
+                Credentials are stored on the server with restricted
+                permissions (only root can read them).
               </div>
               <button type="submit" class="btn btn-primary btn-sm w-100">
                 <i class="bi bi-save"></i> Save credentials
@@ -357,7 +366,7 @@
                     </td>
                     <td>
                       <form method="post" data-exec="true" class="d-inline"
-                            onsubmit="return confirm('Delete forwarding {{ m.protocol }}/{{ m.external_port }}?')">
+                            data-exec-confirm="Delete forwarding {{ m.protocol }}/{{ m.external_port }}?">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="delete">
                         <input type="hidden" name="ext_port" value="{{ m.external_port }}">
@@ -609,7 +618,7 @@ function refreshMappings() {
           '<td><span class="badge ' + ipv6Class + '">' + ipv6Text + '</span></td>' +
           '<td><span class="badge ' + statusClass + '">' + statusText + '</span></td>' +
           '<td>' +
-          '<form method="post" data-exec="true" class="d-inline" onsubmit="return confirm(\'Delete forwarding ' + m.protocol + '/' + m.external_port + '?\')">' +
+          '<form method="post" data-exec="true" class="d-inline" data-exec-confirm="Delete forwarding ' + m.protocol + '/' + m.external_port + '?">' +
           '<input type="hidden" name="csrfmiddlewaretoken" value="' + document.querySelector('[name=csrfmiddlewaretoken]').value + '">' +
           '<input type="hidden" name="action" value="delete">' +
           '<input type="hidden" name="ext_port" value="' + m.external_port + '">' +
