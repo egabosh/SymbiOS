@@ -6,7 +6,22 @@
 
 acme_json="/symbios/base-services/traefik/letsencrypt/acme.json"
 cert_dir="/usr/local/sbin/symbios-boot-unlock"
-domain="${SYMBIOS_BOOT_CERT_DOMAIN:-symbios-dev.dedyn.io}"
+inventory="/symbios/base-services/symbios-ui/config/inventory.yml"
+domain="${SYMBIOS_BOOT_CERT_DOMAIN:-}"
+
+# Fall back to base_domain from the inventory (bash-only extraction, no python/jq)
+if [[ -z "$domain" ]] && [[ -r "$inventory" ]]
+then
+  f_content=$(<"$inventory")
+  if [[ "$f_content" == *base_domain:* ]]
+  then
+    f_line="${f_content#*base_domain:}"
+    f_line="${f_line%%$'\n'*}"
+    domain="${f_line//[[:space:]\'\"]/}"
+  fi
+fi
+
+[[ -z "$domain" ]] && exit 0
 
 [[ ! -r "$acme_json" ]] && exit 0
 
