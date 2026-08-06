@@ -7,13 +7,12 @@
   <div class="col-md-8">
     <div class="alert alert-warning">
       <i class="bi bi-shield-exclamation"></i>
-      <strong>Empfehlung:</strong> 2-Faktor-Anmeldung (2FA) ist derzeit deaktiviert.
-      Mit 2FA wird beim Anmelden zus&auml;tzlich ein Code oder TOTP-Token verlangt
-      &mdash; das sch&uuml;tzt auch bei gestohlenem Passwort.
+      <strong>Recommendation:</strong> 2-Factor Authentication (2FA) is currently disabled.
+      With 2FA, a code or TOTP token is additionally required when logging in
+      &mdash; this protects you even if your password is stolen.
       {% if not vars.smtp_server %}
-      Zuvor muss unter
-      <a href="/settings/mailserver/">Einstellungen &rarr; E-Mail-Versand (SMTP)</a>
-      ein Mailserver eingerichtet werden.
+      First, a mailserver must be set up under
+      <a href="/settings/mailserver/">Settings &rarr; Email Sending (SMTP)</a>.
       {% endif %}
     </div>
   </div>
@@ -24,7 +23,7 @@
   <div class="col-md-8">
 
 <div class="card">
-    <div class="card-header"><i class="bi bi-shield-lock"></i> Anmeldung (Authelia)</div>
+    <div class="card-header"><i class="bi bi-shield-lock"></i> Login (Authelia)</div>
     <div class="card-body">
         <form method="post" data-exec="true">
             {% csrf_token %}
@@ -36,13 +35,13 @@
                                id="twofa_enabled"
                                {% if vars.twofa_enabled %}checked{% endif %}>
                         <label class="form-check-label" for="twofa_enabled">
-                            <strong>2-Faktor-Anmeldung (2FA)</strong>
+                            <strong>2-Factor Authentication (2FA)</strong>
                         </label>
                     </div>
-                    <small class="text-muted">Ben&ouml;tigt einen eingerichteten Mailserver. Benutzer m&uuml;ssen sich dann zus&auml;tzlich per Code oder TOTP best&auml;tigen.</small>
+                    <small class="text-muted">Requires a configured mailserver. Users must then additionally confirm with a code or TOTP.</small>
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Speichern</button>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
         </form>
     </div>
 </div>
@@ -53,18 +52,18 @@
       <div class="card-header"><i class="bi bi-info-circle"></i> Info</div>
       <div class="card-body small">
         <p>
-          <strong>Authelia</strong> ist ein Open-Source-Anmeldeserver, der in Traefik
-          als Forward-Auth-Middleware eingebunden ist. Nach dem Aktivieren:
+          <strong>Authelia</strong> is an open-source login server that is integrated
+          into Traefik as a forward-auth middleware. After enabling:
         </p>
         <ul class="ps-3 mb-2">
-          <li>Alle Web-Dienste hinter Traefik verlangen eine Anmeldung</li>
-          <li>Benutzer melden sich gegen das lokale LDAP-Verzeichnis an</li>
-          <li>Optional 2FA (E-Mail oder TOTP) als zweiter Faktor</li>
+          <li>All web services behind Traefik require a login</li>
+          <li>Users log in against the local LDAP directory</li>
+          <li>Optional 2FA (email or TOTP) as a second factor</li>
         </ul>
         <p class="mb-0 text-muted">
-          Benutzer unter <a href="/users/">Benutzer</a> und Gruppen unter
-          <a href="/groups/">Gruppen</a> verwalten. Ohne 2FA gen&uuml;gt
-          Benutzername/Passwort.
+          Manage users under <a href="/users/">Users</a> and groups under
+          <a href="/groups/">Groups</a>. Without 2FA, username/password
+          is sufficient.
         </p>
       </div>
     </div>

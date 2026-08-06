@@ -102,7 +102,7 @@ def setup(request):
             _save_inventory_config(config)
             if is_ajax:
                 return JsonResponse({'ok': True})
-            messages.success(request, 'Server location saved.')
+            messages.success(request, 'Server connection type saved.')
             return redirect('setup')
         if is_ajax:
             return JsonResponse({'ok': False, 'error': 'Invalid network type'}, status=400)
@@ -130,7 +130,7 @@ def setup_reachability(request):
     vars_ = config.get('all', {}).get('vars', {})
     base_domain = vars_.get('base_domain', '')
     if not base_domain:
-        return JsonResponse({'ok': False, 'error': 'Noch keine Domain konfiguriert. Richte zuerst DNS ein.'})
+        return JsonResponse({'ok': False, 'error': 'No domain configured yet. Set up DNS first.'})
     ok, stdout, stderr = run_command(
         f'symbios-external-check.sh -d {base_domain} -p 80,443', timeout=60)
     if ok:
@@ -138,8 +138,8 @@ def setup_reachability(request):
             import json as _json
             return JsonResponse(_json.loads(stdout))
         except Exception:
-            return JsonResponse({'ok': False, 'error': stdout or 'Pruefung fehlgeschlagen'})
-    return JsonResponse({'ok': False, 'error': (stderr or stdout) or 'Pruefung fehlgeschlagen'})
+            return JsonResponse({'ok': False, 'error': stdout or 'Check failed'})
+    return JsonResponse({'ok': False, 'error': (stderr or stdout) or 'Check failed'})
 
 
 def health(request):

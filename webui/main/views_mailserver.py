@@ -145,7 +145,7 @@ def settings_mailserver(request):
     return render(request, 'main/settings_mailserver.html', {'vars': vars_,
                                                              'page_key': 'mailserver',
                                                              'page_icon': 'bi-envelope',
-                                                             'page_title': 'E-Mail-Versand (SMTP)',
+                                                             'page_title': 'Email Sending (SMTP)',
                                                              'page_explain': PAGE_EXPLAIN['mailserver'],
                                                              'page_status': _badge('mailserver', vars_)[0],
                                                              'page_status_label': _badge('mailserver', vars_)[1],

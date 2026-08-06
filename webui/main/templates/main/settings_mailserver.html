@@ -3,29 +3,28 @@
 {% include "main/_page_header.html" %}
 
 <div class="card">
-    <div class="card-header"><i class="bi bi-envelope-check"></i> SMTP einrichten</div>
+    <div class="card-header"><i class="bi bi-envelope-check"></i> Set up SMTP</div>
     <div class="card-body">
         <div class="alert alert-info">
             <i class="bi bi-info-circle"></i>
-            <strong>E-Mail-Versand</strong> wird f&uuml;r die 2-Faktor-Anmeldung (2FA)
-            ben&ouml;tigt &mdash; Best&auml;tigungscodes, Passwort-Zur&uuml;cksetzungen
-            und Anmelde-Benachrichtigungen werden per E-Mail verschickt. Trage einfach
-            deine E-Mail-Adresse und dein Passwort ein; die Server-Einstellungen werden
-            nach M&ouml;glichkeit automatisch erkannt.
+            <strong>Email sending</strong> is needed for the 2-Factor Authentication (2FA)
+            &mdash; confirmation codes, password resets and login notifications are sent by email.
+            Simply enter your email address and password; the server settings are
+            auto-detected where possible.
         </div>
         <form method="post" data-exec="true" id="main-form">
             {% csrf_token %}
             <div class="row">
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">E-Mail-Adresse</label>
+                    <label class="form-label">Email Address</label>
                     <div class="input-group">
                         <input type="email" class="form-control" name="smtp_from" id="smtp_from" value="{{ vars.smtp_from|default:'' }}" placeholder="user@example.com" onblur="autoDetect()">
-                        <button type="button" class="btn btn-outline-secondary" id="btn_discover" onclick="autoDetect()">Erkennen</button>
+                        <button type="button" class="btn btn-outline-secondary" id="btn_discover" onclick="autoDetect()">Detect</button>
                         <span id="detect_status" class="ms-2"></span>
                     </div>
                 </div>
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">SMTP-Passwort</label>
+                    <label class="form-label">SMTP Password</label>
                     <div class="input-group">
                         <input type="password" class="form-control" name="smtp_password" id="smtp_password" value="{{ vars.smtp_password|default:'' }}">
                         <button type="button" class="btn btn-outline-secondary"
@@ -38,22 +37,22 @@
 
             <div class="mt-4">
               <a class="advanced-toggle" data-bs-toggle="collapse" href="#advanced-mailserver" role="button" aria-expanded="false">
-                <i class="bi bi-sliders"></i> Erweitert (Server, Port, Verschl&uuml;sselung)
+                <i class="bi bi-sliders"></i> Advanced (Server, Port, Encryption)
               </a>
               <div class="collapse advanced-collapse" id="advanced-mailserver">
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">SMTP-Server</label>
+                            <label class="form-label">SMTP Server</label>
                             <input type="text" class="form-control" name="smtp_server" id="smtp_server" value="{{ vars.smtp_server|default:'' }}" placeholder="smtp.example.com">
                         </div>
                         <div class="col-md-3 mb-3">
-                            <label class="form-label">SMTP-Port</label>
+                            <label class="form-label">SMTP Port</label>
                             <input type="number" class="form-control" name="smtp_port" id="smtp_port" value="{{ vars.smtp_port|default:'' }}" placeholder="587">
                         </div>
                         <div class="col-md-3 mb-3">
-                            <label class="form-label">SMTP-Verschl&uuml;sselung</label>
+                            <label class="form-label">SMTP Encryption</label>
                             <select class="form-select" name="smtp_tls" id="smtp_tls">
-                                <option value="" {% if not vars.smtp_tls %}selected{% endif %}>Keine</option>
+                                <option value="" {% if not vars.smtp_tls %}selected{% endif %}>None</option>
                                 <option value="starttls" {% if vars.smtp_tls == "starttls" %}selected{% endif %}>STARTTLS</option>
                                 <option value="tls" {% if vars.smtp_tls == "tls" %}selected{% endif %}>TLS</option>
                             </select>
@@ -61,28 +60,28 @@
                     </div>
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">SMTP-Benutzername</label>
+                            <label class="form-label">SMTP Username</label>
                             <input type="text" class="form-control" name="smtp_user" id="smtp_user" value="{{ vars.smtp_user|default:'' }}" placeholder="%EMAILADDRESS%">
-                            <small class="text-muted"><code>%EMAILADDRESS%</code> = E-Mail-Adresse als Benutzername</small>
+                            <small class="text-muted"><code>%EMAILADDRESS%</code> = email address as username</small>
                         </div>
                     </div>
               </div>
             </div>
 
             <button type="submit" class="btn btn-primary">
-                <i class="bi bi-save"></i> Speichern
+                <i class="bi bi-save"></i> Save
             </button>
         </form>
     </div>
 </div>
 
 <div class="card mt-4">
-    <div class="card-header"><i class="bi bi-send"></i> Test-E-Mail</div>
+    <div class="card-header"><i class="bi bi-send"></i> Test Email</div>
     <div class="card-body">
-        <label class="form-label">Sende eine Test-E-Mail zur Pr&uuml;fung der SMTP-Konfiguration</label>
+        <label class="form-label">Send a test email to verify the SMTP configuration</label>
         <div class="input-group">
-            <input type="email" class="form-control" id="test_recipient" placeholder="empfaenger@example.com">
-            <button type="button" class="btn btn-outline-primary" id="btn_test" onclick="sendTestEmail()">Test senden</button>
+            <input type="email" class="form-control" id="test_recipient" placeholder="recipient@example.com">
+            <button type="button" class="btn btn-outline-primary" id="btn_test" onclick="sendTestEmail()">Send test</button>
         </div>
         <div id="test_result" class="mt-2"></div>
     </div>
@@ -90,10 +89,10 @@
 
 {% if vars.smtp_server or vars.smtp_port or vars.smtp_user or vars.smtp_from %}
 <hr class="mt-4">
-<form method="post" data-exec="true" onsubmit="return confirm('Die gesamte SMTP-Konfiguration l&ouml;schen? Dies kann nicht r&uuml;ckg&auml;ngig gemacht werden.')" class="d-inline">
+<form method="post" data-exec="true" onsubmit="return confirm('Delete the entire SMTP configuration? This cannot be undone.')" class="d-inline">
     {% csrf_token %}
     <input type="hidden" name="action" value="delete">
-    <button type="submit" class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i> SMTP-Konfiguration l&ouml;schen</button>
+    <button type="submit" class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i> Delete SMTP configuration</button>
 </form>
 {% endif %}
 
@@ -123,7 +122,7 @@ function autoDetect() {
 
     const btn = document.getElementById('btn_discover');
     btn.disabled = true;
-    btn.textContent = 'Erkenne...';
+    btn.textContent = 'Detecting...';
 
     const statusEl = document.getElementById('detect_status');
     fetch('/settings/mailserver/discover/?email=' + encodeURIComponent(email))
@@ -144,7 +143,7 @@ function autoDetect() {
                 document.getElementById('smtp_port').value = '';
                 document.getElementById('smtp_tls').value = '';
                 document.getElementById('smtp_user').value = '';
-                statusEl.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-warning" title="Keine Autokonfiguration gefunden, bitte manuell eintragen"></i>';
+                statusEl.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-warning" title="No autoconfiguration found, please enter manually"></i>';
                 new bootstrap.Collapse('#advanced-mailserver').show();
             }
         })
@@ -153,12 +152,12 @@ function autoDetect() {
             document.getElementById('smtp_port').value = '';
             document.getElementById('smtp_tls').value = '';
             document.getElementById('smtp_user').value = '';
-            statusEl.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-warning" title="Auto-Erkennung fehlgeschlagen, bitte manuell eintragen"></i>';
+            statusEl.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-warning" title="Auto-detection failed, please enter manually"></i>';
             new bootstrap.Collapse('#advanced-mailserver').show();
         })
         .finally(() => {
             btn.disabled = false;
-            btn.textContent = 'Erkennen';
+            btn.textContent = 'Detect';
         });
 }
 
@@ -168,11 +167,11 @@ function sendTestEmail() {
     const btn = document.getElementById('btn_test');
 
     if (!recipient || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recipient)) {
-        resultEl.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Bitte eine g&uuml;ltige Empf&auml;nger-Adresse eingeben.</div>';
+        resultEl.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Please enter a valid recipient address.</div>';
         return;
     }
 
-    resultEl.innerHTML = '<div class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Sende...</div>';
+    resultEl.innerHTML = '<div class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Sending...</div>';
     btn.disabled = true;
 
     const form = document.getElementById('main-form');
@@ -194,7 +193,7 @@ function sendTestEmail() {
         }
     })
     .catch(() => {
-        resultEl.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Anfrage fehlgeschlagen.</div>';
+        resultEl.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Request failed.</div>';
     })
     .finally(() => {
         btn.disabled = false;
