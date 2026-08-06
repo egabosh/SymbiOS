@@ -69,7 +69,14 @@ def _host_source_addresses():
     return addrs
 
 
-def _admin_password_is_default():
+def _admin_password_status():
+    """Check the LDAP admin password against the default one.
+
+    Returns:
+      'default'     - bind with the default password succeeds
+      'changed'     - bind fails with invalid credentials (password was changed)
+      'unavailable' - LDAP server not reachable or another LDAP error
+    """
     try:
         import yaml
         config_path = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
@@ -83,7 +90,11 @@ def _admin_password_is_default():
         ['ldapwhoami', '-x', '-H', LDAP_URI, '-D', admin_dn, '-w', 'admin'],
         capture_output=True, text=True, timeout=10,
     )
-    return proc.returncode == 0
+    if proc.returncode == 0:
+        return 'default'
+    if proc.returncode == 49:
+        return 'changed'
+    return 'unavailable'
 
 
 class AutheliaMiddleware:
@@ -114,7 +125,7 @@ class AutheliaMiddleware:
                     is_superuser=remote_user in ('admin', 'root'),
                 )
                 if remote_user == 'admin' and 'force_password_change' not in request.session:
-                    if _admin_password_is_default():
+                    if _admin_password_status() == 'default':
                         request.session['force_password_change'] = True
             elif request.session.get('lan_admin'):
                 # LAN break-glass: password-authenticated against LDAP on the
@@ -123,18 +134,28 @@ class AutheliaMiddleware:
 
         request.user = user if user is not None else AnonymousUser()
 
-        if (request.user.is_authenticated
-                and request.session.get('force_password_change')
-                and request.path not in ('/change-password/', '/exec/start/', '/exec/output/',
-                                         '/logout/', '/authelia-logout/', '/login/')):
-            # Re-validate the flag: a password change submitted through the
-            # exec modal runs asynchronously, so it can only be confirmed on a
-            # later request. Clear the flag once the LDAP password is no longer
-            # the default one; otherwise keep forcing the change.
-            if not _admin_password_is_default():
+        if request.user.is_authenticated and request.session.get('force_password_change'):
+            # Paths that must stay reachable while the flag is active.
+            bypass = request.path in ('/change-password/', '/exec/start/', '/exec/output/',
+                                      '/logout/', '/authelia-logout/', '/login/')
+            # A password change submitted through the exec modal runs
+            # asynchronously, so it can only be confirmed against LDAP on a
+            # later request. Only clear the flag once it is actually confirmed:
+            # - on /change-password/: once the password is no longer the
+            #   default, clear the flag and leave the forced page
+            # - on other bypass paths (e.g. /exec/output/ polling): leave the
+            #   flag untouched so the reload after the modal still redirects
+            # - on all other pages: force the change unless it was confirmed
+            if request.path == '/change-password/':
+                if _admin_password_status() == 'changed':
+                    request.session['force_password_change'] = False
+                    return redirect('/')
+            elif not bypass:
+                if _admin_password_status() != 'changed':
+                    # Password is still the default (or LDAP is unavailable, so
+                    # the change cannot be confirmed) — keep forcing the change.
+                    return redirect('/change-password/')
                 request.session['force_password_change'] = False
-            else:
-                return redirect('/change-password/')
 
         return self.get_response(request)
 
