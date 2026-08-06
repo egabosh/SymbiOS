@@ -38,6 +38,14 @@
   vars:
     default_user: "{{ lookup('pipe', 'getent passwd 1000 | cut -d: -f1') }}"
     default_user_home: "{{ lookup('pipe', 'getent passwd 1000 | cut -d: -f6') }}"
+    # Derive the Wi-Fi country (ISO 3166-1 alpha-2, uppercase) from the
+    # keyboard layout in inventory.yml. Most layouts map 1:1 to the uppercased
+    # code; exceptions need an explicit override. Variants like "us(intl)"
+    # are reduced to their base layout first.
+    wifi_country_overrides:
+      uk: GB
+    wifi_country_base: "{{ keyboard.split('(')[0] }}"
+    wifi_country_code: "{{ wifi_country_overrides.get(wifi_country_base, wifi_country_base) | upper }}"
 
   tasks:
 
@@ -108,6 +116,21 @@
         purge: true
       failed_when: false
 
+    - name: Validate derived Wi-Fi country code is a valid ISO 3166-1 alpha-2 code
+      ansible.builtin.command: grep -q "^{{ wifi_country_code }}\s" /usr/share/zoneinfo/iso3166.tab
+      changed_when: false
+      failed_when: false
+      register: wifi_country_valid
+
+    - name: Warn if Wi-Fi country code could not be validated
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: Keyboard '{{ keyboard }}' maps to '{{ wifi_country_code }}',
+          which is not a valid ISO 3166-1 alpha-2 code. Add an override in
+          wifi_country_overrides in raspberry.yml, otherwise the Wi-Fi stays
+          rfkill-blocked.
+      when: wifi_country_valid.rc != 0
+
     - name: Set raspi-config options
       ansible.builtin.command: >
         raspi-config nonint do_{{ item.action }} {{ item.value }}
@@ -119,7 +142,7 @@
         - { action: serial_hw, value: "1" }
         - { action: onewire, value: "0" }
         - { action: wayland, value: "W1" }
-        - { action: wifi_country, value: "{{ keyboard }}" }
+        - { action: wifi_country, value: "{{ wifi_country_code }}" }
       changed_when: false
       failed_when: false
 
