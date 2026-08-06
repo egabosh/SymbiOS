@@ -62,6 +62,57 @@
   </div>
 </div>
 
+<!-- Port status: which standard ports are already open -->
+<div class="card mt-3">
+  <div class="card-header">
+    <span><i class="bi bi-check2-circle"></i> Port status</span>
+  </div>
+  <div class="card-body small">
+    {% if port_status_known %}
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead>
+          <tr>
+            <th>Port</th>
+            <th>Purpose</th>
+            <th>Forwarded to</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in port_status %}
+          <tr>
+            <td><code>TCP {{ p.port }}</code></td>
+            <td>{{ p.purpose }}</td>
+            <td>
+              {% if p.open %}
+              <code>{{ p.internal_client }}:{{ p.internal_port }}</code>
+              {% else %}
+              <span class="text-muted">&mdash;</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if p.open %}
+              <span class="badge bg-success"><i class="bi bi-check-circle"></i> Open</span>
+              {% else %}
+              <span class="badge bg-danger"><i class="bi bi-x-circle"></i> Missing</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">
+      <i class="bi bi-info-circle"></i>
+      Status unavailable
+      {% if list_error %}({{ list_error }}){% elif not credentials_configured %} — enter router credentials to query the current rules.{% endif %}
+    </p>
+    {% endif %}
+  </div>
+</div>
+
 <!-- Step 2: One-click enable (main path) -->
 <div class="card mt-3">
   <div class="card-header">
@@ -70,16 +121,23 @@
   <div class="card-body small">
     {% if router_info and router_info.available %}
     <p class="mb-2">
-      One click sets up all necessary forwards to the server:
+      One click sets up the necessary forwards to the server
+      (<code>{{ local_ip }}</code>):
     </p>
     <ul class="mb-3">
-      <li><code>TCP 80</code> &rarr; {{ local_ip }}:80 (HTTP)</li>
-      <li><code>TCP 443</code> &rarr; {{ local_ip }}:443 (HTTPS)</li>
-      <li><code>TCP 33</code> &rarr; {{ local_ip }}:22 (SSH)</li>
+      <li><code>TCP 80</code> &rarr; {{ local_ip }}:80 (HTTP) <span class="text-muted">standard</span></li>
+      <li><code>TCP 443</code> &rarr; {{ local_ip }}:443 (HTTPS) <span class="text-muted">standard</span></li>
+      <li><code>TCP 33</code> &rarr; {{ local_ip }}:22 (SSH) <span class="text-muted">optional</span></li>
     </ul>
     <form method="post" data-exec="true">
       {% csrf_token %}
       <input type="hidden" name="action" value="quick-enable">
+      <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" name="include_ssh" value="1" id="include-ssh">
+        <label class="form-check-label" for="include-ssh">
+          Also forward <code>TCP 33</code> &rarr; {{ local_ip }}:22 (SSH)
+        </label>
+      </div>
       <button type="submit" class="btn btn-primary" {% if not credentials_configured %}disabled{% endif %}>
         <i class="bi bi-lightning-charge"></i> Open now
       </button>
@@ -339,7 +397,7 @@
         <ul class="mb-1">
           <li>TCP <code>80</code> &rarr; <code>{{ local_ip }}</code>:80</li>
           <li>TCP <code>443</code> &rarr; <code>{{ local_ip }}</code>:443</li>
-          <li>TCP <code>33</code> &rarr; <code>{{ local_ip }}</code>:22</li>
+          <li>TCP <code>33</code> &rarr; <code>{{ local_ip }}</code>:22 (SSH, optional)</li>
         </ul>
         <p class="text-muted mb-0">
           The settings are often found under &bdquo;Internet &rarr;

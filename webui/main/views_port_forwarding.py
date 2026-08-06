@@ -119,11 +119,13 @@ def settings_port_forwarding(request):
                 return redirect('settings_port_forwarding')
 
             elif action == 'quick-enable':
-                # One-click: ensure static IP (FRITZ!Box), then add all
-                # preset rules (HTTP 80, HTTPS 443, SSH 33).
+                # One-click: ensure static IP (FRITZ!Box), then add the
+                # standard rules (HTTP 80, HTTPS 443) plus the optional
+                # SSH rule (33 -> 22) only if requested.
                 # Runs via the exec modal job so the user sees live output.
                 from .utils.jobs import create_job
                 local_ip = _get_local_ip()
+                include_ssh = request.POST.get('include_ssh') in ('1', 'on', 'true', 'yes')
                 router_info = None
                 try:
                     router_info = _run_upnp('detect', timeout=10)
@@ -134,13 +136,16 @@ def settings_port_forwarding(request):
                     static_ip_cmd = (f'{SCRIPT} staticip {_shell_quote(local_ip)} && ')
                 cmd = (static_ip_cmd +
                        f'{SCRIPT} add 80 TCP 80 {_shell_quote(local_ip)} "SymbiOS HTTP" && '
-                       f'{SCRIPT} add 443 TCP 443 {_shell_quote(local_ip)} "SymbiOS HTTPS" && '
-                       f'{SCRIPT} add 33 TCP 22 {_shell_quote(local_ip)} "SymbiOS SSH"')
+                       f'{SCRIPT} add 443 TCP 443 {_shell_quote(local_ip)} "SymbiOS HTTPS"')
+                port_list = '80 and 443'
+                if include_ssh:
+                    cmd += f' && {SCRIPT} add 33 TCP 22 {_shell_quote(local_ip)} "SymbiOS SSH"'
+                    port_list += ' and 33'
                 if is_ajax:
                     job_id = create_job(cmd, timeout=90)
                     return JsonResponse({'ok': True, 'job': job_id,
                                          'title': 'Enabling port forwarding...',
-                                         'message': 'Ensuring static IP and opening ports 80, 443 and 33 on the router.'})
+                                         'message': f'Ensuring static IP and opening ports {port_list} on the router.'})
                 ok, stdout, stderr = run_command(cmd, timeout=90)
                 if ok:
                     messages.success(request, 'Port forwarding rules added.')
@@ -260,6 +265,26 @@ def settings_port_forwarding(request):
         except Exception as e:
             list_error = str(e)
 
+    # Current status of the standard ports (which rules are already open).
+    # Matches by external + internal port so unrelated rules (e.g. the old
+    # "SSH DEV" 33->33 forward) do not count as the standard SSH rule.
+    standard_ports = [
+        {'port': 80, 'internal_port': 80, 'purpose': 'HTTP (Traefik)'},
+        {'port': 443, 'internal_port': 443, 'purpose': 'HTTPS (Traefik)'},
+        {'port': 33, 'internal_port': 22, 'purpose': 'SSH (optional)'},
+    ]
+    port_status = []
+    for sp in standard_ports:
+        match = next((m for m in mappings
+                      if m.get('enabled')
+                      and str(m.get('external_port', '')) == str(sp['port'])
+                      and str(m.get('internal_port', '')) == str(sp['internal_port'])
+                      and m.get('accesstype', 'ipv4') in ('ipv4', 'ipv4_ipv6')), None)
+        port_status.append({**sp,
+                            'open': bool(match),
+                            'internal_client': match.get('internal_client', '') if match else ''})
+    port_status_known = bool(should_list) and not list_error
+
     return render(request, 'main/settings_port_forwarding.html', {
         'router_info': router_info,
         'detect_error': detect_error,
@@ -267,6 +292,8 @@ def settings_port_forwarding(request):
         'local_ip': local_ip,
         'mappings': mappings,
         'list_error': list_error,
+        'port_status': port_status,
+        'port_status_known': port_status_known,
         'ipv6_info': ipv6_info,
         'page_key': 'port-forwarding',
         'page_icon': 'bi-diagram-3',

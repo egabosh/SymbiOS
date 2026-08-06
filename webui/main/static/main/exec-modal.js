@@ -44,8 +44,19 @@ Also intercepts all forms with data-exec="true" attribute:
   function poll() {
     if (!currentJob) return;
     fetch('/exec/output/?job=' + currentJob)
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        return r.text().then(function (text) {
+          var d = null;
+          try { d = JSON.parse(text); } catch (e) { d = null; }
+          return d;
+        });
+      })
       .then(function (d) {
+        if (d === null) {
+          /* Non-JSON answer (e.g. session expired): stop polling */
+          finish(false);
+          return;
+        }
         appendDelta(d.output || '');
         if (d.done) {
           finish(d.success);
@@ -147,8 +158,12 @@ Also intercepts all forms with data-exec="true" attribute:
       }
     })
       .then(function (r) {
-        return r.json().then(function (data) {
-          return { status: r.status, data: data };
+        /* Read as text and parse leniently: a redirect that the browser
+           followed to a full HTML page must not throw in JSON.parse. */
+        return r.text().then(function (text) {
+          var data = {};
+          try { data = JSON.parse(text); } catch (e) { data = {}; }
+          return { status: r.status, data: data, raw: text, ok: r.ok };
         });
       })
       .then(function (res) {
@@ -165,10 +180,14 @@ Also intercepts all forms with data-exec="true" attribute:
         } else if (d.redirect) {
           close();
           window.location.href = d.redirect;
+        } else if (res.raw && !res.raw.trim().startsWith('{')) {
+          /* Non-JSON success (e.g. the view redirected with Django messages
+             after running the command synchronously) — reload to show them. */
+          close();
+          window.location.reload();
         } else {
           close();
-          /* No job — just reload the page to show Django messages */
-          window.location.reload();
+          showAlert('Unexpected response from server', 'danger');
         }
       })
       .catch(function (err) {
