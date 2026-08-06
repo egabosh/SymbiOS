@@ -17,8 +17,7 @@
             </div>
             <div class="alert alert-info">
                 You are accessing the WebUI from your local network. Please
-                sign in with the <strong>admin</strong> user and its LDAP
-                password.
+                sign in with the <strong>admin</strong> password (LDAP).
             </div>
             {% if messages %}
             {% for message in messages %}
@@ -31,12 +30,8 @@
             <form method="post">
                 {% csrf_token %}
                 <div class="mb-3">
-                    <label class="form-label">Username</label>
-                    <input type="text" name="username" class="form-control" value="admin" required autofocus>
-                </div>
-                <div class="mb-3">
                     <label class="form-label">Password</label>
-                    <input type="password" name="password" class="form-control" required>
+                    <input type="password" name="password" class="form-control" required autofocus>
                 </div>
                 <button type="submit" class="btn btn-primary w-100">Login</button>
             </form>
