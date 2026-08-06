@@ -31,6 +31,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'main.middleware.SecurityHeadersMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -96,6 +97,11 @@ except Exception:
     pass
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+# COOP is only honored on trustworthy origins (HTTPS or localhost); Django's
+# SecurityMiddleware would emit it unconditionally and browsers log a warning
+# on plain HTTP with a non-localhost host. SecurityHeadersMiddleware sets it
+# selectively instead.
+SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 
 MESSAGE_TAGS = {'error': 'danger'}
 
