@@ -183,16 +183,49 @@ function f_probe_port {
   elif [[ "$f_resp" == *"is closed on"* ]]
   then
     echo "closed"
+  elif [[ "$f_resp" == *"Invalid remote address"* ]]
+  then
+    # The probe service cannot resolve the domain to an IPv4 address (no A
+    # record): an IPv6-only domain cannot be verified by an IPv4-based probe.
+    echo "no_ipv4"
   else
     echo "unknown"
   fi
 }
 
-# Check whether the port is reachable locally (raw TCP connect)
+# Raw TCP connect check against a host (IPv4, or IPv6 in brackets).
+function f_tcp_check {
+  local f_host="$1" f_port="$2"
+  timeout 3 bash -c "exec 3<>/dev/tcp/${f_host}/${f_port}" 2>/dev/null
+}
+
+# Check whether the port is reachable locally (IPv4 loopback, falling back to
+# IPv6 loopback for services that listen only on IPv6).
 function f_check_local {
   local f_port="$1"
 
-  if timeout 3 bash -c "exec 3<>/dev/tcp/127.0.0.1/${f_port}" 2>/dev/null
+  if f_tcp_check "127.0.0.1" "$f_port" || f_tcp_check "[::1]" "$f_port"
+  then
+    echo "up"
+  else
+    echo "down"
+  fi
+}
+
+# Check whether the port is served on the IPv6 stack (wildcard or an explicit
+# IPv6 address). A TCP connect to the public address from inside the LAN can
+# fail because of router hairpinning, so the listening socket is inspected
+# instead. Combined with the AAAA match this verifies IPv6 reachability, which
+# needs no port forwarding/NAT.
+function f_check_public_ipv6 {
+  local f_port="$1"
+
+  if [[ -z "$g_public_ip6" ]]
+  then
+    echo "down"
+    return 0
+  fi
+  if ss -ltn 2>/dev/null | grep -qP "\[[^]]+\]:${f_port}\s"
   then
     echo "up"
   else
@@ -209,39 +242,6 @@ f_get_public_ip
 f_get_public_ip6
 g_dns_ip=$(f_resolve_dns "$g_domain")
 g_dns_ip6=$(f_resolve_dns6 "$g_domain")
-
-# Run checks for every requested port
-g_ports_json=""
-g_first_port=true
-g_all_open=true
-g_unknown_count=0
-g_port_count=0
-
-for f_port in ${g_ports//,/ }
-do
-  g_port_count=$((g_port_count + 1))
-  f_ext=$(f_probe_port "$g_domain" "$f_port")
-  f_loc=$(f_check_local "$f_port")
-
-  [[ "$f_ext" == "open" ]] || g_all_open=false
-  [[ "$f_ext" == "unknown" ]] && g_unknown_count=$((g_unknown_count + 1))
-
-  if [[ "$g_first_port" == true ]]
-  then
-    g_first_port=false
-    g_ports_json="["
-  else
-    g_ports_json+=","
-  fi
-  g_ports_json+="{\"port\":${f_port},\"external\":\"${f_ext}\",\"local\":\"${f_loc}\"}"
-done
-
-if [[ -n "$g_ports_json" ]]
-then
-  g_ports_json+="]"
-else
-  g_ports_json="[]"
-fi
 
 # DNS match (public IP vs resolved A record)
 g_dns_match="unknown"
@@ -271,9 +271,78 @@ then
   fi
 fi
 
+# Pure IPv6 mode: the domain has no IPv4 A record, the host has a public IPv6
+# and the domain resolves to an AAAA record. IPv6 needs no port forwarding
+# (no NAT), so the IPv4-only external probe service is skipped entirely.
+g_ipv6_only=false
+if [[ -z "$g_dns_ip" ]] && [[ -n "$g_dns_ip6" ]] && [[ -n "$g_public_ip6" ]]
+then
+  g_ipv6_only=true
+fi
+
+# Run checks for every requested port
+g_ports_json=""
+g_first_port=true
+g_all_open=true
+g_unknown_count=0
+g_port_count=0
+
+for f_port in ${g_ports//,/ }
+do
+  g_port_count=$((g_port_count + 1))
+
+  if [[ "$g_ipv6_only" == true ]]
+  then
+    # IPv6-only: no external IPv4 probe possible. Verify the port on the
+    # public IPv6 address instead; reachable only when the AAAA record also
+    # points to that address.
+    f_ext=$(f_check_public_ipv6 "$f_port")
+    f_loc=$(f_check_local "$f_port")
+    if [[ "$f_ext" == "up" ]] && [[ "$g_dns_match6" == "true" ]]
+    then
+      f_open=true
+    else
+      f_open=false
+    fi
+  else
+    f_ext=$(f_probe_port "$g_domain" "$f_port")
+    f_loc=$(f_check_local "$f_port")
+    [[ "$f_ext" == "open" ]] && f_open=true || f_open=false
+    [[ "$f_ext" == "unknown" ]] && g_unknown_count=$((g_unknown_count + 1))
+  fi
+
+  [[ "$f_open" == true ]] || g_all_open=false
+
+  if [[ "$g_first_port" == true ]]
+  then
+    g_first_port=false
+    g_ports_json="["
+  else
+    g_ports_json+=","
+  fi
+  g_ports_json+="{\"port\":${f_port},\"external\":\"${f_ext}\",\"local\":\"${f_loc}\"}"
+done
+
+if [[ -n "$g_ports_json" ]]
+then
+  g_ports_json+="]"
+else
+  g_ports_json="[]"
+fi
+
 # Build human-readable summary
 g_summary=""
-if [[ "$g_unknown_count" -eq "$g_port_count" ]]
+if [[ "$g_ipv6_only" == true ]]
+then
+  # IPv6 needs no port forwarding (no NAT) - the AAAA match plus the service
+  # answering on the public IPv6 address is the meaningful verification.
+  if [[ "$g_dns_match6" == "true" ]] && [[ "$g_all_open" == true ]]
+  then
+    g_summary="IPv6-only setup: the AAAA record matches the public IPv6 address and all ports are served on it. IPv6 needs no port forwarding - make sure the router allows inbound IPv6."
+  else
+    g_summary="IPv6-only setup: the AAAA record matches the public IPv6 address, but not all ports answer on it (service down or the router blocks inbound IPv6)."
+  fi
+elif [[ "$g_unknown_count" -eq "$g_port_count" ]]
 then
   g_summary="External port probe service unreachable - cannot verify port forwarding."
 elif [[ "$g_all_open" == true ]]
@@ -291,13 +360,6 @@ fi
 if [[ -n "$g_public_ip6" ]] && [[ "$g_dns_match6" == false ]]
 then
   g_summary+=" DNS (IPv6) resolves to ${g_dns_ip6}, but the current public IPv6 is ${g_public_ip6}."
-fi
-
-# No IPv4 A record but a matching AAAA record: explain the IPv6-only setup so
-# the missing dns_match is not mistaken for a DynDNS problem.
-if [[ "$g_dns_match" == unknown ]] && [[ "$g_dns_match6" == true ]]
-then
-  g_summary+=" The domain is IPv6-only (no IPv4 A record) and the AAAA record matches."
 fi
 
 # Assemble final JSON
