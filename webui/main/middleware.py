@@ -125,8 +125,16 @@ class AutheliaMiddleware:
 
         if (request.user.is_authenticated
                 and request.session.get('force_password_change')
-                and request.path not in ('/change-password/', '/logout/', '/authelia-logout/', '/login/')):
-            return redirect('/change-password/')
+                and request.path not in ('/change-password/', '/exec/start/', '/exec/output/',
+                                         '/logout/', '/authelia-logout/', '/login/')):
+            # Re-validate the flag: a password change submitted through the
+            # exec modal runs asynchronously, so it can only be confirmed on a
+            # later request. Clear the flag once the LDAP password is no longer
+            # the default one; otherwise keep forcing the change.
+            if not _admin_password_is_default():
+                request.session['force_password_change'] = False
+            else:
+                return redirect('/change-password/')
 
         return self.get_response(request)
 
