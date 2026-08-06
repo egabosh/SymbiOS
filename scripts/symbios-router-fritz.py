@@ -2,7 +2,8 @@
 # SymbiOS - FRITZ!Box port forwarding via data.lua API
 # PBKDF2 login + edify/delete actions for port forwarding.
 # Called by symbios-router-upnp.sh dispatcher.
-# Reads credentials from environment: ROUTER_UPNP_USER, ROUTER_UPNP_PASS
+# Reads credentials from environment (ROUTER_UPNP_USER, ROUTER_UPNP_PASS),
+# falling back to inventory.yml (all.vars router_upnp_user/router_upnp_password).
 
 import sys
 import os
@@ -16,21 +17,30 @@ import xml.etree.ElementTree as ET
 import re
 
 SCRIPT_NAME = os.path.basename(__file__)
-CONFIG_PATH = '/symbios/base-services/symbios-ui/config/router-upnp.conf'
+INVENTORY_PATH = os.environ.get(
+    'CONFIG_PATH',
+    '/symbios/base-services/symbios-ui/config/inventory.yml')
+
+
+def _inventory_var(lines, key):
+    for line in lines:
+        m = re.match(r'^\s*' + re.escape(key) + r':\s*(.*)$', line)
+        if m:
+            return m.group(1).strip().strip('\'"').strip()
+    return ''
 
 
 def load_config():
     user = os.environ.get('ROUTER_UPNP_USER', '')
     password = os.environ.get('ROUTER_UPNP_PASS', '')
-    if not user and os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH) as f:
-            for line in f:
-                m = re.match(r"ROUTER_UPNP_USER='(.*)'", line)
-                if m:
-                    user = m.group(1)
-                m = re.match(r"ROUTER_UPNP_PASS='(.*)'", line)
-                if m:
-                    password = m.group(1)
+    if not user:
+        try:
+            with open(INVENTORY_PATH) as f:
+                lines = f.readlines()
+        except OSError:
+            lines = []
+        user = _inventory_var(lines, 'router_upnp_user')
+        password = _inventory_var(lines, 'router_upnp_password')
     return user, password
 
 

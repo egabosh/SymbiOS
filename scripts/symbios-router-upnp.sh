@@ -9,12 +9,15 @@
 SCRIPT_NAME="$(basename "$0")"
 source symbios-lib.sh
 UPNP_CONFIG_DIR="${g_config_dir}"
-UPNP_CONFIG_FILE="${UPNP_CONFIG_DIR}/router-upnp.conf"
-ROUTER_UPNP_USER="${ROUTER_UPNP_USER:-}"
-ROUTER_UPNP_PASS="${ROUTER_UPNP_PASS:-}"
 
-# Load config if present
-if [[ -f "$UPNP_CONFIG_FILE" ]]
+# Router credentials. Primary source of truth is inventory.yml (all.vars
+# router_upnp_user / router_upnp_password, written by 'config' or the WebUI).
+# A legacy router-upnp.conf (pre-inventory storage) is honoured as a fallback
+# and removed by 'config save/remove'.
+UPNP_CONFIG_FILE="${UPNP_CONFIG_DIR}/router-upnp.conf"
+ROUTER_UPNP_USER="${ROUTER_UPNP_USER:-$(f_symbios_var router_upnp_user '')}"
+ROUTER_UPNP_PASS="${ROUTER_UPNP_PASS:-$(f_symbios_var router_upnp_password '')}"
+if [[ -z "$ROUTER_UPNP_USER" ]] && [[ -f "$UPNP_CONFIG_FILE" ]]
 then
   source "$UPNP_CONFIG_FILE"
 fi
@@ -220,17 +223,21 @@ case "$ACTION" in
 
   # ------------------------------------------------------------------
   config)
+    # Remove stored credentials (e.g. from the WebUI "Remove credentials").
+    if [[ "$1" == "remove" ]]
+    then
+      f_symbios_var_set router_upnp_user ""
+      f_symbios_var_set router_upnp_password ""
+      rm -f "$UPNP_CONFIG_FILE"
+      echo '{"ok":true,"configured":false,"message":"Router credentials removed."}'
+      exit 0
+    fi
+
     if [[ -n "$1" ]] && [[ -n "$2" ]]
     then
-      mkdir -p "$UPNP_CONFIG_DIR" 2>/dev/null
-      cat > "$UPNP_CONFIG_FILE" <<EOF
-# Router credentials for port forwarding
-# FRITZ!Box users: set WebUI username and password
-# Generic UPnP routers: credentials are optional
-ROUTER_UPNP_USER='$1'
-ROUTER_UPNP_PASS='$2'
-EOF
-      chmod 600 "$UPNP_CONFIG_FILE" 2>/dev/null
+      f_symbios_var_set router_upnp_user "$1"
+      f_symbios_var_set router_upnp_password "$2"
+      rm -f "$UPNP_CONFIG_FILE"
       echo '{"ok":true,"message":"Router credentials saved."}'
       exit 0
     fi
@@ -360,6 +367,7 @@ Actions:
                                   (accesstype: ipv4|ipv6|ipv4_ipv6)
   delete <ext_port> [protocol]    Delete a port forwarding rule
   config [username] [password]    Show or save router credentials
+                                  (use 'config remove' to delete them)
   ipv6info                        Show IPv6 state and device addresses
                                   (FRITZ!Box, read-only)
 
@@ -371,7 +379,7 @@ Router types:
     Uses TR-064 SOAP (AddPortMapping/DeletePortMapping)
     No authentication needed; config is optional
 
-Credentials stored in: ${UPNP_CONFIG_FILE}
+Credentials stored in: ${g_inventory} (all.vars router_upnp_user/router_upnp_password)
 Environment: ROUTER_UPNP_USER, ROUTER_UPNP_PASS
 EOHELP
     exit 0
