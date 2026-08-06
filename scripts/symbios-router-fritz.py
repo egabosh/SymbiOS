@@ -324,6 +324,45 @@ def fb_upnp_enable(host, sid, dev_uid):
              f'autoShar_{dev_uid}=1&apply=%C3%9Cbernehmen')
 
 
+def get_current_ipv6_addr(host, sid, dev_uid):
+    """Return the device's current global IPv6 address from the edit dialog.
+
+    FRITZ!Box never updates the stored device interface_id when the host's
+    SLAAC address changes, so IPv6 rule creation must derive the IID from the
+    most recently used global address instead - otherwise the rule binds to a
+    stale, unreachable IID (the box still creates it, but traffic is dropped).
+    """
+    params = (f'xhrId=all&backToPage=netDev&dev={dev_uid}'
+              f'&initalRefreshParamsSaved=true')
+    dlg = data_lua(host, sid, 'edit_device', params)
+    if dlg.get('pid') != 'edit_device':
+        return ''
+    ipv6 = dlg.get('data', {}).get('vars', {}).get('dev', {}).get('ipv6', {})
+    current = ipv6.get('current', {}).get('ip', '')
+    if current and not current.startswith('fe80:') \
+            and not current.startswith('fd00:'):
+        return current
+    best, best_used = '', -1
+    for entry in ipv6.get('ipList', []):
+        addr = entry.get('ip', '')
+        if not addr or addr.startswith('fe80:') or addr.startswith('fd00:'):
+            continue
+        try:
+            lastused = int(entry.get('lastused', 0))
+        except (TypeError, ValueError):
+            lastused = 0
+        if lastused > best_used:
+            best_used, best = lastused, addr
+    return best
+
+
+def addr_to_iid(addr):
+    """Extract the interface ID part of an IPv6 address as '::xxxx...'."""
+    if '::' in addr:
+        return '::' + addr.split('::')[-1]
+    return '::' + ':'.join(addr.split(':')[-4:])
+
+
 def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc,
            accesstype='ipv4'):
     """Add a port forwarding rule.
@@ -408,7 +447,12 @@ def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc,
                 dev = d
                 break
         if dev:
-            iid = dev.get('interface_id', '')
+            # The box's stored interface_id can go stale after a host address
+            # change; bind the rule to the device's current global IPv6
+            # address instead (falling back to the stored IID if no global
+            # address is reported).
+            addr = get_current_ipv6_addr(host, sid, dev_uid)
+            iid = addr_to_iid(addr) if addr else dev.get('interface_id', '')
             groups = [g for g in iid.split(':') if g][:4]
             while len(groups) < 4:
                 groups.append('')
@@ -440,10 +484,13 @@ def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc,
         if dev.get('UID') != dev_uid:
             continue
         for r in dev.get('rules', []):
+            at = r.get('accesstype', '')
             if (str(r.get('port', '')) == str(ext_port)
                     and r.get('protocol', '').upper() == proto.upper()
-                    and r.get('accesstype', '') == accesstype
-                    and r.get('state', '') == '2'):
+                    and r.get('state', '') == '2'
+                    and (at == accesstype
+                         or (accesstype == 'ipv4_ipv6'
+                             and at in ('ipv4', 'ipv6')))):
                 found = True
                 break
         break
