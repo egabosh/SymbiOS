@@ -30,6 +30,11 @@ all:
     # port forwarding — extra inbound UFW rules for IPv6 forwards,
     # kept in sync by the WebUI (settings → port forwarding)
     ufw_extra_inbound: []
+    # router UPnP/TR-064 credentials (FRITZ!Box WebUI user/password).
+    # Stored only in the deployed inventory.yml (see symbios-router-upnp.sh);
+    # these placeholders keep the template clean for new installs.
+    router_upnp_user: ''
+    router_upnp_password: ''
     # ansible defaults
     ansible_user: "root"
     ansible_python_interpreter: "/usr/bin/python3"

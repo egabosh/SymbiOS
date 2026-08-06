@@ -28,6 +28,7 @@
 #
 # Functions:
 #   f_symbios_var <key> <default>   read a scalar from inventory.yml
+#   f_symbios_var_set <key> <value> set a scalar under all.vars (host only)
 #   f_json_escape                   escape a string (stdin) for JSON
 #   f_json_error <msg>              print {"ok":false,"error":"<msg>"}
 #   f_json_get <json> <key>         extract a string value from JSON
@@ -91,6 +92,32 @@ function f_symbios_var {
   f_value="${f_value%"${f_value##*[![:space:]]}"}"
 
   [[ -n "${f_value}" ]] && echo "${f_value}" || echo "${f_default}"
+}
+
+# Set a scalar under all.vars in inventory.yml (host side).
+# Usage: f_symbios_var_set <key> <value>
+# The write is atomic (tmp file + rename) so concurrent readers always see
+# a valid file. Requires python3 + PyYAML on the host. The WebUI writes its
+# own copy via _save_inventory_config (same effect, no locking either).
+function f_symbios_var_set {
+  local f_key="$1" f_value="$2"
+  python3 - "$f_key" "$f_value" "${g_inventory}" <<'PYEOF'
+import os
+import sys
+import yaml
+
+key, value, path = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path) as f:
+    cfg = yaml.safe_load(f) or {}
+vars_ = cfg.setdefault('all', {}).setdefault('vars', {})
+vars_[key] = value
+tmp = path + '.tmp'
+with open(tmp, 'w') as f:
+    yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(tmp, path)
+PYEOF
 }
 
 # Load the full layout into g_* globals.
