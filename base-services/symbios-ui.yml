@@ -417,7 +417,7 @@
       changed_when: false
 
     - name: Register playbook as installed
-      ansible.builtin.command: symbios-state.sh set base-services/symbios-ui.yml
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/symbios-ui.yml"
       changed_when: false
   handlers:
 

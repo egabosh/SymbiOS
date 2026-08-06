@@ -161,6 +161,10 @@
         backup: yes
         validate: /bin/bash -n %s
 
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/navidrome.yml"
+      changed_when: false
+
   handlers:
 
     - name: Restart navidrome

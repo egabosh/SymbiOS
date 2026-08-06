@@ -250,6 +250,10 @@
 
 
 
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/jellyfin.yml"
+      changed_when: false
+
   handlers:
 
 #    - name: run genpw.sh

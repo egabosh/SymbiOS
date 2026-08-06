@@ -67,5 +67,5 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: symbios-state.sh set base-services/ssh-keys.yml
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/ssh-keys.yml"
       changed_when: false

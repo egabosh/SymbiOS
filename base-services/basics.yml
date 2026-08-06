@@ -767,7 +767,7 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: symbios-state.sh set base-services/basics.yml
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/basics.yml"
       changed_when: false
   handlers:
 
