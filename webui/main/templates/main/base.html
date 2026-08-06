@@ -7,7 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="{% static 'css/custom.css' %}" rel="stylesheet">
+    <link href="{% static 'css/custom.css' %}?v=2" rel="stylesheet">
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
@@ -148,7 +148,7 @@
           <pre id="execOutput" class="exec-output m-0 p-3"></pre>
         </div>
         <div class="exec-modal-footer d-flex justify-content-between align-items-center px-3 py-2">
-          <span id="execStatus" class="small text-muted">
+          <span id="execStatus" class="small text-white-50">
             <span class="spinner-border spinner-border-sm me-1" role="status"></span>
             Executing...
           </span>
@@ -157,7 +157,7 @@
       </div>
     </div>
 
-    <script src="{% static 'main/exec-modal.js' %}?v=4"></script>
+    <script src="{% static 'main/exec-modal.js' %}?v=5"></script>
     {% block scripts %}{% endblock %}
 
 </body>

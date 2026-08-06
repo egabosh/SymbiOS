@@ -65,6 +65,10 @@
     border-top: 1px solid #444;
     border-radius: 0 0 8px 8px;
 }
+/* Bright result colors for the dark exec footer (Bootstrap text-success/-danger
+   are too dark to read on #2d2d2d). */
+.exec-status-ok   { color: #3fb950; }
+.exec-status-err  { color: #f85149; }
 
 /* Services docs */
 .services-docs h1 { font-size: 1.4rem; margin-top: 1.5rem; }

@@ -74,8 +74,8 @@ Also intercepts all forms with data-exec="true" attribute:
     currentJob = null;
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
     statusEl.innerHTML = success
-      ? '<i class="bi bi-check-circle-fill text-success me-1"></i>Completed successfully'
-      : '<i class="bi bi-x-circle-fill text-danger me-1"></i>Failed';
+      ? '<i class="bi bi-check-circle-fill exec-status-ok me-1"></i><span class="exec-status-ok fw-bold">Completed successfully</span>'
+      : '<i class="bi bi-x-circle-fill exec-status-err me-1"></i><span class="exec-status-err fw-bold">Failed</span>';
     doneBtn.classList.remove('d-none');
     /* Remove the spinner from the status line */
     var spinner = statusEl.querySelector('.spinner-border');
