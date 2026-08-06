@@ -190,6 +190,7 @@ def setup_reachability(request):
     return JsonResponse({'ok': False, 'error': (stderr or stdout) or 'Check failed'})
 
 
+@login_required
 def health(request):
     from .setup_status import setup_steps, is_setup_complete
     config = _get_inventory_config()
@@ -201,6 +202,7 @@ def health(request):
         'setup_pending': len(pending),
     })
 
+@login_required
 def health_data(request):
     from .health import run_all
     from django.http import JsonResponse
