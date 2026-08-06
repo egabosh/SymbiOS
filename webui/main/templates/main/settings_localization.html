@@ -13,9 +13,9 @@
 
           <!-- Timezone -->
           <div class="mb-4">
-            <label class="form-label fw-semibold">Zeitzone</label>
+            <label class="form-label fw-semibold">Timezone</label>
             <select class="form-select" name="timezone" required>
-              <option value="" disabled {% if not vars.timezone %}selected{% endif %} hidden>Zeitzone w&auml;hlen...</option>
+              <option value="" disabled {% if not vars.timezone %}selected{% endif %} hidden>Choose timezone...</option>
               {% for tz in all_timezones %}
                 <option value="{{ tz }}" {% if vars.timezone == tz %}selected{% endif %}>{{ tz }}</option>
               {% endfor %}
@@ -24,9 +24,9 @@
 
           <!-- Keyboard Layout -->
           <div class="mb-4">
-            <label class="form-label fw-semibold">Tastatur-Layout</label>
+            <label class="form-label fw-semibold">Keyboard Layout</label>
             <select class="form-select" name="keyboard">
-              <option value="" disabled {% if not vars.keyboard %}selected{% endif %} hidden>Layout w&auml;hlen...</option>
+              <option value="" disabled {% if not vars.keyboard %}selected{% endif %} hidden>Choose layout...</option>
               {% for kb in all_keyboards %}
                 <option value="{{ kb }}" {% if vars.keyboard == kb %}selected{% endif %}>{{ kb }}</option>
               {% endfor %}
@@ -35,13 +35,13 @@
 
           <!-- Locale -->
           <div class="mb-4">
-            <label class="form-label fw-semibold">Sprache</label>
-            <input type="text" class="form-control" name="locale" placeholder="z. B. en_US.UTF-8"
+            <label class="form-label fw-semibold">Language (Locale)</label>
+            <input type="text" class="form-control" name="locale" placeholder="e.g. en_US.UTF-8"
                    value="{% if vars.locale %}{{ vars.locale }}{% endif %}"
                    required>
           </div>
 
-          <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Speichern</button>
+          <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
         </form>
       </div>
     </div>

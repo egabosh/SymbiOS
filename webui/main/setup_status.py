@@ -29,50 +29,49 @@ import os
 
 RUNCHECKS_FILE = '/log/runchecks-results.json'
 
-# Plain-language explanations shown on each settings page ("Wozu dient diese Seite?").
+# Plain-language explanations shown on each settings page ("What is this page for?").
 PAGE_EXPLAIN = {
     'ddns': (
-        'Der Server braucht einen Namen im Internet, z. B. '
-        '<code>mein-server.dedyn.io</code>. Unter diesem Namen werden alle '
-        'Dienste erreichbar sein und Let\u2019s Encrypt stellt daf\u00fcr '
-        'Zertifikate aus.'
+        'The server needs a name on the internet, e.g. '
+        '<code>my-server.dedyn.io</code>. All services will be reachable '
+        'under this name and Let\u2019s Encrypt will issue certificates for it.'
     ),
     'mailserver': (
-        'F\u00fcr Benachrichtigungen und die 2-Faktor-Anmeldung (2FA) '
-        'ben\u00f6tigt der Server die M\u00f6glichkeit, E-Mails zu versenden. '
-        'Dazu wird ein SMTP-Konto eingerichtet.'
+        'For notifications and 2-Factor Authentication (2FA), the server '
+        'needs the ability to send emails. For that, an SMTP account is '
+        'configured.'
     ),
     'auth': (
-        'Authelia sch\u00fctzt alle Web-Dienste mit einem Login. Mit 2FA '
-        'wird beim Anmelden zus\u00e4tzlich ein Code oder ein TOTP-Token '
-        'verlangt \u2014 das sch\u00fctzt auch bei gestohlenem Passwort.'
+        'Authelia protects all web services with a login. With 2FA, a code '
+        'or TOTP token is additionally required when logging in \u2014 this '
+        'protects you even if your password is stolen.'
     ),
     'acme': (
-        'Damit der Browser keine Sicherheitswarnung anzeigt, werden f\u00fcr '
-        'alle Dienste g\u00fcltige TLS-Zertifikate von Let\u2019s Encrypt '
-        'bezogen und automatisch erneuert.'
+        'To prevent the browser from showing a security warning, valid TLS '
+        'certificates from Let\u2019s Encrypt are obtained for all services '
+        'and renewed automatically.'
     ),
     'ssh-keys': (
-        'Hier wird festgelegt, welche SSH-Schl\u00fcssel sich als root auf '
-        'dem Server anmelden d\u00fcrfen. Das ist sicherer als ein Passwort.'
+        'Here you define which SSH keys may log in as root on the server. '
+        'This is more secure than a password.'
     ),
     'backup': (
-        'Der Server kann seine Daten regelm\u00e4\u00dfig auf einen '
-        'externen SFTP-Server sichern. So \u00fcberlebt ein Ausfall die Daten.'
+        'The server can regularly back up its data to an external SFTP '
+        'server. This way your data survives a failure.'
     ),
     'port-forwarding': (
-        'Damit der Server von au\u00dferhalb erreichbar ist, m\u00fcssen die '
-        'Ports 80 (HTTP) und 443 (HTTPS) vom Router zum Server weitergeleitet '
-        'werden. Mit UPnP geht das automatisch.'
+        'For the server to be reachable from outside, ports 80 (HTTP) and '
+        '443 (HTTPS) must be forwarded from the router to the server. With '
+        'UPnP this happens automatically.'
     ),
     'disk': (
-        'Standardm\u00e4\u00dfig liegen alle Daten auf der System-SD-Karte. '
-        'Eine separate Festplatte gibt mehr Platz und \u2014 optional '
-        'verschl\u00fcsselt \u2014 mehr Sicherheit.'
+        'By default, all data is stored on the system SD card. A separate '
+        'hard disk provides more space and \u2014 optionally encrypted \u2014 '
+        'more security.'
     ),
     'localization': (
-        'Zeitzone, Tastatur und Sprache werden verwendet, damit Uhrzeiten '
-        'und Eingaben auf dem Server und im Web-Interface stimmen.'
+        'Timezone, keyboard and language are used so that times and input '
+        'on the server and in the web interface are correct.'
     ),
 }
 
@@ -111,30 +110,29 @@ def get_page_badge(page_key, inventory_vars):
 
     if page_key == 'localization':
         if inventory_vars.get('timezone') and inventory_vars.get('keyboard'):
-            return ('ok', 'Konfiguriert',
-                    'Zeitzone und Tastatur sind eingerichtet.')
-        return ('missing', 'Nicht eingerichtet',
-                'Zeitzone und Tastatur sind noch nicht eingerichtet.')
+            return ('ok', 'Configured',
+                    'Timezone and keyboard are set up.')
+        return ('missing', 'Not configured',
+                'Timezone and keyboard are not set up yet.')
 
     if page_key == 'port-forwarding':
         base_domain = inventory_vars.get('base_domain', '')
         if base_domain:
-            return ('warn', 'Konfiguriert',
-                    'DNS ist eingerichtet. Pr\u00fcfe die Erreichbarkeit '
-                    'auf der Erreichbarkeits-Seite.')
-        return ('missing', 'Ben\u00f6tigt DNS',
-                'Richte zuerst unter DNS einen Namen ein.')
+            return ('warn', 'Configured',
+                    'DNS is set up. Check reachability on the Reachability page.')
+        return ('missing', 'DNS required',
+                'First set up a name under DNS.')
 
     check_name = PAGE_CHECK.get(page_key)
     status = checks.get(check_name) if check_name else None
     if status == 'ok':
-        return ('ok', 'Alles in Ordnung', 'Der Dienst l\u00e4uft und ist konfiguriert.')
+        return ('ok', 'All good', 'The service is running and configured.')
     if status == 'error':
-        return ('error', 'Problem gefunden',
-                'Der Dienst meldet ein Problem \u2014 Details siehe Health-Seite.')
+        return ('error', 'Problem found',
+                'The service reports a problem \u2014 see details on the Health page.')
     if status == 'warn':
-        return ('warn', 'Warnung', 'Der Dienst meldet eine Warnung.')
-    return ('none', 'Noch nicht eingerichtet', 'Dieser Dienst ist noch nicht eingerichtet.')
+        return ('warn', 'Warning', 'The service reports a warning.')
+    return ('none', 'Not set up yet', 'This service is not set up yet.')
 
 
 def setup_steps(inventory_vars):
@@ -150,8 +148,8 @@ def setup_steps(inventory_vars):
     loc_done = bool(inventory_vars.get('timezone') and inventory_vars.get('keyboard'))
     steps.append({
         'key': 'localization',
-        'title': 'Sprache, Zeitzone & Tastatur',
-        'subtitle': 'Grundlage f\u00fcr korrekte Zeiten und Eingaben.',
+        'title': 'Language, Timezone & Keyboard',
+        'subtitle': 'Foundation for correct times and input.',
         'optional': False,
         'status': 'done' if loc_done else 'pending',
         'url': '/settings/localization/',
@@ -161,20 +159,20 @@ def setup_steps(inventory_vars):
     disk_status = checks.get('disk')
     steps.append({
         'key': 'disk',
-        'title': 'Separate Daten-Platte (optional)',
-        'subtitle': 'Mehr Platz \u2014 optional verschl\u00fcsselt.',
+        'title': 'Separate Data Disk (optional)',
+        'subtitle': 'More space \u2014 optionally encrypted.',
         'optional': True,
         'status': 'done' if disk_status == 'ok' else 'optional',
         'url': '/settings/disk/',
     })
 
-    # Step: Network type
+    # Step: Connection type
     network_type = inventory_vars.get('network_type', '')
     steps.append({
         'key': 'network',
-        'title': 'Standort des Servers',
-        'subtitle': ('Heimanschluss hinter Router oder Root-Server mit '
-                     'eigener \u00f6ffentlicher IP?'),
+        'title': 'Server connection type',
+        'subtitle': ('Home connection behind a router or root server with '
+                     'its own public IP?'),
         'optional': False,
         'status': 'done' if network_type else 'pending',
         'url': '/setup/#step-network',
@@ -185,9 +183,9 @@ def setup_steps(inventory_vars):
     dns_status = checks.get('ddns')
     steps.append({
         'key': 'dns',
-        'title': 'Name (DNS) einrichten',
-        'subtitle': 'Z. B. <code>mein-server.dedyn.io</code> \u2014 Voraussetzung '
-                    'f\u00fcr alles Weitere.',
+        'title': 'Set up a Name (DNS)',
+        'subtitle': 'E.g. <code>my-server.dedyn.io</code> \u2014 prerequisite '
+                    'for everything else.',
         'optional': False,
         'status': 'done' if (dns_done and dns_status == 'ok') else 'pending',
         'url': '/settings/ddns/',
@@ -196,8 +194,8 @@ def setup_steps(inventory_vars):
     # Step: Port forwarding (only relevant for home)
     steps.append({
         'key': 'ports',
-        'title': 'Ports freigeben',
-        'subtitle': 'Ports 80/443 vom Router zum Server weiterleiten.',
+        'title': 'Open Ports',
+        'subtitle': 'Forward ports 80/443 from the router to the server.',
         'optional': False,
         'status': 'pending' if (network_type and network_type != 'root') else 'optional',
         'url': '/settings/port-forwarding/',
@@ -207,8 +205,8 @@ def setup_steps(inventory_vars):
     reach_done = checks.get('reachability')
     steps.append({
         'key': 'reachability',
-        'title': 'Erreichbarkeit pr\u00fcfen',
-        'subtitle': 'Von au\u00dfen testen, ob der Server erreichbar ist.',
+        'title': 'Check Reachability',
+        'subtitle': 'Test from outside whether the server is reachable.',
         'optional': False,
         'status': 'done' if reach_done == 'ok' else 'pending',
         'url': '/setup/#step-reachability',
@@ -218,8 +216,8 @@ def setup_steps(inventory_vars):
     cert_status = checks.get('certs')
     steps.append({
         'key': 'certs',
-        'title': 'Sicherheits-Zertifikate (TLS)',
-        'subtitle': 'G\u00fcltige Zertifikate gegen die Browser-Warnung.',
+        'title': 'Security Certificates (TLS)',
+        'subtitle': 'Valid certificates against the browser warning.',
         'optional': False,
         'status': 'done' if cert_status == 'ok' else 'pending',
         'url': '/settings/acme/',
@@ -229,8 +227,8 @@ def setup_steps(inventory_vars):
     smtp_done = bool(inventory_vars.get('smtp_server') and inventory_vars.get('smtp_from'))
     steps.append({
         'key': 'smtp',
-        'title': 'E-Mail-Versand (SMTP) \u2014 optional',
-        'subtitle': 'F\u00fcr Benachrichtigungen und 2FA-Codes.',
+        'title': 'Email Sending (SMTP) \u2014 optional',
+        'subtitle': 'For notifications and 2FA codes.',
         'optional': True,
         'status': 'done' if smtp_done else 'optional',
         'url': '/settings/mailserver/',
@@ -240,8 +238,8 @@ def setup_steps(inventory_vars):
     twofa_done = bool(inventory_vars.get('twofa_enabled'))
     steps.append({
         'key': 'twofa',
-        'title': '2-Faktor-Anmeldung (2FA) \u2014 optional',
-        'subtitle': 'Zus\u00e4tzlicher Schutz beim Anmelden.',
+        'title': '2-Factor Authentication (2FA) \u2014 optional',
+        'subtitle': 'Additional protection when logging in.',
         'optional': True,
         'status': 'done' if twofa_done else 'optional',
         'url': '/settings/auth/',
@@ -261,6 +259,6 @@ def is_setup_complete(inventory_vars):
 def network_type_label(network_type):
     """Human-readable label for the stored network type."""
     return {
-        'home': 'Heimanschluss (hinter Router)',
-        'root': 'Root-Server (eigene \u00f6ffentliche IP)',
+        'home': 'Home connection (behind router)',
+        'root': 'Root server (own public IP)',
     }.get(network_type, '')

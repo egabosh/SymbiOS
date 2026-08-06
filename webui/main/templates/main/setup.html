@@ -4,28 +4,28 @@
 
 <div class="settings-header">
   <div class="settings-header-title">
-    <h2 class="mb-0"><i class="bi bi-magic"></i> Ersteinrichtung</h2>
+    <h2 class="mb-0"><i class="bi bi-magic"></i> Initial Setup</h2>
     {% if complete %}
-    <span class="settings-badge badge ok"><i class="bi bi-check-circle-fill"></i> Alles eingerichtet</span>
+    <span class="settings-badge badge ok"><i class="bi bi-check-circle-fill"></i> Everything set up</span>
     {% else %}
-    <span class="settings-badge badge warn"><i class="bi bi-exclamation-triangle-fill"></i> {{ pending_count }} Schritt{{ pending_count|pluralize }} offen</span>
+    <span class="settings-badge badge warn"><i class="bi bi-exclamation-triangle-fill"></i> {{ pending_count }} step{{ pending_count|pluralize }} remaining</span>
     {% endif %}
   </div>
   <div class="settings-why">
     <div class="settings-why-body">
-      Dies ist eine Schritt-f&uuml;r-Schritt-Anleitung, damit dein Server
-      nach der Installation sicher und von au&szlig;en erreichbar ist.
-      Jeder Schritt f&uuml;hrt dich zu einer Einstellungs-Seite.
-      Erledigte Schritte werden automatisch als erledigt markiert.
+      This is a step-by-step guide to make your server secure and reachable
+      from the internet after installation.
+      Each step leads you to a settings page.
+      Completed steps are marked automatically.
     </div>
   </div>
 </div>
 
-<!-- Server location (network type) -->
+<!-- Server connection type -->
 <div class="card mt-3" id="step-network">
-  <div class="card-header"><i class="bi bi-house-gear"></i> Schritt: Standort des Servers</div>
+  <div class="card-header"><i class="bi bi-diagram-3"></i> Step: Server connection type</div>
   <div class="card-body small">
-    <p class="mb-2">Wo l&auml;uft dein SymbiOS-Server?</p>
+    <p class="mb-2">How is your SymbiOS server connected?</p>
     <form method="post" data-exec="true">
       {% csrf_token %}
       <div class="row g-2">
@@ -34,7 +34,7 @@
             <input class="form-check-input" type="radio" name="network_type" id="nt-home" value="home"
                    {% if network_type == 'home' %}checked{% endif %}>
             <label class="form-check-label" for="nt-home">
-              <strong>Heimanschluss</strong> &mdash; hinter meinem Router (FRITZ!Box, ...)
+              <strong>Home connection</strong> &mdash; behind my router (FRITZ!Box, ...)
             </label>
           </div>
         </div>
@@ -43,7 +43,7 @@
             <input class="form-check-input" type="radio" name="network_type" id="nt-root" value="root"
                    {% if network_type == 'root' %}checked{% endif %}>
             <label class="form-check-label" for="nt-root">
-              <strong>Root-Server</strong> &mdash; z.&nbsp;B. VPS mit eigener &ouml;ffentlicher IP
+              <strong>Root server</strong> &mdash; e.g. VPS with its own public IP
             </label>
           </div>
         </div>
@@ -51,16 +51,16 @@
       {% if not network_type %}
       <div class="alert alert-warning py-2 px-3 mt-2 mb-0">
         <i class="bi bi-info-circle-fill"></i>
-        Das bestimmt, welche Schritte n&ouml;tig sind: Bei einem Heimanschluss
-        m&uuml;ssen Ports im Router freigegeben werden, bei einem Root-Server nicht.
+        This determines which steps are needed: on a home connection, ports
+        must be opened on the router, on a root server they do not.
       </div>
       {% else %}
       <div class="text-muted mt-2 mb-0">
-        Gespeichert: {{ network_type_label }}
+        Saved: {{ network_type_label }}
       </div>
       {% endif %}
       <button type="submit" class="btn btn-primary btn-sm mt-2">
-        <i class="bi bi-save"></i> Speichern
+        <i class="bi bi-save"></i> Save
       </button>
     </form>
   </div>
@@ -68,14 +68,14 @@
 
 <!-- Reachability check -->
 <div class="card mt-3" id="step-reachability">
-  <div class="card-header"><i class="bi bi-globe-americas"></i> Schritt: Erreichbarkeit pr&uuml;fen</div>
+  <div class="card-header"><i class="bi bi-globe-americas"></i> Step: Check reachability</div>
   <div class="card-body small">
     <p class="mb-2">
-      Pr&uuml;ft, ob der Server von au&szlig;en unter deiner Domain erreichbar ist
-      (Ports 80 und 443). Richte zuerst DNS und Port-Weiterleitung ein.
+      Checks whether the server is reachable from the internet under your
+      domain (ports 80 and 443). Set up DNS and port forwarding first.
     </p>
     <button type="button" class="btn btn-outline-primary btn-sm" id="reach-btn" onclick="runReachability()">
-      <i class="bi bi-arrow-repeat"></i> Jetzt pr&uuml;fen
+      <i class="bi bi-arrow-repeat"></i> Check now
     </button>
     <div id="reach-result" class="mt-2"></div>
   </div>
@@ -83,7 +83,7 @@
 
 <!-- Step list -->
 <div class="card mt-3">
-  <div class="card-header"><i class="bi bi-list-check"></i> Einrichtungs-Schritte</div>
+  <div class="card-header"><i class="bi bi-list-check"></i> Setup Steps</div>
   <div class="card-body p-0">
     <table class="table table-sm align-middle mb-0">
       <tbody>
@@ -106,11 +106,11 @@
           </td>
           <td class="text-end pe-3">
             {% if step.status == 'done' %}
-            <span class="badge bg-success">Erledigt</span>
+            <span class="badge bg-success">Done</span>
             {% elif step.optional %}
             <span class="badge bg-secondary">Optional</span>
             {% else %}
-            <a href="{{ step.url }}" class="btn btn-sm btn-outline-primary">Jetzt einrichten</a>
+            <a href="{{ step.url }}" class="btn btn-sm btn-outline-primary">Set up now</a>
             {% endif %}
           </td>
         </tr>
@@ -125,16 +125,16 @@ function runReachability() {
   var btn = document.getElementById('reach-btn');
   var res = document.getElementById('reach-result');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Pr&uuml;fe...';
-  res.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Pr&uuml;fe von au&szlig;en...';
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking...';
+  res.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking from the internet...';
 
   fetch('{% url "setup_reachability" %}')
     .then(r => r.json())
     .then(data => {
       if (data.ok) {
-        res.innerHTML = '<div class="alert alert-success py-2 px-3 mb-0"><i class="bi bi-check-circle-fill"></i> ' + (data.summary || 'Alles erreichbar.') + '</div>';
+        res.innerHTML = '<div class="alert alert-success py-2 px-3 mb-0"><i class="bi bi-check-circle-fill"></i> ' + (data.summary || 'Everything reachable.') + '</div>';
       } else {
-        var msg = data.error || data.summary || 'Server ist nicht erreichbar.';
+        var msg = data.error || data.summary || 'The server is not reachable.';
         res.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0"><i class="bi bi-exclamation-triangle-fill"></i> ' + msg + '</div>';
       }
     })
@@ -143,7 +143,7 @@ function runReachability() {
     })
     .finally(() => {
       btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Jetzt pr&uuml;fen';
+      btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Check now';
     });
 }
 </script>

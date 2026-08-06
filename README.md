@@ -119,6 +119,8 @@ SymbiOS/
 │   ├── authelia-access-control.j2  # Template -> Authelia access_control block
 │   └── traefik-static.yml# Traefik static config (entrypoints, etc.)
 ├── scripts/              # Helper scripts deployed to /usr/local/sbin/ and the WebUI
+│   ├── symbios-router-upnp.sh  # Router port-forwarding dispatcher (generic UPnP)
+│   ├── symbios-router-fritz.py # FRITZ!Box port-forwarding backend (data.lua API)
 │   ├── runchecks.d/      # Health-check scripts (run by runchecks.sh)
 │   ├── autoupdate.d/     # Update dispatchers (debian / docker / symbios)
 │   └── backup.d/         # Backup modules (docker, ldap-docker, …)
@@ -170,7 +172,7 @@ concern and is idempotent, so it is safe to re-run any of them.
 | `autoupdate.yml`     | Unattended upgrades via `/usr/local/sbin/autoupdate.d/`.                |
 | `runchecks.yml`      | Health/SMART/mdadm checks in `/usr/local/sbin/runchecks.d/`.            |
 | `docker.yml`         | Installs Docker, creates the `docker` user/group.                       |
-| `dedyn.yml`          | deSEC (dedyn.io) dynamic-DNS client (`/usr/local/sbin/dedyn.sh`).       |
+| `dedyn.yml`          | deSEC (dedyn.io) dynamic-DNS client; forces EUI-64 IPv6 addressing (stable interface ID). |
 | `traefik.yml`        | Deploys the Traefik reverse proxy (file provider, no Docker socket).   |
 | `traefik-static.yml` | Traefik static config template (entrypoints, ACME resolver).            |
 | `ldap.yml`           | Deploys OpenLDAP.                         |
@@ -256,6 +258,32 @@ When enabled, the following **user-configurable** connections are made:
 Services installed via `services/` are free to contact their own external
 endpoints (e.g. Matrix federation, map tiles) and pull their container images
 from public registries. See each service playbook for details.
+
+### Port forwarding and IPv6
+
+Incoming connections are managed from the WebUI (**Settings → Port
+Forwarding**) and handled by the router dispatcher
+`scripts/symbios-router-upnp.sh`:
+
+- **FRITZ!Box (AVM)** — `symbios-router-fritz.py` authenticates via PBKDF2 and
+  manages device-bound port rules through the `data.lua` API.
+- **Generic UPnP routers** — TR-064 SOAP (`AddPortMapping`/`DeletePortMapping`),
+  no credentials required.
+
+Operational notes for FRITZ!Box with dual-stack:
+
+- The box assigns IPv6 host addresses by **SLAAC only**, so IPv6 port rules are
+  **device-bound** and follow the device's current address.
+- IPv6 rules therefore need a **stable interface ID**. `dedyn.yml` forces
+  EUI-64 address generation and disables IPv6 privacy extensions, so the IID
+  survives upstream prefix changes; rule creation derives the IID from the
+  device's current global address instead of the box's (often stale) stored
+  value.
+- The box only supports IPv6 forwards where the external and internal port are
+  equal (no port remapping).
+- A separate gateway between ISP router and host is supported: the gateway must
+  forward the ISP prefix to the router, and the host rules keep working across
+  prefix changes.
 
 ---
 

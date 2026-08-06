@@ -6,57 +6,57 @@
 {% if detect_error %}
 <div class="alert alert-warning py-2 px-3 mt-3 mb-3">
   <i class="bi bi-exclamation-triangle-fill"></i>
-  <strong>Router-Erkennung fehlgeschlagen:</strong> {{ detect_error }}
+  <strong>Router detection failed:</strong> {{ detect_error }}
 </div>
 {% endif %}
 
 <!-- Step 1: Router detection status -->
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center">
-    <span><i class="bi bi-router"></i> Schritt 1 &mdash; Router erkannt</span>
+    <span><i class="bi bi-router"></i> Step 1 &mdash; Router detected</span>
     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="detectRouter()" id="detect-btn">
-      <i class="bi bi-arrow-repeat"></i> Prüfen
+      <i class="bi bi-arrow-repeat"></i> Check
     </button>
   </div>
   <div class="card-body small" id="router-info-body">
     {% if router_info and router_info.available %}
     <div class="mb-2">
-      <span class="text-muted">Hersteller:</span>
-      <strong>{{ router_info.manufacturer|default:"Unbekannt" }}</strong>
+      <span class="text-muted">Manufacturer:</span>
+      <strong>{{ router_info.manufacturer|default:"Unknown" }}</strong>
     </div>
     <div class="mb-2">
-      <span class="text-muted">Modell:</span>
-      <strong>{{ router_info.model|default:"Unbekannt" }}</strong>
+      <span class="text-muted">Model:</span>
+      <strong>{{ router_info.model|default:"Unknown" }}</strong>
       {% if router_info.model_number %}
       <span class="text-muted">({{ router_info.model_number }})</span>
       {% endif %}
     </div>
     <div class="mb-2">
       <span class="text-muted">Gateway:</span>
-      <code>{{ router_info.gateway|default:"Unbekannt" }}</code>
+      <code>{{ router_info.gateway|default:"Unknown" }}</code>
     </div>
     <div class="mt-2">
       {% if credentials_configured %}
-      <span class="badge bg-success"><i class="bi bi-check-circle"></i> Zugangsdaten hinterlegt</span>
+      <span class="badge bg-success"><i class="bi bi-check-circle"></i> Credentials stored</span>
       {% else %}
-      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> Zugangsdaten fehlen (unter Erweitert)</span>
+      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> Credentials missing (under Advanced)</span>
       {% endif %}
     </div>
     {% elif router_info and router_info.available == false %}
     <p class="text-muted mb-0">
       <i class="bi bi-info-circle"></i>
-      Kein UPnP/TR-064-Ger&auml;t an {{ router_info.gateway|default:"(unbekannt)" }} gefunden.
+      No UPnP/TR-064 device found at {{ router_info.gateway|default:"(unknown)" }}.
     </p>
     <p class="text-muted mb-0 mt-1 small">
-      Port-Weiterleitung setzt einen Router mit
-      <strong>UPnP IGD (WANIPConnection)</strong> voraus &mdash; in der
-      Router-Oberfl&auml;che aktivieren. Falls dein Router das nicht kann,
-      leite die Ports manuell weiter (siehe Erweitert).
+      Port forwarding requires a router with
+      <strong>UPnP IGD (WANIPConnection)</strong> &mdash; enable it in the
+      router's interface. If your router does not support it,
+      forward the ports manually (see Advanced).
     </p>
     {% else %}
     <div id="detect-pending">
       <span class="spinner-border spinner-border-sm" role="status"></span>
-      Router wird gepr&uuml;ft...
+      Checking router...
     </div>
     {% endif %}
   </div>
@@ -65,12 +65,12 @@
 <!-- Step 2: One-click enable (main path) -->
 <div class="card mt-3">
   <div class="card-header">
-    <span><i class="bi bi-lightning-charge"></i> Schritt 2 &mdash; Ports automatisch freigeben</span>
+    <span><i class="bi bi-lightning-charge"></i> Step 2 &mdash; Open ports automatically</span>
   </div>
   <div class="card-body small">
     {% if router_info and router_info.available %}
     <p class="mb-2">
-      Ein Klick richtet alle n&ouml;tigen Weiterleitungen zum Server ein:
+      One click sets up all necessary forwards to the server:
     </p>
     <ul class="mb-3">
       <li><code>TCP 80</code> &rarr; {{ local_ip }}:80 (HTTP)</li>
@@ -81,22 +81,22 @@
       {% csrf_token %}
       <input type="hidden" name="action" value="quick-enable">
       <button type="submit" class="btn btn-primary" {% if not credentials_configured %}disabled{% endif %}>
-        <i class="bi bi-lightning-charge"></i> Jetzt freigeben
+        <i class="bi bi-lightning-charge"></i> Open now
       </button>
     </form>
     {% if not credentials_configured %}
     <p class="text-muted mt-2 mb-0">
       <i class="bi bi-info-circle"></i>
-      Falls dein Router Zugangsdaten ben&ouml;tigt, trage sie unten unter
-      <strong>Erweitert</strong> ein.
+      If your router requires credentials, enter them below under
+      <strong>Advanced</strong>.
     </p>
     {% endif %}
     {% else %}
     <p class="text-muted mb-0">
       <i class="bi bi-info-circle"></i>
-      Sobald der Router erkannt ist, kannst du hier die Ports per Klick freigeben.
-      Falls das nicht funktioniert, leite die Ports 80, 443 und 33 manuell im
-      Router weiter (siehe Erweitert).
+      Once the router is detected, you can open the ports with a click here.
+      If that does not work, forward ports 80, 443 and 33 manually in the
+      router (see Advanced).
     </p>
     {% endif %}
   </div>
@@ -106,41 +106,41 @@
 <!-- IPv6 status (FRITZ!Box, read-only) -->
 <div class="card mt-3">
   <div class="card-header">
-    <span><i class="bi bi-globe2"></i> IPv6-Status</span>
+    <span><i class="bi bi-globe2"></i> IPv6 Status</span>
   </div>
   <div class="card-body small">
     {% if ipv6_info.ipv6_activ %}
     <div class="mb-2">
-      <span class="badge bg-success"><i class="bi bi-check-circle"></i> IPv6 ist auf der FRITZ!Box aktiv</span>
+      <span class="badge bg-success"><i class="bi bi-check-circle"></i> IPv6 is enabled on the FRITZ!Box</span>
     </div>
     {% else %}
     <div class="mb-2">
-      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> IPv6 ist auf der FRITZ!Box deaktiviert</span>
+      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> IPv6 is disabled on the FRITZ!Box</span>
     </div>
     {% endif %}
     <div class="mb-2">
-      <span class="text-muted">Aktuelle IPv6-Adresse des Servers:</span>
+      <span class="text-muted">Server's current IPv6 address:</span>
       <code>{{ ipv6_info.current_device_ipv6|default:"-" }}</code>
     </div>
     {% for d in ipv6_info.devices %}
     {% if d.forwarding_activ %}
     <div class="mb-2">
-      <span class="text-muted">IPv6-Freigabe f&uuml;r {{ d.name }}:</span>
-      <span class="badge bg-success">Aktiv</span>
+      <span class="text-muted">IPv6 forwarding for {{ d.name }}:</span>
+      <span class="badge bg-success">Active</span>
     </div>
     {% endif %}
     {% endfor %}
     {% if ipv6_info.static_ipv6_supported %}
     <p class="text-muted mb-0">
       <i class="bi bi-info-circle"></i>
-      Die FRITZ!Box kann dem Server eine feste IPv6-Adresse zuweisen.
+      The FRITZ!Box can assign a fixed IPv6 address to the server.
     </p>
     {% else %}
     <p class="text-muted mb-0">
       <i class="bi bi-info-circle"></i>
-      {{ ipv6_info.note|default:"Die FRITZ!Box vergibt IPv6-Adressen per SLAAC." }}
-      IPv6-Freigaben sind ger&auml;tegebunden und passen sich automatisch an,
-      wenn sich das IPv6-Pr&auml;fix des Anschlusses &auml;ndert.
+      {{ ipv6_info.note|default:"The FRITZ!Box assigns IPv6 addresses via SLAAC." }}
+      IPv6 forwards are tied to the device and adapt automatically
+      when the connection's IPv6 prefix changes.
     </p>
     {% endif %}
   </div>
@@ -150,7 +150,7 @@
 <!-- Advanced options -->
 <div class="mt-4">
   <a class="advanced-toggle" data-bs-toggle="collapse" href="#advanced-portforward" role="button" aria-expanded="false">
-    <i class="bi bi-sliders"></i> Erweitert (Zugangsdaten, einzelne Regeln)
+    <i class="bi bi-sliders"></i> Advanced (Credentials, individual rules)
   </a>
   <div class="collapse advanced-collapse" id="advanced-portforward">
 
@@ -159,27 +159,27 @@
       <div class="col-md-6 mb-3">
         <div class="card h-100">
           <div class="card-header">
-            <i class="bi bi-key"></i> Router-Zugangsdaten
+            <i class="bi bi-key"></i> Router Credentials
           </div>
           <div class="card-body small">
             {% if credentials_configured %}
             <div class="alert alert-success py-2 px-3 mb-2">
               <i class="bi bi-check-circle-fill"></i>
-              Zugangsdaten sind hinterlegt.
+              Credentials are stored.
             </div>
             <form method="post" data-exec="true" class="mb-0">
               {% csrf_token %}
               <input type="hidden" name="action" value="save-credentials">
               <div class="mb-2">
-                <label class="form-label">Benutzername (UPnP-Benutzer)</label>
+                <label class="form-label">Username (UPnP user)</label>
                 <input type="text" class="form-control form-control-sm" name="username"
-                       placeholder="Router UPnP-Benutzername" value="">
+                       placeholder="Router UPnP username" value="">
               </div>
               <div class="mb-2">
-                <label class="form-label">Passwort</label>
+                <label class="form-label">Password</label>
                 <div class="input-group input-group-sm">
                   <input type="password" class="form-control" name="password" id="cred-password"
-                         placeholder="TR-064-Passwort">
+                         placeholder="TR-064 password">
                   <button type="button" class="btn btn-outline-secondary"
                           onclick="toggleFieldVisibility('cred-password', this)">
                     <i class="bi bi-eye"></i>
@@ -187,27 +187,27 @@
                 </div>
               </div>
               <button type="submit" class="btn btn-primary btn-sm w-100">
-                <i class="bi bi-save"></i> Zugangsdaten aktualisieren
+                <i class="bi bi-save"></i> Update credentials
               </button>
             </form>
             {% else %}
             <p class="text-muted mb-2">
-              Einige Router (z. B. FRITZ!Box) verlangen eine Anmeldung, andere
-              erlauben UPnP ohne Zugangsdaten (dann leer lassen).
+              Some routers (e.g. FRITZ!Box) require a login, others
+              allow UPnP without credentials (then leave empty).
             </p>
             <form method="post" data-exec="true" class="mb-0">
               {% csrf_token %}
               <input type="hidden" name="action" value="save-credentials">
               <div class="mb-2">
-                <label class="form-label">Benutzername</label>
+                <label class="form-label">Username</label>
                 <input type="text" class="form-control form-control-sm" name="username"
-                       placeholder="UPnP-Benutzername (leer, falls keine Anmeldung)">
+                       placeholder="UPnP username (empty if no login)">
               </div>
               <div class="mb-2">
-                <label class="form-label">Passwort</label>
+                <label class="form-label">Password</label>
                 <div class="input-group input-group-sm">
                   <input type="password" class="form-control" name="password" id="cred-password-new"
-                         placeholder="UPnP-Passwort (leer, falls keine Anmeldung)">
+                         placeholder="UPnP password (empty if no login)">
                   <button type="button" class="btn btn-outline-secondary"
                           onclick="toggleFieldVisibility('cred-password-new', this)">
                     <i class="bi bi-eye"></i>
@@ -216,10 +216,10 @@
               </div>
               <div class="alert alert-info py-2 px-3 mb-2">
                 <i class="bi bi-info-circle-fill"></i>
-                Zugangsdaten werden verschl&uuml;sselt auf dem Server gespeichert.
+                Credentials are stored encrypted on the server.
               </div>
               <button type="submit" class="btn btn-primary btn-sm w-100">
-                <i class="bi bi-save"></i> Zugangsdaten speichern
+                <i class="bi bi-save"></i> Save credentials
               </button>
             </form>
             {% endif %}
@@ -231,14 +231,14 @@
       <div class="col-md-6 mb-3">
         <div class="card h-100">
           <div class="card-header d-flex justify-content-between align-items-center">
-            <span><i class="bi bi-list-columns"></i> Einzelne Regeln</span>
+            <span><i class="bi bi-list-columns"></i> Individual Rules</span>
             <div>
               <button type="button" class="btn btn-sm btn-outline-secondary me-1" onclick="refreshMappings()">
-                <i class="bi bi-arrow-repeat"></i> Aktualisieren
+                <i class="bi bi-arrow-repeat"></i> Refresh
               </button>
               {% if credentials_configured and router_info.available %}
               <button type="button" class="btn btn-sm btn-primary" onclick="showAddForm()">
-                <i class="bi bi-plus-circle"></i> Hinzuf&uuml;gen
+                <i class="bi bi-plus-circle"></i> Add
               </button>
               {% endif %}
             </div>
@@ -247,7 +247,7 @@
             {% if not credentials_configured and not router_info.available %}
             <p class="text-muted mb-0">
               <i class="bi bi-info-circle"></i>
-              Zuerst Router-Zugangsdaten eingeben.
+              First enter the router credentials.
             </p>
             {% elif list_error %}
             <div class="alert alert-warning py-2 px-3 mb-0">
@@ -259,12 +259,12 @@
               <table class="table table-sm table-hover mb-0">
                 <thead>
                   <tr>
-                    <th>Externer Port</th>
-                    <th>Protokoll</th>
-                    <th>Interne IP</th>
-                    <th>Interner Port</th>
-                    <th>Beschreibung</th>
-                    <th>IP-Version</th>
+                    <th>External Port</th>
+                    <th>Protocol</th>
+                    <th>Internal IP</th>
+                    <th>Internal Port</th>
+                    <th>Description</th>
+                    <th>IP Version</th>
                     <th>Status</th>
                     <th></th>
                   </tr>
@@ -292,14 +292,14 @@
                     </td>
                     <td>
                       {% if m.enabled %}
-                      <span class="badge bg-success">Aktiv</span>
+                      <span class="badge bg-success">Active</span>
                       {% else %}
-                      <span class="badge bg-secondary">Deaktiviert</span>
+                      <span class="badge bg-secondary">Disabled</span>
                       {% endif %}
                     </td>
                     <td>
                       <form method="post" data-exec="true" class="d-inline"
-                            onsubmit="return confirm('Weiterleitung {{ m.protocol }}/{{ m.external_port }} l&ouml;schen?')">
+                            onsubmit="return confirm('Delete forwarding {{ m.protocol }}/{{ m.external_port }}?')">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="delete">
                         <input type="hidden" name="ext_port" value="{{ m.external_port }}">
@@ -317,8 +317,8 @@
             {% else %}
             <p class="text-muted mb-0">
               <i class="bi bi-info-circle"></i>
-              Keine Weiterleitungen gefunden. &Uuml;ber <strong>Hinzuf&uuml;gen</strong>
-              oder die Ein-Klick-Freigabe oben anlegen.
+              No forwards found. Create one via <strong>Add</strong>
+              or the one-click enable above.
             </p>
             {% endif %}
           </div>
@@ -329,12 +329,12 @@
     <!-- Manual instructions -->
     <div class="card mt-1">
       <div class="card-header">
-        <i class="bi bi-hand-index-thumb"></i> Manuelle Weiterleitung (ohne UPnP)
+        <i class="bi bi-hand-index-thumb"></i> Manual Forwarding (without UPnP)
       </div>
       <div class="card-body small">
         <p class="mb-1">
-          Leite in der Router-Oberfl&auml;che folgende Ports auf die interne IP
-          <code>{{ local_ip }}</code> weiter:
+          Forward the following ports in the router's interface to the internal IP
+          <code>{{ local_ip }}</code>:
         </p>
         <ul class="mb-1">
           <li>TCP <code>80</code> &rarr; <code>{{ local_ip }}</code>:80</li>
@@ -342,10 +342,10 @@
           <li>TCP <code>33</code> &rarr; <code>{{ local_ip }}</code>:22</li>
         </ul>
         <p class="text-muted mb-0">
-          Oft finden sich die Einstellungen unter &bdquo;Internet &rarr;
-          Freigaben&ldquo;, &bdquo;Port Forwarding&ldquo; oder
-          &bdquo;NAT&ldquo;. Am besten zus&auml;tzlich eine feste IP
-          (DHCP-Reservierung) f&uuml;r den Server vergeben.
+          The settings are often found under &bdquo;Internet &rarr;
+          Sharing&ldquo;, &bdquo;Port Forwarding&ldquo; or
+          &bdquo;NAT&ldquo;. It is best to also assign a fixed IP
+          (DHCP reservation) for the server.
         </p>
       </div>
     </div>
@@ -353,7 +353,7 @@
     <!-- Add Port Mapping Form (hidden, slides in) -->
     <div id="add-form-card" class="card mt-3" style="display:none">
       <div class="card-header">
-        <i class="bi bi-plus-circle"></i> Regel hinzuf&uuml;gen
+        <i class="bi bi-plus-circle"></i> Add Rule
       </div>
       <div class="card-body small">
         <form method="post" data-exec="true" id="add-form">
@@ -362,57 +362,57 @@
 
           <div class="row mb-2">
             <div class="col-md-3">
-              <label class="form-label">Externer Port</label>
+              <label class="form-label">External Port</label>
               <input type="number" class="form-control form-control-sm" name="ext_port"
-                     min="1" max="65535" required placeholder="z. B. 80">
+                     min="1" max="65535" required placeholder="e.g. 80">
             </div>
             <div class="col-md-3">
-              <label class="form-label">Protokoll</label>
+              <label class="form-label">Protocol</label>
               <select class="form-select form-select-sm" name="protocol">
                 <option value="TCP">TCP</option>
                 <option value="UDP">UDP</option>
               </select>
             </div>
             <div class="col-md-3">
-              <label class="form-label">Interner Port</label>
+              <label class="form-label">Internal Port</label>
               <input type="number" class="form-control form-control-sm" name="int_port"
-                     min="1" max="65535" required placeholder="z. B. 80" value="80">
+                     min="1" max="65535" required placeholder="e.g. 80" value="80">
             </div>
             <div class="col-md-3">
-              <label class="form-label">Interne IP</label>
+              <label class="form-label">Internal IP</label>
               <input type="text" class="form-control form-control-sm" name="int_client"
                      required pattern="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
-                     placeholder="z. B. 192.168.41.100"
+                     placeholder="e.g. 192.168.41.100"
                      value="{{ local_ip }}">
             </div>
           </div>
 
           <div class="mb-2">
-            <label class="form-label">Beschreibung <span class="text-muted">(optional)</span></label>
+            <label class="form-label">Description <span class="text-muted">(optional)</span></label>
             <input type="text" class="form-control form-control-sm" name="description"
-                   placeholder="z. B. SymbiOS WebUI" value="SymbiOS">
+                   placeholder="e.g. SymbiOS WebUI" value="SymbiOS">
           </div>
 
           <div class="mb-2">
-            <label class="form-label">IP-Version</label>
+            <label class="form-label">IP Version</label>
             <select class="form-select form-select-sm" name="accesstype" id="accesstype-select">
-              <option value="ipv4">Nur IPv4</option>
+              <option value="ipv4">IPv4 only</option>
               {% if ipv6_info %}
-              <option value="ipv6">Nur IPv6 (ger&auml;tegebunden)</option>
+              <option value="ipv6">IPv6 only (device-bound)</option>
               <option value="ipv4_ipv6">IPv4 + IPv6</option>
               {% endif %}
             </select>
             {% if ipv6_info %}
             <div class="form-text">
-              IPv6-Freigaben sind ger&auml;tegebunden: Die FRITZ!Box leitet auf
-              die aktuelle IPv6-Adresse des Servers weiter und passt die Regel
-              automatisch an, wenn sich das IPv6-Pr&auml;fix &auml;ndert.
+              IPv6 forwards are device-bound: The FRITZ!Box forwards to
+              the server's current IPv6 address and adjusts the rule
+              automatically when the IPv6 prefix changes.
             </div>
             {% endif %}
           </div>
 
           <div class="mb-2">
-            <label class="form-label">Vorschl&auml;ge f&uuml;r SymbiOS</label>
+            <label class="form-label">Presets for SymbiOS</label>
             <div class="alert alert-info py-2 px-3 mb-0 small">
               <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="preset-http"
@@ -427,17 +427,17 @@
               <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="preset-ssh"
                        onchange="presetRule('preset-ssh', 33, 22, '{{ local_ip }}', 'SymbiOS SSH')">
-                <label class="form-check-label">TCP 33 &rarr; {{ local_ip }}:22 (SSH, anderer Port)</label>
+                <label class="form-check-label">TCP 33 &rarr; {{ local_ip }}:22 (SSH, different port)</label>
               </div>
             </div>
           </div>
 
           <div class="d-flex gap-2">
             <button type="submit" class="btn btn-primary btn-sm">
-              <i class="bi bi-plus-circle"></i> Regel hinzuf&uuml;gen
+              <i class="bi bi-plus-circle"></i> Add Rule
             </button>
             <button type="button" class="btn btn-outline-secondary btn-sm" onclick="hideAddForm()">
-              Abbrechen
+              Cancel
             </button>
           </div>
         </form>
@@ -466,30 +466,30 @@ function detectRouter() {
   var btn = document.getElementById('detect-btn');
   var body = document.getElementById('router-info-body');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Pr&uuml;fe...';
-  body.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Router wird gepr&uuml;ft...';
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking...';
+  body.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking router...';
 
   fetch('{% url "settings_port_forwarding_detect" %}')
     .then(r => r.json())
     .then(data => {
       if (data.available) {
         var html = '';
-        html += '<div class="mb-2"><span class="text-muted">Hersteller:</span> <strong>' + (data.manufacturer || 'Unbekannt') + '</strong></div>';
-        html += '<div class="mb-2"><span class="text-muted">Modell:</span> <strong>' + (data.model || 'Unbekannt') + '</strong>' + (data.model_number ? ' <span class="text-muted">(' + data.model_number + ')</span>' : '') + '</div>';
-        html += '<div class="mb-2"><span class="text-muted">Gateway:</span> <code>' + (data.gateway || 'Unbekannt') + '</code></div>';
+        html += '<div class="mb-2"><span class="text-muted">Manufacturer:</span> <strong>' + (data.manufacturer || 'Unknown') + '</strong></div>';
+        html += '<div class="mb-2"><span class="text-muted">Model:</span> <strong>' + (data.model || 'Unknown') + '</strong>' + (data.model_number ? ' <span class="text-muted">(' + data.model_number + ')</span>' : '') + '</div>';
+        html += '<div class="mb-2"><span class="text-muted">Gateway:</span> <code>' + (data.gateway || 'Unknown') + '</code></div>';
         body.innerHTML = html;
         location.reload();
       } else {
-        body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> Kein UPnP/TR-064-Ger&auml;t an ' + (data.gateway || '(unbekannt)') + ' gefunden.</p>' +
-          '<p class="text-muted mb-0 mt-1 small">Port-Weiterleitung setzt UPnP IGD (WANIPConnection) voraus &mdash; im Router aktivieren oder manuell weiterleiten.</p>';
+        body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> No UPnP/TR-064 device found at ' + (data.gateway || '(unknown)') + '.</p>' +
+          '<p class="text-muted mb-0 mt-1 small">Port forwarding requires UPnP IGD (WANIPConnection) &mdash; enable it in the router or forward manually.</p>';
       }
     })
     .catch(err => {
-      body.innerHTML = '<div class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> Fehler: ' + err.message + '</div>';
+      body.innerHTML = '<div class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> Error: ' + err.message + '</div>';
     })
     .finally(() => {
       btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Pr&uuml;fen';
+      btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Check';
     });
 }
 
@@ -518,26 +518,26 @@ function presetRule(checkboxId, extPort, intPort, intClient, desc) {
 // Refresh mappings (AJAX)
 function refreshMappings() {
   var body = document.getElementById('mappings-body');
-  body.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Aktualisiere...';
+  body.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Refreshing...';
 
   fetch('{% url "settings_port_forwarding_list" %}')
     .then(r => r.json())
     .then(data => {
       if (!data.ok) {
-        body.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0"><i class="bi bi-exclamation-triangle-fill"></i> ' + (data.error || 'Keine Regeln abrufbar') + '</div>';
+        body.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0"><i class="bi bi-exclamation-triangle-fill"></i> ' + (data.error || 'Could not retrieve rules') + '</div>';
         return;
       }
       var mappings = data.mappings || [];
       if (mappings.length === 0) {
-        body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> Keine Weiterleitungen gefunden.</p>';
+        body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> No forwards found.</p>';
         return;
       }
-      var html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead><tr><th>Externer Port</th><th>Protokoll</th><th>Interne IP</th><th>Interner Port</th><th>Beschreibung</th><th>IP-Version</th><th>Status</th><th></th></tr></thead><tbody>';
+      var html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead><tr><th>External Port</th><th>Protocol</th><th>Internal IP</th><th>Internal Port</th><th>Description</th><th>IP Version</th><th>Status</th><th></th></tr></thead><tbody>';
       for (var i = 0; i < mappings.length; i++) {
         var m = mappings[i];
         var protoClass = m.protocol === 'TCP' ? 'bg-primary' : 'bg-success';
         var statusClass = m.enabled ? 'bg-success' : 'bg-secondary';
-        var statusText = m.enabled ? 'Aktiv' : 'Deaktiviert';
+        var statusText = m.enabled ? 'Active' : 'Disabled';
         var ipv6Class = 'bg-secondary';
         var ipv6Text = 'IPv4';
         if (m.accesstype === 'ipv6') { ipv6Class = 'bg-info text-dark'; ipv6Text = 'IPv6'; }
@@ -551,7 +551,7 @@ function refreshMappings() {
           '<td><span class="badge ' + ipv6Class + '">' + ipv6Text + '</span></td>' +
           '<td><span class="badge ' + statusClass + '">' + statusText + '</span></td>' +
           '<td>' +
-          '<form method="post" data-exec="true" class="d-inline" onsubmit="return confirm(\'Weiterleitung ' + m.protocol + '/' + m.external_port + ' l&ouml;schen?\')">' +
+          '<form method="post" data-exec="true" class="d-inline" onsubmit="return confirm(\'Delete forwarding ' + m.protocol + '/' + m.external_port + '?\')">' +
           '<input type="hidden" name="csrfmiddlewaretoken" value="' + document.querySelector('[name=csrfmiddlewaretoken]').value + '">' +
           '<input type="hidden" name="action" value="delete">' +
           '<input type="hidden" name="ext_port" value="' + m.external_port + '">' +
@@ -564,7 +564,7 @@ function refreshMappings() {
       body.innerHTML = html;
     })
     .catch(err => {
-      body.innerHTML = '<div class="alert alert-danger py-2 px-3 mb-0"><i class="bi bi-x-circle-fill"></i> Fehler: ' + err.message + '</div>';
+      body.innerHTML = '<div class="alert alert-danger py-2 px-3 mb-0"><i class="bi bi-x-circle-fill"></i> Error: ' + err.message + '</div>';
     });
 }
 
