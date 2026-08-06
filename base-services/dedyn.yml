@@ -96,6 +96,33 @@
       when: ddns_host is defined and ddns_host | length > 0
 
 
+    - name: IPv6 EUI-64 addressing (stable interface id for FRITZ!Box port forwards)
+      block:
+        - name: Check for NetworkManager
+          ansible.builtin.stat:
+            path: /usr/bin/nmcli
+          register: nmcli_binary
+
+        - name: Find active ethernet connection profiles
+          ansible.builtin.command: nmcli -t -f NAME,DEVICE,TYPE con show --active
+          register: nm_active
+          changed_when: false
+          check_mode: false
+          when: nmcli_binary.stat.exists
+
+        - name: Force eui64 address generation and disable IPv6 privacy extensions
+          community.general.nmcli:
+            conn_name: "{{ item.split(':')[0] }}"
+            type: ethernet
+            addr_gen_mode6: eui64
+            ip_privacy6: disabled
+            state: present
+          loop: "{{ nm_active.stdout_lines }}"
+          when:
+            - nmcli_binary.stat.exists
+            - item.split(':')[2] == '802-3-ethernet'
+      when: ansible_facts['os_family'] == 'Debian'
+
     - name: Register playbook as installed
       ansible.builtin.command: symbios-state.sh set base-services/dedyn.yml
       changed_when: false
