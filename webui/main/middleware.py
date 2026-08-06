@@ -97,6 +97,28 @@ def _admin_password_status():
     return 'unavailable'
 
 
+class SecurityHeadersMiddleware:
+    """Emit Cross-Origin-Opener-Policy only on trustworthy origins.
+
+    Browsers ignore COOP (and log a console warning) when the response is
+    served over plain HTTP on a non-localhost host. Django's SecurityMiddleware
+    sends the header unconditionally, so it is disabled in settings and set
+    here only when the request is actually secure (HTTPS via the Traefik proxy,
+    i.e. X-Forwarded-Proto: https) or served from localhost, which browsers
+    treat as trustworthy even without TLS.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        host = request.get_host().split(':')[0]
+        if request.is_secure() or host in ('localhost', '127.0.0.1', '::1'):
+            response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+        return response
+
+
 class AutheliaMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
