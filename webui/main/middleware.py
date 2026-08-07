@@ -188,7 +188,7 @@ class SetupRequiredMiddleware:
         '/login/',
         '/health/',
         '/health/data/',
-        '/settings/ddns/',
+        '/settings/dns/',
         '/logout/',
         '/authelia-logout/',
         '/change-password/',

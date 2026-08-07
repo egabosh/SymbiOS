@@ -6,6 +6,7 @@ all:
     locale: "en_US.UTF-8"
     base_domain: ""
     acme_server: ""
+    acme_resolver: 'letsencrypt'
     instance: "default"
     ldap_basedn: "dc=openldap,dc=local"
     # filesystem layout (all data lives under the /symbios data root)

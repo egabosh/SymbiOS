@@ -33,16 +33,21 @@ import re
 import shlex
 
 
-def _start_reapply(playbooks=None):
+def _start_reapply(playbooks=None, force=False):
     """Start symbios-reapply.sh as a tracked job and return the job id.
 
     The job streams live output to the browser via /exec/output/.
+    With force=True, playbooks that are not yet marked as installed are
+    run anyway (--force).
     Returns a (job_id, title, cmd) tuple.
     """
     from .utils.jobs import create_job
     if playbooks:
         args = ' '.join(playbooks)
-        flag = f'--only {args}'
+        if force:
+            flag = f'--only --force {args}'
+        else:
+            flag = f'--only {args}'
         title = 'Reapplying: ' + ', '.join(playbooks)
     else:
         flag = ''
@@ -52,8 +57,19 @@ def _start_reapply(playbooks=None):
     return job_id, title, cmd
 
 
+# Playbooks that configure all domain-dependent services. A DNS domain is the
+# prerequisite for the reverse proxy (Traefik, which also handles the ACME
+# certificates) and the Authelia SSO, so these are only applied once DNS is
+# configured. They are run with --force because they may not be installed yet.
+_DNS_CHAIN = [
+    'base-services/traefik.yml',
+    'base-services/authelia.yml',
+]
+_DNS_CHAIN_DESEC = ['base-services/dedyn.yml'] + _DNS_CHAIN
+
+
 @login_required
-def settings_ddns(request):
+def settings_dns(request):
     config = _get_inventory_config()
     if 'all' not in config:
         config['all'] = {}
@@ -98,7 +114,7 @@ def settings_ddns(request):
                     if is_ajax:
                         return JsonResponse({'ok': False, 'error': 'Please enter a domain.'}, status=400)
                     messages.error(request, 'Please enter a domain.')
-                    return redirect('settings_ddns')
+                    return redirect('settings_dns')
                 config['all']['vars']['dns_mode'] = 'self-managed'
                 config['all']['vars']['ddns_apikey'] = ''
                 config['all']['vars']['ddns_host'] = ''
@@ -106,13 +122,16 @@ def settings_ddns(request):
                 config['all']['vars']['base_domain'] = self_domain
                 _save_inventory_config(config)
                 if is_ajax:
-                    job_id, title, cmd = _start_reapply()
+                    job_id, title, cmd = _start_reapply(playbooks=_DNS_CHAIN,
+                                                        force=True)
                     return JsonResponse({'ok': True, 'job': job_id, 'title': title,
                                          'message': f'DNS settings saved for {self_domain}.',
                                          'command': cmd})
                 messages.success(request, f'DNS settings saved for {self_domain}.')
-                messages.info(request, 'Reapplying all playbooks in the background...')
-                _start_reapply()
+                # Apply the domain-dependent playbooks (Traefik, ACME, Authelia)
+                # in the background, with the new domain.
+                messages.info(request, 'Reapplying DNS playbooks in the background...')
+                _start_reapply(playbooks=_DNS_CHAIN, force=True)
             else:
                 # deSEC mode (existing behavior)
                 ddns_host = request.POST.get('ddns_host', '')
@@ -130,41 +149,31 @@ def settings_ddns(request):
                 config['all']['vars']['base_domain'] = ddns_host
                 _save_inventory_config(config)
                 if is_ajax:
-                    from .utils.jobs import create_job
-                    # Chain: run dedyn playbook, then full reapply
-                    cmd = 'symbios-run-playbook.sh base-services/dedyn.yml && symbios-reapply.sh'
-                    job_id = create_job(cmd, timeout=3600)
-                    return JsonResponse({'ok': True, 'job': job_id,
-                                         'title': 'Configuring DNS and reapplying...',
+                    job_id, title, cmd = _start_reapply(playbooks=_DNS_CHAIN_DESEC,
+                                                        force=True)
+                    return JsonResponse({'ok': True, 'job': job_id, 'title': title,
                                          'message': 'DNS settings saved.',
                                          'command': cmd})
                 messages.success(request, 'DNS settings saved.')
-                try:
-                    ok, out = run_playbook('base-services/dedyn.yml', timeout=120)
-                    if ok:
-                        messages.success(request, 'DDNS playbook completed successfully.')
-                    else:
-                        messages.warning(request, 'DDNS playbook completed with issues.')
-                except Exception as e:
-                    messages.warning(request, 'Could not run DDNS playbook: ' + str(e))
-                # Reapply all playbooks with updated domain in the background
-                messages.info(request, 'Reapplying all playbooks in the background...')
-                _start_reapply()
+                # Apply the domain-dependent playbooks (DDNS, Traefik, ACME,
+                # Authelia) in the background, with the new domain.
+                messages.info(request, 'Reapplying DNS playbooks in the background...')
+                _start_reapply(playbooks=_DNS_CHAIN_DESEC, force=True)
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)
             messages.error(request, f'Error: {e}')
-        return redirect('settings_ddns')
+        return redirect('settings_dns')
 
-    badge = get_page_badge('ddns', vars_)
-    return render(request, 'main/settings_ddns.html', {
+    badge = get_page_badge('dns', vars_)
+    return render(request, 'main/settings_dns.html', {
         'vars': vars_,
         'dns_mode': current_dns_mode,
         'self_domain': vars_.get('base_domain', '') if current_dns_mode == 'self-managed' else '',
-        'page_key': 'ddns',
+        'page_key': 'dns',
         'page_icon': 'bi-globe',
         'page_title': 'DNS',
-        'page_explain': PAGE_EXPLAIN['ddns'],
+        'page_explain': PAGE_EXPLAIN['dns'],
         'page_status': badge[0],
         'page_status_label': badge[1],
         'page_status_text': badge[2],
@@ -172,7 +181,7 @@ def settings_ddns(request):
 
 
 @login_required
-def settings_ddns_check_domain(request):
+def settings_dns_check_domain(request):
     """AJAX GET — check if a .dedyn.io hostname is still available (before registration)."""
     hostname = request.GET.get('hostname', '').strip().lower()
     if not hostname:
@@ -210,7 +219,7 @@ def settings_ddns_check_domain(request):
 
 
 @login_required
-def settings_ddns_host_status(request):
+def settings_dns_host_status(request):
     hostname = request.GET.get('hostname', '')
     api_key = request.GET.get('api_key', '')
     current_ipv4 = request.GET.get('current_ipv4', '')
@@ -325,7 +334,7 @@ def settings_ddns_host_status(request):
     return JsonResponse(result)
 
 @login_required
-def settings_ddns_test_api(request):
+def settings_dns_test_api(request):
     if request.method != 'POST':
         return JsonResponse({'valid': False, 'error': 'POST required'})
 
@@ -383,7 +392,7 @@ def settings_ddns_test_api(request):
 
 
 @login_required
-def settings_ddns_check_ip(request):
+def settings_dns_check_ip(request):
     result = {'ipv4': '', 'ipv6': '', 'ipv4_available': False, 'ipv6_available': False}
 
     try:
@@ -437,7 +446,7 @@ def _desec_request(method, path, data=None, token=None, timeout=15):
 
 
 @login_required
-def settings_ddns_register(request):
+def settings_dns_register(request):
     """AJAX POST — Register a new deSEC account."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
@@ -473,7 +482,7 @@ def settings_ddns_register(request):
 
 
 @login_required
-def settings_ddns_finalize(request):
+def settings_dns_finalize(request):
     """AJAX POST — Login, create API token, optionally create domain, save to inventory."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
@@ -555,7 +564,7 @@ def settings_ddns_finalize(request):
 
 
 @login_required
-def settings_ddns_captcha(request):
+def settings_dns_captcha(request):
     """AJAX GET — Fetch a captcha from deSEC (for registration)."""
     result = _desec_request('POST', '/captcha/', timeout=15)
     if result['status'] == 201:

@@ -20,7 +20,7 @@
           Required for any service that needs to be accessed from the internet
           (web interface, Authelia, etc.).
         </p>
-        <a href="/settings/ddns/" class="btn btn-outline-primary btn-sm">Configure</a>
+        <a href="/settings/dns/" class="btn btn-outline-primary btn-sm">Configure</a>
       </div>
     </div>
   </div>
@@ -136,13 +136,13 @@
     </p>
     <ol class="ps-3 mb-1">
       <li>Enable IPv6 on your router. Verify on the
-          <a href="/settings/ddns/">DNS page</a> that your server has
+          <a href="/settings/dns/">DNS page</a> that your server has
           a global IPv6 address (starts with <code>2001:</code> /
           <code>2a0:</code> / <code>2a01:</code>…).</li>
       <li>In your router's <em>Firewall</em> / <em>Traffic Rules</em>
           section, allow incoming TCP traffic on ports 80 and 443 to your
           server's IPv6 address.</li>
-      <li>On the <a href="/settings/ddns/">DNS page</a>, select
+      <li>On the <a href="/settings/dns/">DNS page</a>, select
           <strong>"IPv6 only"</strong> (or <strong>"Dual-Stack"</strong>
           if you also have working public IPv4).</li>
     </ol>
