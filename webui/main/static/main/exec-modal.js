@@ -57,6 +57,7 @@ Also intercepts all forms with data-exec="true" attribute:
           finish(false);
           return;
         }
+        if (d.command) showCommand(d.command);
         appendDelta(d.output || '');
         if (d.done) {
           finish(d.success);
@@ -84,14 +85,19 @@ Also intercepts all forms with data-exec="true" attribute:
     _needsReload = true;
   }
 
+  function showCommand(command) {
+    if (!command) return;
+    commandEl.textContent = command;
+    commandWrap.classList.remove('d-none');
+  }
+
   function open(title, command) {
     outputEl.innerHTML = '';
     outputEl.dataset.rawLen = '0';
     rawLen = 0;
     titleEl.innerHTML = '<i class="bi bi-terminal me-2"></i>' + escapeHtml(title || 'Running command...');
     if (command) {
-      commandEl.textContent = command;
-      commandWrap.classList.remove('d-none');
+      showCommand(command);
     } else {
       commandWrap.classList.add('d-none');
     }
