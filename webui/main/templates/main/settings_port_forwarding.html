@@ -113,7 +113,7 @@
         </table>
       </li>
       <li><strong>Important:</strong> Assign the server a <strong>fixed IP</strong>
-        (DHCP reservation / &bdquo;always keep this IP&ldquo;) so the forwards keep
+        (DHCP reservation / "always keep this IP") so the forwards keep
         working after a restart.</li>
     </ol>
     {% endif %}
@@ -199,10 +199,10 @@
     </p>
     <p class="text-muted mb-0 mt-1">
       To let SymbiOS open the ports for you, the router must support automatic
-      port forwarding (often called &bdquo;port sharing&ldquo; or
-      &bdquo;UPnP&ldquo;) and this feature must be enabled in the router. If it
-      is not, switch to <strong>Step 1 &mdash; &bdquo;I'll forward the ports
-      manually&ldquo;</strong> above.
+      port forwarding (often called "port sharing" or
+      "UPnP") and this feature must be enabled in the router. If it
+      is not, switch to <strong>Step 1 &mdash; "I'll forward the ports
+      manually"</strong> above.
     </p>
     {% else %}
     <div id="detect-pending">
@@ -423,7 +423,7 @@
     <hr class="my-2">
     <div class="alert alert-warning py-2 px-3 mb-0">
       <i class="bi bi-exclamation-triangle"></i>
-      <strong>Haftungsausschluss / Disclaimer:</strong> With &bdquo;Open all&ldquo;
+      <strong>Disclaimer:</strong> With "Open all"
       or the per-port buttons, SymbiOS changes the port forwarding rules on your
       router using the router login. Save a backup of the router's settings
       before enabling this. SymbiOS is provided without warranty &mdash; you
@@ -578,7 +578,7 @@
       {% else %}
       <p class="text-muted mb-0">
         <i class="bi bi-info-circle"></i>
-        No rules found yet. Use &bdquo;Open all&ldquo; above or create a rule
+        No rules found yet. Use "Open all" above or create a rule
         with <strong>Add</strong>.
       </p>
       {% endif %}
@@ -715,7 +715,7 @@ function detectRouter() {
         location.reload();
       } else {
         body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> No router found that SymbiOS can control automatically at ' + (data.gateway || '(unknown)') + '.</p>' +
-          '<p class="text-muted mb-0 mt-1">To let SymbiOS open the ports for you, the router must support automatic port forwarding (often called &bdquo;port sharing&ldquo; or &bdquo;UPnP&ldquo;) and this feature must be enabled in the router. If it is not, switch to &bdquo;I\'ll forward the ports manually&ldquo; in Step 1 above.</p>';
+          '<p class="text-muted mb-0 mt-1">To let SymbiOS open the ports for you, the router must support automatic port forwarding (often called "port sharing" or "UPnP") and this feature must be enabled in the router. If it is not, switch to "I\'ll forward the ports manually" in Step 1 above.</p>';
       }
     })
     .catch(err => {
