@@ -155,31 +155,9 @@ def setup_steps(inventory_vars):
         'title': 'Language, Timezone & Keyboard',
         'subtitle': 'Foundation for correct times and input.',
         'optional': False,
+        'group': 'main',
         'status': 'done' if loc_done else 'pending',
         'url': '/settings/localization/',
-    })
-
-    # Step: Separate disk (optional)
-    disk_status = checks.get('disk')
-    steps.append({
-        'key': 'disk',
-        'title': 'Separate Data Disk (optional)',
-        'subtitle': 'More space \u2014 optionally encrypted.',
-        'optional': True,
-        'status': 'done' if disk_status == 'ok' else 'optional',
-        'url': '/settings/disk/',
-    })
-
-    # Step: Connection type
-    network_type = inventory_vars.get('network_type', '')
-    steps.append({
-        'key': 'network',
-        'title': 'Server connection type',
-        'subtitle': ('Home connection behind a router or root server with '
-                     'its own public IP?'),
-        'optional': False,
-        'status': 'done' if network_type else 'pending',
-        'url': '/setup/#step-network',
     })
 
     # Step: DNS
@@ -191,11 +169,13 @@ def setup_steps(inventory_vars):
         'subtitle': 'E.g. <code>my-server.dedyn.io</code> \u2014 prerequisite '
                     'for everything else.',
         'optional': False,
+        'group': 'main',
         'status': 'done' if (dns_done and dns_status == 'ok') else 'pending',
         'url': '/settings/dns/',
     })
 
-    # Step: Port forwarding (only relevant for home)
+    # Step: Port forwarding (main only on a home connection, else advanced)
+    network_type = inventory_vars.get('network_type', '')
     ports_relevant = bool(network_type and network_type != 'root')
     ports_configured = bool(inventory_vars.get('port_forwarding_configured'))
     if not ports_relevant:
@@ -209,19 +189,33 @@ def setup_steps(inventory_vars):
         'title': 'Open Ports',
         'subtitle': 'Forward ports 80/443 from the router to the server.',
         'optional': not ports_relevant,
+        'group': 'main' if ports_relevant else 'advanced',
         'status': ports_status,
         'url': '/settings/port-forwarding/',
     })
 
-    # Step: SSL certificate
-    ssl_done = checks.get('ssl')
+    # Step: Separate disk (optional)
+    disk_status = checks.get('disk')
     steps.append({
-        'key': 'ssl',
-        'title': 'Check SSL',
-        'subtitle': 'A valid certificate proves the server is reachable from the internet.',
+        'key': 'disk',
+        'title': 'Separate Data Disk (optional)',
+        'subtitle': 'More space \u2014 optionally encrypted.',
+        'optional': True,
+        'group': 'advanced',
+        'status': 'done' if disk_status == 'ok' else 'optional',
+        'url': '/settings/disk/',
+    })
+
+    # Step: Connection type
+    steps.append({
+        'key': 'network',
+        'title': 'Server connection type',
+        'subtitle': ('Home connection behind a router or root server with '
+                     'its own public IP?'),
         'optional': False,
-        'status': 'done' if ssl_done == 'ok' else 'pending',
-        'url': '/setup/#step-ssl',
+        'group': 'advanced',
+        'status': 'done' if network_type else 'pending',
+        'url': '/setup/#step-network',
     })
 
     # Step: TLS certificates
@@ -231,6 +225,7 @@ def setup_steps(inventory_vars):
         'title': 'Security Certificates (TLS)',
         'subtitle': 'Valid certificates against the browser warning.',
         'optional': False,
+        'group': 'advanced',
         'status': 'done' if cert_status == 'ok' else 'pending',
         'url': '/settings/acme/',
     })
@@ -242,6 +237,7 @@ def setup_steps(inventory_vars):
         'title': 'Email Sending (SMTP) \u2014 optional',
         'subtitle': 'For notifications and 2FA codes.',
         'optional': True,
+        'group': 'advanced',
         'status': 'done' if smtp_done else 'optional',
         'url': '/settings/mailserver/',
     })
@@ -253,6 +249,7 @@ def setup_steps(inventory_vars):
         'title': '2-Factor Authentication (2FA) \u2014 optional',
         'subtitle': 'Additional protection when logging in.',
         'optional': True,
+        'group': 'advanced',
         'status': 'done' if twofa_done else 'optional',
         'url': '/settings/auth/',
     })
