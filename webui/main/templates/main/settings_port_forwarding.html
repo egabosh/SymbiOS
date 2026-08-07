@@ -368,7 +368,11 @@
                 {{ m.protocol }}
               </span>
             </td>
-            <td><code>{{ m.internal_client }}</code></td>
+            <td><code>{{ m.internal_client }}</code>
+              {% if m.accesstype == 'ipv4_ipv6' and m.internal_client_ipv6 %}
+              <span class="text-muted">; </span><code>{{ m.internal_client_ipv6 }}</code>
+              {% endif %}
+            </td>
             <td><code>{{ m.internal_port }}</code></td>
             <td class="text-muted">{{ m.description|default:"-" }}</td>
             <td>
@@ -638,10 +642,14 @@ function refreshMappings() {
         var ipv6Text = 'IPv4';
         if (m.accesstype === 'ipv6') { ipv6Class = 'bg-info text-dark'; ipv6Text = 'IPv6'; }
         else if (m.accesstype === 'ipv4_ipv6') { ipv6Class = 'bg-info text-dark'; ipv6Text = 'IPv4+IPv6'; }
+        var target = m.internal_client || '';
+        var targetIpv6 = (m.accesstype === 'ipv4_ipv6' && m.internal_client_ipv6)
+          ? '<span class="text-muted">; </span><code>' + m.internal_client_ipv6 + '</code>'
+          : '';
         html += '<tr>' +
           '<td><code>' + m.external_port + '</code></td>' +
           '<td><span class="badge ' + protoClass + '">' + m.protocol + '</span></td>' +
-          '<td><code>' + m.internal_client + '</code></td>' +
+          '<td><code>' + target + '</code>' + targetIpv6 + '</td>' +
           '<td><code>' + m.internal_port + '</code></td>' +
           '<td class="text-muted">' + (m.description || '-') + '</td>' +
           '<td><span class="badge ' + ipv6Class + '">' + ipv6Text + '</span></td>' +
