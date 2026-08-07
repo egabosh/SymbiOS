@@ -291,6 +291,9 @@ def fb_list(host, user, password):
                 'mappings': [],
             }
             local_ip = dev.get('local_ipv4', '')
+            # IPv6 rules are device-bound, so the real forwarding target is
+            # the device's current global IPv6 address, not its IPv4 one.
+            local_ipv6 = get_current_ipv6_addr(host, sid, dev_uid) if ipv6_active else ''
             for r in rules:
                 app_name = r.get('app', '')
                 desc = r.get('description', '')
@@ -311,10 +314,20 @@ def fb_list(host, user, password):
                 }
                 result['rules'].append(rule)
 
+                # Show the address family the rule actually forwards to:
+                # IPv6-only rules target the IPv6 address, IPv4/IPv4+IPv6
+                # rules the IPv4 address (IPv6 carried separately).
+                if accesstype == 'ipv6':
+                    target_client = local_ipv6 or local_ip
+                    target_client_ipv6 = ''
+                else:
+                    target_client = local_ip
+                    target_client_ipv6 = local_ipv6 if accesstype == 'ipv4_ipv6' else ''
                 mapping = {
                     'external_port': r.get('port', ''),
                     'protocol': r.get('protocol', ''),
-                    'internal_client': local_ip,
+                    'internal_client': target_client,
+                    'internal_client_ipv6': target_client_ipv6,
                     'internal_port': r.get('fwport', ''),
                     'description': app_name or desc,
                     'enabled': r.get('state', '') == '2',
