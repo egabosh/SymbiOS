@@ -10,10 +10,10 @@
 </div>
 {% endif %}
 
-<!-- Step 1: Router detection status -->
+<!-- Step 1: Router detection -->
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center">
-    <span><i class="bi bi-router"></i> Step 1 &mdash; Router detected</span>
+    <span><i class="bi bi-router"></i> Step 1 &mdash; Your router</span>
     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="detectRouter()" id="detect-btn">
       <i class="bi bi-arrow-repeat"></i> Check
     </button>
@@ -36,22 +36,24 @@
       <code>{{ router_info.gateway|default:"Unknown" }}</code>
     </div>
     <div class="mt-2">
-      {% if credentials_configured %}
-      <span class="badge bg-success"><i class="bi bi-check-circle"></i> Credentials stored</span>
+      {% if can_control_router %}
+      <span class="badge bg-success"><i class="bi bi-check-circle"></i> This router can be controlled</span>
       {% else %}
-      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> Credentials missing (under Advanced)</span>
+      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> Login required below (Step 2)</span>
       {% endif %}
     </div>
     {% elif router_info and router_info.available == false %}
     <p class="text-muted mb-0">
       <i class="bi bi-info-circle"></i>
-      No UPnP/TR-064 device found at {{ router_info.gateway|default:"(unknown)" }}.
+      No router found at {{ router_info.gateway|default:"(unknown)" }} that
+      SymbiOS can control automatically.
     </p>
-    <p class="text-muted mb-0 mt-1 small">
-      Port forwarding requires a router with
-      <strong>UPnP IGD (WANIPConnection)</strong> &mdash; enable it in the
-      router's interface. If your router does not support it,
-      forward the ports manually (see Advanced).
+    <p class="text-muted mb-0 mt-1">
+      To let SymbiOS open the ports for you, the router must support automatic
+      port forwarding (often called &bdquo;port sharing&ldquo; or
+      &bdquo;UPnP&ldquo;) and this feature must be enabled in the router. If it
+      is not, you can still forward the ports manually (see &bdquo;Alternative&ldquo;
+      below).
     </p>
     {% else %}
     <div id="detect-pending">
@@ -62,13 +64,118 @@
   </div>
 </div>
 
-<!-- Port status: which standard ports are already open -->
+<!-- Step 2: Router login (optional) -->
 <div class="card mt-3">
   <div class="card-header">
-    <span><i class="bi bi-check2-circle"></i> Port status</span>
+    <span><i class="bi bi-key"></i> Step 2 &mdash; Router login <span class="text-muted small">(optional)</span></span>
+  </div>
+  <div class="card-body small">
+    <p class="text-muted mb-2">
+      Some routers (for example AVM FRITZ!Box) ask for a login before another
+      device may change the port forwarding settings. Enter that login here so
+      that SymbiOS can open the ports for you. If your router does not ask for
+      a login, leave both fields empty.
+    </p>
+    {% if credentials_configured %}
+    <div class="alert alert-success py-2 px-3 mb-2">
+      <i class="bi bi-check-circle-fill"></i>
+      Router login stored
+      {% if credentials_username %}(user <code>{{ credentials_username }}</code>){% endif %}.
+    </div>
+    <form method="post" data-exec="true" class="mb-0">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save-credentials">
+      <div class="row g-2 mb-2">
+        <div class="col-md-4">
+          <label class="form-label">Username <span class="text-muted">(optional)</span></label>
+          <input type="text" class="form-control form-control-sm" name="username"
+                 placeholder="Only if your router requires a login" value="">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Password</label>
+          <div class="input-group input-group-sm">
+            <input type="password" class="form-control" name="password" id="cred-password"
+                   placeholder="Router login password">
+            <button type="button" class="btn btn-outline-secondary" onclick="toggleFieldVisibility('cred-password', this)">
+              <i class="bi bi-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+          <button type="submit" class="btn btn-primary btn-sm w-100">
+            <i class="bi bi-save"></i> Update login
+          </button>
+        </div>
+      </div>
+    </form>
+    <form method="post" data-exec="true" class="mb-0"
+          data-exec-confirm="Remove the stored router login?">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="remove-credentials">
+      <button type="submit" class="btn btn-outline-danger btn-sm">
+        <i class="bi bi-trash"></i> Remove login
+      </button>
+    </form>
+    {% else %}
+    <form method="post" data-exec="true" class="mb-0">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save-credentials">
+      <div class="row g-2 mb-2">
+        <div class="col-md-4">
+          <label class="form-label">Username <span class="text-muted">(optional)</span></label>
+          <input type="text" class="form-control form-control-sm" name="username"
+                 placeholder="Only if your router requires a login">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Password</label>
+          <div class="input-group input-group-sm">
+            <input type="password" class="form-control" name="password" id="cred-password-new"
+                   placeholder="Only if your router requires a login">
+            <button type="button" class="btn btn-outline-secondary" onclick="toggleFieldVisibility('cred-password-new', this)">
+              <i class="bi bi-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div class="col-md-4 d-flex align-items-end">
+          <button type="submit" class="btn btn-primary btn-sm w-100">
+            <i class="bi bi-save"></i> Save login
+          </button>
+        </div>
+      </div>
+      <div class="alert alert-info py-2 px-3 mb-0">
+        <i class="bi bi-info-circle-fill"></i>
+        The login is stored on the server with restricted permissions
+        (only root can read it).
+      </div>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Step 3: Port status -->
+<div class="card mt-3">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span><i class="bi bi-check2-circle"></i> Step 3 &mdash; Port status</span>
+    {% if router_info and router_info.available %}
+    <form method="post" data-exec="true" class="d-flex align-items-center gap-2 mb-0">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="quick-enable">
+      <div class="form-check form-check-inline mb-0">
+        <input class="form-check-input" type="checkbox" name="include_ssh" value="1" id="include-ssh">
+        <label class="form-check-label small" for="include-ssh">also SSH (TCP 33)</label>
+      </div>
+      <button type="submit" class="btn btn-sm btn-primary" {% if not can_control_router %}disabled{% endif %}>
+        <i class="bi bi-lightning-charge"></i> Open all
+      </button>
+    </form>
+    {% endif %}
   </div>
   <div class="card-body small">
     {% if port_status_known %}
+    <p class="text-muted mb-2">
+      These ports make your server reachable from the internet. Open a missing
+      port, or remove a port you no longer need.
+    </p>
     <div class="table-responsive">
       <table class="table table-sm mb-0">
         <thead>
@@ -77,6 +184,7 @@
             <th>Purpose</th>
             <th>Forwarded to</th>
             <th>Status</th>
+            <th class="text-end">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -98,6 +206,35 @@
               <span class="badge bg-danger"><i class="bi bi-x-circle"></i> Missing</span>
               {% endif %}
             </td>
+            <td class="text-end">
+              {% if p.open %}
+              <form method="post" data-exec="true" class="d-inline"
+                    data-exec-confirm="Delete forwarding TCP/{{ p.port }}?">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="ext_port" value="{{ p.port }}">
+                <input type="hidden" name="protocol" value="TCP">
+                <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2" {% if not can_control_router %}disabled{% endif %}>
+                  <i class="bi bi-x-circle"></i> Remove
+                </button>
+              </form>
+              {% else %}
+              <form method="post" data-exec="true" class="d-inline"
+                    data-exec-confirm="Open TCP {{ p.port }} on the router?">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="add">
+                <input type="hidden" name="ext_port" value="{{ p.port }}">
+                <input type="hidden" name="protocol" value="TCP">
+                <input type="hidden" name="int_port" value="{{ p.internal_port }}">
+                <input type="hidden" name="int_client" value="{{ local_ip }}">
+                <input type="hidden" name="description" value="{{ p.purpose }}">
+                <input type="hidden" name="accesstype" value="ipv4">
+                <button type="submit" class="btn btn-sm btn-outline-success py-0 px-2" {% if not can_control_router %}disabled{% endif %}>
+                  <i class="bi bi-plus-circle"></i> Open
+                </button>
+              </form>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -107,56 +244,27 @@
     <p class="text-muted mb-0">
       <i class="bi bi-info-circle"></i>
       Status unavailable
-      {% if list_error %}({{ list_error }}){% elif not credentials_configured %} — enter router credentials to query the current rules.{% endif %}
+      {% if list_error %}({{ list_error }}){% elif not credentials_configured %} — enter the router login above to query the current rules.{% endif %}
     </p>
     {% endif %}
-  </div>
-</div>
 
-<!-- Step 2: One-click enable (main path) -->
-<div class="card mt-3">
-  <div class="card-header">
-    <span><i class="bi bi-lightning-charge"></i> Step 2 &mdash; Open ports automatically</span>
-  </div>
-  <div class="card-body small">
-    {% if router_info and router_info.available %}
-    <p class="mb-2">
-      One click sets up the necessary forwards to the server
-      (<code>{{ local_ip }}</code>):
-    </p>
-    <ul class="mb-3">
-      <li><code>TCP 80</code> &rarr; {{ local_ip }}:80 (HTTP) <span class="text-muted">standard</span></li>
-      <li><code>TCP 443</code> &rarr; {{ local_ip }}:443 (HTTPS) <span class="text-muted">standard</span></li>
-      <li><code>TCP 33</code> &rarr; {{ local_ip }}:22 (SSH) <span class="text-muted">optional</span></li>
-    </ul>
-    <form method="post" data-exec="true">
-      {% csrf_token %}
-      <input type="hidden" name="action" value="quick-enable">
-      <div class="form-check mb-3">
-        <input class="form-check-input" type="checkbox" name="include_ssh" value="1" id="include-ssh">
-        <label class="form-check-label" for="include-ssh">
-          Also forward <code>TCP 33</code> &rarr; {{ local_ip }}:22 (SSH)
-        </label>
-      </div>
-      <button type="submit" class="btn btn-primary" {% if not credentials_configured %}disabled{% endif %}>
-        <i class="bi bi-lightning-charge"></i> Open now
-      </button>
-    </form>
-    {% if not credentials_configured %}
+    {% if router_info and router_info.available and not can_control_router %}
     <p class="text-muted mt-2 mb-0">
       <i class="bi bi-info-circle"></i>
-      If your router requires credentials, enter them below under
-      <strong>Advanced</strong>.
+      This router asks for a login. Enter it in <strong>Step 2</strong> to open
+      and close ports from here.
     </p>
     {% endif %}
-    {% else %}
-    <p class="text-muted mb-0">
-      <i class="bi bi-info-circle"></i>
-      Once the router is detected, you can open the ports with a click here.
-      If that does not work, forward ports 80, 443 and 33 manually in the
-      router (see Advanced).
+
+    <hr class="my-2">
+    <p class="text-muted small mb-0">
+      <i class="bi bi-exclamation-triangle"></i>
+      <strong>Heads-up:</strong> With &bdquo;Open all&ldquo; or the per-port
+      buttons, SymbiOS changes the port forwarding rules on your router using
+      the router login. Save a backup of the router's settings before enabling
+      this. SymbiOS is provided without warranty &mdash; you remain
+      responsible for your router's configuration.
     </p>
-    {% endif %}
   </div>
 </div>
 
@@ -205,312 +313,228 @@
 </div>
 {% endif %}
 
-<!-- Advanced options -->
-<div class="mt-4">
-  <a class="advanced-toggle" data-bs-toggle="collapse" href="#advanced-portforward" role="button" aria-expanded="false">
-    <i class="bi bi-sliders"></i> Advanced (Credentials, individual rules)
-  </a>
-  <div class="collapse advanced-collapse" id="advanced-portforward">
+<!-- Additional rules -->
+<div class="card mt-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-list-columns"></i> Additional rules</span>
+    <div>
+      <button type="button" class="btn btn-sm btn-outline-secondary me-1" onclick="refreshMappings()">
+        <i class="bi bi-arrow-repeat"></i> Refresh
+      </button>
+      {% if can_control_router %}
+      <button type="button" class="btn btn-sm btn-primary" onclick="showAddForm()">
+        <i class="bi bi-plus-circle"></i> Add
+      </button>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card-body small" id="mappings-body">
+    {% if not can_control_router %}
+    <p class="text-muted mb-0">
+      <i class="bi bi-info-circle"></i>
+      Set up the router (Step 1) and the login (Step 2) above to manage rules.
+    </p>
+    {% elif list_error %}
+    <div class="alert alert-warning py-2 px-3 mb-0">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      {{ list_error }}
+    </div>
+    {% elif mappings %}
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead>
+          <tr>
+            <th>External Port</th>
+            <th>Protocol</th>
+            <th>Internal IP</th>
+            <th>Internal Port</th>
+            <th>Description</th>
+            <th>IP Version</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in mappings %}
+          <tr>
+            <td><code>{{ m.external_port }}</code></td>
+            <td>
+              <span class="badge {% if m.protocol == 'TCP' %}bg-primary{% else %}bg-success{% endif %}">
+                {{ m.protocol }}
+              </span>
+            </td>
+            <td><code>{{ m.internal_client }}</code></td>
+            <td><code>{{ m.internal_port }}</code></td>
+            <td class="text-muted">{{ m.description|default:"-" }}</td>
+            <td>
+              {% if m.accesstype == 'ipv6' %}
+              <span class="badge bg-info text-dark">IPv6</span>
+              {% elif m.accesstype == 'ipv4_ipv6' %}
+              <span class="badge bg-info text-dark">IPv4+IPv6</span>
+              {% else %}
+              <span class="badge bg-secondary">IPv4</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if m.enabled %}
+              <span class="badge bg-success">Active</span>
+              {% else %}
+              <span class="badge bg-secondary">Disabled</span>
+              {% endif %}
+            </td>
+            <td>
+              <form method="post" data-exec="true" class="d-inline"
+                    data-exec-confirm="Delete forwarding {{ m.protocol }}/{{ m.external_port }}?">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="ext_port" value="{{ m.external_port }}">
+                <input type="hidden" name="protocol" value="{{ m.protocol }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">
+      <i class="bi bi-info-circle"></i>
+      No rules found yet. Use &bdquo;Open all&ldquo; above or create a rule
+      with <strong>Add</strong>.
+    </p>
+    {% endif %}
+  </div>
+</div>
 
-    <!-- Credentials Card -->
-    <div class="row">
-      <div class="col-md-6 mb-3">
-        <div class="card h-100">
-          <div class="card-header">
-            <i class="bi bi-key"></i> Router Credentials
+<!-- Add Rule form (hidden, slides in) -->
+<div id="add-form-card" class="card mt-3" style="display:none">
+  <div class="card-header">
+    <i class="bi bi-plus-circle"></i> Add Rule
+  </div>
+  <div class="card-body small">
+    <form method="post" data-exec="true" id="add-form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add">
+
+      <div class="row mb-2">
+        <div class="col-md-3">
+          <label class="form-label">External Port</label>
+          <input type="number" class="form-control form-control-sm" name="ext_port"
+                 min="1" max="65535" required placeholder="e.g. 80">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Protocol</label>
+          <select class="form-select form-select-sm" name="protocol">
+            <option value="TCP">TCP</option>
+            <option value="UDP">UDP</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Internal Port</label>
+          <input type="number" class="form-control form-control-sm" name="int_port"
+                 min="1" max="65535" required placeholder="e.g. 80" value="80">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Internal IP</label>
+          <input type="text" class="form-control form-control-sm" name="int_client"
+                 required pattern="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
+                 placeholder="e.g. 192.168.188.20"
+                 value="{{ local_ip }}">
+        </div>
+      </div>
+
+      <div class="mb-2">
+        <label class="form-label">Description <span class="text-muted">(optional)</span></label>
+        <input type="text" class="form-control form-control-sm" name="description"
+               placeholder="e.g. SymbiOS WebUI" value="SymbiOS">
+      </div>
+
+      <div class="mb-2">
+        <label class="form-label">IP Version</label>
+        <select class="form-select form-select-sm" name="accesstype" id="accesstype-select">
+          <option value="ipv4">IPv4 only</option>
+          {% if ipv6_info %}
+          <option value="ipv6">IPv6 only (device-bound)</option>
+          <option value="ipv4_ipv6">IPv4 + IPv6</option>
+          {% endif %}
+        </select>
+        {% if ipv6_info %}
+        <div class="form-text">
+          IPv6 forwards are device-bound: The FRITZ!Box forwards to
+          the server's current IPv6 address and adjusts the rule
+          automatically when the IPv6 prefix changes.
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="mb-2">
+        <label class="form-label">Presets for SymbiOS</label>
+        <div class="alert alert-info py-2 px-3 mb-0 small">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="preset-http"
+                   onchange="presetRule('preset-http', 80, 80, '{{ local_ip }}', 'SymbiOS HTTP')">
+            <label class="form-check-label">TCP 80 &rarr; {{ local_ip }}:80 (HTTP)</label>
           </div>
-          <div class="card-body small">
-            {% if credentials_configured %}
-            <div class="alert alert-success py-2 px-3 mb-2">
-              <i class="bi bi-check-circle-fill"></i>
-              Credentials are stored.
-            </div>
-            <form method="post" data-exec="true" class="mb-0">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="save-credentials">
-              <div class="mb-2">
-                <label class="form-label">Username (UPnP user)</label>
-                <input type="text" class="form-control form-control-sm" name="username"
-                       placeholder="Router UPnP username" value="">
-              </div>
-              <div class="mb-2">
-                <label class="form-label">Password</label>
-                <div class="input-group input-group-sm">
-                  <input type="password" class="form-control" name="password" id="cred-password"
-                         placeholder="TR-064 password">
-                  <button type="button" class="btn btn-outline-secondary"
-                          onclick="toggleFieldVisibility('cred-password', this)">
-                    <i class="bi bi-eye"></i>
-                  </button>
-                </div>
-              </div>
-              <button type="submit" class="btn btn-primary btn-sm w-100">
-                <i class="bi bi-save"></i> Update credentials
-              </button>
-            </form>
-            <form method="post" data-exec="true" class="mb-0 mt-2"
-                  data-exec-confirm="Remove the stored router credentials?">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="remove-credentials">
-              <button type="submit" class="btn btn-outline-danger btn-sm w-100">
-                <i class="bi bi-trash"></i> Remove credentials
-              </button>
-            </form>
-            {% else %}
-            <p class="text-muted mb-2">
-              Some routers (e.g. FRITZ!Box) require a login, others
-              allow UPnP without credentials (then leave empty).
-            </p>
-            <form method="post" data-exec="true" class="mb-0">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="save-credentials">
-              <div class="mb-2">
-                <label class="form-label">Username</label>
-                <input type="text" class="form-control form-control-sm" name="username"
-                       placeholder="UPnP username (empty if no login)">
-              </div>
-              <div class="mb-2">
-                <label class="form-label">Password</label>
-                <div class="input-group input-group-sm">
-                  <input type="password" class="form-control" name="password" id="cred-password-new"
-                         placeholder="UPnP password (empty if no login)">
-                  <button type="button" class="btn btn-outline-secondary"
-                          onclick="toggleFieldVisibility('cred-password-new', this)">
-                    <i class="bi bi-eye"></i>
-                  </button>
-                </div>
-              </div>
-              <div class="alert alert-info py-2 px-3 mb-2">
-                <i class="bi bi-info-circle-fill"></i>
-                Credentials are stored on the server with restricted
-                permissions (only root can read them).
-              </div>
-              <button type="submit" class="btn btn-primary btn-sm w-100">
-                <i class="bi bi-save"></i> Save credentials
-              </button>
-            </form>
-            {% endif %}
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="preset-https"
+                   onchange="presetRule('preset-https', 443, 443, '{{ local_ip }}', 'SymbiOS HTTPS')">
+            <label class="form-check-label">TCP 443 &rarr; {{ local_ip }}:443 (HTTPS)</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="preset-ssh"
+                   onchange="presetRule('preset-ssh', 33, 22, '{{ local_ip }}', 'SymbiOS SSH')">
+            <label class="form-check-label">TCP 33 &rarr; {{ local_ip }}:22 (SSH, different port)</label>
           </div>
         </div>
       </div>
 
-      <!-- Mappings Card -->
-      <div class="col-md-6 mb-3">
-        <div class="card h-100">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <span><i class="bi bi-list-columns"></i> Individual Rules</span>
-            <div>
-              <button type="button" class="btn btn-sm btn-outline-secondary me-1" onclick="refreshMappings()">
-                <i class="bi bi-arrow-repeat"></i> Refresh
-              </button>
-              {% if credentials_configured and router_info.available %}
-              <button type="button" class="btn btn-sm btn-primary" onclick="showAddForm()">
-                <i class="bi bi-plus-circle"></i> Add
-              </button>
-              {% endif %}
-            </div>
-          </div>
-          <div class="card-body small" id="mappings-body">
-            {% if not credentials_configured and not router_info.available %}
-            <p class="text-muted mb-0">
-              <i class="bi bi-info-circle"></i>
-              First enter the router credentials.
-            </p>
-            {% elif list_error %}
-            <div class="alert alert-warning py-2 px-3 mb-0">
-              <i class="bi bi-exclamation-triangle-fill"></i>
-              {{ list_error }}
-            </div>
-            {% elif mappings %}
-            <div class="table-responsive">
-              <table class="table table-sm table-hover mb-0">
-                <thead>
-                  <tr>
-                    <th>External Port</th>
-                    <th>Protocol</th>
-                    <th>Internal IP</th>
-                    <th>Internal Port</th>
-                    <th>Description</th>
-                    <th>IP Version</th>
-                    <th>Status</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for m in mappings %}
-                  <tr>
-                    <td><code>{{ m.external_port }}</code></td>
-                    <td>
-                      <span class="badge {% if m.protocol == 'TCP' %}bg-primary{% else %}bg-success{% endif %}">
-                        {{ m.protocol }}
-                      </span>
-                    </td>
-                    <td><code>{{ m.internal_client }}</code></td>
-                    <td><code>{{ m.internal_port }}</code></td>
-                    <td class="text-muted">{{ m.description|default:"-" }}</td>
-                    <td>
-                      {% if m.accesstype == 'ipv6' %}
-                      <span class="badge bg-info text-dark">IPv6</span>
-                      {% elif m.accesstype == 'ipv4_ipv6' %}
-                      <span class="badge bg-info text-dark">IPv4+IPv6</span>
-                      {% else %}
-                      <span class="badge bg-secondary">IPv4</span>
-                      {% endif %}
-                    </td>
-                    <td>
-                      {% if m.enabled %}
-                      <span class="badge bg-success">Active</span>
-                      {% else %}
-                      <span class="badge bg-secondary">Disabled</span>
-                      {% endif %}
-                    </td>
-                    <td>
-                      <form method="post" data-exec="true" class="d-inline"
-                            data-exec-confirm="Delete forwarding {{ m.protocol }}/{{ m.external_port }}?">
-                        {% csrf_token %}
-                        <input type="hidden" name="action" value="delete">
-                        <input type="hidden" name="ext_port" value="{{ m.external_port }}">
-                        <input type="hidden" name="protocol" value="{{ m.protocol }}">
-                        <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1">
-                          <i class="bi bi-trash"></i>
-                        </button>
-                      </form>
-                    </td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-            {% else %}
-            <p class="text-muted mb-0">
-              <i class="bi bi-info-circle"></i>
-              No forwards found. Create one via <strong>Add</strong>
-              or the one-click enable above.
-            </p>
-            {% endif %}
-          </div>
-        </div>
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i class="bi bi-plus-circle"></i> Add Rule
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="hideAddForm()">
+          Cancel
+        </button>
       </div>
-    </div>
+    </form>
+  </div>
+</div>
 
-    <!-- Manual instructions -->
-    <div class="card mt-1">
-      <div class="card-header">
-        <i class="bi bi-hand-index-thumb"></i> Manual Forwarding (without UPnP)
-      </div>
-      <div class="card-body small">
-        <p class="mb-1">
-          Forward the following ports in the router's interface to the internal IP
-          <code>{{ local_ip }}</code>:
-        </p>
-        <ul class="mb-1">
-          <li>TCP <code>80</code> &rarr; <code>{{ local_ip }}</code>:80</li>
-          <li>TCP <code>443</code> &rarr; <code>{{ local_ip }}</code>:443</li>
-          <li>TCP <code>33</code> &rarr; <code>{{ local_ip }}</code>:22 (SSH, optional)</li>
-        </ul>
-        <p class="text-muted mb-0">
-          The settings are often found under &bdquo;Internet &rarr;
-          Sharing&ldquo;, &bdquo;Port Forwarding&ldquo; or
-          &bdquo;NAT&ldquo;. It is best to also assign a fixed IP
-          (DHCP reservation) for the server.
-        </p>
-      </div>
-    </div>
-
-    <!-- Add Port Mapping Form (hidden, slides in) -->
-    <div id="add-form-card" class="card mt-3" style="display:none">
-      <div class="card-header">
-        <i class="bi bi-plus-circle"></i> Add Rule
-      </div>
-      <div class="card-body small">
-        <form method="post" data-exec="true" id="add-form">
-          {% csrf_token %}
-          <input type="hidden" name="action" value="add">
-
-          <div class="row mb-2">
-            <div class="col-md-3">
-              <label class="form-label">External Port</label>
-              <input type="number" class="form-control form-control-sm" name="ext_port"
-                     min="1" max="65535" required placeholder="e.g. 80">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Protocol</label>
-              <select class="form-select form-select-sm" name="protocol">
-                <option value="TCP">TCP</option>
-                <option value="UDP">UDP</option>
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Internal Port</label>
-              <input type="number" class="form-control form-control-sm" name="int_port"
-                     min="1" max="65535" required placeholder="e.g. 80" value="80">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Internal IP</label>
-              <input type="text" class="form-control form-control-sm" name="int_client"
-                     required pattern="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"
-                     placeholder="e.g. 192.168.41.100"
-                     value="{{ local_ip }}">
-            </div>
-          </div>
-
-          <div class="mb-2">
-            <label class="form-label">Description <span class="text-muted">(optional)</span></label>
-            <input type="text" class="form-control form-control-sm" name="description"
-                   placeholder="e.g. SymbiOS WebUI" value="SymbiOS">
-          </div>
-
-          <div class="mb-2">
-            <label class="form-label">IP Version</label>
-            <select class="form-select form-select-sm" name="accesstype" id="accesstype-select">
-              <option value="ipv4">IPv4 only</option>
-              {% if ipv6_info %}
-              <option value="ipv6">IPv6 only (device-bound)</option>
-              <option value="ipv4_ipv6">IPv4 + IPv6</option>
-              {% endif %}
-            </select>
-            {% if ipv6_info %}
-            <div class="form-text">
-              IPv6 forwards are device-bound: The FRITZ!Box forwards to
-              the server's current IPv6 address and adjusts the rule
-              automatically when the IPv6 prefix changes.
-            </div>
-            {% endif %}
-          </div>
-
-          <div class="mb-2">
-            <label class="form-label">Presets for SymbiOS</label>
-            <div class="alert alert-info py-2 px-3 mb-0 small">
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="preset-http"
-                       onchange="presetRule('preset-http', 80, 80, '{{ local_ip }}', 'SymbiOS HTTP')">
-                <label class="form-check-label">TCP 80 &rarr; {{ local_ip }}:80 (HTTP)</label>
-              </div>
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="preset-https"
-                       onchange="presetRule('preset-https', 443, 443, '{{ local_ip }}', 'SymbiOS HTTPS')">
-                <label class="form-check-label">TCP 443 &rarr; {{ local_ip }}:443 (HTTPS)</label>
-              </div>
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="preset-ssh"
-                       onchange="presetRule('preset-ssh', 33, 22, '{{ local_ip }}', 'SymbiOS SSH')">
-                <label class="form-check-label">TCP 33 &rarr; {{ local_ip }}:22 (SSH, different port)</label>
-              </div>
-            </div>
-          </div>
-
-          <div class="d-flex gap-2">
-            <button type="submit" class="btn btn-primary btn-sm">
-              <i class="bi bi-plus-circle"></i> Add Rule
-            </button>
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="hideAddForm()">
-              Cancel
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-
+<!-- Alternative: manual forwarding -->
+<div class="card mt-3">
+  <div class="card-header">
+    <span><i class="bi bi-hand-index-thumb"></i> Alternative: forward the ports manually</span>
+  </div>
+  <div class="card-body small">
+    <p class="mb-1">
+      If the router cannot be controlled automatically, you can enter the
+      following forwards in the router's own interface &mdash; no router login
+      is needed for this. The target is the server
+      (<code>{{ local_ip }}</code>):
+    </p>
+    <ul class="mb-1">
+      <li>TCP <code>80</code> &rarr; <code>{{ local_ip }}</code>:80 (HTTP)</li>
+      <li>TCP <code>443</code> &rarr; <code>{{ local_ip }}</code>:443 (HTTPS)</li>
+      <li>TCP <code>33</code> &rarr; <code>{{ local_ip }}</code>:22 (SSH, optional)</li>
+    </ul>
+    <p class="text-muted mb-1">
+      The settings are often found under &bdquo;Internet &rarr; Sharing&ldquo;,
+      &bdquo;Port Forwarding&ldquo; or &bdquo;NAT&ldquo;. It is best to also
+      assign a fixed IP (DHCP reservation) for the server so the forwards keep
+      working after a restart.
+    </p>
+    <p class="mb-0">
+      <strong>IPv6:</strong> If the router uses IPv6, also forward these ports
+      to the server's IPv6 address (for AVM FRITZ!Box: under &bdquo;IPv6
+      &rarr; Port Sharing&ldquo;, tie the forward to the server as a device so
+      the rule keeps working when the internet address changes). For manually
+      forwarded IPv6 ports the server's own firewall must allow the traffic as
+      well &mdash; SymbiOS only adjusts the firewall for the ports it opens
+      itself.
+    </p>
   </div>
 </div>
 
@@ -547,8 +571,8 @@ function detectRouter() {
         body.innerHTML = html;
         location.reload();
       } else {
-        body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> No UPnP/TR-064 device found at ' + (data.gateway || '(unknown)') + '.</p>' +
-          '<p class="text-muted mb-0 mt-1 small">Port forwarding requires UPnP IGD (WANIPConnection) &mdash; enable it in the router or forward manually.</p>';
+        body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> No router found that SymbiOS can control automatically at ' + (data.gateway || '(unknown)') + '.</p>' +
+          '<p class="text-muted mb-0 mt-1">To let SymbiOS open the ports for you, the router must support automatic port forwarding (often called &bdquo;port sharing&ldquo; or &bdquo;UPnP&ldquo;) and this feature must be enabled in the router. If it is not, forward the ports manually (see &bdquo;Alternative&ldquo; below).</p>';
       }
     })
     .catch(err => {
@@ -596,7 +620,7 @@ function refreshMappings() {
       }
       var mappings = data.mappings || [];
       if (mappings.length === 0) {
-        body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> No forwards found.</p>';
+        body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> No rules found.</p>';
         return;
       }
       var html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0"><thead><tr><th>External Port</th><th>Protocol</th><th>Internal IP</th><th>Internal Port</th><th>Description</th><th>IP Version</th><th>Status</th><th></th></tr></thead><tbody>';

@@ -229,16 +229,19 @@ case "$ACTION" in
       f_symbios_var_set router_upnp_user ""
       f_symbios_var_set router_upnp_password ""
       rm -f "$UPNP_CONFIG_FILE"
-      echo '{"ok":true,"configured":false,"message":"Router credentials removed."}'
+      echo '{"ok":true,"configured":false,"message":"Router login removed."}'
       exit 0
     fi
 
-    if [[ -n "$1" ]] && [[ -n "$2" ]]
+    # Save credentials. Both fields may be empty (many routers, e.g. generic
+    # UPnP, require no login); only 'config remove' and a bare 'config'
+    # (status) are the no-write invocations.
+    if [[ $# -ge 2 ]]
     then
       f_symbios_var_set router_upnp_user "$1"
       f_symbios_var_set router_upnp_password "$2"
       rm -f "$UPNP_CONFIG_FILE"
-      echo '{"ok":true,"message":"Router credentials saved."}'
+      echo '{"ok":true,"message":"Router login saved."}'
       exit 0
     fi
 
