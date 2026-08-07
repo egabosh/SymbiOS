@@ -108,7 +108,7 @@
           <tbody>
             <tr><td><code>80</code></td><td>TCP</td><td><code>{{ local_ip|default:"server-IPv4" }}:80</code></td><td>HTTP</td></tr>
             <tr><td><code>443</code></td><td>TCP</td><td><code>{{ local_ip|default:"server-IPv4" }}:443</code></td><td>HTTPS</td></tr>
-            <tr><td><code>33</code></td><td>TCP</td><td><code>{{ local_ip|default:"server-IPv4" }}:22</code></td><td>SSH (optional)</td></tr>
+            <tr><td><code>33</code></td><td>TCP</td><td><code>{{ local_ip|default:"server-IPv4" }}:33</code></td><td>SSH (optional)</td></tr>
           </tbody>
         </table>
       </li>
@@ -136,12 +136,13 @@
           <tbody>
             <tr><td><code>80</code></td><td>TCP</td><td>HTTP</td></tr>
             <tr><td><code>443</code></td><td>TCP</td><td>HTTPS</td></tr>
+            <tr><td><code>33</code></td><td>TCP</td><td>SSH (optional)</td></tr>
           </tbody>
         </table>
       </li>
       <li>IPv6 forwards only work with <strong>identical external and internal
-        port</strong> (e.g. 80 &rarr; 80). A different SSH port can therefore not
-        be forwarded over IPv6.</li>
+        port</strong> (e.g. 80 &rarr; 80, 33 &rarr; 33). A different port can
+        therefore not be mapped over IPv6.</li>
       <li>Device-bound rules follow the server automatically when the IPv6
         prefix from the provider changes.</li>
     </ol>
@@ -314,16 +315,10 @@
     <form method="post" data-exec="true" class="d-flex align-items-center gap-2 mb-0">
       {% csrf_token %}
       <input type="hidden" name="action" value="quick-enable">
-      {% if ip_mode == 'only' %}
-      <div class="form-text small me-1">
-        SSH forwarding is not possible on an IPv6-only connection.
-      </div>
-      {% else %}
       <div class="form-check form-check-inline mb-0">
         <input class="form-check-input" type="checkbox" name="include_ssh" value="1" id="include-ssh">
         <label class="form-check-label small" for="include-ssh">also SSH (TCP 33)</label>
       </div>
-      {% endif %}
       <button type="submit" class="btn btn-sm btn-primary" {% if not can_control_router %}disabled{% endif %}>
         <i class="bi bi-lightning-charge"></i> Open all
       </button>
@@ -667,8 +662,8 @@
           </div>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" id="preset-ssh"
-                   onchange="presetRule('preset-ssh', 33, 22, '{{ local_ip }}', 'SymbiOS SSH')">
-            <label class="form-check-label">TCP 33 &rarr; {{ local_ip }}:22 (SSH, different port)</label>
+                   onchange="presetRule('preset-ssh', 33, 33, '{{ local_ip }}', 'SymbiOS SSH')">
+            <label class="form-check-label">TCP 33 &rarr; {{ local_ip }}:33 (SSH)</label>
           </div>
         </div>
       </div>

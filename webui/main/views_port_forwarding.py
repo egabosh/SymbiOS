@@ -168,7 +168,7 @@ def settings_port_forwarding(request):
             elif action == 'quick-enable':
                 # One-click: ensure static IP (FRITZ!Box), then add the
                 # standard rules (HTTP 80, HTTPS 443) plus the optional SSH
-                # rule (33 -> 22) only if requested.
+                # rule (33 -> 33) only if requested.
                 # The IP version follows ddns_ipv6: '' (IPv4 only) creates IPv4
                 # rules, 'only' creates IPv6 rules and 'yes' dual-stack rules.
                 # Runs via the exec modal job so the user sees live output.
@@ -180,11 +180,11 @@ def settings_port_forwarding(request):
                     (80, 80, 'SymbiOS HTTP', auto_at),
                     (443, 443, 'SymbiOS HTTPS', auto_at),
                 ]
-                # FRITZ!Box cannot map IPv6 ports to a different internal port
-                # (external must equal internal), so SSH stays IPv4-only and is
-                # impossible on an IPv6-only connection.
-                if include_ssh and ip_mode != 'only':
-                    rules.append((33, 22, 'SymbiOS SSH', 'ipv4'))
+                # The server's sshd listens on port 33 directly, so SSH maps
+                # 33 -> 33 — identical external/internal ports also satisfy
+                # the FRITZ!Box IPv6 constraint.
+                if include_ssh:
+                    rules.append((33, 33, 'SymbiOS SSH', auto_at))
                 router_info = None
                 try:
                     router_info = _run_upnp('detect', timeout=10)
@@ -362,12 +362,9 @@ def settings_port_forwarding(request):
         standard_ports = [
             {'port': 80, 'internal_port': 80, 'purpose': 'HTTP (Traefik)'},
             {'port': 443, 'internal_port': 443, 'purpose': 'HTTPS (Traefik)'},
+            # sshd listens on port 33 directly, so 33 -> 33 works on IPv6 too.
+            {'port': 33, 'internal_port': 33, 'purpose': 'SSH (optional)'},
         ]
-        # SSH cannot be forwarded on an IPv6-only connection (FRITZ!Box needs
-        # matching external/internal ports for IPv6), so it is only listed
-        # when IPv4 (or dual-stack) is in use.
-        if ip_mode != 'only':
-            standard_ports.append({'port': 33, 'internal_port': 22, 'purpose': 'SSH (optional)'})
         for sp in standard_ports:
             match = next((m for m in mappings
                           if m.get('enabled')
