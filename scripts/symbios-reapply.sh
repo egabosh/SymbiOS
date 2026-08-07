@@ -30,6 +30,9 @@
 source /etc/bash/gaboshlib.include
 source symbios-lib.sh
 
+# Playbooks live in the git repo (same alias as symbios-run-playbook.sh)
+g_repo="${g_git_root}"
+
 g_log_file="${g_log_dir}/reapply.log"
 g_status_file="/tmp/symbios-reapply.status"
 g_pid_file="/tmp/symbios-reapply.pid"
