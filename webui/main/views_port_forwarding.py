@@ -28,6 +28,20 @@ import json
 SCRIPT = 'symbios-router-upnp.sh'
 
 
+def _auto_accesstype(ip_mode):
+    """IP version for the standard forwards, derived from the DNS IPv6 mode."""
+    return {'only': 'ipv6', 'yes': 'ipv4_ipv6'}.get(ip_mode, 'ipv4')
+
+
+def _status_accesstypes(ip_mode):
+    """Which accesstypes count as 'open' for the standard ports."""
+    if ip_mode == 'only':
+        return ('ipv6',)
+    if ip_mode == 'yes':
+        return ('ipv4', 'ipv6', 'ipv4_ipv6')
+    return ('ipv4', 'ipv4_ipv6')
+
+
 def _run_upnp(args, timeout=15):
     cmd = f'{SCRIPT} {args}'
     ok, stdout, stderr = run_command(cmd, timeout=timeout)
@@ -109,9 +123,13 @@ def _get_server_info():
 @login_required
 def settings_port_forwarding(request):
     """Main port forwarding settings page with router detection."""
-    from .views import _get_inventory_config
+    from .views import _get_inventory_config, _save_inventory_config
     config = _get_inventory_config()
     vars_ = (config.get('all', {}).get('vars', {}) if isinstance(config, dict) else {})
+
+    # DNS IPv6 mode decides the IP version of the standard forwards:
+    # '' (IPv4 only) -> IPv4, 'only' -> IPv6, 'yes' -> IPv4+IPv6.
+    ip_mode = vars_.get('ddns_ipv6', '')
 
     is_ajax = is_ajax_request(request)
 
@@ -122,7 +140,19 @@ def settings_port_forwarding(request):
         action = request.POST.get('action', '')
 
         try:
-            if action == 'save-credentials':
+            if action == 'choose-method':
+                # Remember whether the user wants automatic or manual forwards
+                # so the page skips the (slow) router introspection in manual
+                # mode and restores the chosen view on every visit.
+                method = request.POST.get('method', '').strip()
+                if method in ('auto', 'manual', ''):
+                    vars_['port_forwarding_method'] = method
+                    _save_inventory_config(config)
+                if is_ajax:
+                    return JsonResponse({'ok': True})
+                return redirect('settings_port_forwarding')
+
+            elif action == 'save-credentials':
                 username = request.POST.get('username', '').strip()
                 password = request.POST.get('password', '').strip()
                 result = _run_upnp(f'config {_shell_quote(username)} {_shell_quote(password)}', timeout=10)
@@ -137,12 +167,24 @@ def settings_port_forwarding(request):
 
             elif action == 'quick-enable':
                 # One-click: ensure static IP (FRITZ!Box), then add the
-                # standard rules (HTTP 80, HTTPS 443) plus the optional
-                # SSH rule (33 -> 22) only if requested.
+                # standard rules (HTTP 80, HTTPS 443) plus the optional SSH
+                # rule (33 -> 22) only if requested.
+                # The IP version follows ddns_ipv6: '' (IPv4 only) creates IPv4
+                # rules, 'only' creates IPv6 rules and 'yes' dual-stack rules.
                 # Runs via the exec modal job so the user sees live output.
                 from .utils.jobs import create_job
                 local_ip = _get_local_ip()
                 include_ssh = request.POST.get('include_ssh') in ('1', 'on', 'true', 'yes')
+                auto_at = _auto_accesstype(ip_mode)
+                rules = [
+                    (80, 80, 'SymbiOS HTTP', auto_at),
+                    (443, 443, 'SymbiOS HTTPS', auto_at),
+                ]
+                # FRITZ!Box cannot map IPv6 ports to a different internal port
+                # (external must equal internal), so SSH stays IPv4-only and is
+                # impossible on an IPv6-only connection.
+                if include_ssh and ip_mode != 'only':
+                    rules.append((33, 22, 'SymbiOS SSH', 'ipv4'))
                 router_info = None
                 try:
                     router_info = _run_upnp('detect', timeout=10)
@@ -150,14 +192,15 @@ def settings_port_forwarding(request):
                     router_info = None
                 static_ip_cmd = ''
                 if router_info and router_info.get('router_type') == 'fritzbox' and local_ip:
-                    static_ip_cmd = (f'{SCRIPT} staticip {_shell_quote(local_ip)} && ')
-                cmd = (static_ip_cmd +
-                       f'{SCRIPT} add 80 TCP 80 {_shell_quote(local_ip)} "SymbiOS HTTP" && '
-                       f'{SCRIPT} add 443 TCP 443 {_shell_quote(local_ip)} "SymbiOS HTTPS"')
-                port_list = '80 and 443'
-                if include_ssh:
-                    cmd += f' && {SCRIPT} add 33 TCP 22 {_shell_quote(local_ip)} "SymbiOS SSH"'
-                    port_list += ' and 33'
+                    static_ip_cmd = f'{SCRIPT} staticip {_shell_quote(local_ip)} && '
+                cmd = static_ip_cmd + ' && '.join(
+                    f'{SCRIPT} add {ext} TCP {intp} {_shell_quote(local_ip)} "{desc}" {at}'
+                    for ext, intp, desc, at in rules)
+                port_list = ' and '.join(str(e) for e, _, _, _ in rules)
+                # Persist UFW allows for IPv6 forwards so a reapply re-opens them.
+                if auto_at in ('ipv6', 'ipv4_ipv6'):
+                    _add_ufw_extra_inbound(80, 'TCP')
+                    _add_ufw_extra_inbound(443, 'TCP')
                 if is_ajax:
                     job_id = create_job(cmd, timeout=90)
                     return JsonResponse({'ok': True, 'job': job_id,
@@ -254,86 +297,101 @@ def settings_port_forwarding(request):
             return redirect('settings_port_forwarding')
 
     # --- GET: full page render ---
-    router_info = None
-    detect_error = None
-    try:
-        router_info = _run_upnp('detect', timeout=10)
-    except Exception as e:
-        detect_error = str(e)
+    pf_method = vars_.get('port_forwarding_method', '')
+    auto_at = _auto_accesstype(ip_mode)
 
-    # Check if credentials are stored
-    credentials_configured = False
-    credentials_username = ''
-    try:
-        cfg = _run_upnp('config', timeout=10)
-        credentials_configured = cfg.get('configured', False)
-        credentials_username = cfg.get('username', '')
-    except Exception:
-        pass
-
-    # Get server identity for the default forwarding target suggestion
+    # Server identity for the default forwarding target and the manual guide
     server_info = _get_server_info()
     local_ip = server_info['ipv4']
     local_ipv6 = server_info['ipv6']
     server_name = server_info['hostname']
+    base_domain = vars_.get('base_domain', '')
 
-    # IPv6 state (FRITZ!Box only, read-only)
-    ipv6_info = None
-    try:
-        if router_info and router_info.get('router_type') == 'fritzbox':
-            ipv6_info = _run_upnp('ipv6info', timeout=20)
-    except Exception:
-        ipv6_info = None
-
-    # GET: list current mappings
-    # FRITZ!Box requires credentials; generic UPnP does not
-    should_list = credentials_configured
-    if router_info and router_info.get('router_type') == 'generic_upnp':
-        should_list = True
+    # The expensive router introspection only runs in automatic mode; manual
+    # mode (and the choice screen) render immediately without probing.
+    router_info = None
+    detect_error = None
+    credentials_configured = False
+    credentials_username = ''
     mappings = []
     list_error = None
-    if should_list:
-        try:
-            list_result = _run_upnp('list', timeout=15)
-            if list_result.get('ok'):
-                mappings = list_result.get('mappings', [])
-            else:
-                list_error = list_result.get('error', 'Failed to list mappings')
-        except Exception as e:
-            list_error = str(e)
-
-    # Current status of the standard ports (which rules are already open).
-    # Matches by external + internal port so unrelated rules (e.g. the old
-    # "SSH DEV" 33->33 forward) do not count as the standard SSH rule.
-    standard_ports = [
-        {'port': 80, 'internal_port': 80, 'purpose': 'HTTP (Traefik)'},
-        {'port': 443, 'internal_port': 443, 'purpose': 'HTTPS (Traefik)'},
-        {'port': 33, 'internal_port': 22, 'purpose': 'SSH (optional)'},
-    ]
+    ipv6_info = None
     port_status = []
-    for sp in standard_ports:
-        match = next((m for m in mappings
-                      if m.get('enabled')
-                      and str(m.get('external_port', '')) == str(sp['port'])
-                      and str(m.get('internal_port', '')) == str(sp['internal_port'])
-                      and m.get('accesstype', 'ipv4') in ('ipv4', 'ipv4_ipv6')), None)
-        port_status.append({**sp,
-                            'open': bool(match),
-                            'internal_client': match.get('internal_client', '') if match else '',
-                            'internal_ipv6': local_ipv6})
-    port_status_known = bool(should_list) and not list_error
+    port_status_known = False
 
-    # Persist whether the standard web forwards (80/443) are present so the
-    # setup assistant and the page badge reflect real router state without
-    # needing host execution there. Only written when the rules were actually
-    # fetched, and only on change.
-    if port_status_known:
-        status_by_port = {p['port']: p['open'] for p in port_status}
-        configured = bool(status_by_port.get(80) and status_by_port.get(443))
-        if bool(vars_.get('port_forwarding_configured')) != configured:
-            from .views import _save_inventory_config
-            vars_['port_forwarding_configured'] = configured
-            _save_inventory_config(config)
+    if pf_method == 'auto':
+        try:
+            router_info = _run_upnp('detect', timeout=10)
+        except Exception as e:
+            detect_error = str(e)
+
+        # Check if credentials are stored
+        try:
+            cfg = _run_upnp('config', timeout=10)
+            credentials_configured = cfg.get('configured', False)
+            credentials_username = cfg.get('username', '')
+        except Exception:
+            pass
+
+        # IPv6 state (FRITZ!Box only, read-only)
+        try:
+            if router_info and router_info.get('router_type') == 'fritzbox':
+                ipv6_info = _run_upnp('ipv6info', timeout=20)
+        except Exception:
+            ipv6_info = None
+
+        # GET: list current mappings
+        # FRITZ!Box requires credentials; generic UPnP does not
+        should_list = credentials_configured
+        if router_info and router_info.get('router_type') == 'generic_upnp':
+            should_list = True
+        if should_list:
+            try:
+                list_result = _run_upnp('list', timeout=15)
+                if list_result.get('ok'):
+                    mappings = list_result.get('mappings', [])
+                else:
+                    list_error = list_result.get('error', 'Failed to list mappings')
+            except Exception as e:
+                list_error = str(e)
+
+        # Current status of the standard ports (which rules are already open).
+        # Matches by external + internal port so unrelated rules (e.g. the old
+        # "SSH DEV" 33->33 forward) do not count as the standard SSH rule.
+        status_types = _status_accesstypes(ip_mode)
+        standard_ports = [
+            {'port': 80, 'internal_port': 80, 'purpose': 'HTTP (Traefik)'},
+            {'port': 443, 'internal_port': 443, 'purpose': 'HTTPS (Traefik)'},
+        ]
+        # SSH cannot be forwarded on an IPv6-only connection (FRITZ!Box needs
+        # matching external/internal ports for IPv6), so it is only listed
+        # when IPv4 (or dual-stack) is in use.
+        if ip_mode != 'only':
+            standard_ports.append({'port': 33, 'internal_port': 22, 'purpose': 'SSH (optional)'})
+        for sp in standard_ports:
+            match = next((m for m in mappings
+                          if m.get('enabled')
+                          and str(m.get('external_port', '')) == str(sp['port'])
+                          and str(m.get('internal_port', '')) == str(sp['internal_port'])
+                          and m.get('accesstype', 'ipv4') in status_types), None)
+            port_status.append({**sp,
+                                'open': bool(match),
+                                'internal_client': match.get('internal_client', '') if match else '',
+                                'internal_ipv6': local_ipv6,
+                                'accesstype': auto_at})
+        port_status_known = bool(should_list) and not list_error
+
+        # Persist whether the standard web forwards (80/443) are present so the
+        # setup assistant and the page badge reflect real router state without
+        # needing host execution there. Only written when the rules were actually
+        # fetched, and only on change.
+        if port_status_known:
+            status_by_port = {p['port']: p['open'] for p in port_status}
+            configured = bool(status_by_port.get(80) and status_by_port.get(443))
+            if bool(vars_.get('port_forwarding_configured')) != configured:
+                from .views import _save_inventory_config
+                vars_['port_forwarding_configured'] = configured
+                _save_inventory_config(config)
 
     # Whether the WebUI can actually change rules on the router: it must be
     # reachable, and either a login is stored (FRITZ!Box) or the router needs
@@ -344,6 +402,10 @@ def settings_port_forwarding(request):
              or router_info.get('router_type') == 'generic_upnp'))
 
     return render(request, 'main/settings_port_forwarding.html', {
+        'pf_method': pf_method,
+        'ip_mode': ip_mode,
+        'auto_at': auto_at,
+        'base_domain': base_domain,
         'router_info': router_info,
         'detect_error': detect_error,
         'credentials_configured': credentials_configured,
