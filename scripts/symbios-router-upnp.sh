@@ -24,6 +24,26 @@ fi
 
 # JSON field extraction helpers (f_json_get/f_json_bool in symbios-lib.sh)
 
+# Extract the last-used FRITZ!Box user from login_sid.lua ('' when the box has
+# no user configured). Used to display/derive the login user in password-only
+# setups, where the web UI never asks for a name.
+function f_symbios_fritz_user {
+  local f_xml f_users f_tmp f_user
+  f_xml=$(curl -s --max-time 5 "http://${GATEWAY}/login_sid.lua?version=2" 2>/dev/null)
+  [[ "$f_xml" != *"<Users>"* ]] && { echo ""; return 1; }
+  f_users="${f_xml#*<Users>}"
+  f_users="${f_users%%</Users>*}"
+  if [[ "$f_users" == *'last="1"'* ]]
+  then
+    f_tmp="${f_users#*last=\"1\">}"
+    f_user="${f_tmp%%</User>*}"
+  else
+    f_tmp="${f_users#*<User>}"
+    f_user="${f_tmp%%</User>*}"
+  fi
+  echo "$f_user"
+}
+
 function f_json_bool {
   local f_json="$1" f_key="$2"
   local f_tmp="${f_json#*\"${f_key}\":}"
@@ -248,9 +268,20 @@ case "$ACTION" in
     # A login is configured if either the username or the password is stored.
     # Many FRITZ!Boxes only have the shared router password (no user), so an
     # empty username with a set password is a valid login.
-    if [[ -n "$ROUTER_UPNP_USER" ]] || [[ -n "$ROUTER_UPNP_PASS" ]]
+    CONFIGURED=false
+    [[ -n "$ROUTER_UPNP_USER" ]] && CONFIGURED=true
+    [[ -n "$ROUTER_UPNP_PASS" ]] && CONFIGURED=true
+    USERNAME="$ROUTER_UPNP_USER"
+    # Auto-detect the FRITZ!Box user (login_sid.lua reports it) so the WebUI
+    # can display the name the login will actually use.
+    if [[ -z "$USERNAME" ]]
     then
-      echo "{\"ok\":true,\"configured\":true,\"username\":\"${ROUTER_UPNP_USER}\",\"gateway\":\"${GATEWAY}\"}"
+      f_detected="$(f_symbios_fritz_user)"
+      [[ -n "$f_detected" ]] && USERNAME="$f_detected"
+    fi
+    if [[ "$CONFIGURED" == "true" ]]
+    then
+      echo "{\"ok\":true,\"configured\":true,\"username\":\"${USERNAME}\",\"gateway\":\"${GATEWAY}\"}"
     else
       echo "{\"ok\":true,\"configured\":false,\"gateway\":\"${GATEWAY}\"}"
     fi
