@@ -245,7 +245,10 @@ case "$ACTION" in
       exit 0
     fi
 
-    if [[ -n "$ROUTER_UPNP_USER" ]]
+    # A login is configured if either the username or the password is stored.
+    # Many FRITZ!Boxes only have the shared router password (no user), so an
+    # empty username with a set password is a valid login.
+    if [[ -n "$ROUTER_UPNP_USER" ]] || [[ -n "$ROUTER_UPNP_PASS" ]]
     then
       echo "{\"ok\":true,\"configured\":true,\"username\":\"${ROUTER_UPNP_USER}\",\"gateway\":\"${GATEWAY}\"}"
     else
@@ -272,7 +275,9 @@ case "$ACTION" in
     # FRITZ!Box → Python backend
     if [[ "$ROUTER_TYPE" == "fritzbox" ]]
     then
-      if [[ -z "$ROUTER_UPNP_USER" ]]
+      # Password-only logins are valid (many FRITZ!Boxes have no user), so
+      # block only when neither username nor password is stored.
+      if [[ -z "$ROUTER_UPNP_USER" ]] && [[ -z "$ROUTER_UPNP_PASS" ]]
       then
         echo '{"ok":false,"router_type":"fritzbox","error":"FRITZ!Box credentials not configured. Use '\''config'\'' to set them."}'
         exit 1
