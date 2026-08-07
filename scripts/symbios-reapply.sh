@@ -192,16 +192,12 @@ do
   echo "running:${g_count}/${g_total} ${g_playbook}" > "$g_status_file"
 
   g_tmp_log=$(mktemp)
-  if ansible-playbook --connection=local \
+  ansible-playbook --connection=local \
     --inventory "$g_inventory" \
     --limit localhost \
     -e "ansible_python_interpreter=/usr/bin/python3" \
     "$g_path" 2>&1 | tee "$g_tmp_log"
-  then
-    g_ansible_rc=0
-  else
-    g_ansible_rc=${PIPESTATUS[0]}
-  fi
+  g_ansible_rc=${PIPESTATUS[0]}
   cat "$g_tmp_log" >> "$g_log_file"
   rm -f "$g_tmp_log"
 

@@ -31,7 +31,7 @@ RUNCHECKS_FILE = '/log/runchecks-results.json'
 
 # Plain-language explanations shown on each settings page ("What is this page for?").
 PAGE_EXPLAIN = {
-    'ddns': (
+    'dns': (
         'The server needs a name on the internet, e.g. '
         '<code>my-server.dedyn.io</code>. All services will be reachable '
         'under this name and Let\u2019s Encrypt will issue certificates for it.'
@@ -78,7 +78,7 @@ PAGE_EXPLAIN = {
 
 # Map settings page -> runchecks check name (for the status badge).
 PAGE_CHECK = {
-    'ddns': 'ddns',
+    'dns': 'ddns',
     'mailserver': 'smtp',
     'auth': 'twofa',
     'acme': 'certs',
@@ -192,7 +192,7 @@ def setup_steps(inventory_vars):
                     'for everything else.',
         'optional': False,
         'status': 'done' if (dns_done and dns_status == 'ok') else 'pending',
-        'url': '/settings/ddns/',
+        'url': '/settings/dns/',
     })
 
     # Step: Port forwarding (only relevant for home)

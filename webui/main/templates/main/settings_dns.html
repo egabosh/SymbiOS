@@ -486,7 +486,7 @@ function detectIPs() {
   const ipv6Select = document.getElementById('ddns_ipv6');
   const currentVal = ipv6Select.value;
 
-  fetch('{% url "settings_ddns_check_ip" %}')
+  fetch('{% url "settings_dns_check_ip" %}')
     .then(r => r.json())
     .then(data => {
       let html = '';
@@ -568,7 +568,7 @@ function checkHostStatus() {
     ipv6_mode: ipv6Mode,
   });
 
-  fetch('{% url "settings_ddns_host_status" %}?' + params.toString())
+  fetch('{% url "settings_dns_host_status" %}?' + params.toString())
     .then(r => r.json())
     .then(data => {
       var html = '';
@@ -655,7 +655,7 @@ function testApiKey() {
   formData.append('hostname', hostname);
   formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
 
-  fetch('{% url "settings_ddns_test_api" %}', {
+  fetch('{% url "settings_dns_test_api" %}', {
     method: 'POST',
     body: formData,
     credentials: 'same-origin',
@@ -761,7 +761,7 @@ function submitRegistration() {
   }
   formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
 
-  fetch('{% url "settings_ddns_register" %}', {
+  fetch('{% url "settings_dns_register" %}', {
     method: 'POST',
     body: formData,
     credentials: 'same-origin',
@@ -801,7 +801,7 @@ function setRegStatus(msg, type) {
 
 function fetchCaptchaAndShow() {
   setRegStatus('Fetching captcha...', 'info');
-  fetch('{% url "settings_ddns_captcha" %}')
+  fetch('{% url "settings_dns_captcha" %}')
     .then(r => r.json())
     .then(data => {
       if (data.ok) {
@@ -826,7 +826,7 @@ function checkRegDomainAvailability() {
     statusEl.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> Invalid hostname (letters, digits, hyphens only)</span>';
     return;
   }
-  fetch('{% url "settings_ddns_check_domain" %}?hostname=' + encodeURIComponent(domain + '.dedyn.io'))
+  fetch('{% url "settings_dns_check_domain" %}?hostname=' + encodeURIComponent(domain + '.dedyn.io'))
     .then(r => r.json())
     .then(data => {
       if (data.available === true) {
@@ -857,7 +857,7 @@ function finalizeRegistration() {
   }
   formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
 
-  fetch('{% url "settings_ddns_finalize" %}', {
+  fetch('{% url "settings_dns_finalize" %}', {
     method: 'POST',
     body: formData,
     credentials: 'same-origin',
