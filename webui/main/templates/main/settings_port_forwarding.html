@@ -194,7 +194,12 @@
             <td>{{ p.purpose }}</td>
             <td>
               {% if p.open %}
-              <code>{{ p.internal_client }}:{{ p.internal_port }}</code>
+              <code>{{ server_name }}</code>
+              <span class="text-muted">(</span>
+              {% if p.internal_client %}<code>{{ p.internal_client }}</code>{% endif %}
+              {% if p.internal_client and p.internal_ipv6 %}<span class="text-muted">; </span>{% endif %}
+              {% if p.internal_ipv6 %}<code>{{ p.internal_ipv6 }}</code>{% endif %}
+              <span class="text-muted">)</span>
               {% else %}
               <span class="text-muted">&mdash;</span>
               {% endif %}
