@@ -57,6 +57,27 @@ def get_local_ip():
     return ip
 
 
+def detect_user(xml):
+    """Return the FRITZ!Box user to log in with, or '' when none is configured.
+
+    login_sid.lua lists the configured users in <Users>. Most boxes only have
+    the shared router password and no separate user; some create a default user
+    (e.g. 'fritz4039') that the web UI hides. Prefer the last-used user
+    (last="1"), falling back to the first entry.
+    """
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return ''
+    users = root.findall('Users/User')
+    if not users:
+        return ''
+    for u in users:
+        if u.get('last') == '1' and u.text:
+            return u.text
+    return users[0].text or ''
+
+
 def login_sid(host, user, password):
     url = f'http://{host}/login_sid.lua?version=2'
     try:
@@ -71,6 +92,10 @@ def login_sid(host, user, password):
     if challenge_el is None or not challenge_el.text:
         return {'ok': False, 'error': 'No challenge received'}
 
+    block_el = root.find('BlockTime')
+    if block_el is not None and block_el.text and block_el.text.strip() not in ('0', ''):
+        return {'ok': False, 'error': f'Login blocked by the router, try again in {block_el.text}s'}
+
     challenge = challenge_el.text
     parts = challenge.split('$')
     if parts[0] != '2':
@@ -80,6 +105,11 @@ def login_sid(host, user, password):
     salt1_hex = parts[2]
     iter2 = int(parts[3])
     salt2_hex = parts[4]
+
+    # An empty username is only valid when the box has no user at all; a
+    # default user reported by the box must be used for the login.
+    if not user:
+        user = detect_user(xml)
 
     salt1 = binascii.unhexlify(salt1_hex)
     salt2 = binascii.unhexlify(salt2_hex)
