@@ -40,7 +40,8 @@ def create_job(cmd, timeout=900, stdin_data=None):
     before closing the channel.
     """
     job_id = uuid.uuid4().hex
-    job = {'output': '', 'done': False, 'success': False, 'lock': threading.Lock()}
+    job = {'output': '', 'done': False, 'success': False, 'lock': threading.Lock(),
+           'command': cmd}
     with _JOBS_LOCK:
         # Keep the job table small: drop finished jobs before adding a new one.
         for old in [k for k, v in _JOBS.items() if v['done']]:
@@ -51,12 +52,12 @@ def create_job(cmd, timeout=900, stdin_data=None):
 
 
 def get_job_output(job_id):
-    """Return (output, done, success) for a job, or None if unknown."""
+    """Return (output, done, success, command) for a job, or None if unknown."""
     job = _JOBS.get(job_id)
     if job is None:
         return None
     with job['lock']:
-        return job['output'], job['done'], job['success']
+        return job['output'], job['done'], job['success'], job['command']
 
 
 def _run_job(job, cmd, stdin_data=None):

@@ -52,5 +52,6 @@ def exec_output(request):
     result = get_job_output(job_id)
     if result is None:
         return JsonResponse({'error': 'Unknown job'}, status=404)
-    output, done, success = result
-    return JsonResponse({'output': output, 'done': done, 'success': success})
+    output, done, success, command = result
+    return JsonResponse({'output': output, 'done': done, 'success': success,
+                         'command': command})
