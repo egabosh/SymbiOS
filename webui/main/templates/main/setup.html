@@ -66,18 +66,19 @@
   </div>
 </div>
 
-<!-- Reachability check -->
-<div class="card mt-3" id="step-reachability">
-  <div class="card-header"><i class="bi bi-globe-americas"></i> Step: Check reachability</div>
+<!-- SSL certificate check -->
+<div class="card mt-3" id="step-ssl">
+  <div class="card-header"><i class="bi bi-patch-check"></i> Step: Check SSL</div>
   <div class="card-body small">
     <p class="mb-2">
-      Checks whether the server is reachable from the internet under your
-      domain (ports 80 and 443). Set up DNS and port forwarding first.
+      A valid SSL certificate is only issued by Let's Encrypt when the server
+      is reachable from the internet (HTTP challenge on port 80). So a valid
+      certificate proves that your server can be reached from outside.
     </p>
-    <button type="button" class="btn btn-outline-primary btn-sm" id="reach-btn" onclick="runReachability()">
+    <button type="button" class="btn btn-outline-primary btn-sm" id="ssl-btn" onclick="runSslCheck()">
       <i class="bi bi-arrow-repeat"></i> Check now
     </button>
-    <div id="reach-result" class="mt-2"></div>
+    <div id="ssl-result" class="mt-2"></div>
   </div>
 </div>
 
@@ -121,20 +122,20 @@
 </div>
 
 <script>
-function runReachability() {
-  var btn = document.getElementById('reach-btn');
-  var res = document.getElementById('reach-result');
+function runSslCheck() {
+  var btn = document.getElementById('ssl-btn');
+  var res = document.getElementById('ssl-result');
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking...';
-  res.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking from the internet...';
+  res.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking certificate...';
 
-  fetch('{% url "setup_reachability" %}')
+  fetch('{% url "setup_ssl_check" %}')
     .then(r => r.json())
     .then(data => {
       if (data.ok) {
-        res.innerHTML = '<div class="alert alert-success py-2 px-3 mb-0"><i class="bi bi-check-circle-fill"></i> ' + (data.summary || 'Everything reachable.') + '</div>';
+        res.innerHTML = '<div class="alert alert-success py-2 px-3 mb-0"><i class="bi bi-check-circle-fill"></i> ' + (data.summary || 'Certificate valid.') + '</div>';
       } else {
-        var msg = data.error || data.summary || 'The server is not reachable.';
+        var msg = data.error || data.summary || 'No valid certificate found.';
         res.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0"><i class="bi bi-exclamation-triangle-fill"></i> ' + msg + '</div>';
       }
     })

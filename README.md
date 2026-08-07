@@ -232,7 +232,7 @@ the matching feature is configured or installed.
 |---------|---------|-----------|
 | **Let's Encrypt** (`acme-v02.api.letsencrypt.org`) | Issues the TLS certificates for `*.{{ base_domain }}` (ACME HTTP-01 challenge). Only during issuance/renewal. | always (Traefik) |
 | **deSEC** (`desec.io` API) | Dynamic-DNS updates and domain/rrsets management. | when DDNS is configured |
-| **deSEC echo services** (`checkipv4.dedyn.io`, `checkipv6.dedyn.io`) | Determine the current public IP (DynDNS and external-reachability check). | when DDNS is configured |
+| **deSEC echo services** (`checkipv4.dedyn.io`, `checkipv6.dedyn.io`) | Determine the current public IP (DynDNS updates). | when DDNS is configured |
 | **Debian apt repositories** (`deb.debian.org`, `security.debian.org`) | Base system package updates. | always |
 | **Docker apt repository** (`download.docker.com`) | Installs/updates the Docker engine. | `docker.yml` |
 | **PyPI** (`pypi.org`) | Downloads Python dependencies when building the WebUI container. | WebUI build |
@@ -242,7 +242,6 @@ the matching feature is configured or installed.
 | **GitHub** (`github.com/egabosh/gaboshlib`) | Installs the shared bash library. | `basics.yml` |
 | **Raspberry Pi** (`downloads.raspberrypi.com`) | Downloads the base Raspberry Pi OS image. | image builder only |
 | **Digitalcourage DNS** (`dns3.digitalcourage.de`) | Internet-connectivity ping in the health checks. | every 5 min |
-| **YouGetSignal** (`ports.yougetsignal.com`) | External port-reachability probe (is a port reachable from the internet). | manual / WebUI check |
 | **Qualys SSL Labs** (`ssllabs.com`) | TLS grade scan of hosted services. | optional script |
 
 The host resolves DNS through its locally configured resolver (systemd-resolved

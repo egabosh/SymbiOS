@@ -1,0 +1,33 @@
+# Check: Verify the domain has a valid SSL certificate (proves external reachability)
+f_check_cache "symbios-healthcheck-ssl" || return 2>/dev/null || true
+
+# Only meaningful when DNS is configured
+g_base_domain=$(f_symbios_var base_domain "" 2>/dev/null)
+if [[ -z "$g_base_domain" ]]
+then
+  g_echo_error "No domain configured yet - SSL check cannot be performed"
+  return 2>/dev/null || true
+fi
+
+# Run the local SSL certificate check (no external service)
+g_result=$(symbios-ssl-check.sh -d "$g_base_domain" 2>/dev/null)
+if [[ -z "$g_result" ]]
+then
+  g_echo_error "Healthcheck failed for ssl: check produced no output"
+  return 2>/dev/null || true
+fi
+
+g_ok=""
+if [[ "$g_result" == *'"ok":true'* ]]
+then
+  g_ok="true"
+fi
+g_summary=$(f_json_get "$g_result" "summary")
+
+if [[ "$g_ok" == "true" ]]
+then
+  # Report OK status implicitly by producing no error
+  :
+else
+  g_echo_error "No valid SSL certificate (server may not be reachable from the internet): ${g_summary:-unknown reason}"
+fi

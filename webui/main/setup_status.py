@@ -213,15 +213,15 @@ def setup_steps(inventory_vars):
         'url': '/settings/port-forwarding/',
     })
 
-    # Step: Reachability
-    reach_done = checks.get('reachability')
+    # Step: SSL certificate
+    ssl_done = checks.get('ssl')
     steps.append({
-        'key': 'reachability',
-        'title': 'Check Reachability',
-        'subtitle': 'Test from outside whether the server is reachable.',
+        'key': 'ssl',
+        'title': 'Check SSL',
+        'subtitle': 'A valid certificate proves the server is reachable from the internet.',
         'optional': False,
-        'status': 'done' if reach_done == 'ok' else 'pending',
-        'url': '/setup/#step-reachability',
+        'status': 'done' if ssl_done == 'ok' else 'pending',
+        'url': '/setup/#step-ssl',
     })
 
     # Step: TLS certificates
