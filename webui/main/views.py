@@ -170,8 +170,8 @@ def setup(request):
 
 
 @login_required
-def setup_reachability(request):
-    """AJAX GET — run the external reachability probe and return JSON."""
+def setup_ssl_check(request):
+    """AJAX GET — check for a valid SSL certificate (proves external reachability)."""
     from .utils.ssh_exec import run_command
     from django.http import JsonResponse
     config = _get_inventory_config()
@@ -180,7 +180,7 @@ def setup_reachability(request):
     if not base_domain:
         return JsonResponse({'ok': False, 'error': 'No domain configured yet. Set up DNS first.'})
     ok, stdout, stderr = run_command(
-        f'symbios-external-check.sh -d {base_domain} -p 80,443', timeout=60)
+        f'symbios-ssl-check.sh -d {base_domain}', timeout=60)
     # The script always emits valid JSON on stdout, even when a check fails
     # (exit 1). Return that JSON directly so the template can show the summary
     # instead of a raw JSON blob in the error field.
