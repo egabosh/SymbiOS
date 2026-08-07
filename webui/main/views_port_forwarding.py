@@ -89,6 +89,23 @@ def _get_local_ip():
     return ''
 
 
+def _get_server_info():
+    """Get the server's short hostname, LAN IPv4 and global IPv6 (GUA)."""
+    try:
+        ok, stdout, _ = run_command('symbios-get-local-ips.sh', timeout=10)
+        if ok and stdout:
+            info = json.loads(stdout)
+            return {
+                'hostname': info.get('hostname', ''),
+                'ipv4': info.get('ipv4', ''),
+                'ipv6': info.get('ipv6', ''),
+            }
+    except Exception:
+        pass
+    # Fall back to the well-tested IPv4-only lookup
+    return {'hostname': '', 'ipv4': _get_local_ip(), 'ipv6': ''}
+
+
 @login_required
 def settings_port_forwarding(request):
     """Main port forwarding settings page with router detection."""
@@ -254,8 +271,11 @@ def settings_port_forwarding(request):
     except Exception:
         pass
 
-    # Get local IP for default suggestion
-    local_ip = _get_local_ip()
+    # Get server identity for the default forwarding target suggestion
+    server_info = _get_server_info()
+    local_ip = server_info['ipv4']
+    local_ipv6 = server_info['ipv6']
+    server_name = server_info['hostname']
 
     # IPv6 state (FRITZ!Box only, read-only)
     ipv6_info = None
@@ -299,7 +319,8 @@ def settings_port_forwarding(request):
                       and m.get('accesstype', 'ipv4') in ('ipv4', 'ipv4_ipv6')), None)
         port_status.append({**sp,
                             'open': bool(match),
-                            'internal_client': match.get('internal_client', '') if match else ''})
+                            'internal_client': match.get('internal_client', '') if match else '',
+                            'internal_ipv6': local_ipv6})
     port_status_known = bool(should_list) and not list_error
 
     # Persist whether the standard web forwards (80/443) are present so the
@@ -329,6 +350,8 @@ def settings_port_forwarding(request):
         'credentials_username': credentials_username,
         'can_control_router': can_control_router,
         'local_ip': local_ip,
+        'local_ipv6': local_ipv6,
+        'server_name': server_name,
         'mappings': mappings,
         'list_error': list_error,
         'port_status': port_status,
