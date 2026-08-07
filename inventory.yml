@@ -9,6 +9,10 @@ all:
     acme_resolver: 'letsencrypt'
     instance: "default"
     ldap_basedn: "dc=openldap,dc=local"
+    # setup state — set by the WebUI guided setup (inventory.yml is the central
+    # restore source after a fresh installation)
+    network_type: ""          # 'home' (behind router) or 'root' (own public IP)
+    twofa_enabled: false      # Authelia 2FA enforcement for LDAP users
     # filesystem layout (all data lives under the /symbios data root)
     data_root: "/symbios"
     git_root: "/symbios/git/SymbiOS"
@@ -17,6 +21,8 @@ all:
     docker_root: "/symbios/docker"
     containerd_root: "/symbios/containerd"
     backup_root: "/symbios/backups"
+    # dns/ddns — dns_mode: '' (unset), 'desec' or 'self-managed'
+    dns_mode: ''
     # ddns (desec.io)
     ddns_apikey: ''
     ddns_host: ''
@@ -31,6 +37,7 @@ all:
     # port forwarding — extra inbound UFW rules for IPv6 forwards,
     # kept in sync by the WebUI (settings → port forwarding)
     ufw_extra_inbound: []
+    port_forwarding_configured: false
     # router UPnP/TR-064 credentials (FRITZ!Box WebUI user/password).
     # Stored only in the deployed inventory.yml (see symbios-router-upnp.sh);
     # these placeholders keep the template clean for new installs.
