@@ -146,17 +146,6 @@
         prefix from the provider changes.</li>
     </ol>
     {% endif %}
-
-    <hr class="my-2">
-    <p class="text-muted mb-0">
-      <i class="bi bi-exclamation-triangle"></i>
-      <strong>Heads-up:</strong> For IPv6 forwards (and for non-standard ports)
-      the server's own firewall must also allow the traffic. SymbiOS only opens
-      the firewall for the ports it creates itself. After creating additional
-      forwards, run on the server:
-    </p>
-    <pre class="bg-body border rounded p-2 mt-1 mb-0 font-monospace small">sudo ufw allow 80/tcp comment 'symbios-manual'
-sudo ufw allow 443/tcp comment 'symbios-manual'</pre>
   </div>
 </div>
 {% endif %}
