@@ -61,8 +61,9 @@ PAGE_EXPLAIN = {
     ),
     'port-forwarding': (
         'For the server to be reachable from outside, ports 80 (HTTP) and '
-        '443 (HTTPS) must be forwarded from the router to the server. With '
-        'UPnP this happens automatically.'
+        '443 (HTTPS) must be forwarded from the router to the server. '
+        'SymbiOS can open these ports for you automatically on the router '
+        '(or you can do it manually).'
     ),
     'disk': (
         'By default, all data is stored on the system SD card. A separate '

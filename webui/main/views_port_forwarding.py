@@ -111,11 +111,11 @@ def settings_port_forwarding(request):
                 result = _run_upnp(f'config {_shell_quote(username)} {_shell_quote(password)}', timeout=10)
                 if is_ajax:
                     from .utils.jobs import create_job
-                    job_id = create_job('echo "Router UPnP credentials saved"', timeout=5)
+                    job_id = create_job('echo "Router login saved"', timeout=5)
                     return JsonResponse({'ok': True, 'job': job_id,
-                                         'title': 'Saving router UPnP credentials...',
-                                         'message': 'Credentials saved successfully.'})
-                messages.success(request, 'Router UPnP credentials saved.')
+                                         'title': 'Saving router login...',
+                                         'message': 'Router login saved.'})
+                messages.success(request, 'Router login saved.')
                 return redirect('settings_port_forwarding')
 
             elif action == 'quick-enable':
@@ -216,18 +216,18 @@ def settings_port_forwarding(request):
                 return redirect('settings_port_forwarding')
 
             elif action == 'remove-credentials':
-                # Drop the stored router UPnP/TR-064 credentials entirely.
+                # Drop the stored router login entirely.
                 if is_ajax:
                     from .utils.jobs import create_job
                     job_id = create_job(f'{SCRIPT} config remove', timeout=10)
                     return JsonResponse({'ok': True, 'job': job_id,
-                                         'title': 'Removing router credentials...',
-                                         'message': 'Router credentials removed.'})
+                                         'title': 'Removing router login...',
+                                         'message': 'Router login removed.'})
                 result = _run_upnp('config remove', timeout=10)
                 if result.get('ok'):
-                    messages.success(request, 'Router credentials removed.')
+                    messages.success(request, 'Router login removed.')
                 else:
-                    messages.error(request, result.get('error', 'Failed to remove router credentials.'))
+                    messages.error(request, result.get('error', 'Failed to remove router login.'))
                 return redirect('settings_port_forwarding')
 
         except Exception as e:
@@ -246,9 +246,11 @@ def settings_port_forwarding(request):
 
     # Check if credentials are stored
     credentials_configured = False
+    credentials_username = ''
     try:
         cfg = _run_upnp('config', timeout=10)
         credentials_configured = cfg.get('configured', False)
+        credentials_username = cfg.get('username', '')
     except Exception:
         pass
 
@@ -312,10 +314,20 @@ def settings_port_forwarding(request):
             vars_['port_forwarding_configured'] = configured
             _save_inventory_config(config)
 
+    # Whether the WebUI can actually change rules on the router: it must be
+    # reachable, and either a login is stored (FRITZ!Box) or the router needs
+    # no login at all (generic UPnP).
+    can_control_router = bool(
+        router_info and router_info.get('available')
+        and (credentials_configured
+             or router_info.get('router_type') == 'generic_upnp'))
+
     return render(request, 'main/settings_port_forwarding.html', {
         'router_info': router_info,
         'detect_error': detect_error,
         'credentials_configured': credentials_configured,
+        'credentials_username': credentials_username,
+        'can_control_router': can_control_router,
         'local_ip': local_ip,
         'mappings': mappings,
         'list_error': list_error,
