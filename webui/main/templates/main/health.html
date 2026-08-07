@@ -16,7 +16,14 @@
   </a>
 </div>
 {% endif %}
-<h2><i class="bi bi-heart-pulse"></i> System Health</h2>
+<h2 class="mb-0"><i class="bi bi-heart-pulse"></i> System Health</h2>
+<div class="d-flex align-items-center gap-3 mt-1">
+  <span class="text-muted small">The SSL check verifies that the server is reachable from the internet.</span>
+  <button type="button" class="btn btn-outline-primary btn-sm" id="ssl-check-btn" onclick="runSslCheck()">
+    <i class="bi bi-patch-check"></i> Check SSL now
+  </button>
+</div>
+<div id="ssl-result" class="mt-2"></div>
 
 <div id="health-container" class="row g-3 mt-2">
   <div class="col-12 text-center">
@@ -41,6 +48,32 @@
     if (status === 'warn') return '<span class="badge bg-warning text-dark">Warning</span>';
     if (status === 'error') return '<span class="badge bg-danger">Error</span>';
     return '<span class="badge bg-secondary">Unknown</span>';
+  }
+
+  function runSslCheck() {
+    var btn = document.getElementById('ssl-check-btn');
+    var res = document.getElementById('ssl-result');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking...';
+    res.innerHTML = '<div class="alert alert-info py-2 px-3 mb-0"><span class="spinner-border spinner-border-sm"></span> Checking certificates...</div>';
+
+    fetch('{% url "health_ssl_check" %}')
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          res.innerHTML = '<div class="alert alert-success py-2 px-3 mb-0"><i class="bi bi-check-circle-fill"></i> ' + escapeHtml(data.summary || 'SSL certificates valid.') + '</div>';
+        } else {
+          var msg = data.error || data.summary || 'No valid certificate found.';
+          res.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0"><i class="bi bi-exclamation-triangle-fill"></i> ' + escapeHtml(msg) + '</div>';
+        }
+      })
+      .catch(err => {
+        res.innerHTML = '<div class="alert alert-danger py-2 px-3 mb-0"><i class="bi bi-x-circle-fill"></i> ' + escapeHtml(err.message) + '</div>';
+      })
+      .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-patch-check"></i> Check SSL now';
+      });
   }
 
   function escapeHtml(text) {

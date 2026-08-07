@@ -158,10 +158,13 @@ def setup(request):
     steps = setup_steps(vars_)
     pending = [s for s in steps if not s['optional'] and s['status'] != 'done']
     complete = is_setup_complete(vars_)
+    main_steps = [s for s in steps if s.get('group') == 'main']
+    advanced_steps = [s for s in steps if s.get('group') != 'main']
 
     return render(request, 'main/setup.html', {
         'vars': vars_,
-        'steps': steps,
+        'main_steps': main_steps,
+        'advanced_steps': advanced_steps,
         'pending_count': len(pending),
         'complete': complete,
         'network_type': vars_.get('network_type', ''),
@@ -170,7 +173,7 @@ def setup(request):
 
 
 @login_required
-def setup_ssl_check(request):
+def health_ssl_check(request):
     """AJAX GET — check for a valid SSL certificate (proves external reachability)."""
     from .utils.ssh_exec import run_command
     from django.http import JsonResponse

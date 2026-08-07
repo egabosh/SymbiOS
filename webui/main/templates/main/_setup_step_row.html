@@ -1,0 +1,26 @@
+<tr>
+  <td class="ps-3" style="width:36px">
+    {% if step.status == 'done' %}
+    <i class="bi bi-check-circle-fill text-success fs-5"></i>
+    {% elif step.optional %}
+    <i class="bi bi-circle text-secondary fs-5"></i>
+    {% else %}
+    <i class="bi bi-exclamation-circle text-warning fs-5"></i>
+    {% endif %}
+  </td>
+  <td>
+    <a href="{{ step.url }}" class="text-decoration-none">
+      <strong>{{ step.title|safe }}</strong>
+    </a>
+    <div class="text-muted small">{{ step.subtitle|safe }}</div>
+  </td>
+  <td class="text-end pe-3">
+    {% if step.status == 'done' %}
+    <span class="badge bg-success">Done</span>
+    {% elif step.optional %}
+    <span class="badge bg-secondary">Optional</span>
+    {% else %}
+    <a href="{{ step.url }}" class="btn btn-sm btn-outline-primary">Set up now</a>
+    {% endif %}
+  </td>
+</tr>
