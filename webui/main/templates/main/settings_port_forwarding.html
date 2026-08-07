@@ -3,6 +3,165 @@
 {% block content %}
 {% include "main/_page_header.html" %}
 
+<!-- Step 1: How should the ports be opened? -->
+<div class="card mt-3">
+  <div class="card-header">
+    <i class="bi bi-diagram-3"></i> Step 1 &mdash; How should the ports be opened?
+  </div>
+  <div class="card-body small">
+    <p class="text-muted mb-2">
+      To make the server reachable from the internet, the ports
+      <code>80</code> (HTTP) and <code>443</code> (HTTPS) must be forwarded
+      from your router to the server. Choose how you want to do this:
+    </p>
+    <div class="d-flex flex-column gap-2 mb-0">
+      <form method="post" class="mb-0">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="choose-method">
+        <input type="hidden" name="method" value="auto">
+        <button type="submit" class="btn w-100 text-start {% if pf_method == 'auto' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+                id="choice-auto">
+          <div class="d-flex align-items-center gap-3">
+            <i class="bi bi-lightning-charge fs-4"></i>
+            <div>
+              <strong>SymbiOS opens the ports for me</strong>
+              <div class="small {% if pf_method == 'auto' %}text-white-50{% else %}text-muted{% endif %}">
+                Recommended. Your router is detected and the forwards are set up automatically.
+              </div>
+            </div>
+          </div>
+        </button>
+      </form>
+      <form method="post" class="mb-0">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="choose-method">
+        <input type="hidden" name="method" value="manual">
+        <button type="submit" class="btn w-100 text-start {% if pf_method == 'manual' %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+                id="choice-manual">
+          <div class="d-flex align-items-center gap-3">
+            <i class="bi bi-hand-index-thumb fs-4"></i>
+            <div>
+              <strong>I'll forward the ports manually</strong>
+              <div class="small {% if pf_method == 'manual' %}text-white-50{% else %}text-muted{% endif %}">
+                You enter the forwards yourself in the router &mdash; step-by-step guide
+                for IPv4 and IPv6.
+              </div>
+            </div>
+          </div>
+        </button>
+      </form>
+    </div>
+    {% if not pf_method %}
+    <p class="text-muted small mt-2 mb-0">
+      <i class="bi bi-info-circle"></i>
+      If the router does not support automatic port forwarding (UPnP / port sharing),
+      choose the manual option.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+{% if pf_method == 'manual' %}
+<!-- Manual forwarding guide -->
+<div class="card mt-3">
+  <div class="card-header"><i class="bi bi-hand-index-thumb"></i> Manual port forwarding &mdash; step by step</div>
+  <div class="card-body small">
+
+    <div class="alert alert-info py-2 px-3 mb-3">
+      <i class="bi bi-info-circle-fill"></i>
+      You need access to the <strong>router's web interface</strong>. This is
+      usually <code>http://fritz.box</code> or the IP printed on the router.
+      No router login is stored on the server for this variant.
+    </div>
+
+    <div class="mb-3">
+      <p class="mb-1"><strong>Your server &mdash; the forwarding target:</strong></p>
+      <table class="table table-sm table-borderless mb-0" style="max-width:520px">
+        <tr>
+          <td class="text-muted">Name / domain</td>
+          <td><code>{{ base_domain|default:"(not set yet)" }}</code></td>
+        </tr>
+        {% if local_ip %}
+        <tr>
+          <td class="text-muted">IPv4 (LAN)</td>
+          <td><code>{{ local_ip }}</code></td>
+        </tr>
+        {% endif %}
+        {% if local_ipv6 %}
+        <tr>
+          <td class="text-muted">IPv6 (global)</td>
+          <td><code>{{ local_ipv6 }}</code></td>
+        </tr>
+        {% endif %}
+      </table>
+    </div>
+
+    {% if ip_mode != 'only' %}
+    <h6 class="text-body"><i class="bi bi-globe"></i> IPv4</h6>
+    <ol class="ps-3 mb-2">
+      <li>Open the router's web interface.</li>
+      <li>Find the <strong>port forwarding / port sharing / NAT</strong> settings
+        (FRITZ!Box: <em>Internet &rarr; Permit Access &rarr; Port Sharing</em>).</li>
+      <li>Add these rules &mdash; they make the server reachable from the internet:
+        <table class="table table-sm mb-2 mt-2" style="max-width:560px">
+          <thead><tr><th>External</th><th>Protocol</th><th>Target</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>80</code></td><td>TCP</td><td><code>{{ local_ip|default:"server-IPv4" }}:80</code></td><td>HTTP</td></tr>
+            <tr><td><code>443</code></td><td>TCP</td><td><code>{{ local_ip|default:"server-IPv4" }}:443</code></td><td>HTTPS</td></tr>
+            <tr><td><code>33</code></td><td>TCP</td><td><code>{{ local_ip|default:"server-IPv4" }}:22</code></td><td>SSH (optional)</td></tr>
+          </tbody>
+        </table>
+      </li>
+      <li><strong>Important:</strong> Assign the server a <strong>fixed IP</strong>
+        (DHCP reservation / &bdquo;always keep this IP&ldquo;) so the forwards keep
+        working after a restart.</li>
+    </ol>
+    {% endif %}
+
+    {% if ip_mode == 'yes' or ip_mode == 'only' %}
+    <h6 class="text-body"><i class="bi bi-globe2"></i> IPv6</h6>
+    {% if ip_mode == 'only' %}
+    <div class="alert alert-warning py-2 px-3 mb-2">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      Your DNS is set to <strong>IPv6 only</strong> &mdash; the IPv6 forwards below
+      are therefore required, IPv4 forwards are not needed.
+    </div>
+    {% endif %}
+    <ol class="ps-3 mb-2">
+      <li>Open the router's web interface and go to the IPv6 port sharing settings
+        (FRITZ!Box: <em>Internet &rarr; Permit Access &rarr; IPv6 &rarr; Port Sharing</em>).</li>
+      <li>Add rules for the server as a <strong>device</strong> (not as a fixed IP):
+        <table class="table table-sm mb-2 mt-2" style="max-width:560px">
+          <thead><tr><th>External</th><th>Protocol</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>80</code></td><td>TCP</td><td>HTTP</td></tr>
+            <tr><td><code>443</code></td><td>TCP</td><td>HTTPS</td></tr>
+          </tbody>
+        </table>
+      </li>
+      <li>IPv6 forwards only work with <strong>identical external and internal
+        port</strong> (e.g. 80 &rarr; 80). A different SSH port can therefore not
+        be forwarded over IPv6.</li>
+      <li>Device-bound rules follow the server automatically when the IPv6
+        prefix from the provider changes.</li>
+    </ol>
+    {% endif %}
+
+    <hr class="my-2">
+    <p class="text-muted mb-0">
+      <i class="bi bi-exclamation-triangle"></i>
+      <strong>Heads-up:</strong> For IPv6 forwards (and for non-standard ports)
+      the server's own firewall must also allow the traffic. SymbiOS only opens
+      the firewall for the ports it creates itself. After creating additional
+      forwards, run on the server:
+    </p>
+    <pre class="bg-body border rounded p-2 mt-1 mb-0 font-monospace small">sudo ufw allow 80/tcp comment 'symbios-manual'
+sudo ufw allow 443/tcp comment 'symbios-manual'</pre>
+  </div>
+</div>
+{% endif %}
+
+{% if pf_method == 'auto' %}
 {% if detect_error %}
 <div class="alert alert-warning py-2 px-3 mt-3 mb-3">
   <i class="bi bi-exclamation-triangle-fill"></i>
@@ -10,10 +169,10 @@
 </div>
 {% endif %}
 
-<!-- Step 1: Router detection -->
+<!-- Step 2: Router detection -->
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center">
-    <span><i class="bi bi-router"></i> Step 1 &mdash; Your router</span>
+    <span><i class="bi bi-router"></i> Step 2 &mdash; Your router</span>
     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="detectRouter()" id="detect-btn">
       <i class="bi bi-arrow-repeat"></i> Check
     </button>
@@ -39,7 +198,7 @@
       {% if can_control_router %}
       <span class="badge bg-success"><i class="bi bi-check-circle"></i> This router can be controlled</span>
       {% else %}
-      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> Login required below (Step 2)</span>
+      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> Login required below (Step 3)</span>
       {% endif %}
     </div>
     {% elif router_info and router_info.available == false %}
@@ -52,8 +211,8 @@
       To let SymbiOS open the ports for you, the router must support automatic
       port forwarding (often called &bdquo;port sharing&ldquo; or
       &bdquo;UPnP&ldquo;) and this feature must be enabled in the router. If it
-      is not, you can still forward the ports manually (see &bdquo;Alternative&ldquo;
-      below).
+      is not, switch to <strong>Step 1 &mdash; &bdquo;I'll forward the ports
+      manually&ldquo;</strong> above.
     </p>
     {% else %}
     <div id="detect-pending">
@@ -64,10 +223,10 @@
   </div>
 </div>
 
-<!-- Step 2: Router login (optional) -->
+<!-- Step 3: Router login (optional) -->
 <div class="card mt-3">
   <div class="card-header">
-    <span><i class="bi bi-key"></i> Step 2 &mdash; Router login <span class="text-muted small">(optional)</span></span>
+    <span><i class="bi bi-key"></i> Step 3 &mdash; Router login <span class="text-muted small">(optional)</span></span>
   </div>
   <div class="card-body small">
     <p class="text-muted mb-2">
@@ -152,18 +311,30 @@
   </div>
 </div>
 
-<!-- Step 3: Port status -->
+<!-- Step 4: Port status -->
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-    <span><i class="bi bi-check2-circle"></i> Step 3 &mdash; Port status</span>
+    <span><i class="bi bi-check2-circle"></i> Step 4 &mdash; Port status
+      {% if ip_mode == 'only' %}
+      <span class="badge bg-info text-dark ms-1">IPv6 only</span>
+      {% elif ip_mode == 'yes' %}
+      <span class="badge bg-info text-dark ms-1">IPv4 + IPv6</span>
+      {% endif %}
+    </span>
     {% if router_info and router_info.available %}
     <form method="post" data-exec="true" class="d-flex align-items-center gap-2 mb-0">
       {% csrf_token %}
       <input type="hidden" name="action" value="quick-enable">
+      {% if ip_mode == 'only' %}
+      <div class="form-text small me-1">
+        SSH forwarding is not possible on an IPv6-only connection.
+      </div>
+      {% else %}
       <div class="form-check form-check-inline mb-0">
         <input class="form-check-input" type="checkbox" name="include_ssh" value="1" id="include-ssh">
         <label class="form-check-label small" for="include-ssh">also SSH (TCP 33)</label>
       </div>
+      {% endif %}
       <button type="submit" class="btn btn-sm btn-primary" {% if not can_control_router %}disabled{% endif %}>
         <i class="bi bi-lightning-charge"></i> Open all
       </button>
@@ -194,12 +365,16 @@
             <td>{{ p.purpose }}</td>
             <td>
               {% if p.open %}
+              {% if p.accesstype == 'ipv6' %}
+              <code>{{ p.internal_ipv6 }}</code>
+              {% else %}
               <code>{{ server_name }}</code>
               <span class="text-muted">(</span>
               {% if p.internal_client %}<code>{{ p.internal_client }}</code>{% endif %}
-              {% if p.internal_client and p.internal_ipv6 %}<span class="text-muted">; </span>{% endif %}
-              {% if p.internal_ipv6 %}<code>{{ p.internal_ipv6 }}</code>{% endif %}
+              {% if p.accesstype == 'ipv4_ipv6' and p.internal_client and p.internal_ipv6 %}<span class="text-muted">; </span>{% endif %}
+              {% if p.accesstype == 'ipv4_ipv6' and p.internal_ipv6 %}<code>{{ p.internal_ipv6 }}</code>{% endif %}
               <span class="text-muted">)</span>
+              {% endif %}
               {% else %}
               <span class="text-muted">&mdash;</span>
               {% endif %}
@@ -233,7 +408,7 @@
                 <input type="hidden" name="int_port" value="{{ p.internal_port }}">
                 <input type="hidden" name="int_client" value="{{ local_ip }}">
                 <input type="hidden" name="description" value="{{ p.purpose }}">
-                <input type="hidden" name="accesstype" value="ipv4">
+                <input type="hidden" name="accesstype" value="{{ p.accesstype }}">
                 <button type="submit" class="btn btn-sm btn-outline-success py-0 px-2" {% if not can_control_router %}disabled{% endif %}>
                   <i class="bi bi-plus-circle"></i> Open
                 </button>
@@ -256,20 +431,20 @@
     {% if router_info and router_info.available and not can_control_router %}
     <p class="text-muted mt-2 mb-0">
       <i class="bi bi-info-circle"></i>
-      This router asks for a login. Enter it in <strong>Step 2</strong> to open
+      This router asks for a login. Enter it in <strong>Step 3</strong> to open
       and close ports from here.
     </p>
     {% endif %}
 
     <hr class="my-2">
-    <p class="text-muted small mb-0">
+    <div class="alert alert-warning py-2 px-3 mb-0">
       <i class="bi bi-exclamation-triangle"></i>
-      <strong>Heads-up:</strong> With &bdquo;Open all&ldquo; or the per-port
-      buttons, SymbiOS changes the port forwarding rules on your router using
-      the router login. Save a backup of the router's settings before enabling
-      this. SymbiOS is provided without warranty &mdash; you remain
-      responsible for your router's configuration.
-    </p>
+      <strong>Haftungsausschluss / Disclaimer:</strong> With &bdquo;Open all&ldquo;
+      or the per-port buttons, SymbiOS changes the port forwarding rules on your
+      router using the router login. Save a backup of the router's settings
+      before enabling this. SymbiOS is provided without warranty &mdash; you
+      remain responsible for your router's configuration.
+    </div>
   </div>
 </div>
 
@@ -318,10 +493,17 @@
 </div>
 {% endif %}
 
-<!-- Additional rules -->
+<!-- Additional rules (optional, collapsed) -->
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center">
-    <span><i class="bi bi-list-columns"></i> Additional rules</span>
+    <span>
+      <a class="text-decoration-none text-body d-flex align-items-center gap-2"
+         data-bs-toggle="collapse" href="#additional-rules" role="button"
+         aria-expanded="false" aria-controls="additional-rules">
+        <i class="bi bi-list-columns"></i> Additional rules
+        <span class="badge bg-secondary align-middle">optional</span>
+      </a>
+    </span>
     <div>
       <button type="button" class="btn btn-sm btn-outline-secondary me-1" onclick="refreshMappings()">
         <i class="bi bi-arrow-repeat"></i> Refresh
@@ -333,88 +515,90 @@
       {% endif %}
     </div>
   </div>
-  <div class="card-body small" id="mappings-body">
-    {% if not can_control_router %}
-    <p class="text-muted mb-0">
-      <i class="bi bi-info-circle"></i>
-      Set up the router (Step 1) and the login (Step 2) above to manage rules.
-    </p>
-    {% elif list_error %}
-    <div class="alert alert-warning py-2 px-3 mb-0">
-      <i class="bi bi-exclamation-triangle-fill"></i>
-      {{ list_error }}
+  <div class="collapse" id="additional-rules">
+    <div class="card-body small" id="mappings-body">
+      {% if not can_control_router %}
+      <p class="text-muted mb-0">
+        <i class="bi bi-info-circle"></i>
+        Set up the router (Step 2) and the login (Step 3) above to manage rules.
+      </p>
+      {% elif list_error %}
+      <div class="alert alert-warning py-2 px-3 mb-0">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        {{ list_error }}
+      </div>
+      {% elif mappings %}
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+          <thead>
+            <tr>
+              <th>External Port</th>
+              <th>Protocol</th>
+              <th>Internal IP</th>
+              <th>Internal Port</th>
+              <th>Description</th>
+              <th>IP Version</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in mappings %}
+            <tr>
+              <td><code>{{ m.external_port }}</code></td>
+              <td>
+                <span class="badge {% if m.protocol == 'TCP' %}bg-primary{% else %}bg-success{% endif %}">
+                  {{ m.protocol }}
+                </span>
+              </td>
+              <td><code>{{ m.internal_client }}</code>
+                {% if m.accesstype == 'ipv4_ipv6' and m.internal_client_ipv6 %}
+                <span class="text-muted">; </span><code>{{ m.internal_client_ipv6 }}</code>
+                {% endif %}
+              </td>
+              <td><code>{{ m.internal_port }}</code></td>
+              <td class="text-muted">{{ m.description|default:"-" }}</td>
+              <td>
+                {% if m.accesstype == 'ipv6' %}
+                <span class="badge bg-info text-dark">IPv6</span>
+                {% elif m.accesstype == 'ipv4_ipv6' %}
+                <span class="badge bg-info text-dark">IPv4+IPv6</span>
+                {% else %}
+                <span class="badge bg-secondary">IPv4</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if m.enabled %}
+                <span class="badge bg-success">Active</span>
+                {% else %}
+                <span class="badge bg-secondary">Disabled</span>
+                {% endif %}
+              </td>
+              <td>
+                <form method="post" data-exec="true" class="d-inline"
+                      data-exec-confirm="Delete forwarding {{ m.protocol }}/{{ m.external_port }}?">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="ext_port" value="{{ m.external_port }}">
+                  <input type="hidden" name="protocol" value="{{ m.protocol }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">
+        <i class="bi bi-info-circle"></i>
+        No rules found yet. Use &bdquo;Open all&ldquo; above or create a rule
+        with <strong>Add</strong>.
+      </p>
+      {% endif %}
     </div>
-    {% elif mappings %}
-    <div class="table-responsive">
-      <table class="table table-sm table-hover mb-0">
-        <thead>
-          <tr>
-            <th>External Port</th>
-            <th>Protocol</th>
-            <th>Internal IP</th>
-            <th>Internal Port</th>
-            <th>Description</th>
-            <th>IP Version</th>
-            <th>Status</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for m in mappings %}
-          <tr>
-            <td><code>{{ m.external_port }}</code></td>
-            <td>
-              <span class="badge {% if m.protocol == 'TCP' %}bg-primary{% else %}bg-success{% endif %}">
-                {{ m.protocol }}
-              </span>
-            </td>
-            <td><code>{{ m.internal_client }}</code>
-              {% if m.accesstype == 'ipv4_ipv6' and m.internal_client_ipv6 %}
-              <span class="text-muted">; </span><code>{{ m.internal_client_ipv6 }}</code>
-              {% endif %}
-            </td>
-            <td><code>{{ m.internal_port }}</code></td>
-            <td class="text-muted">{{ m.description|default:"-" }}</td>
-            <td>
-              {% if m.accesstype == 'ipv6' %}
-              <span class="badge bg-info text-dark">IPv6</span>
-              {% elif m.accesstype == 'ipv4_ipv6' %}
-              <span class="badge bg-info text-dark">IPv4+IPv6</span>
-              {% else %}
-              <span class="badge bg-secondary">IPv4</span>
-              {% endif %}
-            </td>
-            <td>
-              {% if m.enabled %}
-              <span class="badge bg-success">Active</span>
-              {% else %}
-              <span class="badge bg-secondary">Disabled</span>
-              {% endif %}
-            </td>
-            <td>
-              <form method="post" data-exec="true" class="d-inline"
-                    data-exec-confirm="Delete forwarding {{ m.protocol }}/{{ m.external_port }}?">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="delete">
-                <input type="hidden" name="ext_port" value="{{ m.external_port }}">
-                <input type="hidden" name="protocol" value="{{ m.protocol }}">
-                <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1">
-                  <i class="bi bi-trash"></i>
-                </button>
-              </form>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <p class="text-muted mb-0">
-      <i class="bi bi-info-circle"></i>
-      No rules found yet. Use &bdquo;Open all&ldquo; above or create a rule
-      with <strong>Add</strong>.
-    </p>
-    {% endif %}
   </div>
 </div>
 
@@ -511,41 +695,7 @@
     </form>
   </div>
 </div>
-
-<!-- Alternative: manual forwarding -->
-<div class="card mt-3">
-  <div class="card-header">
-    <span><i class="bi bi-hand-index-thumb"></i> Alternative: forward the ports manually</span>
-  </div>
-  <div class="card-body small">
-    <p class="mb-1">
-      If the router cannot be controlled automatically, you can enter the
-      following forwards in the router's own interface &mdash; no router login
-      is needed for this. The target is the server
-      (<code>{{ local_ip }}</code>):
-    </p>
-    <ul class="mb-1">
-      <li>TCP <code>80</code> &rarr; <code>{{ local_ip }}</code>:80 (HTTP)</li>
-      <li>TCP <code>443</code> &rarr; <code>{{ local_ip }}</code>:443 (HTTPS)</li>
-      <li>TCP <code>33</code> &rarr; <code>{{ local_ip }}</code>:22 (SSH, optional)</li>
-    </ul>
-    <p class="text-muted mb-1">
-      The settings are often found under &bdquo;Internet &rarr; Sharing&ldquo;,
-      &bdquo;Port Forwarding&ldquo; or &bdquo;NAT&ldquo;. It is best to also
-      assign a fixed IP (DHCP reservation) for the server so the forwards keep
-      working after a restart.
-    </p>
-    <p class="mb-0">
-      <strong>IPv6:</strong> If the router uses IPv6, also forward these ports
-      to the server's IPv6 address (for AVM FRITZ!Box: under &bdquo;IPv6
-      &rarr; Port Sharing&ldquo;, tie the forward to the server as a device so
-      the rule keeps working when the internet address changes). For manually
-      forwarded IPv6 ports the server's own firewall must allow the traffic as
-      well &mdash; SymbiOS only adjusts the firewall for the ports it opens
-      itself.
-    </p>
-  </div>
-</div>
+{% endif %}
 
 <script>
 // Toggle field visibility (password show/hide)
@@ -581,7 +731,7 @@ function detectRouter() {
         location.reload();
       } else {
         body.innerHTML = '<p class="text-muted mb-0"><i class="bi bi-info-circle"></i> No router found that SymbiOS can control automatically at ' + (data.gateway || '(unknown)') + '.</p>' +
-          '<p class="text-muted mb-0 mt-1">To let SymbiOS open the ports for you, the router must support automatic port forwarding (often called &bdquo;port sharing&ldquo; or &bdquo;UPnP&ldquo;) and this feature must be enabled in the router. If it is not, forward the ports manually (see &bdquo;Alternative&ldquo; below).</p>';
+          '<p class="text-muted mb-0 mt-1">To let SymbiOS open the ports for you, the router must support automatic port forwarding (often called &bdquo;port sharing&ldquo; or &bdquo;UPnP&ldquo;) and this feature must be enabled in the router. If it is not, switch to &bdquo;I\'ll forward the ports manually&ldquo; in Step 1 above.</p>';
       }
     })
     .catch(err => {
@@ -674,7 +824,7 @@ function refreshMappings() {
 
 // Auto-detect on page load
 document.addEventListener('DOMContentLoaded', function() {
-  {% if not router_info and not detect_error %}
+  {% if pf_method == 'auto' and not router_info and not detect_error %}
   detectRouter();
   {% endif %}
 });

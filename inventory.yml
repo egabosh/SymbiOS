@@ -38,6 +38,9 @@ all:
     # kept in sync by the WebUI (settings → port forwarding)
     ufw_extra_inbound: []
     port_forwarding_configured: false
+    # how the ports are opened: '' (not decided), 'auto' (router is set up by
+    # SymbiOS) or 'manual' (forwards entered in the router by hand)
+    port_forwarding_method: ''
     # router UPnP/TR-064 credentials (FRITZ!Box WebUI user/password).
     # Stored only in the deployed inventory.yml (see symbios-router-upnp.sh);
     # these placeholders keep the template clean for new installs.
