@@ -1143,21 +1143,22 @@ def settings_disk_setup(request):
         return JsonResponse({'ok': False, 'error': 'Password required for LUKS encryption'})
 
     cmd_parts = [f'{_DATA_PART_SCRIPT} setup', device, encrypt]
-    if encrypt == 'yes':
-        cmd_parts.append(password)
     cmd = ' '.join(cmd_parts)
+    # Pass the LUKS passphrase via stdin, not on the command line, so it never
+    # appears in the exec overlay, audit log, or `ps` output on the host.
+    stdin_data = (password + '\n') if encrypt == 'yes' else None
 
     is_ajax = is_ajax_request(request)
     if is_ajax:
         from .utils.jobs import create_job
-        job_id = create_job(cmd, timeout=600)
+        job_id = create_job(cmd, timeout=600, stdin_data=stdin_data)
         return JsonResponse({'ok': True, 'job': job_id,
                              'title': 'Migrating /symbios to new disk...',
                              'message': f'Setting up {device} as /symbios.',
                              'command': cmd})
 
     # Fallback: synchronous execution
-    ok, stdout, stderr = run_command(cmd, timeout=600)
+    ok, stdout, stderr = run_command(cmd, timeout=600, stdin_data=stdin_data)
     output = stdout
     if stderr:
         output = output + '\n' + stderr
