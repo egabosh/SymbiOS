@@ -158,13 +158,13 @@ def setup(request):
     steps = setup_steps(vars_)
     pending = [s for s in steps if not s['optional'] and s['status'] != 'done']
     complete = is_setup_complete(vars_)
-    main_steps = [s for s in steps if s.get('group') == 'main']
-    advanced_steps = [s for s in steps if s.get('group') != 'main']
+    network_step = next((s for s in steps if s['key'] == 'network'), None)
+    main_steps = [s for s in steps if s['key'] != 'network']
 
     return render(request, 'main/setup.html', {
         'vars': vars_,
+        'network_step': network_step,
         'main_steps': main_steps,
-        'advanced_steps': advanced_steps,
         'pending_count': len(pending),
         'complete': complete,
         'network_type': vars_.get('network_type', ''),

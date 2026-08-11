@@ -17,37 +17,48 @@
     <div class="settings-why-body">
       This is a step-by-step guide to make your server secure and reachable
       from the internet after installation.
-      Each step leads you to a settings page.
+      Complete the steps <strong>in order</strong> — each step builds on the
+      previous one.
       Completed steps are marked automatically.
     </div>
   </div>
 </div>
 
-<!-- Server connection type -->
-<div class="card mt-3" id="step-network">
-  <div class="card-header"><i class="bi bi-diagram-3"></i> Step: Server connection type</div>
+<!-- Step 1: Server connection type -->
+<div class="card mt-3 border-start border-primary border-4" id="step-network">
+  <div class="card-header d-flex align-items-center gap-2">
+    <span class="badge rounded-pill text-bg-primary step-badge">Step 1</span>
+    <i class="bi bi-diagram-3"></i> Server connection type
+    {% if network_step.status == 'done' %}
+    <span class="badge bg-success ms-auto"><i class="bi bi-check-circle-fill"></i> Done</span>
+    {% else %}
+    <span class="badge bg-warning ms-auto"><i class="bi bi-exclamation-triangle-fill"></i> Required</span>
+    {% endif %}
+  </div>
   <div class="card-body small">
-    <p class="mb-2">How is your SymbiOS server connected?</p>
+    <p class="mb-2">How is your SymbiOS server connected? <strong>Choose one option first</strong> — it decides which of the following steps are needed.</p>
     <form method="post">
       {% csrf_token %}
       <div class="row g-2">
         <div class="col-md-6">
-          <div class="form-check form-check-inline">
+          <label class="setup-option" for="nt-home">
             <input class="form-check-input" type="radio" name="network_type" id="nt-home" value="home"
                    {% if network_type == 'home' %}checked{% endif %}>
-            <label class="form-check-label" for="nt-home">
-              <strong>Home connection</strong> &mdash; behind my router (FRITZ!Box, ...)
-            </label>
-          </div>
+            <span class="setup-option-body">
+              <span class="setup-option-title"><strong>Home connection</strong></span>
+              <span class="setup-option-desc">Behind my router (FRITZ!Box, ...)</span>
+            </span>
+          </label>
         </div>
         <div class="col-md-6">
-          <div class="form-check form-check-inline">
+          <label class="setup-option" for="nt-root">
             <input class="form-check-input" type="radio" name="network_type" id="nt-root" value="root"
                    {% if network_type == 'root' %}checked{% endif %}>
-            <label class="form-check-label" for="nt-root">
-              <strong>Root server</strong> &mdash; e.g. VPS with its own public IP
-            </label>
-          </div>
+            <span class="setup-option-body">
+              <span class="setup-option-title"><strong>Root server</strong></span>
+              <span class="setup-option-desc">E.g. VPS with its own public IP</span>
+            </span>
+          </label>
         </div>
       </div>
       {% if not network_type %}
@@ -68,36 +79,20 @@
   </div>
 </div>
 
-<!-- Step list -->
+<!-- Steps 2-4 -->
 <div class="card mt-3">
-  <div class="card-header"><i class="bi bi-list-check"></i> Setup Steps</div>
+  <div class="card-header d-flex align-items-center gap-2">
+    <i class="bi bi-list-check"></i> Remaining Steps
+    <span class="text-muted small fw-normal">— complete in this order</span>
+  </div>
   <div class="card-body p-0">
     <table class="table table-sm align-middle mb-0">
       <tbody>
         {% for step in main_steps %}
-        {% include "main/_setup_step_row.html" %}
+        {% include "main/_setup_step_row.html" with step_number=forloop.counter|add:1 %}
         {% endfor %}
       </tbody>
     </table>
-    {% if advanced_steps %}
-    <div class="border-top">
-      <a class="d-flex align-items-center gap-2 px-3 py-2 text-decoration-none small fw-semibold text-body"
-         data-bs-toggle="collapse" href="#advanced-steps" role="button"
-         aria-expanded="false" aria-controls="advanced-steps">
-        <i class="bi bi-chevron-right"></i> Advanced
-        <span class="text-muted fw-normal">({{ advanced_steps|length }})</span>
-      </a>
-      <div class="collapse" id="advanced-steps">
-        <table class="table table-sm align-middle mb-0 border-top">
-          <tbody>
-            {% for step in advanced_steps %}
-            {% include "main/_setup_step_row.html" %}
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    {% endif %}
   </div>
 </div>
 {% endblock %}

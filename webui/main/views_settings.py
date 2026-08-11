@@ -643,6 +643,7 @@ def settings_localization(request):
             vars_['timezone'] = request.POST.get('timezone', '').strip()
             vars_['keyboard'] = request.POST.get('keyboard', '').strip()
             vars_['locale'] = request.POST.get('locale', '').strip()
+            vars_['localization_configured'] = True
             _save_inventory_config(config)
             if is_ajax:
                 job_id, title, cmd = _start_reapply(

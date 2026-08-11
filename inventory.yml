@@ -13,6 +13,7 @@ all:
     # restore source after a fresh installation)
     network_type: ""          # 'home' (behind router) or 'root' (own public IP)
     twofa_enabled: false      # Authelia 2FA enforcement for LDAP users
+    localization_configured: false  # true after the user saved the localization settings in the WebUI
     # filesystem layout (all data lives under the /symbios data root)
     data_root: "/symbios"
     git_root: "/symbios/git/SymbiOS"
