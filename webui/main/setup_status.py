@@ -110,7 +110,7 @@ def get_page_badge(page_key, inventory_vars):
     checks = _load_runchecks()
 
     if page_key == 'localization':
-        if inventory_vars.get('timezone') and inventory_vars.get('keyboard'):
+        if inventory_vars.get('localization_configured'):
             return ('ok', 'Configured',
                     'Timezone and keyboard are set up.')
         return ('missing', 'Not configured',
@@ -142,25 +142,45 @@ def get_page_badge(page_key, inventory_vars):
 def setup_steps(inventory_vars):
     """Compute the ordered list of setup steps for the /setup/ assistant.
 
+    The steps must be completed in order: the server connection type first
+    (it decides which of the following steps are needed), then localization,
+    DNS and port forwarding. Optional settings (disk, TLS, SMTP, 2FA) are
+    handled on their own settings pages and are deliberately not part of the
+    assistant.
+
     Each step is a dict: key, title, subtitle, optional, status
     ('done' / 'pending' / 'optional') and url.
     """
     checks = _load_runchecks()
+    network_type = inventory_vars.get('network_type', '')
     steps = []
 
-    # Step: Localization
-    loc_done = bool(inventory_vars.get('timezone') and inventory_vars.get('keyboard'))
+    # Step 1: Connection type — first mandatory choice. Determines whether
+    # the "Open Ports" step is needed at all.
+    steps.append({
+        'key': 'network',
+        'title': 'Server connection type',
+        'subtitle': ('First decision: home connection behind a router or '
+                     'root server with its own public IP?'),
+        'optional': False,
+        'status': 'done' if network_type else 'pending',
+        'url': '/setup/#step-network',
+    })
+
+    # Step 2: Localization — done only after the user explicitly confirmed the
+    # settings in the WebUI (the shipped timezone/keyboard defaults alone do
+    # not count as configuration).
+    loc_done = bool(inventory_vars.get('localization_configured'))
     steps.append({
         'key': 'localization',
         'title': 'Language, Timezone & Keyboard',
         'subtitle': 'Foundation for correct times and input.',
         'optional': False,
-        'group': 'main',
         'status': 'done' if loc_done else 'pending',
         'url': '/settings/localization/',
     })
 
-    # Step: DNS
+    # Step 3: DNS
     dns_done = bool(inventory_vars.get('base_domain') and inventory_vars.get('dns_mode'))
     dns_status = checks.get('ddns')
     steps.append({
@@ -169,89 +189,31 @@ def setup_steps(inventory_vars):
         'subtitle': 'E.g. <code>my-server.dedyn.io</code> \u2014 prerequisite '
                     'for everything else.',
         'optional': False,
-        'group': 'main',
         'status': 'done' if (dns_done and dns_status == 'ok') else 'pending',
         'url': '/settings/dns/',
     })
 
-    # Step: Port forwarding (main only on a home connection, else advanced)
-    network_type = inventory_vars.get('network_type', '')
-    ports_relevant = bool(network_type and network_type != 'root')
+    # Step 4: Port forwarding — only needed on a home connection; a root
+    # server has its own public IP and ports 80/443 are already reachable.
     ports_configured = bool(inventory_vars.get('port_forwarding_configured'))
-    if not ports_relevant:
+    ports_optional = network_type == 'root'
+    if ports_optional:
         ports_status = 'optional'
+        ports_subtitle = ('Not needed \u2014 a root server has its own '
+                          'public IP.')
     elif ports_configured:
         ports_status = 'done'
+        ports_subtitle = 'Forward ports 80/443 from the router to the server.'
     else:
         ports_status = 'pending'
+        ports_subtitle = 'Forward ports 80/443 from the router to the server.'
     steps.append({
         'key': 'ports',
         'title': 'Open Ports',
-        'subtitle': 'Forward ports 80/443 from the router to the server.',
-        'optional': not ports_relevant,
-        'group': 'main' if ports_relevant else 'advanced',
+        'subtitle': ports_subtitle,
+        'optional': ports_optional,
         'status': ports_status,
         'url': '/settings/port-forwarding/',
-    })
-
-    # Step: Separate disk (optional)
-    disk_status = checks.get('disk')
-    steps.append({
-        'key': 'disk',
-        'title': 'Separate Data Disk (optional)',
-        'subtitle': 'More space \u2014 optionally encrypted.',
-        'optional': True,
-        'group': 'advanced',
-        'status': 'done' if disk_status == 'ok' else 'optional',
-        'url': '/settings/disk/',
-    })
-
-    # Step: Connection type
-    steps.append({
-        'key': 'network',
-        'title': 'Server connection type',
-        'subtitle': ('Home connection behind a router or root server with '
-                     'its own public IP?'),
-        'optional': False,
-        'group': 'advanced',
-        'status': 'done' if network_type else 'pending',
-        'url': '/setup/#step-network',
-    })
-
-    # Step: TLS certificates
-    cert_status = checks.get('certs')
-    steps.append({
-        'key': 'certs',
-        'title': 'Security Certificates (TLS)',
-        'subtitle': 'Valid certificates against the browser warning.',
-        'optional': False,
-        'group': 'advanced',
-        'status': 'done' if cert_status == 'ok' else 'pending',
-        'url': '/settings/acme/',
-    })
-
-    # Step: SMTP (optional)
-    smtp_done = bool(inventory_vars.get('smtp_server') and inventory_vars.get('smtp_from'))
-    steps.append({
-        'key': 'smtp',
-        'title': 'Email Sending (SMTP) \u2014 optional',
-        'subtitle': 'For notifications and 2FA codes.',
-        'optional': True,
-        'group': 'advanced',
-        'status': 'done' if smtp_done else 'optional',
-        'url': '/settings/mailserver/',
-    })
-
-    # Step: 2FA (optional)
-    twofa_done = bool(inventory_vars.get('twofa_enabled'))
-    steps.append({
-        'key': 'twofa',
-        'title': '2-Factor Authentication (2FA) \u2014 optional',
-        'subtitle': 'Additional protection when logging in.',
-        'optional': True,
-        'group': 'advanced',
-        'status': 'done' if twofa_done else 'optional',
-        'url': '/settings/auth/',
     })
 
     return steps

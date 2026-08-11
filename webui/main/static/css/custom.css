@@ -259,3 +259,43 @@
   cursor: pointer;
 }
 .advanced-toggle:hover { color: var(--bs-body-color); }
+
+/* Initial setup assistant: step number badges */
+.step-badge {
+  font-size: 0.75rem;
+  min-width: 2rem;
+  text-align: center;
+}
+
+/* Setup assistant: selectable option cards (e.g. connection type) */
+.setup-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 2px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  background: var(--bs-body-bg);
+  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+}
+.setup-option:hover {
+  border-color: var(--bs-primary);
+}
+.setup-option:has(input:checked) {
+  border-color: var(--bs-primary);
+  background-color: rgba(13, 110, 253, 0.08);
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15);
+}
+.setup-option .form-check-input {
+  width: 1.25em;
+  height: 1.25em;
+  margin: 0;
+  flex-shrink: 0;
+}
+.setup-option-body {
+  display: flex;
+  flex-direction: column;
+}
+.setup-option-title { font-size: 1rem; }
+.setup-option-desc { color: var(--bs-secondary); font-size: 0.85rem; }

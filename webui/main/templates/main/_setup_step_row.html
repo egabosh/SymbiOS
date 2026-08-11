@@ -1,5 +1,10 @@
 <tr>
-  <td class="ps-3" style="width:36px">
+  <td class="ps-3 text-nowrap" style="width:56px">
+    {% if step_number %}
+    <span class="badge rounded-pill text-bg-primary step-badge">{{ step_number }}</span>
+    {% endif %}
+  </td>
+  <td class="ps-1" style="width:36px">
     {% if step.status == 'done' %}
     <i class="bi bi-check-circle-fill text-success fs-5"></i>
     {% elif step.optional %}
