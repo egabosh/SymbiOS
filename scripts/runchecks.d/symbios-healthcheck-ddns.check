@@ -1,5 +1,11 @@
-# Check: Verify deDyn DDNS cron job and configuration are present
+# Check: Verify deDyn DDNS cron job and inventory configuration are present
 f_check_cache "symbios-healthcheck-ddns" || return 2>/dev/null || true
+
+# Only relevant when desec.io DDNS is the configured DNS mode
+if [[ "$(f_symbios_var dns_mode '')" != "desec" ]]
+then
+  return 2>/dev/null || true
+fi
 
 # Check if dedyn cron job exists
 if ! [[ -f /etc/cron.d/dedyn_local ]]
@@ -8,15 +14,9 @@ then
   return 2>/dev/null || true
 fi
 
-# Check if dedyn.conf exists and has required settings
-if ! [[ -f /usr/local/etc/dedyn.conf ]]
+# Check that the API key and host are configured in inventory.yml
+# (the DDNS updater reads them directly from there)
+if [[ -z "$(f_symbios_var ddns_apikey '')" ]] || [[ -z "$(f_symbios_var ddns_host '')" ]]
 then
-  g_echo_error "Healthcheck failed for ddns: /usr/local/etc/dedyn.conf missing"
-  return 2>/dev/null || true
-fi
-
-. /usr/local/etc/dedyn.conf
-if [[ -z "${dedynpw}" ]] || [[ -z "${dedynhosts}" ]]
-then
-  g_echo_error "Healthcheck failed for ddns: dedynpw or dedynhosts not configured"
+  g_echo_error "Healthcheck failed for ddns: ddns_apikey or ddns_host not configured in inventory.yml"
 fi

@@ -79,22 +79,13 @@
           */5 * * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/update_host_ip.sh ]] && update_host_ip.sh
         backup: yes
 
-    - name: /usr/local/etc/dedyn.conf
-      blockinfile:
+    - name: Remove obsolete /usr/local/etc/dedyn.conf
+      # The DDNS config is read directly from inventory.yml by dedyn.sh
+      # (only /symbios is on the encrypted data partition). Clean up the
+      # old copy from the unencrypted root filesystem.
+      ansible.builtin.file:
         path: /usr/local/etc/dedyn.conf
-        mode: "0500"
-        owner: root
-        group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          dedynpw="{{ ddns_apikey }}"
-          dedynhosts="{{ ddns_host | default('') }}"
-          doipv6="{{ ddns_ipv6 | default('') }}"
-        backup: yes
-        validate: /bin/bash -n %s
-      when: ddns_host is defined and ddns_host | length > 0
-
+        state: absent
 
     - name: IPv6 EUI-64 addressing (stable interface id for FRITZ!Box port forwards)
       block:
