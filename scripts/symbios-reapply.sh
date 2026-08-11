@@ -28,7 +28,8 @@
 #   symbios-reapply.sh --only --force <pb1> <pb2> ...     # same, but skip install check
 
 source /etc/bash/gaboshlib.include
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 
 # Playbooks live in the git repo (same alias as symbios-run-playbook.sh)
 g_repo="${g_git_root}"

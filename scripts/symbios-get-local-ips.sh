@@ -5,7 +5,8 @@
 # (link-local fe80::/10 and ULA fc00::/7 are ignored).
 
 source /etc/bash/gaboshlib.include
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 
 g_host_ip_file="${g_config_dir}/.host-ip"
 g_ipv4=""

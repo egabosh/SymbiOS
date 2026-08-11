@@ -1,6 +1,7 @@
 #!/bin/bash
 # Write host primary LAN IP for webui container
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 # Use the interface of the default route - no external host (e.g. Cloudflare's
 # 1.1.1.1) is contacted.
 f_dev=$(ip -4 route show default 2>/dev/null | grep -oP "dev \K\S+" | head -1)

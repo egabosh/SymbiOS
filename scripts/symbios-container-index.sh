@@ -1,6 +1,7 @@
 #!/bin/bash
 # Index file storing Docker container information
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 g_index_file="${g_log_dir}/docker-containers.tsv"
 g_temp_file="${g_index_file}.tmp"
 

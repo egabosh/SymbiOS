@@ -28,7 +28,8 @@
 #   symbios-ldap-groups.sh --list-members --name <group>
 
 source /etc/bash/gaboshlib.include 1>/dev/null 2>&1 || true
-source symbios-lib.sh 1>/dev/null 2>&1 || true
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh" 1>/dev/null 2>&1 || true
 
 function f_usage {
   cat << EOF

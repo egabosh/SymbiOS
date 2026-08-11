@@ -1,6 +1,7 @@
 #!/bin/bash
 # File storing system service statuses
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 g_file="${g_log_dir}/symbios-services.tsv"
 g_tmp="${g_file}.tmp"
 

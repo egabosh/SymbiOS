@@ -4,7 +4,8 @@
 # Output: first line = total count, remaining lines = extracted log messages
 
 source /etc/bash/gaboshlib.include
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 
 g_container="${1:-}"
 g_offset="${2:-0}"

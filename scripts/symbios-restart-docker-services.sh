@@ -19,7 +19,8 @@
 # Runs as a systemd oneshot at the end of the boot process.
 
 source /etc/bash/gaboshlib.include
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 g_lockfile
 
 for f_compose in $(find "${g_base_services_root}" "${g_services_root}" -maxdepth 2 -name docker-compose.yml | sort)

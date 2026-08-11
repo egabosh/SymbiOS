@@ -30,7 +30,8 @@ set -euo pipefail
 # Source the central config library. Inside the WebUI container it lives under
 # /repo/scripts/ (mounted read-only); the container's CONFIG_PATH=/config/inventory.yml
 # makes the library resolve g_config_dir=/config and g_log_dir=/log.
-source /repo/scripts/symbios-lib.sh 2>/dev/null || source symbios-lib.sh 2>/dev/null || true
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source /repo/scripts/symbios-lib.sh 2>/dev/null || source "$g_symbios_dir/symbios-lib.sh" 2>/dev/null || source symbios-lib.sh 2>/dev/null || true
 
 # Read LDAP connection details from inventory and password file
 function f_read_ldap_vars {
