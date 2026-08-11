@@ -12,7 +12,7 @@
 #
 # Exported globals:
 #   g_data_root          /symbios
-#   g_git_root           $g_data_root/git/SymBiOS
+#   g_git_root           $g_data_root/git/SymbiOS
 #   g_base_services_root $g_data_root/base-services
 #   g_services_root      $g_data_root/services
 #   g_docker_root        $g_data_root/docker
@@ -123,7 +123,7 @@ PYEOF
 # Load the full layout into g_* globals.
 function f_symbios_load_layout {
   g_data_root=$(f_symbios_var data_root "/symbios")
-  g_git_root=$(f_symbios_var git_root "${g_data_root}/git/SymBiOS")
+  g_git_root=$(f_symbios_var git_root "${g_data_root}/git/SymbiOS")
   g_base_services_root=$(f_symbios_var base_services_root "${g_data_root}/base-services")
   g_services_root=$(f_symbios_var services_root "${g_data_root}/services")
   g_docker_root=$(f_symbios_var docker_root "${g_data_root}/docker")
