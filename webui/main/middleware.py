@@ -189,9 +189,13 @@ class SetupRequiredMiddleware:
         '/health/',
         '/health/data/',
         '/settings/dns/',
+        '/settings/localization/',
+        '/settings/port-forwarding/',
         '/logout/',
         '/authelia-logout/',
         '/change-password/',
+        '/exec/start/',
+        '/exec/output/',
         '/static/',
         '/favicon.ico',
     ))
