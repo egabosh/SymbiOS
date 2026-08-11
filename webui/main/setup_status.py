@@ -199,8 +199,9 @@ def setup_steps(inventory_vars):
         'url': '/settings/dns/',
     })
 
-    # Step 4: Port forwarding — only needed on a home connection; a root
-    # server has its own public IP and ports 80/443 are already reachable.
+    # Step 4: Internet reachability (port forwarding) — only needed on a home
+    # connection; a root server has its own public IP and ports 80/443 are
+    # already reachable.
     ports_configured = bool(inventory_vars.get('port_forwarding_configured'))
     ports_optional = network_type == 'root'
     if ports_optional:
@@ -209,13 +210,15 @@ def setup_steps(inventory_vars):
                           'public IP.')
     elif ports_configured:
         ports_status = 'done'
-        ports_subtitle = 'Forward ports 80/443 from the router to the server.'
+        ports_subtitle = ('Your router sends internet traffic on ports 80/443 '
+                          'to your server.')
     else:
         ports_status = 'pending'
-        ports_subtitle = 'Forward ports 80/443 from the router to the server.'
+        ports_subtitle = ('Your router sends internet traffic on ports 80/443 '
+                          'to your server.')
     steps.append({
         'key': 'ports',
-        'title': 'Open Ports',
+        'title': 'Make your server available from the Internet (forward ports)',
         'subtitle': ports_subtitle,
         'optional': ports_optional,
         'status': ports_status,
