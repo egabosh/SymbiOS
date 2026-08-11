@@ -120,6 +120,57 @@ def _get_server_info():
     return {'hostname': '', 'ipv4': _get_local_ip(), 'ipv6': ''}
 
 
+def _static_ip_command(ip, accesstype='ipv4'):
+    """Command prefix that ensures a static IPv4 on FRITZ!Box routers.
+
+    Returns e.g. 'symbios-router-upnp.sh staticip 192.168.188.20 && '
+    when the router is a FRITZ!Box and the forward is IPv4-based; otherwise
+    an empty string (generic UPnP routers cannot reserve IPs via UPnP, the
+    staticip command reports a manual hint there). IPv6-only forwards do not
+    need a static IPv4, so they never get the prefix.
+    """
+    if accesstype not in ('ipv4', 'ipv4_ipv6') or not ip:
+        return ''
+    try:
+        router_info = _run_upnp('detect', timeout=10)
+    except Exception:
+        router_info = None
+    if router_info and router_info.get('router_type') == 'fritzbox':
+        return f'{SCRIPT} staticip {_shell_quote(ip)} && '
+    return ''
+
+
+def _get_static_ip_status(local_ip, router_info=None):
+    """Query whether 'always same IPv4' is active for the server on the router.
+
+    Returns None when the router is not reachable, or a dict with 'static',
+    'ip', 'error'. Generic UPnP routers cannot reserve IPs via UPnP, so the
+    dict carries 'manual': True there (the template then shows a hint to
+    configure the reservation in the router's web interface). Pass in a
+    previously fetched router_info to avoid a second detect call.
+    """
+    if not local_ip:
+        return None
+    if router_info is None:
+        try:
+            router_info = _run_upnp('detect', timeout=10)
+        except Exception:
+            return None
+    if not router_info or router_info.get('available') is not True:
+        return None
+    if router_info.get('router_type') == 'generic_upnp':
+        return {'static': False, 'manual': True, 'ip': local_ip}
+    if router_info.get('router_type') != 'fritzbox':
+        return None
+    try:
+        result = _run_upnp(f'staticip-status {_shell_quote(local_ip)}', timeout=15)
+    except Exception:
+        return None
+    if not result.get('ok'):
+        return {'static': False, 'error': result.get('error', 'Status unknown')}
+    return {'static': bool(result.get('static')), 'ip': result.get('ip', '')}
+
+
 @login_required
 def settings_port_forwarding(request):
     """Main port forwarding settings page with router detection."""
@@ -213,6 +264,29 @@ def settings_port_forwarding(request):
                     messages.error(request, f'Failed: {stderr or stdout}')
                 return redirect('settings_port_forwarding')
 
+            elif action == 'secure-static-ip':
+                # Explicitly make the server's IPv4 permanent on the router so
+                # IPv4 port forwards keep working. Only meaningful on a
+                # FRITZ!Box (generic UPnP routers must be configured manually).
+                from .utils.jobs import create_job
+                local_ip = _get_local_ip()
+                cmd = f'{SCRIPT} staticip {_shell_quote(local_ip)}'
+                if is_ajax:
+                    job_id = create_job(cmd, timeout=30)
+                    return JsonResponse({'ok': True, 'job': job_id,
+                                         'title': 'Securing static IP...',
+                                         'message': 'Making the server\'s IPv4 address permanent on the router.'})
+                ok, stdout, stderr = run_command(cmd, timeout=30)
+                if ok and stdout:
+                    result = json.loads(stdout)
+                    if result.get('ok'):
+                        messages.success(request, result.get('message', 'Static IP secured.'))
+                    else:
+                        messages.error(request, result.get('error', 'Failed to secure static IP.'))
+                else:
+                    messages.error(request, f'Failed: {stderr or stdout}')
+                return redirect('settings_port_forwarding')
+
             elif action == 'add':
                 ext_port = request.POST.get('ext_port', '').strip()
                 protocol = request.POST.get('protocol', 'TCP').strip().upper()
@@ -232,6 +306,11 @@ def settings_port_forwarding(request):
 
                 args = (f'add {ext_port} {protocol} {int_port} {int_client} '
                         f'{_shell_quote(description)} {accesstype}')
+                # An IPv4 forward only keeps working if the server's IPv4
+                # never changes. On a FRITZ!Box, ensure 'always same IPv4'
+                # first so the rule points to a stable address.
+                static_prefix = _static_ip_command(int_client, accesstype)
+                cmd = static_prefix + f'{SCRIPT} {args}'
                 # IPv6 forwards connect directly to the host's GUA, so an
                 # extra UFW allow rule is needed on the host. Keep the
                 # inventory in sync so a reapply re-creates it.
@@ -239,15 +318,27 @@ def settings_port_forwarding(request):
                     _add_ufw_extra_inbound(ext_port, protocol)
                 if is_ajax:
                     from .utils.jobs import create_job
-                    job_id = create_job(f'{SCRIPT} {args}', timeout=15)
+                    job_id = create_job(cmd, timeout=15)
                     return JsonResponse({'ok': True, 'job': job_id,
                                          'title': 'Adding port forwarding...',
                                          'message': 'Port forwarding added.'})
-                result = _run_upnp(args, timeout=15)
-                if result.get('ok'):
+                ok, stdout, stderr = run_command(cmd, timeout=30)
+                # The staticip prefix and the add each emit one JSON line;
+                # the add result is the last one.
+                result = None
+                if ok and stdout:
+                    for line in reversed(stdout.splitlines()):
+                        try:
+                            result = json.loads(line)
+                            break
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                if result and result.get('ok'):
                     messages.success(request, result.get('message', 'Port forwarding added.'))
-                else:
+                elif result:
                     messages.error(request, result.get('error', 'Failed to add port forwarding.'))
+                else:
+                    messages.error(request, f'Failed: {stderr or stdout}')
                 return redirect('settings_port_forwarding')
 
             elif action == 'delete':
@@ -398,6 +489,12 @@ def settings_port_forwarding(request):
         and (credentials_configured
              or router_info.get('router_type') == 'generic_upnp'))
 
+    # Whether the server's IPv4 is permanent on the router, so IPv4 port
+    # forwards keep working. Only determinable for FRITZ!Box routers.
+    static_ip_status = None
+    if pf_method == 'auto' and router_info and router_info.get('available'):
+        static_ip_status = _get_static_ip_status(local_ip, router_info)
+
     return render(request, 'main/settings_port_forwarding.html', {
         'pf_method': pf_method,
         'ip_mode': ip_mode,
@@ -408,6 +505,7 @@ def settings_port_forwarding(request):
         'credentials_configured': credentials_configured,
         'credentials_username': credentials_username,
         'can_control_router': can_control_router,
+        'static_ip_status': static_ip_status,
         'local_ip': local_ip,
         'local_ipv6': local_ipv6,
         'server_name': server_name,
