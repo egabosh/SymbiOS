@@ -22,7 +22,6 @@ This script only handles the web server (HTTPS) and console prompt.
 """
 
 import http.server
-import getpass
 import json
 import os
 import signal
@@ -30,6 +29,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import termios
 import threading
 import time
 
@@ -247,6 +247,43 @@ HTML_DONE = """<!DOCTYPE html>
 
 
 def get_hostname():
+    """Return the hostname this unlock server is reachable at.
+
+    Prefers the names the served certificate is valid for (SAN, then CN)
+    over the bare system hostname, so the shown URL matches the cert that
+    browsers will check. Falls back to the system hostname if no cert
+    exists yet.
+    """
+    if os.path.exists(CERT_FILE):
+        try:
+            f_san = subprocess.run(
+                ["openssl", "x509", "-in", CERT_FILE, "-noout",
+                 "-ext", "subjectAltName"],
+                capture_output=True, text=True, timeout=15
+            ).stdout
+        except Exception:
+            f_san = ""
+        f_names = []
+        for f_line in f_san.splitlines():
+            f_line = f_line.strip()
+            if f_line.startswith("DNS:"):
+                f_name = f_line[4:].strip()
+                if f_name and not f_name.startswith("*"):
+                    f_names.append(f_name)
+        if f_names:
+            return f_names[0]
+        try:
+            f_subject = subprocess.run(
+                ["openssl", "x509", "-in", CERT_FILE, "-noout", "-subject"],
+                capture_output=True, text=True, timeout=15
+            ).stdout
+        except Exception:
+            f_subject = ""
+        if "CN=" in f_subject:
+            f_cn = f_subject.split("CN=", 1)[1]
+            f_cn = f_cn.split(",", 1)[0].strip()
+            if f_cn:
+                return f_cn
     try:
         return socket.gethostname()
     except Exception:
@@ -291,25 +328,67 @@ def do_unlock(passphrase):
     return False, result.get("error", "Unlock failed")
 
 
+def getpass_getpass(f_stream):
+    """Read a passphrase from the given tty stream without echoing."""
+    f_fd = f_stream.fileno()
+    f_old = termios.tcgetattr(f_fd)
+    f_new = termios.tcgetattr(f_fd)
+    f_new[3] = f_new[3] & ~termios.ECHO
+    try:
+        termios.tcsetattr(f_fd, termios.TCSADRAIN, f_new)
+        f_stream.write("LUKS passphrase: ")
+        f_stream.flush()
+        f_line = f_stream.readline()
+    finally:
+        termios.tcsetattr(f_fd, termios.TCSADRAIN, f_old)
+    if not f_line:
+        raise EOFError
+    return f_line.rstrip("\n")
+
+
 def console_unlock_thread():
-    if not sys.stdin.isatty():
+    """Prompt for the LUKS passphrase on the local console.
+
+    Writes to and reads from /dev/console (or /dev/tty when run from an
+    interactive shell) instead of stdin/stdout, because systemd's rc.local
+    runs the script with stdin=/dev/null and pipes stdout into the boot log.
+    """
+    console = None
+    for path in ("/dev/tty", "/dev/console", "/dev/tty1", "/dev/tty0"):
+        try:
+            f = open(path, "r+", encoding="utf-8")
+        except OSError:
+            continue
+        if f.isatty():
+            console = f
+            break
+        f.close()
+    if console is None:
+        print("No console available, web unlock only", file=sys.stderr)
         return
-    print("\n=== SymbiOS LUKS Unlock ===")
-    print("Enter the LUKS passphrase to unlock /symbios.")
-    print("Alternatively, open https://<this-host>/ on another device.\n")
+
+    print("\n=== SymbiOS LUKS Unlock ===", file=console)
+    print("Enter the LUKS passphrase to unlock /symbios.", file=console)
+    print(f"Alternatively, open https://{get_hostname()}/ on another device.\n", file=console)
+    console.flush()
+
     while not _unlock_done.is_set():
         try:
-            passphrase = getpass.getpass("LUKS passphrase: ")
+            passphrase = getpass_getpass(console)
         except (EOFError, KeyboardInterrupt):
-            print("\nSkipping console unlock.\n")
+            print("\nSkipping console unlock.\n", file=console)
+            console.flush()
             return
         if not passphrase:
             continue
         ok, msg = do_unlock(passphrase)
         if ok:
             log(f"Console unlock: {msg}")
+            print(f"Unlock OK: {msg}", file=console)
+            console.flush()
             os._exit(0)
-        print(f"Unlock failed: {msg}. Try again or use the web interface.\n")
+        print(f"Unlock failed: {msg}. Try again or use the web interface.\n", file=console)
+        console.flush()
 
 
 def handle_signal(signum, frame):
@@ -318,12 +397,30 @@ def handle_signal(signum, frame):
 
 
 class UnlockHandler(http.server.BaseHTTPRequestHandler):
+    def _send_body(self, f_body, f_content_type="text/html; charset=utf-8"):
+        """Send a complete response body with an explicit Content-Length.
+
+        Without Content-Length the client cannot know when the body ends and
+        reports "TLS connection was non-properly terminated" because the
+        server closes the connection without a TLS close_notify.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", f_content_type)
+        self.send_header("Content-Length", str(len(f_body)))
+        self.end_headers()
+        self.wfile.write(f_body)
+
+    def _send_json(self, f_obj, f_status=200):
+        f_body = json.dumps(f_obj).encode()
+        self.send_response(f_status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(f_body)))
+        self.end_headers()
+        self.wfile.write(f_body)
+
     def do_GET(self):
         if self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"ok")
+            self._send_body(b"ok", "text/plain")
             return
 
         hostname = get_hostname()
@@ -331,10 +428,7 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
         page = HTML_UNLOCK if must_unlock else HTML_DONE
         page = page.replace("__HOSTNAME__", hostname)
 
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.end_headers()
-        self.wfile.write(page.encode())
+        self._send_body(page.encode())
 
     def do_POST(self):
         if self.path == "/unlock":
@@ -343,41 +437,46 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
             try:
                 data = json.loads(body)
             except json.JSONDecodeError:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"ok":false,"error":"Invalid JSON"}')
+                self._send_json({"ok": False, "error": "Invalid JSON"}, 400)
                 return
 
             passphrase = data.get("passphrase", "")
             if not passphrase:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"ok":false,"error":"Passphrase required"}')
+                self._send_json({"ok": False, "error": "Passphrase required"}, 400)
                 return
 
             ok, msg = do_unlock(passphrase)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
             if ok:
                 log(f"unlock OK: {msg}")
-                self.wfile.write(json.dumps({"ok": True, "message": msg}).encode())
+                self._send_json({"ok": True, "message": msg})
                 self.wfile.flush()
                 os._exit(0)
             else:
-                self.wfile.write(json.dumps({"ok": False, "error": msg}).encode())
+                self._send_json({"ok": False, "error": msg})
             return
         self.send_response(404)
+        self.send_header("Content-Length", "0")
         self.end_headers()
 
     def log_message(self, fmt, *args):
         pass
 
 
+class _DualStackServer(http.server.HTTPServer):
+    """HTTPServer that listens on both IPv4 and IPv6 (dual-stack)."""
+
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        try:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        except OSError:
+            pass
+        super().server_bind()
+
+
 def create_https_server(port, handler):
-    server = http.server.HTTPServer(("0.0.0.0", port), handler)
+    server = _DualStackServer(("::", port), handler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(CERT_FILE, KEY_FILE)
     server.socket = ctx.wrap_socket(server.socket, server_side=True)
@@ -425,20 +524,23 @@ def main():
 
     class HTTPHelpHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
+            f_body = http_help_page.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(f_body)))
             self.end_headers()
-            self.wfile.write(http_help_page.encode())
+            self.wfile.write(f_body)
 
         def do_POST(self):
             self.send_response(301)
             self.send_header("Location", f"https://{hostname}{self.path}")
+            self.send_header("Content-Length", "0")
             self.end_headers()
 
         def log_message(self, fmt, *args):
             pass
 
-    http_server = http.server.HTTPServer(("0.0.0.0", HTTP_PORT), HTTPHelpHandler)
+    http_server = _DualStackServer(("::", HTTP_PORT), HTTPHelpHandler)
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     http_thread.start()
 
