@@ -78,7 +78,6 @@ PAGE_EXPLAIN = {
 
 # Map settings page -> runchecks check name (for the status badge).
 PAGE_CHECK = {
-    'dns': 'ddns',
     'mailserver': 'smtp',
     'auth': 'twofa',
     'acme': 'certs',
@@ -116,6 +115,13 @@ def get_page_badge(page_key, inventory_vars):
         return ('missing', 'Not configured',
                 'Timezone and keyboard are not set up yet.')
 
+    if page_key == 'dns':
+        if inventory_vars.get('dns_configured'):
+            return ('ok', 'Configured',
+                    'The DNS name is set up.')
+        return ('missing', 'Not configured',
+                'The server has no name on the internet yet.')
+
     if page_key == 'port-forwarding':
         if inventory_vars.get('port_forwarding_configured'):
             return ('ok', 'All good',
@@ -151,7 +157,6 @@ def setup_steps(inventory_vars):
     Each step is a dict: key, title, subtitle, optional, status
     ('done' / 'pending' / 'optional') and url.
     """
-    checks = _load_runchecks()
     network_type = inventory_vars.get('network_type', '')
     steps = []
 
@@ -180,16 +185,17 @@ def setup_steps(inventory_vars):
         'url': '/settings/localization/',
     })
 
-    # Step 3: DNS
-    dns_done = bool(inventory_vars.get('base_domain') and inventory_vars.get('dns_mode'))
-    dns_status = checks.get('ddns')
+    # Step 3: DNS — done after the user explicitly saved the DNS settings in
+    # the WebUI (the runcheck status is not part of the setup state; it only
+    # reflects whether the ddns updater currently works).
+    dns_done = bool(inventory_vars.get('dns_configured'))
     steps.append({
         'key': 'dns',
         'title': 'Set up a Name (DNS)',
         'subtitle': 'E.g. <code>my-server.dedyn.io</code> \u2014 prerequisite '
                     'for everything else.',
         'optional': False,
-        'status': 'done' if (dns_done and dns_status == 'ok') else 'pending',
+        'status': 'done' if dns_done else 'pending',
         'url': '/settings/dns/',
     })
 

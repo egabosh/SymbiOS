@@ -10,21 +10,24 @@ g_lockfile
 g_dedyn_log="${g_log_dir}/dedyn.log"
 exec > >(tee -a "$g_dedyn_log") 2>&1
 
-# deDyn/deSEC-Settings
-[[ -f /usr/local/etc/dedyn.conf ]] || exit 0
-. /usr/local/etc/dedyn.conf
+# deDyn/deSEC-Settings — read from the central inventory.yml (via
+# symbios-lib.sh) so the API key is only stored under /symbios (LUKS).
+dedynpw="$(f_symbios_var ddns_apikey '')"
+dedynhosts="$(f_symbios_var ddns_host '')"
+doipv6="$(f_symbios_var ddns_ipv6 '')"
+
+# Skip silently when no DDNS host is configured yet
+if [[ -z "${dedynhosts}" ]]
+then
+  exit 0
+fi
 
 g_dedyndns="ns2.desec.org. ns1.desec.io."
 
 # Validate config
 if [[ -z "${dedynpw}" ]]
 then
-  g_echo_error "dedynpw not set in /usr/local/etc/dedyn.conf"
-  exit 1
-fi
-if [[ -z "${dedynhosts}" ]]
-then
-  g_echo_error "dedynhosts not set in /usr/local/etc/dedyn.conf"
+  g_echo_error "ddns_apikey not set in inventory.yml"
   exit 1
 fi
 
