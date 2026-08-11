@@ -477,6 +477,68 @@
 </div>
 {% endif %}
 
+{% if static_ip_status is not None %}
+<!-- Static IPv4 status -->
+<div class="card mt-3">
+  <div class="card-header">
+    <span><i class="bi bi-shield-lock"></i> Static IPv4 Address</span>
+  </div>
+  <div class="card-body small">
+    {% if static_ip_status.static %}
+    <div class="mb-2">
+      <span class="badge bg-success"><i class="bi bi-check-circle"></i>
+        Static IPv4 secured ({{ static_ip_status.ip|default:local_ip }})</span>
+    </div>
+    <p class="text-muted mb-0">
+      <i class="bi bi-info-circle"></i>
+      The router always assigns the same IPv4 address to this server, so IPv4
+      port forwards keep working.
+    </p>
+    {% elif static_ip_status.error %}
+    <div class="mb-2">
+      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i>
+        Static IPv4 status unknown</span>
+    </div>
+    <p class="text-muted mb-0">
+      <i class="bi bi-info-circle"></i>
+      {{ static_ip_status.error }}
+    </p>
+    {% else %}
+    <div class="mb-2">
+      <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i>
+        Static IPv4 not secured yet</span>
+    </div>
+    {% if router_info.router_type == 'generic_upnp' %}
+    <p class="text-muted mb-0">
+      <i class="bi bi-info-circle"></i>
+      This router type has no API for DHCP reservations. Assign a fixed IPv4
+      address (DHCP reservation) to this server in the router's web interface,
+      otherwise IPv4 port forwards stop working when the address changes.
+    </p>
+    {% elif can_control_router %}
+    <form method="post" data-exec="true">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="secure-static-ip">
+      <button type="submit" class="btn btn-sm btn-primary">
+        <i class="bi bi-shield-check"></i> Secure static IP
+      </button>
+    </form>
+    <p class="text-muted mt-2 mb-0">
+      <i class="bi bi-info-circle"></i>
+      The router will always assign the same IPv4 address
+      ({{ local_ip }}) to this server.
+    </p>
+    {% else %}
+    <p class="text-muted mb-0">
+      <i class="bi bi-info-circle"></i>
+      Enter the router login in <strong>Step 3</strong> to secure the static IP.
+    </p>
+    {% endif %}
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 <!-- Additional rules (optional, collapsed) -->
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center">

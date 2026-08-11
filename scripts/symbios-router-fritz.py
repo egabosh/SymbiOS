@@ -731,6 +731,42 @@ def fb_staticip(host, user, password, ip, dev_uid=''):
     return 1
 
 
+def fb_staticip_status(host, user, password, ip='', dev_uid=''):
+    """Read-only: report whether 'always same IPv4' is active for this device."""
+    login = login_sid(host, user, password)
+    if not login.get('ok'):
+        print(json.dumps(login))
+        return 1
+
+    sid = login['sid']
+    if not dev_uid:
+        dev_uid = get_device_uid(host, sid)
+    if not dev_uid:
+        print(json.dumps({
+            'ok': False,
+            'router_type': 'fritzbox',
+            'error': 'Could not determine device UID',
+        }))
+        return 1
+
+    state = get_device_static_state(host, sid, dev_uid)
+    if 'error' in state:
+        print(json.dumps({
+            'ok': False,
+            'router_type': 'fritzbox',
+            'error': state['error'],
+        }))
+        return 1
+    print(json.dumps({
+        'ok': True,
+        'router_type': 'fritzbox',
+        'static': state['static'],
+        'ip': state['ip'],
+        'device_uid': dev_uid,
+    }))
+    return 0
+
+
 def fb_unset_staticip(host, user, password, ip, dev_uid=''):
     login = login_sid(host, user, password)
     if not login.get('ok'):
@@ -893,6 +929,11 @@ def main():
         uid = sys.argv[3] if len(sys.argv) > 3 else ''
         return fb_staticip(host, user, password, sys.argv[2], uid)
 
+    elif action == 'staticip-status':
+        ip = sys.argv[2] if len(sys.argv) > 2 else ''
+        uid = sys.argv[3] if len(sys.argv) > 3 else ''
+        return fb_staticip_status(host, user, password, ip, uid)
+
     elif action == 'unset-staticip':
         if len(sys.argv) < 3:
             print(json.dumps({
@@ -916,6 +957,7 @@ def main():
         print('                                    accesstype: ipv4|ipv6|ipv4_ipv6')
         print('  delete <ext> [proto]            Delete rule')
         print('  staticip <ip>                   Ensure static IPv4 for this device')
+        print('  staticip-status [ip]            Report whether static IPv4 is active')
         print('  unset-staticip <ip>             Remove static IPv4 for this device')
         print('  ipv6info                        Report IPv6 state and device')
         print('                                    addresses (read-only)')

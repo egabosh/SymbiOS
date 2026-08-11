@@ -290,7 +290,7 @@ case "$ACTION" in
     ;;
 
   # ------------------------------------------------------------------
-  login|list|add|delete|staticip|unset-staticip|ipv6info)
+  login|list|add|delete|staticip|staticip-status|unset-staticip|ipv6info)
     # Detect router type
     DETECT=$(symbios-router-detect.sh 2>/dev/null)
     AVAILABLE=$(f_json_bool "$DETECT" "available")
@@ -387,6 +387,12 @@ case "$ACTION" in
         fi
         f_upnp_delete "$GATEWAY" "$CONTROL_URL" "$EXT_PORT" "$PROTO"
         ;;
+      staticip|staticip-status)
+        # DHCP reservations cannot be managed via UPnP. Tell the caller to
+        # make the server's IPv4 address permanent in the router manually.
+        echo '{"ok":false,"router_type":"generic_upnp","error":"DHCP reservations are not supported via UPnP. Assign a fixed IPv4 address in the router'"'"'s web interface."}'
+        exit 1
+        ;;
     esac
     exit $?
     ;;
@@ -406,6 +412,9 @@ Actions:
                                   Add a port forwarding rule
                                   (accesstype: ipv4|ipv6|ipv4_ipv6)
   delete <ext_port> [protocol]    Delete a port forwarding rule
+  staticip <ip>                   Ensure static IPv4 (FRITZ!Box only)
+  staticip-status [ip]            Report whether static IPv4 is active
+                                  (FRITZ!Box only)
   config [username] [password]    Show or save router credentials
                                   (use 'config remove' to delete them)
   ipv6info                        Show IPv6 state and device addresses
