@@ -13,7 +13,8 @@
 # Output: JSON on stdout, exit 0 only if all hosts have a valid certificate.
 
 source /etc/bash/gaboshlib.include
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 
 g_domain=""
 g_trae_ip=""

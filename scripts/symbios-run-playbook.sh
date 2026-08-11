@@ -4,7 +4,8 @@
 # The playbook_path is relative to the SymbiOS repo (e.g. base-services/smtp.yml)
 
 source /etc/bash/gaboshlib.include
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 
 g_playbook="${1:-}"
 g_repo="${g_git_root}"

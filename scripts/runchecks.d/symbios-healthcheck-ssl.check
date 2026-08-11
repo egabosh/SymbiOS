@@ -10,7 +10,8 @@ then
 fi
 
 # Run the local SSL certificate check (no external service)
-g_result=$(symbios-ssl-check.sh -d "$g_base_domain" 2>/dev/null)
+g_check_dir="$(cd "$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")" && pwd)"
+g_result=$("${g_check_dir}/symbios-ssl-check.sh" -d "$g_base_domain" 2>/dev/null)
 if [[ -z "$g_result" ]]
 then
   g_echo_error "Healthcheck failed for ssl: check produced no output"

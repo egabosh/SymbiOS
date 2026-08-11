@@ -29,7 +29,8 @@
 #   symbios-state.sh is-installed <path>      # exit 0 if installed, 1 if not
 
 source /etc/bash/gaboshlib.include 2>/dev/null || true
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 
 # Ensure state file exists
 if [[ ! -f "$g_state_file" ]]

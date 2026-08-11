@@ -2,7 +2,8 @@
 
 # SymbiOS autoupdate dispatcher - runs all .update scripts from autoupdate.d/
 . /etc/bash/gaboshlib.include
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 g_nice
 g_lockfile
 g_all-to-syslog

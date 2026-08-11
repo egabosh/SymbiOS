@@ -7,7 +7,8 @@
 #   Generic UPnP      → internal bash SOAP functions (curl + temp files)
 
 SCRIPT_NAME="$(basename "$0")"
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 UPNP_CONFIG_DIR="${g_config_dir}"
 
 # Router credentials. Primary source of truth is inventory.yml (all.vars

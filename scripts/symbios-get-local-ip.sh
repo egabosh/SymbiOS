@@ -3,7 +3,8 @@
 # Checks .host-ip file first (written by host cron), falls back to hostname -I
 
 source /etc/bash/gaboshlib.include
-source symbios-lib.sh
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 
 g_host_ip_file="${g_config_dir}/.host-ip"
 
