@@ -15,7 +15,7 @@ all:
     twofa_enabled: false      # Authelia 2FA enforcement for LDAP users
     # filesystem layout (all data lives under the /symbios data root)
     data_root: "/symbios"
-    git_root: "/symbios/git/SymbiOS"
+    git_root: "/symbios/git/SymBiOS"
     base_services_root: "/symbios/base-services"
     services_root: "/symbios/services"
     docker_root: "/symbios/docker"
