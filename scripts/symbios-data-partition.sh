@@ -209,10 +209,11 @@ function f_find_luks {
 # Dispatch (flat — each action lives directly in its case branch)
 # ---------------------------------------------------------------------------
 
-g_action="${1:-}"
-shift 2>/dev/null || true
+function f_main {
+  g_action="${1:-}"
+  shift 2>/dev/null || true
 
-case "$g_action" in
+  case "$g_action" in
 
   # ------------------------------------------------------------------
   list)
@@ -276,6 +277,14 @@ EOF
 
     [[ -z "$f_device" ]] && f_json_error "No device selected"
     [[ "$f_device" == /dev/* ]] || f_json_error "Invalid device path"
+
+    # Read the LUKS passphrase from stdin when it was not passed as an
+    # argument. The WebUI sends it via stdin so it never appears on the
+    # command line (and thus not in `ps`, audit logs, or the exec overlay).
+    if [[ "$f_encrypt" == "yes" ]] && [[ -z "$f_password" ]]
+    then
+      IFS= read -rs f_password || true
+    fi
     [[ "$f_encrypt" == "yes" ]] && [[ -z "$f_password" ]] && \
       f_json_error "Password required for LUKS encryption"
 
@@ -383,15 +392,37 @@ EOF
 
     # Docker/containerd data lives directly in ${g_mountpoint}/docker and
     # ${g_mountpoint}/containerd. Stop all containers so the data is consistent
-    # and can be copied together with everything else. The WebUI goes offline
-    # during this step; the server reboots afterwards anyway.
+    # and can be copied together with everything else. The WebUI container
+    # (symbios-webui) must stay up — this script runs through its SSH exec
+    # gateway, so stopping it would kill the migration mid-copy. OpenLDAP
+    # keeps running too so the WebUI stays functional while it is stopped.
     if command -v docker &>/dev/null
     then
-      f_log_step "Stopping Docker services for consistent copy"
-      docker stop $(docker ps -q) 2>/dev/null || true
-      systemctl stop docker 2>/dev/null || true
-      systemctl stop containerd 2>/dev/null || true
-      f_log_ok "Docker and containerd stopped"
+      f_log_step "Stopping non-essential Docker services for consistent copy"
+      # Snapshot OpenLDAP before the copy so the data on the new disk is
+      # consistent even though the LDAP container stays up during rsync.
+      if docker ps --format '{{.Names}}' | grep -qx openldap
+      then
+        mkdir -p "${g_mountpoint}/backups"
+        docker exec openldap slapcat -F /ldap-config/slapd.d \
+          > "${g_mountpoint}/backups/ldap-pre-migration.ldif" 2>/dev/null || true
+        f_log_ok "OpenLDAP snapshot saved to ${g_mountpoint}/backups"
+      fi
+      local f_cid f_cname
+      for f_cid in $(docker ps -q)
+      do
+        f_cname=$(docker inspect --format '{{.Name}}' "$f_cid" 2>/dev/null)
+        case "$f_cname" in
+          */symbios-webui|*/openldap)
+            f_log "Keeping $f_cname running"
+            ;;
+          *)
+            docker stop "$f_cid" >/dev/null 2>&1 || true
+            f_log "Stopped $f_cname"
+            ;;
+        esac
+      done
+      f_log_ok "Docker services stopped (symbios-webui and openldap kept running)"
     fi
 
     rsync -av --progress \
@@ -505,4 +536,7 @@ EOF
   *)
     f_json_error "Usage: $0 {list|status|setup|rollback||change-password}"
     ;;
-esac
+  esac
+}
+
+f_main "$@"

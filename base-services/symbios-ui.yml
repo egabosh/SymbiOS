@@ -225,6 +225,14 @@
         group: root
         mode: "0755"
 
+    - name: Install data partition manager
+      ansible.builtin.copy:
+        src: "{{ git_root }}/scripts/symbios-data-partition.sh"
+        dest: /usr/local/sbin/symbios-data-partition.sh
+        owner: root
+        group: root
+        mode: "0755"
+
     - name: Set default target to multi-user (text mode at boot)
       ansible.builtin.command:
         cmd: systemctl set-default multi-user.target
