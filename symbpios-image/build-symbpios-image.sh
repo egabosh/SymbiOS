@@ -230,11 +230,13 @@ cat > "${g_mount_point_root}/etc/rc.local" << 'RCLOCALEOF'
 # SymbiOS boot sequence
 
 exec > >(tee -a /var/log/symbios-boot.log) 2>&1
-echo "=== SymbiOS Installer ==="
-echo "Started at: $(date)"
 
 if [ ! -s /var/lib/symbios-install.done ]
 then
+
+  echo "=== SymbiOS Installer ==="
+  echo "Started at: $(date)"
+
   for f_i in $(seq 1 10)
   do
     echo "Downloading installer (attempt ${f_i}/10)..."
