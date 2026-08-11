@@ -359,9 +359,9 @@ sudo bash install.sh
    template on first run.
 4. Run the base-services playbooks in order (basics -> localization ->
    hardening -> firewall -> backup -> autoupdate -> runchecks -> docker ->
-   dedyn -> ldap -> symbios-ui). The `traefik.yml` and `authelia.yml`
-   playbooks are kept commented out at install time — they require
-   `base_domain` and are applied from the WebUI after configuration.
+   dedyn -> ldap -> raspberry (if Pi) -> symbios-ui). The `traefik.yml` and
+   `authelia.yml` playbooks are kept commented out at install time — they
+   require `base_domain` and are applied from the WebUI after configuration.
 5. On a Raspberry Pi, also apply `raspberry.yml` and the
    `desktop/firefox.yml` desktop playbook.
 
