@@ -243,7 +243,16 @@ then
     if wget -q -O /tmp/symbios-install.sh https://raw.githubusercontent.com/egabosh/SymbiOS/main/install.sh
     then
       echo "Starting installation..."
-      bash /tmp/symbios-install.sh && date > /var/lib/symbios-install.done
+      if bash /tmp/symbios-install.sh
+      then
+        date > /var/lib/symbios-install.done
+        echo "=== Installation successful - rebooting ==="
+      else
+        echo "=== Installation FAILED - rebooting to retry ==="
+      fi
+      sync
+      sleep 2
+      reboot
       break
     fi
     sleep 10
