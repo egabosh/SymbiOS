@@ -87,8 +87,13 @@
           Type=simple
           User=root
           Environment=PATH={{ git_root }}/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+          # /symbios is on a LUKS volume that is only unlocked at boot via
+          # the unlock server (rc.local). Wait until it is mounted before
+          # starting, otherwise ExecStart fails with 203/EXEC.
+          ExecStartPre=/bin/bash -c 'for i in $(seq 1 1800); do mountpoint -q /symbios && exit 0; sleep 1; done; exit 1'
           ExecStart={{ git_root }}/scripts/runchecks.sh
           Restart=on-abort
+          RestartSec=5
           
           [Install]
           WantedBy=multi-user.target
