@@ -211,23 +211,28 @@
 
     - name: Ensure /symbios data root and layout exist
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: "{{ item.path }}"
         state: directory
-        owner: root
-        group: root
-        mode: '0750'
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
       loop:
-        - "{{ data_root }}"
-        - "{{ data_root }}/backups"
-        - "{{ git_root }}"
+        # git_root is mounted read-only into the WebUI container (/repo) as
+        # uid 10000, so it must be world-traversable.
+        - { path: "{{ data_root }}", owner: root, group: root, mode: "0750" }
+        - { path: "{{ data_root }}/backups", owner: root, group: root, mode: "0750" }
+        - { path: "{{ git_root }}", owner: root, group: root, mode: "0755" }
       when: nocontainer.stat.exists
 
     - name: Ensure {{ git_root }}/scripts is in system PATH
-      ansible.builtin.lineinfile:
-        path: /etc/profile.d/symbios-path.sh
-        line: 'export PATH="{{ git_root }}/scripts:$PATH"'
-        create: true
+      ansible.builtin.copy:
+        dest: /etc/profile.d/symbios-path.sh
+        # One-line file; content copy is fully idempotent and also removes
+        # stale PATH entries left over from earlier git_root values.
+        content: 'export PATH="{{ git_root }}/scripts:$PATH"'
         mode: '0644'
+        owner: root
+        group: root
       when: nocontainer.stat.exists
 
     - name: Install Basic Packages if not running in container
