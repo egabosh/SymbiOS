@@ -22,6 +22,7 @@ This script only handles the web server (HTTPS) and console prompt.
 """
 
 import http.server
+import io
 import json
 import os
 import signal
@@ -356,7 +357,13 @@ def console_unlock_thread():
     console = None
     for path in ("/dev/tty", "/dev/console", "/dev/tty1", "/dev/tty0"):
         try:
-            f = open(path, "r+", encoding="utf-8")
+            # Open as raw binary stream: the buffered text-mode open() seeks
+            # the tty and fails with "File or stream is not seekable".
+            f = io.TextIOWrapper(
+                open(path, "r+b", buffering=0),
+                encoding="utf-8",
+                write_through=True,
+            )
         except OSError:
             continue
         if f.isatty():
