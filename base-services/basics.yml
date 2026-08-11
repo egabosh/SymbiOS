@@ -74,25 +74,33 @@
 
     - name: Replace /home with symlink
       ansible.builtin.shell: |
-        [[ -d "{{ data_root }}/home" ]] && exit 0
+        if [[ -d "{{ data_root }}/home" ]]
+        then
+          exit 0
+        fi
         mv /home "{{ data_root }}"/home
         ln -s "{{ data_root }}"/home /home
+        echo "migrated-home"
       args:
         executable: /bin/bash
       register: home_symlink
-      changed_when: home_symlink.rc == 0
+      changed_when: "'migrated-home' in home_symlink.stdout"
       failed_when: home_symlink.rc != 0
       when: nocontainer.stat.exists
 
     - name: Replace /root with symlink
       ansible.builtin.shell: |
-        [[ -d "{{ data_root }}/home/root" ]] && exit 0
+        if [[ -d "{{ data_root }}/home/root" ]]
+        then
+          exit 0
+        fi
         mv /root "{{ data_root }}"/home/root
         ln -s "{{ data_root }}"/home/root /root
+        echo "migrated-root"
       args:
         executable: /bin/bash
       register: home_symlink
-      changed_when: home_symlink.rc == 0
+      changed_when: "'migrated-root' in home_symlink.stdout"
       failed_when: home_symlink.rc != 0
       when: nocontainer.stat.exists
 
@@ -212,8 +220,6 @@
         - "{{ data_root }}"
         - "{{ data_root }}/backups"
         - "{{ git_root }}"
-        - "{{ base_services_root }}"
-        - "{{ services_root }}"
       when: nocontainer.stat.exists
 
     - name: Ensure {{ git_root }}/scripts is in system PATH

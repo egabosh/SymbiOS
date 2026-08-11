@@ -233,9 +233,16 @@
         group: root
         mode: "0755"
 
+    - name: Get current default target
+      ansible.builtin.command:
+        cmd: systemctl get-default
+      register: current_default_target
+      changed_when: false
+
     - name: Set default target to multi-user (text mode at boot)
       ansible.builtin.command:
         cmd: systemctl set-default multi-user.target
+      when: current_default_target.stdout != 'multi-user.target'
 
     - name: Disable docker and containerd auto-start (handled by rc.local)
       ansible.builtin.systemd:
@@ -278,11 +285,36 @@
           systemctl start docker
           [[ -x /usr/sbin/lightdm ]] && systemctl start lightdm
 
+    - name: Deploy rc-local systemd unit with Install section
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/rc-local.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # SPDX-License-Identifier: LGPL-2.1-or-later
+          [Unit]
+          Description=/etc/rc.local Compatibility
+          Documentation=man:systemd-rc-local-generator(8)
+          ConditionFileIsExecutable=/etc/rc.local
+          After=network.target
+
+          [Service]
+          Type=forking
+          ExecStart=/etc/rc.local start
+          TimeoutSec=infinity
+          RemainAfterExit=yes
+          GuessMainPID=no
+
+          [Install]
+          WantedBy=multi-user.target
+
     - name: Enable rc-local service
       ansible.builtin.systemd:
         name: rc-local
         enabled: yes
         daemon_reload: yes
+        state: started
 
     - name: Copy LE cert extraction script
       ansible.builtin.copy:
