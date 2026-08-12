@@ -143,13 +143,22 @@ function f_symbios_load_layout {
 # Escape a string for safe embedding in JSON (prints the quoted value).
 # Reads from stdin so it can be used in a pipe.
 function f_json_escape {
-  local f_s
-  IFS= read -r f_s
+  local f_s f_c
+  IFS= read -d '' -r f_s
   f_s="${f_s//\\/\\\\}"
   f_s="${f_s//\"/\\\"}"
   f_s="${f_s//$'\t'/\\t}"
   f_s="${f_s//$'\n'/\\n}"
   f_s="${f_s//$'\r'/\\r}"
+  # Escape the remaining C0 control characters (e.g. the ANSI ESC from
+  # gaboshlib's colored output) as \uXXXX. A raw control byte inside a JSON
+  # string is invalid and makes json.loads() in the WebUI reject the whole
+  # document (jobs then looked like "Host stopped answering").
+  for f_c in 01 02 03 04 05 06 07 08 0b 0c 0e 0f 10 11 12 13 14 15 16 17 \
+             18 19 1a 1b 1c 1d 1e 1f
+  do
+    f_s="${f_s//$(printf "\\x${f_c}")/\\u00${f_c}}"
+  done
   printf '"%s"' "$f_s"
 }
 

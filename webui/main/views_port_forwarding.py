@@ -198,6 +198,18 @@ def settings_port_forwarding(request):
                 method = request.POST.get('method', '').strip()
                 if method in ('auto', 'manual', ''):
                     vars_['port_forwarding_method'] = method
+                    if method == 'manual':
+                        # The user takes care of the forwarding rules and the
+                        # fixed IP in the router themselves. Trust that without
+                        # probing the router, and consider the ports + static
+                        # IPv4 step done so the setup assistant completes.
+                        vars_['port_forwarding_configured'] = True
+                        vars_['port_forwarding_static_ip_configured'] = True
+                    else:
+                        # Back to automatic mode: the real router state decides
+                        # again (ports discovered on the next page render).
+                        vars_['port_forwarding_configured'] = False
+                        vars_['port_forwarding_static_ip_configured'] = False
                     _save_inventory_config(config)
                 if is_ajax:
                     return JsonResponse({'ok': True})
@@ -280,6 +292,10 @@ def settings_port_forwarding(request):
                 if ok and stdout:
                     result = json.loads(stdout)
                     if result.get('ok'):
+                        # Persist that the static IPv4 step is settled so the
+                        # setup assistant and the page badge reflect it.
+                        vars_['port_forwarding_static_ip_configured'] = True
+                        _save_inventory_config(config)
                         messages.success(request, result.get('message', 'Static IP secured.'))
                     else:
                         messages.error(request, result.get('error', 'Failed to secure static IP.'))
@@ -506,6 +522,7 @@ def settings_port_forwarding(request):
         'credentials_username': credentials_username,
         'can_control_router': can_control_router,
         'static_ip_status': static_ip_status,
+        'static_ip_configured': bool(vars_.get('port_forwarding_static_ip_configured')),
         'local_ip': local_ip,
         'local_ipv6': local_ipv6,
         'server_name': server_name,

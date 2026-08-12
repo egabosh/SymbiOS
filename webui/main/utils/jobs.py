@@ -19,25 +19,41 @@
 The WebUI runs a single gunicorn worker, so this dict is shared across all
 requests within the process. Jobs capture live command output for the browser
 to poll. Not suitable for multi-worker scaling.
+
+Jobs are decoupled from the WebUI process and the SSH session: the command is
+started on the host by scripts/symbios-run-detached.sh via `setsid`, and this
+module polls the resulting log file over the SSH gateway. A WebUI restart,
+gunicorn worker recycle or SSH connection drop can therefore never abort the
+remote command (e.g. a long /symbios disk migration). It keeps running on the
+host and writes its progress to /var/log/symbios/jobs/.
 """
 
+import json
+import shlex
 import threading
 import uuid
-from .ssh_exec import stream_command
+
+from .ssh_exec import run_command
 
 _JOBS = {}
 _JOBS_LOCK = threading.Lock()
+
+# Host wrapper that starts commands detached and serves their log output.
+# Polling is done via short SSH calls (never a long-lived channel).
+DETACHED_SCRIPT = 'symbios-run-detached.sh'
 
 
 def create_job(cmd, timeout=900, stdin_data=None):
     """Start a command as a background job and return its id.
 
-    The command is executed via the SSH exec gateway; output is captured
-    incrementally. Returns the job id string for the browser to poll via
-    :func:`get_job_output`.
+    The command is executed on the host by scripts/symbios-run-detached.sh,
+    detached from the SSH session, so it survives WebUI restarts, SSH drops
+    and gunicorn worker recycles. A poller thread fetches the incremental
+    log output from the host. Returns the job id string for the browser to
+    poll via :func:`get_job_output`.
 
     If stdin_data is provided, it is sent to the remote command's stdin
-    before closing the channel.
+    before the command starts (never on the command line).
     """
     job_id = uuid.uuid4().hex
     job = {'output': '', 'done': False, 'success': False, 'lock': threading.Lock(),
@@ -47,7 +63,21 @@ def create_job(cmd, timeout=900, stdin_data=None):
         for old in [k for k, v in _JOBS.items() if v['done']]:
             _JOBS.pop(old, None)
         _JOBS[job_id] = job
-    threading.Thread(target=_run_job, args=(job, cmd, stdin_data), daemon=True).start()
+
+    start_cmd = '{} start {} {}'.format(
+        DETACHED_SCRIPT, job_id, shlex.quote(cmd))
+    try:
+        ok, stdout, stderr = run_command(start_cmd, timeout=60,
+                                         stdin_data=stdin_data)
+    except Exception as e:
+        ok, stderr = False, str(e)
+    if not ok:
+        with job['lock']:
+            job['output'] = '[ERROR] Could not start detached job: {}\n'.format(stderr)
+            job['done'] = True
+        return job_id
+
+    threading.Thread(target=_poll_job, args=(job, job_id), daemon=True).start()
     return job_id
 
 
@@ -60,21 +90,41 @@ def get_job_output(job_id):
         return job['output'], job['done'], job['success'], job['command']
 
 
-def _run_job(job, cmd, stdin_data=None):
-    """Run a command via the SSH exec gateway, appending output as it arrives."""
-    overall_ok = True
-    try:
-        for kind, text in stream_command(cmd, timeout=900, stdin_data=stdin_data):
-            if kind == 'rc':
-                if text != 0:
-                    overall_ok = False
-                continue
+def _poll_job(job, job_id):
+    """Poll the host log file of a detached job, appending output as it arrives."""
+    offset = 0
+    consecutive_failures = 0
+    while True:
+        try:
+            ok, stdout, stderr = run_command(
+                '{} poll {} {}'.format(DETACHED_SCRIPT, job_id, offset),
+                timeout=60)
+            if not ok:
+                raise RuntimeError(stderr or 'poll failed')
+            data = json.loads(stdout)
+        except Exception:
+            # Transient SSH/gateway trouble: retry, but give up after a while
+            # so a permanently lost host does not leak a poller thread.
+            consecutive_failures += 1
+            if consecutive_failures >= 20:
+                with job['lock']:
+                    job['output'] += '\n[ERROR] Host stopped answering; job continues on the host.\n'
+                    job['done'] = True
+                return
+            threading.Event().wait(3)
+            continue
+        consecutive_failures = 0
+
+        text = data.get('output', '')
+        if text:
             with job['lock']:
                 job['output'] += text
-    except Exception as e:
-        overall_ok = False
-        with job['lock']:
-            job['output'] += '\n[ERROR] ' + str(e) + '\n'
-    with job['lock']:
-        job['done'] = True
-        job['success'] = overall_ok
+        offset = int(data.get('size', offset))
+
+        if data.get('status') == 'done':
+            rc = int(data.get('rc') or 0)
+            with job['lock']:
+                job['done'] = True
+                job['success'] = (rc == 0)
+            return
+        threading.Event().wait(1)
