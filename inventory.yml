@@ -11,7 +11,8 @@ all:
     ldap_basedn: "dc=openldap,dc=local"
     # setup state — set by the WebUI guided setup (inventory.yml is the central
     # restore source after a fresh installation)
-    network_type: ""          # 'home' (behind router) or 'root' (own public IP)
+    network_type: ""          # 'home' (behind router), 'root' (own public IP) or
+                              # 'airgapped' (intranet without internet access)
     twofa_enabled: false      # Authelia 2FA enforcement for LDAP users
     localization_configured: false  # true after the user saved the localization settings in the WebUI
     dns_configured: false           # true after the user saved the DNS settings in the WebUI
@@ -40,6 +41,10 @@ all:
     # kept in sync by the WebUI (settings → port forwarding)
     ufw_extra_inbound: []
     port_forwarding_configured: false
+    # true once the static-IPv4 step is settled: either the user chose manual
+    # forwarding (they handle the fixed IP in the router themselves) or a
+    # FRITZ!Box static IPv4 was secured from the WebUI. Analogous to dns_configured.
+    port_forwarding_static_ip_configured: false
     # how the ports are opened: '' (not decided), 'auto' (router is set up by
     # SymbiOS) or 'manual' (forwards entered in the router by hand)
     port_forwarding_method: ''

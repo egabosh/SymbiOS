@@ -350,6 +350,27 @@ EOF
       "$f_encrypt" ${g_mapper_name} "$f_old_fstab_line"
     f_log_ok "State saved (can rollback later)"
 
+    # Resume detection: if a previous run was interrupted (state file present,
+    # the LUKS volume already open and /symbios.new mounted), we continue the
+    # idempotent rsync instead of wiping the disk and copying from scratch.
+    # This makes the migration robust against SSH drops / WebUI restarts.
+    local f_resume=false f_new_source=""
+    if f_load_state && [[ "$f_old_home_device" == "$old_device" ]]
+    then
+      f_new_source=$(findmnt -n -o SOURCE /symbios.new 2>/dev/null || true)
+      if [[ "$f_encrypt" == "yes" ]] && [[ "$f_new_source" == "/dev/mapper/${g_mapper_name}" ]]
+      then
+        f_resume=true
+      elif [[ "$f_encrypt" == "no" ]] && [[ -n "$f_new_source" ]]
+      then
+        f_resume=true
+      fi
+    fi
+    if [[ "$f_resume" == "true" ]]
+    then
+      f_log "Interrupted migration detected - resuming copy (rsync continues where it stopped)"
+    fi
+
     f_log_step "Preparing device"
      umount "$f_device" 2>/dev/null || true
 
@@ -357,35 +378,46 @@ EOF
 
     if [[ "$f_encrypt" == "yes" ]]
     then
-      f_log_step "Formatting device with LUKS encryption"
-      echo "$f_password" | cryptsetup luksFormat --label "$g_luks_label" \
-        --batch-mode "$f_device" || {
-        f_setup_error "LUKS format failed"
-      }
-      f_log_ok "LUKS format complete"
+      if [[ "$f_resume" == "true" ]]
+      then
+        f_log_ok "LUKS volume ${f_luks_name} already open - keeping it"
+        f_target="/dev/mapper/$f_luks_name"
+      else
+        f_log_step "Formatting device with LUKS encryption"
+        echo "$f_password" | cryptsetup luksFormat --label "$g_luks_label" \
+          --batch-mode "$f_device" || {
+          f_setup_error "LUKS format failed"
+        }
+        f_log_ok "LUKS format complete"
 
-      f_log_step "Opening LUKS volume"
-      echo "$f_password" | cryptsetup open "$f_device" "$f_luks_name" || {
-        f_setup_error "LUKS open failed"
-      }
-      f_log_ok "LUKS volume opened as $f_luks_name"
-      f_target="/dev/mapper/$f_luks_name"
+        f_log_step "Opening LUKS volume"
+        echo "$f_password" | cryptsetup open "$f_device" "$f_luks_name" || {
+          f_setup_error "LUKS open failed"
+        }
+        f_log_ok "LUKS volume opened as $f_luks_name"
+        f_target="/dev/mapper/$f_luks_name"
+      fi
     else
       f_target="$f_device"
     fi
 
-    f_log_step "Formatting $f_device as ext4"
-    mkfs.ext4 -F -L "$g_data_label" "$f_target" 2>&1 || {
-      f_setup_error "mkfs.ext4 failed"
-    }
-    f_log_ok "ext4 filesystem created"
+    if [[ "$f_resume" == "true" ]]
+    then
+      f_log_ok "Temporary mount /symbios.new already present - keeping it"
+    else
+      f_log_step "Formatting $f_device as ext4"
+      mkfs.ext4 -F -L "$g_data_label" "$f_target" 2>&1 || {
+        f_setup_error "mkfs.ext4 failed"
+      }
+      f_log_ok "ext4 filesystem created"
 
-    f_log_step "Mounting temporary partition"
-    mkdir -p /symbios.new
-    mount "$f_target" /symbios.new || {
-      f_setup_error "Mount /symbios.new failed"
-    }
-    f_log_ok "Temporary mount at /symbios.new"
+      f_log_step "Mounting temporary partition"
+      mkdir -p /symbios.new
+      mount "$f_target" /symbios.new || {
+        f_setup_error "Mount /symbios.new failed"
+      }
+      f_log_ok "Temporary mount at /symbios.new"
+    fi
 
     f_log_step "Copying data from ${g_mountpoint} to new partition (rsync)"
     f_log "This may take a while for large ${g_mountpoint} directories..."

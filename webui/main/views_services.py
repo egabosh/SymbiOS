@@ -29,7 +29,7 @@ from .utils.ssh_exec import (
     build_action_command,
     build_log_command,
 )
-from .utils.jobs import _JOBS, _JOBS_LOCK
+from .utils.jobs import create_job, _JOBS, _JOBS_LOCK
 
 # Built-in base-services can be managed but never uninstalled from the WebUI.
 PROTECTED_GROUPS = {'base-services'}
@@ -258,27 +258,31 @@ def services_action(request, playbook):
             )
     cmd = build_action_command(playbook, action)
     display_cmd = cmd
-    job_id = uuid.uuid4().hex
-    job = {'output': '', 'done': False, 'success': False, 'lock': threading.Lock()}
-    with _JOBS_LOCK:
-        # Keep the job table small: drop finished jobs before adding a new one.
-        for old in [k for k, v in _JOBS.items() if v['done']]:
-            _JOBS.pop(old, None)
-        _JOBS[job_id] = job
+    # Jobs run detached on the host (symbios-run-detached.sh): a WebUI restart
+    # or SSH drop cannot abort a running playbook/action. The playbook run is
+    # long-running, so the browser polls the job log via /output/?job=<id>.
+    job_id = create_job(cmd, timeout=1800)
     threading.Thread(
-        target=_run_service_job, args=(job, cmd, playbook, action), daemon=True
+        target=_run_service_job, args=(job_id, playbook, action), daemon=True
     ).start()
     return JsonResponse({'job': job_id, 'action': action, 'command': display_cmd})
 
 
-def _run_service_job(job, cmd, playbook=None, action=None):
-    """Run a service action command, appending output as it arrives."""
-    from .utils.jobs import _run_job
-    _run_job(job, cmd)
+def _run_service_job(job_id, playbook=None, action=None):
+    """Wait for a detached service job and update state when it finished."""
+    from .utils.jobs import get_job_output
+    while True:
+        result = get_job_output(job_id)
+        if result is None:
+            return
+        _output, done, _ok, _cmd = result
+        if done:
+            break
+        threading.Event().wait(2)
     # Update the installed-playbooks state file after a successful (Re)Install
     # or Uninstall so symbios-reapply.sh knows which playbooks to re-run.
-    with job['lock']:
-        overall_ok = job['success']
+    result = get_job_output(job_id)
+    overall_ok = bool(result and result[2])
     if playbook and action in ('__playbook__', 'uninstall') and overall_ok:
         state_action = 'set' if action == '__playbook__' else 'unset'
         state_cmd = (

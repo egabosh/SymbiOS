@@ -114,7 +114,11 @@
       </li>
       <li><strong>Important:</strong> Assign the server a <strong>fixed IP</strong>
         (DHCP reservation / "always keep this IP") so the forwards keep
-        working after a restart.</li>
+        working after a restart.
+        {% if static_ip_configured %}
+        <span class="badge bg-success ms-1"><i class="bi bi-check-circle"></i> Done &mdash; you'll handle this manually</span>
+        {% endif %}
+      </li>
     </ol>
     {% endif %}
 

@@ -16,6 +16,7 @@
 
 import yaml
 import os
+import json
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from .decorators import login_required
@@ -145,7 +146,7 @@ def setup(request):
         from django.http import JsonResponse
         is_ajax = is_ajax_request(request)
         network_type = request.POST.get('network_type', '').strip()
-        if network_type in ('home', 'root'):
+        if network_type in ('home', 'root', 'airgapped'):
             vars_['network_type'] = network_type
             _save_inventory_config(config)
             if is_ajax:
@@ -161,6 +162,13 @@ def setup(request):
     network_step = next((s for s in steps if s['key'] == 'network'), None)
     main_steps = [s for s in steps if s['key'] != 'network']
 
+    # Auto-detect the connection type from the host's IP addresses and default
+    # gateway so the setup assistant can pre-select an option. The user still
+    # confirms; the detection is only a suggestion.
+    detected_network = _detect_network_type()
+    if not vars_.get('network_type') and detected_network:
+        vars_['network_type'] = detected_network
+
     return render(request, 'main/setup.html', {
         'vars': vars_,
         'network_step': network_step,
@@ -169,7 +177,25 @@ def setup(request):
         'complete': complete,
         'network_type': vars_.get('network_type', ''),
         'network_type_label': network_type_label(vars_.get('network_type', '')),
+        'detected_network': detected_network,
     })
+
+
+def _detect_network_type():
+    """Best-effort detection of the server connection type (home/root).
+
+    Runs the host helper script and returns 'home', 'root' or '' when nothing
+    can be determined. Never raises: a detection failure just yields no
+    suggestion and the user picks the option manually.
+    """
+    try:
+        from .utils.ssh_exec import run_command
+        ok, stdout, _ = run_command('symbios-detect-network-type.sh', timeout=10)
+        if ok and stdout:
+            return json.loads(stdout).get('network_type', '') or ''
+    except Exception:
+        pass
+    return ''
 
 
 @login_required

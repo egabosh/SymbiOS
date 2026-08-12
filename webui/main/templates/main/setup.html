@@ -40,7 +40,7 @@
     <form method="post">
       {% csrf_token %}
       <div class="row g-2">
-        <div class="col-md-6">
+        <div class="col-md-4">
           <label class="setup-option" for="nt-home">
             <input class="form-check-input" type="radio" name="network_type" id="nt-home" value="home"
                    {% if network_type == 'home' %}checked{% endif %}>
@@ -50,7 +50,7 @@
             </span>
           </label>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-4">
           <label class="setup-option" for="nt-root">
             <input class="form-check-input" type="radio" name="network_type" id="nt-root" value="root"
                    {% if network_type == 'root' %}checked{% endif %}>
@@ -60,8 +60,25 @@
             </span>
           </label>
         </div>
+        <div class="col-md-4">
+          <label class="setup-option" for="nt-airgapped">
+            <input class="form-check-input" type="radio" name="network_type" id="nt-airgapped" value="airgapped"
+                   {% if network_type == 'airgapped' %}checked{% endif %}>
+            <span class="setup-option-body">
+              <span class="setup-option-title"><strong>Air gapped / Intranet</strong></span>
+              <span class="setup-option-desc">No internet access (enterprise network)</span>
+            </span>
+          </label>
+        </div>
       </div>
-      {% if not network_type %}
+      {% if network_type == 'airgapped' %}
+      <div class="alert alert-warning py-2 px-3 mt-2 mb-0">
+        <i class="bi bi-info-circle-fill"></i>
+        No public DNS or Let's Encrypt reachable. You will need to
+        <strong>set up DNS manually</strong> (self-managed) and point a
+        <strong>local ACME server</strong> (e.g. step-ca) to the server.
+      </div>
+      {% elif not network_type %}
       <div class="alert alert-warning py-2 px-3 mt-2 mb-0">
         <i class="bi bi-info-circle-fill"></i>
         This determines which steps are needed: on a home connection, ports
@@ -72,6 +89,20 @@
         Saved: {{ network_type_label }}
       </div>
       {% endif %}
+      <div class="mt-2 mb-0">
+        {% if detected_network %}
+        <span class="badge bg-light border text-muted">
+          <i class="bi bi-magic"></i> Detected: {{ detected_network }}
+        </span>
+        {% else %}
+        <span class="badge bg-light border text-muted">
+          <i class="bi bi-search"></i> Detection could not determine your connection type
+        </span>
+        {% endif %}
+        {% if detected_network and network_type != detected_network %}
+        <span class="text-muted small ms-1">— choose a different option if this is wrong.</span>
+        {% endif %}
+      </div>
       <button type="submit" class="btn btn-primary btn-sm mt-2">
         <i class="bi bi-save"></i> Save
       </button>

@@ -149,11 +149,17 @@ def _exec(cmd, timeout=300, stdin_data=None):
         channel = client.get_transport().open_session(timeout=SSH_CONNECT_TIMEOUT)
         channel.settimeout(timeout)
         channel.exec_command(_wrap(cmd))
-        # Write stdin data if provided (e.g. SSH keys for write-authorized-keys.sh).
-        # Small payloads; close to signal EOF so the remote process can proceed.
+        # Write stdin data if provided (e.g. SSH keys for write-authorized-keys.sh,
+        # LUKS passphrase for the data-disk migration). Small payloads; closing
+        # the single writer signals EOF so the remote process can proceed.
         if stdin_data is not None:
-            channel.makefile('w').write(stdin_data)
-            channel.makefile('w').close()
+            writer = channel.makefile('w')
+            writer.write(stdin_data)
+            writer.close()
+        # Always signal EOF on stdin: scripts like symbios-run-detached.sh start
+        # read stdin (`cat > .input`) until EOF, and a still-open channel would
+        # block them until the command timeout.
+        channel.shutdown_write()
         exit_status = channel.recv_exit_status()
         stdout = channel.makefile('r', -1).read()
         stderr = channel.makefile_stderr('r', -1).read()
@@ -298,10 +304,18 @@ def stream_command(cmd, timeout=600, stdin_data=None):
         # lone '\r' that a PTY adds is already stripped there. Without a PTY the
         # output is colorless, which is why only sources that force ANSI (traefik)
         # showed colors. This is intentionally uniform across all services.
-        try:
-            channel.get_pty(term='xterm', width=220, height=60)
-        except Exception:
-            pass
+        #
+        # NEVER allocate a PTY when stdin_data is provided: a PTY enables
+        # line-discipline echo, so the bytes we send to the remote process's
+        # stdin (LUKS passphrase, SSH keys, ...) are echoed back into the job
+        # output immediately on arrival - before the remote script's `read -s`
+        # can switch ECHO off. Without a TTY the data flows straight to the
+        # process and can never be echoed.
+        if not stdin_data:
+            try:
+                channel.get_pty(term='xterm', width=220, height=60)
+            except Exception:
+                pass
         channel.exec_command(_wrap(cmd))
         # Send stdin data if provided, then close stdin
         if stdin_data:

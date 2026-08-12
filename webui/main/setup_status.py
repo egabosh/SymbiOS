@@ -189,11 +189,17 @@ def setup_steps(inventory_vars):
     # the WebUI (the runcheck status is not part of the setup state; it only
     # reflects whether the ddns updater currently works).
     dns_done = bool(inventory_vars.get('dns_configured'))
+    if network_type == 'airgapped':
+        dns_subtitle = ('Enterprise network without internet: enter your '
+                        'internal domain and use <strong>self-managed DNS</strong> '
+                        '(no public DDNS possible).')
+    else:
+        dns_subtitle = ('E.g. <code>my-server.dedyn.io</code> \u2014 prerequisite '
+                        'for everything else.')
     steps.append({
         'key': 'dns',
         'title': 'Set up a Name (DNS)',
-        'subtitle': 'E.g. <code>my-server.dedyn.io</code> \u2014 prerequisite '
-                    'for everything else.',
+        'subtitle': dns_subtitle,
         'optional': False,
         'status': 'done' if dns_done else 'pending',
         'url': '/settings/dns/',
@@ -201,10 +207,14 @@ def setup_steps(inventory_vars):
 
     # Step 4: Internet reachability (port forwarding) — only needed on a home
     # connection; a root server has its own public IP and ports 80/443 are
-    # already reachable.
+    # already reachable, an air-gapped intranet needs no public ports at all.
     ports_configured = bool(inventory_vars.get('port_forwarding_configured'))
-    ports_optional = network_type == 'root'
-    if ports_optional:
+    ports_optional = network_type in ('root', 'airgapped')
+    if ports_optional and network_type == 'airgapped':
+        ports_status = 'optional'
+        ports_subtitle = ('Not needed \u2014 an intranet server is not reached '
+                          'from the internet.')
+    elif ports_optional:
         ports_status = 'optional'
         ports_subtitle = ('Not needed \u2014 a root server has its own '
                           'public IP.')
@@ -241,4 +251,5 @@ def network_type_label(network_type):
     return {
         'home': 'Home connection (behind router)',
         'root': 'Root server (own public IP)',
+        'airgapped': 'Air gapped / Intranet (no internet access)',
     }.get(network_type, '')
