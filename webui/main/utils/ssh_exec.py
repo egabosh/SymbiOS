@@ -149,9 +149,9 @@ def _exec(cmd, timeout=300, stdin_data=None):
         channel = client.get_transport().open_session(timeout=SSH_CONNECT_TIMEOUT)
         channel.settimeout(timeout)
         channel.exec_command(_wrap(cmd))
-        # Write stdin data if provided (e.g. SSH keys for write-authorized-keys.sh,
-        # LUKS passphrase for the data-disk migration). Small payloads; closing
-        # the single writer signals EOF so the remote process can proceed.
+        # Write stdin data if provided (e.g. SSH keys for
+        # write-authorized-keys.sh). Small payloads; closing the single writer
+        # signals EOF so the remote process can proceed.
         if stdin_data is not None:
             writer = channel.makefile('w')
             writer.write(stdin_data)
@@ -307,10 +307,10 @@ def stream_command(cmd, timeout=600, stdin_data=None):
         #
         # NEVER allocate a PTY when stdin_data is provided: a PTY enables
         # line-discipline echo, so the bytes we send to the remote process's
-        # stdin (LUKS passphrase, SSH keys, ...) are echoed back into the job
-        # output immediately on arrival - before the remote script's `read -s`
-        # can switch ECHO off. Without a TTY the data flows straight to the
-        # process and can never be echoed.
+        # stdin (e.g. SSH keys) are echoed back into the job output immediately
+        # on arrival - before the remote script's `read -s` can switch ECHO
+        # off. Without a TTY the data flows straight to the process and can
+        # never be echoed.
         if not stdin_data:
             try:
                 channel.get_pty(term='xterm', width=220, height=60)

@@ -254,13 +254,52 @@ case "$ACTION" in
       exit 0
     fi
 
+    # Parse the save invocation. The WebUI passes the password via a
+    # --password-file path (so it never appears on the command line); the
+    # positional form 'config <user> <password>' stays for manual use.
+    f_config_user=""
+    f_config_password=""
+    f_pw_file=""
+    f_pos_count=0
+    while [[ $# -gt 0 ]]
+    do
+      case "$1" in
+        --password-file)
+          f_pw_file="$2"
+          shift 2
+          ;;
+        *)
+          if [[ -z "$f_config_user" ]]
+          then
+            f_config_user="$1"
+          else
+            f_config_password="$1"
+          fi
+          f_pos_count=$((f_pos_count+1))
+          shift
+          ;;
+      esac
+    done
+
+    # Read the password from the secret file and remove it afterwards.
+    if [[ -n "$f_pw_file" ]]
+    then
+      if [[ ! -f "$f_pw_file" ]]
+      then
+        echo '{"ok":false,"error":"Password file not found."}'
+        exit 1
+      fi
+      IFS= read -rs f_config_password < "$f_pw_file"
+      rm -f "$f_pw_file" 2>/dev/null
+    fi
+
     # Save credentials. Both fields may be empty (many routers, e.g. generic
     # UPnP, require no login); only 'config remove' and a bare 'config'
     # (status) are the no-write invocations.
-    if [[ $# -ge 2 ]]
+    if [[ -n "$f_pw_file" ]] || [[ $f_pos_count -ge 2 ]]
     then
-      f_symbios_var_set router_upnp_user "$1"
-      f_symbios_var_set router_upnp_password "$2"
+      f_symbios_var_set router_upnp_user "$f_config_user"
+      f_symbios_var_set router_upnp_password "$f_config_password"
       rm -f "$UPNP_CONFIG_FILE"
       echo '{"ok":true,"message":"Router login saved."}'
       exit 0
@@ -416,7 +455,9 @@ Actions:
   staticip-status [ip]            Report whether static IPv4 is active
                                   (FRITZ!Box only)
   config [username] [password]    Show or save router credentials
-                                  (use 'config remove' to delete them)
+                                  (use 'config remove' to delete them;
+                                  'config <user> --password-file <file>'
+                                  reads the password from a secret file)
   ipv6info                        Show IPv6 state and device addresses
                                   (FRITZ!Box, read-only)
 
