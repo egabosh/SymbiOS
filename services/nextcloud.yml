@@ -51,7 +51,6 @@
   vars:
     service_name: nextcloud
     service_domain: "{{ service_name }}.{{ base_domain }}"
-    ldap_basedn: "{{ 'dc=openldap,' ~ base_domain | split('.') | map('regex_replace', '^(.*)$', 'dc=\\1') | join(',') }}"
 
 
   tasks:
@@ -388,9 +387,9 @@
         backup: yes
       notify: Restart nextcloud
 
-    - name: /symbios/services/traefik/providers/nextcloud.yml Routing Configuration
+    - name: /symbios/base-services/traefik/providers/nextcloud.yml Routing Configuration
       blockinfile:
-        path: /symbios/services/traefik/providers/nextcloud.yml
+        path: /symbios/base-services/traefik/providers/nextcloud.yml
         create: yes
         mode: 0444
         owner: root
@@ -540,15 +539,16 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # waiting for started Nextcloud (Login-Screen)
-          until wget nextcloud.{{ base_domain }} -O - | grep -q Login
+          # "direct=1" keeps the regular login page reachable also when SSO auto-redirect is enabled
+          until wget "nextcloud.{{ base_domain }}/login?direct=1" -O - | grep -q Login
           do
             echo "Waiting for Login screen..."
             # restart traefik on Problems with ACME/letsencrypt
-            if [ -f /symbios/services/traefik/docker-compose.yml ]
+            if [ -f /symbios/base-services/traefik/docker-compose.yml ]
             then
-              if docker compose -f /symbios/services/traefik/docker-compose.yml logs | grep -E -q "nextcloud.{{ base_domain }}.+error.+acme-challenge"
+              if docker compose -f /symbios/base-services/traefik/docker-compose.yml logs | grep -E -q "nextcloud.{{ base_domain }}.+error.+acme-challenge"
               then
-                docker compose -f /symbios/services/traefik/docker-compose.yml up -d --force-recreate
+                docker compose -f /symbios/base-services/traefik/docker-compose.yml up -d --force-recreate
               fi
             fi
             sleep 10
@@ -567,10 +567,7 @@
             then
               docker compose exec -T -u www-data nextcloud ./occ app:install "${app}" | tee -a nextcloud.init.log >"app.${app}.installed" 2>&1
             fi
-            if [ ! -f "app.${app}.installed" ]
-            then
-              docker compose exec -T -u www-data nextcloud ./occ app:enable "${app}" | tee -a nextcloud.init.log >>"app.${app}.installed" 2>&1
-            fi
+            docker compose exec -T -u www-data nextcloud ./occ app:enable "${app}" | tee -a nextcloud.init.log >>"app.${app}.installed" 2>&1
           done
 
           # Disable unnecessary apps
@@ -619,12 +616,15 @@
                 --scope=\"openid profile email groups\" \
                 --mapping-uid=\"preferred_username\" \
                 --mapping-groups=\"groups\" \
+                --unique-uid=\"0\" \
                 Authelia" >nextcloud-data/oidc.sh
-              docker compose exec -ti -u www-data nextcloud bash oidc.sh
+              docker compose exec -T -u www-data nextcloud bash oidc.sh
               rm nextcloud-data/oidc.sh
 
-              # multiple backends
-              docker compose exec -T -u www-data nextcloud ./occ config:app:set user_oidc allow_multiple_user_backends --value="1"
+              # SSO default login: with exactly one OIDC provider and allow_multiple_user_backends=0
+              # unauthenticated browser visits to /login are redirected to Authelia directly
+              # (regular Nextcloud login form remains reachable via /login?direct=1)
+              docker compose exec -T -u www-data nextcloud ./occ config:app:set user_oidc allow_multiple_user_backends --value="0"
               # local remote ip
               docker compose exec -T -u www-data nextcloud ./occ config:system:set allow_local_remote_servers --value true --type bool
 
@@ -640,14 +640,14 @@
             LDAP_BASE_DN="{{ ldap_basedn }}"
             LDAP_BIND_DN="cn=readuser,${LDAP_BASE_DN}"
 
-            if [ -s /symbios/services/ldap/env.openldap ]
+            if [ -s /symbios/base-services/ldap/env.openldap ]
             then
-              LDAP_PASSWORD=$(grep ^LDAP_READUSER_PASSWORD= /symbios/services/ldap/env.openldap | cut -d= -f2-)
+              LDAP_PASSWORD=$(grep ^LDAP_READUSER_PASSWORD= /symbios/base-services/ldap/env.openldap | cut -d= -f2-)
             fi
 
             docker compose exec -T -u www-data nextcloud ./occ ldap:create-empty-config >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapHost "openldap.{{ base_domain }}" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapPort "636" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapHost "openldap" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapPort "389" >>app.user_ldap.configured
             #docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapTLS "1" >>app.user_ldap.configured
             docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapBase "${LDAP_BASE_DN}" >>app.user_ldap.configured
             docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapBaseUsers "ou=users,${LDAP_BASE_DN}" >>app.user_ldap.configured
@@ -658,11 +658,17 @@
               docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapAgentPassword "${LDAP_PASSWORD}" >>app.user_ldap.configured
             fi
             docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapLoginFilter "(&(|(objectclass=posixAccount))(uid=%uid))" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapGroupFilter "(&(objectClass=posixGroup)(memberUid=%uid))" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserFilter "(objectClass=posixAccount)" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapGroupFilter "(objectClass=posixGroup)" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapGroupMemberAssocAttr "memberUid" >>app.user_ldap.configured
             docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserDisplayName "cn" >>app.user_ldap.configured
             docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapEmailAttribute "mail" >>app.user_ldap.configured
             docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapConfigurationActive "1" >>app.user_ldap.configured
             docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserLoginName uid >>app.user_ldap.configured
+            # internal username = LDAP uid so LDAP and OIDC logins map to one account
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapExpertUsernameAttr uid >>app.user_ldap.configured
+            # members of the privileged LDAP group get Nextcloud admin rights
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapAdminGroup "ldap-admins" >>app.user_ldap.configured
             date >> app.user_ldap.configured
           fi
 
@@ -721,7 +727,7 @@
           fi
           if [ -s /symbios/services/nextcloud/nextcloud-data/data/nextcloud.log ]
           then
-            docker compose -f /symbios/services/nextcloud/docker-compose.yml exec -ti -u www-data nextcloud ./occ log:tail 1000 | grep " Error " | grep -v "Can't get app storage," | dd bs=1M count=1 2>/dev/null >"${g_tmp}/nextcloud-error.log"
+            docker compose -f /symbios/services/nextcloud/docker-compose.yml exec -T -u www-data nextcloud ./occ log:tail 1000 | grep " Error " | grep -v "Can't get app storage," | dd bs=1M count=1 2>/dev/null >"${g_tmp}/nextcloud-error.log"
             if [ -s "${g_tmp}/nextcloud-error.log" ]
             then
               g_echo_error "Errors in Nextcloud Log: $(cat "${g_tmp}/nextcloud-error.log")"
@@ -773,7 +779,12 @@
         chdir: /symbios/services/nextcloud
 
     - name: run nextcloud.update
-      ansible.builtin.shell: bash /usr/local/sbin/autoupdate.d/nextcloud.update
+      ansible.builtin.shell:
+        cmd: |
+          . /etc/bash/gaboshlib.include
+          source {{ git_root }}/scripts/symbios-lib.sh
+          source /usr/local/sbin/autoupdate.d/nextcloud.update
+        executable: /bin/bash
 
     - name: run nextcloud.init
       ansible.builtin.shell: bash /symbios/services/nextcloud/nextcloud.init.sh
@@ -801,5 +812,5 @@
     - name: Restart traefik
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
-        chdir: /symbios/services/traefik
+        chdir: /symbios/base-services/traefik
 
