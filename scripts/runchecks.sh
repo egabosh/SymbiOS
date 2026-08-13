@@ -19,12 +19,29 @@ function g_echo_error {
   g_current_check_error="$*"
 }
 
+# Exit cleanly on systemd stop (TERM/INT) and never write error results
+# while the system is shutting down. The interruptible sleep (background +
+# wait) makes bash react to the signal immediately instead of blocking.
+function g_shutdown_exit {
+  g_echo "Shutting down - not writing results"
+  exit 0
+}
+trap g_shutdown_exit TERM INT
+
 # Main loop - runs forever with 5min intervals
 while true
 do
   g_echo "Waiting 5min"
-  sleep 300
+  sleep 300 &
+  wait $!
   g_echo "Next Loop"
+
+  # Skip the whole run while the system is shutting down (services are
+  # already stopping, results would be bogus errors)
+  if [[ "$(systemctl is-system-running 2>/dev/null || echo unknown)" == "stopping" ]]
+  then
+    g_shutdown_exit
+  fi
 
   # Ensure g_tmp directory exists (may be cleaned between cycles)
   mkdir -p "$g_tmp"
