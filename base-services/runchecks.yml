@@ -81,20 +81,22 @@
         content: |
           [Unit]
           Description=checks
-          After=syslog.target network.target
+          After=syslog.target network.target rc-local.service
+          # rc.local unlocks LUKS, mounts /symbios and starts docker, so the
+          # first check loop (+5 min) already sees all services up. Without a
+          # running rc.local (root-fs setup), the ExecStartPre below is the
+          # fallback: it fails fast and Restart=on-failure retries forever
+          # (StartLimitIntervalSec=0) until the script is available.
+          StartLimitIntervalSec=0
           
           [Service]
           Type=simple
           User=root
           Environment=PATH={{ git_root }}/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
-          # /symbios is on a LUKS volume that is only unlocked at boot via
-          # the unlock server (rc.local). Wait until it is mounted before
-          # starting, otherwise ExecStart fails with 203/EXEC. When /symbios
-          # lives in the root filesystem (no fstab entry), skip the wait.
-          ExecStartPre=/bin/bash -c 'grep -q "[[:space:]]/symbios[[:space:]]" /etc/fstab || exit 0; for i in $(seq 1 1800); do mountpoint -q /symbios && exit 0; sleep 1; done; exit 1'
+          ExecStartPre=/bin/bash -c '[[ -x /symbios/git/SymbiOS/scripts/runchecks.sh ]] || exit 1'
           ExecStart={{ git_root }}/scripts/runchecks.sh
-          Restart=on-abort
-          RestartSec=5
+          Restart=on-failure
+          RestartSec=10
           
           [Install]
           WantedBy=multi-user.target
