@@ -31,15 +31,15 @@
 #     services:
 #     - name: ldap
 #       type: docker
-#       compose_file: {{ docker_path }}/docker-compose.yml
-#       status: test -d {{ docker_path }} || exit 2; docker compose -f {{ docker_path }}/docker-compose.yml ps | grep -q "Up "
+#       compose_file: /symbios/base-services/ldap/docker-compose.yml
+#       status: test -d /symbios/base-services/ldap || exit 2; docker compose -f /symbios/base-services/ldap/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: ldap
-#       command: docker compose -f {{ docker_path }}/docker-compose.yml logs -f --tail=1000
+#       command: docker compose -f /symbios/base-services/ldap/docker-compose.yml logs -f --tail=1000
 #   actions:
-#     start: docker compose -f {{ docker_path }}/docker-compose.yml up -d
-#     stop: docker compose -f {{ docker_path }}/docker-compose.yml down
-#     restart: docker compose -f {{ docker_path }}/docker-compose.yml restart
+#     start: docker compose -f /symbios/base-services/ldap/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/base-services/ldap/docker-compose.yml down
+#     restart: docker compose -f /symbios/base-services/ldap/docker-compose.yml restart
 
 ---
 - name: ldap

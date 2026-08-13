@@ -31,11 +31,11 @@
 #     services:
 #     - name: symbios-ui
 #       type: docker
-#       compose_file: {{ base_services_root }}/symbios-ui/docker-compose.yml
-#       status: test -d {{ base_services_root }}/symbios-ui || exit 2; docker compose -f {{ base_services_root }}/symbios-ui/docker-compose.yml ps | grep -q "Up "
+#       compose_file: /symbios/base-services/symbios-ui/docker-compose.yml
+#       status: test -d /symbios/base-services/symbios-ui || exit 2; docker compose -f /symbios/base-services/symbios-ui/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: symbios-ui
-#       command: docker compose -f {{ base_services_root }}/symbios-ui/docker-compose.yml logs -f --tail=1000
+#       command: docker compose -f /symbios/base-services/symbios-ui/docker-compose.yml logs -f --tail=1000
 #   actions:
 
 ---
