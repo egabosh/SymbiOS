@@ -243,22 +243,24 @@
 #### Authelia ####
 ##################
 
-    - name: Create group and add user if not exists
-      ansible.builtin.shell: |
-        ldapaddgroup opencode
-        ldapaddusertogroup admin opencode
+    - name: Ensure LDAP groups for OIDC login (opencode-users / opencode-admins)
+      include_tasks: tasks/oidc-groups.yml
+
+    - name: Remove legacy LDAP group (old naming convention)
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-ldap-groups.sh --delete --name opencode"
       changed_when: false
       failed_when: false
 
     - name: write OIDC config in authelias configuration.yml
       ansible.builtin.blockinfile:
-        path: /symbios/services/authelia/authelia-data/configuration.yml
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
         marker: "# {mark} ANSIBLE MANAGED BLOCK opencode ACCESS CONTROL"
         block: |2
               - domain: "opencode.{{ base_domain }}"
                 policy: two_factor
                 subject:
-                  - 'group:opencode'
+                  - 'group:opencode-users'
+                  - 'group:opencode-admins'
 
         insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         backup: yes
@@ -303,7 +305,7 @@
     - name: Restart authelia
       ansible.builtin.shell: docker compose down && docker compose up -d
       args:
-        chdir: /symbios/services/authelia
+        chdir: /symbios/base-services/authelia
 
     - name: Restart traefik
       ansible.builtin.shell: docker compose up -d --force-recreate

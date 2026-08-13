@@ -201,8 +201,8 @@
                 - OAUTH_REDIRECT_URI=https://openwebui.{{ base_domain }}/oauth/oidc
                 - OAUTH_PROVIDER_NAME=Authelia
                 - OPENID_PROVIDER_URL=https://auth.{{ base_domain }}/.well-known/openid-configuration
-                - OAUTH_ALLOWED_ROLES=ai,ai-admin
-                - OAUTH_ADMIN_ROLES=ai-admin
+                - OAUTH_ALLOWED_ROLES=openwebui-users,openwebui-admins
+                - OAUTH_ADMIN_ROLES=openwebui-admins
                 - OAUTH_ROLES_CLAIM=groups
                 - OAUTH_EMAIL_REQUIRED=false
                 - OAUTH_MAP_EMAIL_TO_USERNAME=true
@@ -333,21 +333,23 @@
 
     - name: Create oidc client secret
       ansible.builtin.shell: |
-        /symbios/services/authelia/gen-oidc-client-secret.sh /symbios/services/openwebui
+        /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/openwebui
       changed_when: false
       failed_when: false
 
-    - name: Create group and add user if not exists
+    - name: Ensure LDAP groups for OIDC login (openwebui-users / openwebui-admins)
+      include_tasks: tasks/oidc-groups.yml
+
+    - name: Remove legacy LDAP groups (old naming convention)
       ansible.builtin.shell: |
-        ldapaddgroup ai
-        ldapaddgroup ai-admin
-        ldapaddusertogroup admin ai-admin
+        {{ git_root }}/scripts/symbios-ldap-groups.sh --delete --name ai
+        {{ git_root }}/scripts/symbios-ldap-groups.sh --delete --name ai-admin
       changed_when: false
       failed_when: false
 
     - name: write OIDC config in authelias configuration.yml
       ansible.builtin.blockinfile:
-        path: /symbios/services/authelia/authelia-data/configuration.yml
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
         marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC openwebui"
         block: |2
                 # Open WebUI
@@ -355,7 +357,7 @@
                   client_name: 'Open WebUI'
                   client_secret: '{{ lookup('file', '/symbios/services/openwebui/oidc_digest') }}'
                   public: false
-                  authorization_policy: '{{ lookup('file', '/symbios/services/authelia/authorization_policy') }}'
+                  authorization_policy: '{{ lookup('file', '/symbios/base-services/authelia/authorization_policy') }}'
                   redirect_uris:
                     - 'https://openwebui.{{ base_domain }}/oauth/oidc'
                   scopes:
@@ -599,7 +601,7 @@
     - name: Restart authelia
       ansible.builtin.shell: docker compose down && docker compose up -d
       args:
-        chdir: /symbios/services/authelia
+        chdir: /symbios/base-services/authelia
 
     - name: Restart traefik
       ansible.builtin.shell: docker compose up -d --force-recreate

@@ -1,0 +1,24 @@
+# Shared tasks: ensure the LDAP groups for OIDC/authelia authentication of a
+# service exist and that the admin user is member of the <service>-admins group.
+#
+# Required vars:  service_name, git_root
+# Optional vars:  oidc_admin_uid   (defaults to admin)
+#
+# Group semantics (used by the services / authelia):
+#   <service_name>-users   -> members may log in with user rights
+#   <service_name>-admins  -> members may log in with admin rights
+
+- name: "Create LDAP group {{ service_name }}-users"
+  ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name {{ service_name }}-users"
+  changed_when: false
+  failed_when: false
+
+- name: "Create LDAP group {{ service_name }}-admins"
+  ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name {{ service_name }}-admins"
+  changed_when: false
+  failed_when: false
+
+- name: "Add user {{ oidc_admin_uid | default('admin') }} to LDAP group {{ service_name }}-admins"
+  ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --add-user --name {{ service_name }}-admins --uid {{ oidc_admin_uid | default('admin') }}"
+  changed_when: false
+  failed_when: false

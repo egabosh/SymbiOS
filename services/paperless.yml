@@ -240,14 +240,17 @@
         backup: yes
       notify: Restart traefik
 
+    - name: Ensure LDAP groups for OIDC login (paperless-users / paperless-admins)
+      include_tasks: tasks/oidc-groups.yml
+
     - name: Generate OIDC client secret for Paperless
-      ansible.builtin.shell: /symbios/services/authelia/gen-oidc-client-secret.sh /symbios/services/paperless
+      ansible.builtin.shell: /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/paperless
       changed_when: false
       failed_when: false
 
-    - name: /symbios/services/authelia/configuration.yml OIDC paperless
+    - name: /symbios/base-services/authelia/configuration.yml OIDC paperless
       blockinfile:
-        path: /symbios/services/authelia/configuration.yml
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
         create: yes
         mode: 0640
         owner: root
@@ -260,7 +263,7 @@
             client_name: 'Paperless'
             client_secret: '{{ lookup('file', '/symbios/services/paperless/oidc_digest') }}'
             public: false
-            authorization_policy: '{{ lookup('file', '/symbios/services/authelia/authorization_policy') }}'
+            authorization_policy: '{{ lookup('file', '/symbios/base-services/authelia/authorization_policy') }}'
             redirect_uris:
               - 'https://paperless.{{ base_domain }}/oidc/callback/'
             scopes:
@@ -336,6 +339,6 @@
           docker compose up -d
         fi
       args:
-        chdir: /symbios/services/authelia
+        chdir: /symbios/base-services/authelia
 
 

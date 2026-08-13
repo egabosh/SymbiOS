@@ -96,7 +96,7 @@
 
     - name: Create oidc client secret
       ansible.builtin.shell: |
-        /symbios/services/authelia/gen-oidc-client-secret.sh /symbios/services/home-assistant
+        /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/home-assistant
       changed_when: false
       failed_when: false
 
@@ -158,8 +158,8 @@
             claims:
               groups: 'groups'
             roles:
-              admin: 'home-assistant-admin'
-              user: 'home-assistant'
+              admin: 'home-assistant-admins'
+              user: 'home-assistant-users'
 
         backup: yes
       notify: Restart home-assistant
@@ -318,11 +318,13 @@
         backup: yes
       notify: Restart traefik
 
-    - name: Create group and add user if not exists
+    - name: Ensure LDAP groups for OIDC login (home-assistant-users / home-assistant-admins)
+      include_tasks: tasks/oidc-groups.yml
+
+    - name: Remove legacy LDAP groups (old naming convention)
       ansible.builtin.shell: |
-        ldapaddgroup home-assistant
-        ldapaddgroup home-assistant-admin
-        ldapaddusertogroup admin home-assistant-admin
+        {{ git_root }}/scripts/symbios-ldap-groups.sh --delete --name home-assistant
+        {{ git_root }}/scripts/symbios-ldap-groups.sh --delete --name home-assistant-admin
       changed_when: false
       failed_when: false
 
@@ -351,7 +353,7 @@
 
     - name: write OIDC config in authelias configuration.yml
       ansible.builtin.blockinfile:
-        path: /symbios/services/authelia/authelia-data/configuration.yml
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
         marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC home-assistant"
         block: |2
                 # home-assistant
@@ -361,7 +363,7 @@
                   public: false
                   require_pkce: true
                   pkce_challenge_method: 'S256'
-                  authorization_policy: '{{ lookup('file', '/symbios/services/authelia/authorization_policy') }}'
+                  authorization_policy: '{{ lookup('file', '/symbios/base-services/authelia/authorization_policy') }}'
                   consent_mode: 'implicit'
                   redirect_uris:
                     - 'https://home-assistant.{{ base_domain }}/auth/oidc/callback'
@@ -604,7 +606,7 @@
           docker compose up -d
         fi
       args:
-        chdir: /symbios/services/authelia
+        chdir: /symbios/base-services/authelia
 
     - name: Restart ha_pingcheck
       ansible.builtin.systemd:
