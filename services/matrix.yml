@@ -597,15 +597,18 @@
     #### OIDC Authelia   ####
     ##########################
 
+    - name: Ensure LDAP groups for OIDC login (matrix-users / matrix-admins)
+      include_tasks: tasks/oidc-groups.yml
+
     - name: Create oidc client secret for Matrix
       ansible.builtin.shell: |
-        /symbios/services/authelia/gen-oidc-client-secret.sh /symbios/services/matrix
+        /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/matrix
       changed_when: false
       failed_when: false
 
     - name: Write OIDC config in authelias configuration.yml for Matrix
       ansible.builtin.blockinfile:
-        path: /symbios/services/authelia/authelia-data/configuration.yml
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
         marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC matrix"
         block: |2
                 # Matrix Synapse
@@ -613,7 +616,7 @@
                   client_name: 'Matrix'
                   client_secret: '{{ lookup('file', '/symbios/services/matrix/oidc_digest') }}'
                   public: false
-                  authorization_policy: '{{ lookup('file', '/symbios/services/authelia/authorization_policy') }}'
+                  authorization_policy: '{{ lookup('file', '/symbios/base-services/authelia/authorization_policy') }}'
                   redirect_uris:
                     - 'https://matrix.{{ base_domain }}/_synapse/client/oidc/callback'
                   scopes:
@@ -856,5 +859,5 @@
           docker compose up -d
         fi
       args:
-        chdir: /symbios/services/authelia
+        chdir: /symbios/base-services/authelia
 

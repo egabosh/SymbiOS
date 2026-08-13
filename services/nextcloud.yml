@@ -455,15 +455,18 @@
     #### OIDC Authelia ####
     #######################
 
+    - name: Ensure LDAP groups for OIDC login (nextcloud-users / nextcloud-admins)
+      include_tasks: tasks/oidc-groups.yml
+
     - name: Create oidc client secret for Nextcloud
       ansible.builtin.shell: |
-        /symbios/services/authelia/gen-oidc-client-secret.sh /symbios/services/nextcloud
+        /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/nextcloud
       changed_when: false
       failed_when: false
 
     - name: write OIDC config in authelias configuration.yml for Nextcloud
       ansible.builtin.blockinfile:
-        path: /symbios/services/authelia/authelia-data/configuration.yml
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
         marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC nextcloud"
         block: |2
                 # Nextcloud
@@ -471,7 +474,7 @@
                   client_name: 'Nextcloud'
                   client_secret: '{{ lookup('file', '/symbios/services/nextcloud/oidc_digest') }}'
                   public: false
-                  authorization_policy: '{{ lookup('file', '/symbios/services/authelia/authorization_policy') }}'
+                  authorization_policy: '{{ lookup('file', '/symbios/base-services/authelia/authorization_policy') }}'
                   redirect_uris:
                     - 'https://nextcloud.{{ base_domain }}/apps/user_oidc/code'
                   scopes:
@@ -793,7 +796,7 @@
           docker compose up -d
         fi
       args:
-        chdir: /symbios/services/authelia
+        chdir: /symbios/base-services/authelia
 
     - name: Restart traefik
       ansible.builtin.shell: docker compose up -d --force-recreate
