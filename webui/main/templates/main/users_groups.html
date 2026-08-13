@@ -109,7 +109,7 @@
                     <div class="mb-3">
                         <label class="form-label">Group</label>
                         <select class="form-select" name="group">
-                            {% for group in groups %}<option value="{{ group }}">{{ group }}</option>{% endfor %}
+                            {% for group in groups %}<option value="{{ group }}" {% if group == 'ldap-users' %}selected{% endif %}>{{ group }}</option>{% endfor %}
                         </select>
                     </div>
                 </div>
