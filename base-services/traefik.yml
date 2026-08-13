@@ -31,11 +31,11 @@
 #     services:
 #     - name: traefik
 #       type: docker
-#       compose_file: {{ docker_path }}/docker-compose.yml
-#       status: test -d {{ docker_path }} || exit 2; docker compose -f {{ docker_path }}/docker-compose.yml ps | grep -q "Up "
+#       compose_file: /symbios/base-services/traefik/docker-compose.yml
+#       status: test -d /symbios/base-services/traefik || exit 2; docker compose -f /symbios/base-services/traefik/docker-compose.yml ps | grep -q "Up "
 #     logs:
 #     - name: traefik
-#       command: docker compose -f {{ docker_path }}/docker-compose.yml logs -f --tail=1000
+#       command: docker compose -f /symbios/base-services/traefik/docker-compose.yml logs -f --tail=1000
 #   actions:
 
 ---
