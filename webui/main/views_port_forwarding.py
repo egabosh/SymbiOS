@@ -218,7 +218,18 @@ def settings_port_forwarding(request):
             elif action == 'save-credentials':
                 username = request.POST.get('username', '').strip()
                 password = request.POST.get('password', '').strip()
-                result = _run_upnp(f'config {_shell_quote(username)} {_shell_quote(password)}', timeout=10)
+                # Pass the password via a secret file so it never appears on
+                # the command line (and thus in the exec audit log).
+                if password:
+                    from .utils.secret_file import f_write_secret
+                    f_pw_file = f_write_secret('router-password', password)
+                    result = _run_upnp(
+                        f'config {_shell_quote(username)} --password-file {f_pw_file}',
+                        timeout=10)
+                else:
+                    result = _run_upnp(
+                        f'config {_shell_quote(username)} {_shell_quote(password)}',
+                        timeout=10)
                 if is_ajax:
                     from .utils.jobs import create_job
                     job_id = create_job('echo "Router login saved"', timeout=5)
@@ -569,10 +580,15 @@ def settings_port_forwarding_config(request):
         username = request.POST.get('username', '').strip()
         password = request.POST.get('password', '').strip()
         try:
-            ok, stdout, stderr = run_command(
-                f'{SCRIPT} config {_shell_quote(username)} {_shell_quote(password)}',
-                timeout=10
-            )
+            # Pass the password via a secret file so it never appears on the
+            # command line (and thus in the exec audit log).
+            if password:
+                from .utils.secret_file import f_write_secret
+                f_pw_file = f_write_secret('router-password', password)
+                cmd = f'{SCRIPT} config {_shell_quote(username)} --password-file {f_pw_file}'
+            else:
+                cmd = f'{SCRIPT} config {_shell_quote(username)} {_shell_quote(password)}'
+            ok, stdout, stderr = run_command(cmd, timeout=10)
             if ok and stdout:
                 result = json.loads(stdout)
                 return JsonResponse(result)
