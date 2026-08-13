@@ -21,6 +21,7 @@ from django.contrib import messages
 from .views import _get_ldap_users, _get_ldap_groups
 from .utils.ssh_exec import run_command
 from .utils.jobs import create_job
+from .utils.secret_file import f_write_secret
 
 
 def _exec_ldap_command(request, cmd, title, success_msg, redirect_to='users'):
@@ -70,7 +71,8 @@ def user_create(request):
             messages.error(request, msg)
             return redirect('users')
 
-        cmd = f'symbios-ldap-user.sh --create --uid {uid} --password {password}'
+        f_pw_file = f_write_secret('ldap-password', password)
+        cmd = f'symbios-ldap-user.sh --create --uid {uid} --password-file {f_pw_file}'
         if email:
             cmd += f' --email {email}'
         if group:
@@ -100,7 +102,8 @@ def user_set_password(request, uid):
             messages.error(request, msg)
             return redirect('users')
 
-        cmd = f'symbios-ldap-user.sh --modify --uid {uid} --password {password}'
+        f_pw_file = f_write_secret('ldap-password', password)
+        cmd = f'symbios-ldap-user.sh --modify --uid {uid} --password-file {f_pw_file}'
         return _exec_ldap_command(request, cmd, f'Setting password for "{uid}"...', f'Password for "{uid}" changed.')
     return redirect('users')
 

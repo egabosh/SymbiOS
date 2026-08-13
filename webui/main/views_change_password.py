@@ -20,6 +20,7 @@ from .decorators import login_required
 from django.contrib import messages
 from .utils.ssh_exec import run_command
 from .utils.http import is_ajax_request
+from .utils.secret_file import f_write_secret
 
 
 @login_required
@@ -50,7 +51,8 @@ def change_password(request):
             messages.error(request, msg)
             return redirect("change_password")
 
-        cmd = f'symbios-ldap-user.sh --modify --uid {uid} --password {new_password}'
+        f_pw_file = f_write_secret('ldap-password', new_password)
+        cmd = f'symbios-ldap-user.sh --modify --uid {uid} --password-file {f_pw_file}'
 
         if is_ajax_request(request):
             from .utils.jobs import create_job
