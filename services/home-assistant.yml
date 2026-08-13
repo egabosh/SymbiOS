@@ -274,9 +274,9 @@
         backup: yes
       notify: Restart home-assistant
 
-    - name: /symbios/services/traefik/providers/home-assistant.yml Home-Assistant<->Traefik provider
+    - name: /symbios/base-services/traefik/providers/home-assistant.yml Home-Assistant<->Traefik provider
       blockinfile:
-        path: /symbios/services/traefik/providers/home-assistant.yml
+        path: /symbios/base-services/traefik/providers/home-assistant.yml
         create: yes
         mode: 0444
         owner: root
@@ -617,6 +617,6 @@
     - name: Restart traefik
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
-        chdir: /symbios/services/traefik
+        chdir: /symbios/base-services/traefik
 
 
