@@ -19,11 +19,12 @@
 # Manage LDAP users: create, delete, modify.
 # Runs LDAP commands inside the webui container via docker exec,
 # which has direct network access to the OpenLDAP service.
+# Passwords are passed via a secret file (chmod 600) for security.
 #
 # Usage:
-#   symbios-ldap-user.sh --create --uid <name> --password <pw> [options]
+#   symbios-ldap-user.sh --create --uid <name> --password-file <path> [options]
 #   symbios-ldap-user.sh --delete --uid <name>
-#   symbios-ldap-user.sh --modify --uid <name> [--password <pw>] [--email <addr>]
+#   symbios-ldap-user.sh --modify --uid <name> [--password-file <path>] [--email <addr>]
 
 source /etc/bash/gaboshlib.include 1>/dev/null 2>&1 || true
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -36,9 +37,9 @@ Usage: $(basename "$0") [options]
 Manage LDAP users in SymbiOS.
 
 Actions (exactly one required):
-  --create --uid <name> --password <pw> [options]   Create a new user
-  --delete --uid <name>                              Delete a user
-  --modify --uid <name> [--password <pw>] [--email <addr>]  Modify user
+  --create --uid <name> --password-file <path> [options]   Create a new user
+  --delete --uid <name>                                    Delete a user
+  --modify --uid <name> [--password-file <path>] [--email <addr>]  Modify user
 
 Create options:
   --email <addr>        Email address
@@ -46,7 +47,7 @@ Create options:
   --group <group>       Initial group (default: users)
 
 Modify options:
-  --password <pw>       New password (optional)
+  --password-file <path> New password file (optional)
   --email <addr>        New email (optional, at least one required)
 
 General options:
@@ -57,10 +58,12 @@ EOF
 # Parse arguments
 f_action=""
 f_uid=""
+f_password_file=""
 f_password=""
 f_email=""
 f_displayname=""
 f_group="users"
+f_cleanup_files=""
 
 while [[ $# -gt 0 ]]
 do
@@ -81,8 +84,8 @@ do
       f_uid="$2"
       shift 2
       ;;
-    --password)
-      f_password="$2"
+    --password-file)
+      f_password_file="$2"
       shift 2
       ;;
     --email)
@@ -109,6 +112,17 @@ do
   esac
 done
 
+# Read password from file if provided
+if [[ -n "${f_password_file}" ]]
+then
+  if [[ -f "${f_password_file}" ]]
+  then
+    f_password="$(cat "${f_password_file}")"
+    f_cleanup_files="${f_cleanup_files} ${f_password_file}"
+  fi
+  trap 'rm -f ${f_cleanup_files} 2>/dev/null' EXIT HINT INT TERM
+fi
+
 # Validate action
 if [[ -z "${f_action}" ]]
 then
@@ -132,16 +146,16 @@ then
 fi
 
 # Validate action-specific requirements
-if [[ "${f_action}" == "create" ]] && [[ -z "${f_password}" ]]
+if [[ "${f_action}" == "create" ]] && [[ -z "${f_password_file}" ]]
 then
-  g_echo_error "Missing required argument: --password"
+  g_echo_error "Missing required argument: --password-file"
   f_usage >&2
   exit 1
 fi
 
-if [[ "${f_action}" == "modify" ]] && [[ -z "${f_password}" ]] && [[ -z "${f_email}" ]]
+if [[ "${f_action}" == "modify" ]] && [[ -z "${f_password_file}" ]] && [[ -z "${f_email}" ]]
 then
-  g_echo_error "Modify requires at least --password or --email"
+  g_echo_error "Modify requires at least --password-file or --email"
   f_usage >&2
   exit 1
 fi

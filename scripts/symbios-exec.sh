@@ -53,13 +53,12 @@ then
   exit 0
 fi
 
-# Redact sensitive data from the audit log (passwords, tokens).
+# Redact sensitive data from the audit log.
+# Since passwords are now passed via secret files (not CLI args), only
+# the luksFormat token and generic password= patterns remain.
 g_cmd_safe="${g_cmd}"
 g_cmd_safe="$(echo "$g_cmd_safe" | sed -E 's/(password[=: \"])[^ \"]+/\1***REDACTED***/gi')"
-g_cmd_safe="$(echo "$g_cmd_safe" | sed -E 's/--passphrase [^ ]+ /--passphrase ***REDACTED***/g')"
 g_cmd_safe="$(echo "$g_cmd_safe" | sed -E 's/cryptsetup luksFormat [^ ]+ /cryptsetup luksFormat ***REDACTED*** /g')"
-g_cmd_safe="$(echo "$g_cmd_safe" | sed -E 's/(symbios-data-partition\.sh setup [^ ]+ [^ ]+ )[^ ]+/\1***REDACTED***/g')"
-g_cmd_safe="$(echo "$g_cmd_safe" | sed -E 's/(symbios-data-partition\.sh change-password )[^ ]+ [^ ]+/\1***REDACTED***/g')"
 
 g_logger "client=${g_client_ip} cmd=${g_cmd_safe}"
 echo "$(date -Iseconds) client=${g_client_ip} cmd=${g_cmd_safe}" >> /var/log/symbios-exec.log 2>/dev/null || true

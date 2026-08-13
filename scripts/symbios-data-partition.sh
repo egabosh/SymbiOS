@@ -25,10 +25,10 @@
 # Actions:
 #   list                          List block devices (JSON)
 #   status                        Show /symbios mount + LUKS status (JSON)
-#   setup <device> [encrypt=yes] [password=pw]   Migrate /symbios to new disk
+#   setup <device> [encrypt=yes] [password-file=path]   Migrate /symbios to new disk
 #   rollback                      Undo last migration, restore original /symbios
 #                           Unmount /symbios and close LUKS
-#   change-password               Change LUKS passphrase
+#   change-password <current-pw-file> <new-pw-file>   Change LUKS passphrase
 #
 # State file for rollback: /symbios/.symbios-data-migration.state
 
@@ -273,17 +273,20 @@ EOF
 
   # ------------------------------------------------------------------
   setup)
-    local f_device="${1:-}" f_encrypt="${2:-no}" f_password="${3:-}"
+    local f_device="${1:-}" f_encrypt="${2:-no}" f_password_file="${3:-}"
+    local f_password=""
 
     [[ -z "$f_device" ]] && f_json_error "No device selected"
     [[ "$f_device" == /dev/* ]] || f_json_error "Invalid device path"
 
-    # Read the LUKS passphrase from stdin when it was not passed as an
-    # argument. The WebUI sends it via stdin so it never appears on the
-    # command line (and thus not in `ps`, audit logs, or the exec overlay).
-    if [[ "$f_encrypt" == "yes" ]] && [[ -z "$f_password" ]]
+    # Read the LUKS passphrase from the secret file if provided
+    if [[ "$f_encrypt" == "yes" ]] && [[ -n "$f_password_file" ]]
     then
-      IFS= read -rs f_password || true
+      if [[ -f "$f_password_file" ]]
+      then
+        IFS= read -rs f_password < "$f_password_file"
+        rm -f "$f_password_file" 2>/dev/null
+      fi
     fi
     [[ "$f_encrypt" == "yes" ]] && [[ -z "$f_password" ]] && \
       f_json_error "Password required for LUKS encryption"
@@ -530,7 +533,23 @@ EOF
 
   # ------------------------------------------------------------------
   change-password)
-    local f_current_password="${1:-}" f_new_password="${2:-}"
+    local f_current_pw_file="${1:-}" f_new_pw_file="${2:-}"
+    local f_current_password="" f_new_password=""
+
+    [[ -z "$f_current_pw_file" ]] && f_json_error "Current password file is required"
+    [[ -z "$f_new_pw_file" ]] && f_json_error "New password file is required"
+
+    # Read passwords from secret files
+    if [[ -f "$f_current_pw_file" ]]
+    then
+      IFS= read -rs f_current_password < "$f_current_pw_file"
+      rm -f "$f_current_pw_file" 2>/dev/null
+    fi
+    if [[ -f "$f_new_pw_file" ]]
+    then
+      IFS= read -rs f_new_password < "$f_new_pw_file"
+      rm -f "$f_new_pw_file" 2>/dev/null
+    fi
 
     [[ -z "$f_current_password" ]] && f_json_error "Current password is required"
     [[ -z "$f_new_password" ]] && f_json_error "New password is required"

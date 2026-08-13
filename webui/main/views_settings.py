@@ -22,6 +22,7 @@ from .views import _get_inventory_config, _save_inventory_config, _safe_write
 from .constants import CONFIG_PATH
 from .utils.ssh_exec import run_playbook, run_command
 from .utils.http import is_ajax_request
+from .utils.secret_file import f_write_secret
 from .setup_status import get_page_badge, PAGE_EXPLAIN
 
 import urllib.request
@@ -1147,23 +1148,25 @@ def settings_disk_setup(request):
     if encrypt == 'yes' and not password:
         return JsonResponse({'ok': False, 'error': 'Password required for LUKS encryption'})
 
-    cmd_parts = [f'{_DATA_PART_SCRIPT} setup', device, encrypt]
+    f_pw_file = None
+    if encrypt == 'yes':
+        f_pw_file = f_write_secret('luks-passphrase', password)
+        cmd_parts = [f'{_DATA_PART_SCRIPT} setup', device, encrypt, f_pw_file]
+    else:
+        cmd_parts = [f'{_DATA_PART_SCRIPT} setup', device, encrypt]
     cmd = ' '.join(cmd_parts)
-    # Pass the LUKS passphrase via stdin, not on the command line, so it never
-    # appears in the exec overlay, audit log, or `ps` output on the host.
-    stdin_data = (password + '\n') if encrypt == 'yes' else None
 
     is_ajax = is_ajax_request(request)
     if is_ajax:
         from .utils.jobs import create_job
-        job_id = create_job(cmd, timeout=600, stdin_data=stdin_data)
+        job_id = create_job(cmd, timeout=600)
         return JsonResponse({'ok': True, 'job': job_id,
                              'title': 'Migrating /symbios to new disk...',
                              'message': f'Setting up {device} as /symbios.',
                              'command': cmd})
 
     # Fallback: synchronous execution
-    ok, stdout, stderr = run_command(cmd, timeout=600, stdin_data=stdin_data)
+    ok, stdout, stderr = run_command(cmd, timeout=600)
     output = stdout
     if stderr:
         output = output + '\n' + stderr
@@ -1247,10 +1250,12 @@ def settings_disk_change_password(request):
     if current_password == new_password:
         return JsonResponse({'ok': False, 'error': 'New password must differ from current password'})
 
+    f_old_pw = f_write_secret('luks-current-password', current_password)
+    f_new_pw = f_write_secret('luks-new-password', new_password)
     cmd_parts = [
         f'{_DATA_PART_SCRIPT} change-password',
-        shlex.quote(current_password),
-        shlex.quote(new_password),
+        f_old_pw,
+        f_new_pw,
     ]
     cmd = ' '.join(cmd_parts)
 
@@ -1261,7 +1266,7 @@ def settings_disk_change_password(request):
         return JsonResponse({'ok': True, 'job': job_id,
                              'title': 'Changing LUKS passphrase...',
                              'message': 'Updating encryption key.',
-                             'command': f'{_DATA_PART_SCRIPT} change-password'})
+                             'command': cmd})
 
     ok, stdout, stderr = run_command(cmd, timeout=60)
     output = stdout
