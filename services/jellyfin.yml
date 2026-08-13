@@ -156,9 +156,9 @@
       args:
         chdir: /symbios/services/jellyfin
 
-    - name: /symbios/services/traefik/providers/jellyfin.yml Routing Configuration
+    - name: /symbios/base-services/traefik/providers/jellyfin.yml Routing Configuration
       blockinfile:
-        path: /symbios/services/traefik/providers/jellyfin.yml
+        path: /symbios/base-services/traefik/providers/jellyfin.yml
         create: yes
         mode: 0444
         owner: root
@@ -273,5 +273,5 @@
     - name: Restart traefik
       ansible.builtin.shell: docker compose restart traefik
       args:
-        chdir: /symbios/services/traefik
+        chdir: /symbios/base-services/traefik
 
