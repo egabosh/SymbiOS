@@ -16,6 +16,7 @@
 # docs:
 #   short_description: Deploy the KodiDB media database service
 #   description: Deploys KodiDB (MySQL/MariaDB for Kodi media databases) with phpMyAdmin for administration, exposed via Traefik.
+#   url: "https://kodidb.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -35,8 +36,18 @@
 #     logs:
 #     - name: kodidb
 #       command: docker compose -f /symbios/services/kodidb/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/kodidb/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/kodidb/docker-compose.yml up -d
+#     program_paths:
+#       - /symbios/services/kodidb/
+#       - /symbios/base-services/traefik/providers/kodidb.yml
+#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-kodidb.check
+#       - /usr/local/sbin/autoupdate.d/kodidb-ssl.update
+#       - /usr/local/sbin/backup.d/kodidb-docker.backup
+#     userdata_paths:
+#       - /symbios/services/kodidb/db-data/
 #   actions:
-#     uninstall: docker compose -f /symbios/services/kodidb/docker-compose.yml down
 #     start: docker compose -f /symbios/services/kodidb/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/kodidb/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/kodidb/docker-compose.yml restart

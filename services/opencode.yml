@@ -17,6 +17,7 @@
 # docs:
 #   short_description: Deploy the OpenCode coding assistant
 #   description: Deploys OpenCode, a coding assistant web interface. Exposed via Traefik.
+#   url: "https://opencode.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -36,8 +37,17 @@
 #     logs:
 #     - name: opencode
 #       command: docker compose -f /symbios/services/opencode/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/opencode/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/opencode/docker-compose.yml up -d
+#     program_paths:
+#       - /symbios/services/opencode/
+#       - /symbios/base-services/traefik/providers/opencode.yml
+#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-opencode.check
+#     userdata_paths:
+#       - /symbios/services/opencode/opencode-config/
+#       - /symbios/services/opencode/opencode-data/
 #   actions:
-#     uninstall: docker compose -f /symbios/services/opencode/docker-compose.yml down
 #     start: docker compose -f /symbios/services/opencode/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/opencode/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/opencode/docker-compose.yml restart

@@ -35,8 +35,14 @@
 #     logs:
 #     - name: rustdesk
 #       command: docker compose -f /symbios/services/rustdesk/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/rustdesk/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/rustdesk/docker-compose.yml up -d
+#     program_paths:
+#       - /symbios/services/rustdesk/
+#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-rustdesk.check
+#     userdata_paths: []
 #   actions:
-#     uninstall: docker compose -f /symbios/services/rustdesk/docker-compose.yml down
 #     start: docker compose -f /symbios/services/rustdesk/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/rustdesk/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/rustdesk/docker-compose.yml restart

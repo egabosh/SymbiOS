@@ -19,6 +19,8 @@ from django.http import JsonResponse
 import threading
 import uuid
 import os
+import re
+import yaml
 
 from .decorators import login_required
 from .playbook_catalog import get_catalog, get_playbook
@@ -30,6 +32,27 @@ from .utils.ssh_exec import (
     build_log_command,
 )
 from .utils.jobs import create_job, _JOBS, _JOBS_LOCK
+
+def _get_base_domain():
+    """Read base_domain from inventory.yml."""
+    config_path = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
+    try:
+        with open(config_path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+        return cfg.get('all', {}).get('vars', {}).get('base_domain', '')
+    except Exception:
+        return ''
+
+
+def _render_service_url(raw_url):
+    """Resolve Jinja-like variables in a service URL (e.g. {{ base_domain }})."""
+    if not raw_url:
+        return ''
+    base_domain = _get_base_domain()
+    if base_domain:
+        raw_url = raw_url.replace('{{ base_domain }}', base_domain)
+    return raw_url
+
 
 # Built-in base-services can be managed but never uninstalled from the WebUI.
 PROTECTED_GROUPS = {'base-services'}
@@ -122,8 +145,13 @@ _ACTION_CLS = {
     'stop': 'btn-outline-danger',
     'restart': 'btn-outline-info',
     'reload': 'btn-outline-info',
-    'uninstall': 'btn-outline-warning',
+    'uninstall-full': 'btn-outline-danger',
+    'uninstall-program': 'btn-outline-dark',
+    'uninstall-reset': 'btn-outline-danger',
 }
+
+# The three uninstall action names - used for protection checks and state cleanup.
+_UNINSTALL_ACTIONS = {'uninstall-full', 'uninstall-program', 'uninstall-reset'}
 
 
 def _action_button(name):
@@ -205,20 +233,43 @@ def services_detail(request, playbook):
     if item is None:
         raise Http404("Service not found")
     # Build the action buttons dynamically from the playbook's docs.actions.
-    # Base-services are protected: the uninstall action is never exposed.
+    # Base-services are protected: uninstall actions are never exposed.
+    # Old-style docs.actions.uninstall is ignored (replaced by docs.uninstall).
     actions = item['docs'].get('actions') or {}
     action_list = []
     for name in actions:
-        if name == 'uninstall' and item.get('group') in PROTECTED_GROUPS:
-            continue
         action_list.append(_action_button(name))
+    # Build the 3 uninstall buttons from docs.uninstall (if present and not protected).
+    uninstall_buttons = []
+    has_uninstall_meta = bool((item.get('docs') or {}).get('uninstall'))
+    if has_uninstall_meta and item.get('group') not in PROTECTED_GROUPS:
+        uninstall_buttons = [
+            {'name': 'uninstall-full', 'label': 'Uninstall',
+             'cls': _ACTION_CLS['uninstall-full'],
+             'confirm': 'ACHTUNG: Das entire Service wird inklusive ALLER '
+                        'Daten (Programm + Userdaten) endgueltig geloescht! '
+                        'Sind Sie sich WIRKLICH sicher?'},
+            {'name': 'uninstall-program', 'label': 'Uninstall (keep data)',
+             'cls': _ACTION_CLS['uninstall-program'],
+             'confirm': 'Das Service-Programm wird komplett entfernt. '
+                        'Nur die Userdaten bleiben erhalten. '
+                        'Fortfahren?'},
+            {'name': 'uninstall-reset', 'label': 'Delete Userdata',
+             'cls': _ACTION_CLS['uninstall-reset'],
+             'confirm': 'ACHTUNG: ALLE Userdaten des Services werden '
+                        'geloescht! Das Programm bleibt erhalten und wird '
+                        'neu gestartet. Sind Sie sich WIRKLICH sicher?'},
+        ]
     logs = (item.get('docs') or {}).get('service_control', {}).get('logs', []) or []
     log_units = [{'name': l.get('name'), 'type': l.get('type', 'log')} for l in logs]
+    service_url = _render_service_url((item.get('docs') or {}).get('url'))
     all_catalog = get_catalog()
     response = render(request, 'main/services_detail.html', {
         'item': item,
         'action_list': action_list,
+        'uninstall_buttons': uninstall_buttons,
         'log_units': log_units,
+        'service_url': service_url,
         'all_services': _order_catalog(all_catalog),
         **_sidebar_context(all_catalog),
     })
@@ -233,10 +284,11 @@ def services_action(request, playbook):
     """Start an action as a background job and return a job id.
 
     The special action ``__playbook__`` runs the service's Ansible playbook
-    (idempotent install/reinstall). Any other action name is resolved locally
-    from the playbook's docs.actions into the concrete host command, which is
-    then executed via the SSH gateway. The browser polls /output/?job=<id> to
-    display progress (no response streaming, which Traefik buffers).
+    (idempotent install/reinstall). The three ``uninstall-*`` actions run
+    ``symbios-uninstall.sh`` which reads the ``# docs:`` metadata via yq.
+    Any other action name is resolved locally from the playbook's docs.actions
+    into the concrete host command, which is then executed via the SSH gateway.
+    The browser polls /output/?job=<id> to display progress.
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'Invalid action'}, status=400)
@@ -245,16 +297,25 @@ def services_action(request, playbook):
     if item is None:
         return JsonResponse({'error': 'Playbook not found'}, status=404)
     # (Re)Install always runs the Ansible playbook; it is allowed for every
-    # service. All other actions must be defined in the playbook's docs.actions.
+    # service.
     if action != '__playbook__':
-        actions = item['docs'].get('actions') or {}
-        if action not in actions:
-            return JsonResponse({'error': 'Unknown action: ' + str(action)}, status=400)
+        # The three uninstall modes are always allowed if docs.uninstall exists
+        # (except for protected base-services, checked below).
+        if action not in _UNINSTALL_ACTIONS:
+            actions = item['docs'].get('actions') or {}
+            if action not in actions:
+                return JsonResponse({'error': 'Unknown action: ' + str(action)}, status=400)
         # Built-in base-services are protected: uninstall is never allowed.
-        if action == 'uninstall' and item.get('group') in PROTECTED_GROUPS:
+        if action in _UNINSTALL_ACTIONS and item.get('group') in PROTECTED_GROUPS:
             return JsonResponse(
                 {'error': 'Uninstall is not allowed for built-in base-services.'},
                 status=403,
+            )
+        # Ensure the playbook has docs.uninstall metadata for uninstall actions.
+        if action in _UNINSTALL_ACTIONS and not (item.get('docs') or {}).get('uninstall'):
+            return JsonResponse(
+                {'error': 'No uninstall metadata defined for this service.'},
+                status=400,
             )
     cmd = build_action_command(playbook, action)
     display_cmd = cmd
@@ -281,13 +342,12 @@ def _run_service_job(job_id, playbook=None, action=None):
         threading.Event().wait(2)
     # Update the installed-playbooks state file after a successful (Re)Install
     # or Uninstall so symbios-reapply.sh knows which playbooks to re-run.
+    # The symbios-uninstall.sh script already handles state cleanup, but we
+    # keep this as a safety net in case the script fails mid-way.
     result = get_job_output(job_id)
     overall_ok = bool(result and result[2])
-    if playbook and action in ('__playbook__', 'uninstall') and overall_ok:
-        state_action = 'set' if action == '__playbook__' else 'unset'
-        state_cmd = (
-            f'symbios-state.sh {state_action} {playbook}'
-        )
+    if playbook and action in ('__playbook__',) and overall_ok:
+        state_cmd = 'symbios-state.sh set {}'.format(playbook)
         try:
             from .utils.ssh_exec import run_command as _run_command
             _run_command(state_cmd, timeout=10)

@@ -36,8 +36,15 @@
 #     logs:
 #     - name: sftp-share
 #       command: docker compose -f /symbios/services/sftp-share/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/sftp-share/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/sftp-share/docker-compose.yml up -d
+#     program_paths:
+#       - /symbios/services/sftp-share/
+#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-sftp-share.check
+#     userdata_paths:
+#       - /symbios/services/sftp-share/data/
 #   actions:
-#     uninstall: docker compose -f /symbios/services/sftp-share/docker-compose.yml down
 #     start: docker compose -f /symbios/services/sftp-share/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/sftp-share/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/sftp-share/docker-compose.yml restart
