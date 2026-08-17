@@ -5,169 +5,27 @@
 {% block content %}
 <h2><i class="bi bi-gear"></i> Settings</h2>
 
-<div class="row mt-3">
-  <!-- DNS -->
-  <div class="col-md-6 col-lg-4 mb-3">
-    <div class="card h-100">
-      <div class="card-body">
-        <h5 class="card-title"><i class="bi bi-globe text-primary"></i> DNS</h5>
-        <p class="card-text small">
-          Makes your server reachable under a fixed hostname. Choose between
-          <strong>Dynamic DNS via deSEC</strong> (automatic IP updates) or
-          <strong>self-managed DNS</strong> (bring your own domain).
+<!-- Setup hint -->
+<div class="card mt-3 border-start border-primary border-4">
+  <div class="card-body py-3">
+    <div class="d-flex align-items-center gap-3">
+      <i class="bi bi-magic fs-3 text-primary"></i>
+      <div class="flex-grow-1">
+        <h6 class="mb-1 fw-bold">First time here?</h6>
+        <p class="mb-0 small text-muted">
+          Use the <strong>Initial Setup</strong> to configure the basics of your
+          SymbiOS system - server connection type, localization, DNS and port
+          forwarding.
         </p>
-        <p class="card-text small text-muted">
-          Required for any service that needs to be accessed from the internet
-          (web interface, Authelia, etc.).
-        </p>
-        <a href="/settings/dns/" class="btn btn-outline-primary btn-sm">Configure</a>
       </div>
-    </div>
-  </div>
-
-  <!-- Mailserver (SMTP) -->
-  <div class="col-md-6 col-lg-4 mb-3">
-    <div class="card h-100">
-      <div class="card-body">
-        <h5 class="card-title"><i class="bi bi-envelope text-primary"></i> Mailserver (SMTP)</h5>
-        <p class="card-text small">
-          Configures an outgoing SMTP relay for <strong>Authelia</strong>
-          email-based verification (2FA codes, password resets, login
-          notifications).
-        </p>
-        <p class="card-text small text-muted">
-          SMTP settings are auto-detected from your email domain (MX records
-          / autoconfig). Falls back to manual entry if needed.
-        </p>
-        <a href="/settings/mailserver/" class="btn btn-outline-primary btn-sm">Configure</a>
-      </div>
-    </div>
-  </div>
-
-  <!-- Auth -->
-  <div class="col-md-6 col-lg-4 mb-3">
-    <div class="card h-100">
-      <div class="card-body">
-        <h5 class="card-title"><i class="bi bi-shield-lock text-primary"></i> Auth</h5>
-        <p class="card-text small">
-          Enables <strong>Authelia</strong> as a forward-auth middleware behind
-          Traefik. All web services then require login against the local LDAP
-          directory, with optional 2-Factor Authentication.
-        </p>
-        <p class="card-text small text-muted">
-          Users and groups are managed under the respective menu items.
-        </p>
-        <a href="/settings/auth/" class="btn btn-outline-primary btn-sm">Configure</a>
-      </div>
-    </div>
-  </div>
-
-  <!-- Port Forwarding -->
-  <div class="col-md-6 col-lg-4 mb-3">
-    <div class="card h-100">
-      <div class="card-body">
-        <h5 class="card-title"><i class="bi bi-diagram-3 text-primary"></i> Port Forwarding</h5>
-        <p class="card-text small">
-          Manage port forwarding rules on your router via <strong>UPnP IGD</strong>
-          (WANIPConnection standard, supported by FRITZ!Box and most routers).
-          Detect your router, list mappings, add or delete rules.
-        </p>
-        <p class="card-text small text-muted">
-          Supports IPv4 TCP/UDP port forwarding. Some routers (e.g. FRITZ!Box)
-          require UPnP credentials; others need no authentication.
-        </p>
-        <a href="/settings/port-forwarding/" class="btn btn-outline-primary btn-sm">Manage</a>
-      </div>
+      <a href="/setup/" class="btn btn-primary btn-sm text-nowrap">
+        <i class="bi bi-magic"></i> Initial Setup
+      </a>
     </div>
   </div>
 </div>
 
-<!-- Port Forwarding Guide -->
-<div class="card mt-2">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <span><i class="bi bi-diagram-3"></i> Port Forwarding Guide</span>
-    <a href="/settings/port-forwarding/" class="btn btn-sm btn-outline-primary">
-      <i class="bi bi-gear"></i> Manage automatically
-    </a>
-  </div>
-  <div class="card-body small">
-    <p>
-      For the web interface, Authelia, and all other services behind Traefik
-      to be reachable from the internet, your router must forward
-      <strong>TCP ports 80 (HTTP) and 443 (HTTPS)</strong> to the internal
-      IP of the Symbios server.
-    </p>
-
-    <div class="alert alert-info py-2 px-3 mb-3">
-      <i class="bi bi-info-circle-fill"></i>
-      <strong>UPnP IGD capable router?</strong> You can manage port forwarding
-      automatically from SymbiOS at
-      <a href="/settings/port-forwarding/"><strong>Settings → Port Forwarding</strong></a>.
-      Enter your router's UPnP credentials (if required) and add/delete rules directly.
-    </div>
-
-    <h6 class="fw-bold mt-3 mb-1"><i class="bi bi-globe2"></i> IPv4</h6>
-    <ol class="ps-3 mb-1">
-      <li>Assign your Symbios server a <strong>static local IP</strong>
-          (e.g. <code id="settings-local-ip">192.168.1.100</code>) via your router's DHCP reservation.</li>
-      <li>In your router's <em>Port Forwarding</em> / <em>Virtual Server</em>
-          section, create two rules:
-        <ul>
-          <li><code>TCP 80</code> → <em><code id="settings-local-ip-80">192.168.1.100</code>:80</em></li>
-          <li><code>TCP 443</code> → <em><code id="settings-local-ip-443">192.168.1.100</code>:443</em></li>
-        </ul>
-      </li>
-    </ol>
-    <div class="alert alert-warning py-2 px-3 mb-2">
-      <i class="bi bi-exclamation-triangle-fill"></i>
-      <strong>IPv4 limitation:</strong> Many consumer ISPs use
-      <strong>Carrier-Grade NAT (CG-NAT)</strong> or
-      <strong>DS-Lite</strong>, making IPv4 port forwarding
-      <em>impossible from the internet</em>. If you have a public IPv4
-      but forwarding still fails, your ISP may block ports 80/443
-      - a business plan or VPN tunnel might be required.
-    </div>
-
-    <h6 class="fw-bold mt-3 mb-1"><i class="bi bi-globe"></i> IPv6</h6>
-    <p class="mb-1">
-      With IPv6, every device typically gets a <strong>global,
-      publicly routable address</strong> - no NAT involved. No port
-      forwarding is needed if your firewall permits incoming TCP 80/443.
-    </p>
-    <ol class="ps-3 mb-1">
-      <li>Enable IPv6 on your router. Verify on the
-          <a href="/settings/dns/">DNS page</a> that your server has
-          a global IPv6 address (starts with <code>2001:</code> /
-          <code>2a0:</code> / <code>2a01:</code>…).</li>
-      <li>In your router's <em>Firewall</em> / <em>Traffic Rules</em>
-          section, allow incoming TCP traffic on ports 80 and 443 to your
-          server's IPv6 address.</li>
-      <li>On the <a href="/settings/dns/">DNS page</a>, select
-          <strong>"IPv6 only"</strong> (or <strong>"Dual-Stack"</strong>
-          if you also have working public IPv4).</li>
-    </ol>
-    <div class="alert alert-info py-2 px-3 mb-0">
-      <i class="bi bi-info-circle-fill"></i>
-      <strong>Pro tip:</strong> If you have only IPv6 (CG-NAT for IPv4),
-      choose <strong>IPv6 only</strong> - the server stays reachable via
-      IPv6 while the IPv4 A record is automatically removed from deSEC.
-    </div>
-  </div>
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-  // Detect local (LAN) IPv4 address
-  fetch('/settings/local-ip/')
-    .then(r => r.json())
-    .then(data => {
-      if (data.local_ipv4) {
-        document.getElementById('settings-local-ip').textContent = data.local_ipv4;
-        document.getElementById('settings-local-ip-80').textContent = data.local_ipv4;
-        document.getElementById('settings-local-ip-443').textContent = data.local_ipv4;
-      }
-    })
-    .catch(() => {});
-});
-</script>
+<p class="small text-muted mt-2">
+  Besides the basics, SymbiOS offers additional options to fine-tune your system.
+</p>
 {% endblock %}
