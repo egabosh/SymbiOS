@@ -186,7 +186,7 @@ def settings_dns(request):
 
 @login_required
 def settings_dns_check_domain(request):
-    """AJAX GET — check if a .dedyn.io hostname is still available (before registration)."""
+    """AJAX GET - check if a .dedyn.io hostname is still available (before registration)."""
     hostname = request.GET.get('hostname', '').strip().lower()
     if not hostname:
         return JsonResponse({'ok': False, 'error': 'No hostname provided'})
@@ -451,7 +451,7 @@ def _desec_request(method, path, data=None, token=None, timeout=15):
 
 @login_required
 def settings_dns_register(request):
-    """AJAX POST — Register a new deSEC account."""
+    """AJAX POST - Register a new deSEC account."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
@@ -487,7 +487,7 @@ def settings_dns_register(request):
 
 @login_required
 def settings_dns_finalize(request):
-    """AJAX POST — Login, create API token, optionally create domain, save to inventory."""
+    """AJAX POST - Login, create API token, optionally create domain, save to inventory."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
@@ -538,7 +538,7 @@ def settings_dns_finalize(request):
         if domain_result['status'] == 201:
             domain_created = True
         elif domain_result['status'] == 409:
-            # Domain already exists — that's fine
+            # Domain already exists - that's fine
             domain_created = True
         # If domain creation fails for other reasons, continue anyway (user can create manually)
 
@@ -570,7 +570,7 @@ def settings_dns_finalize(request):
 
 @login_required
 def settings_dns_captcha(request):
-    """AJAX GET — Fetch a captcha from deSEC (for registration)."""
+    """AJAX GET - Fetch a captcha from deSEC (for registration)."""
     result = _desec_request('POST', '/captcha/', timeout=15)
     if result['status'] == 201:
         captcha_id = result['body'].get('id', '')
@@ -1010,7 +1010,7 @@ def settings_backup(request):
 
 @login_required
 def settings_backup_test(request):
-    """AJAX POST — test SSH/SCP connectivity to the backup server."""
+    """AJAX POST - test SSH/SCP connectivity to the backup server."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
@@ -1044,7 +1044,7 @@ def settings_backup_test(request):
 
 
 # ---------------------------------------------------------------------------
-# Data Disk — move /symbios data root to a separate disk
+# Data Disk - move /symbios data root to a separate disk
 # ---------------------------------------------------------------------------
 
 _DATA_PART_SCRIPT = '/usr/local/sbin/symbios-data-partition.sh'
@@ -1069,7 +1069,7 @@ def settings_disk(request):
 
 @login_required
 def settings_disk_list(request):
-    """AJAX GET — list block devices via shell script."""
+    """AJAX GET - list block devices via shell script."""
     ok, stdout, stderr = run_command(
         f'{_DATA_PART_SCRIPT} list', timeout=10)
     if not ok:
@@ -1106,7 +1106,7 @@ def _describe_block(dev):
 
 @login_required
 def settings_disk_status(request):
-    """AJAX GET — check /symbios mount status and LUKS status."""
+    """AJAX GET - check /symbios mount status and LUKS status."""
     ok, stdout, stderr = run_command(
         f'{_DATA_PART_SCRIPT} status', timeout=15)
     if not ok:
@@ -1132,7 +1132,7 @@ def settings_disk_status(request):
 
 @login_required
 def settings_disk_setup(request):
-    """AJAX POST — format, optionally encrypt, and mount a disk as /symbios.
+    """AJAX POST - format, optionally encrypt, and mount a disk as /symbios.
     Returns a job_id for the exec modal (streams live output)."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
@@ -1182,7 +1182,7 @@ def settings_disk_setup(request):
 
 @login_required
 def settings_disk_rollback(request):
-    """AJAX POST — rollback last /symbios migration via exec modal."""
+    """AJAX POST - rollback last /symbios migration via exec modal."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
@@ -1212,7 +1212,7 @@ def settings_disk_rollback(request):
 
 @login_required
 def settings_disk_umount(request):
-    """AJAX POST — unmount and close a LUKS /symbios volume."""
+    """AJAX POST - unmount and close a LUKS /symbios volume."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
@@ -1236,7 +1236,7 @@ def settings_disk_umount(request):
 
 @login_required
 def settings_disk_change_password(request):
-    """AJAX POST — change LUKS passphrase for an encrypted /symbios device."""
+    """AJAX POST - change LUKS passphrase for an encrypted /symbios device."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
@@ -1336,7 +1336,7 @@ def settings_playbooks(request):
 
 @login_required
 def settings_playbooks_upload(request):
-    """AJAX POST — upload one or more .yml playbook files."""
+    """AJAX POST - upload one or more .yml playbook files."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
     _ensure_user_playbooks_dir()
@@ -1366,7 +1366,7 @@ def settings_playbooks_upload(request):
 
 @login_required
 def settings_playbooks_delete(request):
-    """AJAX POST — delete a user-uploaded playbook."""
+    """AJAX POST - delete a user-uploaded playbook."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
     fn = _safe_playbook_name(request.POST.get('filename', ''))

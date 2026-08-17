@@ -160,7 +160,7 @@ def setup_steps(inventory_vars):
     network_type = inventory_vars.get('network_type', '')
     steps = []
 
-    # Step 1: Connection type — first mandatory choice. Determines whether
+    # Step 1: Connection type - first mandatory choice. Determines whether
     # the "Open Ports" step is needed at all.
     steps.append({
         'key': 'network',
@@ -172,7 +172,7 @@ def setup_steps(inventory_vars):
         'url': '/setup/#step-network',
     })
 
-    # Step 2: Localization — done only after the user explicitly confirmed the
+    # Step 2: Localization - done only after the user explicitly confirmed the
     # settings in the WebUI (the shipped timezone/keyboard defaults alone do
     # not count as configuration).
     loc_done = bool(inventory_vars.get('localization_configured'))
@@ -185,7 +185,7 @@ def setup_steps(inventory_vars):
         'url': '/settings/localization/',
     })
 
-    # Step 3: DNS — done after the user explicitly saved the DNS settings in
+    # Step 3: DNS - done after the user explicitly saved the DNS settings in
     # the WebUI (the runcheck status is not part of the setup state; it only
     # reflects whether the ddns updater currently works).
     dns_done = bool(inventory_vars.get('dns_configured'))
@@ -205,7 +205,7 @@ def setup_steps(inventory_vars):
         'url': '/settings/dns/',
     })
 
-    # Step 4: Internet reachability (port forwarding) — only needed on a home
+    # Step 4: Internet reachability (port forwarding) - only needed on a home
     # connection; a root server has its own public IP and ports 80/443 are
     # already reachable, an air-gapped intranet needs no public ports at all.
     ports_configured = bool(inventory_vars.get('port_forwarding_configured'))

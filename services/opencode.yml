@@ -15,8 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # docs:
-#   short_description: Deploy the OpenCode AI coding assistant
-#   description: Deploys OpenCode, an AI-powered coding assistant web interface. Exposed via Traefik.
+#   short_description: Deploy the OpenCode coding assistant
+#   description: Deploys OpenCode, a coding assistant web interface. Exposed via Traefik.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3

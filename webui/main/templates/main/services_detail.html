@@ -93,7 +93,7 @@ function loadStatus() {
       ob.textContent = b.label;
       const area = document.getElementById('status-area');
       if (!d.installed) {
-        area.innerHTML = '<div class="text-muted small">Service not installed — no managed units.</div>';
+        area.innerHTML = '<div class="text-muted small">Service not installed - no managed units.</div>';
         return;
       }
       if (!d.services || !d.services.length) {
@@ -127,7 +127,7 @@ document.querySelectorAll('[data-action]').forEach(btn => {
       .then(d => {
         if (d.error) { SymbiOS.exec.showAlert(d.error, 'danger'); return; }
         if (!d.job) { SymbiOS.exec.showAlert('No job returned', 'danger'); return; }
-        const title = action === '__playbook__' ? 'Installing ' + PLAYBOOK : action.charAt(0).toUpperCase() + action.slice(1) + ' — ' + PLAYBOOK;
+        const title = action === '__playbook__' ? 'Installing ' + PLAYBOOK : action.charAt(0).toUpperCase() + action.slice(1) + ' - ' + PLAYBOOK;
         SymbiOS.exec.start(d.job, title, d.command);
         /* Reload status after modal closes */
         const origFinish = SymbiOS.exec.start;

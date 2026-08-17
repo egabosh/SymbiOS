@@ -10,7 +10,7 @@ g_lockfile
 g_dedyn_log="${g_log_dir}/dedyn.log"
 exec > >(tee -a "$g_dedyn_log") 2>&1
 
-# deDyn/deSEC-Settings — read from the central inventory.yml (via
+# deDyn/deSEC-Settings - read from the central inventory.yml (via
 # symbios-lib.sh) so the API key is only stored under /symbios (LUKS).
 dedynpw="$(f_symbios_var ddns_apikey '')"
 dedynhosts="$(f_symbios_var ddns_host '')"

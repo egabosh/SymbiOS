@@ -175,7 +175,7 @@ class AutheliaMiddleware:
             elif not bypass:
                 if _admin_password_status() != 'changed':
                     # Password is still the default (or LDAP is unavailable, so
-                    # the change cannot be confirmed) — keep forcing the change.
+                    # the change cannot be confirmed) - keep forcing the change.
                     return redirect('/change-password/')
                 request.session['force_password_change'] = False
 

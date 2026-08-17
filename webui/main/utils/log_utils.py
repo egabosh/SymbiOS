@@ -24,14 +24,14 @@ import json
 from django.http import JsonResponse, HttpResponseBadRequest
 from .ssh_exec import run_command
 
-# SymbiOS logs — written by host scripts, mounted read-write in /log.
+# SymbiOS logs - written by host scripts, mounted read-write in /log.
 # These can be read directly inside the container.
 LOCAL_LOG_BASE = "/log"
 
-# System logs on the host — fetched via symbios-exec.sh, not mounted.
+# System logs on the host - fetched via symbios-exec.sh, not mounted.
 HOST_LOG_DIR = "/var/log"
 
-# Docker container logs on the host — fetched via symbios-exec.sh.
+# Docker container logs on the host - fetched via symbios-exec.sh.
 HOST_DOCKER_LOG_DIR = "/symbios/docker/containers"
 
 CONTAINER_INDEX = "/log/docker-containers.tsv"

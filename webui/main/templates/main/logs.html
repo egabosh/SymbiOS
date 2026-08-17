@@ -174,7 +174,7 @@
                 return;
             }
 
-            logMeta.textContent = (data.label || currentLogName) + ' — ' + data.total_lines + ' lines';
+            logMeta.textContent = (data.label || currentLogName) + ' - ' + data.total_lines + ' lines';
 
             if (currentOffset === 0) {
                 startLineNum = Math.max(1, data.total_lines - 499);

@@ -57,7 +57,7 @@ function f_json_bool {
 }
 
 # ============================================================
-#  SOAP helper — builds XML, sends via curl, outputs body + return code
+#  SOAP helper - builds XML, sends via curl, outputs body + return code
 # ============================================================
 
 function f_soap_call {

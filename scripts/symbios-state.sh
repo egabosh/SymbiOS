@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# symbios-state.sh — Manage the installed-playbooks state file.
+# symbios-state.sh - Manage the installed-playbooks state file.
 #
 # Each playbook registers itself via this script so the reapply script
 # knows which playbooks to re-run. The state file is a simple YAML-ish

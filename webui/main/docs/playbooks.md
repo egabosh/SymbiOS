@@ -38,18 +38,18 @@ to know: title, description, available actions, status checks, and log streams.
 
 #### Fields
 
-- **`short_description` / `description`** — title and longer text shown in the WebUI.
-- **`author`, `version`, `license`, `copyright`, `min_ansible_version`, `platforms`, `category`** — informational metadata.
-- **`service_control.services[]`** — one entry per container:
-  - **`name`** — container/service name
-  - **`type: docker`** — service type
-  - **`compose_file`** — path to the Docker Compose file
-  - **`status`** — shell command; exit code tells the WebUI the state:
+- **`short_description` / `description`** - title and longer text shown in the WebUI.
+- **`author`, `version`, `license`, `copyright`, `min_ansible_version`, `platforms`, `category`** - informational metadata.
+- **`service_control.services[]`** - one entry per container:
+  - **`name`** - container/service name
+  - **`type: docker`** - service type
+  - **`compose_file`** - path to the Docker Compose file
+  - **`status`** - shell command; exit code tells the WebUI the state:
     - `0` = running
     - `2` or `4` = not installed
     - anything else = stopped/error
-- **`service_control.logs[]`** — each item has a `name` and a `command` for live log following.
-- **`actions`** — mapping of action name to shell command. Every key becomes a button in the WebUI. Common names: `start`, `stop`, `restart`, `reload`, `uninstall`.
+- **`service_control.logs[]`** - each item has a `name` and a `command` for live log following.
+- **`actions`** - mapping of action name to shell command. Every key becomes a button in the WebUI. Common names: `start`, `stop`, `restart`, `reload`, `uninstall`.
 
 ### 3. The Ansible tasks
 
@@ -129,8 +129,8 @@ to know: title, description, available actions, status checks, and log streams.
 
 ## Rules of thumb
 
-- **Always join the `traefik` external network** — otherwise Traefik cannot reach the container.
-- **Never use `traefik.*` Docker labels** — the Docker provider is disabled. Use a file-provider snippet instead.
+- **Always join the `traefik` external network** - otherwise Traefik cannot reach the container.
+- **Never use `traefik.*` Docker labels** - the Docker provider is disabled. Use a file-provider snippet instead.
 - Pick a unique subdomain: `{{ service_name }}.{{ base_domain }}`
 - Protect the route with `authelia@file` unless it must be public. Public routes still get `secHeaders@file`.
 - Use `{{ acme_resolver }}` to select the Let's Encrypt resolver.
@@ -260,7 +260,7 @@ base-services/authelia.yml: "2025-07-21T12:30:05Z"
   Commands: `set <path>` (register), `unset <path>` (remove), `list` (print paths),
   `is-installed <path>` (exit 0/1).
 
-- **Automatic registration** — every time the WebUI runs (Re)Install successfully,
+- **Automatic registration** - every time the WebUI runs (Re)Install successfully,
   it calls `symbios-state.sh set <playbook>` on the host. Uninstall calls `symbios-state.sh unset <playbook>`.
 
 - **`symbios-reapply.sh`** (`/usr/local/sbin/symbios-reapply.sh`) reads the state file

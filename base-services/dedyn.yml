@@ -63,7 +63,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           SHELL=/bin/bash
-          */5 * * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/dedyn.sh ]] && dedyn.sh >/dev/null 2>&1
+          */5 * * * * root { PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/dedyn.sh ]] && dedyn.sh; } >/dev/null 2>&1
         backup: yes
 
     - name: /etc/cron.d/host-ip

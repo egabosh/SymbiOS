@@ -16,7 +16,7 @@
 #
 # docs:
 #   short_description: Deploy the Open WebUI with SearXNG
-#   description: Deploys Open WebUI (ChatGPT-like interface for local LLMs) with SearXNG for web search. Exposed via Traefik.
+#   description: Deploys Open WebUI (web interface for local LLMs) with SearXNG for web search. Exposed via Traefik.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -220,7 +220,7 @@
                 - SEARXNG_QUERY_URL=http://searxng:8080/search?format=json&q=<query>
                 - ENABLE_RAG_LOCAL_WEB_FETCH=false
                 - BYPASS_WEB_SEARCH_WEB_LOADER=true
-                # AI Model Defaults (llama.cpp via OpenAI-compatible API)
+                # Model Defaults (llama.cpp via OpenAI-compatible API)
                 - OLLAMA_BASE_URL=
                 - OPENAI_API_BASE_URL=http://{{ ai_host }}:8080/v1
                 - OPENAI_API_KEY=

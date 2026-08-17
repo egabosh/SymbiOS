@@ -255,7 +255,7 @@ def settings_port_forwarding(request):
                     (443, 443, 'SymbiOS HTTPS', auto_at),
                 ]
                 # The server's sshd listens on port 33 directly, so SSH maps
-                # 33 -> 33 — identical external/internal ports also satisfy
+                # 33 -> 33 - identical external/internal ports also satisfy
                 # the FRITZ!Box IPv6 constraint.
                 if include_ssh:
                     rules.append((33, 33, 'SymbiOS SSH', auto_at))
@@ -554,7 +554,7 @@ def settings_port_forwarding(request):
 
 @login_required
 def settings_port_forwarding_detect(request):
-    """AJAX GET — re-detect router (for live refresh)."""
+    """AJAX GET - re-detect router (for live refresh)."""
     try:
         router_info = _run_upnp('detect', timeout=10)
         return JsonResponse(router_info)
@@ -564,7 +564,7 @@ def settings_port_forwarding_detect(request):
 
 @login_required
 def settings_port_forwarding_list(request):
-    """AJAX GET — list port mappings (for live refresh)."""
+    """AJAX GET - list port mappings (for live refresh)."""
     try:
         result = _run_upnp('list', timeout=15)
         return JsonResponse(result)
@@ -574,7 +574,7 @@ def settings_port_forwarding_list(request):
 
 @login_required
 def settings_port_forwarding_config(request):
-    """AJAX GET/POST — manage router UPnP credentials."""
+    """AJAX GET/POST - manage router UPnP credentials."""
     if request.method == 'POST':
         is_ajax = is_ajax_request(request)
         username = request.POST.get('username', '').strip()
@@ -605,7 +605,7 @@ def settings_port_forwarding_config(request):
 
 
 def _shell_quote(s):
-    """Simple shell-safe quoting — wrap in single quotes and escape internal single quotes."""
+    """Simple shell-safe quoting - wrap in single quotes and escape internal single quotes."""
     if not s:
         return "''"
     escaped = s.replace("'", "'\\''")

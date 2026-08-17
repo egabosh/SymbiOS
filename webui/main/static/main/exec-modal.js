@@ -1,10 +1,10 @@
-/* SymbiOS exec output modal — shows live command output in an overlay.
+/* SymbiOS exec output modal - shows live command output in an overlay.
 
 Usage:
-  SymbiOS.exec.start(jobId, title)  — open modal and poll a job
-  SymbiOS.exec.open(title)          — open modal with spinner (no job yet)
-  SymbiOS.exec.close()              — close modal
-  SymbiOS.exec.isRunning()          — true while a job is being polled
+  SymbiOS.exec.start(jobId, title)  - open modal and poll a job
+  SymbiOS.exec.open(title)          - open modal with spinner (no job yet)
+  SymbiOS.exec.close()              - close modal
+  SymbiOS.exec.isRunning()          - true while a job is being polled
 
 Also intercepts all forms with data-exec="true" attribute:
   - Submits via AJAX (fetch)
@@ -129,7 +129,7 @@ Also intercepts all forms with data-exec="true" attribute:
   /* Close handlers */
   closeBtn.addEventListener('click', close);
   doneBtn.addEventListener('click', close);
-  /* Clicking the backdrop does NOT close the modal — only the X or Close button */
+  /* Clicking the backdrop does NOT close the modal - only the X or Close button */
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && !overlay.classList.contains('d-none')) close();
   });
@@ -196,7 +196,7 @@ Also intercepts all forms with data-exec="true" attribute:
           window.location.href = d.redirect;
         } else if (res.raw && !res.raw.trim().startsWith('{')) {
           /* Non-JSON success (e.g. the view redirected with Django messages
-             after running the command synchronously) — reload to show them. */
+             after running the command synchronously) - reload to show them. */
           close();
           window.location.reload();
         } else {

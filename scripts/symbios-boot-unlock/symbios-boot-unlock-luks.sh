@@ -2,9 +2,9 @@
 # SymbiOS - LUKS boot unlock helper (called by unlock.py or standalone)
 #
 # Actions:
-#   check       — JSON status: needs_unlock, device, error
-#   unlock      — read passphrase from stdin, unlock LUKS, mount /symbios
-#   close       — unmount /symbios, close LUKS
+#   check       - JSON status: needs_unlock, device, error
+#   unlock      - read passphrase from stdin, unlock LUKS, mount /symbios
+#   close       - unmount /symbios, close LUKS
 
 g_luks_label="CRYPT_LUKS_SYMBIOS_DATA"
 g_mapper_name="symbios-luks"

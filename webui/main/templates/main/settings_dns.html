@@ -778,7 +778,7 @@ function submitRegistration() {
         document.getElementById('register-verify').style.display = '';
         setRegStatus('', '');  // clear any status
       } else {
-        // Check if error mentions captcha — if so, fetch one
+        // Check if error mentions captcha - if so, fetch one
         if (data.error && data.error.toLowerCase().includes('captcha')) {
           fetchCaptchaAndShow();
         }

@@ -1,5 +1,5 @@
 #!/bin/bash
-# symbios-lib.sh — Central configuration loader for SymbiOS bash scripts.
+# symbios-lib.sh - Central configuration loader for SymbiOS bash scripts.
 #
 # Resolves the filesystem layout and key configuration values from
 # inventory.yml (or /etc/symbios/symbios.conf if present) and exports them
