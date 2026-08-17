@@ -115,6 +115,7 @@ f_run_playbook ${g_git_root}/base-services/backup.yml
 f_run_playbook ${g_git_root}/base-services/autoupdate.yml
 f_run_playbook ${g_git_root}/base-services/runchecks.yml
 f_run_playbook ${g_git_root}/base-services/docker.yml
+f_run_playbook ${g_git_root}/base-services/kvm.yml
 f_run_playbook ${g_git_root}/base-services/dedyn.yml
 #f_run_playbook ${g_git_root}/base-services/traefik.yml
 f_run_playbook ${g_git_root}/base-services/ldap.yml

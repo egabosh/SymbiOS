@@ -1,0 +1,207 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   short_description: Install and configure KVM/libvirt for virtual machines
+#   description: 'Installs QEMU/KVM and libvirt, configures storage pools and networking, and prepares the host for running VMs (e.g. OpenWrt, Nextcloud AIO, HomeAssistant). Only runs on bare-metal or KVM-capable hosts - skipped in containers and on non-x86_64/arm64 systems without hardware virtualization.'
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Virtualization
+#   service_control:
+#     services:
+#     - name: libvirtd
+#       type: systemd
+#       unit: libvirtd.service
+#       status: systemctl is-active libvirtd.service
+#     logs:
+#     - name: libvirtd
+#       command: journalctl -fu libvirtd.service -n 1000
+#   actions:
+#     restart: systemctl restart libvirtd.service
+
+---
+
+- name: KVM/libvirt Virtualization Setup
+  hosts: all
+  tasks:
+
+    # Only run on hosts with systemd (not in containers)
+    - name: Check if we are in a container env by existing systemd
+      ansible.builtin.stat:
+        path: /lib/systemd/systemd
+      register: nocontainer
+
+    # Check CPU virtualization support (hardware virt)
+    - name: Check for hardware virtualization support
+      ansible.builtin.command: grep -Ec '(vmx|svm)' /proc/cpuinfo
+      register: cpu_virt_check
+      changed_when: false
+      failed_when: false
+      when: nocontainer.stat.exists
+
+    - name: Set hardware virtualization fact
+      ansible.builtin.set_fact:
+        has_hw_virt: "{{ (cpu_virt_check.rc | default(1)) == 0 and (cpu_virt_check.stdout | default('0') | int) > 0 }}"
+      when: nocontainer.stat.exists
+
+    # Only install on x86_64 or arm64 with hardware virt
+    - name: Check system architecture
+      ansible.builtin.command: uname -m
+      register: host_arch
+      changed_when: false
+      when: nocontainer.stat.exists
+
+    - name: Set KVM-capable fact
+      ansible.builtin.set_fact:
+        kvm_capable: "{{ nocontainer.stat.exists | default(false) | bool and (has_hw_virt | default(false) | bool or host_arch.stdout | default('') in ['x86_64', 'aarch64']) }}"
+      when: nocontainer.stat.exists
+
+    # Install KVM packages
+    - name: Install KVM and libvirt packages
+      ansible.builtin.apt:
+        name:
+          - qemu-kvm
+          - libvirt-daemon-system
+          - libvirt-clients
+          - bridge-utils
+          - virtinst
+          - ovmf
+        state: present
+        update_cache: yes
+        cache_valid_time: 3600
+        install_recommends: no
+      when: kvm_capable | default(false) | bool
+
+    # Add symbios user (UID 1000) to libvirt and kvm groups
+    - name: Add symbios user to libvirt group
+      ansible.builtin.user:
+        name: symbios
+        groups: libvirt
+        append: yes
+      when: kvm_capable | default(false) | bool
+
+    - name: Add symbios user to kvm group
+      ansible.builtin.user:
+        name: symbios
+        groups: kvm
+        append: yes
+      when: kvm_capable | default(false) | bool
+
+    # Create KVM storage directories under /symbios
+    - name: Create KVM storage directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: root
+        group: libvirt
+        state: directory
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ data_root }}/kvm", mode: "0750" }
+        - { path: "{{ data_root }}/kvm/images", mode: "0750" }
+        - { path: "{{ data_root }}/kvm/iso", mode: "0755" }
+        - { path: "{{ data_root }}/kvm/snapshots", mode: "0750" }
+      when: kvm_capable | default(false) | bool
+
+    # Enable and start libvirtd
+    - name: Ensure libvirtd is started
+      ansible.builtin.service:
+        name: libvirtd
+        state: started
+      when: kvm_capable | default(false) | bool
+
+    - name: Ensure libvirtd is enabled
+      ansible.builtin.command: systemctl is-enabled libvirtd
+      register: libvirtd_enabled
+      changed_when: "'enabled' not in libvirtd_enabled.stdout"
+      failed_when: false
+      when: kvm_capable | default(false) | bool
+
+    - name: Enable libvirtd if not already enabled
+      ansible.builtin.command: systemctl enable libvirtd
+      changed_when: true
+      when:
+        - kvm_capable | default(false) | bool
+        - "'enabled' not in libvirtd_enabled.stdout | default('')"
+
+    # Configure default storage pool pointing to /symbios/kvm/images
+    - name: Define default storage pool
+      community.libvirt.virt_pool:
+        name: default
+        state: active
+        autostart: yes
+        xml: |
+          <pool type='dir'>
+            <name>default</name>
+            <target>
+              <path>{{ data_root }}/kvm/images</path>
+              <permissions>
+                <owner>0</owner>
+                <group>107</group>
+                <mode>0750</mode>
+              </permissions>
+            </target>
+          </pool>
+      when: kvm_capable | default(false) | bool
+      register: pool_result
+      failed_when: false
+
+    # Build default XML for storage pool when virt_pool module fails
+    - name: Fallback - create default storage pool via virsh
+      ansible.builtin.shell: |
+        virsh pool-define-as default dir --target {{ data_root }}/kvm/images 2>/dev/null && \
+        virsh pool-build default 2>/dev/null && \
+        virsh pool-start default 2>/dev/null && \
+        virsh pool-autostart default 2>/dev/null && \
+        echo "pool-created" || echo "pool-already-exists"
+      register: pool_fallback
+      changed_when: "'pool-created' in pool_fallback.stdout"
+      failed_when: false
+      when: kvm_capable | default(false) | bool and pool_result is failed
+
+    # Enable nested virtualization if on Intel/AMD (needed for nested KVM)
+    - name: Enable nested virtualization for Intel
+      ansible.builtin.shell: |
+        modprobe -r kvm_intel 2>/dev/null || true
+        echo "options kvm_intel nested=Y" > /etc/modprobe.d/kvm-intel.conf
+        modprobe kvm_intel 2>/dev/null || true
+        echo "done"
+      register: kvm_intel_mod
+      changed_when: false
+      failed_when: false
+      when: kvm_capable | default(false) | bool and host_arch.stdout | default('') == 'x86_64'
+
+    - name: Enable nested virtualization for AMD
+      ansible.builtin.shell: |
+        modprobe -r kvm_amd 2>/dev/null || true
+        echo "options kvm_amd nested=1" > /etc/modprobe.d/kvm-amd.conf
+        modprobe kvm_amd 2>/dev/null || true
+        echo "done"
+      register: kvm_amd_mod
+      changed_when: false
+      failed_when: false
+      when: kvm_capable | default(false) | bool and host_arch.stdout | default('') == 'x86_64'
+
+    # Register playbook as installed
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/kvm.yml"
+      changed_when: false

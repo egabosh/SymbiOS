@@ -1,0 +1,13 @@
+# Healthcheck for KVM/libvirt daemon
+f_check_cache "symbios-healthcheck-kvm" || return 2>/dev/null || true
+
+# Skip if libvirt is not installed
+if ! command -v virsh &>/dev/null
+then
+  return 0
+fi
+
+if ! systemctl is-active libvirtd.service >/dev/null 2>&1
+then
+  g_echo_error "Healthcheck failed for KVM: libvirtd not running"
+fi
