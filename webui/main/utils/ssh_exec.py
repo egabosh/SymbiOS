@@ -393,7 +393,7 @@ def stream_log(cmd, job):
         # Allocate a PTY so commands (docker compose logs, etc.) detect a
         # terminal and emit ANSI colors. ansiToHtml() renders them; '\r' that
         # a PTY adds is already stripped there. Without a PTY the output is
-        # colorless — this is intentionally uniform across all services.
+        # colorless - this is intentionally uniform across all services.
         try:
             channel.get_pty(term='xterm', width=220, height=60)
         except Exception:

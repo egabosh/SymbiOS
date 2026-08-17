@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# symbios-reapply.sh — Re-run installed playbooks.
+# symbios-reapply.sh - Re-run installed playbooks.
 #
 # Reads the state file managed by symbios-state.sh and re-executes every
 # registered playbook. Designed to run in the background (nohup) so the
@@ -124,15 +124,15 @@ g_playbooks=""
 
 if [[ -n "$g_only_playbooks" ]]
 then
-  # Only specific playbooks — check each is installed via symbios-state.sh
+  # Only specific playbooks - check each is installed via symbios-state.sh
   for g_pb in $g_only_playbooks
   do
     if [[ "$g_force" == true ]] || symbios-state.sh is-installed "$g_pb" 2>/dev/null
     then
       g_playbooks=$(printf '%s\n' "$g_playbooks" "$g_pb")
     else
-      f_log "SKIP [$g_pb] — not installed"
-      g_echo_note "SKIP: $g_pb — not installed (use --force to override)"
+      f_log "SKIP [$g_pb] - not installed"
+      g_echo_note "SKIP: $g_pb - not installed (use --force to override)"
     fi
   done
 else

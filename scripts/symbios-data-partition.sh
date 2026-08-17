@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# symbios-data-partition.sh — Manage /symbios data partition (create, encrypt, mount, rollback)
+# symbios-data-partition.sh - Manage /symbios data partition (create, encrypt, mount, rollback)
 #
 # The /symbios data root holds all SymbiOS data (git repo, docker stacks,
 # docker/containerd data dirs, homes, backups). Moving it to a separate
@@ -178,7 +178,7 @@ function f_do_rollback {
   f_json_ok '"message":"Rollback complete. ${g_mountpoint} restored to original location.","can_rollback":false'
 }
 
-# Error handler for setup — rolls back and exits.
+# Error handler for setup - rolls back and exits.
 function f_setup_error {
   local f_msg="$1"
   f_log_error "$f_msg"
@@ -206,7 +206,7 @@ function f_find_luks {
 }
 
 # ---------------------------------------------------------------------------
-# Dispatch (flat — each action lives directly in its case branch)
+# Dispatch (flat - each action lives directly in its case branch)
 # ---------------------------------------------------------------------------
 
 function f_main {
@@ -428,7 +428,7 @@ EOF
     # Docker/containerd data lives directly in ${g_mountpoint}/docker and
     # ${g_mountpoint}/containerd. Stop all containers so the data is consistent
     # and can be copied together with everything else. The WebUI container
-    # (symbios-webui) must stay up — this script runs through its SSH exec
+    # (symbios-webui) must stay up - this script runs through its SSH exec
     # gateway, so stopping it would kill the migration mid-copy. OpenLDAP
     # keeps running too so the WebUI stays functional while it is stopped.
     if command -v docker &>/dev/null
@@ -513,7 +513,7 @@ EOF
     fi
 
     shutdown -c 2>/dev/null || true
-    shutdown -r +1 "Disk migration complete — rebooting." 2>/dev/null || true
+    shutdown -r +1 "Disk migration complete - rebooting." 2>/dev/null || true
     f_log_ok "Reboot scheduled in 1 minute"
 
     f_json_ok '"message":"Disk migration complete. The server will reboot in about 1 minute. All services will restart automatically. You will need to enter your LUKS passphrase at the boot screen.","can_rollback":true'

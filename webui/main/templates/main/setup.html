@@ -17,7 +17,7 @@
     <div class="settings-why-body">
       This is a step-by-step guide to make your server secure and reachable
       from the internet after installation.
-      Complete the steps <strong>in order</strong> — each step builds on the
+      Complete the steps <strong>in order</strong> - each step builds on the
       previous one.
       Completed steps are marked automatically.
     </div>
@@ -36,7 +36,7 @@
     {% endif %}
   </div>
   <div class="card-body small">
-    <p class="mb-2">How is your SymbiOS server connected? <strong>Choose one option first</strong> — it decides which of the following steps are needed.</p>
+    <p class="mb-2">How is your SymbiOS server connected? <strong>Choose one option first</strong> - it decides which of the following steps are needed.</p>
     <form method="post">
       {% csrf_token %}
       <div class="row g-2">
@@ -100,7 +100,7 @@
         </span>
         {% endif %}
         {% if detected_network and network_type != detected_network %}
-        <span class="text-muted small ms-1">— choose a different option if this is wrong.</span>
+        <span class="text-muted small ms-1">- choose a different option if this is wrong.</span>
         {% endif %}
       </div>
       <button type="submit" class="btn btn-primary btn-sm mt-2">
@@ -114,7 +114,7 @@
 <div class="card mt-3">
   <div class="card-header d-flex align-items-center gap-2">
     <i class="bi bi-list-check"></i> Remaining Steps
-    <span class="text-muted small fw-normal">— complete in this order</span>
+    <span class="text-muted small fw-normal">- complete in this order</span>
   </div>
   <div class="card-body p-0">
     <table class="table table-sm align-middle mb-0">

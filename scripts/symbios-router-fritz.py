@@ -446,7 +446,7 @@ def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc,
 
     load_page(host, sid, 'portoverview')
 
-    # Build rule params — semi-colon separated fields as FRITZ!Box expects
+    # Build rule params - semi-colon separated fields as FRITZ!Box expects
     uid_rule = f'newRule{os.getpid()}'
     desc_safe = desc.replace(';', '')
     rule = (
@@ -618,7 +618,7 @@ def fb_delete(host, user, password, ext_port, proto):
     # Build the delete submit exactly like the FRITZ!Box UI (port_edit.js):
     # the target rule is kept in the list marked rulestate=delete and committed
     # via edify=ok together with the device context fields. This removes only
-    # this one rule — the box wipes the whole IPv6 rule set when a delete is
+    # this one rule - the box wipes the whole IPv6 rule set when a delete is
     # submitted with delete=ok and the IPv6 device fields instead (verified
     # against FRITZ!Box 7430, OS 7.31).
     app = str(target_rule.get('app', '')).replace(';', '')

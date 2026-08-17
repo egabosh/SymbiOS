@@ -101,7 +101,7 @@
           <i class="bi bi-info-circle"></i>
           Select a disk to use for your data. All existing data from the
           current location will be copied automatically. The new disk will
-          be formatted — <strong>all data on it will be erased</strong>.
+          be formatted - <strong>all data on it will be erased</strong>.
         </div>
 
         <form id="setup-form" data-exec="true" method="POST" action="{% url "settings_disk_setup" %}">
@@ -221,7 +221,7 @@ function loadStatus() {
     .then(function(data) {
       var el = document.getElementById('home-status');
 
-      /* LUKS locked — needs boot unlock */
+      /* LUKS locked - needs boot unlock */
       if (data.luks_name && !data.luks_open) {
         el.innerHTML =
           '<div class="d-flex align-items-center gap-3">' +
@@ -305,7 +305,7 @@ function loadDisks() {
         return;
       }
 
-      /* Build simplified table — physical disks only, no partitions */
+      /* Build simplified table - physical disks only, no partitions */
       var html = '<div class="table-responsive"><table class="table table-sm align-middle">';
       html += '<thead><tr><th>Disk</th><th>UUID</th><th>LABEL</th><th>Size</th><th>Status</th></tr></thead><tbody>';
 
@@ -326,7 +326,7 @@ function loadDisks() {
     });
 }
 
-/* Render a disk row — only physical disks, skip partitions */
+/* Render a disk row - only physical disks, skip partitions */
 function renderDevice(dev) {
   /* Only show physical disks (skip partitions, loops, etc.) */
   if (dev.type !== 'disk') return '';
@@ -341,8 +341,8 @@ function renderDevice(dev) {
 
   var html = '<tr class="' + rowClass + '">';
   html += '<td>' + diskLabel + '</td>';
-  html += '<td class="text-muted small"><code>' + (dev.uuid || '—') + '</code></td>';
-  html += '<td>' + (dev.label || '—') + '</td>';
+  html += '<td class="text-muted small"><code>' + (dev.uuid || '-') + '</code></td>';
+  html += '<td>' + (dev.label || '-') + '</td>';
   html += '<td>' + dev.size + '</td>';
   html += '<td>';
   if (status === 'system') html += '<span class="badge bg-danger">System disk</span>';
@@ -365,7 +365,7 @@ function getStatus(dev) {
   return 'available';
 }
 
-/* Add options to the target disk select — only unmounted disks */
+/* Add options to the target disk select - only unmounted disks */
 function addDeviceOptions(dev, select) {
   if (dev.type !== 'disk') return;
   var hasMountedChild = hasMountedChildren(dev);
@@ -374,8 +374,8 @@ function addDeviceOptions(dev, select) {
   var opt = document.createElement('option');
   opt.value = dev.path;
   var label = dev.size;
-  if (dev.model) label += ' — ' + dev.model;
-  else label += ' — ' + dev.name;
+  if (dev.model) label += ' - ' + dev.model;
+  else label += ' - ' + dev.name;
   opt.textContent = label;
   opt.dataset.model = dev.model || '';
   opt.dataset.size = dev.size || '';

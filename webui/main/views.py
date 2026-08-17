@@ -136,7 +136,7 @@ def settings(request):
 
 @login_required
 def setup(request):
-    """Guided setup assistant — orchestrates the settings pages (no duplicate forms)."""
+    """Guided setup assistant - orchestrates the settings pages (no duplicate forms)."""
     from .setup_status import setup_steps, is_setup_complete, network_type_label
     config = _get_inventory_config()
     vars_ = config.get('all', {}).get('vars', {})
@@ -200,7 +200,7 @@ def _detect_network_type():
 
 @login_required
 def health_ssl_check(request):
-    """AJAX GET — check for a valid SSL certificate (proves external reachability)."""
+    """AJAX GET - check for a valid SSL certificate (proves external reachability)."""
     from .utils.ssh_exec import run_command
     from django.http import JsonResponse
     config = _get_inventory_config()

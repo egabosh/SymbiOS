@@ -330,7 +330,7 @@
       args:
         creates: "{{ service_path }}/authelia-data/oidc.key"
 
-    # Read OIDC private key (raw, no indent — handled by Jinja2 filter)
+    # Read OIDC private key (raw, no indent - handled by Jinja2 filter)
     - name: OIDC Key aus Datei lesen
       ansible.builtin.command: >
         cat {{ service_path }}/authelia-data/oidc.key
