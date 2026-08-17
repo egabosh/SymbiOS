@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026, Oliver Bohlen
+#
 # SymbiOS - FRITZ!Box port forwarding via data.lua API
 # PBKDF2 login + edify/delete actions for port forwarding.
 # Called by symbios-router-upnp.sh dispatcher.

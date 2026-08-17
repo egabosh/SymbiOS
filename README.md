@@ -454,7 +454,7 @@ documentation for the required `# docs:` format and upload workflow.
 SymbiOS is licensed under the [GNU General Public License v3.0](LICENSE).
 
 ```
-SymbiOS  Copyright (C) 2025  SymbiOS Contributors
+SymbiOS  Copyright (c) 2026, Oliver Bohlen
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

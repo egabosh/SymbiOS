@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright (c) 2026, Oliver Bohlen
+#
 # symbios-lib.sh - Central configuration loader for SymbiOS bash scripts.
 #
 # Resolves the filesystem layout and key configuration values from

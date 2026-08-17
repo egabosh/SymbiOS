@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright (c) 2026, Oliver Bohlen
+#
 # SymbiOS - LUKS boot unlock helper (called by unlock.py or standalone)
 #
 # Actions:

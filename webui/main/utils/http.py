@@ -1,3 +1,4 @@
+# Copyright (c) 2026, Oliver Bohlen
 """HTTP utility helpers for views."""
 
 
