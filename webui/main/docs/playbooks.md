@@ -16,6 +16,7 @@ to know: title, description, available actions, status checks, and log streams.
 # docs:
 #   short_description: Deploy the Nextcloud service
 #   description: Deploys Nextcloud together with its database and storage.
+#   url: "https://nextcloud.{{ base_domain }}"
 #   author: Your Name
 #   version: '1.0'
 #   license: GPLv3
@@ -29,16 +30,26 @@ to know: title, description, available actions, status checks, and log streams.
 #     logs:
 #       - name: nextcloud
 #         command: docker compose -f /symbios/services/nextcloud/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/nextcloud/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/nextcloud/docker-compose.yml up -d
+#     program_paths:
+#       - /symbios/services/nextcloud/
+#       - /symbios/base-services/traefik/providers/nextcloud.yml
+#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-nextcloud.check
+#     userdata_paths:
+#       - /symbios/services/nextcloud/nextcloud-data/
+#       - /symbios/services/nextcloud/nextclouddb-data/
 #   actions:
 #     start:    docker compose -f /symbios/services/nextcloud/docker-compose.yml up -d
 #     stop:     docker compose -f /symbios/services/nextcloud/docker-compose.yml down
 #     restart:  docker compose -f /symbios/services/nextcloud/docker-compose.yml restart
-#     uninstall: docker compose -f /symbios/services/nextcloud/docker-compose.yml down
 ```
 
 #### Fields
 
 - **`short_description` / `description`** - title and longer text shown in the WebUI.
+- **`url`** - web interface URL for the service. Jinja variables like `{{ base_domain }}` are resolved automatically. Displayed as a clickable link on the service detail page.
 - **`author`, `version`, `license`, `copyright`, `min_ansible_version`, `platforms`, `category`** - informational metadata.
 - **`service_control.services[]`** - one entry per container:
   - **`name`** - container/service name
@@ -49,7 +60,12 @@ to know: title, description, available actions, status checks, and log streams.
     - `2` or `4` = not installed
     - anything else = stopped/error
 - **`service_control.logs[]`** - each item has a `name` and a `command` for live log following.
-- **`actions`** - mapping of action name to shell command. Every key becomes a button in the WebUI. Common names: `start`, `stop`, `restart`, `reload`, `uninstall`.
+- **`uninstall`** - controls the 3-mode uninstall feature (Full Uninstall, Uninstall, Delete Userdata):
+  - **`stop`** - shell command to stop the service before deletion (e.g. `docker compose down`)
+  - **`restart`** - shell command to restart the service after deletion (skipped automatically when compose file no longer exists, e.g. after Full Uninstall)
+  - **`program_paths`** - list of paths that belong to the program. In "program" mode only these are deleted; subdirectories are preserved so that nested userdata directories survive.
+  - **`userdata_paths`** - list of paths containing user data (databases, uploaded files, configs). These are deleted completely (`rm -rf`) in "Full Uninstall" and "Delete Userdata" modes. When nested under a `program_paths` entry, they are preserved during "Uninstall (keep data)" mode.
+- **`actions`** - mapping of action name to shell command. Every key becomes a button in the WebUI. Common names: `start`, `stop`, `restart`, `reload`.
 
 ### 3. The Ansible tasks
 
@@ -225,6 +241,7 @@ section under **Custom Playbooks**.
 # docs:
 #   short_description: My custom backup job
 #   description: Runs a backup to an external NFS mount.
+#   url: "https://mybackup.{{ base_domain }}"
 #   actions:
 #     run:
 #       command: /usr/local/sbin/my-backup.sh

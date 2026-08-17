@@ -251,6 +251,11 @@ def build_action_command(playbook, action):
     """Resolve the concrete host command for an action (or the playbook run)."""
     if action == '__playbook__':
         return _playbook_command(playbook)
+    # The three uninstall modes are handled by symbios-uninstall.sh, which
+    # reads the # docs: block via yq and deletes paths accordingly.
+    if action in ('uninstall-full', 'uninstall-program', 'uninstall-reset'):
+        mode = action.replace('uninstall-', '')
+        return 'symbios-uninstall.sh {} {}'.format(playbook, mode)
     return _action_command(playbook, action)
 
 

@@ -16,6 +16,7 @@
 # docs:
 #   short_description: Deploy the Matrix communication server
 #   description: Deploys Matrix (Synapse) with Nginx reverse proxy, PostgreSQL, Redis, Element Web, Matrix Commander, and Admin UI. Exposed via Traefik.
+#   url: "https://matrix.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -35,8 +36,17 @@
 #     logs:
 #     - name: matrix
 #       command: docker compose -f /symbios/services/matrix/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/matrix/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/matrix/docker-compose.yml up -d
+#     program_paths:
+#       - /symbios/services/matrix/
+#       - /symbios/base-services/traefik/providers/matrix.yml
+#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-matrix.check
+#       - /usr/local/sbin/runchecks.d/matrix.check
+#     userdata_paths:
+#       - /symbios/services/matrix/data/
 #   actions:
-#     uninstall: docker compose -f /symbios/services/matrix/docker-compose.yml down
 #     start: docker compose -f /symbios/services/matrix/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/matrix/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/matrix/docker-compose.yml restart

@@ -16,6 +16,7 @@
 # docs:
 #   short_description: Deploy the Paperless-ngx document management system
 #   description: Deploys Paperless-ngx for document management with OCR, tagging, and full-text search. Includes Redis broker. Exposed via Traefik.
+#   url: "https://paperless.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -35,8 +36,20 @@
 #     logs:
 #     - name: paperless
 #       command: docker compose -f /symbios/services/paperless/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/paperless/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/paperless/docker-compose.yml up -d
+#     program_paths:
+#       - /symbios/services/paperless/
+#       - /symbios/base-services/traefik/providers/paperless.yml
+#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-paperless.check
+#     userdata_paths:
+#       - /symbios/services/paperless/data/
+#       - /symbios/services/paperless/media/
+#       - /symbios/services/paperless/export/
+#       - /symbios/services/paperless/consume/
+#       - /symbios/services/paperless/redisdata/
 #   actions:
-#     uninstall: docker compose -f /symbios/services/paperless/docker-compose.yml down
 #     start: docker compose -f /symbios/services/paperless/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/paperless/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/paperless/docker-compose.yml restart

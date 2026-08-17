@@ -16,6 +16,7 @@
 # docs:
 #   short_description: Deploy the Navidrome music streaming server
 #   description: Deploys Navidrome, a self-hosted music server and streamer compatible with Subsonic/Airsonic, exposed via Traefik.
+#   url: "https://navidrome.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -35,8 +36,16 @@
 #     logs:
 #     - name: navidrome
 #       command: docker compose -f /symbios/services/navidrome/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/navidrome/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/navidrome/docker-compose.yml up -d
+#     program_paths:
+#       - /symbios/services/navidrome/
+#       - /symbios/base-services/traefik/providers/navidrome.yml
+#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-navidrome.check
+#     userdata_paths:
+#       - /symbios/services/navidrome/navidrome-data/
 #   actions:
-#     uninstall: docker compose -f /symbios/services/navidrome/docker-compose.yml down
 #     start: docker compose -f /symbios/services/navidrome/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/navidrome/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/navidrome/docker-compose.yml restart

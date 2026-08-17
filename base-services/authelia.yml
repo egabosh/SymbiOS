@@ -17,6 +17,7 @@
 # docs:
 #   short_description: Deploy and configure the Authelia identity provider for Auth and SSO
 #   description: Installs Authelia as the central authentication/authorization server with SSO (signe-sign-on). Users and groups are backed by OpenLDAP; optional second-factor authentication (2FA) is supported.
+#   url: "https://auth.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3

@@ -17,6 +17,7 @@
 # docs:
 #   short_description: Deploy the Nextcloud service
 #   description: Deploys Nextcloud (file sync/collaboration) together with its database and storage, exposed via Traefik.
+#   url: "https://nextcloud.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -36,8 +37,18 @@
 #     logs:
 #     - name: nextcloud
 #       command: docker compose -f /symbios/services/nextcloud/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/nextcloud/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/nextcloud/docker-compose.yml up -d
+#     program_paths:
+#       - /symbios/services/nextcloud/
+#       - /symbios/base-services/traefik/providers/nextcloud.yml
+#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-nextcloud.check
+#       - /usr/local/sbin/autoupdate.d/nextcloud.update
+#     userdata_paths:
+#       - /symbios/services/nextcloud/nextcloud-data/
+#       - /symbios/services/nextcloud/nextclouddb-data/
 #   actions:
-#     uninstall: docker compose -f /symbios/services/nextcloud/docker-compose.yml down
 #     start: docker compose -f /symbios/services/nextcloud/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/nextcloud/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/nextcloud/docker-compose.yml restart

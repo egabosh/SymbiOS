@@ -777,6 +777,35 @@
           /usr/bin/apt-get autoclean -y >/dev/null 2>&1
 
 
+    - name: Install yq binary (YAML processor for service uninstall)
+      block:
+        - name: Check if yq is already installed
+          ansible.builtin.stat:
+            path: /usr/local/bin/yq
+          register: yq_binary
+
+        - name: Get system architecture
+          ansible.builtin.command: uname -m
+          register: yq_arch_result
+          changed_when: false
+
+        - name: Set yq architecture map
+          ansible.builtin.set_fact:
+            yq_arch_map:
+              x86_64: amd64
+              aarch64: arm64
+              armv7l: arm
+
+        - name: Download yq binary
+          ansible.builtin.get_url:
+            url: "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_{{ yq_arch_map[yq_arch_result.stdout] | default(yq_arch_result.stdout) }}"
+            dest: /usr/local/bin/yq
+            mode: '0755'
+            owner: root
+            group: root
+          when: not yq_binary.stat.exists
+      when: nocontainer.stat.exists == true
+
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/basics.yml"
       changed_when: false

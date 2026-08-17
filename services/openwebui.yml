@@ -17,6 +17,7 @@
 # docs:
 #   short_description: Deploy the Open WebUI with SearXNG
 #   description: Deploys Open WebUI (web interface for local LLMs) with SearXNG for web search. Exposed via Traefik.
+#   url: "https://ai.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -36,8 +37,17 @@
 #     logs:
 #     - name: openwebui
 #       command: docker compose -f /symbios/services/openwebui/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/openwebui/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/openwebui/docker-compose.yml up -d
+#     program_paths:
+#       - /symbios/services/openwebui/
+#       - /symbios/base-services/traefik/providers/openwebui.yml
+#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-openwebui.check
+#     userdata_paths:
+#       - /symbios/services/openwebui/openwebui-data/
+#       - /symbios/services/openwebui/searxng-data/
 #   actions:
-#     uninstall: docker compose -f /symbios/services/openwebui/docker-compose.yml down
 #     start: docker compose -f /symbios/services/openwebui/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/openwebui/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/openwebui/docker-compose.yml restart

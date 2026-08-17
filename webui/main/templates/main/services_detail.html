@@ -28,6 +28,13 @@
     <span><b>Min Ansible:</b> {{ item.docs.min_ansible_version }}</span>
     <span><b>Platforms:</b> {% for p in item.docs.platforms %}{{ p.name }} {{ p.versions|join:", " }}{% endfor %}</span>
   </div>
+  {% if service_url %}
+  <div class="mt-2">
+    <a href="{{ service_url }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none">
+      <b>Service URL:</b> {{ service_url }} <i class="bi bi-box-arrow-up-right small"></i>
+    </a>
+  </div>
+  {% endif %}
   <div class="text-muted mt-2">Note: these metadata fields describe the SymbiOS playbook itself, not the software it installs.</div>
 </div>
 
@@ -59,7 +66,14 @@
       <button class="btn {{ a.cls }}" data-action="{{ a.name }}">{{ a.label }}</button>
       {% endfor %}
     </div>
-    {% if not action_list %}
+    {% if uninstall_buttons %}
+    <div class="btn-group mb-3 flex-wrap" role="group">
+      {% for u in uninstall_buttons %}
+      <button class="btn {{ u.cls }}" data-action="{{ u.name }}" data-confirm="{{ u.confirm }}">{{ u.label }}</button>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if not action_list and not uninstall_buttons %}
     <div class="text-muted small mb-3">No service actions defined (only (Re)Install available).</div>
     {% endif %}
 
@@ -119,6 +133,9 @@ loadStatus();
 document.querySelectorAll('[data-action]').forEach(btn => {
   btn.addEventListener('click', () => {
     if (SymbiOS.exec.isRunning()) return;
+    /* Show confirmation dialog if data-confirm is set */
+    const confirmMsg = btn.dataset.confirm;
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
     const action = btn.dataset.action;
     const fd = new FormData();
     fd.append('action', action);
