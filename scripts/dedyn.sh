@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2026, Oliver Bohlen
 
 # Source gaboshlib for utility functions
 . /etc/bash/gaboshlib.include

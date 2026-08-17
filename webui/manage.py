@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # SymbiOS - Debian-based server management platform
-# Copyright (C) 2025  SymbiOS Contributors
+# Copyright (c) 2026, Oliver Bohlen
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
