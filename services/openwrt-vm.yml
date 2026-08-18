@@ -120,6 +120,7 @@
         openwrt_image_decompressed: "openwrt-{{ openwrt_version }}-x86-64.img"
         uefi_vars_template: "/usr/share/OVMF/OVMF_VARS_4M.fd"
         serial_console_device: "ttyS0"
+        serial_file_device: "ttyS1"
         serial_baud: "115200n8"
         virt_install_extra_args: >-
           --cpu host
@@ -136,6 +137,7 @@
         openwrt_image_decompressed: "openwrt-{{ openwrt_version }}-armsr-armv8.img"
         uefi_vars_template: "/usr/share/AAVMF/AAVMF_VARS.fd"
         serial_console_device: "ttyAMA0"
+        serial_file_device: "ttyAMA1"
         serial_baud: "115200n8"
         virt_install_extra_args: >-
           --boot loader=/usr/share/AAVMF/AAVMF_CODE.fd,loader_ro=yes,loader_type=pflash,nvram={{ service_root }}/ovmf/OVMF_VARS.fd
@@ -335,11 +337,12 @@
         # --- Patch GRUB for serial console ---
         mkdir -p /tmp/ow-nbd
         mount "${NBD}p1" /tmp/ow-nbd || { qemu-nbd --disconnect "$NBD"; exit 1; }
-        if grep -q "console={{ serial_console_device }}" /tmp/ow-nbd/EFI/openwrt/grub.cfg
+        if grep -q "console={{ serial_file_device }}" /tmp/ow-nbd/EFI/openwrt/grub.cfg
         then
           echo "GRUB already patched"
         else
-          sed -i "s/console=tty1/console={{ serial_console_device }},{{ serial_baud }}/g" \
+          # Patch: console=tty1 -> serial0 (PTY for virsh console) + serial1 (file for log)
+          sed -i "s/console=tty1/console={{ serial_console_device }},{{ serial_baud }} console={{ serial_file_device }},{{ serial_baud }}/g" \
             /tmp/ow-nbd/EFI/openwrt/grub.cfg
           echo "GRUB patched"
         fi
@@ -370,17 +373,18 @@
     # ── Set file permissions ─────────────────────────────────────────────
     # libvirt-qemu (uid 64055, kvm group) needs to traverse the path.
     - name: Ensure openwrt-vm path is traversable by libvirt
-      ansible.builtin.file:
-        path: "{{ item }}"
-        group: kvm
-        mode: "g+x"
-      loop:
-        - /symbios
-        - /symbios/services
-        - "{{ service_root }}"
-        - "{{ service_root }}/images"
-        - "{{ service_root }}/ovmf"
-        - "{{ service_root }}/log"
+      ansible.builtin.shell: |
+        set -e
+        for dir in /symbios /symbios/services {{ service_root }} {{ service_root }}/images {{ service_root }}/ovmf {{ service_root }}/log
+        do
+          # Grant libvirt-qemu (kvm group member) execute permission to traverse
+          setfacl -m u:libvirt-qemu:x "$dir" 2>/dev/null || true
+          # Also ensure kvm group has execute
+          chmod g+x "$dir" 2>/dev/null || true
+        done
+        echo "acl-ok"
+      register: acl_result
+      changed_when: "'acl-ok' in acl_result.stdout"
       when: kvm_capable | bool
 
     - name: Set ownership and permissions on qcow2 image
@@ -520,6 +524,20 @@
       changed_when: false
       when: kvm_capable | bool
 
+    # ── Pre-create serial log with correct ownership ────────────────────
+    # libvirt creates the file as root:root 0600 on VM start.
+    # QEMU (running as libvirt-qemu) then cannot write to it.
+    # Pre-creating with correct ownership prevents this.
+    - name: Pre-create serial log file
+      ansible.builtin.file:
+        path: "{{ service_root }}/log/serial.log"
+        state: touch
+        owner: libvirt-qemu
+        group: kvm
+        mode: "0660"
+      changed_when: false
+      when: kvm_capable | bool
+
     # ── Create VM ────────────────────────────────────────────────────────
     - name: Create OpenWrt VM
       ansible.builtin.shell: |
@@ -534,6 +552,7 @@
           --network network=openwrt-wan,model=virtio,rom.bar=off \
           --network network=openwrt-lan,model=virtio,rom.bar=off \
           --graphics none \
+          --serial pty \
           --serial file,path={{ service_root }}/log/serial.log \
           --import \
           --noautoconsole
