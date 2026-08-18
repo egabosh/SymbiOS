@@ -81,8 +81,29 @@
         path: "{{ docker_path }}/ldap-config/slapd.conf.ldif.done"
       register: slapd_conf_status
 
+    - name: Check if env.openldap exists
+      stat:
+        path: "{{ docker_path }}/env.openldap"
+      register: env_openldap_status
+
+    # If slapd.conf.ldif.done exists but env.openldap is missing, the LDAP
+    # container initialized with passwords we no longer have. Force a full
+    # re-initialization by removing the marker so the entrypoint runs again.
+    - name: Force reinitialize - remove slapd.conf.ldif.done marker
+      ansible.builtin.file:
+        path: "{{ docker_path }}/ldap-config/slapd.conf.ldif.done"
+        state: absent
+      when: slapd_conf_status.stat.exists and not env_openldap_status.stat.exists
+
+    # Stop and remove LDAP container before regenerating LDIFs
+    - name: Stop LDAP container for reinitialization
+      ansible.builtin.shell: docker compose down 2>/dev/null
+      args:
+        chdir: "{{ docker_path }}"
+      when: slapd_conf_status.stat.exists and not env_openldap_status.stat.exists
+
     - name: Generate initial config for ldap
-      when: not slapd_conf_status.stat.exists
+      when: not slapd_conf_status.stat.exists or not env_openldap_status.stat.exists
       block:
 
         # Generate random password for LDAP admin user
@@ -452,13 +473,13 @@
     # Wait for LDAP container to respond to authentication queries
     - name: Wait for LDAP to be ready
       ansible.builtin.shell:
-        cmd:               docker compose exec -T symbios-base-ldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn}} -w {{ ldap_admin_password.stdout }}
+        cmd:               docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn}} -w {{ ldap_admin_password.stdout }}
       args:
         chdir: "{{ docker_path }}"
       register: ldap_ready
       until: ldap_ready.rc == 0
       retries: 60
-      delay: 5
+      delay: 30
       changed_when: false
       no_log: true
 
@@ -470,7 +491,7 @@
 
     - name: Ensure admin user password is admin in LDAP
       ansible.builtin.shell: |
-                      docker compose exec -T symbios-base-ldap ldappasswd -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}" -w "{{ ldap_admin_password.stdout }}" -s admin "uid=admin,ou=users,{{ldap_basedn}}"
+                      docker compose exec -T openldap ldappasswd -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}" -w "{{ ldap_admin_password.stdout }}" -s admin "uid=admin,ou=users,{{ldap_basedn}}"
       args:
         chdir: "{{ docker_path }}"
       no_log: true
