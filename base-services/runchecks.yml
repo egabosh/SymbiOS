@@ -81,12 +81,7 @@
         content: |
           [Unit]
           Description=checks
-          After=syslog.target network.target rc-local.service
-          # rc.local unlocks LUKS, mounts /symbios and starts docker, so the
-          # first check loop (+5 min) already sees all services up. Without a
-          # running rc.local (root-fs setup), the ExecStartPre below is the
-          # fallback: it fails fast and Restart=on-failure retries forever
-          # (StartLimitIntervalSec=0) until the script is available.
+          After=syslog.target network.target
           StartLimitIntervalSec=0
           
           [Service]
@@ -103,8 +98,8 @@
       notify:
       - Restart systemd
 
-    - name: 'add runchecks to startup'
-      command: systemctl enable runchecks
+    - name: 'disable via systemd - started by rc.local'
+      command: systemctl disable runchecks
       args:
         creates: /etc/systemd/system/multi-user.target.wants/runchecks.service
 

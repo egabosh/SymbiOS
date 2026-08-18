@@ -253,7 +253,6 @@ then
       sync
       sleep 2
       reboot
-      break
     fi
     sleep 10
   done
