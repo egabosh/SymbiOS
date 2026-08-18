@@ -111,15 +111,10 @@ fi
 f_run_playbook ${g_git_root}/base-services/localization.yml
 f_run_playbook ${g_git_root}/base-services/hardening.yml
 f_run_playbook ${g_git_root}/base-services/firewall.yml
-f_run_playbook ${g_git_root}/base-services/backup.yml
 f_run_playbook ${g_git_root}/base-services/autoupdate.yml
-f_run_playbook ${g_git_root}/base-services/runchecks.yml
 f_run_playbook ${g_git_root}/base-services/docker.yml
-f_run_playbook ${g_git_root}/base-services/kvm.yml
 f_run_playbook ${g_git_root}/base-services/dedyn.yml
-#f_run_playbook ${g_git_root}/base-services/traefik.yml
 f_run_playbook ${g_git_root}/base-services/ldap.yml
-#f_run_playbook ${g_git_root}/base-services/authelia.yml
 
 # Detect Raspberry Pi and install platform-specific playbooks
 if [ -f /proc/device-tree/model ] && grep -qi "raspberry" /proc/device-tree/model
@@ -129,6 +124,10 @@ then
 fi
 
 f_run_playbook ${g_git_root}/base-services/symbios-ui.yml
+f_run_playbook ${g_git_root}/base-services/kvm.yml
+f_run_playbook ${g_git_root}/base-services/runchecks.yml
+f_run_playbook ${g_git_root}/base-services/backup.yml
+
 
 # Report results
 echo ""

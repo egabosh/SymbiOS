@@ -281,10 +281,11 @@
             # Mount /symbios (no passphrase needed once LUKS is open, fstab entry is noauto)
             mount /symbios 2>/dev/null || true
           else
-            echo "WARNING: No LUKS device (CRYPT_LUKS_SYMBIOS_DATA) found - /symbios not encrypted. Docker and containerd may fail."
+            echo "WARNING: No LUKS device (CRYPT_LUKS_SYMBIOS_DATA) found - /symbios not encrypted."
           fi
           systemctl start docker
           [[ -x /usr/sbin/lightdm ]] && systemctl start lightdm
+          sleep 30 ; systemctl start runchecks
 
     - name: Deploy rc-local systemd unit with Install section
       ansible.builtin.copy:
