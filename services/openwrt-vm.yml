@@ -1,0 +1,586 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   short_description: Deploy an OpenWrt QEMU/KVM virtual machine
+#   description: |
+#     Deploys an OpenWrt 24.10.2 VM with UEFI boot, serial console, and two
+#     NICs: WAN (DHCP via libvirt NAT to host internet) and LAN (isolated
+#     bridge at 172.18.0.1/24). Supports x86_64 (amd64) and arm64 (aarch64)
+#     hosts. Requires the KVM base playbook (base-services/kvm.yml) first.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Virtualization
+#   service_control:
+#     services:
+#     - name: openwrt
+#       type: libvirt
+#       status: virsh list --name | grep -q openwrt
+#     logs:
+#     - name: openwrt-serial
+#       command: tail -f /symbios/services/openwrt-vm/log/serial.log
+#   uninstall:
+#     stop: virsh destroy openwrt; virsh undefine openwrt --nvram
+#     restart: virsh destroy openwrt; virsh start openwrt
+#     program_paths:
+#       - /symbios/services/openwrt-vm/
+#   actions:
+#     start: virsh start openwrt
+#     stop: virsh destroy openwrt
+#     restart: virsh destroy openwrt; virsh start openwrt
+#
+
+---
+
+- name: Deploy OpenWrt KVM virtual machine
+  hosts: all
+
+  vars:
+    service_name: openwrt-vm
+    openwrt_version: "24.10.2"
+    vm_ram_mb: 512
+    vm_vcpus: 2
+    service_root: "{{ services_root }}/{{ service_name }}"
+    # WAN network (NAT to host internet)
+    wan_subnet: "172.17.0"
+    wan_netmask: "255.255.255.0"
+    wan_dhcp_start: "172.17.0.100"
+    wan_dhcp_end: "172.17.0.200"
+    # LAN network (isolated, OpenWrt is the gateway)
+    lan_subnet: "172.18.0"
+    lan_netmask: "255.255.255.0"
+
+  tasks:
+
+    # ── Prerequisites ──────────────────────────────────────────────────
+    - name: Check if we are in a container (no systemd)
+      ansible.builtin.stat:
+        path: /lib/systemd/systemd
+      register: nocontainer
+
+    - name: Check system architecture
+      ansible.builtin.command: uname -m
+      register: host_arch
+      changed_when: false
+      when: nocontainer.stat.exists
+
+    - name: Check for hardware virtualization support
+      ansible.builtin.command: grep -Ec '(vmx|svm)' /proc/cpuinfo
+      register: cpu_virt_check
+      changed_when: false
+      failed_when: false
+      when: nocontainer.stat.exists
+
+    - name: Set architecture facts
+      ansible.builtin.set_fact:
+        is_arm64: "{{ host_arch.stdout | default('') == 'aarch64' }}"
+        is_x86_64: "{{ host_arch.stdout | default('') == 'x86_64' }}"
+        has_hw_virt: "{{ (cpu_virt_check.rc | default(1)) == 0 and (cpu_virt_check.stdout | default('0') | int) > 0 }}"
+        kvm_capable: "{{ nocontainer.stat.exists | default(false) | bool and (host_arch.stdout | default('') in ['x86_64', 'aarch64']) }}"
+      when: nocontainer.stat.exists
+
+    - name: Set default architecture facts when in container
+      ansible.builtin.set_fact:
+        is_arm64: false
+        is_x86_64: false
+        has_hw_virt: false
+        kvm_capable: false
+      when: not nocontainer.stat.exists
+
+    - name: Skip if not KVM-capable
+      ansible.builtin.debug:
+        msg: "Skipping OpenWrt VM - not a KVM-capable host (arch={{ host_arch.stdout | default('unknown') }})"
+      when: not kvm_capable | bool
+
+    # ── Architecture-specific variables ──────────────────────────────────
+    - name: Set x86_64 facts
+      ansible.builtin.set_fact:
+        openwrt_image_url: "https://downloads.openwrt.org/releases/{{ openwrt_version }}/targets/x86/64/openwrt-{{ openwrt_version }}-x86-64-generic-ext4-combined-efi.img.gz"
+        openwrt_image_filename: "openwrt-{{ openwrt_version }}-x86-64-generic-ext4-combined-efi.img.gz"
+        openwrt_image_decompressed: "openwrt-{{ openwrt_version }}-x86-64.img"
+        uefi_vars_template: "/usr/share/OVMF/OVMF_VARS_4M.fd"
+        serial_console_device: "ttyS0"
+        serial_baud: "115200n8"
+        virt_install_extra_args: >-
+          --cpu host
+          --boot uefi --bios /usr/share/OVMF/OVMF_CODE_4M.fd --nvram {{ service_root }}/ovmf/OVMF_VARS.fd
+          --machine q35
+      when:
+        - kvm_capable | bool
+        - is_x86_64 | bool
+
+    - name: Set ARM64 facts
+      ansible.builtin.set_fact:
+        openwrt_image_url: "https://downloads.openwrt.org/releases/{{ openwrt_version }}/targets/armsr/armv8/openwrt-{{ openwrt_version }}-armsr-armv8-generic-ext4-combined-efi.img.gz"
+        openwrt_image_filename: "openwrt-{{ openwrt_version }}-armsr-armv8-generic-ext4-combined-efi.img.gz"
+        openwrt_image_decompressed: "openwrt-{{ openwrt_version }}-armsr-armv8.img"
+        uefi_vars_template: "/usr/share/AAVMF/AAVMF_VARS.fd"
+        serial_console_device: "ttyAMA0"
+        serial_baud: "115200n8"
+        virt_install_extra_args: >-
+          --boot loader=/usr/share/AAVMF/AAVMF_CODE.fd,loader_ro=yes,loader_type=pflash,nvram={{ service_root }}/ovmf/OVMF_VARS.fd
+          --features acpi=off
+          --machine virt
+      when:
+        - kvm_capable | bool
+        - is_arm64 | bool
+
+    # ── Directory structure ──────────────────────────────────────────────
+    - name: Create service directory structure
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: root
+        group: kvm
+        state: directory
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ service_root }}", mode: "0750" }
+        - { path: "{{ service_root }}/iso", mode: "0755" }
+        - { path: "{{ service_root }}/images", mode: "0750" }
+        - { path: "{{ service_root }}/ovmf", mode: "0750" }
+        - { path: "{{ service_root }}/log", mode: "0750" }
+      when: kvm_capable | bool
+
+    # ── Install dependencies ─────────────────────────────────────────────
+    - name: Ensure KVM packages are installed
+      ansible.builtin.apt:
+        name:
+          - qemu-utils
+        state: present
+        update_cache: yes
+        cache_valid_time: 3600
+        install_recommends: no
+      when: kvm_capable | bool
+
+    # ── Download firmware ────────────────────────────────────────────────
+    - name: Download OpenWrt firmware image
+      ansible.builtin.get_url:
+        url: "{{ openwrt_image_url }}"
+        dest: "{{ service_root }}/iso/{{ openwrt_image_filename }}"
+        mode: "0640"
+        owner: root
+        group: kvm
+      when: kvm_capable | bool
+
+    - name: Check if qcow2 image already exists
+      ansible.builtin.stat:
+        path: "{{ service_root }}/images/openwrt.qcow2"
+      register: qcow2_image
+      when: kvm_capable | bool
+
+    # ── Decompress and convert to qcow2 ─────────────────────────────────
+    - name: Decompress OpenWrt firmware image
+      ansible.builtin.shell: |
+        zcat "{{ service_root }}/iso/{{ openwrt_image_filename }}" > "{{ service_root }}/iso/{{ openwrt_image_decompressed }}" || true
+        test -s "{{ service_root }}/iso/{{ openwrt_image_decompressed }}"
+      args:
+        creates: "{{ service_root }}/iso/{{ openwrt_image_decompressed }}"
+      when:
+        - kvm_capable | bool
+        - not qcow2_image.stat.exists | default(false) | bool
+
+    - name: Convert raw image to qcow2
+      ansible.builtin.shell: |
+        qemu-img convert -f raw -O qcow2 \
+          "{{ service_root }}/iso/{{ openwrt_image_decompressed }}" \
+          "{{ service_root }}/images/openwrt.qcow2"
+        test -s "{{ service_root }}/images/openwrt.qcow2"
+      when:
+        - kvm_capable | bool
+        - not qcow2_image.stat.exists | default(false) | bool
+
+    # ── Ensure nbd module is available ───────────────────────────────────
+    - name: Load nbd kernel module
+      community.general.modprobe:
+        name: nbd
+        state: present
+        params: "max_part=8"
+      when: kvm_capable | bool
+
+    # ── Write uci-defaults script to temp file (avoids heredoc-in-shell) ─
+    - name: Write uci-defaults network config script
+      ansible.builtin.copy:
+        dest: /tmp/openwrt-uci-defaults
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # OpenWrt QEMU VM - WAN + LAN network config (first boot only)
+          # eth0 = WAN (DHCP client, connects to host internet via libvirt NAT)
+          # eth1 = LAN (static 172.18.0.1/24, internal network)
+
+          # Remove default bridge device and LAN interface
+          while uci delete network.@device[0] 2>/dev/null; do :; done
+          uci delete network.lan 2>/dev/null
+          uci delete network.wan6 2>/dev/null
+
+          # WAN interface on eth0 (DHCP)
+          uci set network.wan=interface
+          uci set network.wan.proto=dhcp
+          uci set network.wan.device=eth0
+
+          # LAN interface on eth1 (static)
+          uci set network.lan=interface
+          uci set network.lan.proto=static
+          uci set network.lan.device=eth1
+          uci set network.lan.ipaddr=172.18.0.1
+          uci set network.lan.netmask=255.255.255.0
+
+          # Clean firewall and rebuild zones
+          while uci delete firewall.@zone[0] 2>/dev/null; do :; done
+          while uci delete firewall.@forwarding[0] 2>/dev/null; do :; done
+          while uci delete firewall.@rule[0] 2>/dev/null; do :; done
+
+          uci set firewall.defaults=syn_flood
+          uci set firewall.defaults.syn_flood=1
+          uci set firewall.defaults.input=REJECT
+          uci set firewall.defaults.output=ACCEPT
+          uci set firewall.defaults.forward=REJECT
+
+          uci set firewall.wan=zone
+          uci set firewall.wan.name=wan
+          uci set firewall.wan.network=wan
+          uci set firewall.wan.input=REJECT
+          uci set firewall.wan.output=ACCEPT
+          uci set firewall.wan.forward=REJECT
+
+          uci set firewall.lan=zone
+          uci set firewall.lan.name=lan
+          uci set firewall.lan.network=lan
+          uci set firewall.lan.input=ACCEPT
+          uci set firewall.lan.output=ACCEPT
+          uci set firewall.lan.forward=ACCEPT
+
+          uci set firewall.wan_forward=forwarding
+          uci set firewall.wan_forward.src=lan
+          uci set firewall.wan_forward.dest=wan
+
+          # Allow DHCP on WAN
+          uci set firewall.allow_dhcp=rule
+          uci set firewall.allow_dhcp.name=Allow-DHCP-Renew
+          uci set firewall.allow_dhcp.src=wan
+          uci set firewall.allow_dhcp.proto=udp
+          uci set firewall.allow_dhcp.dest_port=68
+          uci set firewall.allow_dhcp.target=ACCEPT
+          uci set firewall.allow_dhcp.family=ipv4
+
+          # Allow ping
+          uci set firewall.allow_ping=rule
+          uci set firewall.allow_ping.name=Allow-Ping
+          uci set firewall.allow_ping.src=wan
+          uci set firewall.allow_ping.proto=icmp
+          uci set firewall.allow_ping.icmp_type=echo-request
+          uci set firewall.allow_ping.family=ipv4
+          uci set firewall.allow_ping.target=ACCEPT
+
+          uci commit network
+          uci commit firewall
+          exit 0
+      when: kvm_capable | bool
+
+    # ── Patch image: serial console + uci-defaults (single nbd session) ──
+    # Both operations need qcow2 access. We do them in one connect/disconnect
+    # cycle to avoid the qemu-nbd write-lock race condition between tasks.
+    - name: Patch qcow2 image (serial console + uci-defaults)
+      ansible.builtin.shell: |
+        set -e
+        IMAGE="{{ service_root }}/images/openwrt.qcow2"
+        # Disconnect ALL nbd devices to clear any stale state
+        for dev in /dev/nbd*; do
+          [ -b "$dev" ] && qemu-nbd --disconnect "$dev" 2>/dev/null || true
+        done
+        sleep 2
+        # Find a working nbd device (nbd0 may have stale I/O errors)
+        NBD=""
+        for try in /dev/nbd0 /dev/nbd1 /dev/nbd2; do
+          qemu-nbd --connect="$try" "$IMAGE" 2>/dev/null || continue
+          sleep 2
+          for i in $(seq 1 10); do
+            [ -b "${try}p1" ] && [ -b "${try}p2" ] && break
+            sleep 1
+          done
+          if mount "${try}p1" /tmp/ow-nbd 2>/dev/null; then
+            umount /tmp/ow-nbd 2>/dev/null
+            NBD="$try"
+            break
+          else
+            qemu-nbd --disconnect "$try" 2>/dev/null || true
+          fi
+        done
+        if [ -z "$NBD" ]; then
+          echo "ERROR: No working nbd device found"
+          exit 1
+        fi
+        echo "Using $NBD"
+
+        # --- Patch GRUB for serial console ---
+        mkdir -p /tmp/ow-nbd
+        mount "${NBD}p1" /tmp/ow-nbd || { qemu-nbd --disconnect "$NBD"; exit 1; }
+        if grep -q "console={{ serial_console_device }}" /tmp/ow-nbd/EFI/openwrt/grub.cfg
+        then
+          echo "GRUB already patched"
+        else
+          sed -i "s/console=tty1/console={{ serial_console_device }},{{ serial_baud }}/g" \
+            /tmp/ow-nbd/EFI/openwrt/grub.cfg
+          echo "GRUB patched"
+        fi
+        cat /tmp/ow-nbd/EFI/openwrt/grub.cfg
+        umount /tmp/ow-nbd
+        rmdir /tmp/ow-nbd || true
+
+        # --- Inject uci-defaults network config ---
+        mkdir -p /tmp/ow-nbd
+        mount "${NBD}p2" /tmp/ow-nbd || { qemu-nbd --disconnect "$NBD"; exit 1; }
+        if [ -f /tmp/ow-nbd/etc/uci-defaults/99-openwrt-network ]
+        then
+          echo "uci-defaults already injected"
+        else
+          mkdir -p /tmp/ow-nbd/etc/uci-defaults
+          cp /tmp/openwrt-uci-defaults /tmp/ow-nbd/etc/uci-defaults/99-openwrt-network
+          chmod 755 /tmp/ow-nbd/etc/uci-defaults/99-openwrt-network
+          echo "uci-defaults injected"
+        fi
+        umount /tmp/ow-nbd
+        rmdir /tmp/ow-nbd || true
+
+        qemu-nbd --disconnect "$NBD"
+      register: image_patch_result
+      changed_when: "'GRUB patched' in image_patch_result.stdout or 'uci-defaults injected' in image_patch_result.stdout"
+      when: kvm_capable | bool
+
+    # ── Set file permissions ─────────────────────────────────────────────
+    # libvirt-qemu (uid 64055, kvm group) needs to traverse the path.
+    - name: Ensure openwrt-vm path is traversable by libvirt
+      ansible.builtin.file:
+        path: "{{ item }}"
+        group: kvm
+        mode: "g+x"
+      loop:
+        - /symbios
+        - /symbios/services
+        - "{{ service_root }}"
+        - "{{ service_root }}/images"
+        - "{{ service_root }}/ovmf"
+        - "{{ service_root }}/log"
+      when: kvm_capable | bool
+
+    - name: Set ownership and permissions on qcow2 image
+      ansible.builtin.file:
+        path: "{{ service_root }}/images/openwrt.qcow2"
+        owner: root
+        group: kvm
+        mode: "0660"
+      when: kvm_capable | bool
+
+    # ── OVMF/UEFI firmware variables ────────────────────────────────────
+    - name: Copy UEFI VARS template for new VM
+      ansible.builtin.copy:
+        src: "{{ uefi_vars_template }}"
+        dest: "{{ service_root }}/ovmf/OVMF_VARS.fd"
+        remote_src: yes
+        owner: root
+        group: kvm
+        mode: "0640"
+      when: kvm_capable | bool
+
+    # ── Ensure bridge module is loaded for sysctl ────────────────────────
+    - name: Load bridge kernel module
+      community.general.modprobe:
+        name: bridge
+        state: present
+      when: kvm_capable | bool
+
+    # ── bridge-nf-call-iptables must be 0 ───────────────────────────────
+    # UFW FORWARD DROP blocks DHCP/ARP on bridges when this is enabled.
+    # The /proc/sys entries only appear after a bridge interface exists,
+    # so we write the sysctl file and apply it after network creation.
+    - name: Disable bridge-nf-call-iptables via sysctl file
+      ansible.builtin.lineinfile:
+        path: /etc/sysctl.d/99-openwrt-vm.conf
+        line: "{{ item }} = 0"
+        regexp: "^{{ item }} "
+        create: yes
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - net.bridge.bridge-nf-call-iptables
+        - net.bridge.bridge-nf-call-ip6tables
+      when: kvm_capable | bool
+
+    # ── Libvirt networks ─────────────────────────────────────────────────
+    # WAN network: NAT mode, DHCP, bridges to host internet
+    - name: Check if openwrt-wan network exists
+      ansible.builtin.command: virsh net-info openwrt-wan
+      register: ow_wan_net
+      changed_when: false
+      failed_when: false
+      when: kvm_capable | bool
+
+    - name: Define openwrt-wan libvirt network
+      ansible.builtin.shell: |
+        cat > /tmp/ow-wan-net.xml << WANEOF
+        <network>
+          <name>openwrt-wan</name>
+          <bridge name="br-ow-wan"/>
+          <forward mode="nat"/>
+          <ip address="{{ wan_subnet }}.1" netmask="{{ wan_netmask }}">
+            <dhcp>
+              <range start="{{ wan_dhcp_start }}" end="{{ wan_dhcp_end }}"/>
+            </dhcp>
+          </ip>
+        </network>
+        WANEOF
+        virsh net-define /tmp/ow-wan-net.xml
+        virsh net-start openwrt-wan
+        virsh net-autostart openwrt-wan
+        rm -f /tmp/ow-wan-net.xml
+        echo "wan-network-created"
+      register: wan_net_create
+      changed_when: "'wan-network-created' in wan_net_create.stdout"
+      when:
+        - kvm_capable | bool
+        - ow_wan_net.rc | default(1) != 0
+
+    # LAN network: isolated (no forward), OpenWrt acts as gateway
+    - name: Check if openwrt-lan network exists
+      ansible.builtin.command: virsh net-info openwrt-lan
+      register: ow_lan_net
+      changed_when: false
+      failed_when: false
+      when: kvm_capable | bool
+
+    - name: Define openwrt-lan libvirt network
+      ansible.builtin.shell: |
+        cat > /tmp/ow-lan-net.xml << LANEOF
+        <network>
+          <name>openwrt-lan</name>
+          <bridge name="br-ow-lan"/>
+          <ip address="{{ lan_subnet }}.1" netmask="{{ lan_netmask }}"/>
+        </network>
+        LANEOF
+        virsh net-define /tmp/ow-lan-net.xml
+        virsh net-start openwrt-lan
+        virsh net-autostart openwrt-lan
+        rm -f /tmp/ow-lan-net.xml
+        echo "lan-network-created"
+      register: lan_net_create
+      changed_when: "'lan-network-created' in lan_net_create.stdout"
+      when:
+        - kvm_capable | bool
+        - ow_lan_net.rc | default(1) != 0
+
+    # Apply bridge sysctl after networks are created (bridges exist now)
+    - name: Apply bridge-nf-call-iptables sysctl
+      ansible.builtin.shell: sysctl -p /etc/sysctl.d/99-openwrt-vm.conf 2>/dev/null || true
+      changed_when: false
+      when: kvm_capable | bool
+
+    # ── Ensure libvirtd is running ───────────────────────────────────────
+    - name: Ensure libvirtd is started and enabled
+      ansible.builtin.service:
+        name: libvirtd
+        state: started
+        enabled: yes
+      when: kvm_capable | bool
+
+    # ── Check if VM already exists ───────────────────────────────────────
+    - name: Check if openwrt VM already exists
+      ansible.builtin.command: virsh list --name --all
+      register: vm_list
+      changed_when: false
+      when: kvm_capable | bool
+
+    # ── Release any lingering nbd connections before VM creation ─────────
+    - name: Ensure nbd0 is fully released
+      ansible.builtin.shell: |
+        for dev in /dev/nbd*; do
+          [ -b "$dev" ] && qemu-nbd --disconnect "$dev" 2>/dev/null || true
+        done
+        sleep 2
+      changed_when: false
+      when: kvm_capable | bool
+
+    # ── Create VM ────────────────────────────────────────────────────────
+    - name: Create OpenWrt VM
+      ansible.builtin.shell: |
+        set -e
+        virt-install \
+          --name openwrt \
+          --ram {{ vm_ram_mb }} \
+          --vcpus {{ vm_vcpus }} \
+          --os-variant generic \
+          --disk path={{ service_root }}/images/openwrt.qcow2,format=qcow2,bus=virtio \
+          {{ virt_install_extra_args }} \
+          --network network=openwrt-wan,model=virtio,rom.bar=off \
+          --network network=openwrt-lan,model=virtio,rom.bar=off \
+          --graphics none \
+          --serial file,path={{ service_root }}/log/serial.log \
+          --import \
+          --noautoconsole
+        echo "vm-created"
+      register: vm_create
+      changed_when: "'vm-created' in vm_create.stdout"
+      when:
+        - kvm_capable | bool
+        - "'openwrt' not in vm_list.stdout_lines | default([])"
+
+    - name: Start OpenWrt VM if stopped
+      ansible.builtin.command: virsh start openwrt
+      register: vm_start
+      changed_when: "'started' in vm_start.stdout"
+      failed_when: false
+      when:
+        - kvm_capable | bool
+        - "'openwrt' in vm_list.stdout_lines | default([])"
+        - vm_create is skipped | default(true)
+
+    - name: Ensure OpenWrt VM is set to autostart
+      ansible.builtin.command: virsh autostart openwrt
+      changed_when: false
+      failed_when: false
+      when: kvm_capable | bool
+
+    # ── Healthcheck ──────────────────────────────────────────────────────
+    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-openwrt-vm.check
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-openwrt-vm.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Healthcheck for openwrt-vm (KVM virtual machine)
+          if ! virsh list --name | grep -q openwrt
+          then
+            g_echo_error "Healthcheck failed for openwrt-vm: VM not running"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+      when: kvm_capable | bool
+
+    # ── Register playbook ────────────────────────────────────────────────
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/openwrt-vm.yml"
+      changed_when: false
+      when: kvm_capable | bool
