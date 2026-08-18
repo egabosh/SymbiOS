@@ -349,30 +349,24 @@
         backup: yes
 
     - name: Create symbios_base_services network
-      community.docker.docker_network:
-        name: symbios_base_services
-        enable_ipv6: yes
-        driver_options:
-          com.docker.network.bridge.name: br-symbios-base
-        ipam_config:
-          - subnet: 192.168.41.0/24
-            gateway: 192.168.41.1
-          # Local v6 IP  
-          - subnet: fdaa:a192:b168:cd41::/64
-            gateway: fdaa:a192:b168:cd41::1
+      ansible.builtin.shell: |
+        docker network inspect symbios_base_services >/dev/null 2>&1 && exit 0
+        docker network create --ipv6 --driver bridge \
+          --opt com.docker.network.bridge.name=base-services \
+          --subnet 192.168.41.0/24 --gateway 192.168.41.1 \
+          --subnet fdaa:a192:b168:cd41::/64 --gateway fdaa:a192:b168:cd41::1 \
+          symbios_base_services
+      changed_when: false
 
     - name: Create symbios_services network
-      community.docker.docker_network:
-        name: symbios_services
-        enable_ipv6: yes
-        driver_options:
-          com.docker.network.bridge.name: br-symbios-services
-        ipam_config:
-          - subnet: 192.168.42.0/24
-            gateway: 192.168.42.1
-          # Local v6 IP  
-          - subnet: fdaa:a192:b168:cd42::/64
-            gateway: fdaa:a192:b168:cd42::1
+      ansible.builtin.shell: |
+        docker network inspect symbios_services >/dev/null 2>&1 && exit 0
+        docker network create --ipv6 --driver bridge \
+          --opt com.docker.network.bridge.name=services \
+          --subnet 192.168.42.0/24 --gateway 192.168.42.1 \
+          --subnet fdaa:a192:b168:cd42::/64 --gateway fdaa:a192:b168:cd42::1 \
+          symbios_services
+      changed_when: false
 
 
     - name: Register playbook as installed

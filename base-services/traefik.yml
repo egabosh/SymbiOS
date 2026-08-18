@@ -292,16 +292,16 @@
         port: '443'
         proto: tcp
 
-    - name: Allow access from br-symbios-base to Docker-Host for services running without docker
+    - name: Allow access from base-services to Docker-Host for services running without docker
       community.general.ufw:
         rule: allow
-        interface: br-symbios-base
+        interface: base-services
         direction: in
 
-    - name: Allow access from br-symbios-services to Docker-Host for services running without docker
+    - name: Allow access from services to Docker-Host for services running without docker
       community.general.ufw:
         rule: allow
-        interface: br-symbios-services
+        interface: services
         direction: in
 
     - name: Install logrotate for Traefik access log

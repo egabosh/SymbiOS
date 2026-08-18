@@ -292,10 +292,10 @@ Operational notes for FRITZ!Box with dual-stack:
 
 SymbiOS uses two Docker networks to separate base services from user services:
 
-- **`symbios_base_services`** (bridge `br-symbios-base`, subnet `192.168.41.0/24`):
+- **`symbios_base_services`** (bridge `base-services`, subnet `192.168.41.0/24`):
   All base services (Traefik, LDAP, Authelia, WebUI) and Traefik's static IP
   `192.168.41.200`. Traefik bridges to the user service network.
-- **`symbios_services`** (bridge `br-symbios-services`, subnet `192.168.42.0/24`):
+- **`symbios_services`** (bridge `services`, subnet `192.168.42.0/24`):
   Traefik and all user service containers that should be reachable via Traefik.
   User services cannot reach base services directly.
 
@@ -474,8 +474,8 @@ services to keep the system predictable and easy to debug.
 
 | Network | Bridge | Purpose |
 |---------|--------|---------|
-| `symbios_base_services` | `br-symbios-base` | All base services (Traefik, LDAP, Authelia, WebUI) |
-| `symbios_services` | `br-symbios-services` | Traefik + user services reachable via Traefik |
+| `symbios_base_services` | `base-services` | All base services (Traefik, LDAP, Authelia, WebUI) |
+| `symbios_services` | `services` | Traefik + user services reachable via Traefik |
 | `symbios-<service>` | `symbios-<service>` | Internal network for multi-container service stacks |
 
 User service internal networks (e.g. `symbios-matrix`, `symbios-nextcloud`) are
