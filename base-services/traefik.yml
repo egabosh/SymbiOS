@@ -342,6 +342,11 @@
         - "{{ docker_path }}/letsencrypt/acme.json"
 
 
+    - name: Ensure traefik is running
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: "{{ docker_path }}"
+
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/traefik.yml"
       changed_when: false

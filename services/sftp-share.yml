@@ -267,6 +267,11 @@
       validate: /bin/bash -n %s
 
   
+  - name: Ensure sftp-share is running
+    ansible.builtin.shell: docker compose up -d
+    args:
+      chdir: /symbios/services/sftp-share
+
   - name: Register playbook as installed
     ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/sftp-share.yml"
     changed_when: false
