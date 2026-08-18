@@ -152,6 +152,12 @@
         directory_mode: "0770"
       notify: Restart {{ service_name }}
 
+    - name: Clear Python bytecode cache inside webui
+      ansible.builtin.shell: >
+        docker exec symbios-webui
+        find /app -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; true
+      changed_when: false
+
     - name: Set permissions
       ansible.builtin.command:
         cmd: "find {{ docker_path }}/webui -type f -exec chmod o+r {} +"
@@ -283,7 +289,8 @@
           # mount data dsik only if exists
           if blkid | grep -q 'LABEL="SYMBIOS_DATA"'
           then
-            echo "mounting Symbios data disk"
+            echo "checking and mounting Symbios data disk"
+            fsck -y LABEL=SYMBIOS_DATA
             mount -o noatime LABEL=SYMBIOS_DATA /symbios
           fi
           systemctl start docker
