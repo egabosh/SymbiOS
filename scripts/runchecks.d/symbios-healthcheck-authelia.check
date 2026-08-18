@@ -1,6 +1,6 @@
 # Healthcheck for authelia (HTTP health endpoint)
 f_check_cache "symbios-healthcheck-authelia" || return 2>/dev/null || true
-if ! docker exec authelia wget -q -O /dev/null --timeout=10 http://localhost:9091/api/health 2>/dev/null
+if ! docker exec symbios-base-authelia wget -q -O /dev/null --timeout=10 http://localhost:9091/api/health 2>/dev/null
 then
-  g_echo_error "Healthcheck failed for authelia: HTTP health endpoint unreachable"
+  g_echo_error "Healthcheck failed for symbios-base-authelia: HTTP health endpoint unreachable"
 fi

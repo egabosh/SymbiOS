@@ -336,7 +336,7 @@
               build:
                 context: .
                 dockerfile: Dockerfile
-              container_name: openldap
+              container_name: symbios-base-ldap
               ports:
                 - "127.0.0.1:389:389"
               volumes:
@@ -345,16 +345,11 @@
                 - /etc/localtime:/etc/localtime:ro
               restart: unless-stopped
               networks:
-                - ldap
-                - traefik
+                - symbios_base_services
 
 
           networks:
-            ldap:
-              driver: bridge
-              driver_opts:
-                com.docker.network.bridge.name: br-ldap
-            traefik:
+            symbios_base_services:
               external: true
 
         backup: yes        
@@ -457,7 +452,7 @@
     # Wait for LDAP container to respond to authentication queries
     - name: Wait for LDAP to be ready
       ansible.builtin.shell:
-        cmd: docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn}} -w {{ ldap_admin_password.stdout }}
+        cmd:               docker compose exec -T symbios-base-ldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn}} -w {{ ldap_admin_password.stdout }}
       args:
         chdir: "{{ docker_path }}"
       register: ldap_ready
@@ -475,7 +470,7 @@
 
     - name: Ensure admin user password is admin in LDAP
       ansible.builtin.shell: |
-        docker compose exec -T openldap ldappasswd -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}" -w "{{ ldap_admin_password.stdout }}" -s admin "uid=admin,ou=users,{{ldap_basedn}}"
+                      docker compose exec -T symbios-base-ldap ldappasswd -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}" -w "{{ ldap_admin_password.stdout }}" -s admin "uid=admin,ou=users,{{ldap_basedn}}"
       args:
         chdir: "{{ docker_path }}"
       no_log: true

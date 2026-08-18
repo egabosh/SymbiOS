@@ -276,7 +276,7 @@
                   condition: service_started
               networks:
                 openwebui--network: {}
-                traefik: null
+                symbios_services: null
 
             searxng:
               image: searxng/searxng:latest
@@ -304,7 +304,7 @@
               driver: bridge
               driver_opts:
                 com.docker.network.bridge.name: br-openwebui
-            traefik:
+            symbios_services:
               external: true
 
       notify: Restart openwebui

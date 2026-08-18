@@ -102,7 +102,7 @@
                 ND_LISTENBRAINZ_ENABLED: false
                 ND_SCANNER_PURGEMISSING: always
               networks:
-                - traefik
+                - symbios_services
               user: "33"
               volumes:
                 - /data-crypt/share/Musik/Uploaddatum:/music:ro
@@ -110,7 +110,7 @@
                 - /etc/localtime:/etc/localtime:ro
 
           networks:
-            traefik:
+            symbios_services:
               external: true
 
         backup: yes

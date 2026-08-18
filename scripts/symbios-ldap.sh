@@ -167,7 +167,7 @@ Commands:
 
 Environment:
   CONFIG_PATH    Path to inventory.yml (default: /config/inventory.yml)
-  LDAP_URI       LDAP server URI (default: ldap://openldap)
+  LDAP_URI       LDAP server URI (default: ldap://symbios-base-ldap)
 EOF
 }
 

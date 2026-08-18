@@ -145,12 +145,74 @@ to know: title, description, available actions, status checks, and log streams.
 
 ## Rules of thumb
 
-- **Always join the `traefik` external network** - otherwise Traefik cannot reach the container.
+- **Always join the `symbios_services` external network** - otherwise Traefik cannot reach the container.
 - **Never use `traefik.*` Docker labels** - the Docker provider is disabled. Use a file-provider snippet instead.
 - Pick a unique subdomain: `{{ service_name }}.{{ base_domain }}`
 - Protect the route with `authelia@file` unless it must be public. Public routes still get `secHeaders@file`.
 - Use `{{ acme_resolver }}` to select the Let's Encrypt resolver.
 - For non-HTTP services (SFTP, TCP/UDP relays), just publish the port in Compose and open it with `ufw`.
+
+---
+
+## Naming conventions
+
+Follow these naming rules so containers, networks, and services are consistent
+across the system.
+
+### Container names
+
+- **User services**: `symbios-<service>` (e.g. `symbios-jellyfin`, `symbios-nextcloud`)
+- **Sub-containers**: `symbios-<service>-<role>` (e.g. `symbios-nextcloud-db`, `symbios-matrix-synapse`)
+- **Base services** (do not touch): `symbios-base-*` (e.g. `symbios-base-traefik`, `symbios-base-ldap`)
+
+### Docker networks
+
+- **Always join** `symbios_services` (external, created by `docker.yml`).
+- **Multi-container stacks** create an internal network named `symbios-<service>`
+  (e.g. `symbios-matrix`, `symbios-nextcloud`). Set `com.docker.network.bridge.name`
+  to match.
+- **Single-container services** only join `symbios_services` - no extra network needed.
+
+### Service names (Docker Compose)
+
+Keep the service name short (for DNS resolution) and set `container_name` to the
+full prefixed name:
+
+```yaml
+services:
+  myapp:
+    image: myapp:latest
+    container_name: symbios-myapp
+    networks:
+      - symbios_services
+
+networks:
+  symbios_services:
+    external: true
+```
+
+### Example pattern
+
+```yaml
+name: ""
+
+services:
+  symbios-myapp:
+    image: myapp:latest
+    container_name: symbios-myapp
+    restart: unless-stopped
+    networks:
+      symbios-internal: {}
+      symbios_services: null
+
+networks:
+  symbios-internal:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: symbios-myapp
+  symbios_services:
+    external: true
+```
 
 ---
 

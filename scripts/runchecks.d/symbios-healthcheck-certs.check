@@ -2,7 +2,7 @@
 f_check_cache "symbios-healthcheck-certs" || return 2>/dev/null || true
 
 g_base_domain=$(f_symbios_var base_domain "symbios.local")
-g_trae_ip=$(docker inspect traefik --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null)
+g_trae_ip=$(docker inspect symbios-base-traefik --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null)
 if [[ -z "$g_trae_ip" ]]
 then
   g_echo_error "Cannot determine Traefik IP for cert checks"

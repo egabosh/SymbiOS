@@ -19,4 +19,4 @@
 import os
 
 CONFIG_PATH = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
-LDAP_URI = os.environ.get('LDAP_URI', 'ldap://openldap')
+LDAP_URI = os.environ.get('LDAP_URI', 'ldap://symbios-base-ldap')

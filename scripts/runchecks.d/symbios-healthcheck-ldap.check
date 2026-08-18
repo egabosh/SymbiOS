@@ -1,6 +1,6 @@
-# Healthcheck for openldap (LDAP bind test)
+# Healthcheck for symbios-base-ldap (LDAP bind test)
 f_check_cache "symbios-healthcheck-ldap" || return 2>/dev/null || true
-g_ldap_ip=$(docker inspect openldap --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' 2>/dev/null | grep '^192\.168\.' | head -1)
+g_ldap_ip=$(docker inspect symbios-base-ldap --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' 2>/dev/null | grep '^192\.168\.' | head -1)
 f_symbios_ldap_init
 if [[ -z "$g_ldap_ip" ]]
 then

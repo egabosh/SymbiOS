@@ -2,7 +2,7 @@
 # SymbiOS - Write SSH authorized_keys from stdin
 # Usage: echo "key1\nkey2" | symbios-write-authorized-keys.sh
 # Reads keys from stdin and writes to /root/.ssh/authorized_keys
-# Always preserves the symbios-webui exec-gateway key.
+# Always preserves the symbios-base-webui exec-gateway key.
 
 source /etc/bash/gaboshlib.include
 
@@ -44,13 +44,13 @@ then
   exit 1
 fi
 
-# Preserve the symbios-webui exec-gateway key: if the new input does not
+# Preserve the symbios-base-webui exec-gateway key: if the new input does not
 # contain it, extract it from the old file and append it.
-if ! grep -q 'symbios-webui' "$g_tmp" 2>/dev/null
+if ! grep -q 'symbios-base-webui' "$g_tmp" 2>/dev/null
 then
-  if [[ -f "$g_keys_file" ]] && grep -q 'symbios-webui' "$g_keys_file" 2>/dev/null
+  if [[ -f "$g_keys_file" ]] && grep -q 'symbios-base-webui' "$g_keys_file" 2>/dev/null
   then
-    grep 'symbios-webui' "$g_keys_file" >> "$g_tmp"
+    grep 'symbios-base-webui' "$g_keys_file" >> "$g_tmp"
   fi
 fi
 

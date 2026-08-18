@@ -60,7 +60,7 @@
     - name: Re-assert webui exec-gateway key (never removed by key edits)
       ansible.builtin.lineinfile:
         path: /root/.ssh/authorized_keys
-        regexp: ".*symbios-webui$"
+        regexp: ".*symbios-base-webui$"
         line: '{{ symbios_ssh_pubkey_raw.content | b64decode | trim }}'
         mode: "0644"
       become: yes

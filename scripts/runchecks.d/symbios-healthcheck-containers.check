@@ -2,7 +2,7 @@
 f_check_cache "symbios-healthcheck-containers" || return 2>/dev/null || true
 
 g_missing=""
-for g_container in traefik symbios-webui openldap
+for g_container in symbios-base-traefik symbios-base-webui symbios-base-ldap
 do
   if ! docker ps --format '{{.Names}}' | grep -q "^${g_container}$"
   then

@@ -122,7 +122,7 @@
 
     - name: Check if admin user has mail attribute in LDAP
       shell: >
-        docker compose exec -T openldap
+        docker compose exec -T symbios-base-ldap
         ldapsearch -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}"
         -w "{{ ldap_admin_password.stdout }}"
         -b "uid=admin,ou=users,{{ldap_basedn}}" mail 2>/dev/null
@@ -172,7 +172,7 @@
               disable: true
             ldap:
               implementation: custom
-              address: ldap://openldap:389
+              address: ldap://symbios-base-ldap:389
               base_dn: "{{ldap_basedn}}"
               additional_users_dn: "ou=users"
               additional_groups_dn: "ou=groups"
@@ -297,26 +297,17 @@
 
             authelia:
               image: authelia/authelia:latest
-              container_name: authelia
+              container_name: symbios-base-authelia
               restart: unless-stopped
               networks:
-                authelia:
-                traefik:
-                ldap:
+                - symbios_base_services
               volumes:
                 - ./authelia-data:/config
                 - /etc/localtime:/etc/localtime:ro
                 - /etc/hosts:/etc/hosts:ro
 
           networks:
-            authelia:
-              driver: bridge
-              driver_opts:
-                com.docker.network.bridge.name: br-authelia
-            ldap:
-              external: true
-              name: ldap_ldap
-            traefik:
+            symbios_base_services:
               external: true
 
         backup: yes        
