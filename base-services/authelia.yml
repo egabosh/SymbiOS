@@ -122,7 +122,7 @@
 
     - name: Check if admin user has mail attribute in LDAP
       shell: >
-        docker compose exec -T symbios-base-ldap
+        docker compose exec -T openldap
         ldapsearch -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}"
         -w "{{ ldap_admin_password.stdout }}"
         -b "uid=admin,ou=users,{{ldap_basedn}}" mail 2>/dev/null
