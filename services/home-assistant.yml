@@ -62,7 +62,7 @@
   tasks:
 
     - name: Get traefik IP on docker network
-      ansible.builtin.shell: docker inspect traefik --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{% endraw %}'
+      ansible.builtin.shell: docker inspect symbios-base-traefik --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{% endraw %}'
       register: traefik_ip_result
       changed_when: false
 
@@ -71,7 +71,7 @@
         traefik_ip: "{{ traefik_ip_result.stdout }}"
 
     - name: Get traefik network gateway (host IP for HA in host network mode)
-      ansible.builtin.shell: docker network inspect traefik --format '{% raw %}{{ (index .IPAM.Config 0).Gateway }}{% endraw %}'
+      ansible.builtin.shell: docker network inspect symbios_base_services --format '{% raw %}{{ (index .IPAM.Config 0).Gateway }}{% endraw %}'
       register: ha_ip_result
       changed_when: false
 
@@ -275,10 +275,10 @@
                 - /symbios/services/home-assistant/ha_pingcheck_data:/usr/share/nginx/html/pingcheck:ro
                 - /etc/localtime:/etc/localtime:ro
               networks:
-                traefik: null
+                symbios_services: null
 
           networks:
-            traefik:
+            symbios_services:
               external: true
         backup: yes
       notify: Restart home-assistant

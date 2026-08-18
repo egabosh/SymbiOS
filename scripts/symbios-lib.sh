@@ -217,7 +217,7 @@ function f_check_cache {
 # from inventory and the admin password from ${g_config_dir}/.ldap_admin_pw.
 # Sets f_ldap_uri, f_base_dn, f_admin_pw, f_bind_dn.
 function f_symbios_ldap_init {
-  f_ldap_uri="${LDAP_URI:-ldap://openldap}"
+  f_ldap_uri="${LDAP_URI:-ldap://symbios-base-ldap}"
   f_base_dn="$(f_symbios_var ldap_basedn "dc=openldap,dc=local")"
   f_admin_pw="$(cat "${g_config_dir}/.ldap_admin_pw" 2>/dev/null || echo 'changeme')"
   f_bind_dn="cn=head-of-ldap,${f_base_dn}"
@@ -225,12 +225,12 @@ function f_symbios_ldap_init {
 
 # Run an LDAP command inside the webui container (has network access to openldap)
 function f_ldap_exec {
-  docker exec symbios-webui "$@"
+  docker exec symbios-base-webui "$@"
 }
 
 # Run an LDAP command inside the webui container with LDIF on stdin
 function f_ldap_ldif {
-  docker exec -i symbios-webui "$@"
+  docker exec -i symbios-base-webui "$@"
 }
 
 # Collect Traefik Host labels from all service compose files and the traefik

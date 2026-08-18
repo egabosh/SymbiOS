@@ -103,7 +103,7 @@
               build:
                 context: .
                 dockerfile: Dockerfile
-              container_name: symbios-webui
+              container_name: symbios-base-webui
               ports:
                 # Published on all interfaces. Access is restricted to private
                 # IPv4/IPv6 networks by UFW (firewall.yml) and DOCKER-USER
@@ -125,16 +125,16 @@
               environment:
                 - PYTHONUNBUFFERED=1
                 - CONFIG_PATH=/config/inventory.yml
-                - LDAP_URI=ldap://openldap
+                - LDAP_URI=ldap://symbios-base-ldap
                 - HOME=/app
                 - DJANGO_SECRET_KEY={{ lookup("password", docker_path ~ "/.django_secret_key length=50 chars=ascii_letters,digits") }}
               networks:
-                traefik:
+                symbios_base_services:
                   aliases:
                     - symbios-ui
 
           networks:
-            traefik:
+            symbios_base_services:
               external: true
         backup: yes
       notify: Restart {{ service_name }}
@@ -152,12 +152,6 @@
         directory_mode: "0770"
       notify: Restart {{ service_name }}
 
-    - name: Clear Python bytecode cache inside webui
-      ansible.builtin.shell: >
-        docker exec symbios-webui
-        find /app -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; true
-      changed_when: false
-
     - name: Set permissions
       ansible.builtin.command:
         cmd: "find {{ docker_path }}/webui -type f -exec chmod o+r {} +"
@@ -165,7 +159,7 @@
 
     - name: Generate SSH key for webui remote execution
       ansible.builtin.command:
-        cmd: ssh-keygen -t ed25519 -f {{ base_services_root }}/symbios-ui/config/.ssh/id_symbios -N "" -C "symbios-webui"
+        cmd: ssh-keygen -t ed25519 -f {{ base_services_root }}/symbios-ui/config/.ssh/id_symbios -N "" -C "symbios-base-webui"
         creates: "{{ base_services_root }}/symbios-ui/config/.ssh/id_symbios"
 
     - name: Fix permissions on SSH key
@@ -190,7 +184,7 @@
     - name: Add webui SSH key to root authorized_keys
       ansible.builtin.lineinfile:
         path: /root/.ssh/authorized_keys
-        regexp: ".*symbios-webui$"
+        regexp: ".*symbios-base-webui$"
         line: '{{ symbios_ssh_pubkey }}'
         mode: "0644"
         create: yes
@@ -283,15 +277,11 @@
           # Start the boot unlock server only if a LUKS device exists
           if blkid | grep -q 'LABEL="CRYPT_LUKS_SYMBIOS_DATA"'
           then
-            echo "Symbios data disk encrypted"
             /usr/local/sbin/symbios-boot-unlock/unlock.py
-          fi
-          # mount data dsik only if exists
-          if blkid | grep -q 'LABEL="SYMBIOS_DATA"'
-          then
-            echo "checking and mounting Symbios data disk"
-            fsck -y LABEL=SYMBIOS_DATA
-            mount -o noatime LABEL=SYMBIOS_DATA /symbios
+            # Mount /symbios (no passphrase needed once LUKS is open, fstab entry is noauto)
+            mount /symbios 2>/dev/null || true
+          else
+            echo "WARNING: No LUKS device (CRYPT_LUKS_SYMBIOS_DATA) found - /symbios not encrypted. Docker and containerd may fail."
           fi
           systemctl start docker
           [[ -x /usr/sbin/lightdm ]] && systemctl start lightdm
@@ -440,7 +430,7 @@
 
     - name: Seed pinned SSH known_hosts for exec gateway
       # Pin the host key used by the WebUI's SSH exec path. The WebUI connects
-      # to the traefik network gateway (192.168.41.1:33); we record the real
+      # to the symbios_base_services network gateway (192.168.41.1:33); we record the real
       # host key under that IP and localhost so the fingerprint policy can match.
       ansible.builtin.shell: |
         set -e

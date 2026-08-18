@@ -826,9 +826,9 @@ def _read_host_authorized_keys():
 
 
 def _is_system_ssh_key(line):
-    # The WebUI's own exec-gateway key (comment "symbios-webui") is deployed
+    # The WebUI's own exec-gateway key (comment "symbios-base-webui") is deployed
     # automatically and must never be edited or deleted via the UI.
-    return "symbios-webui" in line
+    return "symbios-base-webui" in line
 
 
 @login_required

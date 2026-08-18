@@ -154,13 +154,14 @@
                 # log
                 - --accesslog.filepath=/log/access.log
                 - --accesslog.format=json
-              container_name: traefik
+              container_name: symbios-base-traefik
               restart: unless-stopped
               security_opt:
                 - no-new-privileges:true
               networks:
-                traefik:
+                symbios_base_services:
                   ipv4_address: 192.168.41.200
+                symbios_services: {}
               ports:
                 - 80:80
                 - 443:443
@@ -171,7 +172,9 @@
                 - ./providers:/etc/traefik/providers.local
                 - ./log:/log
           networks:
-            traefik:
+            symbios_base_services:
+              external: true
+            symbios_services:
               external: true
           # END ANSIBLE MANAGED BLOCK
         dest: "{{ docker_path }}/docker-compose.yml"
@@ -230,7 +233,7 @@
                     X-Forwarded-Proto: "https"
               authelia:
                 forwardAuth:
-                  address: "http://authelia:9091/api/authz/forward-auth?authelia_url=https://{{ authelia_domain }}"
+                  address: "http://symbios-base-authelia:9091/api/authz/forward-auth?authelia_url=https://{{ authelia_domain }}"
                   trustForwardHeader: true
                   authResponseHeaders:
                     - "Remote-User"
@@ -289,10 +292,16 @@
         port: '443'
         proto: tcp
 
-    - name: Allow access from br-traefik to Docker-Host for services running without docker
+    - name: Allow access from br-symbios-base to Docker-Host for services running without docker
       community.general.ufw:
         rule: allow
-        interface: br-traefik
+        interface: br-symbios-base
+        direction: in
+
+    - name: Allow access from br-symbios-services to Docker-Host for services running without docker
+      community.general.ufw:
+        rule: allow
+        interface: br-symbios-services
         direction: in
 
     - name: Install logrotate for Traefik access log

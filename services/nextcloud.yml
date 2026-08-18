@@ -67,7 +67,7 @@
   tasks:
 
     - name: Get traefik IP on docker network
-      ansible.builtin.shell: docker inspect traefik --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{% endraw %}'
+      ansible.builtin.shell: docker inspect symbios-base-traefik --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{% endraw %}'
       register: traefik_ip_result
       changed_when: false
 
@@ -308,7 +308,7 @@
                 - PHP_UPLOAD_LIMIT=1024M
               networks:
                 nextcloud: {}
-                traefik: null
+                symbios_services: null
 
             nextcloud-db:
               image: mariadb:lts
@@ -363,7 +363,7 @@
                 - /etc/localtime:/etc/localtime:ro
               networks:
                 nextcloud: {}
-                traefik: null
+                symbios_services: null
 
             nextcloud-collabora:
               image: collabora/code:latest
@@ -384,7 +384,7 @@
                 - DONT_GEN_SSL_CERTS=true
               networks:
                 nextcloud: {}
-                traefik: null
+                symbios_services: null
 
 
           networks:
@@ -392,7 +392,7 @@
               driver: bridge
               driver_opts:
                 com.docker.network.bridge.name: br-nextcloud
-            traefik:
+            symbios_services:
               external: true
 
         backup: yes

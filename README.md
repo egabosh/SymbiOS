@@ -35,8 +35,10 @@ the WebUI - each one stronger together than alone. SymbiOS stands for
    - [State-file install tracking](#state-file-install-tracking)
 10. [Adding your own service](#10-adding-your-own-service)
 11. [User-uploaded playbooks](#11-user-uploaded-playbooks)
-12. [License](#license)
-13. [Disclaimer](#disclaimer)
+12. [Naming conventions](#12-naming-conventions)
+    - [Further reading](#further-reading)
+13. [License](#license)
+14. [Disclaimer](#disclaimer)
 
 ---
 
@@ -101,7 +103,7 @@ daemon is required.
 Key idea: **Traefik does not use the Docker provider and has no access to the
 Docker socket.** Routing is declared as *file-provider* snippets in
 `/symbios/base-services/traefik/providers/`, which Traefik watches at runtime. A service
-becomes reachable by (a) joining the external `traefik` Docker network and
+becomes reachable by (a) joining the external `symbios_services` Docker network and
 (b) dropping a provider snippet that points a `Host(...)` rule at the
 container's IP/port.
 
@@ -288,10 +290,16 @@ Operational notes for FRITZ!Box with dual-stack:
 
 ## 7. Networking and Traefik routing
 
-All proxyable containers attach to one external Docker network named
-**`traefik`** (bridge `br-traefik`, Traefik itself has the static IP
-`192.168.41.200`). Traefik reaches each backend by its service name / IP on
-that network.
+SymbiOS uses two Docker networks to separate base services from user services:
+
+- **`symbios_base_services`** (bridge `br-symbios-base`, subnet `192.168.41.0/24`):
+  All base services (Traefik, LDAP, Authelia, WebUI) and Traefik's static IP
+  `192.168.41.200`. Traefik bridges to the user service network.
+- **`symbios_services`** (bridge `br-symbios-services`, subnet `192.168.42.0/24`):
+  Traefik and all user service containers that should be reachable via Traefik.
+  User services cannot reach base services directly.
+
+Traefik reaches each backend by its service name / IP on the respective network.
 
 Routing is **file-provider based**. Traefik watches
 `/symbios/base-services/traefik/providers/` (mounted as `/etc/traefik/providers.local`).
@@ -373,7 +381,7 @@ matching playbook over SSH, see section 9).
 
 ## 9. Managing the system (WebUI / SSH)
 
-- **symbios-ui** is a Django web app (container `symbios-webui`) that reads the
+- **symbios-ui** is a Django web app (container `symbios-base-webui`) that reads the
   inventory and lets you change settings, add/remove services, and start/stop
   containers. The **Services** section in the sidebar lists all discovered
   playbooks (built-in, service, and custom) and lets you run their actions.
@@ -446,6 +454,52 @@ Upload custom Ansible playbooks through **Settings > Playbooks** in the WebUI.
 They are stored on the host at `/symbios/base-services/symbios-ui/config/user-playbooks/`
 and appear in the Services section under **Custom Playbooks**. See the WebUI
 documentation for the required `# docs:` format and upload workflow.
+
+---
+
+## 12. Naming conventions
+
+SymbiOS follows a consistent naming scheme for Docker containers, networks, and
+services to keep the system predictable and easy to debug.
+
+### Container names
+
+| Scope | Prefix | Example |
+|-------|--------|---------|
+| Base services | `symbios-base-` | `symbios-base-traefik`, `symbios-base-ldap`, `symbios-base-authelia`, `symbios-base-webui` |
+| User services | `symbios-` | `symbios-jellyfin`, `symbios-nextcloud`, `symbios-matrix` |
+| Sub-containers | `symbios-<service>-<role>` | `symbios-nextcloud-db`, `symbios-matrix-synapse`, `symbios-paperless-broker` |
+
+### Docker networks
+
+| Network | Bridge | Purpose |
+|---------|--------|---------|
+| `symbios_base_services` | `br-symbios-base` | All base services (Traefik, LDAP, Authelia, WebUI) |
+| `symbios_services` | `br-symbios-services` | Traefik + user services reachable via Traefik |
+| `symbios-<service>` | `symbios-<service>` | Internal network for multi-container service stacks |
+
+User service internal networks (e.g. `symbios-matrix`, `symbios-nextcloud`) are
+named after the primary container. Single-container services (e.g. `symbios-jellyfin`)
+only join `symbios_services` and do not create their own network.
+
+### Service names (Docker Compose)
+
+Service names in `docker-compose.yml` are kept short and stable for DNS
+resolution. The `container_name` field carries the full prefixed name:
+
+```yaml
+services:
+  jellyfin:                        # DNS name (short, stable)
+    image: jellyfin/jellyfin:latest
+    container_name: symbios-jellyfin  # Display name (prefixed)
+```
+
+### Further reading
+
+- **[playbooks.md](webui/main/docs/playbooks.md)** - How to write service
+  playbooks, including naming rules for containers and networks.
+- **AGENTS.md** - Coding standards and architecture overview for developers
+  and AI assistants working on the SymbiOS codebase.
 
 ---
 

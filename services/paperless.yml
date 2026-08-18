@@ -159,7 +159,7 @@
                 - PAPERLESS_OIDC_AUTO_logout=true
               networks:
                 paperless: {}
-                traefik: null
+                symbios_services: null
               labels: []
             
             paperless-broker:
@@ -176,7 +176,7 @@
               driver: bridge
               driver_opts:
                 com.docker.network.bridge.name: br-paperless
-            traefik:
+            symbios_services:
               external: true
 
         backup: yes

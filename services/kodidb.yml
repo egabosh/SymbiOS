@@ -261,14 +261,14 @@
                 - ./phpmyadmin-config.user.inc.php:/etc/phpmyadmin/config.user.inc.php:ro
               networks:
                 kodidb--network: {}
-                traefik: null
+                symbios_services: null
 
           networks:
             kodidb--network:
               driver: bridge
               driver_opts:
                 com.docker.network.bridge.name: br-kodidb
-            traefik:
+            symbios_services:
               external: true
 
         backup: yes        

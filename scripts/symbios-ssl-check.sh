@@ -66,7 +66,7 @@ function f_load_domain {
 
 # Determine the Traefik container address (loopback fallback)
 function f_traefik_ip {
-  g_trae_ip=$(docker inspect traefik --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1)
+  g_trae_ip=$(docker inspect symbios-base-traefik --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1)
   if [[ -z "$g_trae_ip" ]]
   then
     g_trae_ip="127.0.0.1"

@@ -141,7 +141,7 @@
                 - ./data/cache:/cache
                 - /etc/localtime:/etc/localtime
               networks:
-                - traefik
+                - symbios_services
           # optional hardware acceleration
           #    devices:
           #      - /dev/dri:/dev/dri
@@ -153,7 +153,7 @@
 
 
           networks:
-            traefik:
+            symbios_services:
               external: true
 
         backup: yes

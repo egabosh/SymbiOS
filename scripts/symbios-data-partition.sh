@@ -428,7 +428,7 @@ EOF
     # Docker/containerd data lives directly in ${g_mountpoint}/docker and
     # ${g_mountpoint}/containerd. Stop all containers so the data is consistent
     # and can be copied together with everything else. The WebUI container
-    # (symbios-webui) must stay up - this script runs through its SSH exec
+    # (symbios-base-webui) must stay up - this script runs through its SSH exec
     # gateway, so stopping it would kill the migration mid-copy. OpenLDAP
     # keeps running too so the WebUI stays functional while it is stopped.
     if command -v docker &>/dev/null
@@ -436,10 +436,10 @@ EOF
       f_log_step "Stopping non-essential Docker services for consistent copy"
       # Snapshot OpenLDAP before the copy so the data on the new disk is
       # consistent even though the LDAP container stays up during rsync.
-      if docker ps --format '{{.Names}}' | grep -qx openldap
+      if docker ps --format '{{.Names}}' | grep -qx symbios-base-ldap
       then
         mkdir -p "${g_mountpoint}/backups"
-        docker exec openldap slapcat -F /ldap-config/slapd.d \
+        docker exec symbios-base-ldap slapcat -F /ldap-config/slapd.d \
           > "${g_mountpoint}/backups/ldap-pre-migration.ldif" 2>/dev/null || true
         f_log_ok "OpenLDAP snapshot saved to ${g_mountpoint}/backups"
       fi
@@ -448,7 +448,7 @@ EOF
       do
         f_cname=$(docker inspect --format '{{.Name}}' "$f_cid" 2>/dev/null)
         case "$f_cname" in
-          */symbios-webui|*/openldap)
+          */symbios-base-webui|*/symbios-base-ldap)
             f_log "Keeping $f_cname running"
             ;;
           *)
@@ -457,7 +457,7 @@ EOF
             ;;
         esac
       done
-      f_log_ok "Docker services stopped (symbios-webui and openldap kept running)"
+      f_log_ok "Docker services stopped (symbios-base-webui and symbios-base-ldap kept running)"
     fi
 
     rsync -av --progress \
