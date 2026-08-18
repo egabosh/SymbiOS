@@ -409,6 +409,11 @@
         line: "#!/bin/bash"
 
 
+    - name: Ensure authelia is running
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: "{{ service_path }}"
+
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/authelia.yml"
       changed_when: false

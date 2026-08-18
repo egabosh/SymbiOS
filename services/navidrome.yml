@@ -170,6 +170,11 @@
         backup: yes
         validate: /bin/bash -n %s
 
+    - name: Ensure navidrome is running
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: /symbios/services/navidrome
+
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/navidrome.yml"
       changed_when: false

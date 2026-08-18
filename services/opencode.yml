@@ -301,6 +301,11 @@
         backup: yes
         validate: /bin/bash -n %s
 
+    - name: Ensure opencode is running
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: /symbios/services/opencode
+
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/opencode.yml"
       changed_when: false

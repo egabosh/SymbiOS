@@ -138,6 +138,11 @@
         validate: /bin/bash -n %s
 
 
+    - name: Ensure rustdesk is running
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: /symbios/services/{{ service_name }}
+
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/rustdesk.yml"
       changed_when: false
