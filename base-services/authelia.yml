@@ -314,7 +314,8 @@
               driver_opts:
                 com.docker.network.bridge.name: br-authelia
             ldap:
-              external: false
+              external: true
+              name: ldap_ldap
             traefik:
               external: true
 

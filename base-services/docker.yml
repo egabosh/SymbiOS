@@ -214,7 +214,10 @@
             "ipv6": true,
             "fixed-cidr-v6": "fdab::/64",
             "experimental": true,
-            "ip6tables": true
+            "ip6tables": true,
+            "default-address-pools": [
+              {"base": "172.16.0.0/16", "size": 24}
+            ]
           }
       register: daemon_json
 
