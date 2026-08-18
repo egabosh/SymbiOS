@@ -277,11 +277,14 @@
           # Start the boot unlock server only if a LUKS device exists
           if blkid | grep -q 'LABEL="CRYPT_LUKS_SYMBIOS_DATA"'
           then
+            echo "Symbios data disk encrypted"
             /usr/local/sbin/symbios-boot-unlock/unlock.py
-            # Mount /symbios (no passphrase needed once LUKS is open, fstab entry is noauto)
-            mount /symbios 2>/dev/null || true
-          else
-            echo "WARNING: No LUKS device (CRYPT_LUKS_SYMBIOS_DATA) found - /symbios not encrypted. Docker and containerd may fail."
+          fi
+          # mount data dsik only if exists
+          if blkid | grep -q 'LABEL="SYMBIOS_DATA"'
+          then
+            echo "mounting Symbios data disk"
+            mount -o noatime LABEL=SYMBIOS_DATA /symbios
           fi
           systemctl start docker
           [[ -x /usr/sbin/lightdm ]] && systemctl start lightdm
