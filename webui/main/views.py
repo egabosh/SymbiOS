@@ -199,31 +199,6 @@ def _detect_network_type():
 
 
 @login_required
-def health_ssl_check(request):
-    """AJAX GET - check for a valid SSL certificate (proves external reachability)."""
-    from .utils.ssh_exec import run_command
-    from django.http import JsonResponse
-    config = _get_inventory_config()
-    vars_ = config.get('all', {}).get('vars', {})
-    base_domain = vars_.get('base_domain', '')
-    if not base_domain:
-        return JsonResponse({'ok': False, 'error': 'No domain configured yet. Set up DNS first.'})
-    ok, stdout, stderr = run_command(
-        f'symbios-ssl-check.sh -d {base_domain}', timeout=60)
-    # The script always emits valid JSON on stdout, even when a check fails
-    # (exit 1). Return that JSON directly so the template can show the summary
-    # instead of a raw JSON blob in the error field.
-    import json as _json
-    try:
-        data = _json.loads(stdout)
-        if isinstance(data, dict):
-            return JsonResponse(data)
-    except Exception:
-        pass
-    return JsonResponse({'ok': False, 'error': (stderr or stdout) or 'Check failed'})
-
-
-@login_required
 def health(request):
     from .setup_status import setup_steps, is_setup_complete
     config = _get_inventory_config()
@@ -240,6 +215,22 @@ def health_data(request):
     from .health import run_all
     from django.http import JsonResponse
     return JsonResponse(run_all())
+
+
+@login_required
+def health_recheck(request, check_name):
+    """Run a single health check on demand and return JSON result."""
+    from django.http import JsonResponse
+    from .utils.ssh_exec import run_command
+    ok, stdout, stderr = run_command(f'symbios-run-check.sh {check_name}', timeout=30)
+    if not ok:
+        return JsonResponse({'ok': False, 'error': stderr or 'Check failed'}, status=500)
+    import json
+    try:
+        result = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'Invalid response from check'}, status=500)
+    return JsonResponse({'ok': True, 'check': result})
 
 
 @login_required

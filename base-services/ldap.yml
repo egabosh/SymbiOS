@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: LDAP
 #   short_description: Deploy and configure the OpenLDAP directory
 #   description: Installs OpenLDAP, seeds the directory with users and groups, and provides the identity backend used by Authelia and the WebUI.
 #   author: Oliver Bohlen

@@ -1,3 +1,8 @@
+CHECK_CATEGORY="network"
+CHECK_TITLE="Two-Factor Auth"
+CHECK_DESC="Shows whether two-factor authentication is enabled (informational)."
+CHECK_DETAIL="Reads the twofa_enabled setting from inventory.yml.|Displays current status but never triggers an error.|2FA is optional but strongly recommended for security.|Enable it in Settings > Auth if not active."
+
 # Check: Verify two-factor authentication status in inventory config
 f_check_cache "symbios-healthcheck-twofa" || return 2>/dev/null || true
 

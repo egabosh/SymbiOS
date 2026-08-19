@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: DynDNS
 #   short_description: Configure desec.de dynamic DNS
 #   description: Sets up dyndns updates against desec (dedyn.io) so the public DNS record follows the host's current IP address. Also restarts Traefik when the IP changes. Runs as a cron job.
 #   author: Oliver Bohlen

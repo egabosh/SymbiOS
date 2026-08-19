@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="Inode Usage"
+CHECK_DESC="Checks if any filesystem is running out of inodes (over 98%)."
+CHECK_DETAIL="Runs df -ali and checks inode usage on all mounted partitions.|Inodes store file metadata - even with free disk space,|a full inode count prevents creating new files."
+
 # Alert when any filesystem exceeds 98% inode usage
 df -ali | grep -E -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read g_i
 do

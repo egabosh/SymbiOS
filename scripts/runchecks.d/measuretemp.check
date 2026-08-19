@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="CPU Temperature (RPi)"
+CHECK_DESC="Checks CPU temperature on Raspberry Pi (above 65C)."
+CHECK_DETAIL="Uses vcgencmd measure_temp to read the CPU temperature.|Only runs on Raspberry Pi (vcgencmd must be installed).|Warns when temperature exceeds 65 degrees Celsius.|High temperature may cause thermal throttling."
+
 # Check CPU temperature via vcgencmd on Raspberry Pi
 if which vcgencmd >/dev/null 2>&1
 then

@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # docs:
+#   name: KodiDB
 #   short_description: Deploy the KodiDB media database service
 #   description: Deploys KodiDB (MySQL/MariaDB for Kodi media databases) with phpMyAdmin for administration, exposed via Traefik.
 #   url: "https://kodidb.{{ base_domain }}"

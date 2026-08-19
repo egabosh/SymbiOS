@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: Health Checks
 #   short_description: Install system/service health checks
 #   description: Deploys the runchecks health-check framework (script + systemd service) that periodically verifies critical services and reports their status.
 #   author: Oliver Bohlen

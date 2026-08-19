@@ -1,3 +1,8 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="Web Interface"
+CHECK_DESC="Checks if the SymbiOS web interface is running and responding."
+CHECK_DETAIL="First checks if the symbios-base-webui container is running.|Then queries http://127.0.0.1:8080/health via wget.|Alerts on HTTP 5xx errors or if the endpoint is unreachable.|The web interface is your main management tool."
+
 # Healthcheck for symbios-base-webui (container + health endpoint)
 f_check_cache "symbios-healthcheck-symbios-ui" || return 2>/dev/null || true
 if ! docker ps | grep -q "symbios-base-webui"

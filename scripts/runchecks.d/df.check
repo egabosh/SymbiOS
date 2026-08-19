@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="Disk Space"
+CHECK_DESC="Checks if any filesystem is almost full (over 98%)."
+CHECK_DETAIL="Runs df -al and scans all mounted filesystems.|Alerts if any partition exceeds 98% usage.|Excludes pseudo-filesystems like /proc and /rom."
+
 # Alert when any filesystem exceeds 98% disk usage
 df -al | grep -E -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read g_i
 do

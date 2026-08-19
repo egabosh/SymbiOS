@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: SSH Keys
 #   short_description: Re-assert WebUI exec-gateway SSH key
 #   description: Ensures the WebUI exec-gateway key is always present in /root/.ssh/authorized_keys. The WebUI writes user keys directly via SSH exec; this playbook only re-asserts the system key.
 #   author: Oliver Bohlen

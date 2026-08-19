@@ -1,3 +1,8 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="Docker"
+CHECK_DESC="Checks if the Docker daemon is responding."
+CHECK_DETAIL="Runs docker info to verify the daemon is reachable.|Docker manages all containers in SymbiOS.|If Docker is down, no services can start or restart."
+
 # Healthcheck for docker daemon
 f_check_cache "symbios-healthcheck-docker" || return 2>/dev/null || true
 if ! docker info >/dev/null 2>&1

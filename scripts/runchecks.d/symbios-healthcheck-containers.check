@@ -1,3 +1,8 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="Core Containers"
+CHECK_DESC="Checks if essential Docker containers are running."
+CHECK_DETAIL="Verifies that Traefik, WebUI, and LDAP containers|are listed in docker ps.|These three containers are required for SymbiOS to function.|Missing containers indicate a failed Docker startup."
+
 # Check: Verify all required Docker containers are running
 f_check_cache "symbios-healthcheck-containers" || return 2>/dev/null || true
 

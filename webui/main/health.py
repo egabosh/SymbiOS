@@ -39,6 +39,7 @@ def check_runchecks():
         return {"status": "warn", "message": f"Invalid runchecks data: {e}"}
 
     checks = data.get("checks", [])
+    categories = data.get("categories", [])
     if not checks:
         return {"status": "warn", "message": "No checks found in runchecks data"}
 
@@ -50,13 +51,23 @@ def check_runchecks():
         entry = {"name": c.get("name", "?"), "status": c.get("status", "unknown")}
         if c.get("message"):
             entry["message"] = c["message"]
+        if c.get("title"):
+            entry["title"] = c["title"]
+        if c.get("desc"):
+            entry["desc"] = c["desc"]
+        if c.get("detail"):
+            entry["detail"] = c["detail"]
+        if c.get("category"):
+            entry["category"] = c["category"]
+        if c.get("script"):
+            entry["script"] = c["script"]
         results.append(entry)
 
     if errors:
         msg = f"{len(errors)} of {len(checks)} checks failed"
-        return {"status": "error", "message": msg, "last_run": last_run, "results": results}
+        return {"status": "error", "message": msg, "last_run": last_run, "categories": categories, "results": results}
 
-    return {"status": "ok", "message": f"All {len(checks)} checks passed", "last_run": last_run, "results": results}
+    return {"status": "ok", "message": f"All {len(checks)} checks passed", "last_run": last_run, "categories": categories, "results": results}
 
 
 def run_all():

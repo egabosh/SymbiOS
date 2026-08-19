@@ -1,3 +1,8 @@
+CHECK_CATEGORY="network"
+CHECK_TITLE="SSL & Certificates"
+CHECK_DESC="Checks if your server has valid HTTPS certificates and is reachable from the internet."
+CHECK_DETAIL="Verifies TLS certificates for base_domain, auth.* and traefik.*.|Checks expiry (warns within 7 days) and hostname validity.|A valid Let's Encrypt certificate proves the server is reachable|from the internet (HTTP challenge on port 80)."
+
 # Check: Verify the domain has a valid SSL certificate (proves external reachability)
 f_check_cache "symbios-healthcheck-ssl" || return 2>/dev/null || true
 

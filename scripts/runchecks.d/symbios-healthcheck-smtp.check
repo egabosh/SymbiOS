@@ -1,3 +1,8 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="Email Server"
+CHECK_DESC="Checks if the mail server (postfix) is running."
+CHECK_DETAIL="Verifies postfix.service is active via systemctl.|Postfix handles outgoing emails (notifications, alerts).|If down, the server cannot send emails."
+
 # Healthcheck for postfix (SMTP)
 f_check_cache "symbios-healthcheck-smtp" || return 2>/dev/null || true
 if ! systemctl is-active postfix.service >/dev/null 2>&1

@@ -1,3 +1,8 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="Health Monitor"
+CHECK_DESC="Checks if the health monitoring daemon itself is running."
+CHECK_DETAIL="Verifies runchecks.service is active via systemctl.|This daemon runs all other checks every 5 minutes.|If it stops, no health monitoring happens at all."
+
 # Healthcheck for runchecks daemon itself
 f_check_cache "symbios-healthcheck-runchecks" || return 2>/dev/null || true
 if ! systemctl is-active runchecks.service >/dev/null 2>&1
