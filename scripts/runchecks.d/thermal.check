@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="CPU Temperature"
+CHECK_DESC="Checks CPU temperature via sysfs (above 65C)."
+CHECK_DETAIL="Reads temperature from /sys/class/thermal/thermal_zone0/temp.|Converts millidegrees to degrees Celsius.|Warns when temperature exceeds 65 degrees Celsius.|Works on most Linux systems without special tools."
+
 # Check CPU temperature from thermal sysfs interface
 if [[ -f /sys/class/thermal/thermal_zone0/temp ]]
 then

@@ -17,7 +17,6 @@ g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
 
 g_domain=""
-g_trae_ip=""
 
 function f_usage {
   echo "Usage: $0 [-d|--domain <domain>]"
@@ -64,16 +63,8 @@ function f_load_domain {
   fi
 }
 
-# Determine the Traefik container address (loopback fallback)
-function f_traefik_ip {
-  g_trae_ip=$(docker inspect symbios-base-traefik --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1)
-  if [[ -z "$g_trae_ip" ]]
-  then
-    g_trae_ip="127.0.0.1"
-  fi
-}
-
 # Fetch and validate the certificate Traefik serves for one hostname.
+# Uses the hostname directly (resolves via /etc/hosts or DNS).
 # Sets g_cert_ok (true/false) and g_cert_detail (reason or expiry date).
 function f_check_host {
   local f_host="$1"
@@ -82,7 +73,7 @@ function f_check_host {
   g_cert_ok=false
   g_cert_detail=""
 
-  f_pem=$(echo | timeout 10 openssl s_client -connect "${g_trae_ip}:443" -servername "$f_host" 2>/dev/null | openssl x509 -noout -subject -issuer -enddate -ext subjectAltName 2>/dev/null)
+  f_pem=$(echo | timeout 10 openssl s_client -connect "${f_host}:443" -servername "$f_host" 2>/dev/null | openssl x509 -noout -subject -issuer -enddate -ext subjectAltName 2>/dev/null)
   if [[ -z "$f_pem" ]]
   then
     g_cert_detail="no certificate served for ${f_host} (the service may not be configured for this hostname yet)"
@@ -90,9 +81,16 @@ function f_check_host {
   fi
 
   # -checkend 0 exits non-zero when the certificate has expired
-  if ! echo | timeout 10 openssl s_client -connect "${g_trae_ip}:443" -servername "$f_host" 2>/dev/null | openssl x509 -noout -checkend 0 >/dev/null 2>&1
+  if ! echo | timeout 10 openssl s_client -connect "${f_host}:443" -servername "$f_host" 2>/dev/null | openssl x509 -noout -checkend 0 >/dev/null 2>&1
   then
     g_cert_detail="certificate for ${f_host} is expired"
+    return 0
+  fi
+
+  # Warn if certificate expires within 7 days (604800 seconds)
+  if ! echo | timeout 10 openssl s_client -connect "${f_host}:443" -servername "$f_host" 2>/dev/null | openssl x509 -noout -checkend 604800 >/dev/null 2>&1
+  then
+    g_cert_detail="certificate for ${f_host} expires within 7 days"
     return 0
   fi
 
@@ -112,7 +110,6 @@ function f_check_host {
 g_lockfile
 
 f_load_domain
-f_traefik_ip
 
 g_hosts_json=""
 g_first=true

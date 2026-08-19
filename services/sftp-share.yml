@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: SFTP Share
 #   short_description: Deploy the SFTP file-share service
 #   description: Deploys a scoped SFTP file-sharing container for secure external file exchange.
 #   author: Oliver Bohlen

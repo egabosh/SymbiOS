@@ -1,3 +1,8 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="Playbook Status"
+CHECK_DESC="Detects if any Ansible playbook has failed recently."
+CHECK_DETAIL="Scans playbook-*.log files in the log directory.|Looks for failed=1 or FAILED patterns in log output.|Lists all failed playbooks with their log file paths.|Failed playbooks may leave the system in an inconsistent state."
+
 # Check: Detect failed Ansible playbook runs in log files
 f_check_cache "symbios-healthcheck-playbooks" || return 2>/dev/null || true
 

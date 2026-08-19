@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="System Services"
+CHECK_DESC="Checks that required system services are running."
+CHECK_DETAIL="Reads a list of required services from|/usr/local/sbin/runchecks.d/services.|For each service, checks if a matching process is running.|Missing services may indicate a failed startup."
+
 # Verify required system services are running
 for g_service in $(cat /usr/local/sbin/runchecks.d/services | sort)
 do

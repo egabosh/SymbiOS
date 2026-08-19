@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: KVM
 #   short_description: Install and configure KVM/libvirt for virtual machines
 #   description: 'Installs QEMU/KVM and libvirt, configures storage pools and networking, and prepares the host for running VMs (e.g. OpenWrt, Nextcloud AIO, HomeAssistant). Only runs on bare-metal or KVM-capable hosts - skipped in containers and on non-x86_64/arm64 systems without hardware virtualization.'
 #   author: Oliver Bohlen

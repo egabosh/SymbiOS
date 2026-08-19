@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: Traefik
 #   short_description: Deploy and configure the Traefik reverse proxy
 #   description: Installs Traefik as the central reverse proxy / ingress, sets up entrypoints, TLS (ACME) and forward-auth integration with Authelia.
 #   url: "https://traefik.{{ base_domain }}"

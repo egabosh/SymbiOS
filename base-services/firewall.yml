@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: Firewall
 #   short_description: Configure the host firewall with ufw
 #   description: Installs and configures ufw, sets default deny policies and allows only the required services (SSH, HTTPS, etc.).
 #   author: Oliver Bohlen

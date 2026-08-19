@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="Disk Health"
+CHECK_DESC="Checks hard drives and SSDs for errors and overheating."
+CHECK_DETAIL="Scans /dev/nvme? and /dev/sd? block devices.|Runs smartctl -H for SMART health status.|Checks disk temperature via smartctl -x (warns above 55C).|Skips suspended disks (unchanged IO stats)|and USB disks with unsupported SMART."
+
 # Check each block device for SMART health and temperature
 for g_disk in $(find /dev/ \( -name "nvme?" -o -name "sd?" \) \( -type b -o -type c \))
 do

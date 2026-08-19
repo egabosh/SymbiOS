@@ -1,3 +1,8 @@
+CHECK_CATEGORY="network"
+CHECK_TITLE="Dynamic DNS"
+CHECK_DESC="Checks if the automatic DNS update is configured correctly."
+CHECK_DETAIL="Only relevant when DNS mode is set to desec.io.|Verifies the dedyn cron job exists in /etc/cron.d/.|Checks that ddns_apikey and ddns_host are set in inventory.|Without working DDNS, your server hostname won't resolve."
+
 # Check: Verify deDyn DDNS cron job and inventory configuration are present
 f_check_cache "symbios-healthcheck-ddns" || return 2>/dev/null || true
 

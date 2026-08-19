@@ -16,17 +16,68 @@
   </a>
 </div>
 {% endif %}
-<h2 class="mb-0"><i class="bi bi-heart-pulse"></i> System Health</h2>
-<div class="d-flex align-items-center gap-3 mt-1">
-  <span class="text-muted small">The SSL check verifies that the server is reachable from the internet.</span>
-  <button type="button" class="btn btn-outline-primary btn-sm" id="ssl-check-btn" onclick="runSslCheck()">
-    <i class="bi bi-patch-check"></i> Check SSL now
+
+<!-- Hero Status -->
+<div id="hero-status" class="health-hero mb-4">
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+    <div class="d-flex align-items-center gap-3">
+      <div id="hero-pulse" class="health-pulse"></div>
+      <div>
+        <h2 class="mb-0" id="hero-title"><i class="bi bi-heart-pulse"></i> System Health</h2>
+        <small class="text-muted" id="hero-subtitle">Loading health data...</small>
+      </div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <span class="text-muted small" id="last-run-label"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Summary Cards -->
+<div class="row g-3 mb-4" id="summary-cards">
+  <div class="col-sm-4">
+    <div class="card border-success summary-card" id="card-ok">
+      <div class="card-body text-center py-3">
+        <div class="fs-2 fw-bold text-success" id="count-ok">-</div>
+        <div class="small text-muted">Healthy</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-4">
+    <div class="card border-warning summary-card" id="card-warn">
+      <div class="card-body text-center py-3">
+        <div class="fs-2 fw-bold text-warning" id="count-warn">-</div>
+        <div class="small text-muted">Warnings</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-4">
+    <div class="card border-danger summary-card" id="card-error">
+      <div class="card-body text-center py-3">
+        <div class="fs-2 fw-bold text-danger" id="count-error">-</div>
+        <div class="small text-muted">Errors</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Filter Tabs -->
+<div class="d-flex align-items-center gap-2 mb-3 flex-wrap" id="filter-bar">
+  <button class="btn btn-sm btn-primary filter-btn active" data-filter="all">All</button>
+  <button class="btn btn-sm btn-outline-secondary filter-btn" data-filter="ok">
+    <i class="bi bi-check-circle-fill text-success"></i> Healthy
+  </button>
+  <button class="btn btn-sm btn-outline-secondary filter-btn" data-filter="error">
+    <i class="bi bi-x-circle-fill text-danger"></i> Errors
+  </button>
+  <button class="btn btn-sm btn-outline-secondary filter-btn" data-filter="warn">
+    <i class="bi bi-exclamation-triangle-fill text-warning"></i> Warnings
   </button>
 </div>
-<div id="ssl-result" class="mt-2"></div>
 
-<div id="health-container" class="row g-3 mt-2">
-  <div class="col-12 text-center">
+<!-- Health Checks Container -->
+<div id="health-container">
+  <div class="text-center py-5">
     <div class="spinner-border" role="status">
       <span class="visually-hidden">Loading...</span>
     </div>
@@ -35,6 +86,8 @@
 
 <script>
   const HEALTH_INTERVAL_MS = 15000;
+  let currentFilter = 'all';
+  let gCategories = [];
 
   function statusIcon(status) {
     if (status === 'ok') return '<i class="bi bi-check-circle-fill text-success"></i>';
@@ -43,37 +96,11 @@
     return '<i class="bi bi-question-circle-fill text-secondary"></i>';
   }
 
-  function statusBadge(status) {
-    if (status === 'ok') return '<span class="badge bg-success">OK</span>';
-    if (status === 'warn') return '<span class="badge bg-warning text-dark">Warning</span>';
-    if (status === 'error') return '<span class="badge bg-danger">Error</span>';
-    return '<span class="badge bg-secondary">Unknown</span>';
-  }
-
-  function runSslCheck() {
-    var btn = document.getElementById('ssl-check-btn');
-    var res = document.getElementById('ssl-result');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking...';
-    res.innerHTML = '<div class="alert alert-info py-2 px-3 mb-0"><span class="spinner-border spinner-border-sm"></span> Checking certificates...</div>';
-
-    fetch('{% url "health_ssl_check" %}')
-      .then(r => r.json())
-      .then(data => {
-        if (data.ok) {
-          res.innerHTML = '<div class="alert alert-success py-2 px-3 mb-0"><i class="bi bi-check-circle-fill"></i> ' + escapeHtml(data.summary || 'SSL certificates valid.') + '</div>';
-        } else {
-          var msg = data.error || data.summary || 'No valid certificate found.';
-          res.innerHTML = '<div class="alert alert-warning py-2 px-3 mb-0"><i class="bi bi-exclamation-triangle-fill"></i> ' + escapeHtml(msg) + '</div>';
-        }
-      })
-      .catch(err => {
-        res.innerHTML = '<div class="alert alert-danger py-2 px-3 mb-0"><i class="bi bi-x-circle-fill"></i> ' + escapeHtml(err.message) + '</div>';
-      })
-      .finally(() => {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-patch-check"></i> Check SSL now';
-      });
+  function statusDot(status) {
+    if (status === 'ok') return 'dot-success';
+    if (status === 'warn') return 'dot-warning';
+    if (status === 'error') return 'dot-danger';
+    return 'dot-secondary';
   }
 
   function escapeHtml(text) {
@@ -83,67 +110,244 @@
     return d.innerHTML;
   }
 
-  async function fetchHealth() {
-    const expanded = new Set();
-    document.querySelectorAll('.collapse.show').forEach(el => {
-      if (el.id) expanded.add(el.id);
-    });
-
+  function formatTimestamp(iso) {
+    if (!iso || iso === 'unknown') return 'never';
     try {
-      const resp = await fetch('/health/data/');
+      var d = new Date(iso);
+      return d.toLocaleString();
+    } catch (e) {
+      return iso;
+    }
+  }
+
+  function recheckSingle(checkName, btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    var card = btn.closest('.check-card');
+    fetch('/health/recheck/' + encodeURIComponent(checkName) + '/')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok && data.check) {
+          var r = data.check;
+          var dot = card.querySelector('.check-dot');
+          dot.className = 'check-dot ' + statusDot(r.status) + ' mt-1';
+          var icon = card.querySelector('.check-status-icon');
+          icon.innerHTML = statusIcon(r.status);
+          var msg = card.querySelector('.check-message');
+          if (r.message) {
+            if (msg) { msg.innerHTML = escapeHtml(r.message); }
+            else {
+              var wrap = card.querySelector('.check-desc');
+              wrap.insertAdjacentHTML('afterend', '<div class="check-message text-danger small mt-1">' + escapeHtml(r.message) + '</div>');
+            }
+          } else if (msg) { msg.remove(); }
+          card.setAttribute('data-status', r.status);
+        }
+      })
+      .catch(function(err) {
+        btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
+        btn.title = 'Error: ' + err.message;
+      })
+      .finally(function() {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
+      });
+  }
+
+  function toggleCheckDetail(card) {
+    var detail = card.querySelector('.check-detail');
+    if (!detail) return;
+    var isOpen = detail.classList.contains('show');
+    document.querySelectorAll('.check-detail.show').forEach(function(el) { el.classList.remove('show'); });
+    document.querySelectorAll('.check-card.expanded').forEach(function(el) { el.classList.remove('expanded'); });
+    if (!isOpen) {
+      detail.classList.add('show');
+      card.classList.add('expanded');
+    }
+  }
+
+  function renderCheckCard(r) {
+    var title = r.title || r.name;
+    var desc = r.desc || '';
+    var detail = r.detail || '';
+    var message = r.message || '';
+    var dotClass = statusDot(r.status);
+    var lines = detail ? detail.split('|') : [];
+    var detailHtml = '';
+    if (lines.length || r.script) {
+      detailHtml = '<div class="check-detail">';
+      if (lines.length) {
+        detailHtml += '<div class="detail-label"><i class="bi bi-info-circle"></i> How it works</div>';
+        detailHtml += '<ul class="detail-list">';
+        lines.forEach(function(line) { detailHtml += '<li>' + escapeHtml(line.trim()) + '</li>'; });
+        detailHtml += '</ul>';
+      }
+      if (r.script) {
+        detailHtml += '<div class="detail-script"><i class="bi bi-file-earmark-code"></i> '
+          + escapeHtml(r.script) + '</div>';
+      }
+      detailHtml += '</div>';
+    }
+    var msgHtml = message
+      ? '<div class="check-message text-danger small mt-1">' + escapeHtml(message) + '</div>'
+      : '';
+    return '<div class="card check-card" onclick="toggleCheckDetail(this)" data-status="' + r.status + '">'
+      + '<div class="card-body py-2 px-3">'
+      + '<div class="d-flex align-items-start gap-2">'
+      + '<div class="check-dot ' + dotClass + ' mt-1"></div>'
+      + '<div class="flex-grow-1 min-width-0">'
+      + '<div class="fw-semibold check-title">' + escapeHtml(title) + '</div>'
+      + '<div class="small text-muted check-desc">' + escapeHtml(desc) + '</div>'
+      + msgHtml
+      + '</div>'
+      + '<div class="d-flex align-items-center gap-2">'
+      + '<button class="btn btn-sm btn-outline-secondary py-0 px-1 recheck-btn" title="Recheck" onclick="event.stopPropagation(); recheckSingle(\'' + escapeHtml(r.name) + '\', this)"><i class="bi bi-arrow-clockwise"></i></button>'
+      + '<div class="check-status-icon">' + statusIcon(r.status) + '</div>'
+      + '</div>'
+      + '</div>'
+      + detailHtml
+      + '</div></div>';
+  }
+
+  async function fetchHealth() {
+    try {
+      var resp = await fetch('/health/data/');
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      const data = await resp.json();
+      var data = await resp.json();
 
-      const rc = data.runchecks || {};
-      const status = rc.status || 'unknown';
-      const lastRun = rc.last_run || 'unknown';
-      const results = rc.results || [];
+      var rc = data.runchecks || {};
+      var status = rc.status || 'unknown';
+      var lastRun = rc.last_run || 'unknown';
+      var results = rc.results || [];
+      var categories = rc.categories || [];
 
-      let okCount = 0, warnCount = 0, errorCount = 0;
-      results.forEach(r => {
+      if (categories.length) gCategories = categories;
+
+      var okCount = 0, warnCount = 0, errorCount = 0;
+      results.forEach(function(r) {
         if (r.status === 'ok') okCount++;
         else if (r.status === 'warn') warnCount++;
         else if (r.status === 'error') errorCount++;
       });
 
-      const overallBadge = errorCount > 0
-        ? '<span class="badge bg-danger fs-5 me-2"><i class="bi bi-x-circle-fill"></i> ' + errorCount + ' Error' + (errorCount > 1 ? 's' : '') + '</span>'
-        : warnCount > 0
-        ? '<span class="badge bg-warning text-dark fs-5 me-2"><i class="bi bi-exclamation-triangle-fill"></i> ' + warnCount + ' Warning' + (warnCount > 1 ? 's' : '') + '</span>'
-        : '<span class="badge bg-success fs-5"><i class="bi bi-check-circle-fill"></i> All OK</span>';
+      document.getElementById('count-ok').textContent = okCount;
+      document.getElementById('count-warn').textContent = warnCount;
+      document.getElementById('count-error').textContent = errorCount;
+      document.getElementById('card-ok').classList.toggle('border-success', okCount > 0);
+      document.getElementById('card-warn').classList.toggle('border-warning', warnCount > 0);
+      document.getElementById('card-error').classList.toggle('border-danger', errorCount > 0);
 
-      let tableRows = '';
-      results.forEach(r => {
-        tableRows += '<tr>' +
-          '<td style="width:30px">' + statusIcon(r.status) + '</td>' +
-          '<td class="fw-semibold">' + escapeHtml(r.name) + '</td>' +
-          '<td class="text-muted">' + escapeHtml(r.message || '') + '</td>' +
-          '</tr>';
+      var pulse = document.getElementById('hero-pulse');
+      var heroTitle = document.getElementById('hero-title');
+      var heroSub = document.getElementById('hero-subtitle');
+      pulse.className = 'health-pulse';
+      if (errorCount > 0) {
+        pulse.classList.add('pulse-danger');
+        heroTitle.innerHTML = '<i class="bi bi-heart-pulse text-danger"></i> System Health';
+        heroSub.textContent = errorCount + ' error' + (errorCount > 1 ? 's' : '') + ' detected';
+      } else if (warnCount > 0) {
+        pulse.classList.add('pulse-warning');
+        heroTitle.innerHTML = '<i class="bi bi-heart-pulse text-warning"></i> System Health';
+        heroSub.textContent = warnCount + ' warning' + (warnCount > 1 ? 's' : '');
+      } else {
+        pulse.classList.add('pulse-success');
+        heroTitle.innerHTML = '<i class="bi bi-heart-pulse text-success"></i> System Health';
+        heroSub.textContent = 'All ' + results.length + ' checks passed';
+      }
+
+      document.getElementById('last-run-label').textContent = 'Last run: ' + formatTimestamp(lastRun);
+
+      // Group checks by category from JSON
+      var byCat = {};
+      var uncategorized = [];
+      results.forEach(function(r) {
+        var cat = r.category || '';
+        if (cat) {
+          if (!byCat[cat]) byCat[cat] = [];
+          byCat[cat].push(r);
+        } else {
+          uncategorized.push(r);
+        }
+      });
+      if (uncategorized.length) byCat['_other'] = uncategorized;
+
+      var html = '';
+      gCategories.forEach(function(catDef) {
+        var catChecks = byCat[catDef.id] || [];
+        if (!catChecks.length) return;
+
+        if (currentFilter !== 'all') {
+          catChecks = catChecks.filter(function(r) { return r.status === currentFilter; });
+        }
+        if (!catChecks.length) return;
+
+        catChecks.sort(function(a, b) {
+          var order = { error: 0, warn: 1, ok: 2, unknown: 3 };
+          return (order[a.status] || 3) - (order[b.status] || 3);
+        });
+
+        var catHasError = catChecks.some(function(r) { return r.status === 'error'; });
+        var catHasWarn = catChecks.some(function(r) { return r.status === 'warn'; });
+        var borderClass = catHasError ? 'border-danger' : catHasWarn ? 'border-warning' : 'border-success';
+
+        html += '<div class="card mb-3 ' + borderClass + ' health-category-card">';
+        html += '<div class="card-header py-2 d-flex align-items-center gap-2" style="cursor:pointer" onclick="this.parentElement.querySelector(\'.card-body\').classList.toggle(\'d-none\')">';
+        html += '<i class="bi ' + escapeHtml(catDef.icon) + '"></i>';
+        html += '<span class="fw-semibold">' + escapeHtml(catDef.label) + '</span>';
+        html += '<span class="badge bg-secondary ms-auto">' + catChecks.length + '</span>';
+        html += '</div>';
+        html += '<div class="card-body p-2">';
+        html += '<div class="row g-2">';
+        catChecks.forEach(function(r) {
+          html += '<div class="col-md-6 col-lg-4">' + renderCheckCard(r) + '</div>';
+        });
+        html += '</div></div></div>';
       });
 
-      document.getElementById('health-container').innerHTML =
-        '<div class="col-12 mb-3">' +
-        '<div class="d-flex align-items-center gap-3">' + overallBadge +
-        '<span class="text-muted small">' + results.length + ' checks &mdash; last run: ' + escapeHtml(lastRun) + '</span>' +
-        '</div></div>' +
-        '<div class="col-12">' +
-        '<div class="card border-' + (status === 'ok' ? 'success' : status === 'warn' ? 'warning' : 'danger') + '">' +
-        '<div class="card-body">' +
-        '<h6 class="card-title">Runchecks Results</h6>' +
-        '<div class="table-responsive">' +
-        '<table class="table table-sm table-borderless align-middle mb-0">' +
-        '<tbody>' + tableRows + '</tbody></table>' +
-        '</div></div></div></div>';
+      // Show uncategorized if any exist but not in gCategories
+      if (byCat['_other'] && byCat['_other'].length) {
+        var catChecks = byCat['_other'];
+        if (currentFilter !== 'all') {
+          catChecks = catChecks.filter(function(r) { return r.status === currentFilter; });
+        }
+        if (catChecks.length) {
+          html += '<div class="card mb-3 border-secondary health-category-card">';
+          html += '<div class="card-header py-2 d-flex align-items-center gap-2">';
+          html += '<i class="bi bi-question-circle"></i>';
+          html += '<span class="fw-semibold">Uncategorized</span>';
+          html += '<span class="badge bg-secondary ms-auto">' + catChecks.length + '</span>';
+          html += '</div>';
+          html += '<div class="card-body p-2"><div class="row g-2">';
+          catChecks.forEach(function(r) {
+            html += '<div class="col-md-6 col-lg-4">' + renderCheckCard(r) + '</div>';
+          });
+          html += '</div></div></div>';
+        }
+      }
 
-      expanded.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.add('show');
-      });
+      if (!html) {
+        html = '<div class="text-center text-muted py-4">No checks match the current filter.</div>';
+      }
+
+      document.getElementById('health-container').innerHTML = html;
     } catch (e) {
       document.getElementById('health-container').innerHTML =
-        '<div class="col-12"><div class="alert alert-danger">Error fetching health data: ' + e.message + '</div></div>';
+        '<div class="alert alert-danger">Error fetching health data: ' + e.message + '</div>';
     }
   }
+
+  document.querySelectorAll('.filter-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.filter-btn').forEach(function(b) {
+        b.classList.remove('active', 'btn-primary');
+        b.classList.add('btn-outline-secondary');
+      });
+      this.classList.add('active', 'btn-primary');
+      this.classList.remove('btn-outline-secondary');
+      currentFilter = this.getAttribute('data-filter');
+      fetchHealth();
+    });
+  });
 
   fetchHealth();
   setInterval(fetchHealth, HEALTH_INTERVAL_MS);

@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: Auto Updates
 #   short_description: Configure automated system updates
 #   description: Sets up periodic automatic updates 6:05am of the host OS packages via a cron job, keeping the system up2date without manual intervention.
 #   author: Oliver Bohlen

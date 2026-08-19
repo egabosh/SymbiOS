@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: Backup
 #   short_description: Configure automated backups
 #   description: Installs a scheduled backup job (cron) that backs up SymbiOS configuration and service data to the configured backup target.
 #   author: Oliver Bohlen

@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="Stuck Processes"
+CHECK_DESC="Detects processes stuck for more than 30 minutes."
+CHECK_DETAIL="Monitors processes in D (uninterruptible sleep),|Z (zombie), or R (running) state.|Tracks each PID over time in a temp directory.|Alerts if a process stays stuck for more than 30 minutes.|Excludes known long-running operations (USB storage, RAID)."
+
 # Monitor processes in D (uninterruptible), Z (zombie) or R (running) state
 mkdir -p ${g_tmp}/proc-check
 # Clean up processes that are no longer in a monitored state

@@ -1,3 +1,8 @@
+CHECK_CATEGORY="network"
+CHECK_TITLE="Internet Connection"
+CHECK_DESC="Checks if the server can reach the internet."
+CHECK_DETAIL="Pings dns3.digitalcourage.de (a public DNS server)|with 3 ICMP packets.|Fails if no response is received within the default timeout.|Indicates network, DNS, or gateway issues."
+
 # Ping a known external host to verify internet connectivity
 g_testip=dns3.digitalcourage.de
 if ! ping -c3 ${g_testip} >/dev/null 2>&1

@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: Docker
 #   short_description: Install and configure Docker
 #   description: Installs the Docker engine and compose plugin, configures storage/driver and daemon settings, and prepares the container runtime used by SymbiOS services.
 #   author: Oliver Bohlen

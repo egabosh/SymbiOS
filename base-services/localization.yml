@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: Localization
 #   short_description: Basic SymbiOS localization
 #   description: 'Basic SymbiOS localization sets timezone, keyboard layout and locale'
 #   author: Oliver Bohlen

@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="CPU Load"
+CHECK_DESC="Checks if the CPU load is too high."
+CHECK_DETAIL="Reads the 1-minute load average from /proc/loadavg.|Compares against (number of CPU cores + 10).|A high load average means processes are waiting for CPU time|and the server may be sluggish."
+
 # Alert if system load average exceeds (number of CPUs + 10)
 let g_maxload=$(cat /proc/cpuinfo | grep ^processor | wc -l)+10
 g_load=`cat /proc/loadavg | cut -d" " -f1`

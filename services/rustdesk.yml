@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # docs:
+#   name: RustDesk
 #   short_description: Deploy the RustDesk remote desktop server
 #   description: Deploys RustDesk server (hbbs/hbbr) for self-hosted remote desktop connections. Uses raw TCP/UDP ports, no Traefik.
 #   author: Oliver Bohlen

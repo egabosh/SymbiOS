@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="Disk Usage"
+CHECK_DESC="Monitors disk space on key partitions (root, config, home)."
+CHECK_DETAIL="Checks /, /config, and optionally /home mount points.|Warns above 75% usage (warning), critical above 90%.|Full disks can crash services and prevent log writing.|This is separate from the basic df check (stricter thresholds)."
+
 # Check: Monitor disk usage on key mount points and warn on high usage
 f_check_cache "symbios-healthcheck-disk" || return 2>/dev/null || true
 

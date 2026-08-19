@@ -1,3 +1,8 @@
+CHECK_CATEGORY="network"
+CHECK_TITLE="Reverse Proxy"
+CHECK_DESC="Checks if all websites behind Traefik are reachable."
+CHECK_DETAIL="Collects all hostnames from Docker Compose Traefik labels.|Adds missing hosts to /etc/hosts (指向 Traefik).|Verifies each host via HTTP wget with retries.|Tracks persistent 502 errors (warns after 15 minutes).|401/403 responses are expected (Authelia protection)."
+
 # Healthcheck for traefik host reachability
 # Collect all hostnames from docker-compose files
 f_symbios_traefik_hosts

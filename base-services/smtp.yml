@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: SMTP
 #   short_description: Configure the mail client defaults
 #   description: Deploys the shared mail-client configuration ({{ base_services_root }}/_defaults/mailclient) used by containers to send mail. Also configures Postfix as a local mail relay so system commands like mail(1) work.
 #   author: Oliver Bohlen

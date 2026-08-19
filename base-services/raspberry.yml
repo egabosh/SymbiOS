@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: Raspberry Pi
 #   short_description: Raspberry Pi specific Debian setup
 #   description: Applies Raspberry-Pi-specific tweaks (boot/firmware, hardware enablement and onboarding) for running SymbiOS on Pi hardware. Manages no persistent service of its own.
 #   author: Oliver Bohlen

@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="Free Memory"
+CHECK_DESC="Checks if the server is running low on RAM (below 20 MB)."
+CHECK_DETAIL="Reads /proc/meminfo via the free command.|Alerts when less than 20 MB of free memory remain.|Low memory can cause services to crash or the system to become unresponsive."
+
 # Alert when free memory drops below 20MB
 g_mem=`free | grep "^Mem:" | sed 's/  */ /g' | cut -d" " -f 4`
 if [[ $g_mem -lt 20480 ]]

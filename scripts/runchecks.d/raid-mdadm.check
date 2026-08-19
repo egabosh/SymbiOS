@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="RAID Array"
+CHECK_DESC="Checks if RAID arrays are healthy."
+CHECK_DETAIL="Scans for mdadm RAID arrays via mdadm --D --scan.|Verifies each array state is clean, active, or checking.|A degraded or broken RAID array risks data loss."
+
 # Check each mdadm RAID array for healthy state
 mdadm -D --scan | grep -E "^ARRAY" | cut -d" " -f2 | while read g_array
 do

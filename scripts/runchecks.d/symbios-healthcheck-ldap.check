@@ -1,3 +1,8 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="LDAP Directory"
+CHECK_DESC="Checks if the user directory (LDAP) is accessible."
+CHECK_DETAIL="Reads the LDAP container IP from Docker inspect.|Verifies the admin password file exists and is configured.|Runs ldapwhoami bind test with admin credentials.|LDAP stores all user accounts - if down, no one can log in."
+
 # Healthcheck for symbios-base-ldap (LDAP bind test)
 f_check_cache "symbios-healthcheck-ldap" || return 2>/dev/null || true
 g_ldap_ip=$(docker inspect symbios-base-ldap --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{"\n"}}{{end}}' 2>/dev/null | grep '^192\.168\.' | head -1)

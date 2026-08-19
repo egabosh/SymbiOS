@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: Basics
 #   short_description: Basic SymbiOS host setup
 #   description: 'Performs base system configuration: packages, users, locale/timezone, SSH, logging (rsyslog), mail relay (postfix) and other foundational settings used by all other roles.'
 #   author: Oliver Bohlen

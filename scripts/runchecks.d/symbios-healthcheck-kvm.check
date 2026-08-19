@@ -1,3 +1,8 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="Virtual Machines"
+CHECK_DESC="Checks if the KVM/libvirt service is reachable."
+CHECK_DETAIL="Skipped if libvirt is not installed (virsh not found).|Tests virsh list --all to verify connectivity.|Supports socket activation - service may be inactive|but sockets are still listening. Only alerts if virsh fails."
+
 # Healthcheck for KVM/libvirt daemon
 f_check_cache "symbios-healthcheck-kvm" || return 2>/dev/null || true
 
@@ -7,7 +12,9 @@ then
   return 0
 fi
 
-if ! systemctl is-active libvirtd.service >/dev/null 2>&1
+# libvirtd may use socket activation (service inactive but sockets active).
+# Test actual virsh connectivity instead of systemctl is-active.
+if ! virsh list --all &>/dev/null
 then
-  g_echo_error "Healthcheck failed for KVM: libvirtd not running"
+  g_echo_error "Healthcheck failed for KVM: virsh not reachable (libvirtd not running or socket not activated)"
 fi

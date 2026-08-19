@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: WebUI
 #   short_description: Deploy the SymbiOS WebUI
 #   description: Builds and runs the SymbiOS web interface (Django/gunicorn), wires it to Traefik/Authelia, and configures the loopback break-glass and the audit-logging SSH executor.
 #   url: "https://{{ base_domain }}"

@@ -1,3 +1,8 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="Free Swap"
+CHECK_DESC="Checks if swap space is almost full (below 50 MB free)."
+CHECK_DETAIL="Reads swap usage from the free command.|Only checks when swap is actually configured (total > 0).|Full swap combined with low RAM indicates memory pressure."
+
 # Alert when swap is active and free space drops below 50MB
 if ! [[ $(free | grep "^Swap:" | sed 's/  */ /g' | cut -d" " -f 2) == 0 ]]
 then

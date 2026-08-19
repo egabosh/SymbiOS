@@ -94,6 +94,7 @@ def _scan_dir(group, base, d):
             "name": fn[:-4],
             "playbook": "%s/%s" % (group, fn),
             "title": docs.get("short_description", fn[:-4]),
+            "menu_label": docs.get("name") or _menu_label("%s/%s" % (group, fn)),
             "docs": docs,
         })
     return results
