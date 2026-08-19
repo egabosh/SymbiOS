@@ -18,9 +18,9 @@
 #   short_description: Deploy an OpenWrt QEMU/KVM virtual machine
 #   description: |
 #     Deploys an OpenWrt 24.10.2 VM with UEFI boot, serial console, and two
-#     NICs: WAN (DHCP via libvirt NAT to host internet) and LAN (isolated
-#     bridge at 172.18.0.1/24). Supports x86_64 (amd64) and arm64 (aarch64)
-#     hosts. Requires the KVM base playbook (base-services/kvm.yml) first.
+#     NICs: WAN (static IP via libvirt NAT to host internet, no dnsmasq) and
+#     LAN (isolated bridge at 172.18.0.1/24). Supports x86_64 (amd64) and
+#     arm64 (aarch64) hosts. Requires the KVM base playbook (base-services/kvm.yml) first.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -61,14 +61,15 @@
     vm_ram_mb: 512
     vm_vcpus: 2
     service_root: "{{ services_root }}/{{ service_name }}"
-    # WAN network (NAT to host internet)
+    # WAN network (NAT to host internet, static IPs, no dnsmasq)
     wan_subnet: "172.17.0"
     wan_netmask: "255.255.255.0"
-    wan_dhcp_start: "172.17.0.100"
-    wan_dhcp_end: "172.17.0.200"
+    wan_host_ip: "172.17.0.1"
+    wan_vm_ip: "172.17.0.10"
     # LAN network (isolated, OpenWrt is the gateway)
     lan_subnet: "172.18.0"
     lan_netmask: "255.255.255.0"
+    lan_host_ip: "172.18.0.1"
 
   tasks:
 
@@ -168,6 +169,7 @@
       ansible.builtin.apt:
         name:
           - qemu-utils
+          - "{{ 'qemu-efi-aarch64' if is_arm64 else 'ovmf' }}"
         state: present
         update_cache: yes
         cache_valid_time: 3600
@@ -216,7 +218,6 @@
       community.general.modprobe:
         name: nbd
         state: present
-        params: "max_part=8"
       when: kvm_capable | bool
 
     # ── Write uci-defaults script to temp file (avoids heredoc-in-shell) ─
@@ -227,7 +228,7 @@
         content: |
           #!/bin/sh
           # OpenWrt QEMU VM - WAN + LAN network config (first boot only)
-          # eth0 = WAN (DHCP client, connects to host internet via libvirt NAT)
+          # eth0 = WAN (static IP, connects to host internet via libvirt NAT)
           # eth1 = LAN (static 172.18.0.1/24, internal network)
 
           # Remove default bridge device and LAN interface
@@ -235,10 +236,14 @@
           uci delete network.lan 2>/dev/null
           uci delete network.wan6 2>/dev/null
 
-          # WAN interface on eth0 (DHCP)
+          # WAN interface on eth0 (static IP)
           uci set network.wan=interface
-          uci set network.wan.proto=dhcp
+          uci set network.wan.proto=static
           uci set network.wan.device=eth0
+          uci set network.wan.ipaddr={{ wan_vm_ip }}
+          uci set network.wan.netmask={{ wan_netmask }}
+          uci set network.wan.gateway={{ wan_host_ip }}
+          uci set network.wan.dns={{ wan_host_ip }}
 
           # LAN interface on eth1 (static)
           uci set network.lan=interface
@@ -276,16 +281,7 @@
           uci set firewall.wan_forward.src=lan
           uci set firewall.wan_forward.dest=wan
 
-          # Allow DHCP on WAN
-          uci set firewall.allow_dhcp=rule
-          uci set firewall.allow_dhcp.name=Allow-DHCP-Renew
-          uci set firewall.allow_dhcp.src=wan
-          uci set firewall.allow_dhcp.proto=udp
-          uci set firewall.allow_dhcp.dest_port=68
-          uci set firewall.allow_dhcp.target=ACCEPT
-          uci set firewall.allow_dhcp.family=ipv4
-
-          # Allow ping
+          # Allow ping on WAN
           uci set firewall.allow_ping=rule
           uci set firewall.allow_ping.name=Allow-Ping
           uci set firewall.allow_ping.src=wan
@@ -306,25 +302,42 @@
       ansible.builtin.shell: |
         set -e
         IMAGE="{{ service_root }}/images/openwrt.qcow2"
-        # Disconnect ALL nbd devices to clear any stale state
+
+        # Reload nbd module to ensure clean state
         for dev in /dev/nbd*; do
           [ -b "$dev" ] && qemu-nbd --disconnect "$dev" 2>/dev/null || true
         done
         sleep 2
-        # Find a working nbd device (nbd0 may have stale I/O errors)
+        modprobe -r nbd 2>/dev/null || true
+        sleep 1
+        modprobe nbd 2>/dev/null || true
+        sleep 2
+
+        # Find a working nbd device
         NBD=""
         for try in /dev/nbd0 /dev/nbd1 /dev/nbd2; do
-          qemu-nbd --connect="$try" "$IMAGE" 2>/dev/null || continue
-          sleep 2
+          echo "Trying $try..."
+          if ! qemu-nbd --connect="$try" "$IMAGE" 2>&1; then
+            echo "Connect to $try failed"
+            continue
+          fi
+          sleep 3
           for i in $(seq 1 10); do
             [ -b "${try}p1" ] && [ -b "${try}p2" ] && break
             sleep 1
           done
+          if [ ! -b "${try}p1" ]; then
+            echo "No partition devices on $try"
+            qemu-nbd --disconnect "$try" 2>/dev/null || true
+            continue
+          fi
+          mkdir -p /tmp/ow-nbd
           if mount "${try}p1" /tmp/ow-nbd 2>/dev/null; then
             umount /tmp/ow-nbd 2>/dev/null
             NBD="$try"
             break
           else
+            echo "Mount failed on $try"
             qemu-nbd --disconnect "$try" 2>/dev/null || true
           fi
         done
@@ -432,13 +445,35 @@
       when: kvm_capable | bool
 
     # ── Libvirt networks ─────────────────────────────────────────────────
-    # WAN network: NAT mode, DHCP, bridges to host internet
+    # WAN network: NAT mode, static IPs only, no dnsmasq
+    # If the network already exists (e.g. with old DHCP config), destroy and redefine
+    - name: Destroy existing openwrt VM (needed before network destroy)
+      ansible.builtin.shell: |
+        virsh destroy openwrt 2>/dev/null || true
+        virsh undefine openwrt --nvram 2>/dev/null || true
+        echo "vm-destroyed"
+      register: vm_pre_destroy
+      changed_when: "'vm-destroyed' in vm_pre_destroy.stdout"
+      when: kvm_capable | bool
+
     - name: Check if openwrt-wan network exists
       ansible.builtin.command: virsh net-info openwrt-wan
       register: ow_wan_net
       changed_when: false
       failed_when: false
       when: kvm_capable | bool
+
+    - name: Destroy existing openwrt-wan network if it has DHCP
+      ansible.builtin.shell: |
+        virsh net-destroy openwrt-wan 2>/dev/null || true
+        virsh net-undefine openwrt-wan 2>/dev/null || true
+        echo "wan-network-destroyed"
+      register: wan_net_destroy
+      changed_when: "'wan-network-destroyed' in wan_net_destroy.stdout"
+      when:
+        - kvm_capable | bool
+        - ow_wan_net.rc | default(1) == 0
+      ignore_errors: true
 
     - name: Define openwrt-wan libvirt network
       ansible.builtin.shell: |
@@ -447,11 +482,7 @@
           <name>openwrt-wan</name>
           <bridge name="br-ow-wan"/>
           <forward mode="nat"/>
-          <ip address="{{ wan_subnet }}.1" netmask="{{ wan_netmask }}">
-            <dhcp>
-              <range start="{{ wan_dhcp_start }}" end="{{ wan_dhcp_end }}"/>
-            </dhcp>
-          </ip>
+          <ip address="{{ wan_host_ip }}" netmask="{{ wan_netmask }}"/>
         </network>
         WANEOF
         virsh net-define /tmp/ow-wan-net.xml
@@ -461,9 +492,7 @@
         echo "wan-network-created"
       register: wan_net_create
       changed_when: "'wan-network-created' in wan_net_create.stdout"
-      when:
-        - kvm_capable | bool
-        - ow_wan_net.rc | default(1) != 0
+      when: kvm_capable | bool
 
     # LAN network: isolated (no forward), OpenWrt acts as gateway
     - name: Check if openwrt-lan network exists
@@ -479,7 +508,7 @@
         <network>
           <name>openwrt-lan</name>
           <bridge name="br-ow-lan"/>
-          <ip address="{{ lan_subnet }}.1" netmask="{{ lan_netmask }}"/>
+          <ip address="{{ lan_host_ip }}" netmask="{{ lan_netmask }}"/>
         </network>
         LANEOF
         virsh net-define /tmp/ow-lan-net.xml
