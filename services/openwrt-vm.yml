@@ -17,10 +17,27 @@
 # docs:
 #   short_description: Deploy an OpenWrt QEMU/KVM virtual machine
 #   description: |
-#     Deploys an OpenWrt 24.10.2 VM with UEFI boot, serial console, and two
-#     NICs: WAN (static IP via libvirt NAT to host internet, no dnsmasq) and
-#     LAN (isolated bridge at 172.18.0.1/24). Supports x86_64 (amd64) and
-#     arm64 (aarch64) hosts. Requires the KVM base playbook (base-services/kvm.yml) first.
+#     Deploys an OpenWrt VM with UEFI boot, serial console, and two NICs:
+#     WAN (static IP 172.17.0.10 via libvirt NAT to host internet, no dnsmasq)
+#     and LAN (isolated bridge at 172.18.0.1/24, OpenWrt is the gateway).
+#     Supports x86_64 (amd64) and arm64 (aarch64) hosts.
+#     Requires the KVM base playbook (base-services/kvm.yml) first.
+#
+#     Accessing the VM:
+#       WAN side (host network):
+#         Web UI (LuCI): http://172.17.0.10  (default user: root, no password)
+#         SSH:           ssh root@172.17.0.10 (set password first via LuCI or console)
+#         Console:       virsh console openwrt
+#       LAN side (client network, 172.18.0.0/24):
+#         After configuring OpenWrt as router, connect a client to br-ow-lan:
+#           virsh attach-interface openwrt network openwrt-lan model virtio
+#         Then the client gets DHCP from OpenWrt (172.18.0.x) and routes
+#         internet through the VM's WAN interface.
+#
+#     First boot:
+#       The VM auto-configures WAN (static 172.17.0.10) and LAN (172.18.0.1)
+#       on first boot via uci-defaults. After that, access LuCI at the WAN IP
+#       to finish OpenWrt setup (set root password, install packages, etc.).
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -57,7 +74,7 @@
 
   vars:
     service_name: openwrt-vm
-    openwrt_version: "24.10.2"
+    openwrt_version: "latest"
     vm_ram_mb: 512
     vm_vcpus: 2
     service_root: "{{ services_root }}/{{ service_name }}"
@@ -112,6 +129,40 @@
       ansible.builtin.debug:
         msg: "Skipping OpenWrt VM - not a KVM-capable host (arch={{ host_arch.stdout | default('unknown') }})"
       when: not kvm_capable | bool
+
+    # ── Resolve OpenWrt version ──────────────────────────────────────────
+    - name: Resolve OpenWrt latest version
+      ansible.builtin.shell: |
+        # Fetch releases page and find latest stable version (e.g. 24.10.x, 25.12.x)
+        curl -sf "https://downloads.openwrt.org/releases/" 2>/dev/null \
+          | grep -oP 'href="\K[0-9]+\.[0-9]+\.[0-9]+(?=/")' \
+          | sort -V | tail -1
+      register: openwrt_latest_version
+      changed_when: false
+      when:
+        - kvm_capable | bool
+        - openwrt_version == "latest"
+
+    - name: Set resolved OpenWrt version
+      ansible.builtin.set_fact:
+        openwrt_version: "{{ openwrt_latest_version.stdout }}"
+      when:
+        - kvm_capable | bool
+        - openwrt_version == "latest"
+        - openwrt_latest_version.stdout | default('') | length > 0
+
+    - name: Fail if OpenWrt version could not be resolved
+      ansible.builtin.fail:
+        msg: "Could not resolve OpenWrt latest version from downloads.openwrt.org"
+      when:
+        - kvm_capable | bool
+        - openwrt_version == "latest"
+        - openwrt_latest_version.stdout | default('') | length == 0
+
+    - name: Show resolved OpenWrt version
+      ansible.builtin.debug:
+        msg: "Using OpenWrt version {{ openwrt_version }}"
+      when: kvm_capable | bool
 
     # ── Architecture-specific variables ──────────────────────────────────
     - name: Set x86_64 facts
