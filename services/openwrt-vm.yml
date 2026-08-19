@@ -300,12 +300,23 @@
           uci set network.wan.gateway={{ wan_host_ip }}
           uci set network.wan.dns={{ wan_host_ip }}
 
+          # WAN6 interface on eth0 (SLAAC from libvirt router)
+          uci set network.wan6=interface
+          uci set network.wan6.proto=dhcpv6
+          uci set network.wan6.device=eth0
+          uci set network.wan6.reqaddress=try
+          uci set network.wan6.reqprefix=no
+
           # LAN interface on eth1 (static)
           uci set network.lan=interface
           uci set network.lan.proto=static
           uci set network.lan.device=eth1
           uci set network.lan.ipaddr=172.18.0.1
           uci set network.lan.netmask=255.255.255.0
+          uci set network.lan.ip6assign=64
+
+          # LAN6: static ULA prefix for LAN clients
+          uci set network.lan.ip6addr=fd00:18::1/64
 
           # Clean firewall and rebuild zones
           while uci delete firewall.@zone[0] 2>/dev/null; do :; done
@@ -318,25 +329,30 @@
           uci set firewall.defaults.output=ACCEPT
           uci set firewall.defaults.forward=REJECT
 
+          # WAN zone (IPv4 + IPv6)
           uci set firewall.wan=zone
           uci set firewall.wan.name=wan
-          uci set firewall.wan.network=wan
+          uci set firewall.wan.network="wan wan6"
           uci set firewall.wan.input=REJECT
           uci set firewall.wan.output=ACCEPT
           uci set firewall.wan.forward=REJECT
+          uci set firewall.wan.masq=1
+          uci set firewall.wan.mtu_fix=1
 
+          # LAN zone (IPv4 + IPv6)
           uci set firewall.lan=zone
           uci set firewall.lan.name=lan
-          uci set firewall.lan.network=lan
+          uci set firewall.lan.network="lan lan6"
           uci set firewall.lan.input=ACCEPT
           uci set firewall.lan.output=ACCEPT
           uci set firewall.lan.forward=ACCEPT
 
+          # Forwarding: LAN -> WAN (IPv4 + IPv6)
           uci set firewall.wan_forward=forwarding
           uci set firewall.wan_forward.src=lan
           uci set firewall.wan_forward.dest=wan
 
-          # Allow ping on WAN
+          # Allow ping on WAN (IPv4)
           uci set firewall.allow_ping=rule
           uci set firewall.allow_ping.name=Allow-Ping
           uci set firewall.allow_ping.src=wan
@@ -344,6 +360,15 @@
           uci set firewall.allow_ping.icmp_type=echo-request
           uci set firewall.allow_ping.family=ipv4
           uci set firewall.allow_ping.target=ACCEPT
+
+          # Allow ICMPv6 on WAN (NDP, PMTUD, echo-request)
+          uci set firewall.allow_icmpv6=rule
+          uci set firewall.allow_icmpv6.name=Allow-ICMPv6
+          uci set firewall.allow_icmpv6.src=wan
+          uci set firewall.allow_icmpv6.proto=icmpv6
+          uci set firewall.allow_icmpv6.icmp_type="echo-request neighbor-solicitation neighbor-advertisement router-solicitation router-advertisement destination-unreachable packet-too-big time-exceeded"
+          uci set firewall.allow_icmpv6.family=ipv6
+          uci set firewall.allow_icmpv6.target=ACCEPT
 
           # Allow HTTP/HTTPS on WAN for Traefik access
           uci set firewall.allow_http=rule
@@ -376,6 +401,16 @@
     # ── Patch image: serial console + uci-defaults (single nbd session) ──
     # Both operations need qcow2 access. We do them in one connect/disconnect
     # cycle to avoid the qemu-nbd write-lock race condition between tasks.
+    # The VM must be destroyed first (QEMU holds a write lock on the qcow2).
+    - name: Destroy existing openwrt VM (releases qcow2 lock)
+      ansible.builtin.shell: |
+        virsh destroy openwrt 2>/dev/null || true
+        virsh undefine openwrt --nvram 2>/dev/null || true
+        echo "vm-destroyed"
+      register: vm_pre_destroy
+      changed_when: "'vm-destroyed' in vm_pre_destroy.stdout"
+      when: kvm_capable | bool
+
     - name: Patch qcow2 image (serial console + uci-defaults)
       ansible.builtin.shell: |
         set -e
@@ -525,15 +560,6 @@
     # ── Libvirt networks ─────────────────────────────────────────────────
     # WAN network: NAT mode, static IPs only, no dnsmasq
     # If the network already exists (e.g. with old DHCP config), destroy and redefine
-    - name: Destroy existing openwrt VM (needed before network destroy)
-      ansible.builtin.shell: |
-        virsh destroy openwrt 2>/dev/null || true
-        virsh undefine openwrt --nvram 2>/dev/null || true
-        echo "vm-destroyed"
-      register: vm_pre_destroy
-      changed_when: "'vm-destroyed' in vm_pre_destroy.stdout"
-      when: kvm_capable | bool
-
     - name: Check if openwrt-wan network exists
       ansible.builtin.command: virsh net-info openwrt-wan
       register: ow_wan_net
@@ -556,11 +582,23 @@
     - name: Define openwrt-wan libvirt network
       ansible.builtin.shell: |
         cat > /tmp/ow-wan-net.xml << WANEOF
-        <network>
+        <network xmlns:dnsmasq="http://libvirt.org/schemas/network/dnsmasq/1.0">
           <name>openwrt-wan</name>
           <bridge name="br-ow-wan"/>
-          <forward mode="nat"/>
-          <ip address="{{ wan_host_ip }}" netmask="{{ wan_netmask }}"/>
+          <forward mode="nat">
+            <nat>
+              <ip family="ipv6" address="fd00:17::1" prefix="64"/>
+            </nat>
+          </forward>
+          <ip address="{{ wan_host_ip }}" netmask="{{ wan_netmask }}">
+            <dhcp>
+              <range start="{{ wan_vm_ip }}" end="{{ wan_vm_ip }}"/>
+            </dhcp>
+          </ip>
+          <ip family="ipv6" address="fd00:17::1" prefix="64"/>
+          <dnsmasq:options>
+            <dnsmasq:option value="enable-ra"/>
+          </dnsmasq:options>
         </network>
         WANEOF
         virsh net-define /tmp/ow-wan-net.xml
@@ -691,13 +729,15 @@
     # LIBVIRT_FWI blocks forwarded traffic to br-ow-wan with REJECT.
     # We insert ACCEPT rules before the REJECT for Docker network <-> VM traffic.
     # These rules must be re-applied after libvirtd restarts (it recreates chains).
+    # IPv6 NAT masquerade is needed because ip6table_nat module is unavailable;
+    # libvirt doesn't create the rule automatically with the nftables backend.
     - name: Create openwrt-vm iptables service
       ansible.builtin.copy:
         dest: /etc/systemd/system/openwrt-vm-iptables.service
         mode: "0644"
         content: |
           [Unit]
-          Description=Allow Docker-to-VM forwarding for openwrt-vm
+          Description=Allow Docker-to-VM forwarding and IPv6 NAT for openwrt-vm
           After=libvirtd.service
           Requires=libvirtd.service
 
@@ -706,8 +746,10 @@
           RemainAfterExit=yes
           ExecStart=/bin/bash -c "iptables -C LIBVIRT_FWI -s 192.168.41.0/24 -d 172.17.0.0/24 -j ACCEPT 2>/dev/null || iptables -I LIBVIRT_FWI 1 -s 192.168.41.0/24 -d 172.17.0.0/24 -j ACCEPT"
           ExecStart=/bin/bash -c "iptables -C LIBVIRT_FWO -s 172.17.0.0/24 -d 192.168.41.0/24 -j ACCEPT 2>/dev/null || iptables -I LIBVIRT_FWO 1 -s 172.17.0.0/24 -d 192.168.41.0/24 -j ACCEPT"
+          ExecStart=/bin/bash -c "ip6tables -t nat -C LIBVIRT_PRT -s fd00:17::/64 ! -d fd00:17::/64 -j MASQUERADE 2>/dev/null || ip6tables -t nat -I LIBVIRT_PRT 1 -s fd00:17::/64 ! -d fd00:17::/64 -j MASQUERADE"
           ExecStop=/bin/bash -c "iptables -D LIBVIRT_FWI -s 192.168.41.0/24 -d 172.17.0.0/24 -j ACCEPT 2>/dev/null || true"
           ExecStop=/bin/bash -c "iptables -D LIBVIRT_FWO -s 172.17.0.0/24 -d 192.168.41.0/24 -j ACCEPT 2>/dev/null || true"
+          ExecStop=/bin/bash -c "ip6tables -t nat -D LIBVIRT_PRT -s fd00:17::/64 ! -d fd00:17::/64 -j MASQUERADE 2>/dev/null || true"
 
           [Install]
           WantedBy=multi-user.target
