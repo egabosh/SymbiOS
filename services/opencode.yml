@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # docs:
+#   name: OpenCode
 #   short_description: Deploy the OpenCode coding assistant
 #   description: Deploys OpenCode, a coding assistant web interface. Exposed via Traefik.
 #   url: "https://opencode.{{ base_domain }}"
@@ -28,6 +29,9 @@
 #     versions:
 #     - '13'
 #   category: Service
+#   access:
+#     admin_group: opencode-admins
+#     user_group: opencode-users
 #   service_control:
 #     services:
 #     - name: opencode

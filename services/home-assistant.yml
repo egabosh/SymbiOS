@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: Home Assistant
 #   short_description: Deploy the Home Assistant service
 #   description: Deploys the Home Assistant container for home automation, managed by SymbiOS.
 #   url: "https://home-assistant.{{ base_domain }}"
@@ -28,6 +29,9 @@
 #     versions:
 #     - '13'
 #   category: Service
+#   access:
+#     admin_group: home-assistant-admins
+#     user_group: home-assistant-users
 #   service_control:
 #     services:
 #     - name: home-assistant

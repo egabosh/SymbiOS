@@ -22,11 +22,13 @@ import os
 import re
 import yaml
 
+from django.contrib import messages as flash_messages
 from .decorators import login_required
 from .playbook_catalog import get_catalog, get_playbook
 from .utils.ssh_exec import (
     stream_log,
     stop_log,
+    run_command,
     run_service_status,
     build_action_command,
     build_log_command,
@@ -189,6 +191,39 @@ def _aggregate_state(states):
     return 'stopped'
 
 
+def _build_access_context(item):
+    """Build access group context from a playbook's docs.access config.
+
+    Returns a dict with 'groups' (list of group dicts for the template) and
+    'users' (all LDAP users for the add-user dropdown).  Each group dict has
+    'name', 'role' ('admin' or 'user'), and 'members' (list of user dicts).
+    """
+    from .views import _get_ldap_users
+    access = (item.get('docs') or {}).get('access') or {}
+    if not access:
+        return {'groups': [], 'users': []}
+    all_users = _get_ldap_users()
+    # Build a uid->user lookup for quick member resolution.
+    user_by_uid = {u['uid']: u for u in all_users}
+    groups = []
+    for role, key in [('admin', 'admin_group'), ('user', 'user_group')]:
+        group_name = access.get(key)
+        if not group_name:
+            continue
+        members = [user_by_uid[uid] for uid in user_by_uid
+                   if group_name in (user_by_uid[uid].get('groups') or [])]
+        # Users not yet in this group (available for the add dropdown).
+        available = [u for u in all_users if group_name not in (u.get('groups') or [])]
+        groups.append({
+            'name': group_name,
+            'role': role,
+            'role_label': 'Admin' if role == 'admin' else 'User',
+            'members': sorted(members, key=lambda u: u['uid']),
+            'available': sorted(available, key=lambda u: u['uid']),
+        })
+    return {'groups': groups, 'users': all_users}
+
+
 
 
 
@@ -264,12 +299,16 @@ def services_detail(request, playbook):
     log_units = [{'name': l.get('name'), 'type': l.get('type', 'log')} for l in logs]
     service_url = _render_service_url((item.get('docs') or {}).get('url'))
     all_catalog = get_catalog()
+    # Build access groups context from the playbook's docs.access config.
+    access_ctx = _build_access_context(item)
     response = render(request, 'main/services_detail.html', {
         'item': item,
         'action_list': action_list,
         'uninstall_buttons': uninstall_buttons,
         'log_units': log_units,
         'service_url': service_url,
+        'access_groups': access_ctx['groups'],
+        'all_ldap_users': access_ctx['users'],
         'all_services': _order_catalog(all_catalog),
         **_sidebar_context(all_catalog),
     })
@@ -525,3 +564,50 @@ def services_status(request, playbook):
         'overall_badge': _state_badge(overall),
         'installed': installed,
     })
+
+
+@login_required
+def services_access(request, playbook):
+    """Add or remove a user from a service's LDAP access group.
+
+    POST parameters: action (add|remove), uid, group.
+    Validates that the group is defined in the playbook's docs.access config
+    before executing the LDAP change.  Supports both AJAX (exec modal) and
+    regular POST (flash + redirect) fallback.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid request'}, status=400)
+    action = request.POST.get('action', '').strip()
+    uid = request.POST.get('uid', '').strip()
+    group = request.POST.get('group', '').strip()
+    if action not in ('add', 'remove') or not uid or not group:
+        return JsonResponse({'error': 'Missing parameters'}, status=400)
+    item = get_playbook(playbook)
+    if item is None:
+        return JsonResponse({'error': 'Playbook not found'}, status=404)
+    # Validate that the group is in the playbook's access config.
+    access = (item.get('docs') or {}).get('access') or {}
+    allowed_groups = set()
+    for key in ('admin_group', 'user_group'):
+        g = access.get(key)
+        if g:
+            allowed_groups.add(g)
+    if group not in allowed_groups:
+        return JsonResponse({'error': 'Group not in service access config'}, status=403)
+    # Build the LDAP command.
+    sub = '--add-user' if action == 'add' else '--remove-user'
+    cmd = f'symbios-ldap-groups.sh {sub} --name {group} --uid {uid}'
+    # Dual-mode: AJAX -> exec modal job; regular POST -> sync + redirect.
+    from .utils.http import is_ajax_request
+    if is_ajax_request(request):
+        job_id = create_job(cmd, timeout=300)
+        title = f'{"Adding" if action == "add" else "Removing"} "{uid}" {"to" if action == "add" else "from"} "{group}"...'
+        return JsonResponse({'ok': True, 'job': job_id, 'title': title,
+                             'command': cmd})
+    ok, stdout, stderr = run_command(cmd, timeout=30)
+    output = (stdout + '\n' + stderr).strip()
+    if ok:
+        flash_messages.success(request, f'"{uid}" {"added to" if action == "add" else "removed from"} "{group}".')
+    else:
+        flash_messages.error(request, f'Error: {output}')
+    return redirect(f'/services/{playbook}/')

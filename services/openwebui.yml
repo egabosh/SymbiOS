@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # docs:
+#   name: Open WebUI
 #   short_description: Deploy the Open WebUI with SearXNG
 #   description: Deploys Open WebUI (web interface for local LLMs) with SearXNG for web search. Exposed via Traefik.
 #   url: "https://ai.{{ base_domain }}"
@@ -28,6 +29,9 @@
 #     versions:
 #     - '13'
 #   category: Service
+#   access:
+#     admin_group: openwebui-admins
+#     user_group: openwebui-users
 #   service_control:
 #     services:
 #     - name: openwebui
