@@ -15,29 +15,29 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
-#   short_description: Deploy an OpenWrt QEMU/KVM virtual machine
+#   name: OpenWrt VM
+#   short_description: OpenWrt QEMU/KVM virtual machine with Traefik access
 #   description: |
-#     Deploys an OpenWrt VM with UEFI boot, serial console, and two NICs:
-#     WAN (static IP 172.17.0.10 via libvirt NAT to host internet, no dnsmasq)
-#     and LAN (isolated bridge at 172.18.0.1/24, OpenWrt is the gateway).
-#     Supports x86_64 (amd64) and arm64 (aarch64) hosts.
-#     Requires the KVM base playbook (base-services/kvm.yml) first.
+#     Deploys an OpenWrt VM (latest stable release) as a QEMU/KVM virtual
+#     machine with UEFI boot, serial console, and two NICs.
 #
-#     Accessing the VM:
-#       WAN side (host network):
-#         Web UI (LuCI): http://172.17.0.10  (default user: root, no password)
-#         SSH:           ssh root@172.17.0.10 (set password first via LuCI or console)
-#         Console:       virsh console openwrt
-#       LAN side (client network, 172.18.0.0/24):
-#         After configuring OpenWrt as router, connect a client to br-ow-lan:
-#           virsh attach-interface openwrt network openwrt-lan model virtio
-#         Then the client gets DHCP from OpenWrt (172.18.0.x) and routes
-#         internet through the VM's WAN interface.
+#     Requirements:
+#       - KVM base playbook (base-services/kvm.yml)
+#       - Traefik base playbook (base-services/traefik.yml)
 #
-#     First boot:
-#       The VM auto-configures WAN (static 172.17.0.10) and LAN (172.18.0.1)
-#       on first boot via uci-defaults. After that, access LuCI at the WAN IP
-#       to finish OpenWrt setup (set root password, install packages, etc.).
+#     Networks:
+#       WAN: libvirt NAT bridge (172.17.0.0/24) - connects to host internet
+#       LAN: isolated bridge (172.18.0.0/24) - OpenWrt acts as gateway
+#
+#     Access:
+#       Web interface (LuCI): https://openwrt.{{ base_domain }}
+#         - Protected by Authelia (2FA)
+#         - Default credentials: root / no password (set one via LuCI)
+#       Serial console: virsh console openwrt
+#       LAN clients: attach to openwrt-lan network for DHCP + internet
+#
+#     First boot: The VM auto-configures WAN (172.17.0.10) and LAN (172.18.0.1)
+#     via uci-defaults. Access LuCI through Traefik to finish setup.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -74,6 +74,7 @@
 
   vars:
     service_name: openwrt-vm
+    service_domain: "openwrt.{{ base_domain }}"
     openwrt_version: "latest"
     vm_ram_mb: 512
     vm_vcpus: 2
@@ -133,9 +134,12 @@
     # ── Resolve OpenWrt version ──────────────────────────────────────────
     - name: Resolve OpenWrt latest version
       ansible.builtin.shell: |
-        # Fetch releases page and find latest stable version (e.g. 24.10.x, 25.12.x)
+        # Fetch releases page, find latest stable version (no RC/snapshot)
+        # Stable versions: 24.10.x, 25.12.x (3 numeric parts, no suffix)
+        # Exclude: 24.10.0-rc1, 25.04-rc1, snapshot, etc.
         curl -sf "https://downloads.openwrt.org/releases/" 2>/dev/null \
           | grep -oP 'href="\K[0-9]+\.[0-9]+\.[0-9]+(?=/")' \
+          | grep -v '\-rc\|-snapshot\|-dev' \
           | sort -V | tail -1
       register: openwrt_latest_version
       changed_when: false
@@ -340,6 +344,29 @@
           uci set firewall.allow_ping.icmp_type=echo-request
           uci set firewall.allow_ping.family=ipv4
           uci set firewall.allow_ping.target=ACCEPT
+
+          # Allow HTTP/HTTPS on WAN for Traefik access
+          uci set firewall.allow_http=rule
+          uci set firewall.allow_http.name=Allow-HTTP
+          uci set firewall.allow_http.src=wan
+          uci set firewall.allow_http.proto=tcp
+          uci set firewall.allow_http.dest_port=80
+          uci set firewall.allow_http.target=ACCEPT
+
+          uci set firewall.allow_https=rule
+          uci set firewall.allow_https.name=Allow-HTTPS
+          uci set firewall.allow_https.src=wan
+          uci set firewall.allow_https.proto=tcp
+          uci set firewall.allow_https.dest_port=443
+          uci set firewall.allow_https.target=ACCEPT
+
+          # Allow SSH on WAN for management
+          uci set firewall.allow_ssh=rule
+          uci set firewall.allow_ssh.name=Allow-SSH
+          uci set firewall.allow_ssh.src=wan
+          uci set firewall.allow_ssh.proto=tcp
+          uci set firewall.allow_ssh.dest_port=22
+          uci set firewall.allow_ssh.target=ACCEPT
 
           uci commit network
           uci commit firewall
@@ -659,6 +686,72 @@
       failed_when: false
       when: kvm_capable | bool
 
+    # ── Traefik integration ──────────────────────────────────────────────
+    # Allow Docker containers to reach the OpenWrt VM on br-ow-wan.
+    # LIBVIRT_FWI blocks forwarded traffic to br-ow-wan with REJECT.
+    # We insert ACCEPT rules before the REJECT for Docker network <-> VM traffic.
+    # These rules must be re-applied after libvirtd restarts (it recreates chains).
+    - name: Create openwrt-vm iptables service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/openwrt-vm-iptables.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Allow Docker-to-VM forwarding for openwrt-vm
+          After=libvirtd.service
+          Requires=libvirtd.service
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/bin/bash -c "iptables -C LIBVIRT_FWI -s 192.168.41.0/24 -d 172.17.0.0/24 -j ACCEPT 2>/dev/null || iptables -I LIBVIRT_FWI 1 -s 192.168.41.0/24 -d 172.17.0.0/24 -j ACCEPT"
+          ExecStart=/bin/bash -c "iptables -C LIBVIRT_FWO -s 172.17.0.0/24 -d 192.168.41.0/24 -j ACCEPT 2>/dev/null || iptables -I LIBVIRT_FWO 1 -s 172.17.0.0/24 -d 192.168.41.0/24 -j ACCEPT"
+          ExecStop=/bin/bash -c "iptables -D LIBVIRT_FWI -s 192.168.41.0/24 -d 172.17.0.0/24 -j ACCEPT 2>/dev/null || true"
+          ExecStop=/bin/bash -c "iptables -D LIBVIRT_FWO -s 172.17.0.0/24 -d 192.168.41.0/24 -j ACCEPT 2>/dev/null || true"
+
+          [Install]
+          WantedBy=multi-user.target
+      when: kvm_capable | bool
+
+    - name: Enable openwrt-vm iptables service
+      ansible.builtin.systemd:
+        name: openwrt-vm-iptables
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      when: kvm_capable | bool
+
+    # Traefik file-provider route for LuCI (Authelia-protected)
+    - name: /symbios/base-services/traefik/providers/openwrt-vm.yml Traefik routing
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/traefik/providers/openwrt-vm.yml
+        create: yes
+        mode: "0444"
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              openwrt-vm:
+                rule: "Host(`{{ service_domain }}`)"
+                service: openwrt-vm
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+                  - "authelia@file"
+            services:
+              openwrt-vm:
+                loadBalancer:
+                  servers:
+                    - url: "http://{{ wan_vm_ip }}:80"
+        backup: yes
+      notify: Restart traefik
+      when: kvm_capable | bool
+
     # ── Healthcheck ──────────────────────────────────────────────────────
     - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-openwrt-vm.check
       ansible.builtin.blockinfile:
@@ -683,3 +776,9 @@
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/openwrt-vm.yml"
       changed_when: false
       when: kvm_capable | bool
+
+  handlers:
+    - name: Restart traefik
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /symbios/base-services/traefik
