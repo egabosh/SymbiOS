@@ -1,0 +1,326 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# docs:
+#   name: Dabo
+#   short_description: Deploy the Dabo crypto trading bot
+#   description: Deploys Dabo, a crypto trading bot with web UI, exposed via Traefik. Includes LDAP group-based access control.
+#   url: "https://dabo.{{ base_domain }}"
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   access:
+#     user_group: dabo
+#   service_control:
+#     services:
+#     - name: dabo
+#       type: docker
+#       compose_file: /symbios/services/dabo/docker-compose.yml
+#       status: test -d /symbios/services/dabo || exit 2; docker compose -f /symbios/services/dabo/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: dabo
+#       command: docker compose -f /symbios/services/dabo/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/dabo/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/dabo/docker-compose.yml up -d
+#     program_paths:
+#       - /symbios/services/dabo/
+#       - /symbios/base-services/traefik/providers/dabo.yml
+#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-dabo.check
+#     userdata_paths: []
+#   actions:
+#     start: docker compose -f /symbios/services/dabo/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/dabo/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/dabo/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/dabo/docker-compose.yml up -d
+#
+---
+- name: dabo
+  hosts: all
+  vars:
+    service_name: dabo
+    service_domain: "{{ service_name }}.{{ base_domain }}"
+    docker_path: "{{ services_root }}/dabo"
+  tasks:
+
+    # Create the service directory
+    - name: Create /symbios/services/dabo dir
+      ansible.builtin.file:
+        path: /symbios/services/dabo
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    # Clone the Dabo repository from GitHub
+    - name: Git checkout dabo
+      ansible.builtin.git:
+        repo: 'https://github.com/egabosh/dabo.git'
+        dest: /symbios/services/dabo
+        force: true
+      notify: Restart dabo
+
+    # Create the initiate.sh script that sets up SSH keys and directories
+    - name: /symbios/services/dabo/initiate.sh
+      blockinfile:
+        path: /symbios/services/dabo/initiate.sh
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd /symbios/services/dabo
+
+          # Generate SSH key pair if not yet present
+          if ! [ -d home/.ssh ]
+          then
+            mkdir -p home/.ssh
+            ssh-keygen -f home/.ssh/id_ed25519 -N "" -t ed25519 >/dev/null
+            chmod 700 home/.ssh
+          fi
+
+          # Create required directories and set ownership for the container user
+          mkdir -p data/botdata strategies
+          chown -R 10000:10000 dabo data home strategies dabo-bot.conf
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: run initiate.sh
+
+    # Add shebang to initiate.sh
+    - name: /symbios/services/dabo/initiate.sh shebang
+      lineinfile:
+        path: /symbios/services/dabo/initiate.sh
+        insertbefore: BOF
+        line: "#!/bin/bash -e"
+
+    # Create the basic dabo configuration file
+    - name: Basic dabo config
+      blockinfile:
+        path: /symbios/services/dabo/dabo-bot.conf
+        create: yes
+        mode: 0440
+        owner: 10000
+        group: 10000
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          URL=dabo.{{ base_domain }}
+        validate: /bin/bash -n %s
+        backup: yes
+      notify: Restart dabo
+
+    # Create docker-compose.override.yml - rename containers, add Traefik network
+    - name: /symbios/services/dabo/docker-compose.override.yml Container and Network Configuration
+      blockinfile:
+        path: /symbios/services/dabo/docker-compose.override.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+
+          networks:
+            symbios_services:
+              external: true
+
+          services:
+            dabo-bot:
+              container_name: symbios-dabo-bot
+            dabo-ohlcv-candles-indicators-5m:
+              container_name: symbios-dabo-ohlcv-5m
+            dabo-ohlcv-candles-indicators-15m:
+              container_name: symbios-dabo-ohlcv-15m
+            dabo-ohlcv-candles-indicators-1h:
+              container_name: symbios-dabo-ohlcv-1h
+            dabo-ohlcv-candles-indicators-4h:
+              container_name: symbios-dabo-ohlcv-4h
+            dabo-ohlcv-candles-indicators-1d:
+              container_name: symbios-dabo-ohlcv-1d
+            dabo-ohlcv-candles-indicators-1w:
+              container_name: symbios-dabo-ohlcv-1w
+            dabo-calc-indicators-hist:
+              container_name: symbios-dabo-calc
+            dabo-transaction-history:
+              container_name: symbios-dabo-txhistory
+            dabo-fetch-coinmarketcapids:
+              container_name: symbios-dabo-fetchids
+            dabo-django:
+              container_name: symbios-dabo-django
+              restart: unless-stopped
+              networks:
+                - dabo--network
+                - symbios_services
+            dabo-django-runner:
+              container_name: symbios-dabo-runner
+            dabo-healthcheck:
+              container_name: symbios-dabo-healthcheck
+        backup: yes
+      notify: Restart dabo
+
+    # Create Traefik provider file for dabo routing
+    - name: /symbios/base-services/traefik/providers/dabo.yml Routing Configuration
+      blockinfile:
+        path: /symbios/base-services/traefik/providers/dabo.yml
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              dabo:
+                rule: "Host(`{{ service_domain }}`)"
+                service: dabo
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+                  - "authelia@file"
+            services:
+              dabo:
+                loadBalancer:
+                  servers:
+                    - url: "http://symbios-dabo-django:80"
+        backup: yes
+      notify: Restart traefik
+
+    # Create empty notify.local.conf (required by dabo containers)
+    # Use shell because state=touch does not convert an existing directory to a file
+    - name: /symbios/services/dabo/notify.local.conf
+      ansible.builtin.shell: |
+        [ -d notify.local.conf ] && rm -rf notify.local.conf
+        [ -f notify.local.conf ] || touch notify.local.conf
+        chown 10000:10000 notify.local.conf
+        chmod 0644 notify.local.conf
+      args:
+        chdir: /symbios/services/dabo
+        creates: /symbios/services/dabo/notify.local.conf
+
+    # Create empty botdata/webcontrol (required by dabo-django-runner)
+    - name: /symbios/services/dabo/data/botdata/webcontrol
+      ansible.builtin.shell: |
+        mkdir -p data/botdata
+        [ -d data/botdata/webcontrol ] && rm -rf data/botdata/webcontrol
+        [ -f data/botdata/webcontrol ] || touch data/botdata/webcontrol
+        chown -R 10000:10000 data/botdata
+      args:
+        chdir: /symbios/services/dabo
+        creates: /symbios/services/dabo/data/botdata/webcontrol
+
+    # Create secrets_django directory (required by dabo-django)
+    - name: Create /symbios/services/dabo/secrets_django dir
+      ansible.builtin.file:
+        path: /symbios/services/dabo/secrets_django
+        owner: "10000"
+        group: "10000"
+        state: directory
+        mode: '0770'
+
+    # Download Bootstrap CSS for the web UI (JS is already in the repo)
+    - name: Add/Update Bootstrap CSS
+      ansible.builtin.shell: |
+        curl -s https://cdn.jsdelivr.net/npm/bootstrap@5/dist/css/bootstrap.min.css >data-django/dabo-webui/main/static/css/bootstrap.min.css
+      args:
+        chdir: /symbios/services/dabo
+      changed_when: false
+      failed_when: false
+
+    # Create LDAP group for dabo access control
+    - name: Create LDAP group dabo
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name dabo"
+      changed_when: false
+      failed_when: false
+
+    # Add admin user to the dabo LDAP group
+    - name: Add admin to LDAP group dabo
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --add-user --name dabo --uid admin"
+      changed_when: false
+      failed_when: false
+
+    # Run initiate.sh to set up SSH keys and directories
+    - name: Run initiate.sh
+      ansible.builtin.shell: ./initiate.sh
+      args:
+        chdir: /symbios/services/dabo
+      notify: Restart dabo
+
+    # Ensure the dabo container is running
+    - name: Ensure dabo is running
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: /symbios/services/dabo
+
+    # Deploy healthcheck script
+    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-dabo.check
+      ansible.builtin.blockinfile:
+        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-dabo.check
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Healthcheck for dabo
+          g_svc_url="https://{{ service_domain }}"
+          g_check_file="${g_tmp}/symbios-healthcheck-dabo"
+          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+          then
+            return 2>/dev/null || true
+          fi
+          date > "$g_check_file"
+          g_http_code=$(wget -q -O /dev/null --server-response --timeout=10 "$g_svc_url" 2>&1 | grep -oE "HTTP/[0-9.]+" | tail -1 | grep -oE "[0-9]+$")
+          if [ -z "$g_http_code" ] || [ "$g_http_code" -ge 500 ]
+          then
+            g_echo_error "Healthcheck failed for dabo: HTTP $g_http_code from $g_svc_url"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
+    # Register playbook as installed in the state file
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/dabo.yml"
+      changed_when: false
+
+  handlers:
+
+    # Run initiate.sh when changed (generates SSH keys, sets permissions)
+    - name: run initiate.sh
+      ansible.builtin.shell: ./initiate.sh
+      args:
+        chdir: /symbios/services/dabo
+      notify: Restart dabo
+
+    # Restart the dabo container
+    - name: Restart dabo
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /symbios/services/dabo
+
+    # Restart Traefik when routing config changes
+    - name: Restart traefik
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /symbios/base-services/traefik

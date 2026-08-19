@@ -56,6 +56,11 @@
   <li class="nav-item" role="presentation">
     <button class="nav-link" id="tab-source" data-bs-toggle="tab" data-bs-target="#pane-source" type="button" role="tab">Source</button>
   </li>
+  {% if access_groups %}
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-access" data-bs-toggle="tab" data-bs-target="#pane-access" type="button" role="tab">Access</button>
+  </li>
+  {% endif %}
 </ul>
 <div class="tab-content">
   <div class="tab-pane fade show active" id="pane-output" role="tabpanel">
@@ -90,6 +95,63 @@
     <h4>Source</h4>
     <pre id="source-output" class="bg-dark text-light p-2 small" style="max-height:480px;overflow:auto;white-space:pre-wrap;word-break:break-word;">Loading source…</pre>
   </div>
+  {% if access_groups %}
+  <div class="tab-pane fade" id="pane-access" role="tabpanel">
+    <h4>Access Groups</h4>
+    <p class="text-muted small mb-3">Users in these groups are granted access to this service via Authelia/LDAP. Group membership is managed by the service playbook.</p>
+    {% for grp in access_groups %}
+    <div class="card mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>
+          <strong>{{ grp.name }}</strong>
+          <span class="badge {% if grp.role == 'admin' %}bg-warning text-dark{% else %}bg-info{% endif %} ms-2">{{ grp.role_label }}</span>
+        </span>
+        <span class="badge bg-secondary">{{ grp.members|length }} member{{ grp.members|length|pluralize }}</span>
+      </div>
+      <div class="card-body">
+        {% if grp.members %}
+        <div class="d-flex flex-wrap gap-2 mb-2">
+          {% for u in grp.members %}
+          <span class="badge bg-secondary d-flex align-items-center gap-1">
+            {{ u.uid }}
+            <form method="post" action="/services/{{ item.playbook }}/access/" class="d-inline" data-exec="true">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="remove">
+              <input type="hidden" name="uid" value="{{ u.uid }}">
+              <input type="hidden" name="group" value="{{ grp.name }}">
+              <button type="submit" class="btn-close btn-close-white" style="font-size:0.5rem;" title="Remove from {{ grp.name }}"></button>
+            </form>
+          </span>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-muted small mb-2">No members in this group.</div>
+        {% endif %}
+        {% if grp.available %}
+        <div class="dropdown">
+          <button class="btn btn-outline-success btn-sm" data-bs-toggle="dropdown">
+            <i class="bi bi-person-plus"></i> Add User
+          </button>
+          <ul class="dropdown-menu">
+            {% for u in grp.available %}
+            <li>
+              <form method="post" action="/services/{{ item.playbook }}/access/" data-exec="true">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="add">
+                <input type="hidden" name="uid" value="{{ u.uid }}">
+                <input type="hidden" name="group" value="{{ grp.name }}">
+                <button type="submit" class="dropdown-item">{{ u.uid }}{% if u.email %} <span class="text-muted small">({{ u.email }})</span>{% endif %}</button>
+              </form>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 </div>
 
 {% endblock %}

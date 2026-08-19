@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   name: Nextcloud
 #   short_description: Deploy the Nextcloud service
 #   description: Deploys Nextcloud (file sync/collaboration) together with its database and storage, exposed via Traefik.
 #   url: "https://nextcloud.{{ base_domain }}"
@@ -28,6 +29,9 @@
 #     versions:
 #     - '13'
 #   category: Service
+#   access:
+#     admin_group: nextcloud-admins
+#     user_group: nextcloud-users
 #   service_control:
 #     services:
 #     - name: nextcloud

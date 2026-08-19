@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # docs:
+#   name: Paperless-ngx
 #   short_description: Deploy the Paperless-ngx document management system
 #   description: Deploys Paperless-ngx for document management with OCR, tagging, and full-text search. Includes Redis broker. Exposed via Traefik.
 #   url: "https://paperless.{{ base_domain }}"
@@ -27,6 +28,9 @@
 #     versions:
 #     - '13'
 #   category: Service
+#   access:
+#     admin_group: paperless-admins
+#     user_group: paperless-users
 #   service_control:
 #     services:
 #     - name: paperless
