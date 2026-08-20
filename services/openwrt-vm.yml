@@ -83,7 +83,6 @@
     vm_ip: "192.168.41.201"
     vm_netmask: "255.255.255.0"
     vm_gateway: "192.168.41.1"
-    vm_dns: "192.168.41.2"
     # LAN: isolated, OpenWrt is the gateway
     lan_subnet: "172.18.0"
     lan_netmask: "255.255.255.0"
@@ -296,6 +295,29 @@
         - kvm_capable | bool
         - host_ipv6_available | bool
 
+    # ── Detect DNS server from host DHCP ─────────────────────────────────
+    - name: Detect host DNS server
+      ansible.builtin.shell: |
+        set -e
+        resolvectl status 2>/dev/null \
+          | grep "Current DNS Server" \
+          | awk '{print $4}' \
+          | head -1
+      register: dns_result
+      changed_when: false
+      failed_when: false
+      when: kvm_capable | bool
+
+    - name: Set DNS server fact
+      ansible.builtin.set_fact:
+        vm_dns: "{{ dns_result.stdout | default('1.1.1.1') }}"
+      when: kvm_capable | bool
+
+    - name: Show DNS server
+      ansible.builtin.debug:
+        msg: "VM DNS server: {{ vm_dns }}"
+      when: kvm_capable | bool
+
     # Write uci-defaults to temp (avoids heredoc-in-shell escaping issues)
     - name: Write uci-defaults network config script
       ansible.builtin.copy:
@@ -306,14 +328,14 @@
           # OpenWrt QEMU VM - WAN + LAN network config (first boot only)
           # eth0 = WAN (static 192.168.41.201/24 on base-services bridge)
           # eth1 = LAN (static 172.18.0.1/24, internal network)
-          # IPv6 handled by S99zzz-ipv6-setup init script
+          # IPv6: static global address + default route via UCI
 
           # Remove default bridge device and LAN interface
           while uci delete network.@device[0] 2>/dev/null; do :; done
           uci delete network.lan 2>/dev/null
           uci delete network.wan6 2>/dev/null
 
-          # WAN interface on eth0 (static IP on base-services)
+          # WAN interface on eth0 (static IPv4 + IPv6 on base-services)
           uci set network.wan=interface
           uci set network.wan.proto=static
           uci set network.wan.device=eth0
@@ -408,6 +430,13 @@
           uci set firewall.allow_ssh.dest_port=22
           uci set firewall.allow_ssh.target=ACCEPT
 
+          # IPv6 static address + default route
+          PREFIX="{{ host_ipv6_prefix | default('') }}"
+          if [ -n "$PREFIX" ]; then
+            uci set network.wan.ip6addr="${PREFIX}::201/64"
+            uci set network.wan.ip6gw="${PREFIX}::1"
+          fi
+
           uci commit network
           uci commit firewall
 
@@ -417,30 +446,6 @@
           net.ipv6.conf.all.accept_dad=0
           SYSCTLEOF
           sysctl -p /etc/sysctl.d/99-no-dad.conf 2>/dev/null || true
-
-          # ── IPv6 init script (static address + default route) ──
-          # Prefix is detected by Ansible at playbook time and embedded here.
-          # Docker's base-services bridge has forwarding=1, so no RAs are sent;
-          # the VM cannot discover the prefix via SLAAC.
-          cat > /etc/init.d/zzz-ipv6-setup << 'INITEOF'
-          #!/bin/sh /etc/rc.common
-          START=99
-          PREFIX="{{ host_ipv6_prefix | default('') }}"
-          stop() { :; }
-          start() {
-            [ -z "$PREFIX" ] && return 0
-            # Wait for eth0 to be ready (link-local address present)
-            local try
-            for try in 1 2 3 4 5; do
-              ip link show dev eth0 up 2>/dev/null | grep -q "state UP" && break
-              sleep 2
-            done
-            ip -6 addr add "$PREFIX::201/64" dev eth0 2>/dev/null || true
-            ip -6 route add default via "$PREFIX::1" dev eth0 metric 1024 2>/dev/null || true
-          }
-          INITEOF
-          chmod 755 /etc/init.d/zzz-ipv6-setup
-          ln -sf /etc/init.d/zzz-ipv6-setup /etc/rc.d/S99zzz-ipv6-setup
 
           exit 0
       when: kvm_capable | bool
