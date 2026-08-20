@@ -26,7 +26,7 @@
 #       - Traefik base playbook (base-services/traefik.yml)
 #
 #     Networks:
-#       WAN: libvirt NAT bridge (172.17.0.0/24) - connects to host internet
+#       WAN: base-services bridge (192.168.41.201/24) - same L2 as Docker containers
 #       LAN: isolated bridge (172.18.0.0/24) - OpenWrt acts as gateway
 #
 #     Access:
@@ -36,10 +36,12 @@
 #       Serial console: virsh console openwrt
 #       LAN clients: attach to openwrt-lan network for DHCP + internet
 #
-#     First boot: The VM auto-configures WAN (172.17.0.10) and LAN (172.18.0.1)
-#     via uci-defaults. Access LuCI through Traefik to finish setup.
+#     First boot: The VM auto-configures WAN (192.168.41.201) and LAN (172.18.0.1)
+#     via uci-defaults. IPv6 is configured by an init script that detects the
+#     host's prefix and assigns a static address. Access LuCI through Traefik
+#     to finish setup.
 #   author: Oliver Bohlen
-#   version: '1.0'
+#   version: '2.0'
 #   license: GPLv3
 #   copyright: Copyright (c) 2026, Oliver Bohlen
 #   min_ansible_version: '2.11'
@@ -76,12 +78,13 @@
     vm_ram_mb: 512
     vm_vcpus: 2
     service_root: "{{ services_root }}/{{ service_name }}"
-    # WAN network (NAT to host internet, static IPs, no dnsmasq)
-    wan_subnet: "172.17.0"
-    wan_netmask: "255.255.255.0"
-    wan_host_ip: "172.17.0.1"
-    wan_vm_ip: "172.17.0.10"
-    # LAN network (isolated, OpenWrt is the gateway)
+    service_port: 80
+    # WAN: VM sits on base-services bridge (same L2 as Docker containers)
+    vm_ip: "192.168.41.201"
+    vm_netmask: "255.255.255.0"
+    vm_gateway: "192.168.41.1"
+    vm_dns: "192.168.41.2"
+    # LAN: isolated, OpenWrt is the gateway
     lan_subnet: "172.18.0"
     lan_netmask: "255.255.255.0"
     lan_host_ip: "172.18.0.1"
@@ -208,6 +211,12 @@
       when: kvm_capable | bool
 
     # ── Download firmware ────────────────────────────────────────────────
+    - name: Check if qcow2 image already exists
+      ansible.builtin.stat:
+        path: "{{ service_root }}/images/openwrt.qcow2"
+      register: qcow2_image
+      when: kvm_capable | bool
+
     - name: Download OpenWrt firmware image
       ansible.builtin.get_url:
         url: "{{ openwrt_image_url }}"
@@ -215,13 +224,9 @@
         mode: "0640"
         owner: root
         group: kvm
-      when: kvm_capable | bool
-
-    - name: Check if qcow2 image already exists
-      ansible.builtin.stat:
-        path: "{{ service_root }}/images/openwrt.qcow2"
-      register: qcow2_image
-      when: kvm_capable | bool
+      when:
+        - kvm_capable | bool
+        - not qcow2_image.stat.exists | default(false) | bool
 
     # ── Decompress, patch, convert to qcow2 ─────────────────────────────
     # Patch the raw image before conversion: no nbd module, no write locks.
@@ -236,6 +241,61 @@
         - kvm_capable | bool
         - not qcow2_image.stat.exists | default(false) | bool
 
+    # ── Detect uplink interface ──────────────────────────────────────────
+    # The interface with the default route (used for NAT and IPv6 prefix).
+    - name: Detect uplink interface
+      ansible.builtin.shell: |
+        set -e
+        uplink=$(ip route show default | awk '{print $5}' | head -1)
+        if [ -z "$uplink" ]; then
+          uplink=$(ip -o route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+        fi
+        echo "$uplink"
+      register: uplink_result
+      changed_when: false
+      when: kvm_capable | bool
+
+    - name: Set uplink interface fact
+      ansible.builtin.set_fact:
+        uplink_interface: "{{ uplink_result.stdout }}"
+      when:
+        - kvm_capable | bool
+        - uplink_result.stdout | default('') | length > 0
+
+    - name: Fail if uplink interface not found
+      ansible.builtin.fail:
+        msg: "Could not detect uplink interface (no default route)"
+      when:
+        - kvm_capable | bool
+        - uplink_interface | default('') | length == 0
+
+    # ── Detect IPv6 prefix from uplink ───────────────────────────────────
+    # Extract first 4 groups from the host's global IPv6 address on the uplink.
+    - name: Detect IPv6 prefix
+      ansible.builtin.shell: |
+        set -e
+        ip -6 -o addr show dev {{ uplink_interface }} scope global \
+          | awk '{print $4}' | cut -d/ -f1 \
+          | awk -F: '{OFS=":"; print $1,$2,$3,$4}' \
+          | head -1
+      register: ipv6_prefix_result
+      changed_when: false
+      failed_when: false
+      when: kvm_capable | bool
+
+    - name: Set IPv6 prefix fact
+      ansible.builtin.set_fact:
+        host_ipv6_prefix: "{{ ipv6_prefix_result.stdout }}"
+        host_ipv6_available: "{{ ipv6_prefix_result.stdout | default('') | length > 0 }}"
+      when: kvm_capable | bool
+
+    - name: Show IPv6 prefix
+      ansible.builtin.debug:
+        msg: "IPv6 prefix: {{ host_ipv6_prefix }}::/64 on {{ uplink_interface }}"
+      when:
+        - kvm_capable | bool
+        - host_ipv6_available | bool
+
     # Write uci-defaults to temp (avoids heredoc-in-shell escaping issues)
     - name: Write uci-defaults network config script
       ansible.builtin.copy:
@@ -244,29 +304,23 @@
         content: |
           #!/bin/sh
           # OpenWrt QEMU VM - WAN + LAN network config (first boot only)
-          # eth0 = WAN (static IP, connects to host internet via libvirt NAT)
+          # eth0 = WAN (static 192.168.41.201/24 on base-services bridge)
           # eth1 = LAN (static 172.18.0.1/24, internal network)
+          # IPv6 handled by S99zzz-ipv6-setup init script
 
           # Remove default bridge device and LAN interface
           while uci delete network.@device[0] 2>/dev/null; do :; done
           uci delete network.lan 2>/dev/null
           uci delete network.wan6 2>/dev/null
 
-          # WAN interface on eth0 (static IP)
+          # WAN interface on eth0 (static IP on base-services)
           uci set network.wan=interface
           uci set network.wan.proto=static
           uci set network.wan.device=eth0
-          uci set network.wan.ipaddr={{ wan_vm_ip }}
-          uci set network.wan.netmask={{ wan_netmask }}
-          uci set network.wan.gateway={{ wan_host_ip }}
-          uci set network.wan.dns={{ wan_host_ip }}
-
-          # WAN6 interface on eth0 (SLAAC from libvirt router)
-          uci set network.wan6=interface
-          uci set network.wan6.proto=dhcpv6
-          uci set network.wan6.device=eth0
-          uci set network.wan6.reqaddress=try
-          uci set network.wan6.reqprefix=no
+          uci set network.wan.ipaddr={{ vm_ip }}
+          uci set network.wan.netmask={{ vm_netmask }}
+          uci set network.wan.gateway={{ vm_gateway }}
+          uci set network.wan.dns={{ vm_dns }}
 
           # LAN interface on eth1 (static)
           uci set network.lan=interface
@@ -290,11 +344,11 @@
           uci set firewall.defaults.output=ACCEPT
           uci set firewall.defaults.forward=REJECT
 
-          # WAN zone (IPv4 + IPv6)
+          # WAN zone - input ACCEPT (VM behind Traefik+SSO)
           uci set firewall.wan=zone
           uci set firewall.wan.name=wan
-          uci set firewall.wan.network="wan wan6"
-          uci set firewall.wan.input=REJECT
+          uci set firewall.wan.network="wan"
+          uci set firewall.wan.input=ACCEPT
           uci set firewall.wan.output=ACCEPT
           uci set firewall.wan.forward=REJECT
           uci set firewall.wan.masq=1
@@ -308,7 +362,7 @@
           uci set firewall.lan.output=ACCEPT
           uci set firewall.lan.forward=ACCEPT
 
-          # Forwarding: LAN -> WAN (IPv4 + IPv6)
+          # Forwarding: LAN -> WAN
           uci set firewall.wan_forward=forwarding
           uci set firewall.wan_forward.src=lan
           uci set firewall.wan_forward.dest=wan
@@ -356,6 +410,38 @@
 
           uci commit network
           uci commit firewall
+
+          # ── Disable DAD for IPv6 stability ──
+          cat > /etc/sysctl.d/99-no-dad.conf << SYSCTLEOF
+          net.ipv6.conf.eth0.accept_dad=0
+          net.ipv6.conf.all.accept_dad=0
+          SYSCTLEOF
+          sysctl -p /etc/sysctl.d/99-no-dad.conf 2>/dev/null || true
+
+          # ── IPv6 init script (static address + default route) ──
+          # Prefix is detected by Ansible at playbook time and embedded here.
+          # Docker's base-services bridge has forwarding=1, so no RAs are sent;
+          # the VM cannot discover the prefix via SLAAC.
+          cat > /etc/init.d/zzz-ipv6-setup << 'INITEOF'
+          #!/bin/sh /etc/rc.common
+          START=99
+          PREFIX="{{ host_ipv6_prefix | default('') }}"
+          stop() { :; }
+          start() {
+            [ -z "$PREFIX" ] && return 0
+            # Wait for eth0 to be ready (link-local address present)
+            local try
+            for try in 1 2 3 4 5; do
+              ip link show dev eth0 up 2>/dev/null | grep -q "state UP" && break
+              sleep 2
+            done
+            ip -6 addr add "$PREFIX::201/64" dev eth0 2>/dev/null || true
+            ip -6 route add default via "$PREFIX::1" dev eth0 metric 1024 2>/dev/null || true
+          }
+          INITEOF
+          chmod 755 /etc/init.d/zzz-ipv6-setup
+          ln -sf /etc/init.d/zzz-ipv6-setup /etc/rc.d/S99zzz-ipv6-setup
+
           exit 0
       when: kvm_capable | bool
 
@@ -431,7 +517,7 @@
         - not qcow2_image.stat.exists | default(false) | bool
 
     # ── Set file permissions ─────────────────────────────────────────────
-    # libvirt-qemu (uid 64055, kvm group) needs to traverse the path.
+    # libvirt-qemu (uid 64055, kvm group member) needs to traverse the path.
     - name: Ensure openwrt-vm path is traversable by libvirt
       ansible.builtin.shell: |
         set -e
@@ -466,84 +552,7 @@
         mode: "0640"
       when: kvm_capable | bool
 
-    # ── Ensure bridge module is loaded for sysctl ────────────────────────
-    - name: Load bridge kernel module
-      community.general.modprobe:
-        name: bridge
-        state: present
-      when: kvm_capable | bool
-
-    # ── bridge-nf-call-iptables must be 0 ───────────────────────────────
-    # UFW FORWARD DROP blocks DHCP/ARP on bridges when this is enabled.
-    # The /proc/sys entries only appear after a bridge interface exists,
-    # so we write the sysctl file and apply it after network creation.
-    - name: Disable bridge-nf-call-iptables via sysctl file
-      ansible.builtin.lineinfile:
-        path: /etc/sysctl.d/99-openwrt-vm.conf
-        line: "{{ item }} = 0"
-        regexp: "^{{ item }} "
-        create: yes
-        owner: root
-        group: root
-        mode: "0644"
-      loop:
-        - net.bridge.bridge-nf-call-iptables
-        - net.bridge.bridge-nf-call-ip6tables
-      when: kvm_capable | bool
-
     # ── Libvirt networks ─────────────────────────────────────────────────
-    # WAN network: NAT mode, static IPs only, no dnsmasq
-    # If the network already exists (e.g. with old DHCP config), destroy and redefine
-    - name: Check if openwrt-wan network exists
-      ansible.builtin.command: virsh net-info openwrt-wan
-      register: ow_wan_net
-      changed_when: false
-      failed_when: false
-      when: kvm_capable | bool
-
-    - name: Destroy existing openwrt-wan network if it has DHCP
-      ansible.builtin.shell: |
-        virsh net-destroy openwrt-wan 2>/dev/null || true
-        virsh net-undefine openwrt-wan 2>/dev/null || true
-        echo "wan-network-destroyed"
-      register: wan_net_destroy
-      changed_when: "'wan-network-destroyed' in wan_net_destroy.stdout"
-      when:
-        - kvm_capable | bool
-        - ow_wan_net.rc | default(1) == 0
-      ignore_errors: true
-
-    - name: Define openwrt-wan libvirt network
-      ansible.builtin.shell: |
-        cat > /tmp/ow-wan-net.xml << WANEOF
-        <network xmlns:dnsmasq="http://libvirt.org/schemas/network/dnsmasq/1.0">
-          <name>openwrt-wan</name>
-          <bridge name="br-ow-wan"/>
-          <forward mode="nat">
-            <nat>
-              <ip family="ipv6" address="fd00:17::1" prefix="64"/>
-            </nat>
-          </forward>
-          <ip address="{{ wan_host_ip }}" netmask="{{ wan_netmask }}">
-            <dhcp>
-              <range start="{{ wan_vm_ip }}" end="{{ wan_vm_ip }}"/>
-            </dhcp>
-          </ip>
-          <ip family="ipv6" address="fd00:17::1" prefix="64"/>
-          <dnsmasq:options>
-            <dnsmasq:option value="enable-ra"/>
-          </dnsmasq:options>
-        </network>
-        WANEOF
-        virsh net-define /tmp/ow-wan-net.xml
-        virsh net-start openwrt-wan
-        virsh net-autostart openwrt-wan
-        rm -f /tmp/ow-wan-net.xml
-        echo "wan-network-created"
-      register: wan_net_create
-      changed_when: "'wan-network-created' in wan_net_create.stdout"
-      when: kvm_capable | bool
-
     # LAN network: isolated (no forward), OpenWrt acts as gateway
     - name: Check if openwrt-lan network exists
       ansible.builtin.command: virsh net-info openwrt-lan
@@ -572,11 +581,101 @@
         - kvm_capable | bool
         - ow_lan_net.rc | default(1) != 0
 
-    # Apply bridge sysctl after networks are created (bridges exist now)
-    - name: Apply bridge-nf-call-iptables sysctl
-      ansible.builtin.shell: sysctl -p /etc/sysctl.d/99-openwrt-vm.conf 2>/dev/null || true
+    # ── UFW: NAT and route forwarding ────────────────────────────────────
+    # MASQUERADE traffic from base-services to uplink (VM internet access).
+    - name: UFW NAT masquerade for VM internet access
+      ansible.builtin.shell: |
+        set -e
+        RULE="-A POSTROUTING -s 192.168.41.0/24 ! -d 192.168.41.0/24 -j MASQUERADE # openwrt-vm-masquerade"
+        if grep -q "openwrt-vm-masquerade" /etc/ufw/before.rules; then
+          echo "nat-rule-exists"
+        elif grep -q '^\*nat' /etc/ufw/before.rules; then
+          LAST_COMMIT=$(grep -n '^COMMIT' /etc/ufw/before.rules | tail -1 | cut -d: -f1)
+          if [ -n "$LAST_COMMIT" ]; then
+            sed -i "${LAST_COMMIT}i $RULE" /etc/ufw/before.rules
+            echo "nat-rule-added"
+          fi
+        else
+          printf '\n*nat\n:PREROUTING ACCEPT [0:0]\n:POSTROUTING ACCEPT [0:0]\n%s\nCOMMIT\n' "$RULE" \
+            >> /etc/ufw/before.rules
+          echo "nat-section-added"
+        fi
+      register: ufw_nat_result
+      changed_when: "'nat-rule-added' in ufw_nat_result.stdout or 'nat-section-added' in ufw_nat_result.stdout"
+      when: kvm_capable | bool
+
+    # Allow routed traffic between base-services and uplink.
+    - name: UFW route allow base-services to uplink
+      ansible.builtin.shell: |
+        ufw route allow in on base-services out on {{ uplink_interface }} 2>/dev/null
+        ufw route allow in on {{ uplink_interface }} out on base-services 2>/dev/null
+        echo "route-rules-ok"
+      register: ufw_route_result
       changed_when: false
       when: kvm_capable | bool
+
+    # ── nftables: IPv6 NAT and forwarding ────────────────────────────────
+    # IPv6 masquerade for VM internet access (ip6table_nat backend).
+    - name: IPv6 NAT masquerade for VM
+      ansible.builtin.shell: |
+        set -e
+        PREFIX="{{ host_ipv6_prefix }}"
+        [ -z "$PREFIX" ] && exit 0
+        ip6tables -t nat -C POSTROUTING -s "$PREFIX::/64" ! -d "$PREFIX::/64" -j MASQUERADE 2>/dev/null \
+          || ip6tables -t nat -A POSTROUTING -s "$PREFIX::/64" ! -d "$PREFIX::/64" -j MASQUERADE
+        echo "ipv6-nat-ok"
+      register: ipv6_nat_result
+      changed_when: false
+      when:
+        - kvm_capable | bool
+        - host_ipv6_available | bool
+
+    # Allow IPv6 forwarding between base-services and uplink.
+    - name: IPv6 forwarding rules for VM
+      ansible.builtin.shell: |
+        set -e
+        UP="{{ uplink_interface }}"
+        ip6tables -C FORWARD -i base-services -o "$UP" -j ACCEPT 2>/dev/null \
+          || ip6tables -I FORWARD -i base-services -o "$UP" -j ACCEPT
+        ip6tables -C FORWARD -i "$UP" -o base-services -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \
+          || ip6tables -I FORWARD -i "$UP" -o base-services -m state --state RELATED,ESTABLISHED -j ACCEPT
+        echo "ipv6-forward-ok"
+      register: ipv6_fwd_result
+      changed_when: false
+      when:
+        - kvm_capable | bool
+        - host_ipv6_available | bool
+
+    # ── IPv6 host route for VM ───────────────────────────────────────────
+    # /128 host route on base-services overrides ISP's /64 on uplink
+    # (metric 100 on uplink vs more-specific /128 wins).
+    - name: Add IPv6 host route for VM on base-services
+      ansible.builtin.shell: |
+        set -e
+        PREFIX="{{ host_ipv6_prefix }}"
+        [ -z "$PREFIX" ] && exit 0
+        ip -6 route replace "$PREFIX::201/128" dev base-services
+        echo "ipv6-route-ok"
+      register: ipv6_route_result
+      changed_when: false
+      when:
+        - kvm_capable | bool
+        - host_ipv6_available | bool
+
+    # Persist the route across reboots.
+    - name: Persist IPv6 host route for VM
+      ansible.builtin.copy:
+        dest: /etc/network/if-up.d/openwrt-vm-ipv6-route
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          # IPv6 host route for openwrt VM on base-services bridge
+          PREFIX="{{ host_ipv6_prefix }}"
+          [ -z "$PREFIX" ] && exit 0
+          ip -6 route replace "$PREFIX::201/128" dev base-services
+      when:
+        - kvm_capable | bool
+        - host_ipv6_available | bool
 
     # ── Ensure libvirtd is running ───────────────────────────────────────
     - name: Ensure libvirtd is started and enabled
@@ -588,13 +687,16 @@
 
     # ── Check if VM already exists ───────────────────────────────────────
     - name: Check if openwrt VM already exists
-      ansible.builtin.command: virsh list --name --all
-      register: vm_list
+      ansible.builtin.command: virsh dominfo openwrt
+      register: vm_dominfo
       changed_when: false
+      failed_when: false
       when: kvm_capable | bool
 
     # ── Create VM ────────────────────────────────────────────────────────
-    # Define VM via libvirt XML (consistent with network XML approach)
+    # Define VM via libvirt XML.
+    # NIC1: base-services bridge (same L2 as Docker, Traefik, Authelia)
+    # NIC2: openwrt-lan (isolated, OpenWrt is gateway for LAN clients)
     - name: Define OpenWrt VM
       ansible.builtin.shell: |
         cat > /tmp/openwrt-vm.xml << 'XMLEOF'
@@ -620,8 +722,8 @@
               <source file='{{ service_root }}/images/openwrt.qcow2'/>
               <target dev='vda' bus='virtio'/>
             </disk>
-            <interface type='network'>
-              <source network='openwrt-wan'/>
+            <interface type='bridge'>
+              <source bridge='base-services'/>
               <model type='virtio'/>
               <rom bar='off'/>
             </interface>
@@ -643,7 +745,7 @@
       changed_when: "'vm-defined' in vm_define.stdout"
       when:
         - kvm_capable | bool
-        - "'openwrt' not in vm_list.stdout_lines | default([])"
+        - vm_dominfo.rc | default(1) != 0
 
     - name: Start OpenWrt VM if stopped
       ansible.builtin.command: virsh start openwrt
@@ -652,7 +754,7 @@
       failed_when: false
       when:
         - kvm_capable | bool
-        - "'openwrt' in vm_list.stdout_lines | default([])"
+        - vm_dominfo.rc | default(1) == 0
         - vm_define is skipped | default(true)
 
     - name: Ensure OpenWrt VM is set to autostart
@@ -662,44 +764,6 @@
       when: kvm_capable | bool
 
     # ── Traefik integration ──────────────────────────────────────────────
-    # Allow Docker containers to reach the OpenWrt VM on br-ow-wan.
-    # LIBVIRT_FWI blocks forwarded traffic to br-ow-wan with REJECT.
-    # We insert ACCEPT rules before the REJECT for Docker network <-> VM traffic.
-    # These rules must be re-applied after libvirtd restarts (it recreates chains).
-    # IPv6 NAT masquerade is needed because ip6table_nat module is unavailable;
-    # libvirt doesn't create the rule automatically with the nftables backend.
-    - name: Create openwrt-vm iptables service
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/openwrt-vm-iptables.service
-        mode: "0644"
-        content: |
-          [Unit]
-          Description=Allow Docker-to-VM forwarding and IPv6 NAT for openwrt-vm
-          After=libvirtd.service
-          Requires=libvirtd.service
-
-          [Service]
-          Type=oneshot
-          RemainAfterExit=yes
-          ExecStart=/bin/bash -c "iptables -C LIBVIRT_FWI -s 192.168.41.0/24 -d 172.17.0.0/24 -j ACCEPT 2>/dev/null || iptables -I LIBVIRT_FWI 1 -s 192.168.41.0/24 -d 172.17.0.0/24 -j ACCEPT"
-          ExecStart=/bin/bash -c "iptables -C LIBVIRT_FWO -s 172.17.0.0/24 -d 192.168.41.0/24 -j ACCEPT 2>/dev/null || iptables -I LIBVIRT_FWO 1 -s 172.17.0.0/24 -d 192.168.41.0/24 -j ACCEPT"
-          ExecStart=/bin/bash -c "ip6tables -t nat -C LIBVIRT_PRT -s fd00:17::/64 ! -d fd00:17::/64 -j MASQUERADE 2>/dev/null || ip6tables -t nat -I LIBVIRT_PRT 1 -s fd00:17::/64 ! -d fd00:17::/64 -j MASQUERADE"
-          ExecStop=/bin/bash -c "iptables -D LIBVIRT_FWI -s 192.168.41.0/24 -d 172.17.0.0/24 -j ACCEPT 2>/dev/null || true"
-          ExecStop=/bin/bash -c "iptables -D LIBVIRT_FWO -s 172.17.0.0/24 -d 192.168.41.0/24 -j ACCEPT 2>/dev/null || true"
-          ExecStop=/bin/bash -c "ip6tables -t nat -D LIBVIRT_PRT -s fd00:17::/64 ! -d fd00:17::/64 -j MASQUERADE 2>/dev/null || true"
-
-          [Install]
-          WantedBy=multi-user.target
-      when: kvm_capable | bool
-
-    - name: Enable openwrt-vm iptables service
-      ansible.builtin.systemd:
-        name: openwrt-vm-iptables
-        enabled: yes
-        state: started
-        daemon_reload: yes
-      when: kvm_capable | bool
-
     # Traefik file-provider route for LuCI (Authelia-protected)
     - name: /symbios/base-services/traefik/providers/openwrt-vm.yml Traefik routing
       ansible.builtin.blockinfile:
@@ -726,7 +790,7 @@
               openwrt-vm:
                 loadBalancer:
                   servers:
-                    - url: "http://{{ wan_vm_ip }}:80"
+                    - url: "http://{{ vm_ip }}:{{ service_port }}"
         backup: yes
       notify: Restart traefik
       when: kvm_capable | bool
