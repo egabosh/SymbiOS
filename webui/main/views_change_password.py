@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import shlex
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from .decorators import login_required
@@ -44,6 +45,21 @@ def change_password(request):
             messages.error(request, msg)
             return redirect("change_password")
 
+        if len(new_password) < 8:
+            msg = "Password must be at least 8 characters long."
+            if is_ajax_request(request):
+                return JsonResponse({'ok': False, 'error': msg}, status=400)
+            messages.error(request, msg)
+            return redirect("change_password")
+
+        # Basic complexity: must contain at least one letter and one digit
+        if not any(c.isalpha() for c in new_password) or not any(c.isdigit() for c in new_password):
+            msg = "Password must contain at least one letter and one digit."
+            if is_ajax_request(request):
+                return JsonResponse({'ok': False, 'error': msg}, status=400)
+            messages.error(request, msg)
+            return redirect("change_password")
+
         if new_password != confirm_password:
             msg = "Passwords do not match."
             if is_ajax_request(request):
@@ -52,7 +68,7 @@ def change_password(request):
             return redirect("change_password")
 
         f_pw_file = f_write_secret('ldap-password', new_password)
-        cmd = f'symbios-ldap-user.sh --modify --uid {uid} --password-file {f_pw_file}'
+        cmd = f'symbios-ldap-user.sh --modify --uid {shlex.quote(uid)} --password-file {shlex.quote(f_pw_file)}'
 
         if is_ajax_request(request):
             from .utils.jobs import create_job

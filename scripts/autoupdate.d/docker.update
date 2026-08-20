@@ -24,7 +24,7 @@ do
   if docker -l warn compose --ansi never pull --include-deps 2>&1 | grep " Pulled"
   then
     # Write PID file for this service
-    echo $$ >/tmp/$(basename $g_docker_dir)
+    echo $$ >/run/$(basename $g_docker_dir)
     if ! docker -l warn compose --ansi never up -d --remove-orphans >$g_tmp/up 2>&1
     then
       g_echo_error "$g_docker_dir: docker compose up failed: $(cat $g_tmp/up)"

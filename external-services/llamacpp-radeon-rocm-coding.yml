@@ -1,0 +1,247 @@
+# docs:
+#   name: llama.cpp ROCm (Coding)
+#   description: >
+#     Installiert llama.cpp Server mit AMD ROCm GPU Support und Qwen3.6-27B-Coder Modell.
+#     Laeuft als Systemd Service auf Port 8080.
+#   category: linux-mint
+#   target:
+#     type: linux-mint
+#     description: llama.cpp Coding mit ROCm
+#   healthcheck:
+#     command: systemctl is-active llama-server
+---
+- name: Setup & Update llama.cpp ROCm Server with model
+  hosts: all
+
+  environment:
+    TMPDIR: /opt/tmp
+
+  vars:
+    llama_user: "llama"
+    llama_dir: "/opt/llama.cpp"
+    models_dir: "/opt/llama-models"
+    server_port: 8080
+    rocm_path: "/opt/rocm"
+    # Defaults for AMD Radeon RX 7900 XTX 24G
+    #model_url: "https://huggingface.co/unsloth/Devstral-Small-2-24B-Instruct-2512-GGUF/resolve/main/Devstral-Small-2-24B-Instruct-2512-IQ4_NL.gguf"
+    #model_file: "Devstral-Small-2-24B-Instruct-2512-IQ4_NL.gguf"
+    model_url: "https://huggingface.co/ManniX-ITA/Qwen3.6-27B-A3B-Coder-MTP-GGUF/resolve/main/Qwen3.6-27B-A3B-Coder-IQ4_NL.gguf"
+    model_file: "Qwen3.6-27B-A3B-Coder-IQ4_NL.gguf"
+    mmproj_file: ""
+    mmproj_url: ""
+    #context_length: 133120
+    #context_length: 262144
+    context_length: 65536
+    cache_type: "q4_0"
+    ansible_remote_tmp: /opt/tmp/ansible_$$
+
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install build dependencies
+      ansible.builtin.apt:
+        name:
+          - build-essential
+          - cmake
+          - git
+          - libcurl4-openssl-dev
+          - libomp-dev
+          - wget
+          - curl
+          - pkg-config
+          - ufw
+        state: present
+
+    - name: Ensure user has ROCm device access
+      ansible.builtin.user:
+        name: "{{ llama_user }}"
+        groups: video,render
+        append: yes
+
+    - name: Clone/Update llama.cpp repository
+      ansible.builtin.git:
+        repo: https://github.com/ggerganov/llama.cpp.git
+        dest: "{{ llama_dir }}"
+        version: master
+        force: no
+        update: yes
+      notify: Rebuild llama.cpp with ROCm support
+
+    - name: Create llama directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ llama_dir }}"
+        - "{{ models_dir }}"
+
+    - name: Check for existing GGUF model
+      ansible.builtin.stat:
+        path: "{{ models_dir }}/{{ model_file }}"
+      register: model_stat
+
+    - name: Download GGUF model (if not present)
+      ansible.builtin.get_url:
+        url: "{{ model_url }}"
+        dest: "{{ models_dir }}/{{ model_file }}"
+        mode: "0644"
+        #owner: "{{ llama_user }}"
+        timeout: 7200
+        force: no
+      when: not model_stat.stat.exists
+
+    #- name: Check for existing Vision Projector
+    #  ansible.builtin.stat:
+    #    path: "{{ models_dir }}/{{ mmproj_file }}"
+    #  register: mmproj_stat
+
+    #- name: Download Vision Projector (if not present)
+    #  ansible.builtin.get_url:
+    #    url: "{{ mmproj_url }}"
+    #    dest: "{{ models_dir }}/{{ mmproj_file }}"
+    #    mode: "0644"
+    #    timeout: 7200
+    #    force: no
+    #  when: not mmproj_stat.stat.exists
+
+    - name: Deploy systemd service file
+      ansible.builtin.copy:
+        content: |
+          [Unit]
+          Description=llama.cpp ROCm Inference Server
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=llama
+          Group=llama
+
+          # ROCm environment
+          Environment=HSA_ENABLE_SDMA=0
+          Environment=HSA_OVERRIDE_GFX_VERSION=11.0.0
+          Environment=ROCR_VISIBLE_DEVICES=0
+          Environment=HIP_VISIBLE_DEVICES=0
+          Environment=LD_LIBRARY_PATH={{ rocm_path }}/lib:{{ rocm_path }}/lib64:/usr/lib/x86_64-linux-gnu
+          Environment=PATH={{ rocm_path }}/bin:{{ rocm_path }}/llvm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+          # HIP/ROCm JIT benötigt Lese-/Schreibzugriff auf /tmp und /var/tmp
+          PrivateTmp=false
+          ProtectSystem=full
+          ProtectHome=read-only
+
+          # Keine restriktiven Privilegien- oder Device-Filter (blockieren oft HIP)
+          NoNewPrivileges=no
+
+          ExecStart=/opt/llama.cpp/build/bin/llama-server \
+            -m {{ models_dir }}/{{ model_file }} \
+            -c {{ context_length }} \
+            -ngl 99 \
+            --no-kv-offload \
+            --kv-unified \
+            -cram -1 \
+            --cache-type-k {{ cache_type }} \
+            --cache-type-v {{ cache_type }} \
+            --flash-attn on \
+            #--chat-template qwen3 \
+            --chat-template-kwargs '{"preserve_thinking": true}' \
+            --reasoning on \
+            --reasoning-budget 4096 \
+            --n-predict 8192 \
+            --temp 0.6 \
+            --top-p 0.95 \
+            --top-k 20 \
+            --presence-penalty 0.0 \
+            --repeat-penalty 1.0 \
+            --port {{ server_port }} \
+            --host 0.0.0.0 \
+            --parallel 2 \
+            -b 1024 \
+            -ub 256 \
+            --spec-type draft-mtp \
+            --spec-draft-n-max 2 \
+            -lv 2
+
+          #ExecStart=/opt/llama.cpp/build/bin/llama-server \
+          #  -m {{ models_dir }}/{{ model_file }} \
+          #  #--mmproj {{ models_dir }}/{{ mmproj_file }} \
+          #  -c {{ context_length }} \
+          #  -ngl 99 \
+          #  --no-kv-offload \
+          #  --kv-unified \
+          #  -cram -1 \
+          #  --cache-type-k {{cache_type}} \
+          #  --cache-type-v {{cache_type}} \
+          #  --reasoning on \
+          #  --n-predict 32768 \
+          #  --reasoning-budget 4096 \
+          #  --port 8080 \
+          #  --host 0.0.0.0 \
+          #  --parallel 2 \
+          #  -b 2048 \
+          #  -ub 256 \
+          #  -lv 2
+          
+          # --flash-attn on \
+          Restart=on-failure
+          RestartSec=10
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=llama-server
+
+          ReadWritePaths=/opt/llama.cpp {{ models_dir }} /tmp /var/tmp
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/llama-server.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart llama-server
+
+    - name: Enable and start llama-server service
+      ansible.builtin.systemd:
+        name: llama-server
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+    - name: Allow llama port through UFW
+      community.general.ufw:
+        rule: allow
+        port: "8080"
+        proto: tcp
+      notify: reload ufw
+
+  handlers:
+
+    - name: reload ufw
+      ansible.builtin.command: ufw reload
+
+    - name: Rebuild llama.cpp with ROCm support
+      ansible.builtin.shell: |
+        rm -rf build/
+        cmake -B build \
+          -DGGML_HIP=ON \
+          -DGGML_HIP_ROCWMMA_FATTN=ON \    
+          -DCMAKE_PREFIX_PATH={{ rocm_path }} \
+          -DAMDGPU_TARGETS=gfx1100 \
+          -DCMAKE_BUILD_TYPE=Release
+        cmake --build build -j$(nproc)
+      args:
+        chdir: "{{ llama_dir }}"
+      environment:
+        HIP_PATH: "{{ rocm_path }}"
+        PATH: "{{ rocm_path }}/bin:{{ rocm_path }}/llvm/bin:{{ ansible_env.PATH | default('/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', true) }}"
+      register: build_result
+      changed_when: build_result.rc == 0
+      notify: Restart llama-server
+
+    - name: Restart llama-server
+      ansible.builtin.systemd:
+        name: llama-server
+        state: restarted
+        daemon_reload: yes

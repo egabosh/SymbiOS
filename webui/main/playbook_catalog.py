@@ -30,7 +30,7 @@ CONFIG_BASE = "/config"
 EXCLUDE_PLAYBOOKS = {"traefik-static.yml", "inventory.yml"}
 # User-uploaded playbooks live under /config/user-playbooks/ (writable),
 # while built-in playbooks live under /repo/{services,base-services} (read-only).
-_REPO_GROUPS = ("services", "base-services")
+_REPO_GROUPS = ("services", "base-services", "external-services")
 
 # Cache the parsed catalog for a short time so it is not re-fetched on every
 # request (the sidebar is rendered on several pages).

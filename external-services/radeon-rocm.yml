@@ -1,0 +1,103 @@
+# docs:
+#   name: AMD ROCm Radeon Treiber
+#   description: >
+#     Installiert AMD ROCm 6.4.4 und Radeon GPU Treiber fuer Linux Mint.
+#     Benoetigt kompatible AMD GPU (z.B. RX 7900 XTX).
+#   category: linux-mint
+#   target:
+#     type: linux-mint
+#     description: AMD ROCm Treiber
+#   healthcheck:
+#     command: rocminfo 2>/dev/null | grep -q "Agent" && echo ok || exit 1
+---
+- name: Install and update AMD ROCm
+  hosts: all
+
+  vars:
+    amdgpu_url: >-
+      {{ 
+        'https://repo.radeon.com/amdgpu-install/latest/ubuntu/noble/' ~
+        (lookup('url', 'https://repo.radeon.com/amdgpu-install/latest/ubuntu/noble/', split_lines=False) 
+         | regex_findall('href="(amdgpu-install_[\d.]+-[^"]+\.deb)"') 
+         | first)
+      }}
+    ansible_remote_tmp: /opt/tmp/ansible_$$
+
+  tasks:
+    # pre tasks
+    - name: Update APT cache
+      ansible.builtin.apt:
+        update_cache: yes
+      tags: always
+      changed_when: false
+
+    - name: tmp-dir for following model downlaods,...
+      file:
+        path: "/opt/tmp"
+        state: directory
+        owner: root
+        group: root
+        mode: "1777"
+
+    - name: Install base packages (curl, tar, zstd, ca-certificates, wget)
+      ansible.builtin.apt:
+        name:
+          - curl
+          - tar
+          - zstd
+          - ca-certificates
+          - wget
+        state: present
+
+    # AMDGPU + ROCm driver installation (based on AMD installer)
+    - name: Download amdgpu-install.deb
+      ansible.builtin.get_url:
+        url: "{{ amdgpu_url }}"
+        dest: "/opt/amdgpu-install.deb"
+        mode: "0644"
+        force: yes
+      changed_when: false
+
+    - name: Install/Update amdgpu-install package
+      ansible.builtin.apt:
+        deb: "/opt/amdgpu-install.deb"
+        state: present
+        update_cache: yes
+      register: amdgpu_install
+
+    - name: empty amdgpu-proprietary.list - needs to be there
+      ansible.builtin.copy:
+        content: ""
+        dest: /etc/apt/sources.list.d/amdgpu-proprietary.list
+
+    - name: Run amdgpu-install with graphics and ROCm usecases
+      ansible.builtin.command:
+        cmd: "amdgpu-install -y --usecase=graphics,rocm --vulkan=radv --opencl=rocr --accept-eula"
+      when: amdgpu_install.changed
+
+    - name: get latest ROCm-dir
+      ansible.builtin.shell: |
+        ls -d /opt/rocm-* 2>/dev/null | sort -V | tail -n1
+      register: rocm_latest_dir
+      changed_when: false
+      failed_when: false
+
+    - name: create /opt/rocm symlink
+      ansible.builtin.file:
+        src: "{{ rocm_latest_dir.stdout }}"
+        dest: /opt/rocm
+        state: link
+        force: true
+      when: rocm_latest_dir.stdout | length > 0
+
+
+    # Generic GPU / ROCm helper tools
+    - name: Install generic GPU/ROCm helper packages
+      ansible.builtin.apt:
+        name:
+          - pciutils
+          - mesa-opencl-icd
+          - clinfo
+          - radeontop
+        state: present
+

@@ -121,6 +121,7 @@
         group: root
       when: smtp_user is defined and smtp_user | length > 0 and smtp_password is defined and smtp_password | length > 0
       notify: Restart postfix
+      no_log: true
 
     - name: Generate SASL password DB
       ansible.builtin.command:

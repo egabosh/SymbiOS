@@ -1,0 +1,240 @@
+# docs:
+#   name: ComfyUI (CPU)
+#   description: >
+#     Installiert ComfyUI fuer Bildgenerierung auf der CPU.
+#     Laeuft als Systemd Service auf Port 8188.
+#   category: linux-mint
+#   target:
+#     type: linux-mint
+#     description: ComfyUI CPU
+#   healthcheck:
+#     command: systemctl is-active comfyui
+---
+- name: Install ComfyUI (CPU) on ai.lan
+  hosts: all
+
+  vars:
+    comfyui_user: llama
+    comfyui_dir: /opt/comfyui
+    comfyui_port: 8188
+    ansible_remote_tmp: /opt/tmp/ansible_$$
+
+  environment:
+    TMPDIR: /opt/tmp
+    PIP_CACHE_DIR: /opt/.pip-cache
+
+  tasks:
+
+    - name: Ensure llama user exists
+      ansible.builtin.user:
+        name: "{{ comfyui_user }}"
+        groups: video
+        append: yes
+        system: yes
+        create_home: yes
+        shell: /usr/sbin/nologin
+      ignore_errors: yes
+
+    - name: Install Python and build deps
+      ansible.builtin.apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+          - python3-requests
+          - git
+          - libgl1
+          - libglib2.0-0
+          - ca-certificates
+          - wget
+        state: present
+        update_cache: yes
+
+    - name: Clone ComfyUI repository
+      ansible.builtin.git:
+        repo: https://github.com/comfyanonymous/ComfyUI.git
+        dest: "{{ comfyui_dir }}"
+        version: master
+        force: yes
+        update: yes
+      become: yes
+      become_user: "{{ comfyui_user }}"
+
+    - name: Create Python virtualenv
+      ansible.builtin.command:
+        cmd: python3 -m venv {{ comfyui_dir }}/venv
+        creates: "{{ comfyui_dir }}/venv/bin/python"
+
+    - name: Upgrade pip in venv
+      ansible.builtin.pip:
+        name: pip
+        state: latest
+        virtualenv: "{{ comfyui_dir }}/venv"
+        virtualenv_python: python3
+
+    - name: CPU torch
+      ansible.builtin.pip:
+        name: torch
+        virtualenv: "{{ comfyui_dir }}/venv"
+        extra_args: "--index-url https://download.pytorch.org/whl/cpu --force-reinstall"
+
+    - name: Install ComfyUI Python dependencies in venv
+      ansible.builtin.pip:
+        requirements: "{{ comfyui_dir }}/requirements.txt"
+        virtualenv: "{{ comfyui_dir }}/venv"
+        chdir: "{{ comfyui_dir }}"
+        extra_args: "--index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple"
+
+    - name: kornia entfernen (AVX2-Binary crasht auf Xeon E5-2696)
+      ansible.builtin.pip:
+        name:
+          - kornia
+          - kornia-rs
+        virtualenv: "{{ comfyui_dir }}/venv"
+        state: absent
+ 
+    - name: kornia-Import lazy machen (top-level import kornia = Startup-Crash)
+      ansible.builtin.replace:
+        path: "{{ comfyui_dir }}/comfy_extras/nodes_post_processing.py"
+        regexp: '^import kornia$'
+        replace: '# import kornia (lazy, siehe Funktionen)'
+ 
+    - name: Git skip-worktree für gepatche Node-Datei
+      ansible.builtin.command:
+        cmd: git update-index --skip-worktree comfy_extras/nodes_post_processing.py
+        chdir: "{{ comfyui_dir }}"
+      changed_when: false
+      become: yes
+      become_user: "{{ comfyui_user }}"
+
+    - name: create models dir
+      ansible.builtin.file:
+        path: "{{ comfyui_dir }}/models/checkpoints"
+        state: directory
+        mode: "0755"
+
+    - name: downlaod SD 1.5 model
+      ansible.builtin.get_url:
+        url: https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned.safetensors
+        dest: "{{ comfyui_dir }}/models/checkpoints/sd15.safetensors"
+        timeout: 120
+
+    - name: Deploy ComfyUI systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/comfyui.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=ComfyUI (CPU)
+          After=network.target
+
+          [Service]
+          Type=simple
+          User={{ comfyui_user }}
+          Group={{ comfyui_user }}
+          WorkingDirectory={{ comfyui_dir }}
+          Environment=PATH={{ comfyui_dir }}/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          ExecStart={{ comfyui_dir }}/venv/bin/python {{ comfyui_dir }}/main.py --cpu --listen 0.0.0.0 --port {{ comfyui_port }}
+          Restart=on-failure
+          RestartSec=10
+          TimeoutStartSec=300
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart ComfyUI
+
+    - name: Enable ComfyUI
+      ansible.builtin.systemd:
+        name: comfyui
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Deploy ComfyUI workflow (API format)
+      ansible.builtin.copy:
+        dest: "{{ comfyui_dir }}/workflow_api.json"
+        owner: "{{ comfyui_user }}"
+        group: "{{ comfyui_user }}"
+        mode: "0644"
+        content: |
+          {
+            "3": {
+              "class_type": "KSampler",
+              "inputs": {
+                "cfg": 8.0,
+                "denoise": 1.0,
+                "latent_image": ["5", 0],
+                "model": ["4", 0],
+                "negative": ["6", 0],
+                "positive": ["7", 0],
+                "sampler_name": "euler",
+                "scheduler": "normal",
+                "seed": 42,
+                "steps": 20
+              }
+            },
+            "4": {
+              "class_type": "CheckpointLoaderSimple",
+              "inputs": {
+                "ckpt_name": "sd15.safetensors"
+              }
+            },
+            "5": {
+              "class_type": "EmptyLatentImage",
+              "inputs": {
+                "batch_size": 1,
+                "height": 512,
+                "width": 512
+              }
+            },
+            "6": {
+              "class_type": "CLIPTextEncode",
+              "inputs": {
+                "clip": ["4", 1],
+                "text": "NEGATIVE_PROMPT"
+              }
+            },
+            "7": {
+              "class_type": "CLIPTextEncode",
+              "inputs": {
+                "clip": ["4", 1],
+                "text": "PROMPT"
+              }
+            },
+            "8": {
+              "class_type": "VAEDecode",
+              "inputs": {
+                "samples": ["3", 0],
+                "vae": ["4", 2]
+              }
+            },
+            "9": {
+              "class_type": "SaveImage",
+              "inputs": {
+                "filename_prefix": "ComfyUI",
+                "images": ["8", 0]
+              }
+            }
+          }
+      notify: Restart ComfyUI
+
+    - name: Set ownership on ComfyUI directory
+      ansible.builtin.file:
+        path: "{{ comfyui_dir }}"
+        owner: "{{ comfyui_user }}"
+        group: "{{ comfyui_user }}"
+        recurse: yes
+
+
+    - name: Allow ComfyUI port {{ comfyui_port }} in UFW
+      ansible.builtin.shell:
+        cmd: ufw allow {{ comfyui_port }}/tcp
+      changed_when: false
+
+  handlers:
+    - name: Restart ComfyUI
+      ansible.builtin.systemd:
+        name: comfyui
+        state: restarted
+        daemon_reload: yes

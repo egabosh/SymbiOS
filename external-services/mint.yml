@@ -1,0 +1,385 @@
+# docs:
+#   name: Linux Mint Basis-Pakete
+#   description: >
+#     Installiert grundlegende Pakete und Konfiguration fuer Linux Mint Systeme.
+#     Basis fuer alle weiteren linux-mint Playbooks.
+#   category: linux-mint
+#   target:
+#     type: linux-mint
+#     description: Linux Mint Basis
+#   healthcheck:
+#     command: exit 0
+---
+- name: Mint Packages
+  hosts: all
+  gather_facts: yes
+  tasks:
+
+    - name: Remove packages
+      apt:
+        name: timeshift
+        state: absent
+        autoremove: yes
+        purge: yes
+
+    - name: Install Basic Packages
+      apt:
+        name:
+          # powersave
+          - tlp
+          - tlp-rdw
+          # Speed up program start
+          - preload
+          # mediacodecs and fonts
+          - mint-meta-codecs
+          - ubuntu-restricted-extras
+          - libavcodec-extra
+          - libdvd-pkg
+          - fonts-terminus
+          # share desk
+          - x11vnc
+          # useful other stuff
+          - spectre-meltdown-checker
+          - pwgen
+          - arj
+          - p7zip
+          - unace
+          - unadf
+          - bvi
+          - fdupes
+          - radeontop
+          - debootstrap
+          - geoip-bin
+          - sshfs
+          - speedtest-cli
+          - gnome-characters
+          - gparted
+          # tools for android-smartphones/LineageOS
+          - heimdall-flash
+          - android-tools-adb
+          - android-tools-fastboot
+          # dconf-gui
+          - dconf-editor
+          # Media
+          - lame
+          - vorbis-tools
+          - fdkaac
+          - flac
+          # brennen
+          - brasero
+          # misc
+          - wireguard
+          - wireguard-tools
+          - tinyproxy
+          - hardinfo
+          - rpi-imager
+          - redshift-gtk
+          - clamtk
+          # virtualization
+          #- virtualbox
+          #- virtualbox-qt
+          #- virtualbox-guest-additions-iso
+          # screenshot
+          - flameshot
+          # print
+          - printer-driver-escpr
+          - openvpn
+          - network-manager-openvpn
+          - network-manager-openvpn-gnome
+        update_cache: yes
+        install_recommends: no
+
+    - name: check if mint-minimal exists
+      ansible.builtin.stat:
+        path: /etc/mint-minimal
+      register: mint_minimal_file
+
+    - name: install additional packages if no mint minimal install
+      ansible.builtin.apt:
+        name:
+          - openoffice.org-hyphenation
+          # groupware
+          - evolution
+          # nextcloud
+          - nextcloud-desktop
+          - nemo-nextcloud
+          # misc
+          - opus-tools
+          - wavpack
+          - musepack-tools
+          - gthumb
+          - mediainfo-gui
+          - easytag
+          - audacity
+          - asunder
+          - mediathekview
+          - audacious
+          - guvcview
+          - calf-plugins
+          - handbrake
+          - gpodder
+          # retro
+          - dosbox
+        install_recommends: no
+      when: not mint_minimal_file.stat.exists
+
+    - name: Install Flatpaks
+      community.general.flatpak:
+        name:
+          - org.gtk.Gtk3theme.Mint-Y-Dark
+          - com.github.tchx84.Flatseal
+        state: present
+        method: system
+      when: not mint_minimal_file.stat.exists
+  
+    # Gather facts about the system, including virtualization type
+    - name: Gather system facts
+      ansible.builtin.setup:
+
+    # Check if the system is running as a KVM virtual machine
+    - name: Set fact if running on KVM
+      ansible.builtin.set_fact:
+        is_kvm_guest: "{{ ansible_facts.virtualization_type == 'kvm' and ansible_facts.virtualization_role == 'guest' }}"
+
+    - name: Install QXL components only if this is a KVM guest
+      apt:
+        name:
+          - xserver-xorg-video-qxl
+          - spice-vdagent
+          - qemu-guest-agent
+          - virtiofsd
+          - linux-image-virtual
+      when: is_kvm_guest
+
+    - name: Install KVM/libvirt if this is not a KVM guest
+      apt:
+        name:
+          - virtinst
+          - virt-manager
+          - virt-top
+      when: not is_kvm_guest
+
+    - name: start qemu-guest-agent
+      service:
+        name: qemu-guest-agent
+        state: started
+        enabled: yes
+      when: is_kvm_guest
+
+    - name: create /etc/pipewire/pipewire-pulse.conf.d
+      ansible.builtin.file:
+        path: /etc/pipewire/pipewire-pulse.conf.d
+        state: directory
+        mode: '0755'
+      when: is_kvm_guest
+
+    - name: pipewire write tunnel to gateway
+      ansible.builtin.copy:
+        dest: /etc/pipewire/pipewire-pulse.conf.d/99-tunnel.conf
+        content: |
+          context.modules = [
+            { name = libpipewire-module-pulse-tunnel
+              args = {
+                tunnel.mode = source
+                pulse.server.address = "tcp:{{ ansible_default_ipv4.gateway }}:4656"
+                node.name = "Input-to-Host"
+                node.description = "tcp forward to {{ ansible_default_ipv4.gateway }}"
+                # pulse.latency = 200
+                # reconnect.interval.ms = 0
+                # stream.props = { }
+              }
+            }
+          
+            { name = libpipewire-module-pulse-tunnel
+              args = {
+                tunnel.mode = sink
+                pulse.server.address = "tcp:{{ ansible_default_ipv4.gateway }}:4656"
+                node.name = "Output-to-Host"
+                node.description = "tcp forward to {{ ansible_default_ipv4.gateway }}"
+                # pulse.latency = 200
+                # reconnect.interval.ms = 0
+                # stream.props = { }
+              }
+            }
+          ]
+        owner: root
+        group: root
+        mode: '0644'
+      when: is_kvm_guest
+
+    - name: mint-config-update
+      blockinfile:
+        path: /etc/systemd/system/mint-config-update.service
+        create: yes
+        mode: 0444
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          [Unit]
+          Description=Mint Upgrade Service
+          # star after and on shutdown dont stop before script has terminated
+          After=network.target dnscrypt-proxy.service systemd-resolved.service sshd.service tor@default.service
+                    
+          [Service]
+          Type=oneshot
+          User=root
+          ExecStart=bash /usr/local/sbin/mint-config-update.sh
+          # Wait for "normal" exit of the script SIGCONT doesnt kill/terminate it
+          KillSignal=SIGCONT
+          # wait a maximum of 30 minutes
+          TimeoutStopSec=1800
+          StandardOutput=append:/var/log/mint-config-update.sh.log
+          StandardError=append:/var/log/mint-config-update.sh.log
+          
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: 'add mint-config-update to startup'
+      command: systemctl enable mint-config-update.service
+      args:
+        creates: /etc/systemd/system/multi-user.target.wants/mint-config-update.service
+
+    - name: remove dhcpcd because NetworkManager is doing the job
+      command: systemctl disable dhcpcd
+      args:
+        removes: /etc/systemd/system/multi-user.target.wants/dhcpcd.service
+
+    - name: enable Mint Autoupdate 
+      command: systemctl enable mintupdate-automation-upgrade.timer
+      args:
+        creates: /etc/systemd/system/timers.target.wants/mintupdate-automation-upgrade.timer
+
+    - name: enable Mint Autoupdate Cleanup
+      command: systemctl enable mintupdate-automation-autoremove.timer
+      args:
+        creates: /etc/systemd/system/timers.target.wants/mintupdate-automation-autoremove.timer
+
+    - name: mint-config-update
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/egabosh/linux-setups/refs/heads/main/mint/mint-config-update.sh
+        dest: /usr/local/sbin/mint-config-update.sh
+        mode: '0555'
+        owner: root
+        group: root
+        force: yes
+        backup: yes
+
+    - name: mint-config-update startmenu
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/egabosh/linux-setups/refs/heads/main/mint/mint-config-update.desktop
+        dest: /usr/share/applications/mint-config-update.desktop
+        mode: '0444'
+        owner: root
+        group: root
+        force: yes
+
+    - name: Allow Mint warpinator in firewall to tcp port 42000
+      community.general.ufw:
+        rule: allow
+        port: '42000'
+        proto: tcp
+
+    - name: Allow Mint warpinator in firewall to udp port 42000
+      community.general.ufw:
+        rule: allow
+        port: '42000'
+        proto: udp
+
+    - name: PipeWire Sample-Rate 44100 Hz
+      blockinfile:
+        path: /etc/pipewire/pipewire.conf.d/99-sample-rate.conf
+        owner: root
+        group: root
+        create: yes
+        marker: "; {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          context.properties = {
+              default.clock.rate = 44100
+          }
+        backup: yes
+
+    - name: Check if /usr/local/etc/cryptstick.key exists
+      stat:
+        path: /usr/local/etc/cryptstick.key
+      register: cryptstick_key
+
+    - name: Add entry to /etc/crypttab for CRYPTSTICK
+      lineinfile:
+        path: /etc/crypttab
+        regexp: '^cryptstick '
+        line: 'cryptstick LABEL=CRYPTSTICK /usr/local/etc/cryptstick.key luks,nofail'
+        create: yes
+        state: present
+        insertafter: EOF
+      when: cryptstick_key.stat.exists
+
+    - name: Add entry to /etc/fstab for decrypted USB stick
+      lineinfile:
+        path: /etc/fstab
+        regexp: '^/dev/mapper/cryptstick'
+        line: '/dev/mapper/cryptstick /home ext4 defaults,nofail 0 2'
+        create: yes
+        state: present
+        insertafter: EOF
+      when: cryptstick_key.stat.exists
+
+    - name: Create mountpoint for decrypted USB stick
+      file:
+        path: /media/cryptstick
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      when: cryptstick_key.stat.exists
+
+    - name: Systemd mount unit for cryptstick
+      copy:
+        dest: /etc/systemd/system/media-cryptstick.mount
+        content: |
+          [Unit]
+          Description=Mount cryptstick device
+          After=cryptsetup.target
+
+          [Mount]
+          What=/dev/mapper/cryptstick
+          Where=/media/cryptstick
+          Type=auto
+          Options=defaults
+
+          [Install]
+          WantedBy=multi-user.target
+
+      notify: Reload systemd
+      when: cryptstick_key.stat.exists
+
+    - name: Systemd-Service-Unit for lightdm restart
+      copy:
+        dest: /etc/systemd/system/restart-lightdm-on-cryptstick.service
+        content: |
+          [Unit]
+          Description=Restart LightDM when cryptstick is mounted
+          After=media-cryptstick.mount
+          Requires=media-cryptstick.mount
+
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/systemctl restart lightdm
+
+          [Install]
+          WantedBy=media-cryptstick.mount
+
+      notify: Reload systemd
+      when: cryptstick_key.stat.exists
+
+    - name: enable Systemd-Service
+      ansible.builtin.systemd:
+        name: restart-lightdm-on-cryptstick.service
+        enabled: yes
+      when: cryptstick_key.stat.exists
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: yes
+

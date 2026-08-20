@@ -18,6 +18,14 @@ then
   exit 1
 fi
 
+# Validate container ID format (must be hex string, 64 chars or shorter)
+# This prevents path traversal attacks via crafted container IDs
+if ! [[ "$g_container" =~ ^[a-f0-9]+$ ]]
+then
+  echo "0"
+  exit 1
+fi
+
 g_log_file="${g_log_base}/${g_container}/${g_container}-json.log"
 
 if [[ ! -f "$g_log_file" ]]

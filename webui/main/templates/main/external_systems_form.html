@@ -1,0 +1,64 @@
+{% extends "main/base.html" %}
+{% block title %}{% if editing %}Edit{% else %}Add{% endif %} External System - SymbiOS{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/external-systems/">External Systems</a></li>
+    <li class="breadcrumb-item active">{% if editing %}Edit {{ system.name }}{% else %}Add System{% endif %}</li>
+  </ol>
+</nav>
+
+<h2><i class="bi bi-hdd-network"></i> {% if editing %}Edit External System{% else %}Add External System{% endif %}</h2>
+
+<form method="post" class="mt-3" style="max-width:600px;">
+  {% csrf_token %}
+
+  <div class="mb-3">
+    <label for="name" class="form-label">Name <span class="text-danger">*</span></label>
+    <input type="text" class="form-control" id="name" name="name" value="{{ system.name|default:'' }}" required
+           placeholder="e.g. ai-workstation" pattern="[\w\s-]+" title="Letters, numbers, spaces and hyphens only">
+    <div class="form-text">Used as identifier (spaces and special chars converted to hyphens).</div>
+  </div>
+
+  <div class="mb-3">
+    <label for="host" class="form-label">Host / IP <span class="text-danger">*</span></label>
+    <input type="text" class="form-control" id="host" name="host" value="{{ system.host|default:'' }}" required
+           placeholder="e.g. 192.168.1.100 or ai.lan">
+  </div>
+
+  <div class="row mb-3">
+    <div class="col-md-4">
+      <label for="port" class="form-label">SSH Port</label>
+      <input type="number" class="form-control" id="port" name="port" value="{{ system.port|default:'22' }}" min="1" max="65535">
+    </div>
+    <div class="col-md-8">
+      <label for="user" class="form-label">SSH User</label>
+      <input type="text" class="form-control" id="user" name="user" value="{{ system.user|default:'root' }}">
+    </div>
+  </div>
+
+  <div class="mb-3">
+    <label for="type" class="form-label">System Type <span class="text-danger">*</span></label>
+    <select class="form-select" id="type" name="type" required>
+      <option value="">-- select type --</option>
+      {% for t in target_types %}
+      <option value="{{ t }}" {% if system.type == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+    <div class="form-text">Must match the <code>docs.target.type</code> of the playbooks you want to run.</div>
+  </div>
+
+  <div class="mb-3">
+    <label for="description" class="form-label">Description</label>
+    <input type="text" class="form-control" id="description" name="description" value="{{ system.description|default:'' }}"
+           placeholder="e.g. AI workstation with AMD RX 7900 XTX">
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-success">
+      <i class="bi bi-check-lg"></i> {% if editing %}Save Changes{% else %}Create System{% endif %}
+    </button>
+    <a href="/external-systems/" class="btn btn-outline-secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}

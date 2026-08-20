@@ -36,11 +36,19 @@ do
 
   g_echo "Backup MySQL/MariaDB database $g_db from $g_container_id"
 
-  # Perform the database dump and compress it
-  if ! docker exec $g_container_id $g_dumpcmd --no-tablespaces -u $g_usr -p$g_pwd $g_db 2>${g_tmp}/dberr | gzip > $g_backupdir/$g_container_id-$g_db-$g_timestamp.sql.gz
+  # Write password to a temp file to avoid CLI exposure in ps output
+  g_pw_file=$(mktemp /tmp/symbios-db-pw.XXXXXX)
+  chmod 600 "$g_pw_file"
+  echo "$g_pwd" > "$g_pw_file"
+
+  # Perform the database dump and compress it (password via file, not CLI)
+  if ! docker exec $g_container_id $g_dumpcmd --no-tablespaces -u $g_usr --password="$(cat $g_pw_file)" $g_db 2>${g_tmp}/dberr | gzip > $g_backupdir/$g_container_id-$g_db-$g_timestamp.sql.gz
   then
     g_echo_error "DB backup of $g_db failed: $(cat ${g_tmp}/dberr)"
   fi
+
+  # Cleanup password file
+  rm -f "$g_pw_file"
 
   # Remove old backups but keep at least the last g_days
   g_old_backups=$(ls -1 $g_backupdir/$g_container_id*.gz | wc -l)
@@ -63,11 +71,19 @@ do
 
   g_echo "Backup database $g_db from $g_container_id"
 
-  # Perform the PostgreSQL dump and compress it
-  if ! docker exec -e PGPASSWORD=$g_pwd $g_container_id /usr/bin/pg_dump -U $g_usr $g_db 2>${g_tmp}/dberr | gzip > $g_backupdir/$g_container_id-$g_db-$g_timestamp.sql.gz
+  # Write password to a temp file to avoid CLI exposure in ps output
+  g_pw_file=$(mktemp /tmp/symbios-db-pw.XXXXXX)
+  chmod 600 "$g_pw_file"
+  echo "$g_pwd" > "$g_pw_file"
+
+  # Perform the PostgreSQL dump and compress it (password via env, not CLI arg)
+  if ! docker exec -e PGPASSWORD="$(cat $g_pw_file)" $g_container_id /usr/bin/pg_dump -U $g_usr $g_db 2>${g_tmp}/dberr | gzip > $g_backupdir/$g_container_id-$g_db-$g_timestamp.sql.gz
   then
     g_echo_error "DB backup of $g_db failed: $(cat ${g_tmp}/dberr)"
   fi
+
+  # Cleanup password file
+  rm -f "$g_pw_file"
 
   # Remove old backups but keep at least the last g_days
   g_old_backups=$(ls -1 $g_backupdir/$g_container_id*.gz | wc -l)

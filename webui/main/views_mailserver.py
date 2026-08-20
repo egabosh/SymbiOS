@@ -152,18 +152,23 @@ def settings_mailserver(request):
                                                              'page_status_text': _badge('mailserver', vars_)[2]})
 
 
-def _test_smtp(server, port, user, password, sender, tls_mode):
+def _test_smtp(server, port, user, password, sender, tls_mode, skip_verify=False):
     try:
         port = int(port)
         if tls_mode == 'tls':
             ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            if skip_verify:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
             with smtplib.SMTP_SSL(server, port, context=ctx, timeout=10) as smtp:
                 smtp.login(user, password)
         elif tls_mode == 'starttls':
             with smtplib.SMTP(server, port, timeout=10) as smtp:
-                smtp.starttls()
+                ctx = ssl.create_default_context()
+                if skip_verify:
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                smtp.starttls(context=ctx)
                 smtp.login(user, password)
         else:
             with smtplib.SMTP(server, port, timeout=10) as smtp:
@@ -177,7 +182,7 @@ def _test_smtp(server, port, user, password, sender, tls_mode):
         return False, str(e)
 
 
-def _send_test_email(server, port, user, password, sender, to_address, tls_mode):
+def _send_test_email(server, port, user, password, sender, to_address, tls_mode, skip_verify=False):
     try:
         port = int(port)
         msg = EmailMessage()
@@ -188,14 +193,19 @@ def _send_test_email(server, port, user, password, sender, to_address, tls_mode)
 
         if tls_mode == 'tls':
             ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            if skip_verify:
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
             with smtplib.SMTP_SSL(server, port, context=ctx, timeout=10) as smtp:
                 smtp.login(user, password)
                 smtp.send_message(msg)
         elif tls_mode == 'starttls':
             with smtplib.SMTP(server, port, timeout=10) as smtp:
-                smtp.starttls()
+                ctx = ssl.create_default_context()
+                if skip_verify:
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                smtp.starttls(context=ctx)
                 smtp.login(user, password)
                 smtp.send_message(msg)
         else:
@@ -300,6 +310,7 @@ def settings_mailserver_discover(request):
     return JsonResponse(result)
 
 
+@login_required
 def autoconfig_xml(request):
     config = _get_inventory_config()
     vars_ = config.get('all', {}).get('vars', {})
@@ -364,12 +375,13 @@ def settings_mailserver_test_email(request):
         return JsonResponse({'error': 'SMTP not fully configured. Save settings first.'})
 
     smtp_user = smtp_user.replace('%EMAILADDRESS%', smtp_from).replace('%EMAILLOCALPART%', smtp_from.split('@')[0])
+    skip_verify = request.POST.get('skip_tls_verify') == 'on'
 
-    ok, err = _test_smtp(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls)
+    ok, err = _test_smtp(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls, skip_verify)
     if not ok:
         return JsonResponse({'error': f'SMTP auth failed: {err}'})
 
-    ok, err = _send_test_email(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, to_address, smtp_tls)
+    ok, err = _send_test_email(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, to_address, smtp_tls, skip_verify)
     if ok:
         return JsonResponse({'success': f'Test email sent to {to_address}.'})
     else:

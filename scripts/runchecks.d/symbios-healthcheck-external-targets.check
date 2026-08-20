@@ -1,0 +1,51 @@
+#!/bin/bash
+# Healthcheck for external system targets
+# Checks if configured external systems are reachable via SSH
+
+source /etc/bash/gaboshlib.include 2>/dev/null || true
+
+EXTERNAL_SYSTEMS_CONFIG="/symbios/base-services/symbios-ui/config/external-systems.yml"
+RESULTS_FILE="/symbios/base-services/symbios-ui/log/runchecks-results.json"
+CHECK_NAME="external-targets"
+STATUS="ok"
+DETAIL=""
+
+if [ ! -f "$EXTERNAL_SYSTEMS_CONFIG" ]; then
+  STATUS="ok"
+  DETAIL="No external systems configured"
+  echo "$CHECK_NAME:ok:$DETAIL"
+  exit 0
+fi
+
+# Count systems and check connectivity
+TOTAL=0
+REACHABLE=0
+UNREACHABLE=0
+
+while IFS= read -r line; do
+  # Parse YAML fields (simple grep, no yq dependency)
+  if [[ "$line" =~ host:\ (.+) ]]; then
+    host="${BASH_REMATCH[1]}"
+    host=$(echo "$host" | tr -d '"' | tr -d "'")
+    TOTAL=$((TOTAL + 1))
+    # Quick SSH connectivity check (2 second timeout)
+    if timeout 2 bash -c "echo >/dev/tcp/$host/22" 2>/dev/null; then
+      REACHABLE=$((REACHABLE + 1))
+    else
+      UNREACHABLE=$((UNREACHABLE + 1))
+    fi
+  fi
+done < "$EXTERNAL_SYSTEMS_CONFIG"
+
+if [ "$TOTAL" -eq 0 ]; then
+  STATUS="ok"
+  DETAIL="No external systems configured"
+elif [ "$UNREACHABLE" -gt 0 ]; then
+  STATUS="error"
+  DETAIL="$UNREACHABLE of $TOTAL external systems unreachable"
+else
+  STATUS="ok"
+  DETAIL="$REACHABLE/$TOTAL external systems reachable"
+fi
+
+echo "$CHECK_NAME:$STATUS:$DETAIL"

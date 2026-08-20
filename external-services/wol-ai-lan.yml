@@ -1,0 +1,62 @@
+# docs:
+#   name: Wake on LAN
+#   description: >
+#     Aktiviert Wake on LAN auf allen physischen Netzwerkkarten via Cron.
+#   category: linux-mint
+#   target:
+#     type: linux-mint
+#     description: WoL aktivieren
+#   healthcheck:
+#     command: exit 0
+---
+# WoL – pragmatische Cron-Lösung (keine Dependencies, kein systemd, kein udev)
+#
+# Script läuft alle 2 Minuten via Cron, setzt WoL auf allen physischen NICs
+# wenn nicht aktiv. Stumpf, zuverlässig, überlebt alles.
+#
+# Usage:
+#   ansible-playbook -i ai.lan, /root/wol-ai-lan.yml
+
+- hosts: all
+  gather_facts: false
+  tasks:
+
+    - name: Install ethtool
+      ansible.builtin.apt:
+        name: ethtool
+        state: present
+
+    - name: Create WoL watchdog script
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/wol-watch.sh
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          
+          for d in /sys/class/net/*/device
+          do
+            [ -d "$d" ] || continue
+            iface=$(basename "$(dirname "$d")")
+
+            case "$iface" in
+              lo|tornet*|vnet*|br*|docker0|veth*|virbr*|tun*|tap*) continue ;;
+            esac
+
+            [ "$(cat /sys/class/net/$iface/type 2>/dev/null)" = "1" ] || continue
+
+            wol=$(ethtool "$iface" 2>/dev/null | awk '/^Wake-on/{print $2}')
+            [ "$wol" = "g" ] && continue
+
+            ethtool -s "$iface" wol g 2>/dev/null
+            [ -f "$d/power/wakeup" ] && echo enabled > "$d/power/wakeup"
+          done
+
+    - name: Install WoL watchdog cron file
+      ansible.builtin.copy:
+        dest: /etc/cron.d/wol-set-netdev-flag
+        mode: '0644'
+        content: |
+          # WoL watchdog – checks all physical NICs every minute
+          @reboot	root	/usr/local/sbin/wol-watch.sh
+          * * * * *	root	/usr/local/sbin/wol-watch.sh
+

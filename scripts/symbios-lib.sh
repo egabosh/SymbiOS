@@ -87,7 +87,10 @@ function f_symbios_var {
   fi
 
   # Find the key line (anchor: line starts with whitespace, not with '#')
-  f_line=$(grep -E "^[[:space:]]*${f_key}:[[:space:]]" "${g_inventory}" \
+  # Escape regex metacharacters in the key to prevent injection
+  local f_escaped_key
+  f_escaped_key=$(printf '%s' "${f_key}" | sed 's/[.[\*^$()+?{|]/\\&/g')
+  f_line=$(grep -E "^[[:space:]]*${f_escaped_key}:[[:space:]]" "${g_inventory}" \
     | head -1)
   if [[ -z "${f_line}" ]]
   then
