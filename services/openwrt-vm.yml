@@ -804,7 +804,7 @@
     - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-openwrt-vm.check
       ansible.builtin.blockinfile:
         path: /usr/local/sbin/runchecks.d/symbios-healthcheck-openwrt-vm.check
-        mode: "0400"
+        mode: "0755"
         owner: root
         group: root
         create: yes
