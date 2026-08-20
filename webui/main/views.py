@@ -17,6 +17,7 @@
 import yaml
 import os
 import json
+import shlex
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from .decorators import login_required
@@ -222,7 +223,7 @@ def health_recheck(request, check_name):
     """Run a single health check on demand and return JSON result."""
     from django.http import JsonResponse
     from .utils.ssh_exec import run_command
-    ok, stdout, stderr = run_command(f'symbios-run-check.sh {check_name}', timeout=30)
+    ok, stdout, stderr = run_command(f'symbios-run-check.sh {shlex.quote(check_name)}', timeout=30)
     if not ok:
         return JsonResponse({'ok': False, 'error': stderr or 'Check failed'}, status=500)
     import json

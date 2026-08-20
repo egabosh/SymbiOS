@@ -104,7 +104,7 @@ luks_name=${f_luks_name}
 old_fstab_line=${f_old_fstab_line}
 timestamp=$(date -Iseconds)
 EOF
-  chmod 644 "${f_state_file}"
+  chmod 600 "${f_state_file}"
 }
 
 function f_load_state {
@@ -112,7 +112,15 @@ function f_load_state {
   then
     return 1
   fi
-  source "${f_state_file}"
+  # Read known variables explicitly instead of sourcing the file
+  # to prevent code execution through a tampered state file
+  f_old_device=$(grep '^old_device=' "${f_state_file}" | cut -d= -f2-)
+  f_old_fstype=$(grep '^old_fstype=' "${f_state_file}" | cut -d= -f2-)
+  f_new_device=$(grep '^new_device=' "${f_state_file}" | cut -d= -f2-)
+  f_encrypt=$(grep '^encrypt=' "${f_state_file}" | cut -d= -f2-)
+  f_luks_name=$(grep '^luks_name=' "${f_state_file}" | cut -d= -f2-)
+  f_old_fstab_line=$(grep '^old_fstab_line=' "${f_state_file}" | cut -d= -f2-)
+  f_migration_timestamp=$(grep '^timestamp=' "${f_state_file}" | cut -d= -f2-)
   return 0
 }
 
