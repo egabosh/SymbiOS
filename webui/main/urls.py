@@ -24,6 +24,7 @@ from . import views_change_password
 from . import views_services
 from . import views_exec
 from . import views_port_forwarding
+from . import views_external
 from .utils.log_utils import logs_stream
 
 urlpatterns = [
@@ -97,4 +98,11 @@ urlpatterns = [
     path('authelia-logout/', views.authelia_logout, name='authelia_logout'),
     path('exec/start/', views_exec.exec_start, name='exec_start'),
     path('exec/output/', views_exec.exec_output, name='exec_output'),
+    path('external-systems/', views_external.external_systems, name='external_systems'),
+    path('external-systems/create/', views_external.external_system_create, name='external_system_create'),
+    re_path(r'^external-systems/(?P<system_id>[\w-]+)/edit/$', views_external.external_system_edit, name='external_system_edit'),
+    re_path(r'^external-systems/(?P<system_id>[\w-]+)/delete/$', views_external.external_system_delete, name='external_system_delete'),
+    re_path(r'^external-systems/(?P<system_id>[\w-]+)/test/$', views_external.external_system_test, name='external_system_test'),
+    path('external-systems/api/public-key/', views_external.external_system_public_key, name='external_system_public_key'),
+    path('external-systems/api/types/', views_external.external_types_api, name='external_types_api'),
 ]

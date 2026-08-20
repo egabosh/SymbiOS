@@ -21,6 +21,7 @@ import uuid
 import os
 import re
 import yaml
+import shlex
 
 from django.contrib import messages as flash_messages
 from .decorators import login_required
@@ -301,6 +302,12 @@ def services_detail(request, playbook):
     all_catalog = get_catalog()
     # Build access groups context from the playbook's docs.access config.
     access_ctx = _build_access_context(item)
+    # External systems: only show compatible systems for this playbook's target type.
+    playbook_target = (item.get('docs') or {}).get('target') or {}
+    playbook_target_type = playbook_target.get('type', '')
+    from .views_external import _load_systems
+    all_systems = _load_systems()
+    compatible_systems = [s for s in all_systems if s.get('type') == playbook_target_type] if playbook_target_type else []
     response = render(request, 'main/services_detail.html', {
         'item': item,
         'action_list': action_list,
@@ -310,6 +317,8 @@ def services_detail(request, playbook):
         'access_groups': access_ctx['groups'],
         'all_ldap_users': access_ctx['users'],
         'all_services': _order_catalog(all_catalog),
+        'compatible_systems': compatible_systems,
+        'playbook_target_type': playbook_target_type,
         **_sidebar_context(all_catalog),
     })
     # Never cache: the inline JS/logic changes frequently during development
@@ -596,7 +605,7 @@ def services_access(request, playbook):
         return JsonResponse({'error': 'Group not in service access config'}, status=403)
     # Build the LDAP command.
     sub = '--add-user' if action == 'add' else '--remove-user'
-    cmd = f'symbios-ldap-groups.sh {sub} --name {group} --uid {uid}'
+    cmd = f'symbios-ldap-groups.sh {sub} --name {shlex.quote(group)} --uid {shlex.quote(uid)}'
     # Dual-mode: AJAX -> exec modal job; regular POST -> sync + redirect.
     from .utils.http import is_ajax_request
     if is_ajax_request(request):

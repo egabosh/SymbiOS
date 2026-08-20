@@ -14,7 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Minimal login_required replacement (no django.contrib.auth needed)."""
+"""Minimal login_required replacement (no django.contrib.auth needed).
+
+Only staff users (ldap-admins group, admin/root accounts) may access
+management views. Regular ldap-users are rejected - they should use
+service-level access (Nextcloud, Matrix, etc.) instead.
+"""
 from django.conf import settings
 from django.shortcuts import redirect
 
@@ -22,6 +27,10 @@ from django.shortcuts import redirect
 def login_required(view_func):
     def wrapper(request, *args, **kwargs):
         if not getattr(request.user, 'is_authenticated', False):
+            return redirect(settings.LOGIN_URL)
+        if not getattr(request.user, 'is_staff', False):
+            from django.contrib import messages
+            messages.error(request, 'Access denied. Admin privileges required.')
             return redirect(settings.LOGIN_URL)
         return view_func(request, *args, **kwargs)
     wrapper.__name__ = getattr(view_func, '__name__', 'wrapper')

@@ -35,8 +35,8 @@ source "$g_symbios_dir/symbios-lib.sh"
 g_repo="${g_git_root}"
 
 g_log_file="${g_log_dir}/reapply.log"
-g_status_file="/tmp/symbios-reapply.status"
-g_pid_file="/tmp/symbios-reapply.pid"
+g_status_file="/run/symbios-reapply.status"
+g_pid_file="/run/symbios-reapply.pid"
 g_only_playbooks=""
 g_force=false
 

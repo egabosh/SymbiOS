@@ -145,6 +145,20 @@ then
   exit 1
 fi
 
+# Validate email format (if provided)
+if [[ -n "${f_email}" ]] && ! [[ "${f_email}" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]
+then
+  g_echo_error "Invalid email address format"
+  exit 1
+fi
+
+# Validate group name format (if provided)
+if [[ -n "${f_group}" ]] && ! [[ "${f_group}" =~ ^[a-zA-Z0-9._-]+$ ]]
+then
+  g_echo_error "Invalid group name: may only contain letters, digits, dots, hyphens, underscores"
+  exit 1
+fi
+
 # Validate action-specific requirements
 if [[ "${f_action}" == "create" ]] && [[ -z "${f_password_file}" ]]
 then
@@ -164,6 +178,13 @@ fi
 if [[ -z "${f_displayname}" ]]
 then
   f_displayname="${f_uid}"
+fi
+
+# Validate displayname - reject newlines and LDIF-special characters
+if [[ "${f_displayname}" =~ $'\n' ]] || [[ "${f_displayname}" =~ $'\r' ]]
+then
+  g_echo_error "Invalid displayname: contains illegal characters"
+  exit 1
 fi
 
 # Read LDAP connection details from inventory

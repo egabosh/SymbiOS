@@ -21,6 +21,7 @@
                     <li class="nav-item"><a class="nav-link" href="/setup/"><i class="bi bi-magic"></i> Setup</a></li>
                     <li class="nav-item"><a class="nav-link" href="/health/"><i class="bi bi-heart-pulse"></i> Health</a></li>
                     <li class="nav-item"><a class="nav-link" href="/services/"><i class="bi bi-hdd-stack"></i> Services</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/external-systems/"><i class="bi bi-hdd-network"></i> External</a></li>
                     <li class="nav-item"><a class="nav-link" href="/settings/"><i class="bi bi-gear"></i> Settings</a></li>
                     <li class="nav-item"><a class="nav-link" href="/users/"><i class="bi bi-people"></i> Users</a></li>
                     <li class="nav-item"><a class="nav-link" href="/groups/"><i class="bi bi-collection"></i> Groups</a></li>
@@ -53,7 +54,7 @@
                     {% if message.tags == 'error' %}<i class="bi bi-exclamation-triangle-fill me-2"></i>{% endif %}
                     {% if message.tags == 'warning' %}<i class="bi bi-info-circle-fill me-2"></i>{% endif %}
                     {% if message.tags == 'success' %}<i class="bi bi-check-circle-fill me-2"></i>{% endif %}
-                    <span{% if message.tags == 'error' %} class="fw-bold"{% endif %}>{{ message|safe }}</span>
+                    <span{% if message.tags == 'error' %} class="fw-bold"{% endif %}>{{ message }}</span>
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                 </div>
                 {% endfor %}

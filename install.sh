@@ -120,7 +120,7 @@ f_run_playbook ${g_git_root}/base-services/ldap.yml
 if [ -f /proc/device-tree/model ] && grep -qi "raspberry" /proc/device-tree/model
 then
   f_run_playbook ${g_git_root}/base-services/raspberry.yml
-  f_run_playbook ${g_git_root}/desktop/firefox.yml
+  f_run_playbook ${g_git_root}/base-services/firefox.yml
 fi
 
 f_run_playbook ${g_git_root}/base-services/symbios-ui.yml

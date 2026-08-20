@@ -81,8 +81,8 @@ function f_unset_quiet {
   local f_playbook="$1"
   local f_tmp
   f_tmp=$(mktemp)
-  # Remove lines matching this playbook (prefix or full match)
-  grep -v "^${f_playbook}:" "$g_state_file" > "$f_tmp" 2>/dev/null || true
+  # Remove lines matching this playbook (literal string match, not regex)
+  grep -vF "${f_playbook}:" "$g_state_file" > "$f_tmp" 2>/dev/null || true
   mv "$f_tmp" "$g_state_file"
   chmod 644 "$g_state_file"
 }
@@ -94,7 +94,7 @@ function f_list {
 
 function f_is_installed {
   local f_playbook="$1"
-  grep -q "^${f_playbook}:" "$g_state_file" 2>/dev/null
+  grep -qF "${f_playbook}:" "$g_state_file" 2>/dev/null
 }
 
 # Dispatch

@@ -131,7 +131,6 @@ SymbiOS/
 │   ├── nextcloud.yml     # Example service
 │   └── sftp-share.yml    # Example service (exposes a raw port, not via Traefik)
 ├── webui/                # Django management UI (shipped as the symbios-ui container)
-├── desktop/              # Optional desktop environment playbooks (Raspberry Pi)
 ├── symbpios-image/       # Raspberry Pi OS image builder (first-boot installer via rc.local)
 └── LICENSE
 ```
@@ -182,6 +181,7 @@ concern and is idempotent, so it is safe to re-run any of them.
 | `smtp.yml`           | Writes an SMTP client marker file when mail is configured.             |
 | `ssh-keys.yml`       | Deploys `root/.ssh/authorized_keys` from the inventory.                |
 | `raspberry.yml`      | Raspberry-Pi-specific setup (desktop, video, boot tweaks).             |
+| `firefox.yml`        | Firefox/LibreWolf browser policies and extensions (Raspberry Pi only).|
 | `symbios-ui.yml`     | Builds the WebUI container + systemd timers/index scripts.             |
 
 ### Traefik (`traefik.yml`)
@@ -371,7 +371,7 @@ sudo bash install.sh
    `authelia.yml` playbooks are kept commented out at install time - they
    require `base_domain` and are applied from the WebUI after configuration.
 5. On a Raspberry Pi, also apply `raspberry.yml` and the
-   `desktop/firefox.yml` desktop playbook.
+   `base-services/firefox.yml` desktop playbook.
 
 After install, edit the inventory to set `base_domain` and
 (optionally) deSEC credentials, then apply them via the WebUI (which runs the

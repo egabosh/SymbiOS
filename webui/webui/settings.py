@@ -19,8 +19,13 @@ import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'fallback-secret-key-for-dev')
-DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    raise ValueError(
+        'DJANGO_SECRET_KEY environment variable is required. '
+        'Generate one with: python3 -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
+    )
+DEBUG = os.getenv('DJANGO_DEBUG', 'False').lower() in ('true', '1', 'yes')
 ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [

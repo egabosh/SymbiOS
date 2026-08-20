@@ -23,6 +23,7 @@ from .utils.http import is_ajax_request
 from .setup_status import get_page_badge, PAGE_EXPLAIN
 
 import json
+import shlex
 
 
 SCRIPT = 'symbios-router-upnp.sh'
@@ -136,7 +137,7 @@ def _static_ip_command(ip, accesstype='ipv4'):
     except Exception:
         router_info = None
     if router_info and router_info.get('router_type') == 'fritzbox':
-        return f'{SCRIPT} staticip {_shell_quote(ip)} && '
+        return f'{SCRIPT} staticip {shlex.quote(ip)} && '
     return ''
 
 
@@ -163,7 +164,7 @@ def _get_static_ip_status(local_ip, router_info=None):
     if router_info.get('router_type') != 'fritzbox':
         return None
     try:
-        result = _run_upnp(f'staticip-status {_shell_quote(local_ip)}', timeout=15)
+        result = _run_upnp(f'staticip-status {shlex.quote(local_ip)}', timeout=15)
     except Exception:
         return None
     if not result.get('ok'):
@@ -224,11 +225,11 @@ def settings_port_forwarding(request):
                     from .utils.secret_file import f_write_secret
                     f_pw_file = f_write_secret('router-password', password)
                     result = _run_upnp(
-                        f'config {_shell_quote(username)} --password-file {f_pw_file}',
+                        f'config {shlex.quote(username)} --password-file {f_pw_file}',
                         timeout=10)
                 else:
                     result = _run_upnp(
-                        f'config {_shell_quote(username)} {_shell_quote(password)}',
+                        f'config {shlex.quote(username)} {shlex.quote(password)}',
                         timeout=10)
                 if is_ajax:
                     from .utils.jobs import create_job
@@ -266,9 +267,9 @@ def settings_port_forwarding(request):
                     router_info = None
                 static_ip_cmd = ''
                 if router_info and router_info.get('router_type') == 'fritzbox' and local_ip:
-                    static_ip_cmd = f'{SCRIPT} staticip {_shell_quote(local_ip)} && '
+                    static_ip_cmd = f'{SCRIPT} staticip {shlex.quote(local_ip)} && '
                 cmd = static_ip_cmd + ' && '.join(
-                    f'{SCRIPT} add {ext} TCP {intp} {_shell_quote(local_ip)} "{desc}" {at}'
+                    f'{SCRIPT} add {ext} TCP {intp} {shlex.quote(local_ip)} "{desc}" {at}'
                     for ext, intp, desc, at in rules)
                 port_list = ' and '.join(str(e) for e, _, _, _ in rules)
                 # Persist UFW allows for IPv6 forwards so a reapply re-opens them.
@@ -293,7 +294,7 @@ def settings_port_forwarding(request):
                 # FRITZ!Box (generic UPnP routers must be configured manually).
                 from .utils.jobs import create_job
                 local_ip = _get_local_ip()
-                cmd = f'{SCRIPT} staticip {_shell_quote(local_ip)}'
+                cmd = f'{SCRIPT} staticip {shlex.quote(local_ip)}'
                 if is_ajax:
                     job_id = create_job(cmd, timeout=30)
                     return JsonResponse({'ok': True, 'job': job_id,
@@ -331,8 +332,8 @@ def settings_port_forwarding(request):
                     messages.error(request, 'All port fields are required.')
                     return redirect('settings_port_forwarding')
 
-                args = (f'add {ext_port} {protocol} {int_port} {int_client} '
-                        f'{_shell_quote(description)} {accesstype}')
+                args = (f'add {shlex.quote(ext_port)} {shlex.quote(protocol)} {shlex.quote(int_port)} {shlex.quote(int_client)} '
+                        f'{shlex.quote(description)} {shlex.quote(accesstype)}')
                 # An IPv4 forward only keeps working if the server's IPv4
                 # never changes. On a FRITZ!Box, ensure 'always same IPv4'
                 # first so the rule points to a stable address.
@@ -585,9 +586,9 @@ def settings_port_forwarding_config(request):
             if password:
                 from .utils.secret_file import f_write_secret
                 f_pw_file = f_write_secret('router-password', password)
-                cmd = f'{SCRIPT} config {_shell_quote(username)} --password-file {f_pw_file}'
+                cmd = f'{SCRIPT} config {shlex.quote(username)} --password-file {f_pw_file}'
             else:
-                cmd = f'{SCRIPT} config {_shell_quote(username)} {_shell_quote(password)}'
+                cmd = f'{SCRIPT} config {shlex.quote(username)} {shlex.quote(password)}'
             ok, stdout, stderr = run_command(cmd, timeout=10)
             if ok and stdout:
                 result = json.loads(stdout)
@@ -604,9 +605,4 @@ def settings_port_forwarding_config(request):
         return JsonResponse({'ok': True, 'configured': False, 'error': str(e)})
 
 
-def _shell_quote(s):
-    """Simple shell-safe quoting - wrap in single quotes and escape internal single quotes."""
-    if not s:
-        return "''"
-    escaped = s.replace("'", "'\\''")
-    return f"'{escaped}'"
+# shlex.quote is replaced by shlex.quote for consistency and security

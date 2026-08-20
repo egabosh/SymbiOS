@@ -1,0 +1,122 @@
+{% extends "main/base.html" %}
+{% block title %}External Systems - SymbiOS{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0"><i class="bi bi-hdd-network"></i> External Systems</h2>
+  <a href="/external-systems/create/" class="btn btn-success btn-sm">
+    <i class="bi bi-plus-lg"></i> Add System
+  </a>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-key"></i> Host Public SSH Key</div>
+  <div class="card-body">
+    <p class="text-muted small mb-2">Copy this key to the <code>authorized_keys</code> file on each external system to allow SymbiOS to connect via SSH.</p>
+    {% if public_key %}
+    <div class="input-group">
+      <input type="text" class="form-control form-control-sm font-monospace" id="pubkey" value="{{ public_key }}" readonly>
+      <button class="btn btn-outline-secondary btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('pubkey').value)">
+        <i class="bi bi-clipboard"></i> Copy
+      </button>
+    </div>
+    {% else %}
+    <div class="text-warning small">No SSH key found. Generate one with <code>ssh-keygen -t ed25519</code> on the host.</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if systems %}
+<div class="table-responsive">
+  <table class="table table-hover">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Host</th>
+        <th>Port</th>
+        <th>User</th>
+        <th>Type</th>
+        <th>Description</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in systems %}
+      <tr>
+        <td><strong>{{ s.name }}</strong></td>
+        <td><code>{{ s.host }}</code></td>
+        <td>{{ s.port|default:"22" }}</td>
+        <td>{{ s.user|default:"root" }}</td>
+        <td><span class="badge bg-info">{{ s.type }}</span></td>
+        <td class="text-muted">{{ s.description }}</td>
+        <td class="text-end">
+          <button class="btn btn-outline-success btn-sm" onclick="testSSH('{{ s.id }}', this)" title="Test SSH">
+            <i class="bi bi-lightning"></i> Test
+          </button>
+          <a href="/external-systems/{{ s.id }}/edit/" class="btn btn-outline-secondary btn-sm" title="Edit">
+            <i class="bi bi-pencil"></i>
+          </a>
+          <form method="post" action="/external-systems/{{ s.id }}/delete/" class="d-inline" data-exec="true">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">
+              <i class="bi bi-trash"></i>
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="text-center text-muted py-5">
+  <i class="bi bi-hdd-network" style="font-size: 3rem;"></i>
+  <p class="mt-3">No external systems configured yet.</p>
+  <a href="/external-systems/create/" class="btn btn-success btn-sm">
+    <i class="bi bi-plus-lg"></i> Add your first system
+  </a>
+</div>
+{% endif %}
+
+<div class="card mt-4">
+  <div class="card-header"><i class="bi bi-info-circle"></i> How it works</div>
+  <div class="card-body text-muted small">
+    <p>External systems are remote hosts managed via SSH from the SymbiOS server. You can run
+       Ansible playbooks from <code>external-services/</code> on these systems.</p>
+    <ul class="mb-0">
+      <li>Add the host's public SSH key (shown above) to the target's <code>~/.ssh/authorized_keys</code>.</li>
+      <li>Playbooks with <code>docs.target.type</code> matching the system type will be available for that system.</li>
+      <li>Execution happens via SSH with the host's existing <code>/root/.ssh/id_ed25519</code> key.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+function testSSH(systemId, btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  fetch('/external-systems/' + systemId + '/test/', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {'X-CSRFToken': getCsrfToken()}
+  })
+  .then(r => r.json())
+  .then(d => {
+    btn.disabled = false;
+    if (d.ok) {
+      btn.innerHTML = '<i class="bi bi-check-lg"></i> OK';
+      btn.className = 'btn btn-outline-success btn-sm';
+    } else {
+      btn.innerHTML = '<i class="bi bi-x-lg"></i> Fail';
+      btn.className = 'btn btn-outline-danger btn-sm';
+      setTimeout(() => { btn.innerHTML = '<i class="bi bi-lightning"></i> Test'; btn.className = 'btn btn-outline-success btn-sm'; }, 3000);
+    }
+  })
+  .catch(e => {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-x-lg"></i> Error';
+    btn.className = 'btn btn-outline-danger btn-sm';
+    setTimeout(() => { btn.innerHTML = '<i class="bi bi-lightning"></i> Test'; btn.className = 'btn btn-outline-success btn-sm'; }, 3000);
+  });
+}
+</script>
+{% endblock %}

@@ -14,6 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import shlex
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from .decorators import login_required
@@ -72,11 +73,11 @@ def user_create(request):
             return redirect('users')
 
         f_pw_file = f_write_secret('ldap-password', password)
-        cmd = f'symbios-ldap-user.sh --create --uid {uid} --password-file {f_pw_file}'
+        cmd = f'symbios-ldap-user.sh --create --uid {shlex.quote(uid)} --password-file {shlex.quote(f_pw_file)}'
         if email:
-            cmd += f' --email {email}'
+            cmd += f' --email {shlex.quote(email)}'
         if group:
-            cmd += f' --group {group}'
+            cmd += f' --group {shlex.quote(group)}'
 
         return _exec_ldap_command(request, cmd, f'Creating user "{uid}"...', f'User "{uid}" created.')
     return redirect('users')
@@ -85,7 +86,7 @@ def user_create(request):
 @login_required
 def user_delete(request, uid):
     if request.method == 'POST':
-        cmd = f'symbios-ldap-user.sh --delete --uid {uid}'
+        cmd = f'symbios-ldap-user.sh --delete --uid {shlex.quote(uid)}'
         return _exec_ldap_command(request, cmd, f'Deleting user "{uid}"...', f'User "{uid}" deleted.')
     return redirect('users')
 
@@ -103,7 +104,7 @@ def user_set_password(request, uid):
             return redirect('users')
 
         f_pw_file = f_write_secret('ldap-password', password)
-        cmd = f'symbios-ldap-user.sh --modify --uid {uid} --password-file {f_pw_file}'
+        cmd = f'symbios-ldap-user.sh --modify --uid {shlex.quote(uid)} --password-file {shlex.quote(f_pw_file)}'
         return _exec_ldap_command(request, cmd, f'Setting password for "{uid}"...', f'Password for "{uid}" changed.')
     return redirect('users')
 
@@ -112,7 +113,7 @@ def user_set_password(request, uid):
 def user_update_email(request, uid):
     if request.method == 'POST':
         email = request.POST.get('email', '').strip()
-        cmd = f'symbios-ldap-user.sh --modify --uid {uid} --email {email}'
+        cmd = f'symbios-ldap-user.sh --modify --uid {shlex.quote(uid)} --email {shlex.quote(email)}'
         return _exec_ldap_command(request, cmd, f'Updating email for "{uid}"...', f'Email for "{uid}" updated.')
     return redirect('users')
 
@@ -129,7 +130,7 @@ def group_create(request):
             messages.error(request, msg)
             return redirect('groups')
 
-        cmd = f'symbios-ldap-groups.sh --create --name {name}'
+        cmd = f'symbios-ldap-groups.sh --create --name {shlex.quote(name)}'
         return _exec_ldap_command(request, cmd, f'Creating group "{name}"...', f'Group "{name}" created.', redirect_to='groups')
     return redirect('groups')
 
@@ -137,7 +138,7 @@ def group_create(request):
 @login_required
 def group_delete(request, name):
     if request.method == 'POST':
-        cmd = f'symbios-ldap-groups.sh --delete --name {name}'
+        cmd = f'symbios-ldap-groups.sh --delete --name {shlex.quote(name)}'
         return _exec_ldap_command(request, cmd, f'Deleting group "{name}"...', f'Group "{name}" deleted.', redirect_to='groups')
     return redirect('groups')
 
@@ -148,7 +149,7 @@ def group_add_user(request):
         uid = request.POST.get('uid', '')
         group = request.POST.get('group', '')
         if uid and group:
-            cmd = f'symbios-ldap-groups.sh --add-user --name {group} --uid {uid}'
+            cmd = f'symbios-ldap-groups.sh --add-user --name {shlex.quote(group)} --uid {shlex.quote(uid)}'
             return _exec_ldap_command(request, cmd, f'Adding "{uid}" to "{group}"...', f'"{uid}" added to "{group}".')
     return redirect('users')
 
@@ -159,6 +160,6 @@ def group_remove_user(request):
         uid = request.POST.get('uid', '')
         group = request.POST.get('group', '')
         if uid and group:
-            cmd = f'symbios-ldap-groups.sh --remove-user --name {group} --uid {uid}'
+            cmd = f'symbios-ldap-groups.sh --remove-user --name {shlex.quote(group)} --uid {shlex.quote(uid)}'
             return _exec_ldap_command(request, cmd, f'Removing "{uid}" from "{group}"...', f'"{uid}" removed from "{group}".')
     return redirect('users')

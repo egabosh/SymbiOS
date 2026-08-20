@@ -106,8 +106,15 @@ g_echo_note "Parsed docs block from $f_playbook"
 f_stop_cmd=$(yq eval '.docs.uninstall.stop // ""' "$f_tmp" 2>/dev/null)
 if [[ -n "$f_stop_cmd" && "$f_stop_cmd" != "" ]]
 then
-  g_echo_note "Stopping services: $f_stop_cmd"
-  eval "$f_stop_cmd"
+  # Whitelist: only allow docker compose and systemctl commands
+  if [[ "$f_stop_cmd" =~ ^(docker\ compose|systemctl) ]]
+  then
+    g_echo_note "Stopping services: $f_stop_cmd"
+    eval "$f_stop_cmd"
+  else
+    g_echo_error "Invalid stop command (only docker compose/systemctl allowed): $f_stop_cmd"
+    exit 1
+  fi
 else
   g_echo_note "No stop command defined, skipping service stop"
 fi
@@ -137,6 +144,17 @@ function f_delete_paths {
     if [[ -z "$f_path" ]]
     then
       continue
+    fi
+    # Safety check: refuse to delete critical system paths
+    if [[ "$f_path" == "/" || "$f_path" == "/bin" || "$f_path" == "/boot" || \
+          "$f_path" == "/dev" || "$f_path" == "/etc" || "$f_path" == "/home" || \
+          "$f_path" == "/lib" || "$f_path" == "/lib64" || "$f_path" == "/opt" || \
+          "$f_path" == "/proc" || "$f_path" == "/root" || "$f_path" == "/run" || \
+          "$f_path" == "/sbin" || "$f_path" == "/sys" || "$f_path" == "/tmp" || \
+          "$f_path" == "/usr" || "$f_path" == "/var" ]]
+    then
+      g_echo_error "Refusing to delete critical system path: $f_path"
+      exit 1
     fi
     if [[ -e "$f_path" ]]
     then
@@ -184,17 +202,23 @@ fi
 f_restart_cmd=$(yq eval '.docs.uninstall.restart // ""' "$f_tmp" 2>/dev/null)
 if [[ -n "$f_restart_cmd" && "$f_restart_cmd" != "" ]]
 then
-  f_compose_file=$(echo "$f_restart_cmd" | grep -oP '(?<=-f )\S+' || true)
-  if [[ -n "$f_compose_file" && -f "$f_compose_file" ]]
+  # Whitelist: only allow docker compose and systemctl commands
+  if [[ "$f_restart_cmd" =~ ^(docker\ compose|systemctl) ]]
   then
-    g_echo_note "Restarting services: $f_restart_cmd"
-    eval "$f_restart_cmd"
-  elif [[ -n "$f_compose_file" ]]
-  then
-    g_echo_note "Compose file $f_compose_file not found - skipping restart"
+    f_compose_file=$(echo "$f_restart_cmd" | grep -oP '(?<=-f )\S+' || true)
+    if [[ -n "$f_compose_file" && -f "$f_compose_file" ]]
+    then
+      g_echo_note "Restarting services: $f_restart_cmd"
+      eval "$f_restart_cmd"
+    elif [[ -n "$f_compose_file" ]]
+    then
+      g_echo_note "Compose file $f_compose_file not found - skipping restart"
+    else
+      g_echo_note "Restarting services: $f_restart_cmd"
+      eval "$f_restart_cmd"
+    fi
   else
-    g_echo_note "Restarting services: $f_restart_cmd"
-    eval "$f_restart_cmd"
+    g_echo_error "Invalid restart command (only docker compose/systemctl allowed): $f_restart_cmd"
   fi
 else
   g_echo_note "No restart command defined, skipping service restart"

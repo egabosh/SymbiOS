@@ -19,9 +19,12 @@ Log utility functions for secure log file access and streaming.
 All host system data is fetched via symbios-exec.sh (run_command),
 not through Docker volume mounts.
 """
+
 import os
 import json
+import subprocess
 from django.http import JsonResponse, HttpResponseBadRequest
+from ..decorators import login_required
 from .ssh_exec import run_command
 
 # SymbiOS logs - written by host scripts, mounted read-write in /log.
@@ -161,6 +164,7 @@ def _get_container_list():
     return containers
 
 
+@login_required
 def logs_stream(request):
     log_name = request.GET.get("log", "messages")
     offset_param = request.GET.get("offset", "0")
