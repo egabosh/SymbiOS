@@ -340,10 +340,23 @@
       changed_when: false
       no_log: true
 
-    # Generate OIDC client secret dynamically (instead of hardcoding)
-    - name: Generate OIDC client secret
-      ansible.builtin.command: >
-        docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+    # OIDC dummy client secret: the argon2 hash is persisted in the env file
+    # so re-runs are idempotent. A regenerated hash would rewrite
+    # configuration.yml on every reapply and restart Authelia, wiping all
+    # in-memory login sessions.
+    - name: Ensure oidc_client_secret exists in env file
+      ansible.builtin.shell: |
+        if ! grep -q '^oidc_client_secret=' "{{ service_path }}/env"
+        then
+          f_digest=$(docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password "$(pwgen -s 32 1)" | awk '{print $NF}')
+          echo "oidc_client_secret=${f_digest}" >> "{{ service_path }}/env"
+        fi
+      changed_when: false
+      no_log: true
+
+    # Read OIDC client secret (argon2 hash) from env file
+    - name: Get oidc_client_secret from file
+      shell: "grep ^oidc_client_secret= {{ service_path }}/env | cut -d= -f2-"
       register: oidc_client_secret
       changed_when: false
       no_log: true
