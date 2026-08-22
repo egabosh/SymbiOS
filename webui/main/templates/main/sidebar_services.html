@@ -53,31 +53,6 @@
         {% endwith %}
       {% endfor %}
 
-    {% elif g.grouper == 'base-services' %}
-      <li class="svc-group-header"><i class="bi bi-gear-wide-connected"></i> Base Services</li>
-      {% for svc in g.list %}
-        {% with svc_hc=svc.playbook|hc_name %}
-        <li>
-          <a class="svc-item" href="/services/{{ svc.playbook }}/">
-            <i class="bi bi-box svc-icon"></i>
-            <span class="svc-label">{{ svc.menu_label }}</span>
-            <span class="svc-badges">
-              {% if svc.playbook in installed_playbooks %}
-                <i class="bi bi-check-circle-fill text-success" title="Installed"></i>
-              {% endif %}
-              {% with hc_status=healthcheck_status|dict_get:svc_hc %}
-                {% if hc_status == "ok" %}
-                  <i class="bi bi-heart-pulse text-success" title="Healthcheck OK"></i>
-                {% elif hc_status == "error" %}
-                  <i class="bi bi-exclamation-triangle-fill text-danger" title="Healthcheck error"></i>
-                {% endif %}
-              {% endwith %}
-            </span>
-          </a>
-        </li>
-        {% endwith %}
-      {% endfor %}
-
     {% elif g.grouper == 'external-services' %}
       <li class="svc-group-header"><i class="bi bi-hdd-network"></i> External Services</li>
       {% for svc in g.list %}
@@ -99,6 +74,39 @@
         </li>
         {% endwith %}
       {% endfor %}
+
+    {% elif g.grouper == 'base-services' %}
+      <li class="svc-group-header p-0">
+        <a class="svc-group-toggle" data-bs-toggle="collapse" href="#sidebar-base-services"
+           role="button" aria-expanded="false" aria-controls="sidebar-base-services">
+          <i class="bi bi-gear-wide-connected"></i> Base Services
+          <i class="bi bi-chevron-down svc-chevron ms-auto"></i>
+        </a>
+      </li>
+      <ul class="collapse list-unstyled mb-0" id="sidebar-base-services">
+        {% for svc in g.list %}
+          {% with svc_hc=svc.playbook|hc_name %}
+          <li>
+            <a class="svc-item" href="/services/{{ svc.playbook }}/">
+              <i class="bi bi-box svc-icon"></i>
+              <span class="svc-label">{{ svc.menu_label }}</span>
+              <span class="svc-badges">
+                {% if svc.playbook in installed_playbooks %}
+                  <i class="bi bi-check-circle-fill text-success" title="Installed"></i>
+                {% endif %}
+                {% with hc_status=healthcheck_status|dict_get:svc_hc %}
+                  {% if hc_status == "ok" %}
+                    <i class="bi bi-heart-pulse text-success" title="Healthcheck OK"></i>
+                  {% elif hc_status == "error" %}
+                    <i class="bi bi-exclamation-triangle-fill text-danger" title="Healthcheck error"></i>
+                  {% endif %}
+                {% endwith %}
+              </span>
+            </a>
+          </li>
+          {% endwith %}
+        {% endfor %}
+      </ul>
 
     {% endif %}
   {% empty %}
