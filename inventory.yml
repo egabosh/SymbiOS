@@ -16,6 +16,9 @@ all:
     twofa_enabled: false      # Authelia 2FA enforcement for LDAP users
     localization_configured: false  # true after the user saved the localization settings in the WebUI
     dns_configured: false           # true after the user saved the DNS settings in the WebUI
+    # Docker network IPs (static, defined in base-services/traefik.yml)
+    traefik_ip: "192.168.41.200"
+    traefik_network_gateway: "192.168.41.1"
     # filesystem layout (all data lives under the /symbios data root)
     data_root: "/symbios"
     git_root: "/symbios/git/SymbiOS"

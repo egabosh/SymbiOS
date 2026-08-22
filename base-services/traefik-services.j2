@@ -16,6 +16,9 @@ http:
         - https
       middlewares:
         - secHeaders@file
+{% if webui_public_access is defined and webui_public_access|string|lower == 'false' %}
+        - allowlocalipsonly@file
+{% endif %}
         - authelia@file
       service: symbios-ui
       tls:

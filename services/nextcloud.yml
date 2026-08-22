@@ -70,18 +70,9 @@
 
   tasks:
 
-    - name: Get traefik IP on docker network
-      ansible.builtin.shell: docker inspect symbios-base-traefik --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{% endraw %}'
-      register: traefik_ip_result
-      changed_when: false
-
-    - name: Set traefik_ip
+    - name: Compute trusted_proxies_cidr from traefik_ip inventory variable
       ansible.builtin.set_fact:
-        traefik_ip: "{{ traefik_ip_result.stdout }}"
-
-    - name: Compute trusted_proxies_cidr from traefik IP
-      ansible.builtin.set_fact:
-        trusted_proxies_cidr: "{{ traefik_ip_result.stdout | regex_replace('^([0-9]+\\.[0-9]+\\.[0-9]+)\\..*$', '\\1.0/24') }}"
+        trusted_proxies_cidr: "{{ traefik_ip | regex_replace('^([0-9]+\\.[0-9]+\\.[0-9]+)\\..*$', '\\1.0/24') }}"
 
     - name: Create /symbios/services/nextcloud dir
       ansible.builtin.file:
@@ -300,7 +291,7 @@
                 - MYSQL_HOST=nextcloud-db
                 - MYSQL_DATABASE=nextcloud-db
                 - NEXTCLOUD_TRUSTED_DOMAINS=nextcloud.{{ base_domain }}
-                - TRUSTED_PROXIES={{ traefik_ip }}/24
+                - TRUSTED_PROXIES={{ trusted_proxies_cidr }}
                 - REDIS_HOST=nextcloud-redis
                 - SMTP_HOST=mail.{{ base_domain }}
                 - SMTP_PORT=25
@@ -313,6 +304,7 @@
               networks:
                 nextcloud: {}
                 symbios_services: null
+                symbios_base_services: null
 
             nextcloud-db:
               image: mariadb:lts
@@ -354,6 +346,7 @@
                 - nextcloud-db
               networks:
                 - nextcloud
+                - symbios_base_services
 
             nextcloud-phpmyadmin:
               image: phpmyadmin:latest
@@ -397,6 +390,8 @@
               driver_opts:
                 com.docker.network.bridge.name: br-nextcloud
             symbios_services:
+              external: true
+            symbios_base_services:
               external: true
 
         backup: yes

@@ -1,0 +1,103 @@
+{% extends "main/base.html" %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<div class="row">
+  <div class="col-md-8">
+
+<div class="card">
+    <div class="card-header"><i class="bi bi-shield-check"></i> Password Policy</div>
+    <div class="card-body">
+        <form method="post" data-exec="true">
+            {% csrf_token %}
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Password Policy</label>
+                    <select class="form-select" name="password_policy" id="password_policy">
+                        <option value="none" {% if vars.password_policy == 'none' %}selected{% endif %}>None &mdash; min. 1 character</option>
+                        <option value="low" {% if vars.password_policy == 'low' %}selected{% endif %}>Low &mdash; min. 8 characters</option>
+                        <option value="medium" {% if not vars.password_policy or vars.password_policy == 'medium' %}selected{% endif %}>Medium &mdash; min. 10 characters, letters + digits + special characters</option>
+                        <option value="high" {% if vars.password_policy == 'high' %}selected{% endif %}>High &mdash; min. 16 characters, letters + digits + special characters</option>
+                        <option value="paranoid" {% if vars.password_policy == 'paranoid' %}selected{% endif %}>Paranoid &mdash; min. 32 characters, letters + digits + special characters</option>
+                    </select>
+                </div>
+            </div>
+            <div id="policy-preview" class="alert alert-info py-2 mb-3" style="display:none;">
+                <i class="bi bi-info-circle"></i>
+                <span id="policy-preview-text"></span>
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
+        </form>
+    </div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-header"><i class="bi bi-globe"></i> Network Access</div>
+    <div class="card-body">
+        <form method="post" data-exec="true">
+            {% csrf_token %}
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">WebUI Internet Access</label>
+                    <div class="form-check form-switch">
+                        <input type="hidden" name="webui_public_access" value="false">
+                        <input class="form-check-input" type="checkbox" id="webui_public_access" name="webui_public_access" value="true"
+                            {% if vars.webui_public_access %}checked{% endif %}>
+                        <label class="form-check-label" for="webui_public_access">Allow access from the internet</label>
+                    </div>
+                    <div class="form-text">
+                        When disabled, the WebUI is only reachable from private networks
+                        (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fd00::/8).
+                        Access from public IPs will be blocked by Traefik.
+                    </div>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
+        </form>
+    </div>
+</div>
+
+  </div>
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-info-circle"></i> Info</div>
+      <div class="card-body small">
+        <p>
+          The password policy determines the minimum requirements for all
+          passwords in the system. It applies to:
+        </p>
+        <ul class="ps-3 mb-2">
+          <li>Initial admin password change</li>
+          <li>User creation by administrators</li>
+          <li>Password resets for existing users</li>
+        </ul>
+        <p class="mb-0 text-muted">
+          <strong>Recommended:</strong> <em>Medium</em> for home servers,
+          <em>High</em> for internet-facing systems.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const descriptions = {
+  none: 'No requirements beyond a minimum of 1 character.',
+  low: 'Minimum 8 characters. No complexity requirements.',
+  medium: 'Minimum 10 characters. Must contain at least one letter, one digit, and one special character (!@#$%^&*...).',
+  high: 'Minimum 16 characters. Must contain at least one letter, one digit, and one special character.',
+  paranoid: 'Minimum 32 characters. Must contain at least one letter, one digit, and one special character.'
+};
+function updatePreview() {
+  const sel = document.getElementById('password_policy');
+  const preview = document.getElementById('policy-preview');
+  const text = document.getElementById('policy-preview-text');
+  if (sel && descriptions[sel.value]) {
+    text.textContent = descriptions[sel.value];
+    preview.style.display = '';
+  }
+}
+document.getElementById('password_policy').addEventListener('change', updatePreview);
+updatePreview();
+</script>
+{% endblock %}

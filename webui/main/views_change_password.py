@@ -22,6 +22,7 @@ from django.contrib import messages
 from .utils.ssh_exec import run_command
 from .utils.http import is_ajax_request
 from .utils.secret_file import f_write_secret
+from .utils.password_policy import validate_password
 
 
 @login_required
@@ -45,19 +46,11 @@ def change_password(request):
             messages.error(request, msg)
             return redirect("change_password")
 
-        if len(new_password) < 8:
-            msg = "Password must be at least 8 characters long."
+        policy_err = validate_password(new_password)
+        if policy_err:
             if is_ajax_request(request):
-                return JsonResponse({'ok': False, 'error': msg}, status=400)
-            messages.error(request, msg)
-            return redirect("change_password")
-
-        # Basic complexity: must contain at least one letter and one digit
-        if not any(c.isalpha() for c in new_password) or not any(c.isdigit() for c in new_password):
-            msg = "Password must contain at least one letter and one digit."
-            if is_ajax_request(request):
-                return JsonResponse({'ok': False, 'error': msg}, status=400)
-            messages.error(request, msg)
+                return JsonResponse({'ok': False, 'error': policy_err}, status=400)
+            messages.error(request, policy_err)
             return redirect("change_password")
 
         if new_password != confirm_password:

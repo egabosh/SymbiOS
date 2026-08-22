@@ -1378,3 +1378,70 @@ def settings_playbooks_delete(request):
     get_catalog(force=True)
     return JsonResponse({'ok': True, 'message': f'Deleted {fn}'})
 
+
+@login_required
+def settings_security(request):
+    config = _get_inventory_config()
+    if 'all' not in config:
+        config['all'] = {}
+    if 'vars' not in config['all']:
+        config['all']['vars'] = {}
+    vars_ = config['all']['vars']
+
+    if request.method == 'POST':
+        is_ajax = is_ajax_request(request)
+
+        # Only process fields that are actually present in the POST data
+        # (two separate forms share this view)
+        if 'password_policy' in request.POST:
+            password_policy = request.POST['password_policy']
+            if password_policy not in ('none', 'low', 'medium', 'high', 'paranoid'):
+                msg = 'Invalid password policy.'
+                if is_ajax:
+                    return JsonResponse({'ok': False, 'error': msg}, status=400)
+                messages.error(request, msg)
+                return redirect('settings_security')
+            vars_['password_policy'] = password_policy
+
+        if 'webui_public_access' in request.POST:
+            webui_public_access = request.POST['webui_public_access'] == 'true'
+            old_public_access = vars_.get('webui_public_access', False)
+            vars_['webui_public_access'] = webui_public_access
+
+        _save_inventory_config(config)
+
+        # Re-apply traefik playbook only if public access actually changed
+        if 'webui_public_access' in request.POST and old_public_access != webui_public_access:
+            from .utils.jobs import create_job
+            cmd = 'symbios-run-playbook.sh base-services/traefik.yml'
+            job_id = create_job(cmd, timeout=300)
+            title = 'Updating network access...'
+            msg = ('Internet access enabled.' if webui_public_access
+                   else 'Internet access disabled - only local networks allowed.')
+            if is_ajax:
+                return JsonResponse({'ok': True, 'job': job_id,
+                                     'title': title,
+                                     'message': msg,
+                                     'command': cmd})
+            messages.success(request, msg)
+            messages.info(request, title)
+            return redirect('settings_security')
+
+        msg = 'Security settings saved.'
+        if is_ajax:
+            return JsonResponse({'ok': True, 'message': msg,
+                                 'redirect': '/settings/security/'})
+        messages.success(request, msg)
+        return redirect('settings_security')
+
+    return render(request, 'main/settings_security.html', {
+        'vars': vars_,
+        'page_key': 'security',
+        'page_icon': 'bi-shield-check',
+        'page_title': 'Security',
+        'page_explain': PAGE_EXPLAIN.get('security', ''),
+        'page_status': get_page_badge('security', vars_)[0],
+        'page_status_label': get_page_badge('security', vars_)[1],
+        'page_status_text': get_page_badge('security', vars_)[2],
+    })
+

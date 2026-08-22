@@ -74,6 +74,11 @@ PAGE_EXPLAIN = {
         'Timezone, keyboard and language are used so that times and input '
         'on the server and in the web interface are correct.'
     ),
+    'security': (
+        'Configure the global password policy for all user accounts. '
+        'This applies to the initial admin password change, user creation, '
+        'and password resets.'
+    ),
 }
 
 # Map settings page -> runchecks check name (for the status badge).

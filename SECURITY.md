@@ -152,8 +152,13 @@ Debian server from a WebUI.
 - Excluding it would break compatibility with older clients.
 
 ### L3: No LDAP Password Policy
-- Single-admin system. Password policy is admin responsibility.
-- Forced default password change provides initial security gate.
+- **Status**: Resolved - configurable password policy implemented
+- Password policy is configurable in the WebUI (Settings > Security) with levels:
+  none, low, medium, high, paranoid
+- Enforced at: initial admin password change, user creation, admin password
+  reset, and via `symbios-ldap-user.sh`
+- Validation implemented in `utils/password_policy.py` (shared between WebUI
+  views and CLI script)
 
 ### L4: SSH StrictHostKeyChecking
 - Test scripts use StrictHostKeyChecking=no for dev environments.
@@ -170,6 +175,43 @@ Debian server from a WebUI.
 ### L10: No set -euo pipefail
 - Explicit error handling throughout scripts.
 - Deliberate architectural choice per coding standards.
+
+---
+
+## Configurable Security Features
+
+### Password Policy
+
+Configurable in the WebUI under Settings > Security. Stored in `inventory.yml`
+as `password_policy`. Five levels:
+
+| Level | Requirements |
+|-------|-------------|
+| none | No requirements |
+| low | Min 8 characters |
+| medium | Min 8 chars + letters + digits |
+| high | Min 12 chars + mixed case + digits + special chars |
+| paranoid | Min 16 chars + mixed case + digits + special + no common patterns |
+
+Enforced at all password change points:
+- Initial admin password change (forced on first login)
+- User creation via WebUI
+- Admin password reset via WebUI
+- `symbios-ldap-user.sh` CLI script
+
+### WebUI Internet Access Control
+
+Configurable in the WebUI under Settings > Security (Network Access toggle).
+Stored in `inventory.yml` as `webui_public_access` (default: `false`).
+
+When `false` (default):
+- Traefik applies `allowlocalipsonly@file` middleware to the WebUI router
+- Only RFC1918 private IP ranges (10.x, 172.16-31.x, 192.168.x) and
+  localhost can reach the WebUI via Traefik
+- The break-glass endpoint at localhost:8080 is unaffected
+
+When `true`:
+- WebUI is reachable from the public internet (still requires Authelia auth)
 
 ---
 
@@ -206,3 +248,12 @@ Debian server from a WebUI.
 ### Low Findings
 - **L1**: DEBUG defaults to False
 - **L7**: Unused csrf_exempt import removed
+
+### Infrastructure Fixes
+- **FIX**: Traefik IP detection moved from runtime `docker inspect` to static
+  `traefik_ip` variable in `inventory.yml` (prevents multi-network IP
+  concatenation bug in TRUSTED_PROXIES)
+- **FIX**: Nextcloud Docker network: added `symbios_base_services` to enable
+  LDAP connectivity from the Nextcloud container
+- **FIX**: TRUSTED_PROXIES now uses computed CIDR (`trusted_proxies_cidr`)
+  instead of raw IP with `/24` suffix
