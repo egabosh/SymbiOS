@@ -30,7 +30,18 @@ Also intercepts all forms with data-exec="true" attribute:
   let rawLen = 0;
   let _needsReload = false;
   let _pollRetries = 0;
-  const MAX_POLL_RETRIES = 15;
+  /* The job keeps running on the host even when it is unreachable from the
+     browser (Traefik/Authelia restarts mid-job, flaky links). Retry for a
+     few minutes before declaring failure instead of giving up too early. */
+  const MAX_POLL_RETRIES = 150;
+
+  /* Append a dim status line to the output area (e.g. connection notes). */
+  function appendNote(text) {
+    const nearBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight < 60;
+    outputEl.insertAdjacentHTML('beforeend',
+      '<div class="text-warning small"><i class="bi bi-wifi-off me-1"></i>' + escapeHtml(text) + '</div>');
+    if (nearBottom) outputEl.scrollTop = outputEl.scrollHeight;
+  }
 
   /* Append only the new tail of raw output as rendered HTML.
      Tracks the previous raw length so we only render the delta. */
@@ -59,6 +70,7 @@ Also intercepts all forms with data-exec="true" attribute:
              Authelia redirect): retry instead of failing immediately, as the
              job is still running on the host. */
           _pollRetries++;
+          if (_pollRetries === 3) appendNote('Connection interrupted - retrying...');
           if (_pollRetries >= MAX_POLL_RETRIES) {
             finish(false);
             return;
@@ -77,6 +89,7 @@ Also intercepts all forms with data-exec="true" attribute:
       })
       .catch(function () {
         _pollRetries++;
+        if (_pollRetries === 3) appendNote('Connection interrupted - retrying...');
         if (_pollRetries >= MAX_POLL_RETRIES) {
           finish(false);
           return;
@@ -201,8 +214,11 @@ Also intercepts all forms with data-exec="true" attribute:
         var d = res.data;
         if (res.status >= 400) {
           close();
-          /* Show error in a Bootstrap alert instead of the modal */
-          showAlert(d.error || 'An error occurred', 'danger');
+          /* Show error in a Bootstrap alert instead of the modal.
+             d.link/d.link_text optionally point to the page where the
+             failing setting can be changed (e.g. password policy). */
+          showAlert(d.error || 'An error occurred', 'danger',
+                    {link: d.link, link_text: d.link_text});
           return;
         }
         if (d.job) {
@@ -227,16 +243,24 @@ Also intercepts all forms with data-exec="true" attribute:
       });
   });
 
-  /* Show a dismissible Bootstrap alert at the top of the content area */
-  function showAlert(message, type) {
+  /* Show a dismissible Bootstrap alert at the top of the content area.
+     opts.link + opts.link_text optionally append an anchor to the page
+     where the reported problem can be fixed. */
+  function showAlert(message, type, opts) {
     var container = document.querySelector('.col.py-3');
     if (!container) return;
     var icons = { success: 'check-circle-fill', danger: 'exclamation-triangle-fill', warning: 'info-circle-fill', info: 'info-circle-fill' };
+    var text = '<span>' + escapeHtml(message);
+    if (opts && opts.link) {
+      text += ' <a href="' + encodeURI(opts.link) + '">' +
+        escapeHtml(opts.link_text || opts.link) + '</a>';
+    }
+    text += '</span>';
     var alert = document.createElement('div');
     alert.className = 'alert alert-' + type + ' alert-dismissible fade show';
     alert.innerHTML =
       '<i class="bi bi-' + (icons[type] || 'info-circle-fill') + ' me-2"></i>' +
-      '<span>' + escapeHtml(message) + '</span>' +
+      text +
       '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
     /* Insert after any existing messages */
     var first = container.querySelector('.alert');

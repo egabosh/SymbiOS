@@ -72,13 +72,16 @@ def user_create(request):
             messages.error(request, msg)
             return redirect('users')
 
-        from .utils.password_policy import validate_password
+        from .utils.password_policy import (validate_password,
+                                            policy_error_response,
+                                            policy_error_message)
         policy_err = validate_password(password)
         if policy_err:
             from .utils.http import is_ajax_request
             if is_ajax_request(request):
-                return JsonResponse({'ok': False, 'error': policy_err}, status=400)
-            messages.error(request, policy_err)
+                return JsonResponse(policy_error_response(policy_err),
+                                    status=400)
+            messages.error(request, policy_error_message(policy_err))
             return redirect('users')
 
         f_pw_file = f_write_secret('ldap-password', password)
@@ -112,13 +115,16 @@ def user_set_password(request, uid):
             messages.error(request, msg)
             return redirect('users')
 
-        from .utils.password_policy import validate_password
+        from .utils.password_policy import (validate_password,
+                                            policy_error_response,
+                                            policy_error_message)
         policy_err = validate_password(password)
         if policy_err:
             from .utils.http import is_ajax_request
             if is_ajax_request(request):
-                return JsonResponse({'ok': False, 'error': policy_err}, status=400)
-            messages.error(request, policy_err)
+                return JsonResponse(policy_error_response(policy_err),
+                                    status=400)
+            messages.error(request, policy_error_message(policy_err))
             return redirect('users')
 
         f_pw_file = f_write_secret('ldap-password', password)

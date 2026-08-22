@@ -48,9 +48,12 @@ def change_password(request):
 
         policy_err = validate_password(new_password)
         if policy_err:
+            from .utils.password_policy import (policy_error_response,
+                                                policy_error_message)
             if is_ajax_request(request):
-                return JsonResponse({'ok': False, 'error': policy_err}, status=400)
-            messages.error(request, policy_err)
+                return JsonResponse(policy_error_response(policy_err),
+                                    status=400)
+            messages.error(request, policy_error_message(policy_err))
             return redirect("change_password")
 
         if new_password != confirm_password:
