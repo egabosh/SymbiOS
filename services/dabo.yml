@@ -260,6 +260,21 @@
       changed_when: false
       failed_when: false
 
+    # Write Authelia access_control for dabo group restriction
+    - name: write Authelia access_control for dabo group restriction
+      blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK dabo ACCESS CONTROL"
+        block: |2
+              - domain: "dabo.{{ base_domain }}"
+                policy: two_factor
+                subject:
+                  - 'group:dabo'
+
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+      notify: Restart authelia
+
     # Run initiate.sh to set up SSH keys and directories
     - name: Run initiate.sh
       ansible.builtin.shell: ./initiate.sh
@@ -324,3 +339,13 @@
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /symbios/base-services/traefik
+
+    # Restart Authelia when access_control changes
+    - name: Restart authelia
+      ansible.builtin.shell: |
+        if docker compose down
+        then
+          docker compose up -d
+        fi
+      args:
+        chdir: /symbios/base-services/authelia

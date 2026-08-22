@@ -576,6 +576,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+                  - "authelia@file"
 
               matrix-web:
                 rule: "Host(`matrix-web.{{ base_domain }}`)"
@@ -586,6 +587,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+                  - "authelia@file"
 
             services:
               matrix-http:
@@ -646,6 +648,38 @@
                   userinfo_signed_response_alg: 'none'
                   token_endpoint_auth_method: 'client_secret_post'
         insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
+        backup: yes
+      notify: Restart authelia
+
+    # Access control for Matrix web UIs (Element + admin panel)
+    # Note: matrix and matrix-synapse routers stay unprotected for federation + OIDC callback
+    - name: write Authelia access_control for matrix-admin group restriction
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK matrix-admin ACCESS CONTROL"
+        block: |2
+              - domain: "matrix-admin.{{ base_domain }}"
+                policy: two_factor
+                subject:
+                  - 'group:matrix-users'
+                  - 'group:matrix-admins'
+
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+      notify: Restart authelia
+
+    - name: write Authelia access_control for matrix-web group restriction
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK matrix-web ACCESS CONTROL"
+        block: |2
+              - domain: "matrix-web.{{ base_domain }}"
+                policy: two_factor
+                subject:
+                  - 'group:matrix-users'
+                  - 'group:matrix-admins'
+
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         backup: yes
       notify: Restart authelia
 

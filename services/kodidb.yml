@@ -297,7 +297,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - secHeaders@file
-                  - default-basic-auth@file
+                  - authelia@file
             services:
               kodidb-pma:
                 loadBalancer:
@@ -310,6 +310,33 @@
       args:
         chdir: /symbios/services/kodidb
         creates: /symbios/services/kodidb/ssl/certificate.pem
+
+    # Create LDAP group for kodidb access control (no admin/user distinction)
+    - name: Create LDAP group kodidb
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name kodidb"
+      changed_when: false
+      failed_when: false
+
+    # Add admin user to the kodidb LDAP group
+    - name: Add admin to LDAP group kodidb
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --add-user --name kodidb --uid admin"
+      changed_when: false
+      failed_when: false
+
+    # Write Authelia access_control for kodidb group restriction
+    - name: write Authelia access_control for kodidb group restriction
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK kodidb ACCESS CONTROL"
+        block: |2
+              - domain: "kodidb.{{ base_domain }}"
+                policy: two_factor
+                subject:
+                  - 'group:kodidb'
+
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+      notify: Restart authelia
 
     - name: /usr/local/sbin/backup.d/kodidb-docker.backup
       blockinfile:
@@ -395,4 +422,13 @@
       ansible.builtin.shell: docker compose restart traefik
       args:
         chdir: /symbios/base-services/traefik
+
+    - name: Restart authelia
+      ansible.builtin.shell: |
+        if docker compose down
+        then
+          docker compose up -d
+        fi
+      args:
+        chdir: /symbios/base-services/authelia
 

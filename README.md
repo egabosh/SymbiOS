@@ -430,7 +430,36 @@ healthcheck scripts, and user-uploaded playbooks is available in the WebUI at
 **Services** (or directly from the repository at
 `webui/main/docs/services.md`).
 
-Summary of the workflow:
+### Service access control (mandatory)
+
+Every service that provides web access MUST enforce group-based access control.
+Only LDAP users who are members of the service's designated group(s) may log in.
+
+**Group naming convention:**
+
+| Service type | Groups | Example |
+|-------------|--------|---------|
+| Service with admin/user distinction | `<service>-users` + `<service>-admins` | `nextcloud-users`, `nextcloud-admins` |
+| Service without admin/user distinction | `<service>` | `dabo` |
+
+**How to enforce:**
+
+- **OIDC services**: Include `services/tasks/oidc-groups.yml` in your playbook,
+  then configure the app to restrict login to the group(s). Examples:
+  - `openwebui`: `OAUTH_ALLOWED_ROLES=openwebui-users,openwebui-admins`
+  - `home-assistant`: HA `auth_oidc` role mapping
+  - `nextcloud`: LDAP `ldapUserFilterGroups` setting
+- **Authelia forward-auth services**: Add an Authelia `access_control` rule
+  with `subject` restricting to `<service>-users` / `<service>-admins`.
+- **Internal auth services**: No LDAP groups needed (service manages own users).
+
+**Checklist for new services:**
+
+- [ ] Create LDAP groups `<service>-users` and `<service>-admins`
+- [ ] Configure group restriction at app or proxy level
+- [ ] Verify that users NOT in the group cannot access the service
+
+### Workflow summary
 
 1. Create `services/<name>.yml` with a `# docs:` header and Ansible tasks.
 2. The playbook creates a Docker Compose stack under `/symbios/services/<name>/`
