@@ -134,9 +134,21 @@ def _sidebar_context(catalog):
                 svc_names.add(name)
         if svc_names & running_names:
             installed.add(pb)
+    ordered = _order_catalog(catalog)
+    # The sidebar lists only installed services; everything else is reachable
+    # via the collapsible "Add Service" section. External services have no
+    # install concept and are therefore always shown.
+    sidebar_installed = [i for i in ordered
+                         if i.get('group') == 'external-services'
+                         or i.get('playbook', '') in installed]
+    sidebar_available = [i for i in ordered
+                         if i.get('group') != 'external-services'
+                         and i.get('playbook', '') not in installed]
     return {
         'installed_playbooks': installed,
         'healthcheck_status': _get_healthcheck_status(),
+        'sidebar_installed': sidebar_installed,
+        'sidebar_available': sidebar_available,
     }
 
 # Visual class per action name when rendered as a button. Arbitrary action
@@ -242,7 +254,6 @@ def services(request):
     ordered = _order_catalog(catalog)
     return render(request, 'main/services.html', {
         'catalog': ordered,
-        'all_services': ordered,
         'docs_md': docs_md,
         **_sidebar_context(catalog),
     })
@@ -256,7 +267,6 @@ def services_manage(request):
     all_catalog = get_catalog()
     response = render(request, 'main/services.html', {
         'catalog': catalog,
-        'all_services': _order_catalog(all_catalog),
         **_sidebar_context(all_catalog),
     })
     response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -316,7 +326,6 @@ def services_detail(request, playbook):
         'service_url': service_url,
         'access_groups': access_ctx['groups'],
         'all_ldap_users': access_ctx['users'],
-        'all_services': _order_catalog(all_catalog),
         'compatible_systems': compatible_systems,
         'playbook_target_type': playbook_target_type,
         **_sidebar_context(all_catalog),
