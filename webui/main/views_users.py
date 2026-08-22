@@ -72,6 +72,15 @@ def user_create(request):
             messages.error(request, msg)
             return redirect('users')
 
+        from .utils.password_policy import validate_password
+        policy_err = validate_password(password)
+        if policy_err:
+            from .utils.http import is_ajax_request
+            if is_ajax_request(request):
+                return JsonResponse({'ok': False, 'error': policy_err}, status=400)
+            messages.error(request, policy_err)
+            return redirect('users')
+
         f_pw_file = f_write_secret('ldap-password', password)
         cmd = f'symbios-ldap-user.sh --create --uid {shlex.quote(uid)} --password-file {shlex.quote(f_pw_file)}'
         if email:
@@ -101,6 +110,15 @@ def user_set_password(request, uid):
             if is_ajax_request(request):
                 return JsonResponse({'ok': False, 'error': msg}, status=400)
             messages.error(request, msg)
+            return redirect('users')
+
+        from .utils.password_policy import validate_password
+        policy_err = validate_password(password)
+        if policy_err:
+            from .utils.http import is_ajax_request
+            if is_ajax_request(request):
+                return JsonResponse({'ok': False, 'error': policy_err}, status=400)
+            messages.error(request, policy_err)
             return redirect('users')
 
         f_pw_file = f_write_secret('ldap-password', password)

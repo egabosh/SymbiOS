@@ -65,23 +65,9 @@
     service_domain: "{{ service_name }}.{{ base_domain }}"
   tasks:
 
-    - name: Get traefik IP on docker network
-      ansible.builtin.shell: docker inspect symbios-base-traefik --format '{% raw %}{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}{% endraw %}'
-      register: traefik_ip_result
-      changed_when: false
-
-    - name: Set traefik_ip
+    - name: Set home_assistant_ip from traefik_network_gateway inventory variable
       ansible.builtin.set_fact:
-        traefik_ip: "{{ traefik_ip_result.stdout }}"
-
-    - name: Get traefik network gateway (host IP for HA in host network mode)
-      ansible.builtin.shell: docker network inspect symbios_base_services --format '{% raw %}{{ (index .IPAM.Config 0).Gateway }}{% endraw %}'
-      register: ha_ip_result
-      changed_when: false
-
-    - name: Set home_assistant_ip
-      ansible.builtin.set_fact:
-        home_assistant_ip: "{{ ha_ip_result.stdout }}"
+        home_assistant_ip: "{{ traefik_network_gateway }}"
 
     - name: Create /symbios/services/home-assistant dir
       ansible.builtin.file:

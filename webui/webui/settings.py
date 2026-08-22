@@ -78,6 +78,7 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'main' / 'static']
+WHITENOISE_USE_FINDERS = True
 
 SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
 # Allow cookies over the host-local http break-glass (127.0.0.1:8080).

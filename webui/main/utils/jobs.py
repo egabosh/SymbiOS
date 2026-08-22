@@ -106,7 +106,24 @@ def _poll_job(job, job_id):
             # Transient SSH/gateway trouble: retry, but give up after a while
             # so a permanently lost host does not leak a poller thread.
             consecutive_failures += 1
-            if consecutive_failures >= 20:
+            if consecutive_failures >= 60:
+                # Last attempt with a longer timeout before giving up, so we
+                # pick up a job that finished on the host while SSH was flaky.
+                try:
+                    ok, stdout, stderr = run_command(
+                        '{} poll {} {}'.format(DETACHED_SCRIPT, job_id, offset),
+                        timeout=120)
+                    if ok:
+                        data = json.loads(stdout)
+                        if data.get('status') == 'done':
+                            rc = int(data.get('rc') or 0)
+                            with job['lock']:
+                                job['output'] += data.get('output', '')
+                                job['done'] = True
+                                job['success'] = (rc == 0)
+                            return
+                except Exception:
+                    pass
                 with job['lock']:
                     job['output'] += '\n[ERROR] Host stopped answering; job continues on the host.\n'
                     job['done'] = True

@@ -140,7 +140,7 @@ f_poll() {
   fi
 
   printf '{"ok":true,"status":"%s","rc":"%s","size":%s,"output":%s}' \
-    "$f_status" "$f_rc" "$f_size" "$(echo "$f_new" | f_json_escape)"
+    "$f_status" "$f_rc" "$f_size" "$(printf '%s' "$f_new" | f_json_escape)"
 }
 
 case "$g_action" in

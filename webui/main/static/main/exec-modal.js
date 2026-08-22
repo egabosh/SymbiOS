@@ -29,6 +29,8 @@ Also intercepts all forms with data-exec="true" attribute:
   let currentJob = null;
   let rawLen = 0;
   let _needsReload = false;
+  let _pollRetries = 0;
+  const MAX_POLL_RETRIES = 15;
 
   /* Append only the new tail of raw output as rendered HTML.
      Tracks the previous raw length so we only render the delta. */
@@ -53,10 +55,18 @@ Also intercepts all forms with data-exec="true" attribute:
       })
       .then(function (d) {
         if (d === null) {
-          /* Non-JSON answer (e.g. session expired): stop polling */
-          finish(false);
+          /* Non-JSON answer (e.g. session expired, Traefik restarting,
+             Authelia redirect): retry instead of failing immediately, as the
+             job is still running on the host. */
+          _pollRetries++;
+          if (_pollRetries >= MAX_POLL_RETRIES) {
+            finish(false);
+            return;
+          }
+          pollTimer = setTimeout(poll, 2000);
           return;
         }
+        _pollRetries = 0;
         if (d.command) showCommand(d.command);
         appendDelta(d.output || '');
         if (d.done) {
@@ -66,6 +76,11 @@ Also intercepts all forms with data-exec="true" attribute:
         pollTimer = setTimeout(poll, 1000);
       })
       .catch(function () {
+        _pollRetries++;
+        if (_pollRetries >= MAX_POLL_RETRIES) {
+          finish(false);
+          return;
+        }
         pollTimer = setTimeout(poll, 2000);
       });
   }
@@ -95,6 +110,7 @@ Also intercepts all forms with data-exec="true" attribute:
     outputEl.innerHTML = '';
     outputEl.dataset.rawLen = '0';
     rawLen = 0;
+    _pollRetries = 0;
     titleEl.innerHTML = '<i class="bi bi-terminal me-2"></i>' + escapeHtml(title || 'Running command...');
     if (command) {
       showCommand(command);
@@ -123,6 +139,7 @@ Also intercepts all forms with data-exec="true" attribute:
   function start(jobId, title, command) {
     open(title, command);
     currentJob = jobId;
+    _pollRetries = 0;
     poll();
   }
 

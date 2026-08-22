@@ -187,6 +187,68 @@ then
   exit 1
 fi
 
+# Validate password against the global policy (from inventory.yml)
+function f_validate_password_policy {
+  local f_pw="$1"
+  # Read policy from inventory (default: medium)
+  local f_policy="medium"
+  if [[ -n "${g_inventory}" ]] && [[ -f "${g_inventory}" ]]
+  then
+    local f_raw
+    f_raw=$(grep -F 'password_policy:' "${g_inventory}" 2>/dev/null | head -1)
+    if [[ -n "${f_raw}" ]]
+    then
+      f_policy="${f_raw##*password_policy:}"
+      f_policy="${f_policy%%#*}"
+      f_policy="${f_policy%%,*}"
+      f_policy="$(echo "${f_policy}" | tr -d '[:space:]')"
+    fi
+  fi
+
+  case "${f_policy}" in
+    none)
+      [[ ${#f_pw} -ge 1 ]] && return 0
+      g_echo_error "Password policy (${f_policy}): must be at least 1 character"
+      return 1
+      ;;
+    low)
+      [[ ${#f_pw} -ge 8 ]] && return 0
+      g_echo_error "Password policy (${f_policy}): must be at least 8 characters"
+      return 1
+      ;;
+    medium)
+      [[ ${#f_pw} -ge 10 ]] || { g_echo_error "Password policy (${f_policy}): must be at least 10 characters"; return 1; }
+      [[ "${f_pw}" =~ [a-zA-Z] ]] || { g_echo_error "Password policy (${f_policy}): must contain at least one letter"; return 1; }
+      [[ "${f_pw}" =~ [0-9] ]] || { g_echo_error "Password policy (${f_policy}): must contain at least one digit"; return 1; }
+      [[ "${f_pw}" =~ [^a-zA-Z0-9] ]] || { g_echo_error "Password policy (${f_policy}): must contain at least one special character"; return 1; }
+      return 0
+      ;;
+    high)
+      [[ ${#f_pw} -ge 16 ]] || { g_echo_error "Password policy (${f_policy}): must be at least 16 characters"; return 1; }
+      [[ "${f_pw}" =~ [a-zA-Z] ]] || { g_echo_error "Password policy (${f_policy}): must contain at least one letter"; return 1; }
+      [[ "${f_pw}" =~ [0-9] ]] || { g_echo_error "Password policy (${f_policy}): must contain at least one digit"; return 1; }
+      [[ "${f_pw}" =~ [^a-zA-Z0-9] ]] || { g_echo_error "Password policy (${f_policy}): must contain at least one special character"; return 1; }
+      return 0
+      ;;
+    paranoid)
+      [[ ${#f_pw} -ge 32 ]] || { g_echo_error "Password policy (${f_policy}): must be at least 32 characters"; return 1; }
+      [[ "${f_pw}" =~ [a-zA-Z] ]] || { g_echo_error "Password policy (${f_policy}): must contain at least one letter"; return 1; }
+      [[ "${f_pw}" =~ [0-9] ]] || { g_echo_error "Password policy (${f_policy}): must contain at least one digit"; return 1; }
+      [[ "${f_pw}" =~ [^a-zA-Z0-9] ]] || { g_echo_error "Password policy (${f_policy}): must contain at least one special character"; return 1; }
+      return 0
+      ;;
+    *)
+      g_echo_error "Unknown password policy: ${f_policy} (valid: none, low, medium, high, paranoid)"
+      return 1
+      ;;
+  esac
+}
+
+if [[ -n "${f_password}" ]] && [[ "${f_action}" != "delete" ]]
+then
+  f_validate_password_policy "${f_password}" || exit 1
+fi
+
 # Read LDAP connection details from inventory
 f_symbios_ldap_init
 f_user_dn="uid=${f_uid},ou=users,${f_base_dn}"

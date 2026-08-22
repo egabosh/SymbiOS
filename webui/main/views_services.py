@@ -282,19 +282,19 @@ def services_detail(request, playbook):
         uninstall_buttons = [
             {'name': 'uninstall-full', 'label': 'Uninstall',
              'cls': _ACTION_CLS['uninstall-full'],
-             'confirm': 'ACHTUNG: Das entire Service wird inklusive ALLER '
-                        'Daten (Programm + Userdaten) endgueltig geloescht! '
-                        'Sind Sie sich WIRKLICH sicher?'},
+             'confirm': 'WARNING: The entire service including ALL '
+                        'data (program + user data) will be permanently deleted! '
+                        'Are you REALLY sure?'},
             {'name': 'uninstall-program', 'label': 'Uninstall (keep data)',
              'cls': _ACTION_CLS['uninstall-program'],
-             'confirm': 'Das Service-Programm wird komplett entfernt. '
-                        'Nur die Userdaten bleiben erhalten. '
-                        'Fortfahren?'},
+             'confirm': 'The service program will be completely removed. '
+                        'Only user data will be kept. '
+                        'Continue?'},
             {'name': 'uninstall-reset', 'label': 'Delete Userdata',
              'cls': _ACTION_CLS['uninstall-reset'],
-             'confirm': 'ACHTUNG: ALLE Userdaten des Services werden '
-                        'geloescht! Das Programm bleibt erhalten und wird '
-                        'neu gestartet. Sind Sie sich WIRKLICH sicher?'},
+             'confirm': 'WARNING: ALL user data of the service will be '
+                        'deleted! The program will remain and be '
+                        'restarted. Are you REALLY sure?'},
         ]
     logs = (item.get('docs') or {}).get('service_control', {}).get('logs', []) or []
     log_units = [{'name': l.get('name'), 'type': l.get('type', 'log')} for l in logs]
@@ -413,37 +413,59 @@ def services_log_tail(request, playbook):
     line-by-line and new entries appear within the poll interval. ``offset`` is
     an absolute character position into the stream; it is mapped into the
     rolling output window below (see stream_log).
+
+    If the job is not in the in-memory registry (e.g. after gunicorn worker
+    recycle), fall back to polling the detached job directly on the host via
+    ``symbios-run-detached.sh poll``.
     """
+    import json
     job_id = request.GET.get('job')
     try:
         offset = int(request.GET.get('offset', '0'))
     except ValueError:
         offset = 0
-    if not job_id or job_id not in _JOBS:
-        return JsonResponse({'error': 'Unknown job'}, status=404)
-    job = _JOBS[job_id]
-    with job['lock']:
-        out = job['output']
-        total = job['total']
-        done = job['done']
-        success = job['success']
-    # Map the browser's absolute offset into the rolling window. The window holds
-    # absolute positions [total - len(out), total). If the browser fell behind
-    # past the window (its offset was trimmed away), resync to the whole window
-    # -- tail -f style, the browser simply jumps to the most recent lines.
-    win_start = total - len(out)
-    if offset <= win_start:
-        delta = out
-        new_offset = total
-    else:
-        delta = out[offset - win_start:]
-        new_offset = total
-    return JsonResponse({
-        'delta': delta,
-        'offset': new_offset,
-        'done': done,
-        'success': success,
-    })
+    if not job_id:
+        return JsonResponse({'error': 'Missing job id'}, status=400)
+    if job_id in _JOBS:
+        job = _JOBS[job_id]
+        with job['lock']:
+            out = job['output']
+            total = job['total']
+            done = job['done']
+            success = job['success']
+        # Map the browser's absolute offset into the rolling window. The window holds
+        # absolute positions [total - len(out), total). If the browser fell behind
+        # past the window (its offset was trimmed away), resync to the whole window
+        # -- tail -f style, the browser simply jumps to the most recent lines.
+        win_start = total - len(out)
+        if offset <= win_start:
+            delta = out
+            new_offset = total
+        else:
+            delta = out[offset - win_start:]
+            new_offset = total
+        return JsonResponse({
+            'delta': delta,
+            'offset': new_offset,
+            'done': done,
+            'success': success,
+        })
+    # Job not in memory (worker recycled). Poll the detached host job directly.
+    from .utils.ssh_exec import run_command
+    try:
+        ok, stdout, _stderr = run_command(
+            f'symbios-run-detached.sh poll {job_id} {offset}', timeout=30)
+        if not ok or not stdout:
+            return JsonResponse({'error': 'Job not found'}, status=404)
+        data = json.loads(stdout)
+        return JsonResponse({
+            'delta': data.get('output', ''),
+            'offset': int(data.get('size', offset)),
+            'done': data.get('status') == 'done',
+            'success': data.get('rc') == '0',
+        })
+    except Exception:
+        return JsonResponse({'error': 'Job not found'}, status=404)
 
 
 @login_required
