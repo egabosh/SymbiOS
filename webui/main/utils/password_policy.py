@@ -42,8 +42,10 @@ SPECIAL_CHARS = re.compile(r'[!@#$%^&*()_+\-=\[\]{}|;:\'",.<>?/`~\\]')
 def get_password_policy():
     """Read the password policy from inventory.yml. Defaults to 'medium'."""
     try:
-        from .views import _get_inventory_config
-        config = _get_inventory_config()
+        import yaml
+        from ..constants import CONFIG_PATH
+        with open(CONFIG_PATH, 'r') as f:
+            config = yaml.safe_load(f) or {}
         return config.get('all', {}).get('vars', {}).get(
             'password_policy', 'medium')
     except Exception:
