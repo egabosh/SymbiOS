@@ -38,6 +38,10 @@ POLICY_LABELS = {
 
 SPECIAL_CHARS = re.compile(r'[!@#$%^&*()_+\-=\[\]{}|;:\'",.<>?/`~\\]')
 
+# Link shown next to policy violations so admins can adjust the policy
+POLICY_SETTINGS_URL = '/settings/security/'
+POLICY_LINK_TEXT = 'Change password policy'
+
 
 def get_password_policy():
     """Read the password policy from inventory.yml. Defaults to 'medium'."""
@@ -72,3 +76,17 @@ def validate_password(password, policy=None):
     if req_special and not SPECIAL_CHARS.search(password):
         return 'Password must contain at least one special character.'
     return None
+
+
+def policy_error_response(error):
+    """JSON payload for a policy violation, including the settings link."""
+    return {'ok': False, 'error': error,
+            'link': POLICY_SETTINGS_URL, 'link_text': POLICY_LINK_TEXT}
+
+
+def policy_error_message(error):
+    """Policy error as safe HTML with a link to the security settings."""
+    from django.utils.html import escape
+    from django.utils.safestring import mark_safe
+    return mark_safe('{} <a href="{}">{}</a>'.format(
+        escape(error), POLICY_SETTINGS_URL, POLICY_LINK_TEXT))
