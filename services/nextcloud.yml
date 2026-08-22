@@ -148,16 +148,6 @@
         chdir: /symbios/services/nextcloud
         creates: /symbios/services/nextcloud/env
 
-    - name: Patch Redis password into docker-compose.yml
-      ansible.builtin.shell: |
-        redis_pw=$(grep ^REDIS_PASSWORD= env | cut -d= -f2-)
-        if [ -n "$redis_pw" ]; then
-          sed -i "s|redis-server --requirepass .*|redis-server --requirepass $redis_pw|g" docker-compose.yml
-          sed -i "s|REDIS_HOST_PASSWORD=.*|REDIS_HOST_PASSWORD=$redis_pw|g" docker-compose.yml
-        fi
-      args:
-        chdir: /symbios/services/nextcloud
-
     - name: /symbios/services/nextcloud/fulldockerfile.sh (Download full Dockerfile)
       blockinfile:
         path: /symbios/services/nextcloud/fulldockerfile.sh
@@ -412,6 +402,16 @@
 
         backup: yes
       notify: Restart nextcloud
+
+    - name: Patch Redis password into docker-compose.yml
+      ansible.builtin.shell: |
+        redis_pw=$(grep ^REDIS_PASSWORD= env | cut -d= -f2-)
+        if [ -n "$redis_pw" ]; then
+          sed -i "s|redis-server --requirepass .*|redis-server --requirepass $redis_pw|g" docker-compose.yml
+          sed -i "s|REDIS_HOST_PASSWORD=.*|REDIS_HOST_PASSWORD=$redis_pw|g" docker-compose.yml
+        fi
+      args:
+        chdir: /symbios/services/nextcloud
 
     - name: /symbios/base-services/traefik/providers/nextcloud.yml Routing Configuration
       blockinfile:
