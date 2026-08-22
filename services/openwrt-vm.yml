@@ -17,6 +17,7 @@
 # docs:
 #   name: OpenWrt VM
 #   short_description: OpenWrt QEMU/KVM virtual machine with Traefik access
+#   url: "https://openwrt.{{ base_domain }}"
 #   description: |
 #     Deploys an OpenWrt VM (latest stable release) as a QEMU/KVM virtual
 #     machine with UEFI boot, serial console, and two NICs.
@@ -37,9 +38,8 @@
 #       LAN clients: attach to openwrt-lan network for DHCP + internet
 #
 #     First boot: The VM auto-configures WAN (192.168.41.201) and LAN (172.18.0.1)
-#     via uci-defaults. IPv6 is configured by an init script that detects the
-#     host's prefix and assigns a static address. Access LuCI through Traefik
-#     to finish setup.
+#     via uci-defaults. IPv6 is configured via UCI (ip6addr/ip6gw) with a
+#     host-detected prefix. Access LuCI through Traefik to finish setup.
 #   author: Oliver Bohlen
 #   version: '2.0'
 #   license: GPLv3
