@@ -1,79 +1,18 @@
 {% load markdown_extras %}
-{% regroup all_services by group as groups %}
-{% with user_pbs="" %}
+{% regroup sidebar_installed by group as groups %}
 <ul class="nav flex-column mb-2">
   {% for g in groups %}
     {% if g.grouper == 'user-playbooks' %}
       <li class="svc-group-header"><i class="bi bi-journal-plus"></i> Custom User Services</li>
-      {% for svc in g.list %}
-        {% with svc_hc=svc.playbook|hc_name %}
-        <li>
-          <a class="svc-item" href="/services/{{ svc.playbook }}/">
-            <i class="bi bi-box svc-icon"></i>
-            <span class="svc-label">{{ svc.menu_label }}</span>
-            <span class="svc-badges">
-              {% if svc.playbook in installed_playbooks %}
-                <i class="bi bi-check-circle-fill text-success" title="Installed"></i>
-              {% endif %}
-              {% with hc_status=healthcheck_status|dict_get:svc_hc %}
-                {% if hc_status == "ok" %}
-                  <i class="bi bi-heart-pulse text-success" title="Healthcheck OK"></i>
-                {% elif hc_status == "error" %}
-                  <i class="bi bi-exclamation-triangle-fill text-danger" title="Healthcheck error"></i>
-                {% endif %}
-              {% endwith %}
-            </span>
-          </a>
-        </li>
-        {% endwith %}
-      {% endfor %}
+      {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
 
     {% elif g.grouper == 'services' %}
       <li class="svc-group-header"><i class="bi bi-box-seam"></i> Services</li>
-      {% for svc in g.list %}
-        {% with svc_hc=svc.playbook|hc_name %}
-        <li>
-          <a class="svc-item" href="/services/{{ svc.playbook }}/">
-            <i class="bi bi-box svc-icon"></i>
-            <span class="svc-label">{{ svc.menu_label }}</span>
-            <span class="svc-badges">
-              {% if svc.playbook in installed_playbooks %}
-                <i class="bi bi-check-circle-fill text-success" title="Installed"></i>
-              {% endif %}
-              {% with hc_status=healthcheck_status|dict_get:svc_hc %}
-                {% if hc_status == "ok" %}
-                  <i class="bi bi-heart-pulse text-success" title="Healthcheck OK"></i>
-                {% elif hc_status == "error" %}
-                  <i class="bi bi-exclamation-triangle-fill text-danger" title="Healthcheck error"></i>
-                {% endif %}
-              {% endwith %}
-            </span>
-          </a>
-        </li>
-        {% endwith %}
-      {% endfor %}
+      {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
 
     {% elif g.grouper == 'external-services' %}
       <li class="svc-group-header"><i class="bi bi-hdd-network"></i> External Services</li>
-      {% for svc in g.list %}
-        {% with svc_hc=svc.playbook|hc_name %}
-        <li>
-          <a class="svc-item" href="/services/{{ svc.playbook }}/">
-            <i class="bi bi-box svc-icon"></i>
-            <span class="svc-label">{{ svc.menu_label }}</span>
-            <span class="svc-badges">
-              {% with hc_status=healthcheck_status|dict_get:svc_hc %}
-                {% if hc_status == "ok" %}
-                  <i class="bi bi-heart-pulse text-success" title="Healthcheck OK"></i>
-                {% elif hc_status == "error" %}
-                  <i class="bi bi-exclamation-triangle-fill text-danger" title="Healthcheck error"></i>
-                {% endif %}
-              {% endwith %}
-            </span>
-          </a>
-        </li>
-        {% endwith %}
-      {% endfor %}
+      {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
 
     {% elif g.grouper == 'base-services' %}
       <li class="svc-group-header p-0">
@@ -84,28 +23,7 @@
         </a>
       </li>
       <ul class="collapse list-unstyled mb-0" id="sidebar-base-services">
-        {% for svc in g.list %}
-          {% with svc_hc=svc.playbook|hc_name %}
-          <li>
-            <a class="svc-item" href="/services/{{ svc.playbook }}/">
-              <i class="bi bi-box svc-icon"></i>
-              <span class="svc-label">{{ svc.menu_label }}</span>
-              <span class="svc-badges">
-                {% if svc.playbook in installed_playbooks %}
-                  <i class="bi bi-check-circle-fill text-success" title="Installed"></i>
-                {% endif %}
-                {% with hc_status=healthcheck_status|dict_get:svc_hc %}
-                  {% if hc_status == "ok" %}
-                    <i class="bi bi-heart-pulse text-success" title="Healthcheck OK"></i>
-                  {% elif hc_status == "error" %}
-                    <i class="bi bi-exclamation-triangle-fill text-danger" title="Healthcheck error"></i>
-                  {% endif %}
-                {% endwith %}
-              </span>
-            </a>
-          </li>
-          {% endwith %}
-        {% endfor %}
+        {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
       </ul>
 
     {% endif %}
@@ -113,9 +31,38 @@
     <li class="px-3"><small class="text-muted">No services available</small></li>
   {% endfor %}
 </ul>
-<div class="px-3">
+<div class="px-3 pb-2">
+  {% if sidebar_available %}
+  <a class="btn btn-outline-primary btn-sm w-100 svc-add-toggle" data-bs-toggle="collapse"
+     href="#sidebar-add-services" role="button" aria-expanded="false" aria-controls="sidebar-add-services">
+    <i class="bi bi-plus-lg"></i> Add Service
+  </a>
+  <div class="collapse mt-1 mb-2" id="sidebar-add-services">
+    <ul class="list-unstyled mb-0">
+      {% regroup sidebar_available by group as avail_groups %}
+      {% for g in avail_groups %}
+        {% if g.grouper == 'user-playbooks' %}
+          <li class="svc-group-header"><i class="bi bi-journal-plus"></i> Custom User Services</li>
+        {% elif g.grouper == 'services' %}
+          <li class="svc-group-header"><i class="bi bi-box-seam"></i> Services</li>
+        {% elif g.grouper == 'base-services' %}
+          <li class="svc-group-header"><i class="bi bi-gear-wide-connected"></i> Base Services</li>
+        {% else %}
+          <li class="svc-group-header">{{ g.grouper }}</li>
+        {% endif %}
+        {% for svc in g.list %}
+          <li>
+            <a class="svc-item svc-item-add" href="/services/{{ svc.playbook }}/">
+              <i class="bi bi-plus-circle svc-icon"></i>
+              <span class="svc-label">{{ svc.menu_label }}</span>
+            </a>
+          </li>
+        {% endfor %}
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
   <a class="btn btn-outline-success btn-sm w-100" href="/services/playbooks/">
     <i class="bi bi-upload"></i> Custom Playbooks
   </a>
 </div>
-{% endwith %}

@@ -180,6 +180,12 @@
   transition: transform 0.2s;
 }
 .svc-group-toggle[aria-expanded="true"] .svc-chevron { transform: rotate(180deg); }
+/* Non-installed services listed under the "Add Service" toggle */
+.svc-item-add {
+  color: var(--bs-secondary-color);
+  font-size: 0.8rem;
+}
+.svc-item-add .svc-icon { opacity: 0.5; }
 .svc-item {
   display: flex;
   align-items: center;

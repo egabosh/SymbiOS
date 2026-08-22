@@ -650,13 +650,17 @@
                 --clientid=\"nextcloud\" \
                 --clientsecret='${oidc_secret}' \
                 --discoveryuri=\"https://auth.{{ base_domain }}/.well-known/openid-configuration\" \
-                --scope=\"openid profile email groups\" \
                 --mapping-uid=\"preferred_username\" \
                 --mapping-groups=\"groups\" \
                 --unique-uid=\"0\" \
                 Authelia" >nextcloud-data/oidc.sh
               docker compose exec -T -u www-data nextcloud bash oidc.sh
               rm nextcloud-data/oidc.sh
+
+              # Fix scope (occ --scope only keeps last value, set full scope via DB)
+              nc_db_user=$(grep MYSQL_USER= /symbios/services/nextcloud/env | cut -d= -f2-)
+              nc_db_pass=$(grep MYSQL_PASSWORD= /symbios/services/nextcloud/env | cut -d= -f2-)
+              docker exec nextcloud-db mariadb -u\$nc_db_user -p\$nc_db_pass nextcloud-db -e \"UPDATE oc_user_oidc_providers SET scope='openid profile email groups' WHERE identifier='Authelia';\" 2>/dev/null
 
               # SSO default login: with exactly one OIDC provider and allow_multiple_user_backends=0
               # unauthenticated browser visits to /login are redirected to Authelia directly
