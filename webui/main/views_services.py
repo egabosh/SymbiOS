@@ -61,8 +61,8 @@ def _render_service_url(raw_url):
 PROTECTED_GROUPS = {'base-services'}
 
 # Sidebar group display order: user-playbooks on top, then services, then
-# base-services at the bottom.
-_GROUP_ORDER = ('user-playbooks', 'services', 'base-services')
+# external-services; base-services is collapsed at the very bottom.
+_GROUP_ORDER = ('user-playbooks', 'services', 'external-services', 'base-services')
 
 
 def _order_catalog(catalog):
