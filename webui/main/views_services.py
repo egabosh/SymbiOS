@@ -61,7 +61,7 @@ def _render_service_url(raw_url):
 PROTECTED_GROUPS = {'base-services'}
 
 # Sidebar group display order: user-playbooks on top, then services, then
-# external-services; base-services is collapsed at the very bottom.
+# external-services; base-services collapsed at the very bottom.
 _GROUP_ORDER = ('user-playbooks', 'services', 'external-services', 'base-services')
 
 
@@ -135,14 +135,13 @@ def _sidebar_context(catalog):
         if svc_names & running_names:
             installed.add(pb)
     ordered = _order_catalog(catalog)
-    # The sidebar lists only installed services; everything else is reachable
-    # via the collapsible "Add Service" section. External services have no
-    # install concept and are therefore always shown.
+    # The sidebar lists installed services only; everything else is reachable
+    # via the collapsible "Add Service" section at the top. Base services are
+    # shown as a collapsible group at the bottom but never in the Add list.
     sidebar_installed = [i for i in ordered
-                         if i.get('group') == 'external-services'
-                         or i.get('playbook', '') in installed]
+                         if i.get('playbook', '') in installed]
     sidebar_available = [i for i in ordered
-                         if i.get('group') != 'external-services'
+                         if i.get('group') != 'base-services'
                          and i.get('playbook', '') not in installed]
     return {
         'installed_playbooks': installed,
