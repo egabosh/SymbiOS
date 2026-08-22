@@ -94,17 +94,19 @@
           # Change to service directory
           cd /symbios/services/nextcloud
 
-          # Generate random passwords for Nextcloud admin and database
+          # Generate random passwords for Nextcloud admin, database, and Redis
           g_ncadminpassword=$(pwgen -s 32 1)
           g_mysqluser=$(pwgen -s 32 1)
           g_mysqlpassword=$(pwgen -s 32 1)
+          g_redispassword=$(pwgen -s 32 1)
 
           # Create env file for Nextcloud if not exists
           if [ ! -f env ]
           then
             echo "MYSQL_USER=!MYSQLUSER!
           MYSQL_PASSWORD=!MYSQLPASSWORD!
-          NEXTCLOUD_ADMIN_PASSWORD=!NCADMINPASSWORD!" >env
+          NEXTCLOUD_ADMIN_PASSWORD=!NCADMINPASSWORD!
+          REDIS_PASSWORD=!REDISPASSWORD!" >env
           fi
 
           # Create env file for MariaDB if not exists
@@ -129,6 +131,7 @@
           sed -i "s/\!MYSQLUSER\!/$g_mysqluser/g" env env.db env.phpmyadmin
           sed -i "s/\!MYSQLPASSWORD\!/$g_mysqlpassword/g" env env.db env.phpmyadmin
           sed -i "s/\!NCADMINPASSWORD\!/$g_ncadminpassword/g" env
+          sed -i "s/\!REDISPASSWORD\!/$g_redispassword/g" env
         backup: yes
         validate: /bin/bash -n %s
       notify: run genpw.sh
@@ -144,6 +147,16 @@
       args:
         chdir: /symbios/services/nextcloud
         creates: /symbios/services/nextcloud/env
+
+    - name: Patch Redis password into docker-compose.yml
+      ansible.builtin.shell: |
+        redis_pw=$(grep ^REDIS_PASSWORD= env | cut -d= -f2-)
+        if [ -n "$redis_pw" ]; then
+          sed -i "s|redis-server --requirepass .*|redis-server --requirepass $redis_pw|g" docker-compose.yml
+          sed -i "s|REDIS_HOST_PASSWORD=.*|REDIS_HOST_PASSWORD=$redis_pw|g" docker-compose.yml
+        fi
+      args:
+        chdir: /symbios/services/nextcloud
 
     - name: /symbios/services/nextcloud/fulldockerfile.sh (Download full Dockerfile)
       blockinfile:
@@ -293,6 +306,7 @@
                 - NEXTCLOUD_TRUSTED_DOMAINS=nextcloud.{{ base_domain }}
                 - TRUSTED_PROXIES={{ trusted_proxies_cidr }}
                 - REDIS_HOST=nextcloud-redis
+                - REDIS_HOST_PASSWORD=$${REDIS_PASSWORD}
                 - SMTP_HOST=mail.{{ base_domain }}
                 - SMTP_PORT=25
                 - MAIL_FROM_ADDRESS=nextcloud
@@ -328,6 +342,8 @@
               image: redis:latest
               container_name: nextcloud-redis
               restart: unless-stopped
+              command: redis-server --requirepass $${REDIS_PASSWORD}
+              env_file: env
               networks:
                 - nextcloud
 
@@ -609,6 +625,17 @@
             docker compose exec -T -u www-data nextcloud ./occ config:system:set overwrite.cli.url --value="https://nextcloud.{{ base_domain }}"
             docker compose exec -T -u www-data nextcloud ./occ config:system:set trusted_proxies 1 --value="{{ trusted_proxies_cidr }}"
             docker compose exec -T -u www-data nextcloud ./occ config:system:set trusted_proxies 2 --value="fdaa:a192:b168:cd41::/64"
+          fi
+
+          # Redis password
+          if ! [ -s app.redis.configured ]
+          then
+            if [ -s /symbios/services/nextcloud/env ]
+            then
+              redis_password=$(grep ^REDIS_PASSWORD= /symbios/services/nextcloud/env | cut -d= -f2-)
+              docker compose exec -T -u www-data nextcloud ./occ config:system:set redis password --value="${redis_password}"
+              date >> app.redis.configured
+            fi
           fi
 
           # OIDC via Authelia (user_oidc)

@@ -99,8 +99,8 @@ Debian server from a WebUI.
   for this architecture.
 
 ### Docker Socket Access (Traefik)
-- Required for Traefik's Docker provider. Compromise of Traefik = root.
-  This is accepted because Traefik is a base service managed by the admin.
+- **Not applicable**: Traefik does NOT mount the Docker socket.
+- Only file-based providers are configured; no Docker provider needed.
 
 ### M2: Signed Cookies (not encrypted)
 - Session data is stored in signed cookies (HMAC), not encrypted.
@@ -112,8 +112,9 @@ Debian server from a WebUI.
 - Traffic never leaves the host. LDAPS available via Traefik.
 
 ### M7: Docker Socket for Traefik
-- Required for automatic service discovery. Industry standard.
-- Consider Docker socket proxy for enhanced isolation.
+- **Status**: Not applicable - Traefik does NOT mount the Docker socket.
+- Traefik uses only file-based providers (`--providers.file=true`).
+- No Docker provider is configured; service routes are static YAML files.
 
 ### M8: WebUI Port 0.0.0.0:8080
 - Bound to all interfaces but restricted by UFW to private networks.
@@ -140,16 +141,19 @@ Debian server from a WebUI.
 - Removed from PATH after setup completes.
 
 ### M17: Redis Without Authentication
-- Isolated on Docker internal networks.
-- Only accessible from authorized containers.
+- **Status**: Resolved - Redis password implemented
+- Each service Redis instance uses a randomly generated password.
+- Password stored in service env file, passed via `REDIS_HOST_PASSWORD`.
+- Isolated on Docker internal networks, but defense-in-depth applied.
 
 ### M18: Collabora SYS_ADMIN Capability
 - Required by Collabora for document conversion sandbox.
 - Contained within Docker network.
 
-### L2: TLS 1.2 Minimum
-- TLS 1.2 remains secure and widely supported.
-- Excluding it would break compatibility with older clients.
+### L2: TLS 1.3 Minimum
+- **Status**: Resolved - TLS 1.3 enforced
+- TLS 1.2 support removed. Only TLS 1.3 cipher suites configured.
+- Supported by all modern browsers (Chrome 70+, Firefox 63+, Safari 12.1+).
 
 ### L3: No LDAP Password Policy
 - **Status**: Resolved - configurable password policy implemented
