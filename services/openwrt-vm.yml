@@ -770,6 +770,27 @@
 
     # ── Traefik integration ──────────────────────────────────────────────
     # Traefik file-provider route for LuCI (Authelia-protected)
+    - name: Create LDAP group for openwrt-vm access control
+      ansible.builtin.shell: |
+        "{{ git_root }}/scripts/symbios-ldap-groups.sh" --create --name openwrt-vm
+        "{{ git_root }}/scripts/symbios-ldap-groups.sh" --add-user --name openwrt-vm --uid admin
+      changed_when: false
+      failed_when: false
+
+    - name: write Authelia access_control for openwrt-vm group restriction
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK openwrt-vm ACCESS CONTROL"
+        block: |2
+              - domain: "openwrt.{{ base_domain }}"
+                policy: two_factor
+                subject:
+                  - 'group:openwrt-vm'
+
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+      notify: Restart authelia
+
     - name: /symbios/base-services/traefik/providers/openwrt-vm.yml Traefik routing
       ansible.builtin.blockinfile:
         path: /symbios/base-services/traefik/providers/openwrt-vm.yml
@@ -830,3 +851,12 @@
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /symbios/base-services/traefik
+
+    - name: Restart authelia
+      ansible.builtin.shell: |
+        if docker compose down
+        then
+          docker compose up -d
+        fi
+      args:
+        chdir: /symbios/base-services/authelia

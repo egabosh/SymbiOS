@@ -249,6 +249,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+                  - "authelia@file"
             services:
               paperless:
                 loadBalancer:
@@ -295,6 +296,21 @@
             access_token_signed_response_alg: 'none'
             userinfo_signed_response_alg: 'none'
             token_endpoint_auth_method: 'client_secret_post'
+        backup: yes
+      notify: Restart authelia
+
+    - name: write Authelia access_control for paperless group restriction
+      blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK paperless ACCESS CONTROL"
+        block: |2
+              - domain: "paperless.{{ base_domain }}"
+                policy: two_factor
+                subject:
+                  - 'group:paperless-users'
+                  - 'group:paperless-admins'
+
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         backup: yes
       notify: Restart authelia
 
