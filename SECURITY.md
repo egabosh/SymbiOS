@@ -98,23 +98,10 @@ Debian server from a WebUI.
   never leaves the host. TLS would add complexity without security benefit
   for this architecture.
 
-### Docker Socket Access (Traefik)
-- **Not applicable**: Traefik does NOT mount the Docker socket.
-- Only file-based providers are configured; no Docker provider needed.
-
 ### M2: Signed Cookies (not encrypted)
 - Session data is stored in signed cookies (HMAC), not encrypted.
 - Only authorization flags (is_staff, force_password_change) are stored.
 - No secrets or passwords in session data.
-
-### M5: LDAP Unencrypted (Port 389)
-- LDAP only listens on 127.0.0.1:389 inside the Docker network.
-- Traffic never leaves the host. LDAPS available via Traefik.
-
-### M7: Docker Socket for Traefik
-- **Status**: Not applicable - Traefik does NOT mount the Docker socket.
-- Traefik uses only file-based providers (`--providers.file=true`).
-- No Docker provider is configured; service routes are static YAML files.
 
 ### M8: WebUI Port 0.0.0.0:8080
 - Bound to all interfaces but restricted by UFW to private networks.
@@ -140,29 +127,9 @@ Debian server from a WebUI.
 - Only used for initial SSH key deployment.
 - Removed from PATH after setup completes.
 
-### M17: Redis Without Authentication
-- **Status**: Resolved - Redis password implemented
-- Each service Redis instance uses a randomly generated password.
-- Password stored in service env file, passed via `REDIS_HOST_PASSWORD`.
-- Isolated on Docker internal networks, but defense-in-depth applied.
-
 ### M18: Collabora SYS_ADMIN Capability
 - Required by Collabora for document conversion sandbox.
 - Contained within Docker network.
-
-### L2: TLS 1.3 Minimum
-- **Status**: Resolved - TLS 1.3 enforced
-- TLS 1.2 support removed. Only TLS 1.3 cipher suites configured.
-- Supported by all modern browsers (Chrome 70+, Firefox 63+, Safari 12.1+).
-
-### L3: No LDAP Password Policy
-- **Status**: Resolved - configurable password policy implemented
-- Password policy is configurable in the WebUI (Settings > Security) with levels:
-  none, low, medium, high, paranoid
-- Enforced at: initial admin password change, user creation, admin password
-  reset, and via `symbios-ldap-user.sh`
-- Validation implemented in `utils/password_policy.py` (shared between WebUI
-  views and CLI script)
 
 ### L4: SSH StrictHostKeyChecking
 - Test scripts use StrictHostKeyChecking=no for dev environments.
