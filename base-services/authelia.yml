@@ -120,6 +120,23 @@
       changed_when: false
       no_log: true
 
+    # Ensure a Redis password exists in the env file (persistent session store)
+    - name: Ensure redis_password exists in env file
+      ansible.builtin.shell: |
+        if ! grep -q '^redis_password=' "{{ service_path }}/env"
+        then
+          echo "redis_password=$(pwgen -s 32 1)" >> "{{ service_path }}/env"
+        fi
+      changed_when: false
+      no_log: true
+
+    # Read redis password from env file
+    - name: Get redis_password from file
+      shell: "grep ^redis_password= {{ service_path }}/env | cut -d= -f2-"
+      register: redis_password
+      changed_when: false
+      no_log: true
+
     # Read LDAP admin password from the OpenLDAP env file
     - name: Get LDAP admin password from file
       shell: "grep ^LDAP_ADMIN_PASSWORD= {{ ldap_service_path }}/env.openldap | cut -d= -f2-"
@@ -170,6 +187,11 @@
               - domain: "{{ ddns_host }}"
                 authelia_url: https://{{ authelia_domain }}
               {% endif %}
+
+            redis:
+              host: symbios-base-authelia-redis
+              port: 6379
+              password: "{{ redis_password.stdout }}"
 
           storage:
             local:
@@ -308,12 +330,25 @@
               image: authelia/authelia:latest
               container_name: symbios-base-authelia
               restart: unless-stopped
+              depends_on:
+                - redis
               networks:
                 - symbios_base_services
               volumes:
                 - ./authelia-data:/config
                 - /etc/localtime:/etc/localtime:ro
                 - /etc/hosts:/etc/hosts:ro
+
+            redis:
+              image: redis:latest
+              container_name: symbios-base-authelia-redis
+              restart: unless-stopped
+              command: redis-server --requirepass {{ redis_password.stdout }} --appendonly yes
+              volumes:
+                - ./redis-data:/data
+                - /etc/localtime:/etc/localtime:ro
+              networks:
+                - symbios_base_services
 
           networks:
             symbios_base_services:
