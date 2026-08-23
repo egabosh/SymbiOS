@@ -192,7 +192,6 @@
                   servers:
                     - url: "http://jellyfin:8096"
         backup: yes
-      notify: Restart traefik
 
     - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-jellyfin.check
       ansible.builtin.blockinfile:
@@ -278,9 +277,4 @@
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /symbios/services/jellyfin
-
-    - name: Restart traefik
-      ansible.builtin.shell: docker compose restart traefik
-      args:
-        chdir: /symbios/base-services/traefik
 

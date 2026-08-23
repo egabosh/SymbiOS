@@ -144,7 +144,6 @@
                   servers:
                     - url: "http://navidrome:4533"
         backup: yes
-      notify: Restart traefik
 
     - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-navidrome.check
       ansible.builtin.blockinfile:
@@ -186,9 +185,4 @@
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /symbios/services/navidrome
-
-    - name: Restart traefik
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/base-services/traefik
 

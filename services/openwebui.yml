@@ -339,7 +339,6 @@
                   servers:
                     - url: "http://openwebui:8080"
         backup: yes
-      notify: Restart traefik
 
 #######################
 #### OIDC Authelia ####
@@ -618,11 +617,6 @@
         chdir: /symbios/services/openwebui
 
     - name: Restart authelia
-      ansible.builtin.shell: docker compose down && docker compose up -d
+      ansible.builtin.shell: docker compose restart
       args:
         chdir: /symbios/base-services/authelia
-
-    - name: Restart traefik
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/base-services/traefik
