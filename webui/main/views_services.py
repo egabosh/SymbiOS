@@ -291,19 +291,24 @@ def services_detail(request, playbook):
         uninstall_buttons = [
             {'name': 'uninstall-full', 'label': 'Uninstall',
              'cls': _ACTION_CLS['uninstall-full'],
-             'confirm': 'WARNING: The entire service including ALL '
-                        'data (program + user data) will be permanently deleted! '
-                        'Are you REALLY sure?'},
+             'confirm': 'WARNING: The service will be stopped, its container '
+                        'images removed and the ENTIRE directory including '
+                        'ALL data (program + user data) will be permanently '
+                        'deleted! Are you REALLY sure?'},
             {'name': 'uninstall-program', 'label': 'Uninstall (keep data)',
              'cls': _ACTION_CLS['uninstall-program'],
-             'confirm': 'The service program will be completely removed. '
-                        'Only user data will be kept. '
+             'confirm': 'The service will be stopped and its container '
+                        'images plus routing/monitoring components removed. '
+                        'The service directory with ALL data (including the '
+                        'compose file) is kept for a later reinstall. '
                         'Continue?'},
             {'name': 'uninstall-reset', 'label': 'Delete Userdata',
              'cls': _ACTION_CLS['uninstall-reset'],
-             'confirm': 'WARNING: ALL user data of the service will be '
-                        'deleted! The program will remain and be '
-                        'restarted. Are you REALLY sure?'},
+             'confirm': 'WARNING: The service will be stopped and the ENTIRE '
+                        'service directory including ALL data will be '
+                        'deleted! Afterwards the playbook re-provisions the '
+                        'service from scratch (this can take several '
+                        'minutes). Are you REALLY sure?'},
         ]
     logs = (item.get('docs') or {}).get('service_control', {}).get('logs', []) or []
     log_units = [{'name': l.get('name'), 'type': l.get('type', 'log')} for l in logs]

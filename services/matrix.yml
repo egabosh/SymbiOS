@@ -42,14 +42,11 @@
 #       command: docker compose -f /symbios/services/matrix/docker-compose.yml logs -f --tail=100
 #   uninstall:
 #     stop: docker compose -f /symbios/services/matrix/docker-compose.yml down
-#     restart: docker compose -f /symbios/services/matrix/docker-compose.yml up -d
 #     program_paths:
 #       - /symbios/services/matrix/
 #       - /symbios/base-services/traefik/providers/matrix.yml
 #       - /usr/local/sbin/runchecks.d/symbios-healthcheck-matrix.check
 #       - /usr/local/sbin/runchecks.d/matrix.check
-#     userdata_paths:
-#       - /symbios/services/matrix/data/
 #   actions:
 #     start: docker compose -f /symbios/services/matrix/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/matrix/docker-compose.yml down

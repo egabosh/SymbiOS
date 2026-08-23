@@ -43,13 +43,17 @@
 #       command: docker compose -f /symbios/services/home-assistant/docker-compose.yml logs -f --tail=100
 #   uninstall:
 #     stop: docker compose -f /symbios/services/home-assistant/docker-compose.yml down
-#     restart: docker compose -f /symbios/services/home-assistant/docker-compose.yml up -d
 #     program_paths:
 #       - /symbios/services/home-assistant/
 #       - /symbios/base-services/traefik/providers/home-assistant.yml
 #       - /usr/local/sbin/runchecks.d/symbios-healthcheck-home-assistant.check
-#     userdata_paths:
-#       - /symbios/services/home-assistant/config/
+#       - /usr/local/bin/ha_pingcheck
+#       - /etc/systemd/system/ha_pingcheck.service
+#     commands:
+#       - systemctl disable --now ha_pingcheck.service
+#       - ufw delete allow in on iot0 to any port 8123 proto tcp
+#       - ufw delete allow 5353/udp
+#       - ufw delete allow in on iot0 to any port 8889 proto tcp
 #   actions:
 #     start: docker compose -f /symbios/services/home-assistant/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/home-assistant/docker-compose.yml down

@@ -39,15 +39,12 @@
 #       command: docker compose -f /symbios/services/kodidb/docker-compose.yml logs -f --tail=100
 #   uninstall:
 #     stop: docker compose -f /symbios/services/kodidb/docker-compose.yml down
-#     restart: docker compose -f /symbios/services/kodidb/docker-compose.yml up -d
 #     program_paths:
 #       - /symbios/services/kodidb/
 #       - /symbios/base-services/traefik/providers/kodidb.yml
 #       - /usr/local/sbin/runchecks.d/symbios-healthcheck-kodidb.check
 #       - /usr/local/sbin/autoupdate.d/kodidb-ssl.update
 #       - /usr/local/sbin/backup.d/kodidb-docker.backup
-#     userdata_paths:
-#       - /symbios/services/kodidb/db-data/
 #   actions:
 #     start: docker compose -f /symbios/services/kodidb/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/kodidb/docker-compose.yml down

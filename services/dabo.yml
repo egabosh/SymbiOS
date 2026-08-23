@@ -41,12 +41,10 @@
 #       command: docker compose -f /symbios/services/dabo/docker-compose.yml logs -f --tail=100
 #   uninstall:
 #     stop: docker compose -f /symbios/services/dabo/docker-compose.yml down
-#     restart: docker compose -f /symbios/services/dabo/docker-compose.yml up -d
 #     program_paths:
 #       - /symbios/services/dabo/
 #       - /symbios/base-services/traefik/providers/dabo.yml
 #       - /usr/local/sbin/runchecks.d/symbios-healthcheck-dabo.check
-#     userdata_paths: []
 #   actions:
 #     start: docker compose -f /symbios/services/dabo/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/dabo/docker-compose.yml down

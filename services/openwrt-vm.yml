@@ -57,7 +57,6 @@
 #       status: virsh list --name | grep -q openwrt
 #   uninstall:
 #     stop: virsh destroy openwrt; virsh undefine openwrt --nvram
-#     restart: virsh destroy openwrt; virsh start openwrt
 #     program_paths:
 #       - /symbios/services/openwrt-vm/
 #   actions:

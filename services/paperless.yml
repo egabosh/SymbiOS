@@ -42,17 +42,13 @@
 #       command: docker compose -f /symbios/services/paperless/docker-compose.yml logs -f --tail=100
 #   uninstall:
 #     stop: docker compose -f /symbios/services/paperless/docker-compose.yml down
-#     restart: docker compose -f /symbios/services/paperless/docker-compose.yml up -d
 #     program_paths:
 #       - /symbios/services/paperless/
 #       - /symbios/base-services/traefik/providers/paperless.yml
 #       - /usr/local/sbin/runchecks.d/symbios-healthcheck-paperless.check
-#     userdata_paths:
-#       - /symbios/services/paperless/data/
-#       - /symbios/services/paperless/media/
-#       - /symbios/services/paperless/export/
-#       - /symbios/services/paperless/consume/
-#       - /symbios/services/paperless/redisdata/
+#       - /etc/samba/smb-{{ ansible_facts['hostname'] }}.conf
+#     commands:
+#       - userdel paperless
 #   actions:
 #     start: docker compose -f /symbios/services/paperless/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/paperless/docker-compose.yml down
