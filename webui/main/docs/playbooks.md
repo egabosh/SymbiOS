@@ -221,9 +221,29 @@ networks:
 Every service should deploy a healthcheck script to
 `/usr/local/sbin/runchecks.d/symbios-healthcheck-<name>.check` (where `<name>`
 is the playbook filename without `.yml`). The `runchecks.sh` daemon iterates
-over all `*.check` files every 5 minutes.
+over all `*.check` files every 5 minutes. The name mapping matters: the WebUI
+sidebar derives its health icon from the playbook basename.
 
 ### Web-facing services (HTTP)
+
+For HTTP services include the shared task file `services/tasks/healthcheck.yml`
+(same pattern as `tasks/oidc-groups.yml`; the path is relative to the
+playbook's directory):
+
+```yaml
+    # Required vars in the playbook: service_name, service_domain
+    # Optional var: healthcheck_url (default: https://{{ service_domain }})
+    - name: Deploy healthcheck
+      include_tasks: tasks/healthcheck.yml
+
+    # Variant with a custom probe URL (e.g. openwebui on ai.<base_domain>):
+    - name: Deploy healthcheck
+      include_tasks: tasks/healthcheck.yml
+      vars:
+        healthcheck_url: "https://ai.{{ base_domain }}"
+```
+
+The shared task deploys this check (5-minute cooldown, HTTP `>= 500` = error):
 
 ```yaml
     - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
@@ -236,7 +256,7 @@ over all `*.check` files every 5 minutes.
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # Healthcheck for {{ service_name }}
-          g_svc_url="https://{{ service_domain }}"
+          g_svc_url="{{ healthcheck_url | default('https://' ~ service_domain) }}"
           g_check_file="${g_tmp}/symbios-healthcheck-{{ service_name }}"
           if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
           then
@@ -254,6 +274,9 @@ over all `*.check` files every 5 minutes.
 
 ### Non-web services (Docker containers)
 
+Services without a web UI deploy an inline check with the same 5-minute
+cooldown wrapper (see `rustdesk.yml`, `sftp-share.yml`, `openwrt-vm.yml`):
+
 ```yaml
     - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
       ansible.builtin.blockinfile:
@@ -265,6 +288,12 @@ over all `*.check` files every 5 minutes.
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # Healthcheck for {{ service_name }} (container)
+          g_check_file="${g_tmp}/symbios-healthcheck-{{ service_name }}"
+          if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+          then
+            return 2>/dev/null || true
+          fi
+          date > "$g_check_file"
           if ! docker ps | grep -q "{{ service_name }}"
           then
             g_echo_error "Healthcheck failed for {{ service_name }}: container not running"
@@ -275,7 +304,11 @@ over all `*.check` files every 5 minutes.
 
 ### Conventions
 
-- File name: `symbios-healthcheck-<name>.check`
+- File name: `symbios-healthcheck-<name>.check` (`<name>` must match the
+  playbook filename without `.yml`, or the sidebar icon will not appear)
+- Mode `0400` (checks are sourced by runchecks.sh as root, never executed)
+- **Never call `exit` in a `.check` script** - runchecks.sh sources every
+  check, so an `exit` kills the whole health daemon mid-loop
 - Uses `g_echo_error` from gaboshlib for error reporting (logged to syslog)
 - Uses `g_tmp` for 5-minute cooldown file to avoid redundant checks
 - HTTP status `>= 500` or connection failure = error; `200`-`499` = healthy

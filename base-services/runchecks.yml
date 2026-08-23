@@ -34,13 +34,15 @@
 #       type: systemd
 #       unit: runchecks.service
 #       status: systemctl is-active runchecks.service
-#     - name: runchecks
+#     - name: runchecks-watchdog
 #       type: systemd
-#       unit: runchecks.timer
-#       status: systemctl is-active runchecks.timer
+#       unit: runchecks-watchdog.timer
+#       status: systemctl is-active runchecks-watchdog.timer
 #     logs:
 #     - name: runchecks.service
 #       command: journalctl -fu runchecks.service -n 1000
+#     - name: runchecks-watchdog.timer
+#       command: journalctl -u runchecks-watchdog.service -n 1000
 #   actions:
 #     start: systemctl start runchecks.service
 #     stop: systemctl stop runchecks.service
@@ -91,13 +93,61 @@
           Environment=PATH={{ git_root }}/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
           ExecStartPre=/bin/bash -c '[[ -x /symbios/git/SymbiOS/scripts/runchecks.sh ]] || exit 1'
           ExecStart={{ git_root }}/scripts/runchecks.sh
-          Restart=on-failure
+          Restart=always
           RestartSec=10
           
           [Install]
           WantedBy=multi-user.target
       notify:
       - Restart systemd
+
+    - name: /etc/systemd/system/runchecks-watchdog.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/runchecks-watchdog.service
+        mode: "0444"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=Watchdog for the runchecks health daemon
+          After=runchecks.service
+
+          [Service]
+          Type=oneshot
+          User=root
+          Environment=PATH={{ git_root }}/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+          ExecStartPre=/bin/bash -c '[[ -x {{ git_root }}/scripts/runchecks-watchdog.sh ]] || exit 1'
+          ExecStart={{ git_root }}/scripts/runchecks-watchdog.sh
+      notify:
+      - Restart systemd
+
+    - name: /etc/systemd/system/runchecks-watchdog.timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/runchecks-watchdog.timer
+        mode: "0444"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=Periodically check that the runchecks daemon is alive
+
+          [Timer]
+          OnBootSec=10min
+          OnUnitActiveSec=10min
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+      notify:
+      - Restart systemd
+
+    # The watchdog runs independently of runchecks.service, so it can detect
+    # (and restart) a dead daemon - closing the self-monitoring blind spot.
+    - name: Enable runchecks-watchdog.timer
+      ansible.builtin.systemd:
+        name: runchecks-watchdog.timer
+        state: started
+        enabled: true
 
     - name: 'disable via systemd - started by rc.local'
       command: systemctl disable runchecks
