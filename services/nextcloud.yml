@@ -473,7 +473,6 @@
                   servers:
                     - url: "http://nextcloud-collabora:9980"
         backup: yes
-      notify: Restart traefik
 
 
     #######################
@@ -854,16 +853,7 @@
       notify: Restart nextcloud
 
     - name: Restart authelia
-      ansible.builtin.shell: |
-        if docker compose down
-        then
-          docker compose up -d
-        fi
+      ansible.builtin.shell: docker compose restart
       args:
         chdir: /symbios/base-services/authelia
-
-    - name: Restart traefik
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/base-services/traefik
 

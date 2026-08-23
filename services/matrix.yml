@@ -607,7 +607,6 @@
                   servers:
                     - url: "http://matrix-web:80"
         backup: yes
-      notify: Restart traefik
 
     ##########################
     #### OIDC Authelia   ####
@@ -895,17 +894,8 @@
       args:
         chdir: /symbios/services/matrix
 
-    - name: Restart traefik
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/base-services/traefik
-
     - name: Restart authelia
-      ansible.builtin.shell: |
-        if docker compose down
-        then
-          docker compose up -d
-        fi
+      ansible.builtin.shell: docker compose restart
       args:
         chdir: /symbios/base-services/authelia
 

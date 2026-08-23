@@ -275,7 +275,6 @@
         backup: yes        
       notify:
         - Restart mariadb
-        - Restart traefik
 
     - name: /symbios/base-services/traefik/providers/kodidb.yml Traefik File Provider
       blockinfile:
@@ -418,17 +417,8 @@
       args:
         chdir: /symbios/services/kodidb
 
-    - name: Restart traefik
-      ansible.builtin.shell: docker compose restart traefik
-      args:
-        chdir: /symbios/base-services/traefik
-
     - name: Restart authelia
-      ansible.builtin.shell: |
-        if docker compose down
-        then
-          docker compose up -d
-        fi
+      ansible.builtin.shell: docker compose restart
       args:
         chdir: /symbios/base-services/authelia
 
