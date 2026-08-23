@@ -719,7 +719,7 @@
         validate: /bin/bash -n %s
       notify: run nextcloud.init
 
-    - name: Run nextcloud.init after install
+    - name: Run nextcloud.init after install - can take a long time while installing addons
       ansible.builtin.shell: bash /symbios/services/nextcloud/nextcloud.init.sh
       args:
         chdir: /symbios/services/nextcloud
