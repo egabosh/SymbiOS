@@ -520,7 +520,7 @@
 
 
     - name: Start nextcloud
-      ansible.builtin.shell: docker compose up -d
+      ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /symbios/services/nextcloud
         creates: /symbios/services/nextcloud/nextcloud-data/config/config.php
@@ -566,25 +566,37 @@
         block: |
           # waiting for started Nextcloud (Login-Screen)
           # "direct=1" keeps the regular login page reachable also when SSO auto-redirect is enabled
-          until wget "nextcloud.{{ base_domain }}/login?direct=1" -O - | grep -q Login
-          do
-            echo "Waiting for Login screen..."
-            # restart traefik on Problems with ACME/letsencrypt
-            if [ -f /symbios/base-services/traefik/docker-compose.yml ]
-            then
-              if docker compose -f /symbios/base-services/traefik/docker-compose.yml logs | grep -E -q "nextcloud.{{ base_domain }}.+error.+acme-challenge"
-              then
-                docker compose -f /symbios/base-services/traefik/docker-compose.yml up -d --force-recreate
-              fi
-            fi
-            sleep 10
-          done
+          #until wget "nextcloud.{{ base_domain }}/login?direct=1" -O - | grep -q Login
+          #do
+          #  echo "Waiting for Login screen..."
+          #  # restart traefik on Problems with ACME/letsencrypt
+          #  if [ -f /symbios/base-services/traefik/docker-compose.yml ]
+          #  then
+          #    if docker compose -f /symbios/base-services/traefik/docker-compose.yml logs | grep -E -q "nextcloud.{{ base_domain }}.+error.+acme-challenge"
+          #    then
+          #      docker compose -f /symbios/base-services/traefik/docker-compose.yml up -d --force-recreate
+          #      docker compose up -d --force-recreate
+          #    fi
+          #  fi
+          #  sleep 120
+          #done
 
           # Change to service directory
           if ! cd /symbios/services/nextcloud
           then
             exit 1
           fi
+
+          # Wait for Nextcloud
+          i=0
+          docker compose up -d
+          until docker compose exec -T -u www-data nextcloud ./occ status >/dev/null
+          do
+            [[ $i -gt 30 ]] && exit 2
+            echo "Waiting for Nextcloud"
+            sleep 10
+            ((i++))
+          done
 
           # Install and enable Nextcloud apps
           for app in admin_audit bookmarks calendar contacts files_external gpoddersync impersonate maps news notes oauth2 passwords phonetrack photos spreed tasks twofactor_backupcodes twofactor_totp richdocuments user_oidc user_ldap
