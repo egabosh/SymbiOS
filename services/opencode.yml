@@ -43,14 +43,10 @@
 #       command: docker compose -f /symbios/services/opencode/docker-compose.yml logs -f --tail=100
 #   uninstall:
 #     stop: docker compose -f /symbios/services/opencode/docker-compose.yml down
-#     restart: docker compose -f /symbios/services/opencode/docker-compose.yml up -d
 #     program_paths:
 #       - /symbios/services/opencode/
 #       - /symbios/base-services/traefik/providers/opencode.yml
 #       - /usr/local/sbin/runchecks.d/symbios-healthcheck-opencode.check
-#     userdata_paths:
-#       - /symbios/services/opencode/opencode-config/
-#       - /symbios/services/opencode/opencode-data/
 #   actions:
 #     start: docker compose -f /symbios/services/opencode/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/opencode/docker-compose.yml down

@@ -296,6 +296,11 @@ function f_check_no_dir {
   f_ssh_try "test ! -d '$f_path' && echo yes || echo no" 2>/dev/null | grep -q "yes"
 }
 
+function f_check_no_path {
+  local f_path="$1"
+  f_ssh_try "test ! -e '$f_path' && echo yes || echo no" 2>/dev/null | grep -q "yes"
+}
+
 function f_check_dir_exists {
   local f_path="$1"
   f_ssh_try "test -d '$f_path' && echo yes || echo no" 2>/dev/null | grep -q "yes"
@@ -473,6 +478,11 @@ do
   # Extract program_paths and userdata_paths arrays
   f_program_paths=$(f_json_get_array "$f_svc_json" ".uninstall.program_paths")
   f_userdata_paths=$(f_json_get_array "$f_svc_json" ".uninstall.userdata_paths")
+
+  # Expand template variables used in docs paths (hostname-dependent paths)
+  f_hostname=$(f_ssh_try "hostname" 2>/dev/null | head -1)
+  f_program_paths="${f_program_paths//\{\{ ansible_facts['hostname'] \}\}/${f_hostname}}"
+  f_program_paths="${f_program_paths//\{\{ ansible_hostname \}\}/${f_hostname}}"
 
   # Apply service filter
   if [[ ${#g_filter_services[@]} -gt 0 ]]
@@ -685,28 +695,16 @@ do
     f_result "Phase 4: Containers removed" FAIL "Containers still running"
   fi
 
-  # Verify all program_paths are removed
-  # Note: symbios-uninstall.sh removes files inside directories but keeps the
-  # directory structure for program_paths. Only userdata_paths uses rm -rf.
+  # Verify all program_paths are removed completely (recursive deletion)
   f_pp_removed=0
   f_pp_total=0
   while IFS= read -r f_path
   do
     [[ -z "$f_path" ]] && continue
     f_pp_total=$((f_pp_total + 1))
-    if [[ "$f_path" == */ ]]
+    if f_check_no_path "$f_path"
     then
-      # Directory: check that it's empty (no files/symlinks inside)
-      if f_check_dir_empty "$f_path"
-      then
-        f_pp_removed=$((f_pp_removed + 1))
-      fi
-    else
-      # File: check that it's gone
-      if ! f_check_file_exists "$f_path"
-      then
-        f_pp_removed=$((f_pp_removed + 1))
-      fi
+      f_pp_removed=$((f_pp_removed + 1))
     fi
   done <<< "$f_program_paths"
 
@@ -715,9 +713,17 @@ do
     f_result "Phase 4: program_paths removed" SKIP "No program_paths defined"
   elif [[ $f_pp_removed -eq $f_pp_total ]]
   then
-    f_result "Phase 4: program_paths removed ($f_pp_total/$f_pp_total)" PASS
+    f_result "Phase 4: program_paths removed ($f_pp_removed/$f_pp_total)" PASS
   else
     f_result "Phase 4: program_paths removed ($f_pp_removed/$f_pp_total)" FAIL "Some program paths remain"
+  fi
+
+  # Verify the whole service dir is gone (full uninstall wipes it)
+  if f_check_no_dir "/symbios/services/$f_name"
+  then
+    f_result "Phase 4: Service dir removed" PASS
+  else
+    f_result "Phase 4: Service dir removed" FAIL "/symbios/services/$f_name still exists"
   fi
 
   # Verify state entry removed
@@ -746,49 +752,38 @@ do
     continue
   fi
 
-  # Run reset
+  # Run reset: wipes the whole service dir and re-runs the playbook
   f_output5=$(f_uninstall_service "$f_playbook" "reset" 2>&1)
-  f_rc5=$?
   f_log5="$g_log_dir/${f_name}_reset.log"
   echo "$f_output5" > "$f_log5"
 
+  # Reset includes a full playbook run - wait generously for containers
+  f_wait_containers "$f_compose"
   sleep 3
 
-  # After reset: program dir should still exist, userdata should be gone
   if f_check_compose_up "$f_compose"
   then
-    f_result "Phase 5: Reset - containers restarted" PASS
+    f_result "Phase 5: Reset - service reprovisioned" PASS
   else
-    if f_check_dir_exists "/symbios/services/$f_name"
-    then
-      f_result "Phase 5: Reset - program dir preserved" PASS
-    else
-      f_result "Phase 5: Reset" FAIL "Program dir removed by reset"
-    fi
+    f_result "Phase 5: Reset - service reprovisioned" FAIL "Containers not running after reset (see $f_log5)"
   fi
 
-  # Verify userdata_paths are removed or reset (empty after recreation)
-  # Note: reset mode deletes userdata then restarts, so dirs may be recreated
-  f_ud_removed=0
-  f_ud_total=0
-  while IFS= read -r f_path
-  do
-    [[ -z "$f_path" ]] && continue
-    f_ud_total=$((f_ud_total + 1))
-    if f_check_no_dir "$f_path" || f_check_dir_empty "$f_path"
-    then
-      f_ud_removed=$((f_ud_removed + 1))
-    fi
-  done <<< "$f_userdata_paths"
-
-  if [[ $f_ud_total -eq 0 ]]
+  # The service dir must have been recreated by the playbook run
+  if f_check_dir_exists "/symbios/services/$f_name"
   then
-    f_result "Phase 5: userdata_paths removed" SKIP "No userdata_paths defined"
-  elif [[ $f_ud_removed -eq $f_ud_total ]]
-  then
-    f_result "Phase 5: userdata_paths removed ($f_ud_removed/$f_ud_total)" PASS
+    f_result "Phase 5: Reset - service dir recreated" PASS
   else
-    f_result "Phase 5: userdata_paths removed ($f_ud_removed/$f_ud_total)" FAIL "Some userdata paths remain"
+    f_result "Phase 5: Reset - service dir recreated" FAIL "/symbios/services/$f_name missing after reset"
+  fi
+
+  # State entry must stay set after a reset (service stays installed)
+  f_state_check5=$(f_ssh_try "grep -c 'services/$f_name.yml' /symbios/base-services/symbios-ui/config/installed-playbooks.yml || true" 2>/dev/null)
+  f_state_check5="${f_state_check5//[^0-9]/}"
+  if [[ -n "$f_state_check5" && "$f_state_check5" != "0" ]]
+  then
+    f_result "Phase 5: Reset - state entry kept" PASS
+  else
+    f_result "Phase 5: Reset - state entry kept" FAIL "Entry missing from installed-playbooks.yml after reset"
   fi
 
   # =========================================================================

@@ -43,15 +43,11 @@
 #       command: docker compose -f /symbios/services/nextcloud/docker-compose.yml logs -f --tail=100
 #   uninstall:
 #     stop: docker compose -f /symbios/services/nextcloud/docker-compose.yml down
-#     restart: docker compose -f /symbios/services/nextcloud/docker-compose.yml up -d
 #     program_paths:
 #       - /symbios/services/nextcloud/
 #       - /symbios/base-services/traefik/providers/nextcloud.yml
 #       - /usr/local/sbin/runchecks.d/symbios-healthcheck-nextcloud.check
 #       - /usr/local/sbin/autoupdate.d/nextcloud.update
-#     userdata_paths:
-#       - /symbios/services/nextcloud/nextcloud-data/
-#       - /symbios/services/nextcloud/nextclouddb-data/
 #   actions:
 #     start: docker compose -f /symbios/services/nextcloud/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/nextcloud/docker-compose.yml down

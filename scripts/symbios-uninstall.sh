@@ -18,17 +18,38 @@
 
 # symbios-uninstall.sh - Uninstall a SymbiOS service.
 #
-# Reads the # docs: block from the playbook via yq, stops services,
-# deletes paths according to the mode, restarts if configured,
-# and removes the state file entry.
-#
-# Usage:
-#   symbios-uninstall.sh <playbook-path> <mode>
+# Reads the # docs: block from the playbook via yq and performs the
+# uninstall according to the selected mode.
 #
 # Modes:
-#   full    - Delete program_paths + userdata_paths
-#   program - Delete only program_paths (keep userdata)
-#   reset   - Delete only userdata_paths (keep program)
+#   full    - Uninstall: stop containers (removing their images), run the
+#             optional docs.uninstall.commands cleanup list, delete the whole
+#             service dir plus program_paths and userdata_paths (recursive)
+#             and clear the state entry.
+#   program - Uninstall (keep data): stop containers (removing their images),
+#             delete program_paths (Traefik provider, healthcheck, ...) while
+#             keeping the service dir completely intact - compose file and
+#             all data survive - and clear the state entry.
+#   reset   - Delete Userdata: stop containers (images are kept), wipe the
+#             service dir plus userdata_paths and re-run the playbook so the
+#             service comes back freshly provisioned. The state entry stays.
+#
+# docs.uninstall schema:
+#   stop           - whitelisted stop command (docker compose/systemctl/virsh)
+#   commands       - optional list of whitelisted cleanup commands, executed
+#                    in full mode only (docker compose/systemctl/ufw/userdel/
+#                    groupdel/smbpasswd/deluser/delgroup)
+#   service_dir    - optional explicit service dir (default for playbooks
+#                    below services/: $services_root/<name>/); must live
+#                    below the services root
+#   program_paths  - files/dirs installed outside the service dir
+#   userdata_paths - legacy extra data dirs outside the service dir
+#
+# Template variables {{ ansible_facts['hostname'] }}, {{ ansible_hostname }}
+# and {{ base_domain }} are expanded in paths and commands.
+#
+# The obsolete "restart" key of old playbooks is ignored: reset now always
+# re-runs the playbook instead of restarting via a single command.
 #
 # The playbook-path is relative to the git root, e.g. "services/jellyfin.yml".
 
@@ -102,37 +123,141 @@ fi
 
 g_echo_note "Parsed docs block from $f_playbook"
 
+# Expand supported template variables in strings from the docs block.
+# The patterns are passed quoted so brackets/quotes are matched literally.
+function f_expand_vars {
+  local f_value="$1"
+  local f_host
+  f_host="$(hostname)"
+  local f_p_facts="{{ ansible_facts['hostname'] }}"
+  local f_p_hostname="{{ ansible_hostname }}"
+  local f_p_domain="{{ base_domain }}"
+  f_value="${f_value//"${f_p_facts}"/${f_host}}"
+  f_value="${f_value//"${f_p_hostname}"/${f_host}}"
+  f_value="${f_value//"${f_p_domain}"/${g_base_domain}}"
+  echo "$f_value"
+}
+
 # --- Step 1: Stop services ---
 f_stop_cmd=$(yq eval '.docs.uninstall.stop // ""' "$f_tmp" 2>/dev/null)
-if [[ -n "$f_stop_cmd" && "$f_stop_cmd" != "" ]]
+if [[ -n "$f_stop_cmd" ]]
 then
-  # Whitelist: only allow docker compose and systemctl commands
-  if [[ "$f_stop_cmd" =~ ^(docker\ compose|systemctl) ]]
+  # In full/program mode the container images are removed too by extending
+  # a plain docker compose down with --rmi all (scoped to this project).
+  if [[ "$f_mode" != "reset" && "$f_stop_cmd" =~ ^(docker\ compose\ .*)down$ ]]
+  then
+    f_stop_cmd="${BASH_REMATCH[1]}down --rmi all"
+    g_echo_note "Removing container images along with the stack (--rmi all)"
+  fi
+  # Whitelist: only allow known management commands
+  if [[ "$f_stop_cmd" =~ ^(docker\ compose|systemctl|virsh)([[:space:]]|$) ]]
   then
     g_echo_note "Stopping services: $f_stop_cmd"
     eval "$f_stop_cmd"
   else
-    g_echo_error "Invalid stop command (only docker compose/systemctl allowed): $f_stop_cmd"
+    g_echo_error "Invalid stop command (only docker compose/systemctl/virsh allowed): $f_stop_cmd"
     exit 1
   fi
 else
   g_echo_note "No stop command defined, skipping service stop"
 fi
 
-# --- Step 2: Delete paths ---
-f_deleted_any=0
+# --- Step 2: Cleanup commands (full mode only) ---
+if [[ "$f_mode" == "full" ]]
+then
+  f_commands=$(yq eval '.docs.uninstall.commands[]' "$f_tmp" 2>/dev/null)
+  if [[ -z "$f_commands" ]]
+  then
+    g_echo_note "No cleanup commands defined"
+  else
+    while IFS= read -r f_raw_cmd
+    do
+      if [[ -z "$f_raw_cmd" ]]
+      then
+        continue
+      fi
+      f_cmd=$(f_expand_vars "$f_raw_cmd")
+      # Whitelist: only allow known cleanup commands
+      if [[ ! "$f_cmd" =~ ^(docker\ compose|systemctl|ufw|userdel|groupdel|smbpasswd|deluser|delgroup)([[:space:]]|$) ]]
+      then
+        g_echo_error "Invalid cleanup command (only docker compose/systemctl/ufw/userdel/groupdel/smbpasswd/deluser/delgroup allowed): $f_cmd"
+        exit 1
+      fi
+      g_echo_note "Running cleanup command: $f_cmd"
+      if ! eval "$f_cmd"
+      then
+        # Individual cleanup steps may already be gone - never fatal.
+        g_echo_warn "Cleanup command failed (continuing): $f_cmd"
+      fi
+    done <<< "$f_commands"
+  fi
+fi
 
-# Helper function: delete a list of paths from the docs block.
-# When f_recursive=1, directories are removed completely (rm -rf).
-# When f_recursive=0 (default), only files directly inside a directory
-# are removed; subdirectories are preserved so that userdata dirs
-# (e.g. nextcloud-data/) nested under a program dir (e.g.
-# /symbios/services/nextcloud/) survive the "program" uninstall mode.
+# --- Step 3: Resolve the service dir ---
+# Explicit docs key wins, otherwise playbooks below services/ map to
+# $g_services_root/<name>/. It must stay below the services root for safety:
+# the service dir is deleted wholesale in full/reset mode.
+f_service_dir=$(yq eval '.docs.uninstall.service_dir // ""' "$f_tmp" 2>/dev/null)
+if [[ -n "$f_service_dir" ]]
+then
+  f_service_dir=$(f_expand_vars "$f_service_dir")
+elif [[ "$f_playbook" == services/* ]]
+then
+  f_service_dir="${g_services_root}/$(basename "$f_playbook" .yml)"
+fi
+f_service_dir="${f_service_dir%/}"
+if [[ -n "$f_service_dir" && "$f_service_dir" != "${g_services_root}/"* ]]
+then
+  g_echo_error "Refusing unsafe service_dir outside ${g_services_root}: $f_service_dir"
+  rm -f "$f_tmp"
+  exit 1
+fi
+
+# Check whether a path is the service dir itself or lives below it.
+function f_in_service_dir {
+  local f_path="${1%/}"
+  if [[ -z "$f_service_dir" ]]
+  then
+    return 1
+  fi
+  [[ "$f_path" == "$f_service_dir" || "$f_path" == "$f_service_dir"/* ]]
+}
+
+# Safety check: refuse to delete critical system paths
+function f_path_is_critical {
+  case "$1" in
+    /|/bin|/boot|/dev|/etc|/home|/lib|/lib64|/opt|/proc|/root|/run|/sbin|/sys|/tmp|/usr|/var)
+      return 0 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+# Delete a single path recursively after safety checks.
+function f_delete_path {
+  local f_path="$1"
+  local f_label="$2"
+  if f_path_is_critical "$f_path"
+  then
+    g_echo_error "Refusing to delete critical system path: $f_path"
+    exit 1
+  fi
+  if [[ -e "$f_path" ]]
+  then
+    g_echo_note "Deleting ${f_label}: $f_path"
+    rm -rf "$f_path"
+  else
+    g_echo_note "Path not found (skipping): $f_path"
+  fi
+}
+
+# Delete a list of paths from the docs block (recursive).
+# In "program" mode paths at/below the service dir are skipped so that the
+# whole service dir (compose file + all data) survives.
 function f_delete_paths {
   local f_key="$1"
   local f_label="$2"
-  local f_recursive="${3:-0}"
-  local f_paths
+  local f_paths f_path f_expanded
   f_paths=$(yq eval ".docs.uninstall.${f_key}[]" "$f_tmp" 2>/dev/null)
   if [[ -z "$f_paths" ]]
   then
@@ -145,90 +270,60 @@ function f_delete_paths {
     then
       continue
     fi
-    # Safety check: refuse to delete critical system paths
-    if [[ "$f_path" == "/" || "$f_path" == "/bin" || "$f_path" == "/boot" || \
-          "$f_path" == "/dev" || "$f_path" == "/etc" || "$f_path" == "/home" || \
-          "$f_path" == "/lib" || "$f_path" == "/lib64" || "$f_path" == "/opt" || \
-          "$f_path" == "/proc" || "$f_path" == "/root" || "$f_path" == "/run" || \
-          "$f_path" == "/sbin" || "$f_path" == "/sys" || "$f_path" == "/tmp" || \
-          "$f_path" == "/usr" || "$f_path" == "/var" ]]
+    f_expanded=$(f_expand_vars "$f_path")
+    if [[ "$f_mode" == "program" ]] && f_in_service_dir "$f_expanded"
     then
-      g_echo_error "Refusing to delete critical system path: $f_path"
-      exit 1
+      g_echo_note "Keeping ${f_label} (service dir stays intact): $f_expanded"
+      continue
     fi
-    if [[ -e "$f_path" ]]
-    then
-      g_echo_note "Deleting ${f_label}: $f_path"
-      if [[ "$f_recursive" -eq 1 ]]
-      then
-        rm -rf "$f_path"
-      elif [[ -d "$f_path" ]]
-      then
-        # Remove files and symlinks inside the directory, keep subdirectories
-        find "$f_path" -maxdepth 1 -mindepth 1 ! -type d -delete
-      else
-        rm -f "$f_path"
-      fi
-      f_deleted_any=1
-    else
-      g_echo_note "Path not found (skipping): $f_path"
-    fi
+    f_delete_path "$f_expanded" "$f_label"
   done <<< "$f_paths"
 }
 
+# --- Step 4: Delete paths ---
 case "$f_mode" in
   full)
-    g_echo_note "Mode: full - deleting program + userdata paths"
+    g_echo_note "Mode: full - removing program paths, userdata and the service dir"
     f_delete_paths "program_paths" "program"
-    f_delete_paths "userdata_paths" "userdata" 1
+    f_delete_paths "userdata_paths" "userdata"
+    if [[ -n "$f_service_dir" ]]
+    then
+      f_delete_path "$f_service_dir" "service dir"
+    fi
     ;;
   program)
-    g_echo_note "Mode: program - deleting program paths only"
+    g_echo_note "Mode: program - removing program paths, keeping the service dir with all data"
     f_delete_paths "program_paths" "program"
     ;;
   reset)
-    g_echo_note "Mode: reset - deleting userdata paths only"
-    f_delete_paths "userdata_paths" "userdata" 1
+    g_echo_note "Mode: reset - wiping service data for fresh reprovisioning"
+    f_delete_paths "userdata_paths" "userdata"
+    if [[ -n "$f_service_dir" ]]
+    then
+      f_delete_path "$f_service_dir" "service dir"
+    fi
     ;;
 esac
 
-if [[ "$f_deleted_any" -eq 0 ]]
+# --- Step 5: State handling / reprovisioning ---
+if [[ "$f_mode" == "reset" ]]
 then
-  g_echo_warn "No paths were deleted (none found on disk)"
-fi
-
-# --- Step 3: Restart services ---
-# Only restart if the docker-compose file still exists (skipped after full uninstall)
-f_restart_cmd=$(yq eval '.docs.uninstall.restart // ""' "$f_tmp" 2>/dev/null)
-if [[ -n "$f_restart_cmd" && "$f_restart_cmd" != "" ]]
-then
-  # Whitelist: only allow docker compose and systemctl commands
-  if [[ "$f_restart_cmd" =~ ^(docker\ compose|systemctl) ]]
+  # The service stays installed: re-run the playbook so compose files,
+  # configuration and containers come back freshly provisioned.
+  g_echo_note "Re-provisioning $f_playbook via playbook run"
+  if "$g_script_dir/symbios-run-playbook.sh" "$f_playbook"
   then
-    f_compose_file=$(echo "$f_restart_cmd" | grep -oP '(?<=-f )\S+' || true)
-    if [[ -n "$f_compose_file" && -f "$f_compose_file" ]]
-    then
-      g_echo_note "Restarting services: $f_restart_cmd"
-      eval "$f_restart_cmd"
-    elif [[ -n "$f_compose_file" ]]
-    then
-      g_echo_note "Compose file $f_compose_file not found - skipping restart"
-    else
-      g_echo_note "Restarting services: $f_restart_cmd"
-      eval "$f_restart_cmd"
-    fi
+    "$g_script_dir/symbios-state.sh" set "$f_playbook"
+    g_echo_note "Reset of $f_playbook completed successfully"
   else
-    g_echo_error "Invalid restart command (only docker compose/systemctl allowed): $f_restart_cmd"
+    g_echo_error "Playbook run failed during reset - service may be incomplete"
+    exit 1
   fi
 else
-  g_echo_note "No restart command defined, skipping service restart"
+  g_echo_note "Removing $f_playbook from installed-playbooks state"
+  "$g_script_dir/symbios-state.sh" unset "$f_playbook"
+  g_echo_note "Uninstall of $f_playbook completed (mode: $f_mode)"
 fi
-
-# --- Step 4: Remove from state file ---
-g_echo_note "Removing $f_playbook from installed-playbooks state"
-"$g_script_dir/symbios-state.sh" unset "$f_playbook"
 
 # Cleanup
 rm -f "$f_tmp"
-
-g_echo_note "Uninstall of $f_playbook completed (mode: $f_mode)"
