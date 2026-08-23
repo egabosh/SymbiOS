@@ -1,51 +1,51 @@
-#!/bin/bash
-# Healthcheck for external system targets
-# Checks if configured external systems are reachable via SSH
+CHECK_CATEGORY="services"
+CHECK_TITLE="External Targets"
+CHECK_DESC="Checks if configured external systems are reachable via SSH."
+CHECK_DETAIL="Reads host: entries from external-systems.yml and tests TCP port 22.|Without a configuration file there is nothing to check (status ok)."
 
-source /etc/bash/gaboshlib.include 2>/dev/null || true
+# IMPORTANT: This file is SOURCED by runchecks.sh. Never call exit here -
+# an exit would terminate the whole health daemon mid-loop.
 
-EXTERNAL_SYSTEMS_CONFIG="/symbios/base-services/symbios-ui/config/external-systems.yml"
-RESULTS_FILE="/symbios/base-services/symbios-ui/log/runchecks-results.json"
-CHECK_NAME="external-targets"
-STATUS="ok"
-DETAIL=""
+# Cooldown: each host probe costs up to 2s
+f_check_cache "symbios-healthcheck-external-targets" || return 2>/dev/null || true
 
-if [ ! -f "$EXTERNAL_SYSTEMS_CONFIG" ]; then
-  STATUS="ok"
-  DETAIL="No external systems configured"
-  echo "$CHECK_NAME:ok:$DETAIL"
-  exit 0
+g_external_config="${g_config_dir}/external-systems.yml"
+
+# No config file: healthy no-op
+if [[ ! -f "$g_external_config" ]]
+then
+  g_echo_note "no external systems configured (${g_external_config} missing)"
+  return 2>/dev/null || true
 fi
 
-# Count systems and check connectivity
-TOTAL=0
-REACHABLE=0
-UNREACHABLE=0
-
-while IFS= read -r line; do
-  # Parse YAML fields (simple grep, no yq dependency)
-  if [[ "$line" =~ host:\ (.+) ]]; then
-    host="${BASH_REMATCH[1]}"
-    host=$(echo "$host" | tr -d '"' | tr -d "'")
-    TOTAL=$((TOTAL + 1))
-    # Quick SSH connectivity check (2 second timeout)
-    if timeout 2 bash -c "echo >/dev/tcp/$host/22" 2>/dev/null; then
-      REACHABLE=$((REACHABLE + 1))
+# Count systems and check connectivity (TCP port 22, 2s timeout per host)
+g_total=0
+g_reachable=0
+g_unreachable=0
+while IFS= read -r g_line
+do
+  if [[ "$g_line" =~ host:\ (.+) ]]
+  then
+    g_host="${BASH_REMATCH[1]}"
+    g_host="${g_host//\"/}"
+    g_host="${g_host//\'}"
+    g_total=$((g_total + 1))
+    if timeout 2 bash -c "echo >/dev/tcp/${g_host}/22" 2>/dev/null
+    then
+      g_reachable=$((g_reachable + 1))
     else
-      UNREACHABLE=$((UNREACHABLE + 1))
+      g_unreachable=$((g_unreachable + 1))
     fi
   fi
-done < "$EXTERNAL_SYSTEMS_CONFIG"
+done < "$g_external_config"
 
-if [ "$TOTAL" -eq 0 ]; then
-  STATUS="ok"
-  DETAIL="No external systems configured"
-elif [ "$UNREACHABLE" -gt 0 ]; then
-  STATUS="error"
-  DETAIL="$UNREACHABLE of $TOTAL external systems unreachable"
+# Report result via gaboshlib (g_echo_error marks the check as failed)
+if [[ "$g_total" -eq 0 ]]
+then
+  g_echo_note "no external systems configured"
+elif [[ "$g_unreachable" -gt 0 ]]
+then
+  g_echo_error "${g_unreachable} of ${g_total} external systems unreachable"
 else
-  STATUS="ok"
-  DETAIL="$REACHABLE/$TOTAL external systems reachable"
+  g_echo_note "${g_reachable}/${g_total} external systems reachable"
 fi
-
-echo "$CHECK_NAME:$STATUS:$DETAIL"

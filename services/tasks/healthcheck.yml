@@ -1,0 +1,37 @@
+---
+# Shared healthcheck deployment for HTTP-based services.
+#
+# Deploys /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check.
+# The check probes the service URL once per runchecks cycle (5 min cache file
+# in $g_tmp) and flags HTTP codes >= 500 (or no answer) as an error. The file
+# name scheme symbios-healthcheck-<name>.check is mandatory: the WebUI sidebar
+# derives the icon mapping from the playbook basename (<name>.yml).
+#
+# Required vars: service_name, service_domain (set in each service playbook)
+# Optional var:  healthcheck_url (overrides https://{{ service_domain }},
+#                e.g. openwebui uses "https://ai.{{ base_domain }}")
+
+- name: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+  ansible.builtin.blockinfile:
+    path: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+    mode: "0400"
+    owner: root
+    group: root
+    create: yes
+    marker: "# {mark} ANSIBLE MANAGED BLOCK"
+    block: |
+      # Healthcheck for {{ service_name }}
+      g_svc_url="{{ healthcheck_url | default('https://' ~ service_domain) }}"
+      g_check_file="${g_tmp}/symbios-healthcheck-{{ service_name }}"
+      if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+      then
+        return 2>/dev/null || true
+      fi
+      date > "$g_check_file"
+      g_http_code=$(wget -q -O /dev/null --server-response --timeout=10 "$g_svc_url" 2>&1 | grep -oE "HTTP/[0-9.]+" | tail -1 | grep -oE "[0-9]+$")
+      if [ -z "$g_http_code" ] || [ "$g_http_code" -ge 500 ]
+      then
+        g_echo_error "Healthcheck failed for {{ service_name }}: HTTP $g_http_code from $g_svc_url"
+      fi
+    backup: yes
+    validate: /bin/bash -n %s
