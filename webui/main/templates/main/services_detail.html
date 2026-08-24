@@ -1,4 +1,5 @@
 {% extends "main/base.html" %}
+{% load plugin_extras %}
 {% block sidebar %}{% include "main/sidebar_services.html" %}{% endblock %}
 {% block content %}
 <nav aria-label="breadcrumb">
@@ -189,11 +190,130 @@
   {% endif %}
   {% if has_feature_plugin %}
   <div class="tab-pane fade" id="pane-features" role="tabpanel">
-    <div class="text-center py-4">
-      <a href="/plugins/{{ feature_service }}/features/" class="btn btn-primary btn-lg">
-        <i class="bi bi-puzzle"></i> Features konfigurieren
-      </a>
-      <p class="text-muted mt-2 small">Konfigurieren Sie die verfuegbaren Features fuer diesen Service.</p>
+    {% for group in feature_groups %}
+    <div class="mb-4">
+      <h5 class="d-flex align-items-center gap-2 mb-3">
+        <i class="bi bi-{{ group.icon }}"></i>
+        {{ group.name }}
+        <span class="badge bg-secondary">{{ group.features|length }}</span>
+      </h5>
+      <div class="row g-3">
+        {% for feat in group.features %}
+        <div class="col-md-6 col-lg-4">
+          <div class="card h-100" id="feat-card-{{ feat.id }}">
+            <div class="card-header d-flex justify-content-between align-items-center">
+              <span class="d-flex align-items-center gap-2">
+                <i class="bi bi-{{ feat.icon }}"></i>
+                <strong>{{ feat.name }}</strong>
+              </span>
+              <div class="d-flex align-items-center gap-2">
+                {% if feat.status == 'applied' %}
+                <span class="badge bg-success">Aktiv</span>
+                {% elif feat.status == 'draft' %}
+                <span class="badge bg-warning text-dark">Entwurf</span>
+                {% elif feat.status == 'applying' %}
+                <span class="badge bg-info">Wird ausgefuhrt</span>
+                {% elif feat.status == 'error' %}
+                <span class="badge bg-danger">Fehler</span>
+                {% else %}
+                <span class="badge bg-secondary">Inaktiv</span>
+                {% endif %}
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input feat-toggle" type="checkbox"
+                         id="toggle-{{ feat.id }}" data-feature="{{ feat.id }}"
+                         data-has-params="{{ feat.has_params|yesno:'1,0' }}"
+                         {% if feat.enabled %}checked{% endif %}>
+                </div>
+              </div>
+            </div>
+            <div class="card-body position-relative">
+              <p class="card-text small text-muted">{{ feat.description }}</p>
+              {% if feat.error %}
+              <div class="alert alert-danger py-1 px-2 small mb-2">
+                <i class="bi bi-exclamation-triangle"></i> {{ feat.error }}
+              </div>
+              {% endif %}
+              {% if feat.last_applied %}
+              <div class="small text-muted mb-2">
+                <i class="bi bi-clock"></i> Zuletzt angewendet: {{ feat.last_applied }}
+              </div>
+              {% endif %}
+              {% if feat.has_params %}
+              <div class="feat-config-area mt-2" id="config-area-{{ feat.id }}" style="display:{% if feat.enabled %}block{% else %}none{% endif %};">
+                <hr class="my-2">
+                <form id="config-form-{{ feat.id }}" data-feature="{{ feat.id }}">
+                  {% for param in feat.params %}
+                  <div class="mb-2">
+                    <label for="param-{{ feat.id }}-{{ param.name }}" class="form-label small mb-0">
+                      {{ param.label }}{% if param.required %}<span class="text-danger">*</span>{% endif %}
+                    </label>
+                    {% if param.type == 'select' %}
+                    <select class="form-select form-select-sm param-input" id="param-{{ feat.id }}-{{ param.name }}"
+                            name="{{ param.name }}" data-detect="{{ param.detect|default:'' }}" {% if param.required %}required{% endif %}>
+                      <option value="">Wird erkannt...</option>
+                    </select>
+                    {% elif param.type == 'multi-select' %}
+                    <select class="form-select form-select-sm param-input" id="param-{{ feat.id }}-{{ param.name }}"
+                            name="{{ param.name }}" multiple data-detect="{{ param.detect|default:'' }}" {% if param.required %}required{% endif %}>
+                    </select>
+                    {% elif param.type == 'password' %}
+                    <input class="form-control form-control-sm param-input" type="password"
+                           id="param-{{ feat.id }}-{{ param.name }}" name="{{ param.name }}"
+                           placeholder="{{ param.label }}" {% if param.required %}required{% endif %}
+                           value="{{ feat.values|default_if_none:''|dict_get:param.name }}">
+                    {% elif param.type == 'number' %}
+                    <input class="form-control form-control-sm param-input" type="number"
+                           id="param-{{ feat.id }}-{{ param.name }}" name="{{ param.name }}"
+                           placeholder="{{ param.label }}" {% if param.required %}required{% endif %}
+                           value="{{ feat.values|default_if_none:''|dict_get:param.name|default:param.default }}">
+                    {% else %}
+                    <input class="form-control form-control-sm param-input" type="text"
+                           id="param-{{ feat.id }}-{{ param.name }}" name="{{ param.name }}"
+                           placeholder="{{ param.label }}" {% if param.required %}required{% endif %}
+                           value="{{ feat.values|default_if_none:''|dict_get:param.name }}">
+                    {% endif %}
+                  </div>
+                  {% endfor %}
+                </form>
+                <button type="button" class="btn btn-primary btn-sm w-100 mt-1 feat-save-apply" data-feature="{{ feat.id }}">
+                  <i class="bi bi-play-fill"></i> Speichern & Anwenden
+                </button>
+              </div>
+              {% endif %}
+              {% if not feat.has_params %}
+              <button class="btn btn-outline-success btn-sm w-100 mt-2 feat-apply-standalone"
+                      data-feature="{{ feat.id }}" style="display:{% if feat.enabled %}block{% else %}none{% endif %};">
+                <i class="bi bi-play-fill"></i> Anwenden
+              </button>
+              {% endif %}
+              {% if feat.playbook_source %}
+              <button class="btn btn-link btn-sm position-absolute bottom-0 end-0 m-2 p-0 text-muted feat-source-btn"
+                      data-feature="{{ feat.id }}" data-bs-toggle="modal" data-bs-target="#playbookModal"
+                      title="Playbook anzeigen" style="font-size:0.75rem;line-height:1;">
+                <i class="bi bi-code-slash"></i>
+              </button>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+    <!-- Playbook modal -->
+    <div class="modal fade" id="playbookModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header py-2">
+            <h6 class="modal-title" id="playbookModalTitle"><i class="bi bi-code-slash me-2"></i>Playbook</h6>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body p-0">
+            <pre id="playbookModalContent" class="bg-dark text-light p-3 mb-0 small"
+                 style="min-height:60vh;white-space:pre-wrap;word-break:break-word;"></pre>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   {% endif %}
@@ -202,6 +322,118 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+const FEATURE_SERVICE = "{{ feature_service }}";
+const PLAYBOOK_SOURCES = {};
+{% for group in feature_groups %}
+{% for feat in group.features %}
+{% if feat.playbook_source %}
+PLAYBOOK_SOURCES["{{ feat.id }}"] = {{ feat.playbook_source|safe|truncatechars:65535 }};
+{% endif %}
+{% endfor %}
+{% endfor %}
+
+function updateFeatBadge(card, status) {
+  const badge = card ? card.querySelector('.card-header .badge') : null;
+  if (!badge) return;
+  const map = { applied:['bg-success','Aktiv'], draft:['bg-warning text-dark','Entwurf'], applying:['bg-info','Wird ausgefuhrt'], error:['bg-danger','Fehler'], '':['bg-secondary','Inaktiv'], null:['bg-secondary','Inaktiv'] };
+  const [cls, label] = map[status] || map[''];
+  badge.className = 'badge ' + cls;
+  badge.textContent = label;
+}
+
+function applyFeatFeature(fid) {
+  return fetch('/plugins/' + FEATURE_SERVICE + '/features/' + fid + '/apply/', {
+    method: 'POST', credentials: 'same-origin',
+    headers: {'X-CSRFToken': getCsrfToken()}
+  }).then(r => r.json()).then(d => {
+    if (!d.ok) { alert('Fehler: ' + (d.error || '')); return; }
+    if (typeof SymbiOS !== 'undefined' && SymbiOS.exec && d.job) {
+      SymbiOS.exec.start(d.job, d.title, d.message);
+      /* exec-modal.js handles overlay + reload on close via _needsReload */
+    } else {
+      location.reload();
+    }
+  });
+}
+
+function detectFeatOptions(container, fid) {
+  container.querySelectorAll('select[data-detect]').forEach(sel => {
+    const ds = sel.dataset.detect;
+    if (!ds) return;
+    sel.innerHTML = '<option value="">Wird erkannt...</option>';
+    fetch('/plugins/' + FEATURE_SERVICE + '/features/' + fid + '/detect/' + sel.name + '/')
+      .then(r => r.json()).then(d => {
+        sel.innerHTML = '';
+        if (!d.ok || !d.options || !d.options.length) { sel.innerHTML = '<option value="">Keine Optionen</option>'; return; }
+        d.options.forEach(opt => { const o = document.createElement('option'); o.value = opt.value; o.textContent = opt.label || opt.value; sel.appendChild(o); });
+      }).catch(() => { sel.innerHTML = '<option value="">Fehler</option>'; });
+  });
+}
+
+document.querySelectorAll('.feat-toggle').forEach(toggle => {
+  toggle.addEventListener('change', function() {
+    const fid = this.dataset.feature;
+    const hasParams = this.dataset.hasParams === '1';
+    const card = document.getElementById('feat-card-' + fid);
+    const configArea = document.getElementById('config-area-' + fid);
+    const standaloneBtn = card ? card.querySelector('.feat-apply-standalone') : null;
+    if (this.checked) {
+      if (hasParams && configArea) {
+        configArea.style.display = 'block';
+        detectFeatOptions(configArea, fid);
+        fetch('/plugins/' + FEATURE_SERVICE + '/features/' + fid + '/toggle/', { method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':getCsrfToken()} }).then(r=>r.json()).then(d=>{ if(d.ok) updateFeatBadge(card,d.status); });
+      } else if (standaloneBtn) {
+        standaloneBtn.style.display = 'block';
+        fetch('/plugins/' + FEATURE_SERVICE + '/features/' + fid + '/toggle/', { method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':getCsrfToken()} }).then(r=>r.json()).then(d=>{ if(d.ok){ updateFeatBadge(card,'applying'); applyFeatFeature(fid); } });
+      } else {
+        fetch('/plugins/' + FEATURE_SERVICE + '/features/' + fid + '/toggle/', { method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':getCsrfToken()} }).then(r=>r.json()).then(d=>{ if(d.ok) updateFeatBadge(card,d.status); });
+      }
+    } else {
+      if (configArea) configArea.style.display = 'none';
+      if (standaloneBtn) standaloneBtn.style.display = 'none';
+      fetch('/plugins/' + FEATURE_SERVICE + '/features/' + fid + '/toggle/', { method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':getCsrfToken()} }).then(r=>r.json()).then(d=>{ if(d.ok) updateFeatBadge(card,d.status); });
+    }
+  });
+});
+
+document.querySelectorAll('.feat-save-apply').forEach(btn => {
+  btn.addEventListener('click', function() {
+    const fid = this.dataset.feature;
+    const form = document.getElementById('config-form-' + fid);
+    if (!form || !form.reportValidity()) return;
+    const data = {};
+    const fd = new FormData(form);
+    for (const [k,v] of fd.entries()) { data[k] = v; }
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Wird gespeichert...';
+    fetch('/plugins/' + FEATURE_SERVICE + '/features/' + fid + '/save/', { method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':getCsrfToken(),'Content-Type':'application/json'}, body:JSON.stringify(data) })
+      .then(r=>r.json()).then(d=>{
+        if(!d.ok){ alert('Fehler beim Speichern'); btn.disabled=false; btn.innerHTML='<i class="bi bi-play-fill"></i> Speichern & Anwenden'; return; }
+        return applyFeatFeature(fid);
+      }).catch(e=>{ alert('Netzwerkfehler'); btn.disabled=false; btn.innerHTML='<i class="bi bi-play-fill"></i> Speichern & Anwenden'; });
+  });
+});
+
+document.querySelectorAll('.feat-apply-standalone').forEach(btn => {
+  btn.addEventListener('click', function() {
+    const fid = this.dataset.feature;
+    this.disabled = true;
+    this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Wird ausgefuhrt...';
+    applyFeatFeature(fid);
+  });
+});
+
+document.querySelectorAll('.feat-source-btn').forEach(btn => {
+  btn.addEventListener('click', function() {
+    const fid = this.dataset.feature;
+    const card = document.getElementById('feat-card-' + fid);
+    const name = card ? card.querySelector('strong').textContent : fid;
+    document.getElementById('playbookModalTitle').innerHTML = '<i class="bi bi-code-slash me-2"></i>' + name + ' - Playbook';
+    document.getElementById('playbookModalContent').textContent = PLAYBOOK_SOURCES[fid] || '(kein Quelltext)';
+  });
+});
+</script>
 <script>
 const PLAYBOOK = "{{ item.playbook }}";
 function loadStatus() {
