@@ -63,6 +63,7 @@ urlpatterns = [
     path('settings/config/', views_settings.settings_config, name='settings_config'),
     path('settings/backup/', views_settings.settings_backup, name='settings_backup'),
     path('settings/backup/test/', views_settings.settings_backup_test, name='settings_backup_test'),
+    path('settings/updates/', views_settings.settings_updates, name='settings_updates'),
     path('settings/disk/', views_settings.settings_disk, name='settings_disk'),
     path('settings/disk/list/', views_settings.settings_disk_list, name='settings_disk_list'),
     path('settings/disk/status/', views_settings.settings_disk_status, name='settings_disk_status'),

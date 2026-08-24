@@ -1,0 +1,168 @@
+{% extends "main/base.html" %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<!-- Automatic updates, last run and log -->
+<div class="row mb-3">
+  <div class="col-md-4 mb-2">
+    <div class="card h-100">
+      <div class="card-body d-flex align-items-center gap-3 py-3">
+        <i class="bi bi-clock-history fs-3 {% if schedule %}text-success{% else %}text-warning{% endif %}"></i>
+        <div>
+          <div class="fw-bold">Automatic Updates</div>
+          {% if schedule %}
+          <div class="small text-muted">Active - every day at <strong>{{ schedule }}</strong> your server updates itself.</div>
+          {% else %}
+          <div class="small text-warning">Not active - please start updates manually below or reinstall the autoupdate service.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4 mb-2">
+    <div class="card h-100">
+      <div class="card-body d-flex align-items-center gap-3 py-3">
+        {% if last_run %}
+        <i class="bi {% if last_run.ok %}bi-check-circle-fill text-success{% else %}bi-x-circle-fill text-danger{% endif %} fs-3"></i>
+        <div>
+          <div class="fw-bold">Last Update Run</div>
+          <div class="small text-muted">{{ last_run.last_run_display }}
+            {% if last_run.ok %}- completed successfully{% else %}- reported errors{% endif %}
+          </div>
+        </div>
+        {% else %}
+        <i class="bi bi-info-circle fs-3 text-muted"></i>
+        <div>
+          <div class="fw-bold">Last Update Run</div>
+          <div class="small text-muted">No update has been run yet.</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4 mb-2">
+    <div class="card h-100">
+      <div class="card-body d-flex align-items-center gap-3 py-3">
+        <i class="bi bi-file-text fs-3 text-primary"></i>
+        <div>
+          <div class="fw-bold">Update Log</div>
+          <div class="small text-muted mb-1">See what past updates have done.</div>
+          <a href="{% url 'logs' %}?log=autoupdate" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-box-arrow-up-right"></i> Open Update Log
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- One-click full update -->
+<div class="row mb-3">
+  <div class="col-12">
+    <div class="card border-primary">
+      <div class="card-header bg-primary-subtle">
+        <i class="bi bi-stars"></i> <strong>Update Everything</strong>
+        <span class="badge text-bg-primary ms-1">Recommended</span>
+      </div>
+      <div class="card-body">
+        <p class="mb-2">
+          This installs all available updates in one go:
+        </p>
+        <ul class="small mb-3 ps-3">
+          <li>Security fixes for the operating system (Debian Linux)</li>
+          <li>New versions of all installed apps (Docker services)</li>
+          <li>New SymbiOS functions and improvements</li>
+        </ul>
+        <form method="post" action="{% url 'settings_updates' %}" data-exec="true"
+              data-exec-confirm="Apps restart briefly during the update. Start the full update now?">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="update_all">
+          <button type="submit" class="btn btn-primary btn-lg">
+            <i class="bi bi-arrow-repeat"></i> Start Full Update
+          </button>
+          <span class="small text-muted ms-2">
+            <i class="bi bi-hourglass-split"></i> Can take several minutes to over an hour.
+          </span>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Individual update areas -->
+<div class="row">
+  <div class="col-md-4 mb-3">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-motherboard"></i> Operating System</div>
+      <div class="card-body d-flex flex-column">
+        <p class="small flex-grow-1">
+          Updates the Debian Linux base system of your server: security
+          fixes, driver and bug fixes. Your apps are not touched.
+        </p>
+        <form method="post" action="{% url 'settings_updates' %}" data-exec="true">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="update_debian">
+          <button type="submit" class="btn btn-outline-primary w-100">
+            <i class="bi bi-download"></i> Update OS
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4 mb-3">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-grid-3x3-gap"></i> Apps (Docker)</div>
+      <div class="card-body d-flex flex-column">
+        <p class="small flex-grow-1">
+          Downloads new versions of your installed apps (e.g. media
+          server, cloud) and restarts them automatically.
+        </p>
+        <form method="post" action="{% url 'settings_updates' %}" data-exec="true"
+              data-exec-confirm="Apps restart briefly during the update. Continue?">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="update_docker">
+          <button type="submit" class="btn btn-outline-primary w-100">
+            <i class="bi bi-download"></i> Update Apps
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4 mb-3">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-github"></i> SymbiOS Platform</div>
+      <div class="card-body d-flex flex-column">
+        <p class="small flex-grow-1">
+          Fetches new SymbiOS functions and fixes from GitHub and applies
+          them to your server configuration.
+        </p>
+        <div class="d-flex gap-2">
+          <form method="post" action="{% url 'settings_updates' %}" data-exec="true" class="w-50">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="check_symbios">
+            <button type="submit" class="btn btn-outline-secondary w-100" title="Check what would be updated without changing anything">
+              <i class="bi bi-search"></i> Check
+            </button>
+          </form>
+          <form method="post" action="{% url 'settings_updates' %}" data-exec="true" class="w-50">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="update_symbios">
+            <button type="submit" class="btn btn-outline-primary w-100">
+              <i class="bi bi-download"></i> Update
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reassurance note for non-technical users -->
+<div class="alert alert-light small mt-2">
+  <i class="bi bi-shield-check text-success"></i>
+  <strong>Is this safe?</strong> Yes - updates only install tested changes.
+  If an app is restarted it may be unavailable for a few seconds. The web
+  interface shows you live progress while updating, and everything continues
+  in the background even if you close this page.
+</div>
+{% endblock %}

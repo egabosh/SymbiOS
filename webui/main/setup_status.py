@@ -79,6 +79,13 @@ PAGE_EXPLAIN = {
         'This applies to the initial admin password change, user creation, '
         'and password resets.'
     ),
+    'updates': (
+        'SymbiOS keeps your server up to date automatically once a day: '
+        'the operating system, your installed apps and SymbiOS itself. '
+        'On this page you can see whether that is active and start '
+        'updates manually at any time - for example right now, without '
+        'waiting for the nightly run.'
+    ),
 }
 
 # Map settings page -> runchecks check name (for the status badge).
