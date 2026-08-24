@@ -760,17 +760,64 @@
         - kvm_capable | bool
         - host_ipv6_available | bool
 
-    # Persist the route across reboots.
-    - name: Persist IPv6 host route for VM
+    # ── NDP proxy for VM gateway ─────────────────────────────────────────
+    # The VM's default gateway is $PREFIX::1 (host's GUA on uplink), but
+    # the VM sits on the base-services bridge where nobody owns that
+    # address.  Without NDP proxying the VM cannot resolve the gateway's
+    # MAC and all IPv6 traffic dies at layer-2.  The proxy entry makes the
+    # host answer NDP for ::1 on the bridge.
+    - name: Enable proxy_ndp sysctl for VM
+      ansible.posix.sysctl:
+        name: net.ipv6.conf.all.proxy_ndp
+        value: "1"
+        sysctl_set: yes
+        state: present
+        reload: yes
+      when:
+        - kvm_capable | bool
+        - host_ipv6_available | bool
+
+    - name: NDP proxy for VM gateway on base-services
+      ansible.builtin.shell: |
+        set -e
+        PREFIX="{{ host_ipv6_prefix }}"
+        [ -z "$PREFIX" ] && exit 0
+        ip -6 neigh add proxy "$PREFIX::1" dev base-services 2>/dev/null || \
+          ip -6 neigh replace "$PREFIX::1" dev base-services nud permanent
+        echo "ndp-proxy-ok"
+      register: ndp_proxy_result
+      changed_when: false
+      when:
+        - kvm_capable | bool
+        - host_ipv6_available | bool
+
+    # Persist the route and NDP proxy across reboots.
+    - name: Persist IPv6 host route, NDP proxy and ip6tables for VM
       ansible.builtin.copy:
         dest: /etc/network/if-up.d/openwrt-vm-ipv6-route
         mode: "0755"
         content: |
           #!/bin/bash
-          # IPv6 host route for openwrt VM on base-services bridge
+          # IPv6 setup for openwrt VM on base-services bridge:
+          # - /128 host route (more-specific overrides ISP /64)
+          # - NDP proxy for gateway (::1) on the bridge
+          # - NAT66 masquerade + FORWARD rules
           PREFIX="{{ host_ipv6_prefix }}"
+          UP="{{ uplink_interface }}"
           [ -z "$PREFIX" ] && exit 0
+          # Host route
           ip -6 route replace "$PREFIX::201/128" dev base-services
+          # NDP proxy: host answers for $PREFIX::1 (gateway) on the bridge
+          ip -6 neigh add proxy "$PREFIX::1" dev base-services 2>/dev/null || \
+            ip -6 neigh replace "$PREFIX::1" dev base-services nud permanent
+          # NAT66 masquerade
+          ip6tables -t nat -C POSTROUTING -s "$PREFIX::/64" ! -d "$PREFIX::/64" -j MASQUERADE 2>/dev/null || \
+            ip6tables -t nat -A POSTROUTING -s "$PREFIX::/64" ! -d "$PREFIX::/64" -j MASQUERADE
+          # FORWARD rules
+          ip6tables -C FORWARD -i base-services -o "$UP" -j ACCEPT 2>/dev/null || \
+            ip6tables -I FORWARD -i base-services -o "$UP" -j ACCEPT
+          ip6tables -C FORWARD -i "$UP" -o base-services -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+            ip6tables -I FORWARD -i "$UP" -o base-services -m state --state RELATED,ESTABLISHED -j ACCEPT
       when:
         - kvm_capable | bool
         - host_ipv6_available | bool
