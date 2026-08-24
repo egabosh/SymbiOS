@@ -33,13 +33,14 @@
 #     Access:
 #       Web interface (LuCI): https://openwrt.{{ base_domain }}
 #         - Protected by Authelia (2FA)
-#         - Default credentials: root / no password (set one via LuCI)
+#         - Credentials: root / password stored in env file
 #       Serial console: virsh console openwrt
+#       SSH: root@192.168.41.201 (public key from host)
 #       LAN clients: attach to openwrt-lan network for DHCP + internet
 #
 #     First boot: The VM auto-configures WAN (192.168.41.201) and LAN (172.18.0.1)
-#     via uci-defaults. IPv6 is configured via UCI (ip6addr/ip6gw) with a
-#     host-detected prefix. Access LuCI through Traefik to finish setup.
+#     via uci-defaults, sets root password, and deploys the host SSH public key.
+#     IPv6 is configured via UCI (ip6addr/ip6gw) with a host-detected prefix.
 #   author: Oliver Bohlen
 #   version: '2.0'
 #   license: GPLv3
@@ -294,28 +295,65 @@
         - kvm_capable | bool
         - host_ipv6_available | bool
 
-    # ── Detect DNS server from host DHCP ─────────────────────────────────
-    - name: Detect host DNS server
-      ansible.builtin.shell: |
-        set -e
-        resolvectl status 2>/dev/null \
-          | grep "Current DNS Server" \
-          | awk '{print $4}' \
-          | head -1
-      register: dns_result
-      changed_when: false
-      failed_when: false
-      when: kvm_capable | bool
-
+    # ── DNS for the VM ───────────────────────────────────────────────────
+    # The VM sits on the base-services bridge (192.168.41.0/24) with NAT.
+    # Host DNS servers (FRITZ!Box on LAN) are not reachable from this
+    # subnet. Use public DNS which is reachable via the host's NAT.
     - name: Set DNS server fact
       ansible.builtin.set_fact:
-        vm_dns: "{{ dns_result.stdout | default('1.1.1.1') }}"
+        vm_dns: "1.1.1.1"
       when: kvm_capable | bool
 
     - name: Show DNS server
       ansible.builtin.debug:
-        msg: "VM DNS server: {{ vm_dns }}"
+        msg: "VM DNS server: {{ vm_dns }} (public, reachable via host NAT)"
       when: kvm_capable | bool
+
+    # ── Root password generation ────────────────────────────────────────
+    - name: /symbios/services/openwrt-vm/genpw.sh (generate random root PW for OpenWrt VM)
+      ansible.builtin.blockinfile:
+        path: /symbios/services/openwrt-vm/genpw.sh
+        create: yes
+        mode: "0550"
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd /symbios/services/openwrt-vm
+
+          g_openwrtrootpw=$(pwgen -s 32 1)
+
+          [ -f env ] || echo "OPENWRT_ROOT_PASSWORD=!PLACEHOLDER!" > env
+          chmod 440 env
+          chown root:root env
+          sed -i "s/\!PLACEHOLDER\!/$g_openwrtrootpw/g" env
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: genpw.sh shebang
+      ansible.builtin.lineinfile:
+        path: /symbios/services/openwrt-vm/genpw.sh
+        insertbefore: BOF
+        line: "#!/bin/bash -e"
+
+    - name: Generate OpenWrt root password if not exists
+      ansible.builtin.shell: ./genpw.sh
+      args:
+        chdir: /symbios/services/openwrt-vm
+        creates: /symbios/services/openwrt-vm/env
+      no_log: true
+
+    - name: Read generated OpenWrt root password
+      ansible.builtin.shell: grep OPENWRT_ROOT_PASSWORD /symbios/services/openwrt-vm/env | cut -d= -f2
+      register: openwrt_root_password_raw
+      changed_when: false
+      no_log: true
+
+    - name: Compute SHA-512 hash of OpenWrt root password
+      ansible.builtin.shell: openssl passwd -6 -salt "$(openssl rand -hex 16)" "{{ openwrt_root_password_raw.stdout }}"
+      register: openwrt_root_password_hash
+      changed_when: false
+      no_log: true
 
     # Write uci-defaults to temp (avoids heredoc-in-shell escaping issues)
     - name: Write uci-defaults network config script
@@ -328,6 +366,7 @@
           # eth0 = WAN (static 192.168.41.201/24 on base-services bridge)
           # eth1 = LAN (static 172.18.0.1/24, internal network)
           # IPv6: static global address + default route via UCI
+          # Root password + SSH key are injected directly into the image
 
           # Remove default bridge device and LAN interface
           while uci delete network.@device[0] 2>/dev/null; do :; done
@@ -450,7 +489,7 @@
       when: kvm_capable | bool
 
     # Patch raw image: GRUB serial console + uci-defaults injection
-    - name: Patch raw image (serial console + uci-defaults)
+    - name: Patch raw image (serial console + uci-defaults + credentials)
       ansible.builtin.shell: |
         set -e
         RAW="{{ service_root }}/iso/{{ openwrt_image_decompressed }}"
@@ -485,9 +524,11 @@
         cat /tmp/ow-mount/EFI/openwrt/grub.cfg
         umount /tmp/ow-mount
 
-        # --- Inject uci-defaults network config ---
+        # --- Patch root filesystem (p2): uci-defaults + credentials ---
         mkdir -p /tmp/ow-mount
         mount "${LOOP}p2" /tmp/ow-mount
+
+        # Inject uci-defaults network config
         if [ -f /tmp/ow-mount/etc/uci-defaults/99-openwrt-network ]
         then
           echo "uci-defaults already injected"
@@ -497,6 +538,30 @@
           chmod 755 /tmp/ow-mount/etc/uci-defaults/99-openwrt-network
           echo "uci-defaults injected"
         fi
+
+        # Set root password in /etc/shadow (pre-computed SHA-512 hash)
+        if grep -q 'root:\$6\$' /tmp/ow-mount/etc/shadow 2>/dev/null
+        then
+          echo "root password already set"
+        else
+          sed -i '1s|^root:.*|root:{{ openwrt_root_password_hash.stdout }}:0:99999:7:::|' \
+            /tmp/ow-mount/etc/shadow
+          echo "root password set"
+        fi
+
+        # Deploy host SSH public key
+        mkdir -p /tmp/ow-mount/etc/dropbear
+        if [ -f /tmp/ow-mount/etc/dropbear/authorized_keys ]
+        then
+          echo "SSH key already deployed"
+        else
+          cat > /tmp/ow-mount/etc/dropbear/authorized_keys << 'SSHEOF'
+        {{ lookup('file', '/root/.ssh/id_ed25519.pub') }}
+        SSHEOF
+          chmod 600 /tmp/ow-mount/etc/dropbear/authorized_keys
+          echo "SSH key deployed"
+        fi
+
         umount /tmp/ow-mount
         rmdir /tmp/ow-mount || true
 
@@ -504,7 +569,7 @@
         losetup -d "$LOOP"
         echo "image-patched"
       register: image_patch_result
-      changed_when: "'GRUB patched' in image_patch_result.stdout or 'uci-defaults injected' in image_patch_result.stdout"
+      changed_when: "'GRUB patched' in image_patch_result.stdout or 'uci-defaults injected' in image_patch_result.stdout or 'root password set' in image_patch_result.stdout or 'SSH key deployed' in image_patch_result.stdout"
       when:
         - kvm_capable | bool
         - not qcow2_image.stat.exists | default(false) | bool
