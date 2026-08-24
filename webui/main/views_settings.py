@@ -1444,3 +1444,123 @@ def settings_security(request):
         'page_status_text': get_page_badge('security', vars_)[2],
     })
 
+
+# ---------------------------------------------------------------------------
+# Updates - manual update triggers and automatic-update status
+# ---------------------------------------------------------------------------
+
+# Manual actions offered on the Updates page: action name -> (host command,
+# exec-modal title, success message). All commands are idempotent SymbiOS
+# scripts that live in scripts/ (deployed to PATH on the host).
+UPDATE_ACTIONS = {
+    'update_all': ('autoupdate.sh',
+                   'Running all updates...',
+                   'Full update started.'),
+    'update_debian': ('autoupdate.sh debian',
+                      'Updating the operating system...',
+                      'Operating system update started.'),
+    'update_docker': ('autoupdate.sh docker',
+                      'Updating apps (Docker)...',
+                      'App update started.'),
+    'update_symbios': ('symbios-update.sh',
+                       'Updating the SymbiOS platform...',
+                       'SymbiOS platform update started.'),
+    'check_symbios': ('symbios-update.sh --dry-run',
+                      'Checking for SymbiOS updates...',
+                      'Update check started (nothing is changed).'),
+}
+
+
+def _updates_autoupdate_schedule():
+    """Read the daily autoupdate cron time from the host, or None."""
+    try:
+        ok, stdout, _ = run_command('cat /etc/cron.d/autoupdate_local',
+                                    timeout=10)
+        if not ok:
+            return None
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            parts = line.split()
+            # A daily "M H * * *" entry means automatic updates are active
+            if len(parts) >= 5 and parts[2:5] == ['*', '*', '*']:
+                try:
+                    minute, hour = int(parts[0]), int(parts[1])
+                except ValueError:
+                    break
+                return f'{hour:02d}:{minute:02d}'
+    except Exception:
+        pass
+    return None
+
+
+def _updates_last_run():
+    """Load the last autoupdate result written by autoupdate.sh (/log mount)."""
+    try:
+        with open('/log/autoupdate-last.json') as fh:
+            data = json.load(fh)
+    except Exception:
+        return None
+    # Turn the ISO timestamp into a human-readable string for the template
+    raw = data.get('last_run') if isinstance(data, dict) else None
+    if raw:
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(raw)
+            data['last_run_display'] = dt.strftime('%b %d, %Y %H:%M')
+        except ValueError:
+            data['last_run_display'] = raw
+    return data
+
+
+@login_required
+def settings_updates(request):
+    """Updates page - start updates via the exec overlay and show status."""
+    if request.method == 'POST':
+        is_ajax = is_ajax_request(request)
+        action = request.POST.get('action', '')
+        entry = UPDATE_ACTIONS.get(action)
+        if not entry:
+            msg = 'Unknown action.'
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': msg}, status=400)
+            messages.error(request, msg)
+            return redirect('settings_updates')
+        cmd, title, message = entry
+
+        # Updates run far longer than a web request: always start them as a
+        # detached job whose live output streams into the exec modal.
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=7200)
+        if is_ajax:
+            return JsonResponse({'ok': True, 'job': job_id,
+                                 'title': title,
+                                 'message': message,
+                                 'command': cmd})
+        messages.success(request, message)
+        messages.info(request, title)
+        return redirect('settings_updates')
+
+    schedule = _updates_autoupdate_schedule()
+    last_run = _updates_last_run()
+    if schedule:
+        badge = ('ok', 'Automatic daily',
+                 f'Updates run automatically every day at {schedule}. '
+                 'You do not have to do anything.')
+    else:
+        badge = ('missing', 'Not configured',
+                 'The autoupdate playbook is not installed - please start '
+                 'updates manually here or reinstall it.')
+    return render(request, 'main/settings_updates.html', {
+        'schedule': schedule,
+        'last_run': last_run,
+        'page_key': 'updates',
+        'page_icon': 'bi-arrow-repeat',
+        'page_title': 'Updates',
+        'page_explain': PAGE_EXPLAIN.get('updates', ''),
+        'page_status': badge[0],
+        'page_status_label': badge[1],
+        'page_status_text': badge[2],
+    })
+

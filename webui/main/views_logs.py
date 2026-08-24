@@ -16,10 +16,18 @@
 
 from django.shortcuts import render
 from .decorators import login_required
+from .utils.log_utils import ALLOWED_LOG_FILES
 
 
 @login_required
 def logs(request):
-    response = render(request, 'main/logs.html', {'default_log_name': 'messages'})
+    # Optional ?log=<name> deep link (e.g. from the Updates page); only
+    # names registered in ALLOWED_LOG_FILES are accepted.
+    default_log_name = 'messages'
+    requested = request.GET.get('log', '')
+    if requested in ALLOWED_LOG_FILES:
+        default_log_name = requested
+    response = render(request, 'main/logs.html',
+                      {'default_log_name': default_log_name})
     response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     return response

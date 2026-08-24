@@ -28,6 +28,18 @@ g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
 g_lockfile
 
+# Also log standalone runs to the shared update log for the WebUI log
+# viewer. When called from autoupdate.sh the variable is already exported
+# and the output is logged there - skip to avoid double entries.
+if [[ -z "${SYMBIOS_UPDATE_LOG:-}" ]] && [[ -n "${g_log_dir}" ]]
+then
+  export SYMBIOS_UPDATE_LOG="${g_log_dir}/autoupdate.log"
+  if mkdir -p "${g_log_dir}" 2>/dev/null || [[ -d "${g_log_dir}" ]]
+  then
+    exec > >(tee -a "${SYMBIOS_UPDATE_LOG}") 2>&1
+  fi
+fi
+
 g_symbios_dir="${SYMBIOS_DIR:-${g_git_root}}"
 g_repo_url="https://github.com/egabosh/SymbiOS.git"
 g_failed=""
@@ -84,12 +96,22 @@ git remote set-url origin "${g_repo_url}"
 # Save pre-pull HEAD for diff
 g_head_before=$(git rev-parse HEAD 2>/dev/null)
 
-# Discard any local changes and sync to GitHub
+# Fetch the latest changes from GitHub
 git fetch origin
-git reset --hard origin/main
-git clean -fd
 
-g_head_after=$(git rev-parse HEAD 2>/dev/null)
+if [[ "${g_dry_run}" == true ]]
+then
+  # Dry run: never touch the working tree - compare HEAD against the
+  # freshly fetched origin/main (read-only check).
+  g_head_after=$(git rev-parse origin/main 2>/dev/null)
+  g_changed_files=$(git diff --name-only "${g_head_before}" "${g_head_after}" 2>/dev/null)
+else
+  # Discard any local changes and sync to GitHub
+  git reset --hard origin/main
+  git clean -fd
+
+  g_head_after=$(git rev-parse HEAD 2>/dev/null)
+fi
 
 # Nothing changed
 if [[ "${g_head_before}" == "${g_head_after}" ]]
@@ -119,8 +141,11 @@ then
   exit 1
 fi
 
-# Get changed files between old and new HEAD
-g_changed_files=$(git diff --name-only "${g_head_before}" "${g_head_after}" 2>/dev/null)
+# Get changed files between old and new HEAD (already computed for dry run)
+if [[ "${g_dry_run}" != true ]]
+then
+  g_changed_files=$(git diff --name-only "${g_head_before}" "${g_head_after}" 2>/dev/null)
+fi
 
 # Get list of installed playbooks from state file
 g_echo_note "Checking installed playbooks"
