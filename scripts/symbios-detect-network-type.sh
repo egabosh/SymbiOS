@@ -27,7 +27,7 @@ g_gateway=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
 # short TCP connect to a well-known public address (works even when ICMP is
 # filtered and independent of the configured DNS server).
 g_online=""
-if timeout 3 bash -c 'exec 3<>/dev/tcp/1.1.1.1/443' 2>/dev/null
+if timeout 3 bash -c 'exec 3<>/dev/tcp/5.9.164.112/443' 2>/dev/null
 then
   g_online="yes"
 fi

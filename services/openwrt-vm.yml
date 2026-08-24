@@ -60,6 +60,10 @@
 #     stop: virsh destroy openwrt; virsh undefine openwrt --nvram
 #     program_paths:
 #       - /symbios/services/openwrt-vm/
+#     ldap_groups:
+#       - openwrt-vm
+#     authelia_blocks:
+#       - "openwrt-vm ACCESS CONTROL"
 #   actions:
 #     start: virsh start openwrt
 #     stop: virsh destroy openwrt
@@ -247,7 +251,7 @@
         set -e
         uplink=$(ip route show default | awk '{print $5}' | head -1)
         if [ -z "$uplink" ]; then
-          uplink=$(ip -o route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+          uplink=$(ip -o route get 5.9.164.112 | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
         fi
         echo "$uplink"
       register: uplink_result
@@ -297,16 +301,41 @@
 
     # ── DNS for the VM ───────────────────────────────────────────────────
     # The VM sits on the base-services bridge (192.168.41.0/24) with NAT.
-    # Host DNS servers (FRITZ!Box on LAN) are not reachable from this
-    # subnet. Use public DNS which is reachable via the host's NAT.
+    # The host's DHCP DNS (FRITZ!Box 192.168.188.1) is reachable via NAT.
+    # Digitalcourage DNS is DoT (port 853) and cannot be used as plain nameserver.
+    - name: Detect host DNS server
+      ansible.builtin.shell: |
+        set -e
+        # Get all DNS servers from resolvectl, prefer IPv4 on the host LAN
+        CANDIDATES=$(resolvectl status 2>/dev/null \
+          | grep "DNS Servers:" \
+          | sed 's/.*DNS Servers: //' \
+          | tr ' ' '\n' \
+          | grep -v '^$' \
+          | grep ':' --invert-match \
+          | sort -u)
+        for srv in $CANDIDATES; do
+          echo "$srv"
+          exit 0
+        done
+        # Fallback: first DNS from any interface
+        resolvectl status 2>/dev/null \
+          | grep "DNS Server" \
+          | awk '{print $NF}' \
+          | head -1
+      register: dns_result
+      changed_when: false
+      failed_when: false
+      when: kvm_capable | bool
+
     - name: Set DNS server fact
       ansible.builtin.set_fact:
-        vm_dns: "5.9.164.112"
+        vm_dns: "{{ dns_result.stdout | default('192.168.188.1') }}"
       when: kvm_capable | bool
 
     - name: Show DNS server
       ansible.builtin.debug:
-        msg: "VM DNS server: {{ vm_dns }} (public, reachable via host NAT)"
+        msg: "VM DNS server: {{ vm_dns }} (host DHCP DNS via NAT)"
       when: kvm_capable | bool
 
     # ── Root password generation ────────────────────────────────────────
