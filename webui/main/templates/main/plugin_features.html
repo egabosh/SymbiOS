@@ -37,24 +37,24 @@
             <i class="bi bi-{{ feat.icon }}"></i>
             <strong>{{ feat.name }}</strong>
           </span>
-          <div class="form-check form-switch mb-0">
-            <input class="form-check-input feat-toggle" type="checkbox"
-                   id="toggle-{{ feat.id }}" data-feature="{{ feat.id }}"
-                   {% if feat.enabled %}checked{% endif %}
-                   {% if not feat.has_params %}data-no-params="1"{% endif %}>
-            <label class="form-check-label" for="toggle-{{ feat.id }}">
-              {% if feat.status == 'applied' %}
-              <span class="badge bg-success">Aktiv</span>
-              {% elif feat.status == 'draft' %}
-              <span class="badge bg-warning text-dark">Entwurf</span>
-              {% elif feat.status == 'applying' %}
-              <span class="badge bg-info">Wird ausgefuhrt</span>
-              {% elif feat.status == 'error' %}
-              <span class="badge bg-danger">Fehler</span>
-              {% else %}
-              <span class="badge bg-secondary">Inaktiv</span>
-              {% endif %}
-            </label>
+          <div class="d-flex align-items-center gap-2">
+            {% if feat.status == 'applied' %}
+            <span class="badge bg-success">Aktiv</span>
+            {% elif feat.status == 'draft' %}
+            <span class="badge bg-warning text-dark">Entwurf</span>
+            {% elif feat.status == 'applying' %}
+            <span class="badge bg-info">Wird ausgefuhrt</span>
+            {% elif feat.status == 'error' %}
+            <span class="badge bg-danger">Fehler</span>
+            {% else %}
+            <span class="badge bg-secondary">Inaktiv</span>
+            {% endif %}
+            <div class="form-check form-switch mb-0">
+              <input class="form-check-input feat-toggle" type="checkbox"
+                     id="toggle-{{ feat.id }}" data-feature="{{ feat.id }}"
+                     data-has-params="{{ feat.has_params|yesno:'1,0' }}"
+                     {% if feat.enabled %}checked{% endif %}>
+            </div>
           </div>
         </div>
         <div class="card-body">
@@ -69,60 +69,44 @@
             <i class="bi bi-clock"></i> Zuletzt angewendet: {{ feat.last_applied }}
           </div>
           {% endif %}
-          {% if feat.has_params %}
-          <button class="btn btn-outline-primary btn-sm w-100 mt-2 feat-configure"
-                  data-feature="{{ feat.id }}" data-bs-toggle="modal" data-bs-target="#configModal-{{ feat.id }}">
-            <i class="bi bi-gear"></i> Konfigurieren
-          </button>
-          {% endif %}
-        </div>
-      </div>
-    </div>
 
-    {% if feat.has_params %}
-    <!-- Configuration modal for this feature -->
-    <div class="modal fade" id="configModal-{{ feat.id }}" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title"><i class="bi bi-{{ feat.icon }}"></i> {{ feat.name }} - Konfiguration</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-          </div>
-          <div class="modal-body">
-            <p class="text-muted small">{{ feat.description }}</p>
+          <!-- Inline config form (visible when toggled ON, has params) -->
+          {% if feat.has_params %}
+          <div class="feat-config-area mt-2" id="config-area-{{ feat.id }}" style="display:{% if feat.enabled %}block{% else %}none{% endif %};">
+            <hr class="my-2">
             <form id="config-form-{{ feat.id }}" data-feature="{{ feat.id }}">
               {% for param in feat.params %}
-              <div class="mb-3">
-                <label for="param-{{ feat.id }}-{{ param.name }}" class="form-label">
+              <div class="mb-2">
+                <label for="param-{{ feat.id }}-{{ param.name }}" class="form-label small mb-0">
                   {{ param.label }}
                   {% if param.required %}<span class="text-danger">*</span>{% endif %}
                 </label>
                 {% if param.type == 'select' %}
-                <select class="form-select param-input" id="param-{{ feat.id }}-{{ param.name }}"
+                <select class="form-select form-select-sm param-input" id="param-{{ feat.id }}-{{ param.name }}"
                         name="{{ param.name }}" data-detect="{{ param.detect|default:'' }}"
                         {% if param.required %}required{% endif %}>
                   <option value="">Wird erkannt...</option>
                 </select>
                 {% elif param.type == 'multi-select' %}
-                <select class="form-select param-input" id="param-{{ feat.id }}-{{ param.name }}"
+                <select class="form-select form-select-sm param-input" id="param-{{ feat.id }}-{{ param.name }}"
                         name="{{ param.name }}" multiple data-detect="{{ param.detect|default:'' }}"
                         {% if param.required %}required{% endif %}>
                 </select>
                 {% elif param.type == 'password' %}
-                <input class="form-control param-input" type="password"
+                <input class="form-control form-control-sm param-input" type="password"
                        id="param-{{ feat.id }}-{{ param.name }}" name="{{ param.name }}"
                        placeholder="{{ param.label }}"
                        {% if param.required %}required{% endif %}
                        {% if param.min_length %}minlength="{{ param.min_length }}"{% endif %}
                        value="{{ feat.values|default_if_none:''|dict_get:param.name }}">
                 {% elif param.type == 'number' %}
-                <input class="form-control param-input" type="number"
+                <input class="form-control form-control-sm param-input" type="number"
                        id="param-{{ feat.id }}-{{ param.name }}" name="{{ param.name }}"
                        placeholder="{{ param.label }}"
                        {% if param.required %}required{% endif %}
                        {% if param.default %}value="{{ feat.values|default_if_none:''|dict_get:param.name|default:param.default }}"{% else %}value="{{ feat.values|default_if_none:''|dict_get:param.name }}"{% endif %}>
                 {% else %}
-                <input class="form-control param-input" type="text"
+                <input class="form-control form-control-sm param-input" type="text"
                        id="param-{{ feat.id }}-{{ param.name }}" name="{{ param.name }}"
                        placeholder="{{ param.label }}"
                        {% if param.required %}required{% endif %}
@@ -131,22 +115,27 @@
                        value="{{ feat.values|default_if_none:''|dict_get:param.name }}">
                 {% endif %}
                 {% if param.pattern %}
-                <div class="form-text">Format: {{ param.pattern }}</div>
+                <div class="form-text">{{ param.pattern }}</div>
                 {% endif %}
               </div>
               {% endfor %}
             </form>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
-            <button type="button" class="btn btn-primary feat-save-apply" data-feature="{{ feat.id }}">
-              <i class="bi bi-save"></i> Speichern & Anwenden
+            <button type="button" class="btn btn-primary btn-sm w-100 mt-1 feat-save-apply" data-feature="{{ feat.id }}">
+              <i class="bi bi-play-fill"></i> Speichern & Anwenden
             </button>
           </div>
+          {% endif %}
+
+          <!-- Apply button for features without params -->
+          {% if not feat.has_params %}
+          <button class="btn btn-outline-success btn-sm w-100 mt-2 feat-apply-standalone"
+                  data-feature="{{ feat.id }}" style="display:{% if feat.enabled %}block{% else %}none{% endif %};">
+            <i class="bi bi-play-fill"></i> Anwenden
+          </button>
+          {% endif %}
         </div>
       </div>
     </div>
-    {% endif %}
     {% endfor %}
   </div>
 </div>
@@ -160,61 +149,129 @@ const CSRF = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
 
 function getCsrfToken() { return CSRF; }
 
+function getCsrfCookie() {
+  return document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('csrftoken='))?.split('=')[1] || '';
+}
+
+function updateBadge(card, status) {
+  const badge = card ? card.querySelector('.card-header .badge') : null;
+  if (!badge) return;
+  const map = {
+    applied: ['bg-success', 'Aktiv'],
+    draft: ['bg-warning text-dark', 'Entwurf'],
+    applying: ['bg-info', 'Wird ausgefuhrt'],
+    error: ['bg-danger', 'Fehler'],
+    '': ['bg-secondary', 'Inaktiv'],
+    null: ['bg-secondary', 'Inaktiv'],
+  };
+  const [cls, label] = map[status] || map[''];
+  badge.className = 'badge ' + cls;
+  badge.textContent = label;
+}
+
+function reloadPage() { setTimeout(() => location.reload(), 300); }
+
+function applyFeature(fid) {
+  return fetch('/plugins/' + SERVICE + '/features/' + fid + '/apply/', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {'X-CSRFToken': getCsrfToken()}
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (!d.ok) { alert('Fehler beim Anwenden: ' + (d.error || '')); return; }
+    if (typeof SymbiOS !== 'undefined' && SymbiOS.exec && d.job) {
+      SymbiOS.exec.start(d.job, d.title, d.message);
+      const checkDone = setInterval(() => {
+        if (!SymbiOS.exec.isRunning()) { clearInterval(checkDone); reloadPage(); }
+      }, 1000);
+    } else {
+      reloadPage();
+    }
+  });
+}
+
+function detectOptions(container, fid) {
+  container.querySelectorAll('select[data-detect]').forEach(sel => {
+    const detectScript = sel.dataset.detect;
+    if (!detectScript) return;
+    sel.innerHTML = '<option value="">Wird erkannt...</option>';
+    fetch('/plugins/' + SERVICE + '/features/' + fid + '/detect/' + sel.name + '/')
+      .then(r => r.json())
+      .then(d => {
+        sel.innerHTML = '';
+        if (!d.ok || !d.options || !d.options.length) {
+          sel.innerHTML = '<option value="">Keine Optionen gefunden</option>';
+          return;
+        }
+        d.options.forEach(opt => {
+          const o = document.createElement('option');
+          o.value = opt.value;
+          o.textContent = opt.label || opt.value;
+          sel.appendChild(o);
+        });
+      })
+      .catch(() => { sel.innerHTML = '<option value="">Fehler bei der Erkennung</option>'; });
+  });
+}
+
 /* Toggle feature on/off */
 document.querySelectorAll('.feat-toggle').forEach(toggle => {
   toggle.addEventListener('change', function() {
     const fid = this.dataset.feature;
+    const hasParams = this.dataset.hasParams === '1';
     const card = document.getElementById('feat-card-' + fid);
-    const badge = card ? card.querySelector('.form-check-label .badge') : null;
+    const configArea = document.getElementById('config-area-' + fid);
+    const standaloneBtn = card ? card.querySelector('.feat-apply-standalone') : null;
 
-    fetch('/plugins/' + SERVICE + '/features/' + fid + '/toggle/', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {'X-CSRFToken': getCsrfToken()}
-    })
-    .then(r => r.json())
-    .then(d => {
-      if (!d.ok) { alert('Fehler: ' + (d.error || '')); return; }
-      if (badge) {
-        badge.className = 'badge ' + (d.status === 'applied' ? 'bg-success' : d.status === 'draft' ? 'bg-warning text-dark' : d.status === 'error' ? 'bg-danger' : 'bg-secondary');
-        badge.textContent = d.status === 'applied' ? 'Aktiv' : d.status === 'draft' ? 'Entwurf' : d.status === 'error' ? 'Fehler' : 'Inaktiv';
-      }
-    })
-    .catch(e => { alert('Netzwerkfehler'); });
-  });
-});
-
-/* Detect options for select parameters on modal open */
-document.querySelectorAll('.feat-configure').forEach(btn => {
-  btn.addEventListener('click', function() {
-    const fid = this.dataset.feature;
-    const modal = document.getElementById('configModal-' + fid);
-    if (!modal) return;
-    modal.querySelectorAll('select[data-detect]').forEach(sel => {
-      const detectScript = sel.dataset.detect;
-      if (!detectScript) return;
-      sel.innerHTML = '<option value="">Wird erkannt...</option>';
-      fetch('/plugins/' + SERVICE + '/features/' + fid + '/detect/' + sel.name + '/')
-        .then(r => r.json())
-        .then(d => {
-          sel.innerHTML = '';
-          if (!d.ok || !d.options || !d.options.length) {
-            sel.innerHTML = '<option value="">Keine Optionen gefunden</option>';
-            return;
+    if (this.checked) {
+      /* ON: show config area or apply immediately */
+      if (hasParams && configArea) {
+        configArea.style.display = 'block';
+        detectOptions(configArea, fid);
+        /* Also toggle state on server */
+        fetch('/plugins/' + SERVICE + '/features/' + fid + '/toggle/', {
+          method: 'POST', credentials: 'same-origin',
+          headers: {'X-CSRFToken': getCsrfToken()}
+        }).then(r => r.json()).then(d => {
+          if (d.ok) updateBadge(card, d.status);
+        });
+      } else if (standaloneBtn) {
+        standaloneBtn.style.display = 'block';
+        /* Toggle + immediate apply for no-param features */
+        fetch('/plugins/' + SERVICE + '/features/' + fid + '/toggle/', {
+          method: 'POST', credentials: 'same-origin',
+          headers: {'X-CSRFToken': getCsrfToken()}
+        }).then(r => r.json()).then(d => {
+          if (d.ok) {
+            updateBadge(card, 'applying');
+            applyFeature(fid);
           }
-          d.options.forEach(opt => {
-            const o = document.createElement('option');
-            o.value = opt.value;
-            o.textContent = opt.label || opt.value;
-            sel.appendChild(o);
-          });
-        })
-        .catch(() => { sel.innerHTML = '<option value="">Fehler bei der Erkennung</option>'; });
-    });
+        });
+      } else {
+        /* No params, no standalone btn - just toggle */
+        fetch('/plugins/' + SERVICE + '/features/' + fid + '/toggle/', {
+          method: 'POST', credentials: 'same-origin',
+          headers: {'X-CSRFToken': getCsrfToken()}
+        }).then(r => r.json()).then(d => {
+          if (d.ok) updateBadge(card, d.status);
+        });
+      }
+    } else {
+      /* OFF: hide config area, toggle off */
+      if (configArea) configArea.style.display = 'none';
+      if (standaloneBtn) standaloneBtn.style.display = 'none';
+      fetch('/plugins/' + SERVICE + '/features/' + fid + '/toggle/', {
+        method: 'POST', credentials: 'same-origin',
+        headers: {'X-CSRFToken': getCsrfToken()}
+      }).then(r => r.json()).then(d => {
+        if (d.ok) updateBadge(card, d.status);
+      });
+    }
   });
 });
 
-/* Save and apply feature */
+/* Save and apply feature (inline config form) */
 document.querySelectorAll('.feat-save-apply').forEach(btn => {
   btn.addEventListener('click', function() {
     const fid = this.dataset.feature;
@@ -228,47 +285,36 @@ document.querySelectorAll('.feat-save-apply').forEach(btn => {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Wird gespeichert...';
 
-    /* Save parameters */
     fetch('/plugins/' + SERVICE + '/features/' + fid + '/save/', {
-      method: 'POST',
-      credentials: 'same-origin',
+      method: 'POST', credentials: 'same-origin',
       headers: {'X-CSRFToken': getCsrfToken(), 'Content-Type': 'application/json'},
       body: JSON.stringify(data)
     })
     .then(r => r.json())
     .then(d => {
-      if (!d.ok) { alert('Fehler beim Speichern'); btn.disabled = false; btn.innerHTML = '<i class="bi bi-save"></i> Speichern & Anwenden'; return; }
-
-      /* Apply feature */
-      return fetch('/plugins/' + SERVICE + '/features/' + fid + '/apply/', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {'X-CSRFToken': getCsrfToken()}
-      });
-    })
-    .then(r => r ? r.json() : null)
-    .then(d => {
-      if (!d) return;
-      if (!d.ok) { alert('Fehler beim Anwenden: ' + (d.error || '')); btn.disabled = false; btn.innerHTML = '<i class="bi bi-save"></i> Speichern & Anwenden'; return; }
-      /* Start exec modal for the job */
-      if (typeof SymbiOS !== 'undefined' && SymbiOS.exec && d.job) {
-        SymbiOS.exec.start(d.job, d.title, d.message);
-        const origFinish = SymbiOS.exec.start;
-        const checkDone = setInterval(() => {
-          if (!SymbiOS.exec.isRunning()) {
-            clearInterval(checkDone);
-            location.reload();
-          }
-        }, 1000);
-      } else {
-        location.reload();
+      if (!d.ok) {
+        alert('Fehler beim Speichern');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-play-fill"></i> Speichern & Anwenden';
+        return;
       }
+      return applyFeature(fid);
     })
     .catch(e => {
       alert('Netzwerkfehler: ' + e);
       btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-save"></i> Speichern & Anwenden';
+      btn.innerHTML = '<i class="bi bi-play-fill"></i> Speichern & Anwenden';
     });
+  });
+});
+
+/* Standalone apply button (no-param features) */
+document.querySelectorAll('.feat-apply-standalone').forEach(btn => {
+  btn.addEventListener('click', function() {
+    const fid = this.dataset.feature;
+    this.disabled = true;
+    this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Wird ausgefuhrt...';
+    applyFeature(fid);
   });
 });
 </script>
