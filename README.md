@@ -243,7 +243,8 @@ the matching feature is configured or installed.
 | **GitHub** (`github.com/egabosh/SymbiOS`, `raw.githubusercontent.com`) | Clones/pulls the SymbiOS repo during install and automatic updates. | install/update |
 | **GitHub** (`github.com/egabosh/gaboshlib`) | Installs the shared bash library. | `basics.yml` |
 | **Raspberry Pi** (`downloads.raspberrypi.com`) | Downloads the base Raspberry Pi OS image. | image builder only |
-| **Digitalcourage DNS** (`dns3.digitalcourage.de`) | Internet-connectivity ping in the health checks. | every 5 min |
+| **Digitalcourage DNS** (`5.9.164.112`, `2a01:4f8:251:554::2`) | TCP connectivity check in `symbios-detect-network-type.sh`. DoT only (port 853), not used as nameserver. | network detection |
+| **FRITZ!Box** (`192.168.188.1`) | DNS resolver for the openwrt-vm service (via NAT from host). | openwrt-vm |
 | **Qualys SSL Labs** (`ssllabs.com`) | TLS grade scan of hosted services. | optional script |
 
 The host resolves DNS through its locally configured resolver (systemd-resolved
