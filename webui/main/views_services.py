@@ -323,9 +323,53 @@ def services_detail(request, playbook):
     from .views_external import _load_systems
     all_systems = _load_systems()
     compatible_systems = [s for s in all_systems if s.get('type') == playbook_target_type] if playbook_target_type else []
-    # Check if this service has a feature plugin (Services/Features tab).
+    # Check if this service has a feature plugin (Features tab).
     svc_name = playbook.replace('.yml', '').split('/')[-1]
     has_feature_plugin = has_plugin(svc_name)
+    feature_groups = []
+    feature_manifest_name = svc_name
+    if has_feature_plugin:
+        from .plugin_catalog import get_plugin as _get_plugin, load_plugin_state
+        _plugin = _get_plugin(svc_name)
+        if _plugin:
+            feature_manifest_name = _plugin["manifest"].get("name", svc_name)
+            _features = _plugin["manifest"].get("features", [])
+            _groups = _plugin["manifest"].get("groups", [])
+            _state = load_plugin_state(svc_name)
+            _grouped = {}
+            for _g in _groups:
+                _grouped[_g["id"]] = {"name": _g["name"], "icon": _g.get("icon", "puzzle"), "features": []}
+            _grouped["_ungrouped"] = {"name": "Weitere", "icon": "puzzle", "features": []}
+            for _f in _features:
+                _fid = _f["id"]
+                _fs = _state.get(_fid, {})
+                _feat_data = {
+                    "id": _fid,
+                    "name": _f.get("name", _fid),
+                    "icon": _f.get("icon", "puzzle"),
+                    "description": _f.get("description", ""),
+                    "enabled": _fs.get("enabled", False),
+                    "status": _fs.get("status"),
+                    "error": _fs.get("error"),
+                    "last_applied": _fs.get("last_applied"),
+                    "params": _f.get("params", []),
+                    "values": _fs.get("params", {}),
+                    "has_params": bool(_f.get("params")),
+                    "playbook_source": "",
+                }
+                # Load playbook source for the modal.
+                _pb = _f.get("playbook")
+                if _pb:
+                    try:
+                        with open(os.path.join(_plugin["plugin_dir"], "features", _pb)) as _fh:
+                            _feat_data["playbook_source"] = _fh.read()
+                    except (OSError, IOError):
+                        pass
+                _gid = _f.get("group", "_ungrouped")
+                if _gid not in _grouped:
+                    _grouped[_gid] = {"name": _gid, "icon": "puzzle", "features": []}
+                _grouped[_gid]["features"].append(_feat_data)
+            feature_groups = [g for g in _grouped.values() if g["features"]]
     response = render(request, 'main/services_detail.html', {
         'item': item,
         'action_list': action_list,
@@ -338,6 +382,8 @@ def services_detail(request, playbook):
         'playbook_target_type': playbook_target_type,
         'has_feature_plugin': has_feature_plugin,
         'feature_service': svc_name,
+        'feature_manifest_name': feature_manifest_name,
+        'feature_groups': feature_groups,
         **_sidebar_context(all_catalog),
     })
     # Never cache: the inline JS/logic changes frequently during development

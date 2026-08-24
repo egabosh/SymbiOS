@@ -198,8 +198,8 @@ function updateBadge(card, status) {
   badge.textContent = label;
 }
 
-/* Apply feature via exec overlay. On success: reload after overlay closes.
-   On failure: keep overlay open so user can read the error output. */
+/* Apply feature via exec overlay - standard behavior: overlay stays open,
+   page reloads when user closes the overlay (handled by exec-modal.js). */
 function applyFeature(fid) {
   return fetch('/plugins/' + SERVICE + '/features/' + fid + '/apply/', {
     method: 'POST',
@@ -211,15 +211,6 @@ function applyFeature(fid) {
     if (!d.ok) { alert('Fehler beim Anwenden: ' + (d.error || '')); return; }
     if (typeof SymbiOS !== 'undefined' && SymbiOS.exec && d.job) {
       SymbiOS.exec.start(d.job, d.title, d.message);
-      /* Poll for completion - only reload on success; on failure the exec
-         overlay stays open with error output until the user closes it. */
-      const checkDone = setInterval(() => {
-        if (!SymbiOS.exec.isRunning()) {
-          clearInterval(checkDone);
-          /* Small delay so user sees "Completed successfully" before reload */
-          setTimeout(() => location.reload(), 800);
-        }
-      }, 1000);
     } else {
       location.reload();
     }
