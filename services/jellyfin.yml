@@ -42,7 +42,7 @@
 #     program_paths:
 #       - /symbios/services/jellyfin/
 #       - /symbios/base-services/traefik/providers/jellyfin.yml
-#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-jellyfin.check
+#       - /symbios/runchecks.d/symbios-healthcheck-jellyfin.check
 #   actions:
 #     start: docker compose -f /symbios/services/jellyfin/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/jellyfin/docker-compose.yml down
@@ -191,9 +191,9 @@
                     - url: "http://jellyfin:8096"
         backup: yes
 
-    # Deploy the shared HTTP healthcheck (services/tasks/healthcheck.yml)
+    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/healthcheck.yml
+      include_tasks: tasks/runcheck.yml
 
 #        creates: /symbios/services/jellyfin/db-data/sys/db.opt
 

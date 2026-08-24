@@ -68,6 +68,14 @@
         state: directory
         mode: '0700'
 
+    - name: Create checks dir /symbios/runchecks.d
+      ansible.builtin.file:
+        path: "{{ data_root }}/runchecks.d"
+        owner: root
+        group: root
+        state: directory
+        mode: '0700'
+
     - name: "{{ git_root }}/scripts/runchecks.d/services"
       lineinfile:
         path: "{{ git_root }}/scripts/runchecks.d/services"

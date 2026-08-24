@@ -44,7 +44,7 @@
 #     program_paths:
 #       - /symbios/services/dabo/
 #       - /symbios/base-services/traefik/providers/dabo.yml
-#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-dabo.check
+#       - /symbios/runchecks.d/symbios-healthcheck-dabo.check
 #   actions:
 #     start: docker compose -f /symbios/services/dabo/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/dabo/docker-compose.yml down
@@ -286,9 +286,9 @@
         chdir: /symbios/services/dabo
 
     # Deploy healthcheck script
-    # Deploy the shared HTTP healthcheck (services/tasks/healthcheck.yml)
+    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/healthcheck.yml
+      include_tasks: tasks/runcheck.yml
 
     # Register playbook as installed in the state file
     - name: Register playbook as installed

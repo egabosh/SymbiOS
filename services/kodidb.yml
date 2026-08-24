@@ -42,8 +42,8 @@
 #     program_paths:
 #       - /symbios/services/kodidb/
 #       - /symbios/base-services/traefik/providers/kodidb.yml
-#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-kodidb.check
-#       - /usr/local/sbin/autoupdate.d/kodidb-ssl.update
+#       - /symbios/runchecks.d/symbios-healthcheck-kodidb.check
+#       - /symbios/autoupdate.d/kodidb-ssl.update
 #       - /usr/local/sbin/backup.d/kodidb-docker.backup
 #   actions:
 #     start: docker compose -f /symbios/services/kodidb/docker-compose.yml up -d
@@ -67,15 +67,15 @@
         state: directory
         mode: '0550'
 
-    - name: /usr/local/sbin/autoupdate.d/kodidb-ssl.update
-      blockinfile:
-        path: /usr/local/sbin/autoupdate.d/kodidb-ssl.update
-        create: yes
-        mode: 0550
-        owner: root
-        group: root
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
+    # Deploy the shared autoupdate script (services/tasks/autoupdate.yml);
+    # executable because it is also run standalone to fetch certificates
+    - name: Deploy autoupdate script
+      include_tasks: tasks/autoupdate.yml
+      vars:
+        autoupdate_name: kodidb-ssl
+        autoupdate_mode: "0550"
+        autoupdate_content: |
+          #!/bin/bash -e
           cd /symbios/services/kodidb
 
           # start phpmyadmin (if not) to force traefik to get a letsencrypt certificate
@@ -170,14 +170,6 @@
             </videolibrary>
           </advancedsettings>" >advancedsettings.xml
           fi
-        backup: yes
-        validate: /bin/bash -n %s
-
-    - name: /usr/local/sbin/autoupdate.d/kodidb-ssl.update shebang
-      lineinfile:
-        path: /usr/local/sbin/autoupdate.d/kodidb-ssl.update
-        insertbefore: BOF
-        line: "#!/bin/bash -e"
 
     - name: /symbios/services/kodidb/ssl.cnf (use ssl in mariadb)
       blockinfile:
@@ -302,7 +294,7 @@
         backup: yes
 
     - name: Get letsencrypt cert from traefik
-      ansible.builtin.shell: /usr/local/sbin/autoupdate.d/kodidb-ssl.update
+      ansible.builtin.shell: "{{ data_root }}/autoupdate.d/kodidb-ssl.update"
       args:
         chdir: /symbios/services/kodidb
         creates: /symbios/services/kodidb/ssl/certificate.pem
@@ -373,9 +365,9 @@
         port: '3307'
         proto: tcp
 
-    # Deploy the shared HTTP healthcheck (services/tasks/healthcheck.yml)
+    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/healthcheck.yml
+      include_tasks: tasks/runcheck.yml
 
     - name: Ensure mariadb is running
       ansible.builtin.shell: docker compose up -d

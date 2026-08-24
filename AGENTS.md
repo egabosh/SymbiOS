@@ -167,11 +167,12 @@ Defined in `inventory.yml` under `all.vars`:
 2. Include `services/tasks/oidc-groups.yml` for OIDC services
 3. Create Traefik provider snippet
 4. Enforce group restriction at app or proxy level
-5. Deploy a healthcheck: include `tasks/healthcheck.yml` (HTTP services, vars
+5. Deploy a healthcheck: include `tasks/runcheck.yml` (HTTP services, vars
    `service_name` + `service_domain`, optional `healthcheck_url`) or deploy a
-   custom `/usr/local/sbin/runchecks.d/symbios-healthcheck-<name>.check`
+   custom `/symbios/runchecks.d/symbios-healthcheck-<name>.check`
    (`<name>` must match the playbook basename; never call `exit` inside a
    `.check` script - it is sourced by runchecks.sh and would kill the daemon;
-   see webui/main/docs/playbooks.md)
+   set the CHECK_* metadata vars so the check appears categorized on the
+   /health/ page; see webui/main/docs/playbooks.md)
 6. Verify after install: `symbios-healthcheck-<name>.check` appears in
    `/symbios/base-services/symbios-ui/log/runchecks-results.json`

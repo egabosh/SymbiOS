@@ -1,26 +1,31 @@
 ---
-# Shared healthcheck deployment for HTTP-based services.
+# Shared runcheck deployment for HTTP-based services.
 #
-# Deploys /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check.
+# Deploys {{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check.
 # The check probes the service URL once per runchecks cycle (5 min cache file
-# in $g_tmp) and flags HTTP codes >= 500 (or no answer) as an error. The file
-# name scheme symbios-healthcheck-<name>.check is mandatory: the WebUI sidebar
-# derives the icon mapping from the playbook basename (<name>.yml).
+# in $g_tmp) and flags HTTP codes >= 500 (or no answer) as an error. The
+# CHECK_* variables feed the /health/ overview page (title, description and
+# category). The file name scheme symbios-healthcheck-<name>.check is
+# mandatory: the WebUI sidebar derives the icon mapping from the playbook
+# basename (<name>.yml).
 #
 # Required vars: service_name, service_domain (set in each service playbook)
 # Optional var:  healthcheck_url (overrides https://{{ service_domain }},
 #                e.g. openwebui uses "https://ai.{{ base_domain }}")
 
-- name: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+- name: "{{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check"
   ansible.builtin.blockinfile:
-    path: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+    path: "{{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check"
     mode: "0400"
     owner: root
     group: root
     create: yes
     marker: "# {mark} ANSIBLE MANAGED BLOCK"
     block: |
-      # Healthcheck for {{ service_name }}
+      CHECK_CATEGORY="services"
+      CHECK_TITLE="{{ service_name }}"
+      CHECK_DESC="Healthcheck for the {{ service_name }} service."
+      CHECK_DETAIL="Probes {{ healthcheck_url | default('https://' ~ service_domain) }} every 5 minutes.|HTTP status >= 500 or connection failure marks the check as failed."
       g_svc_url="{{ healthcheck_url | default('https://' ~ service_domain) }}"
       g_check_file="${g_tmp}/symbios-healthcheck-{{ service_name }}"
       if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"

@@ -46,7 +46,7 @@
 #     program_paths:
 #       - /symbios/services/opencode/
 #       - /symbios/base-services/traefik/providers/opencode.yml
-#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-opencode.check
+#       - /symbios/runchecks.d/symbios-healthcheck-opencode.check
 #   actions:
 #     start: docker compose -f /symbios/services/opencode/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/opencode/docker-compose.yml down
@@ -275,9 +275,9 @@
         backup: yes
       notify: Restart authelia
 
-    # Deploy the shared HTTP healthcheck (services/tasks/healthcheck.yml)
+    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/healthcheck.yml
+      include_tasks: tasks/runcheck.yml
 
     - name: Ensure opencode is running
       ansible.builtin.shell: docker compose up -d

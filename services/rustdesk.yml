@@ -40,7 +40,7 @@
 #     stop: docker compose -f /symbios/services/rustdesk/docker-compose.yml down
 #     program_paths:
 #       - /symbios/services/rustdesk/
-#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-rustdesk.check
+#       - /symbios/runchecks.d/symbios-healthcheck-rustdesk.check
 #   actions:
 #     start: docker compose -f /symbios/services/rustdesk/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/rustdesk/docker-compose.yml down
@@ -119,16 +119,19 @@
         backup: yes
       notify: Restart rustdesk
 
-    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-rustdesk.check
+    - name: "{{ data_root }}/runchecks.d/symbios-healthcheck-rustdesk.check"
       ansible.builtin.blockinfile:
-        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-rustdesk.check
+        path: "{{ data_root }}/runchecks.d/symbios-healthcheck-rustdesk.check"
         mode: "0400"
         owner: root
         group: root
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          # Healthcheck for rustdesk (container)
+          CHECK_CATEGORY="services"
+          CHECK_TITLE="rustdesk"
+          CHECK_DESC="Healthcheck for the rustdesk service."
+          CHECK_DETAIL="Verifies that a rustdesk container is listed in docker ps.|Container missing marks the check as failed."
           g_check_file="${g_tmp}/symbios-healthcheck-rustdesk"
           if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
           then

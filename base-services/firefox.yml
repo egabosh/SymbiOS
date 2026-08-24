@@ -67,9 +67,9 @@
         mode: "0555"
       changed_when: false
 
-    - name: /usr/local/sbin/autoupdate.d/video-download-helper.update
+    - name: "{{ data_root }}/autoupdate.d/video-download-helper.update"
       blockinfile:
-        path: /usr/local/sbin/autoupdate.d/video-download-helper.update
+        path: "{{ data_root }}/autoupdate.d/video-download-helper.update"
         mode: "0400"
         owner: root
         group: root
@@ -89,7 +89,7 @@
         validate: /bin/bash -n %s
 
     - name: Install video-download-helper
-      command: bash -e /usr/local/sbin/autoupdate.d/video-download-helper.update
+      command: bash -e "{{ data_root }}/autoupdate.d/video-download-helper.update"
       args:
         creates: /opt/net.downloadhelper.coapp
       changed_when: false

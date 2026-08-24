@@ -45,8 +45,8 @@
 #     program_paths:
 #       - /symbios/services/matrix/
 #       - /symbios/base-services/traefik/providers/matrix.yml
-#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-matrix.check
-#       - /usr/local/sbin/runchecks.d/matrix.check
+#       - /symbios/runchecks.d/symbios-healthcheck-matrix.check
+#       - /symbios/runchecks.d/matrix.check
 #   actions:
 #     start: docker compose -f /symbios/services/matrix/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/matrix/docker-compose.yml down
@@ -806,9 +806,9 @@
         chdir: /symbios/services/matrix
         creates: /symbios/services/matrix/matrix.init.log
 
-#    - name: /usr/local/sbin/autoupdate.d/matrix.update
+#    - name: /symbios/autoupdate.d/matrix.update
 #      blockinfile:
-#        path: /usr/local/sbin/autoupdate.d/matrix.update
+#        path: /symbios/autoupdate.d/matrix.update
 #        mode: "0400"
 #        owner: root
 #        group: root
@@ -820,15 +820,19 @@
 #        validate: /bin/bash -n %s
 #      notify: run matrix.update
 
-    - name: /usr/local/sbin/runchecks.d/matrix.check
+    - name: "{{ data_root }}/runchecks.d/matrix.check"
       blockinfile:
-        path: /usr/local/sbin/runchecks.d/matrix.check
+        path: "{{ data_root }}/runchecks.d/matrix.check"
         mode: "0400"
         owner: root
         group: root
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
+          CHECK_CATEGORY="services"
+          CHECK_TITLE="matrix watchdog"
+          CHECK_DESC="Kills the synapse server when zombie curls pile up."
+          CHECK_DETAIL="Scans /proc for long-running zombie/stopped synapse processes.|Restarts synapse when zombie curls block it for more than 30 minutes."
           egrep "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read dzpid
           do
             if find ${g_tmp}/proc-check/$dzpid -mmin +30 | grep -q $dzpid
@@ -844,9 +848,9 @@
         backup: yes
         validate: /bin/bash -n %s
 
-    # Deploy the shared HTTP healthcheck (services/tasks/healthcheck.yml)
+    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/healthcheck.yml
+      include_tasks: tasks/runcheck.yml
 
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/matrix.yml"
@@ -860,7 +864,7 @@
       notify: Restart matrix
 
 #    - name: run matrix.update
-#      ansible.builtin.shell: bash /usr/local/sbin/autoupdate.d/matrix.update
+#      ansible.builtin.shell: bash /symbios/autoupdate.d/matrix.update
 #
 #    - name: run matrix.init
 #      ansible.builtin.shell: bash /symbios/services/matrix/matrix.init.sh
