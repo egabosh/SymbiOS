@@ -582,12 +582,13 @@
             exit 1
           fi
 
-          # Wait for Nextcloud
+          # Wait for Nextcloud (occ status exits 0 even when the instance is
+          # not installed yet, so check the installed flag instead of rc)
           i=0
           docker compose up -d
-          until docker compose exec -T -u www-data nextcloud ./occ status >/dev/null
+          until docker compose exec -T -u www-data nextcloud ./occ status 2>/dev/null | grep -q "installed: true"
           do
-            [[ $i -gt 30 ]] && exit 2
+            [[ $i -gt 60 ]] && exit 2
             echo "Waiting for Nextcloud"
             sleep 10
             ((i++))
