@@ -39,6 +39,7 @@ from .plugin_catalog import (
 )
 from .utils.ssh_exec import run_command
 from .utils.jobs import create_job
+from .views_services import _sidebar_context, get_catalog
 
 
 @login_required
@@ -92,10 +93,34 @@ def plugin_features(request, service):
     # Remove empty groups.
     groups_out = [g for g in grouped.values() if g["features"]]
 
+    # Sidebar context (same as services pages).
+    catalog = get_catalog()
+    sidebar_ctx = _sidebar_context(catalog)
+
+    # Load playbook source for each feature (small preview).
+    features_with_source = []
+    for g in groups_out:
+        for feat in g["features"]:
+            playbook_file = None
+            for f in plugin["manifest"].get("features", []):
+                if f["id"] == feat["id"]:
+                    playbook_file = f.get("playbook")
+                    break
+            if playbook_file:
+                src_path = os.path.join(plugin["plugin_dir"], "features", playbook_file)
+                try:
+                    with open(src_path) as fh:
+                        feat["playbook_source"] = fh.read()
+                except (OSError, IOError):
+                    feat["playbook_source"] = ""
+            else:
+                feat["playbook_source"] = ""
+
     return render(request, "main/plugin_features.html", {
         "service": service,
         "manifest": manifest,
         "groups": groups_out,
+        **sidebar_ctx,
     })
 
 
