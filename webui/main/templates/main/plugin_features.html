@@ -133,6 +133,16 @@
             <i class="bi bi-play-fill"></i> Anwenden
           </button>
           {% endif %}
+
+          {% if feat.playbook_source %}
+          <button class="btn btn-outline-secondary btn-sm w-100 mt-2 feat-source-toggle"
+                  data-feature="{{ feat.id }}" type="button">
+            <i class="bi bi-code-slash"></i> Playbook anzeigen
+          </button>
+          <pre class="bg-dark text-light p-2 small mt-1 mb-0 feat-source"
+               id="source-{{ feat.id }}"
+               style="display:none;max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-word;">{{ feat.playbook_source }}</pre>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -315,6 +325,20 @@ document.querySelectorAll('.feat-apply-standalone').forEach(btn => {
     this.disabled = true;
     this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Wird ausgefuhrt...';
     applyFeature(fid);
+  });
+});
+
+/* Toggle playbook source visibility */
+document.querySelectorAll('.feat-source-toggle').forEach(btn => {
+  btn.addEventListener('click', function() {
+    const fid = this.dataset.feature;
+    const pre = document.getElementById('source-' + fid);
+    if (!pre) return;
+    const visible = pre.style.display !== 'none';
+    pre.style.display = visible ? 'none' : 'block';
+    this.innerHTML = visible
+      ? '<i class="bi bi-code-slash"></i> Playbook anzeigen'
+      : '<i class="bi bi-code-slash"></i> Playbook ausblenden';
   });
 });
 </script>
