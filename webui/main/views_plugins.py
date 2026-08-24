@@ -21,6 +21,7 @@ Features are rendered inline in services_detail.html.
 """
 import json
 import os
+import threading
 
 from django.http import JsonResponse
 from django.shortcuts import Http404
@@ -103,12 +104,49 @@ def plugin_feature_apply(request, service, feature_id):
     state[feature_id] = feat
     save_plugin_state(service, state)
 
+    # Background thread: wait for job to finish and update state.
+    threading.Thread(
+        target=_finish_feature_apply,
+        args=(service, feature_id, job_id),
+        daemon=True,
+    ).start()
+
     return JsonResponse({
         "ok": True,
         "job": job_id,
-        "title": "Feature anwenden: %s" % feature_id,
-        "message": "Playbook wird ausgefuhrt...",
+        "title": "Feature apply: %s" % feature_id,
+        "message": "Running playbook...",
     })
+
+
+def _finish_feature_apply(service, feature_id, job_id):
+    """Wait for a feature apply job to complete and update the feature state."""
+    from .utils.jobs import get_job_output
+    import time
+    # Poll until the job is done.
+    for _ in range(300):
+        result = get_job_output(job_id)
+        if result is None:
+            return
+        _output, done, _ok, _cmd = result
+        if done:
+            break
+        time.sleep(2)
+    result = get_job_output(job_id)
+    success = bool(result and result[2])
+    state = load_plugin_state(service)
+    feat = state.get(feature_id, {})
+    if success:
+        feat["status"] = "applied"
+        feat["error"] = None
+        from datetime import datetime, timezone
+        feat["last_applied"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    else:
+        feat["status"] = "error"
+        output = (result[0] if result else "")[-500:] if result else ""
+        feat["error"] = output.strip() or "Playbook failed"
+    state[feature_id] = feat
+    save_plugin_state(service, state)
 
 
 @login_required

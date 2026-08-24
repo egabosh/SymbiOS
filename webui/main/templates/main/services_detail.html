@@ -208,15 +208,15 @@
               </span>
               <div class="d-flex align-items-center gap-2">
                 {% if feat.status == 'applied' %}
-                <span class="badge bg-success">Aktiv</span>
+                <span class="badge bg-success">Active</span>
                 {% elif feat.status == 'draft' %}
-                <span class="badge bg-warning text-dark">Entwurf</span>
+                <span class="badge bg-warning text-dark">Draft</span>
                 {% elif feat.status == 'applying' %}
-                <span class="badge bg-info">Wird ausgefuhrt</span>
+                <span class="badge bg-info">Applying</span>
                 {% elif feat.status == 'error' %}
-                <span class="badge bg-danger">Fehler</span>
+                <span class="badge bg-danger">Error</span>
                 {% else %}
-                <span class="badge bg-secondary">Inaktiv</span>
+                <span class="badge bg-secondary">Inactive</span>
                 {% endif %}
                 <div class="form-check form-switch mb-0">
                   <input class="form-check-input feat-toggle" type="checkbox"
@@ -235,7 +235,7 @@
               {% endif %}
               {% if feat.last_applied %}
               <div class="small text-muted mb-2">
-                <i class="bi bi-clock"></i> Zuletzt angewendet: {{ feat.last_applied }}
+                <i class="bi bi-clock"></i> Last applied: {{ feat.last_applied }}
               </div>
               {% endif %}
               {% if feat.has_params %}
@@ -250,7 +250,7 @@
                     {% if param.type == 'select' %}
                     <select class="form-select form-select-sm param-input" id="param-{{ feat.id }}-{{ param.name }}"
                             name="{{ param.name }}" data-detect="{{ param.detect|default:'' }}" {% if param.required %}required{% endif %}>
-                      <option value="">Wird erkannt...</option>
+                      <option value="">Detecting...</option>
                     </select>
                     {% elif param.type == 'multi-select' %}
                     <select class="form-select form-select-sm param-input" id="param-{{ feat.id }}-{{ param.name }}"
@@ -276,20 +276,20 @@
                   {% endfor %}
                 </form>
                 <button type="button" class="btn btn-primary btn-sm w-100 mt-1 feat-save-apply" data-feature="{{ feat.id }}">
-                  <i class="bi bi-play-fill"></i> Speichern & Anwenden
+                  <i class="bi bi-play-fill"></i> Save &amp; Apply
                 </button>
               </div>
               {% endif %}
               {% if not feat.has_params %}
               <button class="btn btn-outline-success btn-sm w-100 mt-2 feat-apply-standalone"
                       data-feature="{{ feat.id }}" style="display:{% if feat.enabled %}block{% else %}none{% endif %};">
-                <i class="bi bi-play-fill"></i> Anwenden
+                <i class="bi bi-play-fill"></i> Apply
               </button>
               {% endif %}
               {% if feat.playbook_source %}
               <button class="btn btn-link btn-sm position-absolute bottom-0 end-0 m-2 p-0 text-muted feat-source-btn"
                       data-feature="{{ feat.id }}" data-bs-toggle="modal" data-bs-target="#playbookModal"
-                      title="Playbook anzeigen" style="font-size:0.75rem;line-height:1;">
+                      title="View playbook" style="font-size:0.75rem;line-height:1;">
                 <i class="bi bi-code-slash"></i>
               </button>
               {% endif %}
@@ -328,7 +328,7 @@ const PLAYBOOK_SOURCES = {};
 {% for group in feature_groups %}
 {% for feat in group.features %}
 {% if feat.playbook_source %}
-PLAYBOOK_SOURCES["{{ feat.id }}"] = {{ feat.playbook_source|safe|truncatechars:65535 }};
+PLAYBOOK_SOURCES["{{ feat.id }}"] = "{{ feat.playbook_source|escapejs|truncatechars:65535 }}";
 {% endif %}
 {% endfor %}
 {% endfor %}
@@ -336,7 +336,7 @@ PLAYBOOK_SOURCES["{{ feat.id }}"] = {{ feat.playbook_source|safe|truncatechars:6
 function updateFeatBadge(card, status) {
   const badge = card ? card.querySelector('.card-header .badge') : null;
   if (!badge) return;
-  const map = { applied:['bg-success','Aktiv'], draft:['bg-warning text-dark','Entwurf'], applying:['bg-info','Wird ausgefuhrt'], error:['bg-danger','Fehler'], '':['bg-secondary','Inaktiv'], null:['bg-secondary','Inaktiv'] };
+  const map = { applied:['bg-success','Active'], draft:['bg-warning text-dark','Draft'], applying:['bg-info','Applying'], error:['bg-danger','Error'], '':['bg-secondary','Inactive'], null:['bg-secondary','Inactive'] };
   const [cls, label] = map[status] || map[''];
   badge.className = 'badge ' + cls;
   badge.textContent = label;
@@ -347,7 +347,7 @@ function applyFeatFeature(fid) {
     method: 'POST', credentials: 'same-origin',
     headers: {'X-CSRFToken': getCsrfToken()}
   }).then(r => r.json()).then(d => {
-    if (!d.ok) { alert('Fehler: ' + (d.error || '')); return; }
+    if (!d.ok) { alert('Error: ' + (d.error || '')); return; }
     if (typeof SymbiOS !== 'undefined' && SymbiOS.exec && d.job) {
       SymbiOS.exec.start(d.job, d.title, d.message);
       /* exec-modal.js handles overlay + reload on close via _needsReload */
@@ -361,13 +361,13 @@ function detectFeatOptions(container, fid) {
   container.querySelectorAll('select[data-detect]').forEach(sel => {
     const ds = sel.dataset.detect;
     if (!ds) return;
-    sel.innerHTML = '<option value="">Wird erkannt...</option>';
+    sel.innerHTML = '<option value="">Detecting...</option>';
     fetch('/plugins/' + FEATURE_SERVICE + '/features/' + fid + '/detect/' + sel.name + '/')
       .then(r => r.json()).then(d => {
         sel.innerHTML = '';
-        if (!d.ok || !d.options || !d.options.length) { sel.innerHTML = '<option value="">Keine Optionen</option>'; return; }
+        if (!d.ok || !d.options || !d.options.length) { sel.innerHTML = '<option value="">No options found</option>'; return; }
         d.options.forEach(opt => { const o = document.createElement('option'); o.value = opt.value; o.textContent = opt.label || opt.value; sel.appendChild(o); });
-      }).catch(() => { sel.innerHTML = '<option value="">Fehler</option>'; });
+      }).catch(() => { sel.innerHTML = '<option value="">Error</option>'; });
   });
 }
 
@@ -406,12 +406,12 @@ document.querySelectorAll('.feat-save-apply').forEach(btn => {
     const fd = new FormData(form);
     for (const [k,v] of fd.entries()) { data[k] = v; }
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Wird gespeichert...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
     fetch('/plugins/' + FEATURE_SERVICE + '/features/' + fid + '/save/', { method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':getCsrfToken(),'Content-Type':'application/json'}, body:JSON.stringify(data) })
       .then(r=>r.json()).then(d=>{
-        if(!d.ok){ alert('Fehler beim Speichern'); btn.disabled=false; btn.innerHTML='<i class="bi bi-play-fill"></i> Speichern & Anwenden'; return; }
+        if(!d.ok){ alert('Save failed'); btn.disabled=false; btn.innerHTML='<i class="bi bi-play-fill"></i> Save &amp; Apply'; return; }
         return applyFeatFeature(fid);
-      }).catch(e=>{ alert('Netzwerkfehler'); btn.disabled=false; btn.innerHTML='<i class="bi bi-play-fill"></i> Speichern & Anwenden'; });
+      }).catch(e=>{ alert('Network error'); btn.disabled=false; btn.innerHTML='<i class="bi bi-play-fill"></i> Save &amp; Apply'; });
   });
 });
 
@@ -419,7 +419,7 @@ document.querySelectorAll('.feat-apply-standalone').forEach(btn => {
   btn.addEventListener('click', function() {
     const fid = this.dataset.feature;
     this.disabled = true;
-    this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Wird ausgefuhrt...';
+    this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
     applyFeatFeature(fid);
   });
 });
