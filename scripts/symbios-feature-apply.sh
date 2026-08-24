@@ -95,7 +95,7 @@ else
   VM_IP=$(yq '.vars.vm_ip // "192.168.41.201"' "${g_git_root}/services/${SERVICE}.yml" 2>/dev/null)
   VM_IP="${VM_IP:-192.168.41.201}"
   ansible-playbook -i "${VM_IP}," -u root \
-    --timeout=30 --connect-timeout=10 \
+    -T 30 \
     $EXTRA_ARGS \
     "$PLAYBOOK_PATH"
 fi
