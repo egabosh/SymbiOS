@@ -190,3 +190,11 @@ or 9.9.9.9 (Quad9). If a public DNS is required, use Digitalcourage:
 - TLS hostname: `dns3.digitalcourage.de`
 - sha256 SPKI pinset: `2WFzfO2/56HpeR+v/l25NPf5dacfxLrudH5yZbWCfdo=`
 - See https://digitalcourage.de/support/zensurfreier-dns-server
+
+IMPORTANT: Digitalcourage DNS is DNS-over-TLS (port 853). It CANNOT be
+used as a plain nameserver in /etc/resolv.conf. It requires a TLS-capable
+DNS resolver (e.g. systemd-resolved with DNSOverTLS=yes, or unbound).
+
+NEVER use public IPs like 1.1.1.1 for routing tests or network detection
+either. Use Digitalcourage IPs (`5.9.164.112` / `2a01:4f8:251:554::2`)
+instead.
