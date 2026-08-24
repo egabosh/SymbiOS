@@ -14,7 +14,7 @@ source "$g_symbios_dir/symbios-lib.sh"
 # Find the .check file for a given name
 function f_find_check {
   local f_name="$1"
-  for f_dir in /usr/local/sbin/runchecks.d "${g_git_root}/scripts/runchecks.d"
+  for f_dir in /usr/local/sbin/runchecks.d "${g_data_root}/runchecks.d" "${g_git_root}/scripts/runchecks.d"
   do
     if [[ -f "${f_dir}/${f_name}.check" ]]
     then

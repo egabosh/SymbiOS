@@ -46,7 +46,7 @@
 #     program_paths:
 #       - /symbios/services/home-assistant/
 #       - /symbios/base-services/traefik/providers/home-assistant.yml
-#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-home-assistant.check
+#       - /symbios/runchecks.d/symbios-healthcheck-home-assistant.check
 #       - /usr/local/bin/ha_pingcheck
 #       - /etc/systemd/system/ha_pingcheck.service
 #     commands:
@@ -556,9 +556,9 @@
         interface: iot0
         direction: in
 
-    # Deploy the shared HTTP healthcheck (services/tasks/healthcheck.yml)
+    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/healthcheck.yml
+      include_tasks: tasks/runcheck.yml
 
 
     - name: Register playbook as installed

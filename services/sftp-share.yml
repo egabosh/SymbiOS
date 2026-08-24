@@ -41,7 +41,7 @@
 #     stop: docker compose -f /symbios/services/sftp-share/docker-compose.yml down
 #     program_paths:
 #       - /symbios/services/sftp-share/
-#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-sftp-share.check
+#       - /symbios/runchecks.d/symbios-healthcheck-sftp-share.check
 #   actions:
 #     start: docker compose -f /symbios/services/sftp-share/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/sftp-share/docker-compose.yml down
@@ -247,16 +247,19 @@
     notify:
     - Restart sftp-share
 
-  - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-sftp-share.check
+  - name: "{{ data_root }}/runchecks.d/symbios-healthcheck-sftp-share.check"
     ansible.builtin.blockinfile:
-      path: /usr/local/sbin/runchecks.d/symbios-healthcheck-sftp-share.check
+      path: "{{ data_root }}/runchecks.d/symbios-healthcheck-sftp-share.check"
       mode: "0400"
       owner: root
       group: root
       create: yes
       marker: "# {mark} ANSIBLE MANAGED BLOCK"
       block: |
-        # Healthcheck for sftp-share (container)
+        CHECK_CATEGORY="services"
+        CHECK_TITLE="sftp-share"
+        CHECK_DESC="Healthcheck for the sftp-share service."
+        CHECK_DETAIL="Verifies that a sftp-share container is listed in docker ps.|Container missing marks the check as failed."
         g_check_file="${g_tmp}/symbios-healthcheck-sftp-share"
         if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
         then

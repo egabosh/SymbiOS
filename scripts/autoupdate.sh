@@ -10,7 +10,7 @@ g_all-to-syslog
 DISPLAY=""
 set -o pipefail
 
-for g_update in $(find /usr/local/sbin/autoupdate.d ${g_git_root}/scripts/autoupdate.d -name "*.update" -type f | sort)
+for g_update in $(find /usr/local/sbin/autoupdate.d ${g_data_root}/autoupdate.d ${g_git_root}/scripts/autoupdate.d -name "*.update" -type f | sort)
 do
   g_echo "Running: $g_update"
   . "$g_update"

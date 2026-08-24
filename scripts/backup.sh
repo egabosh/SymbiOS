@@ -15,7 +15,7 @@ mkdir -p ${g_backupdir}
 chmod 700 ${g_backupdir}
 chown root:root ${g_backupdir}
 
-for g_backup in $(find /usr/local/sbin/backup.d ${g_git_root}/scripts/backup.d -name "*.backup" -type f | sort)
+for g_backup in $(find /usr/local/sbin/backup.d ${g_data_root}/backup.d ${g_git_root}/scripts/backup.d -name "*.backup" -type f | sort)
 do
   if bash -n "$g_backup" >$g_tmp/backup_error 2>&1
   then

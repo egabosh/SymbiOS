@@ -46,7 +46,7 @@
 #     program_paths:
 #       - /symbios/services/openwebui/
 #       - /symbios/base-services/traefik/providers/openwebui.yml
-#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-openwebui.check
+#       - /symbios/runchecks.d/symbios-healthcheck-openwebui.check
 #   actions:
 #     start: docker compose -f /symbios/services/openwebui/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/openwebui/docker-compose.yml down
@@ -566,9 +566,9 @@
     - name: Flush handlers - restart OpenWebUI to pick up DB config
       ansible.builtin.meta: flush_handlers
 
-    # Deploy the shared HTTP healthcheck (services/tasks/healthcheck.yml)
+    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/healthcheck.yml
+      include_tasks: tasks/runcheck.yml
       vars:
         healthcheck_url: "https://ai.{{ base_domain }}"
 

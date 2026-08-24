@@ -1,0 +1,24 @@
+---
+# Shared autoupdate script deployment for services.
+#
+# Deploys {{ data_root }}/autoupdate.d/{{ service_name }}.update from the
+# caller-provided autoupdate_content variable (full script text). Scripts
+# without a shebang are only sourced (by autoupdate.sh or handlers); add a
+# shebang line to autoupdate_content if the script is also executed
+# standalone.
+#
+# Required var:  service_name
+# Required var:  autoupdate_content (full script text)
+# Optional var:  autoupdate_name (defaults to service_name; file becomes
+#                <name>.update)
+# Optional var:  autoupdate_mode (default "0400"; use e.g. "0550" when the
+#                script must be directly executable)
+
+- name: "{{ data_root }}/autoupdate.d/{{ autoupdate_name | default(service_name) }}.update"
+  ansible.builtin.copy:
+    dest: "{{ data_root }}/autoupdate.d/{{ autoupdate_name | default(service_name) }}.update"
+    mode: "{{ autoupdate_mode | default('0400') }}"
+    owner: root
+    group: root
+    content: "{{ autoupdate_content }}"
+    validate: /bin/bash -n %s

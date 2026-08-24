@@ -45,7 +45,7 @@
 #     program_paths:
 #       - /symbios/services/paperless/
 #       - /symbios/base-services/traefik/providers/paperless.yml
-#       - /usr/local/sbin/runchecks.d/symbios-healthcheck-paperless.check
+#       - /symbios/runchecks.d/symbios-healthcheck-paperless.check
 #       - /etc/samba/smb-{{ ansible_facts['hostname'] }}.conf
 #     commands:
 #       - userdel paperless
@@ -309,9 +309,9 @@
         backup: yes
       notify: Restart authelia
 
-    # Deploy the shared HTTP healthcheck (services/tasks/healthcheck.yml)
+    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/healthcheck.yml
+      include_tasks: tasks/runcheck.yml
 
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/paperless.yml"

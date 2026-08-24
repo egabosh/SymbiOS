@@ -228,44 +228,48 @@ networks:
 ## Healthcheck scripts
 
 Every service should deploy a healthcheck script to
-`/usr/local/sbin/runchecks.d/symbios-healthcheck-<name>.check` (where `<name>`
+`/symbios/runchecks.d/symbios-healthcheck-<name>.check` (where `<name>`
 is the playbook filename without `.yml`). The `runchecks.sh` daemon iterates
 over all `*.check` files every 5 minutes. The name mapping matters: the WebUI
 sidebar derives its health icon from the playbook basename.
 
 ### Web-facing services (HTTP)
 
-For HTTP services include the shared task file `services/tasks/healthcheck.yml`
+For HTTP services include the shared task file `services/tasks/runcheck.yml`
 (same pattern as `tasks/oidc-groups.yml`; the path is relative to the
 playbook's directory):
 
 ```yaml
     # Required vars in the playbook: service_name, service_domain
     # Optional var: healthcheck_url (default: https://{{ service_domain }})
-    - name: Deploy healthcheck
-      include_tasks: tasks/healthcheck.yml
+    - name: Deploy runcheck
+      include_tasks: tasks/runcheck.yml
 
     # Variant with a custom probe URL (e.g. openwebui on ai.<base_domain>):
-    - name: Deploy healthcheck
-      include_tasks: tasks/healthcheck.yml
+    - name: Deploy runcheck
+      include_tasks: tasks/runcheck.yml
       vars:
         healthcheck_url: "https://ai.{{ base_domain }}"
 ```
 
-The shared task deploys this check (5-minute cooldown, HTTP `>= 500` = error):
+The shared task deploys this check (5-minute cooldown, HTTP `>= 500` = error).
+The CHECK_* variables feed the /health/ overview page:
 
 ```yaml
-    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+    - name: "{{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check"
       ansible.builtin.blockinfile:
-        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+        path: "{{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check"
         mode: "0400"
         owner: root
         group: root
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          # Healthcheck for {{ service_name }}
-          g_svc_url="{{ healthcheck_url | default('https://' ~ service_domain) }}"
+          CHECK_CATEGORY="services"
+          CHECK_TITLE="{{ service_name }}"
+          CHECK_DESC="Healthcheck for the {{ service_name }} service."
+          CHECK_DETAIL="Probes https://{{ service_domain }} every 5 minutes.|HTTP status >= 500 or connection failure marks the check as failed."
+          g_svc_url="https://{{ service_domain }}"
           g_check_file="${g_tmp}/symbios-healthcheck-{{ service_name }}"
           if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
           then
@@ -284,19 +288,23 @@ The shared task deploys this check (5-minute cooldown, HTTP `>= 500` = error):
 ### Non-web services (Docker containers)
 
 Services without a web UI deploy an inline check with the same 5-minute
-cooldown wrapper (see `rustdesk.yml`, `sftp-share.yml`, `openwrt-vm.yml`):
+cooldown wrapper and CHECK_* metadata (see `rustdesk.yml`, `sftp-share.yml`,
+`openwrt-vm.yml`):
 
 ```yaml
-    - name: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+    - name: "{{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check"
       ansible.builtin.blockinfile:
-        path: /usr/local/sbin/runchecks.d/symbios-healthcheck-{{ service_name }}.check
+        path: "{{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check"
         mode: "0400"
         owner: root
         group: root
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          # Healthcheck for {{ service_name }} (container)
+          CHECK_CATEGORY="services"
+          CHECK_TITLE="{{ service_name }}"
+          CHECK_DESC="Healthcheck for the {{ service_name }} service."
+          CHECK_DETAIL="Verifies that the container is listed in docker ps."
           g_check_file="${g_tmp}/symbios-healthcheck-{{ service_name }}"
           if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
           then
@@ -315,6 +323,8 @@ cooldown wrapper (see `rustdesk.yml`, `sftp-share.yml`, `openwrt-vm.yml`):
 
 - File name: `symbios-healthcheck-<name>.check` (`<name>` must match the
   playbook filename without `.yml`, or the sidebar icon will not appear)
+- Set `CHECK_CATEGORY`, `CHECK_TITLE`, `CHECK_DESC` and `CHECK_DETAIL` so the
+  check shows up categorized on the /health/ page (see `load.check`)
 - Mode `0400` (checks are sourced by runchecks.sh as root, never executed)
 - **Never call `exit` in a `.check` script** - runchecks.sh sources every
   check, so an `exit` kills the whole health daemon mid-loop

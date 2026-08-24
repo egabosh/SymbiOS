@@ -170,8 +170,8 @@ concern and is idempotent, so it is safe to re-run any of them.
 | `hardening.yml`      | SSHd hardening, kernel/sysctl and permission hardening.                 |
 | `firewall.yml`       | `ufw` firewall; opens SSH (port 33), and the ports services need.      |
 | `backup.yml`         | Installs `rsync` and `/usr/local/sbin/backup.d/` backup hooks.          |
-| `autoupdate.yml`     | Unattended upgrades via `/usr/local/sbin/autoupdate.d/`.                |
-| `runchecks.yml`      | Health/SMART/mdadm checks in `/usr/local/sbin/runchecks.d/`.            |
+| `autoupdate.yml`     | Unattended upgrades via `/symbios/autoupdate.d/`.                       |
+| `runchecks.yml`      | Health/SMART/mdadm checks in `/symbios/runchecks.d/`.                   |
 | `docker.yml`         | Installs Docker, creates the `docker` user/group.                       |
 | `dedyn.yml`          | deSEC (dedyn.io) dynamic-DNS client; forces EUI-64 IPv6 addressing (stable interface ID). |
 | `traefik.yml`        | Deploys the Traefik reverse proxy (file provider, no Docker socket).   |

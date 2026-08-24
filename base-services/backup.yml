@@ -61,6 +61,14 @@
         state: directory
         mode: '0700'
 
+    - name: Create checks dir /symbios/backup.d
+      ansible.builtin.file:
+        path: /symbios/backup.d
+        owner: root
+        group: root
+        state: directory
+        mode: '0700'
+
     - name: /etc/cron.d/backup_local
       blockinfile:
         path: /etc/cron.d/backup_local

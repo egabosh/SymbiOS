@@ -55,6 +55,14 @@
         state: directory
         mode: "0700"
 
+    - name: Create updates dir /symbios/autoupdate.d
+      ansible.builtin.file:
+        path: "{{ data_root }}/autoupdate.d"
+        owner: root
+        group: root
+        state: directory
+        mode: "0700"
+
     - name: /etc/cron.d/autoupdate_local
       blockinfile:
         path: /etc/cron.d/autoupdate_local
