@@ -169,7 +169,7 @@ concern and is idempotent, so it is safe to re-run any of them.
 | `localization.yml`   | Timezone, keyboard layout and system locale.                            |
 | `hardening.yml`      | SSHd hardening, kernel/sysctl and permission hardening.                 |
 | `firewall.yml`       | `ufw` firewall; opens SSH (port 33), and the ports services need.      |
-| `backup.yml`         | Installs `rsync` and `/usr/local/sbin/backup.d/` backup hooks.          |
+| `backup.yml`         | Installs `rsync` and `/symbios/backup.d/` backup hooks.                  |
 | `autoupdate.yml`     | Unattended upgrades via `/symbios/autoupdate.d/`.                       |
 | `runchecks.yml`      | Health/SMART/mdadm checks in `/symbios/runchecks.d/`.                   |
 | `docker.yml`         | Installs Docker, creates the `docker` user/group.                       |

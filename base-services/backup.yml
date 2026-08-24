@@ -53,7 +53,9 @@
         update_cache: no
         install_recommends: no
 
-    - name: Create checks dir /usr/local/sbin/backup.d
+    # Legacy location kept for transition; new backups go to
+    # {{ data_root }}/backup.d (scanned by backup.sh)
+    - name: Create legacy backups dir /usr/local/sbin/backup.d
       ansible.builtin.file:
         path: /usr/local/sbin/backup.d
         owner: root
@@ -61,9 +63,9 @@
         state: directory
         mode: '0700'
 
-    - name: Create checks dir /symbios/backup.d
+    - name: Create backups dir {{ data_root }}/backup.d
       ansible.builtin.file:
-        path: /symbios/backup.d
+        path: "{{ data_root }}/backup.d"
         owner: root
         group: root
         state: directory
