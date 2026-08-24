@@ -57,7 +57,7 @@
             </div>
           </div>
         </div>
-        <div class="card-body">
+        <div class="card-body position-relative">
           <p class="card-text small text-muted">{{ feat.description }}</p>
           {% if feat.error %}
           <div class="alert alert-danger py-1 px-2 small mb-2">
@@ -134,14 +134,13 @@
           </button>
           {% endif %}
 
+          <!-- Subtle playbook source button (bottom right) -->
           {% if feat.playbook_source %}
-          <button class="btn btn-outline-secondary btn-sm w-100 mt-2 feat-source-toggle"
-                  data-feature="{{ feat.id }}" type="button">
-            <i class="bi bi-code-slash"></i> Playbook anzeigen
+          <button class="btn btn-link btn-sm position-absolute bottom-0 end-0 m-2 p-0 text-muted feat-source-btn"
+                  data-feature="{{ feat.id }}" data-bs-toggle="modal" data-bs-target="#playbookModal"
+                  title="Playbook anzeigen" style="font-size:0.75rem;line-height:1;">
+            <i class="bi bi-code-slash"></i>
           </button>
-          <pre class="bg-dark text-light p-2 small mt-1 mb-0 feat-source"
-               id="source-{{ feat.id }}"
-               style="display:none;max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-word;">{{ feat.playbook_source }}</pre>
           {% endif %}
         </div>
       </div>
@@ -150,18 +149,38 @@
   </div>
 </div>
 {% endfor %}
+
+<!-- Single playbook modal (reused by all features) -->
+<div class="modal fade" id="playbookModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title" id="playbookModalTitle"><i class="bi bi-code-slash me-2"></i>Playbook</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <pre id="playbookModalContent" class="bg-dark text-light p-3 mb-0 small"
+             style="min-height:60vh;white-space:pre-wrap;word-break:break-word;"></pre>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 const SERVICE = "{{ service }}";
 const CSRF = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+const PLAYBOOK_SOURCES = {};
+{% for group in groups %}
+{% for feat in group.features %}
+{% if feat.playbook_source %}
+PLAYBOOK_SOURCES["{{ feat.id }}"] = {{ feat.playbook_source|safe|truncatechars:65535 }};
+{% endif %}
+{% endfor %}
+{% endfor %}
 
 function getCsrfToken() { return CSRF; }
-
-function getCsrfCookie() {
-  return document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('csrftoken='))?.split('=')[1] || '';
-}
 
 function updateBadge(card, status) {
   const badge = card ? card.querySelector('.card-header .badge') : null;
@@ -179,8 +198,8 @@ function updateBadge(card, status) {
   badge.textContent = label;
 }
 
-function reloadPage() { setTimeout(() => location.reload(), 300); }
-
+/* Apply feature via exec overlay. On success: reload after overlay closes.
+   On failure: keep overlay open so user can read the error output. */
 function applyFeature(fid) {
   return fetch('/plugins/' + SERVICE + '/features/' + fid + '/apply/', {
     method: 'POST',
@@ -192,11 +211,17 @@ function applyFeature(fid) {
     if (!d.ok) { alert('Fehler beim Anwenden: ' + (d.error || '')); return; }
     if (typeof SymbiOS !== 'undefined' && SymbiOS.exec && d.job) {
       SymbiOS.exec.start(d.job, d.title, d.message);
+      /* Poll for completion - only reload on success; on failure the exec
+         overlay stays open with error output until the user closes it. */
       const checkDone = setInterval(() => {
-        if (!SymbiOS.exec.isRunning()) { clearInterval(checkDone); reloadPage(); }
+        if (!SymbiOS.exec.isRunning()) {
+          clearInterval(checkDone);
+          /* Small delay so user sees "Completed successfully" before reload */
+          setTimeout(() => location.reload(), 800);
+        }
       }, 1000);
     } else {
-      reloadPage();
+      location.reload();
     }
   });
 }
@@ -235,11 +260,9 @@ document.querySelectorAll('.feat-toggle').forEach(toggle => {
     const standaloneBtn = card ? card.querySelector('.feat-apply-standalone') : null;
 
     if (this.checked) {
-      /* ON: show config area or apply immediately */
       if (hasParams && configArea) {
         configArea.style.display = 'block';
         detectOptions(configArea, fid);
-        /* Also toggle state on server */
         fetch('/plugins/' + SERVICE + '/features/' + fid + '/toggle/', {
           method: 'POST', credentials: 'same-origin',
           headers: {'X-CSRFToken': getCsrfToken()}
@@ -248,7 +271,6 @@ document.querySelectorAll('.feat-toggle').forEach(toggle => {
         });
       } else if (standaloneBtn) {
         standaloneBtn.style.display = 'block';
-        /* Toggle + immediate apply for no-param features */
         fetch('/plugins/' + SERVICE + '/features/' + fid + '/toggle/', {
           method: 'POST', credentials: 'same-origin',
           headers: {'X-CSRFToken': getCsrfToken()}
@@ -259,7 +281,6 @@ document.querySelectorAll('.feat-toggle').forEach(toggle => {
           }
         });
       } else {
-        /* No params, no standalone btn - just toggle */
         fetch('/plugins/' + SERVICE + '/features/' + fid + '/toggle/', {
           method: 'POST', credentials: 'same-origin',
           headers: {'X-CSRFToken': getCsrfToken()}
@@ -268,7 +289,6 @@ document.querySelectorAll('.feat-toggle').forEach(toggle => {
         });
       }
     } else {
-      /* OFF: hide config area, toggle off */
       if (configArea) configArea.style.display = 'none';
       if (standaloneBtn) standaloneBtn.style.display = 'none';
       fetch('/plugins/' + SERVICE + '/features/' + fid + '/toggle/', {
@@ -328,17 +348,16 @@ document.querySelectorAll('.feat-apply-standalone').forEach(btn => {
   });
 });
 
-/* Toggle playbook source visibility */
-document.querySelectorAll('.feat-source-toggle').forEach(btn => {
+/* Playbook source modal: populate content when button is clicked */
+document.querySelectorAll('.feat-source-btn').forEach(btn => {
   btn.addEventListener('click', function() {
     const fid = this.dataset.feature;
-    const pre = document.getElementById('source-' + fid);
-    if (!pre) return;
-    const visible = pre.style.display !== 'none';
-    pre.style.display = visible ? 'none' : 'block';
-    this.innerHTML = visible
-      ? '<i class="bi bi-code-slash"></i> Playbook anzeigen'
-      : '<i class="bi bi-code-slash"></i> Playbook ausblenden';
+    const title = document.getElementById('playbookModalTitle');
+    const content = document.getElementById('playbookModalContent');
+    const card = document.getElementById('feat-card-' + fid);
+    const name = card ? card.querySelector('strong').textContent : fid;
+    title.innerHTML = '<i class="bi bi-code-slash me-2"></i>' + name + ' - Playbook';
+    content.textContent = PLAYBOOK_SOURCES[fid] || '(kein Quelltext verfuegbar)';
   });
 });
 </script>
