@@ -20,9 +20,11 @@ then
   exit 1
 fi
 
-PLUGIN_DIR="${g_services_root}/${SERVICE}"
+# plugin.yml and features/ live in the git repo (read-only source).
+# features-state.yml is in the config dir (writable, same as WebUI container /config).
+PLUGIN_DIR="${g_git_root}/services/${SERVICE}"
 PLUGIN_YML="${PLUGIN_DIR}/plugin.yml"
-STATE_YML="${PLUGIN_DIR}/features-state.yml"
+STATE_YML="${g_config_dir}/services/${SERVICE}/features-state.yml"
 
 if [[ ! -f "$PLUGIN_YML" ]]
 then
@@ -90,7 +92,7 @@ then
     "$PLAYBOOK_PATH"
 else
   # VM-side playbook: SSH into the target (default).
-  VM_IP=$(yq '.vars.vm_ip // "192.168.41.201"' "${PLUGIN_DIR}/${SERVICE}.yml" 2>/dev/null)
+  VM_IP=$(yq '.vars.vm_ip // "192.168.41.201"' "${g_git_root}/services/${SERVICE}.yml" 2>/dev/null)
   VM_IP="${VM_IP:-192.168.41.201}"
   ansible-playbook -i "${VM_IP}," -u root \
     --timeout=30 --connect-timeout=10 \

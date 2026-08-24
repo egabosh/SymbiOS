@@ -95,6 +95,8 @@ def get_plugin_state_path(service_name):
 
     State is stored in the writable /config directory (persisted across
     container restarts), falling back to the read-only repo for initial state.
+    The host script (symbios-feature-apply.sh) mirrors this path via the
+    /config mount -> /symbios/base-services/symbios-ui/config/ on the host.
     """
     config_path = os.path.join(CONFIG_BASE, "services", service_name, "features-state.yml")
     if os.path.isfile(config_path):
