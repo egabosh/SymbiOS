@@ -449,7 +449,10 @@ Only LDAP users who are members of the service's designated group(s) may log in.
   then configure the app to restrict login to the group(s). Examples:
   - `openwebui`: `OAUTH_ALLOWED_ROLES=openwebui-users,openwebui-admins`
   - `home-assistant`: HA `auth_oidc` role mapping
-  - `nextcloud`: LDAP `ldapUserFilterGroups` setting
+  - `nextcloud`: user_oidc `--group-whitelist-regex` +
+    `--group-restrict-login-to-whitelist` (requires the `groups` scope; a
+    plain LDAP `ldapUserFilterGroups` filter does NOT work because OpenLDAP
+    has no memberOf overlay)
 - **Authelia forward-auth services**: Add an Authelia `access_control` rule
   with `subject` restricting to `<service>-users` / `<service>-admins`.
 - **Internal auth services**: No LDAP groups needed (service manages own users).

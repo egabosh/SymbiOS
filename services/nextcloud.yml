@@ -500,6 +500,7 @@
                   client_secret: '{{ lookup('file', '/symbios/services/nextcloud/oidc_digest') }}'
                   public: false
                   authorization_policy: '{{ lookup('file', '/symbios/base-services/authelia/authorization_policy') }}'
+                  consent_mode: 'implicit'
                   redirect_uris:
                     - 'https://nextcloud.{{ base_domain }}/apps/user_oidc/code'
                   scopes:
@@ -668,6 +669,8 @@
                  --mapping-groups="groups" \
                  --unique-uid="0" \
                  --scope="openid profile email groups" \
+                 --group-whitelist-regex="^nextcloud-(users|admins)$" \
+                 --group-restrict-login-to-whitelist=true \
                  Authelia
             then
               echo "ERROR: could not configure Authelia OIDC provider for Nextcloud" >&2
