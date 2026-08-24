@@ -47,6 +47,11 @@
 #       - /symbios/services/opencode/
 #       - /symbios/base-services/traefik/providers/opencode.yml
 #       - /symbios/runchecks.d/symbios-healthcheck-opencode.check
+#     ldap_groups:
+#       - opencode-users
+#       - opencode-admins
+#     authelia_blocks:
+#       - "opencode ACCESS CONTROL"
 #   actions:
 #     start: docker compose -f /symbios/services/opencode/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/opencode/docker-compose.yml down

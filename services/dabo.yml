@@ -45,6 +45,10 @@
 #       - /symbios/services/dabo/
 #       - /symbios/base-services/traefik/providers/dabo.yml
 #       - /symbios/runchecks.d/symbios-healthcheck-dabo.check
+#     ldap_groups:
+#       - dabo
+#     authelia_blocks:
+#       - "dabo ACCESS CONTROL"
 #   actions:
 #     start: docker compose -f /symbios/services/dabo/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/dabo/docker-compose.yml down

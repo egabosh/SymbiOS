@@ -88,3 +88,17 @@ then
 fi
 
 g_echo_note "Autoupdate finished at $(date)"
+
+# Wind down the output chain gracefully: closing our standard outputs sends
+# EOF through tee and the syslog FIFO readers, so they terminate by themselves.
+# Without this, gaboshlib's exit trap SIGKILLs the still-blocked readers, which
+# prints an ugly "Killed ... while read line" notice into the job/UI output.
+sleep 0.2
+exec 1>&- 2>&-
+for i in 1 2 3 4 5 6 7 8 9 10
+do
+  [[ -z "$(jobs -p)" ]] && break
+  sleep 0.2
+done
+
+exit ${g_rc:-0}

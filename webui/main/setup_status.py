@@ -56,8 +56,11 @@ PAGE_EXPLAIN = {
         'This is more secure than a password.'
     ),
     'backup': (
-        'The server can regularly back up its data to an external SFTP '
-        'server. This way your data survives a failure.'
+        'Your data deserves protection: every night SymbiOS automatically '
+        'saves a complete snapshot of all data - either only on this server '
+        'or additionally on your own backup server (optionally encrypted). '
+        'If something breaks, you can restore individual services or the '
+        'whole system from any day.'
     ),
     'port-forwarding': (
         'For the server to be reachable from outside, ports 80 (HTTP) and '
@@ -94,6 +97,7 @@ PAGE_CHECK = {
     'auth': 'twofa',
     'acme': 'certs',
     'disk': 'disk',
+    'backup': 'backup',
 }
 
 

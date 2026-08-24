@@ -2,131 +2,445 @@
 {% block content %}
 <h2><i class="bi bi-cloud-arrow-up"></i> Backup</h2>
 
+{% if status %}
+  {% if status.state == 'ok' %}
+    <div class="alert alert-success d-flex align-items-center gap-2">
+      <i class="bi bi-check-circle-fill"></i>
+      <div>Your last backup ran successfully on {{ status.finished }} ({{ status.message }})</div>
+    </div>
+  {% elif status.state == 'running' %}
+    <div class="alert alert-info d-flex align-items-center gap-2">
+      <span class="spinner-border spinner-border-sm"></span>
+      <div>A backup is currently running...</div>
+    </div>
+  {% else %}
+    <div class="alert alert-danger d-flex align-items-center gap-2">
+      <i class="bi bi-x-circle-fill"></i>
+      <div>The last backup failed: {{ status.message }}</div>
+    </div>
+  {% endif %}
+{% else %}
+  <div class="alert alert-warning d-flex align-items-center gap-2">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    <div>No backup has run yet. Everything below can stay as it is for now - a backup runs automatically every night at 00:05.</div>
+  </div>
+{% endif %}
+
+<form method="post" id="backup-form" data-exec="true">
+{% csrf_token %}
 <div class="row">
   <div class="col-md-8">
-    <div class="card">
-      <div class="card-header">
-        <i class="bi bi-hdd-network"></i> SSH/SFTP Backup Server
-      </div>
+
+    <!-- Step 1: target -->
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-1-circle"></i> <strong>Where should your backups go?</strong></div>
       <div class="card-body">
-        <form method="post" id="backup-form" data-exec="true">
-          {% csrf_token %}
+        <p class="text-muted small">Everything that matters lives under <code>/symbios</code>: all services, their data, databases and settings. A complete snapshot of this folder is enough - it runs automatically every night.</p>
 
-          <div class="mb-3">
-            <label class="form-label">Hostname / IP</label>
-            <input type="text" class="form-control" name="backup_server_host" id="backup_host"
-                   value="{{ vars.backup_server_host|default:'' }}"
-                   placeholder="backup.example.com">
+        <div class="row g-3 mb-2">
+          <div class="col-md-6">
+            <label class="d-block h-100 border rounded p-3 mb-0 {% if not vars.backup_server_host %}border-primary bg-light{% endif %}" style="cursor:pointer">
+              <input type="radio" name="backup_target" value="local" class="me-2"
+                     {% if not vars.backup_server_host %}checked{% endif %} onchange="toggleTarget()">
+              <strong><i class="bi bi-hdd me-1"></i> Only on this server</strong>
+              <div class="small text-muted mt-1">Backups are stored locally in <code>/symbios/backup</code>. Protects against deleted files and botched updates - but not against hardware failure.</div>
+            </label>
           </div>
+          <div class="col-md-6">
+            <label class="d-block h-100 border rounded p-3 mb-0 {% if vars.backup_server_host %}border-primary bg-light{% endif %}" style="cursor:pointer">
+              <input type="radio" name="backup_target" value="remote" class="me-2"
+                     {% if vars.backup_server_host %}checked{% endif %} onchange="toggleTarget()">
+              <strong><i class="bi bi-cloud-arrow-up me-1"></i> Additional server</strong>
+              <div class="small text-muted mt-1">Copies the backups to your own second server via SSH/SFTP. Recommended - this also protects against hardware failure or theft.</div>
+            </label>
+          </div>
+        </div>
 
-          <div class="row mb-3">
-            <div class="col-md-4">
+        <div id="remote-panel" class="mt-3">
+          <div class="row g-2">
+            <div class="col-md-5">
+              <label class="form-label">Server address</label>
+              <input type="text" class="form-control" name="backup_server_host" id="backup_host"
+                     value="{{ vars.backup_server_host|default:'' }}"
+                     placeholder="backup.example.com">
+            </div>
+            <div class="col-md-2">
               <label class="form-label">Port</label>
               <input type="number" class="form-control" name="backup_server_port" id="backup_port"
                      value="{{ vars.backup_server_port|default:'22' }}"
                      placeholder="22" min="1" max="65535">
             </div>
-            <div class="col-md-4">
+            <div class="col-md-2">
               <label class="form-label">User</label>
               <input type="text" class="form-control" name="backup_server_user" id="backup_user"
                      value="{{ vars.backup_server_user|default:'root' }}"
                      placeholder="root">
             </div>
-            <div class="col-md-4">
-              <label class="form-label">Path</label>
+            <div class="col-md-3">
+              <label class="form-label">Directory there</label>
               <input type="text" class="form-control" name="backup_server_path" id="backup_path"
                      value="{{ vars.backup_server_path|default:'' }}"
                      placeholder="/backups/symbios">
             </div>
           </div>
 
-          <div class="d-flex gap-2 align-items-center">
-            <button type="button" class="btn btn-outline-secondary" id="test-btn" onclick="testConnection()">
-              <i class="bi bi-plug"></i> Test Connection
-            </button>
-            <div id="test-result" class="flex-grow-1"></div>
-            <button type="submit" class="btn btn-primary">
-              <i class="bi bi-save"></i> Save
-            </button>
+          <div class="mt-3 form-check form-switch">
+            <input class="form-check-input" type="checkbox" name="backup_encryption" id="backup_encryption"
+                   role="switch" {% if vars.backup_encryption %}checked{% endif %}>
+            <label class="form-check-label" for="backup_encryption">
+              <strong>Encrypt backups on the server</strong>
+              <span class="text-muted small">- recommended when you do not fully control the server (e.g. rented root server, cloud storage). The nightly backups are then stored there encrypted; nobody can read them without the passphrase below.</span>
+            </label>
           </div>
-        </form>
+
+          <div id="encryption-panel" class="ms-4 mt-2 border-start ps-3">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="passphraseAction('generate')" id="pw-gen-btn">
+              <i class="bi bi-magic"></i> Generate passphrase
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary ms-1" onclick="passphraseAction('show')">
+              <i class="bi bi-eye"></i> Show passphrase
+            </button>
+            <div class="input-group input-group-sm mt-2 {% if not vars.backup_encryption %}d-none{% endif %}" id="pw-display-group">
+              <input type="text" class="form-control font-monospace bg-white" id="pw-display" readonly
+                     placeholder="(not shown yet)">
+              <button class="btn btn-outline-secondary" type="button" id="copy-pw-btn"
+                      onclick="copyToClipboard('pw-display')"><i class="bi bi-clipboard"></i></button>
+            </div>
+            <div class="small text-muted mt-1">
+              Write this passphrase down somewhere safe (e.g. printed in a drawer). Without it,
+              encrypted backups can never be opened again - not even by SymbiOS.
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <button type="button" class="btn btn-outline-secondary" id="test-btn" onclick="testConnection()">
+              <i class="bi bi-plug"></i> Test connection
+            </button>
+            <div id="test-result" class="d-inline-block ms-2"></div>
+            <div class="form-text small mt-2">
+              SymbiOS logs in with this public key - add it once to the file
+              <code>~/.ssh/authorized_keys</code> of the backup user on the target server:
+            </div>
+            <textarea class="form-control font-monospace small mt-1" rows="2" readonly id="pubkey-box">{{ data.pubkey|default:'' }}</textarea>
+          </div>
+        </div>
       </div>
+    </div>
+
+    <!-- Step 2: excludes -->
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-2-circle"></i> <strong>Leave things out (optional)</strong></div>
+      <div class="card-body">
+        <p class="text-muted small mb-2">
+          Normally you do not need to change anything here. If single folders should NOT be backed up
+          (e.g. a huge download directory), enter them here - one line per folder.
+        </p>
+        <textarea class="form-control font-monospace small" name="backup_exclude" rows="4"
+                  placeholder="/services/my-service/downloads&#10;/services/nextcloud/data/files_trashbin">{% if vars.backup_exclude %}{% for line in vars.backup_exclude %}{{ line }}
+{% endfor %}{% endif %}</textarea>
+        <div class="form-text small">Examples above. Patterns follow rsync syntax; lines starting with # are ignored. System internals (Docker images, temporary files, the backups themselves) are always excluded automatically.</div>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mb-4">
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-save"></i> Save settings
+      </button>
+      <span class="text-muted small align-self-center">Saving re-applies the backup configuration in the background.</span>
     </div>
   </div>
 
+  <!-- Right column: help -->
   <div class="col-md-4">
-    <div class="card">
-      <div class="card-header">
-        <i class="bi bi-info-circle"></i> About
-      </div>
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-info-circle"></i> How it works</div>
       <div class="card-body small">
-        <p class="card-text">
-          Configure an SSH/SFTP server for automated backups. The server
-          must be reachable via SSH with key-based authentication.
-        </p>
         <ul class="mb-2 ps-3">
-          <li>The WebUI's SSH key is used for authentication</li>
-          <li>Test the connection before saving</li>
-          <li>The remote directory must already exist</li>
-          <li>Backups are stored as timestamped files</li>
+          <li>Every night at 00:05 a complete snapshot of your data (<code>/symbios</code>) is created.</li>
+          <li>Databases (Nextcloud etc.) and the user directory are exported first, so snapshots are always consistent.</li>
+          <li>Unchanged files are stored only once (hard links), so snapshots need far less space than a full copy every day.</li>
+          <li>With a backup server, everything is mirrored there; with encryption enabled as an unreadable archive.</li>
         </ul>
-        <p class="mb-0 small text-muted">
-          <i class="bi bi-info-circle"></i>
-          Ensure the SSH key is authorized on the remote host
-          (see <a href="/settings/ssh-keys/">SSH Keys</a>).
-        </p>
+        <hr>
+        <strong><i class="bi bi-life-preserver me-1"></i>Restoring</strong>
+        <p class="mb-2">Below under <em>"Your backups"</em> you can bring back any previous state: either just a single service (e.g. Nextcloud from yesterday) or the whole system. Files AND databases are restored automatically.</p>
+        <p class="mb-0 text-muted">Tip: after setting up, click <em>"Run backup now"</em> once to check everything works.</p>
       </div>
+    </div>
+  </div>
+</div>
+</form>
+
+<!-- Step 3: history -->
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-clock-history"></i> <strong>Your backups</strong></span>
+    <span>
+      <button type="button" class="btn btn-sm btn-outline-secondary me-1" onclick="refreshSnapshots()">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="runBackupNow()">
+        <i class="bi bi-play-fill"></i> Run backup now
+      </button>
+    </span>
+  </div>
+  <div class="card-body">
+    {% if data.warning %}<div class="alert alert-warning py-2 small">{{ data.warning }}</div>{% endif %}
+    {% if data.snapshots %}
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0" id="snapshot-table">
+          <thead><tr><th>Date</th><th>Location</th><th class="text-end"></th></tr></thead>
+          <tbody>
+          </tbody>
+        </table>
+      </div>
+      <div class="form-text small mt-2">Snapshots are kept automatically: recent days plus monthly long-term copies.</div>
+    {% else %}
+      <p class="text-muted mb-0">No backups found yet. They will appear here after the first run (tonight, or via <em>"Run backup now"</em>).</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Step 4: restore -->
+<div class="card mb-3 border-warning" id="restore">
+  <div class="card-header bg-warning-subtle"><i class="bi bi-life-preserver"></i> <strong>Restore</strong> <span class="text-muted fw-normal">- bring back a previous state</span></div>
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label">From which day?</label>
+        <select class="form-select" id="restore-date">
+          <option value="">- choose date -</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">What?</label>
+        <select class="form-select" id="restore-scope">
+          <option value="--full">The whole system</option>
+        </select>
+      </div>
+      <div class="col-md-auto">
+        <button type="button" class="btn btn-outline-secondary" id="plan-btn" onclick="loadPlan()" disabled>
+          <i class="bi bi-search"></i> Show what happens
+        </button>
+        <button type="button" class="btn btn-danger" id="restore-btn" onclick="doRestore()" disabled>
+          <i class="bi bi-arrow-counterclockwise"></i> Restore
+        </button>
+      </div>
+    </div>
+    <div id="restore-plan" class="mt-3"></div>
+    <div class="form-text small mt-2">
+      A restore stops the affected service(s) briefly, puts the old files (and databases) back and starts everything again.
+      Restoring the <em>whole system</em> restarts the server completely and removes everything created after the chosen day.
     </div>
   </div>
 </div>
 
 <script>
+/* Toggle between local-only and remote backup target */
+function toggleTarget() {
+  var remote = document.querySelector('input[name="backup_target"][value="remote"]').checked;
+  document.getElementById('remote-panel').style.display = remote ? '' : 'none';
+}
+
+/* Fetch or reveal the encryption passphrase */
+function passphraseAction(action) {
+  var fd = new FormData();
+  fd.append('action', action);
+  fetch('{% url "settings_backup_passphrase" %}', {
+    method: 'POST', body: fd, credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken(), 'X-Requested-With': 'XMLHttpRequest' }
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) { alert(data.error || 'Error'); return; }
+      var group = document.getElementById('pw-display-group');
+      group.classList.remove('d-none');
+      document.getElementById('pw-display').value = data.passphrase || '';
+      if (data.generated) {
+        group.insertAdjacentHTML('afterend',
+          '<div class="alert alert-success py-2 small mt-2">Passphrase created. Please store it safely now!</div>');
+      }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function copyToClipboard(id) {
+  var el = document.getElementById(id);
+  el.select();
+  navigator.clipboard.writeText(el.value);
+}
+
+/* Test SSH connectivity to the backup server */
 function testConnection() {
   var btn = document.getElementById('test-btn');
   var result = document.getElementById('test-result');
-
   var host = document.getElementById('backup_host').value.trim();
-  var port = document.getElementById('backup_port').value.trim();
-  var user = document.getElementById('backup_user').value.trim();
-  var path = document.getElementById('backup_path').value.trim();
-
   if (!host) {
-    result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> Please enter a hostname.</span>';
+    result.innerHTML = '<span class="text-danger small"><i class="bi bi-x-circle-fill"></i> Please enter a server address.</span>';
     return;
   }
-
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Testing...';
   result.innerHTML = '';
-
   var formData = new FormData();
   formData.append('host', host);
-  formData.append('port', port);
-  formData.append('user', user);
-  formData.append('path', path);
-  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
-
+  formData.append('port', document.getElementById('backup_port').value.trim());
+  formData.append('user', document.getElementById('backup_user').value.trim());
+  formData.append('path', document.getElementById('backup_path').value.trim());
   fetch('{% url "settings_backup_test" %}', {
-    method: 'POST',
-    body: formData,
-    credentials: 'same-origin',
+    method: 'POST', body: formData, credentials: 'same-origin',
     headers: { 'X-CSRFToken': getCsrfToken() }
   })
     .then(r => r.json())
     .then(data => {
       if (data.ok) {
-        result.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + data.message + '</span>';
+        result.innerHTML = '<span class="text-success small"><i class="bi bi-check-circle-fill"></i> ' + (data.message || 'OK') + '</span>';
       } else {
-        result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + data.error + '</span>';
+        result.innerHTML = '<span class="text-danger small"><i class="bi bi-x-circle-fill"></i> ' + data.error + '</span>';
       }
     })
     .catch(err => {
-      result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> Connection error: ' + err.message + '</span>';
+      result.innerHTML = '<span class="text-danger small"><i class="bi bi-x-circle-fill"></i> ' + err.message + '</span>';
     })
     .finally(() => {
       btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-plug"></i> Test Connection';
+      btn.innerHTML = '<i class="bi bi-plug"></i> Test connection';
     });
 }
+
+/* Render the snapshot table and fill the restore selects */
+function renderSnapshots(snapshots, services) {
+  var tbody = document.querySelector('#snapshot-table tbody');
+  var dateSel = document.getElementById('restore-date');
+  var scopeSel = document.getElementById('restore-scope');
+  tbody.innerHTML = '';
+  dateSel.innerHTML = '<option value="">- choose date -</option>';
+  /* keep only the "whole system" option, then re-add services */
+  scopeSel.innerHTML = '<option value="--full">The whole system</option>';
+  (snapshots || []).forEach(function (s) {
+    var where = [];
+    if (s.local) where.push('<i class="bi bi-hdd" title="On this server"></i> this server');
+    if (s.remote) where.push((s.encrypted ? '<i class="bi bi-lock-fill" title="Encrypted"></i> ' : '<i class="bi bi-cloud-check" title=""></i> ') + 'server');
+    tbody.insertAdjacentHTML('beforeend',
+      '<tr><td>' + s.date + '</td><td>' + where.join(' + ') + '</td>' +
+      '<td class="text-end"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="quickRestore(\'' + s.date + '\')">Restore this</button></td></tr>');
+    dateSel.insertAdjacentHTML('beforeend', '<option value="' + s.date + '">' + s.date + '</option>');
+  });
+  (services || []).forEach(function (svc) {
+    scopeSel.insertAdjacentHTML('beforeend', '<option value="' + svc + '">Only "' + svc + '"</option>');
+  });
+  updateRestoreButtons();
+}
+
+function quickRestore(dateStr) {
+  document.getElementById('restore-date').value = dateStr;
+  document.getElementById('restore').scrollIntoView({behavior: 'smooth'});
+  updateRestoreButtons();
+}
+
+function updateRestoreButtons() {
+  var hasDate = !!document.getElementById('restore-date').value;
+  document.getElementById('plan-btn').disabled = !hasDate;
+  document.getElementById('restore-btn').disabled = !hasDate;
+}
+document.getElementById('restore-date').addEventListener('change', function () {
+  /* require a fresh plan after changing inputs */
+  document.getElementById('restore-plan').innerHTML = '';
+  updateRestoreButtons();
+});
+document.getElementById('restore-scope').addEventListener('change', function () {
+  document.getElementById('restore-plan').innerHTML = '';
+});
+
+/* Refresh the snapshot list */
+function refreshSnapshots() {
+  fetch('{% url "settings_backup_snapshots" %}', {credentials: 'same-origin'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok === false) { alert(d.error || 'Could not read snapshots'); return; }
+      renderSnapshots(d.snapshots, d.services);
+      if (d.warning) alert(d.warning);
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+/* Start a backup immediately */
+function runBackupNow() {
+  if (!window.confirm('Start a backup right now?')) return;
+  var fd = new FormData();
+  fetch('{% url "settings_backup_runnow" %}', {
+    method: 'POST', body: fd, credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken(), 'X-Requested-With': 'XMLHttpRequest' }
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.job) { SymbiOS.exec.start(d.job, d.title, d.command); }
+      else { alert(d.error || 'Could not start backup'); }
+    });
+}
+
+/* Load the restore plan preview */
+function loadPlan() {
+  var planDiv = document.getElementById('restore-plan');
+  var dateStr = document.getElementById('restore-date').value;
+  var scope = document.getElementById('restore-scope').value;
+  if (!dateStr) return;
+  planDiv.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking...';
+  var fd = new FormData();
+  fd.append('date', dateStr);
+  fd.append('scope', scope);
+  fetch('{% url "settings_backup_restore_plan" %}', {
+    method: 'POST', body: fd, credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken(), 'X-Requested-With': 'XMLHttpRequest' }
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok === false) {
+        planDiv.innerHTML = '<div class="alert alert-danger mb-0">' + (d.error || 'Plan failed') + '</div>';
+        return;
+      }
+      var html = '<h6 class="mb-1">This will happen:</h6><ol class="mb-2 small">';
+      (d.steps || []).forEach(function (s) { html += '<li>' + escapeHtml(s) + '</li>'; });
+      html += '</ol>';
+      if ((d.dumps || []).length) {
+        html += '<div class="small text-muted mb-2">Database backups included: ' +
+                d.dumps.map(escapeHtml).join(', ') + '</div>';
+      }
+      if ((d.warnings || []).length) {
+        html += '<div class="alert alert-warning py-2 small mb-0"><strong>Please note:</strong><ul class="mb-0">';
+        d.warnings.forEach(function (w) { html += '<li>' + escapeHtml(w) + '</li>'; });
+        html += '</ul></div>';
+      }
+      planDiv.innerHTML = html;
+    })
+    .catch(err => { planDiv.innerHTML = '<div class="alert alert-danger mb-0">' + err.message + '</div>'; });
+}
+
+/* Start the actual restore */
+function doRestore() {
+  var dateStr = document.getElementById('restore-date').value;
+  var scope = document.getElementById('restore-scope').value;
+  if (!dateStr) return;
+  var what = scope === '--full'
+    ? 'THE WHOLE SYSTEM will be reset to the state of ' + dateStr + '.\nEverything newer will be lost and the server restarts.\n\nAre you REALLY sure?'
+    : 'The service "' + scope + '" will be reset to the state of ' + dateStr + '.\nNewer data of THIS SERVICE will be lost.\n\nContinue?';
+  if (!window.confirm(what)) return;
+  var fd = new FormData();
+  fd.append('date', dateStr);
+  fd.append('scope', scope);
+  fetch('{% url "settings_backup_restore" %}', {
+    method: 'POST', body: fd, credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken(), 'X-Requested-With': 'XMLHttpRequest' }
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok && d.job) { SymbiOS.exec.start(d.job, d.title, d.command); }
+      else { alert(d.error || 'Could not start restore'); }
+    });
+}
+
+/* Initial state */
+toggleTarget();
+renderSnapshots({{ snapshots_json|safe }}, {{ services_json|safe }});
 </script>
 {% endblock %}

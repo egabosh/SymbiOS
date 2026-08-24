@@ -1,0 +1,27 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="Backup"
+CHECK_DESC="Checks that the nightly backup ran successfully."
+CHECK_DETAIL="Watches the success marker written by the nightly backup job.|Daily snapshots protect all data below /symbios (services, databases, configuration).|If this fails, no recent backup exists - check Settings -> Backup."
+
+# Healthcheck for the nightly backup job
+f_check_cache "symbios-healthcheck-backup" || return 2>/dev/null || true
+
+g_backup_marker="${g_log_dir}/backup-last-success"
+
+if [[ ! -f "$g_backup_marker" ]]
+then
+  g_echo_error "No successful backup yet - open Settings -> Backup and run one."
+else
+  # Older than two days means at least two nightly runs were missed
+  g_backup_age_hours=$(( ($(date +%s) - $(head -1 "$g_backup_marker" 2>/dev/null || echo 0)) / 3600 ))
+  if [[ "$g_backup_age_hours" -ge 48 ]]
+  then
+    g_echo_error "Last successful backup is $g_backup_age_hours hours old."
+  fi
+fi
+
+# Cron entry must be active
+if ! grep -q "backup.sh" /etc/cron.d/backup_local 2>/dev/null
+then
+  g_echo_error "Backup cron entry /etc/cron.d/backup_local is missing."
+fi

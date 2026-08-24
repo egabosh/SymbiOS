@@ -47,6 +47,11 @@
 #       - /symbios/services/openwebui/
 #       - /symbios/base-services/traefik/providers/openwebui.yml
 #       - /symbios/runchecks.d/symbios-healthcheck-openwebui.check
+#     ldap_groups:
+#       - openwebui-users
+#       - openwebui-admins
+#     authelia_blocks:
+#       - "OIDC openwebui"
 #   actions:
 #     start: docker compose -f /symbios/services/openwebui/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/openwebui/docker-compose.yml down

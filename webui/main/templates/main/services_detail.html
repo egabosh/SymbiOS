@@ -65,14 +65,21 @@
 <div class="tab-content">
   <div class="tab-pane fade show active" id="pane-output" role="tabpanel">
     <h4>Actions</h4>
-    <div class="btn-group mb-3 flex-wrap" role="group">
-      <button class="btn btn-outline-success" data-action="__playbook__">(Re)Install</button>
+    <!-- (Re)Install is always offered; service actions and uninstall only
+         appear once the service is actually installed (toggled by JS below,
+         groups start hidden so nothing flashes before the status loads). -->
+    <div class="btn-group mb-3 flex-wrap me-2" role="group">
+      <button id="btn-install" class="btn btn-outline-success" data-action="__playbook__">(Re)Install</button>
+    </div>
+    {% if action_list %}
+    <div id="svc-actions" class="btn-group mb-3 flex-wrap d-none" role="group">
       {% for a in action_list %}
       <button class="btn {{ a.cls }}" data-action="{{ a.name }}">{{ a.label }}</button>
       {% endfor %}
     </div>
+    {% endif %}
     {% if uninstall_buttons %}
-    <div class="btn-group mb-3 flex-wrap" role="group">
+    <div id="svc-uninstall" class="btn-group mb-3 flex-wrap d-none" role="group">
       {% for u in uninstall_buttons %}
       <button class="btn {{ u.cls }}" data-action="{{ u.name }}" data-confirm="{{ u.confirm }}">{{ u.label }}</button>
       {% endfor %}
@@ -190,6 +197,13 @@ function loadStatus() {
       const b = d.overall_badge || {label: '?', cls: 'bg-secondary'};
       ob.className = 'badge fs-6 ' + b.cls;
       ob.textContent = b.label;
+      /* Only (Re)Install until the service is installed; the other
+         action/uninstall buttons appear once it is. */
+      const inst = !!d.installed;
+      const acts = document.getElementById('svc-actions');
+      if (acts) acts.classList.toggle('d-none', !inst);
+      const uni = document.getElementById('svc-uninstall');
+      if (uni) uni.classList.toggle('d-none', !inst);
       const area = document.getElementById('status-area');
       if (!d.installed) {
         area.innerHTML = '<div class="text-muted small">Service not installed - no managed units.</div>';
@@ -210,6 +224,11 @@ function loadStatus() {
       const ob = document.getElementById('overall-badge');
       ob.className = 'badge bg-secondary fs-6';
       ob.textContent = 'status error';
+      /* Fail-open: on status errors keep all actions available. */
+      const acts = document.getElementById('svc-actions');
+      if (acts) acts.classList.remove('d-none');
+      const uni = document.getElementById('svc-uninstall');
+      if (uni) uni.classList.remove('d-none');
       document.getElementById('status-area').innerHTML = '<div class="text-danger small">status error</div>';
     });
 }

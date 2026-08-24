@@ -54,6 +54,11 @@
 #       - ufw delete allow in on iot0 to any port 8123 proto tcp
 #       - ufw delete allow 5353/udp
 #       - ufw delete allow in on iot0 to any port 8889 proto tcp
+#     ldap_groups:
+#       - home-assistant-users
+#       - home-assistant-admins
+#     authelia_blocks:
+#       - "OIDC home-assistant"
 #   actions:
 #     start: docker compose -f /symbios/services/home-assistant/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/home-assistant/docker-compose.yml down

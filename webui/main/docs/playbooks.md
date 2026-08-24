@@ -60,6 +60,8 @@ to know: title, description, available actions, status checks, and log streams.
 - **`uninstall`** - controls the 3-mode uninstall feature (Uninstall, Uninstall (keep data), Delete Userdata). The service dir is derived automatically for playbooks below `services/` as `$services_root/<name>/`; everything inside it (compose file, env, bind-mounted data) is treated as the service's data:
   - **`stop`** - whitelisted shell command to stop the service before deletion (`docker compose ...`, `systemctl ...` or `virsh ...`). In "full" and "program" mode a plain `docker compose ... down` is extended with `--rmi all` so the container images are removed as well (scoped to this compose project).
   - **`commands`** - optional list of whitelisted cleanup commands, executed in "full" mode only (e.g. `ufw delete allow ...`, `systemctl disable --now ...`, `userdel ...`). Allowed prefixes: `docker compose`, `systemctl`, `ufw`, `userdel`, `groupdel`, `smbpasswd`, `deluser`, `delgroup`. A failing command is logged but does not abort the uninstall.
+  - **`ldap_groups`** - optional list of LDAP groups deleted via `symbios-ldap-groups.sh --delete` in "full" mode, even if they still have members. Defaults to the groups named in `docs.access` (`admin_group`/`user_group`). A failing deletion is logged but does not abort the uninstall.
+  - **`authelia_blocks`** - optional list of Ansible managed block marker suffixes (e.g. `"OIDC nextcloud"`, `"dabo ACCESS CONTROL"`) removed from the Authelia configuration (`authelia-data/configuration.yml`) in "full" mode. The result is validated as YAML before it is accepted (a backup is kept next to the file); Authelia is restarted afterwards when something changed. If validation fails the uninstall is aborted before anything else gets deleted.
   - **`service_dir`** - optional explicit service dir path. Must live below the services root. Only needed if it cannot be derived from the playbook name.
   - **`program_paths`** - list of files/dirs installed OUTSIDE the service dir (Traefik provider snippet, healthcheck script, autoupdate module, systemd units, scripts). Deleted recursively in "full" and "program" mode.
   - **`userdata_paths`** - legacy: extra data dirs outside the service dir. Deleted recursively in "full" and "reset" mode. Normally not needed anymore since everything below the service dir counts as userdata.
@@ -70,6 +72,8 @@ to know: title, description, available actions, status checks, and log streams.
   |---|---|---|---|
   | stop command | yes (+`--rmi all`) | yes (+`--rmi all`) | yes |
   | `commands` cleanup | yes | no | no |
+  | `ldap_groups` | deleted | no | no |
+  | `authelia_blocks` | removed + Authelia restart | no | no |
   | service dir | deleted completely | kept completely (incl. compose + data) | deleted completely |
   | `program_paths` | deleted | deleted | kept |
   | state entry | removed | removed | stays set |
