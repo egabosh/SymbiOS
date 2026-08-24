@@ -259,5 +259,33 @@ function f_symbios_traefik_hosts {
   grep Host "${g_base_services_root}/traefik/providers/"*.yml >>"$g_tmp/hosts" 2>/dev/null
 }
 
+# Run all LDAP group-change hooks from ${g_data_root}/ldap-groups.d/.
+# Called after every successful group mutation by symbios-ldap-groups.sh
+# (CLI and WebUI both go through it) so services can react to membership
+# changes (e.g. Nextcloud admin sync). Hooks receive:
+#   $1 = event (group-created|group-deleted|member-added|member-removed)
+#   $2 = group name
+#   $3 = uid (empty for create/delete)
+function f_ldap_groups_hooks {
+  local f_hook_event="$1"
+  local f_hook_group="$2"
+  local f_hook_uid="${3:-}"
+  local f_hook_dir="${g_data_root}/ldap-groups.d"
+  local f_hook_file
+
+  # No hook directory -> nothing to do
+  [[ -d "${f_hook_dir}" ]] || return 0
+
+  for f_hook_file in "${f_hook_dir}"/*.hook
+  do
+    # Skip when the glob did not match anything
+    [[ -e "${f_hook_file}" ]] || continue
+    g_echo_note "Group-change hook: $(basename "${f_hook_file}") (${f_hook_event} ${f_hook_group} ${f_hook_uid})"
+    # Errors are logged but never abort the loop or the caller
+    bash "${f_hook_file}" "${f_hook_event}" "${f_hook_group}" "${f_hook_uid}" \
+      || g_echo_error "Hook failed: ${f_hook_file}"
+  done
+}
+
 # Load layout immediately so sourcing the library is sufficient.
 f_symbios_load_layout
