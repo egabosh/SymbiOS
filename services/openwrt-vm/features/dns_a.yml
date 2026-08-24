@@ -1,0 +1,41 @@
+---
+- name: dns-config
+  hosts: all
+  gather_facts: no
+ 
+  vars:
+
+    uci_vars:
+      - { key: "dhcp.host_{{ host | replace('.', '_') }}", value: "domain" }
+      - { key: "dhcp.host_{{ host | replace('.', '_') }}.ip",   value: "{{ ip }}" }
+      - { key: "dhcp.host_{{ host | replace('.', '_') }}.name", value: "{{ host }}" }
+
+  tasks:
+
+    - name: set uci values if needed
+      raw: |
+        desired=$(echo "{{ item.value }}" | sed 's/_/-/g')
+        key=$(echo "{{ item.key }}" | sed 's/-/_/g' )
+        current=$(uci get $key 2>/dev/null || echo "NOT_SET")
+
+        if ! echo "$current" | grep "$desired"
+        then
+          uci set $key="$desired"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/dnsmasq reload"
+          when: uci_set_result.changed
+

@@ -41,6 +41,10 @@
 #     First boot: The VM auto-configures WAN (192.168.41.201) and LAN (172.18.0.1)
 #     via uci-defaults, sets root password, and deploys the host SSH public key.
 #     IPv6 is configured via UCI (ip6addr/ip6gw) with a host-detected prefix.
+#
+#     Features: This service exposes configurable features via the feature plugin
+#     system (services/openwrt-vm/plugin.yml). Features include network interfaces,
+#     WiFi, VPN, DNS, and more. Configure via the WebUI Features tab.
 #   author: Oliver Bohlen
 #   version: '2.0'
 #   license: GPLv3

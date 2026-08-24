@@ -25,6 +25,7 @@ from . import views_services
 from . import views_exec
 from . import views_port_forwarding
 from . import views_external
+from . import views_plugins
 from .utils.log_utils import logs_stream
 
 urlpatterns = [
@@ -112,4 +113,11 @@ urlpatterns = [
     re_path(r'^external-systems/(?P<system_id>[\w-]+)/test/$', views_external.external_system_test, name='external_system_test'),
     path('external-systems/api/public-key/', views_external.external_system_public_key, name='external_system_public_key'),
     path('external-systems/api/types/', views_external.external_types_api, name='external_types_api'),
+    # Feature plugin routes.
+    re_path(r'^plugins/(?P<service>[\w-]+)/features/$', views_plugins.plugin_features, name='plugin_features'),
+    re_path(r'^plugins/(?P<service>[\w-]+)/features/status/$', views_plugins.plugin_feature_status, name='plugin_feature_status'),
+    re_path(r'^plugins/(?P<service>[\w-]+)/features/(?P<feature_id>[\w-]+)/toggle/$', views_plugins.plugin_feature_toggle, name='plugin_feature_toggle'),
+    re_path(r'^plugins/(?P<service>[\w-]+)/features/(?P<feature_id>[\w-]+)/save/$', views_plugins.plugin_feature_save, name='plugin_feature_save'),
+    re_path(r'^plugins/(?P<service>[\w-]+)/features/(?P<feature_id>[\w-]+)/apply/$', views_plugins.plugin_feature_apply, name='plugin_feature_apply'),
+    re_path(r'^plugins/(?P<service>[\w-]+)/features/(?P<feature_id>[\w-]+)/detect/(?P<param_name>[\w-]+)/$', views_plugins.plugin_feature_detect, name='plugin_feature_detect'),
 ]

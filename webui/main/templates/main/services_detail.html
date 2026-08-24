@@ -61,6 +61,11 @@
     <button class="nav-link" id="tab-access" data-bs-toggle="tab" data-bs-target="#pane-access" type="button" role="tab">Access</button>
   </li>
   {% endif %}
+  {% if has_feature_plugin %}
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-features" data-bs-toggle="tab" data-bs-target="#pane-features" type="button" role="tab">Features</button>
+  </li>
+  {% endif %}
 </ul>
 <div class="tab-content">
   <div class="tab-pane fade show active" id="pane-output" role="tabpanel">
@@ -180,6 +185,16 @@
       </div>
     </div>
     {% endfor %}
+  </div>
+  {% endif %}
+  {% if has_feature_plugin %}
+  <div class="tab-pane fade" id="pane-features" role="tabpanel">
+    <div class="text-center py-4">
+      <a href="/plugins/{{ feature_service }}/features/" class="btn btn-primary btn-lg">
+        <i class="bi bi-puzzle"></i> Features konfigurieren
+      </a>
+      <p class="text-muted mt-2 small">Konfigurieren Sie die verfuegbaren Features fuer diesen Service.</p>
+    </div>
   </div>
   {% endif %}
 </div>

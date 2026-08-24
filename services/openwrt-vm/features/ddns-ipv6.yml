@@ -1,0 +1,82 @@
+---
+- name: ddns ipv6 desec.io
+  hosts: all
+  gather_facts: no
+
+  vars:
+    openwrt_packages:
+      - ddns-scripts
+      - luci-app-ddns
+
+    uci_delete_vars:
+      - ddns.myddns_ipv4
+      - ddns.myddns_ipv6 
+
+    uci_vars:
+      - { key: "ddns.dedyn_ipv6_openwrt", value: "service" }
+      - { key: "ddns.dedyn_ipv6_openwrt.service_name", value: "desec.io" }
+      - { key: "ddns.dedyn_ipv6_openwrt.use_ipv6", value: "1" }
+      - { key: "ddns.dedyn_ipv6_openwrt.enabled", value: "1" }
+      - { key: "ddns.dedyn_ipv6_openwrt.lookup_host", value: "{{ domainname }}" }
+      - { key: "ddns.dedyn_ipv6_openwrt.domain", value: "{{ domainname }}" }
+      - { key: "ddns.dedyn_ipv6_openwrt.username", value: "{{ domainname }}" }
+      - { key: "ddns.dedyn_ipv6_openwrt.password", value: "{{ apikey }}" }
+      - { key: "ddns.dedyn_ipv6_openwrt.use_https", value: "1" }
+      - { key: "ddns.dedyn_ipv6_openwrt.cacert", value: "/etc/ssl/certs" }
+      - { key: "ddns.dedyn_ipv6_openwrt.ip_source", value: "interface" }
+      - { key: "ddns.dedyn_ipv6_openwrt.interface", value: "wan" }
+      - { key: "ddns.dedyn_ipv6_openwrt.use_syslog", value: "1" }
+
+  tasks:
+
+    - name: update opkg db
+      raw: opkg update
+      changed_when: false
+  
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: detele config defaults
+      raw: |
+        # detele default config indices
+        while uci show | grep -q "^{{ item }}="
+        do
+          echo "changed"
+          uci delete {{ item }}[0]
+          uci delete {{ item }}
+        done
+      loop: "{{ uci_delete_vars }}"
+      register: uci_delete_result
+      changed_when: "'changed' in uci_delete_result.stdout"
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/ddns restart"
+          when: uci_set_result.changed
+

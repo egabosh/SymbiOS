@@ -1,0 +1,36 @@
+---
+- name: send log to logserver
+  hosts: all
+  gather_facts: no
+
+  vars:
+    uci_vars:
+      - { key: "system.@system[0].log_ip", value: "{{ logserver }}" }
+      - { key: "system.@system[0].log_proto", value: "udp" }
+      - { key: "system.@system[0].cronloglevel", value: "5" }
+      - { key: "system.@system[0].log_size", value: "0" }
+
+  tasks:
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: commit enable and restart
+      raw: "{{ item }}"
+      loop:
+        - "uci commit"
+        - "/etc/init.d/log restart"
+      when: uci_set_result.changed
+
+
