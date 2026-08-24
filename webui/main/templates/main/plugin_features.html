@@ -1,4 +1,5 @@
 {% extends "main/base.html" %}
+{% load plugin_extras %}
 {% block sidebar %}{% include "main/sidebar_services.html" %}{% endblock %}
 {% block content %}
 <nav aria-label="breadcrumb">
@@ -113,13 +114,13 @@
                        placeholder="{{ param.label }}"
                        {% if param.required %}required{% endif %}
                        {% if param.min_length %}minlength="{{ param.min_length }}"{% endif %}
-                       value="{{ feat.values|default_if_none:''|get:param.name }}">
+                       value="{{ feat.values|default_if_none:''|dict_get:param.name }}">
                 {% elif param.type == 'number' %}
                 <input class="form-control param-input" type="number"
                        id="param-{{ feat.id }}-{{ param.name }}" name="{{ param.name }}"
                        placeholder="{{ param.label }}"
                        {% if param.required %}required{% endif %}
-                       {% if param.default %}value="{{ feat.values|default_if_none:''|get:param.name|default:param.default }}"{% else %}value="{{ feat.values|default_if_none:''|get:param.name }}"{% endif %}>
+                       {% if param.default %}value="{{ feat.values|default_if_none:''|dict_get:param.name|default:param.default }}"{% else %}value="{{ feat.values|default_if_none:''|dict_get:param.name }}"{% endif %}>
                 {% else %}
                 <input class="form-control param-input" type="text"
                        id="param-{{ feat.id }}-{{ param.name }}" name="{{ param.name }}"
@@ -127,7 +128,7 @@
                        {% if param.required %}required{% endif %}
                        {% if param.max_length %}maxlength="{{ param.max_length }}"{% endif %}
                        {% if param.pattern %}pattern="{{ param.pattern }}"{% endif %}
-                       value="{{ feat.values|default_if_none:''|get:param.name }}">
+                       value="{{ feat.values|default_if_none:''|dict_get:param.name }}">
                 {% endif %}
                 {% if param.pattern %}
                 <div class="form-text">Format: {{ param.pattern }}</div>
