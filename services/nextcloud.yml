@@ -727,50 +727,9 @@
 
 
           # Sync Nextcloud admins from the LDAP group nextcloud-admins.
-          # ldapAdminGroup only promotes users logging in through the
-          # user_ldap backend - accounts provisioned via OIDC are never
-          # promoted. Reconcile the internal "admin" group on every init run.
-          # Local users (e.g. ncadmin) are never touched, only LDAP accounts.
-          if [ -s /symbios/base-services/symbios-ui/config/.ldap_admin_pw ]
-          then
-            ldap_admin_pw=$(cat /symbios/base-services/symbios-ui/config/.ldap_admin_pw)
-
-            # desired: members of LDAP group nextcloud-admins
-            desired_admins=$(docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-              -D "cn=head-of-ldap,{{ ldap_basedn }}" -w "$ldap_admin_pw" \
-              -b "cn=nextcloud-admins,ou=groups,{{ ldap_basedn }}" memberUid 2>/dev/null \
-              | sed -n "s/^memberUid: //p" | sort -u)
-
-            nc_db_user=$(grep ^MYSQL_USER= /symbios/services/nextcloud/env | cut -d= -f2-)
-            nc_db_pass=$(grep ^MYSQL_PASSWORD= /symbios/services/nextcloud/env | cut -d= -f2-)
-            current_admins=$(docker exec nextcloud-db mariadb -u"$nc_db_user" -p"$nc_db_pass" nextcloud-db -N -e 'SELECT uid FROM oc_group_user WHERE gid="admin";' 2>/dev/null | sort -u)
-
-            # promote missing members of nextcloud-admins
-            for uid in $desired_admins
-            do
-              if ! grep -qx "$uid" <<<"$current_admins"
-              then
-                docker compose exec -T -u www-data nextcloud ./occ group:adduser admin "$uid"
-              fi
-            done
-
-            # demote LDAP users that left nextcloud-admins (never local users)
-            for uid in $current_admins
-            do
-              if grep -qx "$uid" <<<"$desired_admins"
-              then
-                continue
-              fi
-              in_ldap=$(docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-                -D "cn=head-of-ldap,{{ ldap_basedn }}" -w "$ldap_admin_pw" \
-                -b "ou=users,{{ ldap_basedn }}" "(uid=$uid)" dn 2>/dev/null \
-                | grep -c "^dn: uid=")
-              if [ "${in_ldap:-0}" -gt 0 ]
-              then
-                docker compose exec -T -u www-data nextcloud ./occ group:removeuser admin "$uid"
-              fi
-            done
-          fi
+          # The script also runs from cron every 5 minutes, so group changes
+          # take effect without waiting for the next playbook apply.
+          "{{ git_root }}/scripts/symbios-nextcloud-admin-sync.sh" >/dev/null 2>&1 || true
 
 
           exit 0
@@ -783,6 +742,18 @@
       args:
         chdir: /symbios/services/nextcloud
         creates: /symbios/services/nextcloud/nextcloud.init.log
+
+    - name: /etc/cron.d/symbios-nextcloud-sync (periodic admin sync)
+      ansible.builtin.copy:
+        dest: /etc/cron.d/symbios-nextcloud-sync
+        content: |
+          # SymbIOS - periodic Nextcloud admin sync (deployed by services/nextcloud.yml)
+          SHELL=/bin/bash
+          PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          */5 * * * * root {{ git_root }}/scripts/symbios-nextcloud-admin-sync.sh >>{{ data_root }}/base-services/symbios-ui/log/nextcloud-admin-sync.log 2>&1
+        mode: '0644'
+        owner: root
+        group: root
 
     # Deploy the shared autoupdate script (services/tasks/autoupdate.yml)
     - name: Deploy autoupdate script
