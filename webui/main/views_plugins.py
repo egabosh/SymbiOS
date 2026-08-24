@@ -16,112 +16,24 @@
 
 """Views for the feature plugin system.
 
-Provides the Features tab on service detail pages, parameter detection,
-and feature application via the generic symbios-feature-apply.sh script.
+API endpoints for toggling, saving, applying, and detecting feature parameters.
+Features are rendered inline in services_detail.html.
 """
 import json
 import os
-import yaml
-import time
-from datetime import datetime, timezone
 
 from django.http import JsonResponse
-from django.shortcuts import render, Http404
+from django.shortcuts import Http404
 
 from .decorators import login_required
 from .plugin_catalog import (
     get_plugin,
-    get_plugin_features,
-    get_plugin_groups,
     load_plugin_state,
     save_plugin_state,
     has_plugin,
 )
 from .utils.ssh_exec import run_command
 from .utils.jobs import create_job
-from .views_services import _sidebar_context, get_catalog
-
-
-@login_required
-def plugin_features(request, service):
-    """Render the Features tab for a service that has a plugin.yml."""
-    plugin = get_plugin(service)
-    if not plugin:
-        raise Http404("No plugin found for service: %s" % service)
-
-    manifest = plugin["manifest"]
-    features = manifest.get("features", [])
-    groups = manifest.get("groups", [])
-    state = load_plugin_state(service)
-
-    # Group features by their group id.
-    grouped = {}
-    for group in groups:
-        grouped[group["id"]] = {
-            "name": group["name"],
-            "icon": group.get("icon", "puzzle"),
-            "features": [],
-        }
-    # Ungrouped features go into a default group.
-    grouped["_ungrouped"] = {
-        "name": "Weitere",
-        "icon": "puzzle",
-        "features": [],
-    }
-
-    for feat in features:
-        fid = feat["id"]
-        feat_state = state.get(fid, {})
-        feat_data = {
-            "id": fid,
-            "name": feat.get("name", fid),
-            "icon": feat.get("icon", "puzzle"),
-            "description": feat.get("description", ""),
-            "enabled": feat_state.get("enabled", False),
-            "status": feat_state.get("status"),
-            "error": feat_state.get("error"),
-            "last_applied": feat_state.get("last_applied"),
-            "params": feat.get("params", []),
-            "values": feat_state.get("params", {}),
-            "has_params": bool(feat.get("params")),
-        }
-        gid = feat.get("group", "_ungrouped")
-        if gid not in grouped:
-            grouped[gid] = {"name": gid, "icon": "puzzle", "features": []}
-        grouped[gid]["features"].append(feat_data)
-
-    # Remove empty groups.
-    groups_out = [g for g in grouped.values() if g["features"]]
-
-    # Sidebar context (same as services pages).
-    catalog = get_catalog()
-    sidebar_ctx = _sidebar_context(catalog)
-
-    # Load playbook source for each feature (small preview).
-    features_with_source = []
-    for g in groups_out:
-        for feat in g["features"]:
-            playbook_file = None
-            for f in plugin["manifest"].get("features", []):
-                if f["id"] == feat["id"]:
-                    playbook_file = f.get("playbook")
-                    break
-            if playbook_file:
-                src_path = os.path.join(plugin["plugin_dir"], "features", playbook_file)
-                try:
-                    with open(src_path) as fh:
-                        feat["playbook_source"] = fh.read()
-                except (OSError, IOError):
-                    feat["playbook_source"] = ""
-            else:
-                feat["playbook_source"] = ""
-
-    return render(request, "main/plugin_features.html", {
-        "service": service,
-        "manifest": manifest,
-        "groups": groups_out,
-        **sidebar_ctx,
-    })
 
 
 @login_required
