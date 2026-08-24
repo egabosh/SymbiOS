@@ -13,6 +13,12 @@
 #                <name>.update)
 # Optional var:  autoupdate_mode (default "0400"; use e.g. "0550" when the
 #                script must be directly executable)
+#
+# The copy task registers `autoupdate_result`; use it to trigger handlers:
+#   - name: Run update script when it changed
+#     ansible.builtin.command: /bin/true
+#     changed_when: autoupdate_result is changed
+#     notify: <handler>
 
 - name: "{{ data_root }}/autoupdate.d/{{ autoupdate_name | default(service_name) }}.update"
   ansible.builtin.copy:
@@ -22,3 +28,4 @@
     group: root
     content: "{{ autoupdate_content }}"
     validate: /bin/bash -n %s
+  register: autoupdate_result

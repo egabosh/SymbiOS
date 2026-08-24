@@ -777,6 +777,12 @@
               g_echo_error "Errors in Nextcloud Log: $(cat "${g_tmp}/nextcloud-error.log")"
             fi
           fi
+
+    # Run the update script once when its content changed (handlers cannot
+    # be attached to include_tasks, see services/tasks/autoupdate.yml)
+    - name: Run nextcloud.update when it changed
+      ansible.builtin.command: /bin/true
+      changed_when: autoupdate_result is changed
       notify: run nextcloud.update
 
     # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
