@@ -1,0 +1,204 @@
+---
+- name: iot infrastructure
+  hosts: all
+  gather_facts: no
+
+  vars:
+    uci_vars:
+      # Bridge device for iot network
+      - { key: "network.iot_dev", value: "device" }
+      - { key: "network.iot_dev.name", value: "br-iot" }
+      - { key: "network.iot_dev.type", value: "bridge" }
+      - { key: "network.iot_dev.bridge_empty", value: "0" }
+
+      # iot network (uses br-iot device with static IP)
+      - { key: "network.iot", value: "interface" }
+      - { key: "network.iot.device", value: "br-iot" }
+      - { key: "network.iot.ipv6", value: "1" }
+      - { key: "network.iot.proto", value: "static" }
+      - { key: "network.iot.ipaddr", value: "192.168.143.1" }
+      - { key: "network.iot.netmask", value: "255.255.255.0" }
+      - { key: "network.iot.dns", value: "192.168.143.1" }
+      - { key: "network.iot.ip6addr", value: "fd12:3456:143::1/64" }
+
+      # dhcp for iot network
+      - { key: "dhcp.iot", value: "dhcp" }
+      - { key: "dhcp.iot.interface", value: "iot" }
+      - { key: "dhcp.iot.start", value: "50" }
+      - { key: "dhcp.iot.limit", value: "150" }
+      - { key: "dhcp.iot.leasetime", value: "1h" }
+      - { key: "dhcp.iot.rebind_protection", value: "0" }
+      - { key: "dhcp.iot.dhcpv4", value: "server" }
+      - { key: "dhcp.iot.dhcpv6", value: "server" }
+      - { key: "dhcp.iot.ra", value: "server" }
+      - { key: "dhcp.iot.ra_management", value: '1' }
+      - { key: "dhcp.iot.ra_default", value: '1' }
+      - { key: "dhcp.iot.ra_lifetime", value: '1800' }
+      - { key: "dhcp.iot.force", value: "1" }
+      - { key: "dhcp.iot.dhcp_option", value: "119,iot,lan" }
+      - { key: "dhcp.iot.dhcp_option", value: "6,$(uci get network.iot.ipaddr)" }
+      - { key: "dhcp.iot.dns",  value: "$(uci get network.iot.ip6addr | cut -d/ -f1)" }
+      - { key: "dhcp.iot_dnsmasq", value: "dnsmasq" }
+      - { key: "dhcp.iot_dnsmasq.domain", value: "iot" }
+      - { key: "dhcp.iot_dnsmasq.resolvfile", value: "/etc/resolv.dnsmasq.iot" }
+      - { key: "dhcp.iot_dnsmasq.leasefile", value: "/tmp/dhcp.iot.leases" }
+      - { key: "dhcp.iot_dnsmasq.listen_address", value: "192.168.143.1" }
+      - { key: "dhcp.iot_dnsmasq.listen_address", value: "fd12:3456:143::1" }
+      - { key: "dhcp.iot_dnsmasq.logqueries", value: "1" }
+      - { key: "dhcp.iot_dnsmasq.authoritative", value: "1" }
+      - { key: "dhcp.iot_dnsmasq.sequential_ip", value: "1" }
+      - { key: "dhcp.iot_dnsmasq.readethers", value: "1" }
+      - { key: "dhcp.iot_dnsmasq.server", value: "/.lan/$(uci get network.lan.ipaddr)" }
+
+      # iot zone
+      - { key: "firewall.zone_iot", value: "zone" }
+      - { key: "firewall.zone_iot.name", value: "iot" }
+      - { key: "firewall.zone_iot.network", value: "iot" }
+      - { key: "firewall.zone_iot.input", value: "REJECT" }
+      - { key: "firewall.zone_iot.output", value: "ACCEPT" }
+      - { key: "firewall.zone_iot.forward", value: "ACCEPT" }
+      - { key: "firewall.zone_iot.log", value: "1" }
+      - { key: "firewall.zone_iot.masq", value: "0" }
+      - { key: "firewall.zone_iot.mtu_fix", value: "0" }
+
+      ## forwarding
+      #- { key: "firewall.forwarding_iot_lan", value: "forwarding" }
+      #- { key: "firewall.forwarding_iot_lan.src", value: "iot" }
+      #- { key: "firewall.forwarding_iot_lan.dest", value: "lan" }
+
+      - { key: "firewall.forwarding_lan_iot", value: "forwarding" }
+      - { key: "firewall.forwarding_lan_iot.src", value: "lan" }
+      - { key: "firewall.forwarding_lan_iot.dest", value: "iot" }
+
+      # Allow-DHCP-IOTLAN
+      - { key: "firewall.rule_allow_dhcp_iot",      value: "rule" }
+      - { key: "firewall.rule_allow_dhcp_iot.name",      value: "ansible_Allow-DHCP-iot" }
+      - { key: "firewall.rule_allow_dhcp_iot.src",       value: "iot" }
+      - { key: "firewall.rule_allow_dhcp_iot.proto",     value: "udp" }
+      - { key: "firewall.rule_allow_dhcp_iot.dest_port", value: "67-68" }
+      - { key: "firewall.rule_allow_dhcp_iot.target",    value: "ACCEPT" }
+
+      # Allow-DNS-IOTLAN
+      - { key: "firewall.rule_allow_dns_iot",      value: "rule" }
+      - { key: "firewall.rule_allow_dns_iot.name",      value: "ansible_Allow-DNS-iot" }
+      - { key: "firewall.rule_allow_dns_iot.src",       value: "iot" }
+      - { key: "firewall.rule_allow_dns_iot.proto",     value: "udp" }
+      - { key: "firewall.rule_allow_dns_iot.dest_port", value: "53" }
+      - { key: "firewall.rule_allow_dns_iot.target",    value: "ACCEPT" }
+      - { key: "firewall.rule_allow_dns_iot.src_ip",  value: "192.168.143.0/24" }
+      - { key: "firewall.rule_allow_dns_iot.dest_ip", value: "192.168.143.1" }
+
+      # Allow-DNS-ITOLAN ipv6
+      - { key: "firewall.rule_allow_dns_iot6",      value: "rule" }
+      - { key: "firewall.rule_allow_dns_iot6.name",      value: "ansible_allow_dns_iot6" }
+      - { key: "firewall.rule_allow_dns_iot6.src",       value: "iot" }
+      - { key: "firewall.rule_allow_dns_iot6.proto",     value: "udp" }
+      - { key: "firewall.rule_allow_dns_iot6.dest_port", value: "53" }
+      - { key: "firewall.rule_allow_dns_iot6.target",    value: "ACCEPT" }
+      - { key: "firewall.rule_allow_dns_iot6.src_ip",  value: "fd12:3456:143::/64" }
+      - { key: "firewall.rule_allow_dns_iot6.dest_ip", value: "fd12:3456:143::1" }
+
+      # Allow-NTP-IOTLAN
+      - { key: "firewall.rule_allow_ntp_iot",      value: "rule" }
+      - { key: "firewall.rule_allow_ntp_iot.name",      value: "ansible_allow_ntp_iot" }
+      - { key: "firewall.rule_allow_ntp_iot.src",       value: "iot" }
+      - { key: "firewall.rule_allow_ntp_iot.proto",     value: "udp" }
+      - { key: "firewall.rule_allow_ntp_iot.dest_port", value: "123" }
+      - { key: "firewall.rule_allow_ntp_iot.target",    value: "ACCEPT" }
+      - { key: "firewall.rule_allow_ntp_iot.src_ip",  value: "192.168.143.0/24" }
+      - { key: "firewall.rule_allow_ntp_iot.dest_ip", value: "192.168.143.1" }
+
+      # Allow-NTPv6-IOTLAN
+      - { key: "firewall.rule_allow_ntpv6_iot",      value: "rule" }
+      - { key: "firewall.rule_allow_ntpv6_iot.name", value: "ansible_allow_ntpv6_iot" }
+      - { key: "firewall.rule_allow_ntpv6_iot.src",  value: "iot" }
+      - { key: "firewall.rule_allow_ntpv6_iot.proto",value: "udp" }
+      - { key: "firewall.rule_allow_ntpv6_iot.dest_port", value: "123" }
+      - { key: "firewall.rule_allow_ntpv6_iot.src_ip",   value: "fd12:3456:143::/64" }
+      - { key: "firewall.rule_allow_ntpv6_iot.dest_ip",  value: "fd12:3456:143::1" }
+      - { key: "firewall.rule_allow_ntpv6_iot.family",   value: "ipv6" }
+      - { key: "firewall.rule_allow_ntpv6_iot.target",   value: "ACCEPT" }
+
+
+      # Allow-ICMPv6-ND-iot (Neighbor Solicitation/Advertisement/Router Solicitation)
+      - { key: "firewall.rule_allow_icmpv6_nd_iot",        value: "rule" }
+      - { key: "firewall.rule_allow_icmpv6_nd_iot.name",   value: "ansible_allow_icmpv6_nd_iot" }
+      - { key: "firewall.rule_allow_icmpv6_nd_iot.src",    value: "iot" }
+      - { key: "firewall.rule_allow_icmpv6_nd_iot.family", value: "ipv6" }
+      - { key: "firewall.rule_allow_icmpv6_nd_iot.proto",  value: "icmp" }
+      - { key: "firewall.rule_allow_icmpv6_nd_iot.icmp_type", value: "135 136 133" }
+      - { key: "firewall.rule_allow_icmpv6_nd_iot.target", value: "ACCEPT" }
+
+      # ICMP/ping
+      - { key: "firewall.rule_allow_icmp_ping_iot",     value: "rule" }
+      - { key: "firewall.rule_allow_icmp_ping_iot.src",      value: "iot" }
+      - { key: "firewall.rule_allow_icmp_ping_iot.target",   value: "ACCEPT" }
+      - { key: "firewall.rule_allow_icmp_ping_iot.proto",    value: "icmp" }
+      - { key: "firewall.rule_allow_icmp_ping_iot.icmp_type",    value: "echo-request" }
+      - { key: "firewall.rule_allow_icmp_ping_iot.name",     value: "ansible_allow_icmp_ping_iot" }
+      - { key: "firewall.rule_allow_icmp_ping_iot.src_ip",  value: "192.168.143.0/24" }
+      - { key: "firewall.rule_allow_icmp_ping_iot.dest_ip", value: "192.168.143.1" }
+
+      # ICML/ping6
+      - { key: "firewall.rule_allow_icmpv6_ping_iot",           value: "rule" }
+      - { key: "firewall.rule_allow_icmpv6_ping_iot.name",      value: "ansible_allow_icmpv6_ping_iot" }
+      - { key: "firewall.rule_allow_icmpv6_ping_iot.src",       value: "iot" }
+      - { key: "firewall.rule_allow_icmpv6_ping_iot.family",    value: "ipv6" }
+      - { key: "firewall.rule_allow_icmpv6_ping_iot.proto",     value: "icmp" }
+      - { key: "firewall.rule_allow_icmpv6_ping_iot.icmp_type", value: "echo-request" }
+      - { key: "firewall.rule_allow_icmpv6_ping_iot.target",    value: "ACCEPT" }
+      - { key: "firewall.rule_allow_icmpv6_ping_iot.src_ip",   value: "fd12:3456:143::/64" }
+      - { key: "firewall.rule_allow_icmpv6_ping_iot.dest_ip",  value: "fd12:3456:143::1" }
+
+
+  tasks:
+
+    - name: use local upstream dns
+      raw: |
+        cat << 'EOF' > /etc/resolv.dnsmasq.iot
+        nameserver 127.0.0.56
+        EOF
+      changed_when: false
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+
+        #if [ "$current" != "$desired" ]
+        if ! echo "$current" | grep "$desired"
+        then
+          if echo "{{ item.key }}" | egrep -q "dhcp\...._dnsmasq.listen_address|dhcp\...._dnsmasq.server|dhcp\....\.dhcp_option"
+          then
+            uci add_list {{ item.key }}="{{ item.value }}"
+          else
+            uci set {{ item.key }}="{{ item.value }}"
+          fi
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+
+    - name: write, run and create cronjob /etc/scripts/firewall_port_forwards_from_wan_to_newzone.sh
+      raw: |
+        /etc/scripts/firewall_port_forwards_from_wan_to_newzone.sh iot
+        cronjob="1 4 * * *   /etc/scripts/firewall_port_forwards_from_wan_to_newzone.sh iot"
+        grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+      changed_when: false
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/network reload"
+            - "/etc/init.d/firewall reload"
+            - "/etc/init.d/dnsmasq restart"
+            - "/etc/init.d/odhcpd restart"
+          when: uci_set_result.changed
+

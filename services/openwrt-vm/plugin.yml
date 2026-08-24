@@ -1,0 +1,301 @@
+# SymbiOS feature manifest for OpenWrt VM.
+# Defines available features, their parameters, and mapping to Ansible playbooks.
+# Read by symbios-feature-apply.sh and the WebUI plugin_catalog.
+name: openwrt
+version: '1.0'
+description: OpenWrt VM - Router, Netzwerk und Sicherheit konfigurieren
+
+# Feature groups organize features in the WebUI by category.
+groups:
+  - id: network
+    name: Netzwerk
+    icon: ethernet
+  - id: wifi
+    name: WLAN
+    icon: wifi
+  - id: vpn
+    name: VPN
+    icon: vpn
+  - id: security
+    name: Sicherheit
+    icon: shield-lock
+  - id: dns
+    name: DNS
+    icon: globe
+  - id: services
+    name: Dienste
+    icon: plug
+
+features:
+  # ── Network ───────────────────────────────────────────────────────────
+  - id: interfaces
+    name: Host-Interfaces
+    icon: ethernet
+    description: Physische Host-Interfaces an die OpenWrt-VM Bridge binden.
+    group: network
+    target: host
+    playbook: host-bridge.yml
+    param_mapping:
+      bridge_interfaces: interfaces
+    params:
+      - name: bridge_interfaces
+        type: multi-select
+        label: Interfaces fur br-ow-lan
+        detect: detect-interfaces.sh
+
+  - id: iot
+    name: IoT-Netzwerk
+    icon: router
+    description: Eigenes IoT-Netzwerk mit eingeschranktem Zugang.
+    group: network
+    target: vm
+    playbook: iot.yml
+    param_mapping: {}
+    params: []
+
+  # ── WiFi ──────────────────────────────────────────────────────────────
+  - id: wireless
+    name: WLAN Access Point
+    icon: wifi
+    description: WLAN Access Point auf dem Router konfigurieren.
+    group: wifi
+    target: vm
+    playbook: wireless.yml
+    param_mapping:
+      radio: wlandev
+      ssid: wlan_ssid
+      key: wlan_key
+      country: wlan_contry
+    params:
+      - name: radio
+        type: select
+        label: Radio
+        detect: detect-radios.sh
+        required: true
+      - name: ssid
+        type: text
+        label: SSID
+        required: true
+        max_length: 32
+      - name: key
+        type: password
+        label: WPA3 Key
+        required: true
+        min_length: 8
+      - name: country
+        type: text
+        label: Land
+        default: DE
+        pattern: "^[A-Z]{2}$"
+
+  - id: wireless_iot
+    name: WLAN IoT
+    icon: wifi
+    description: Separates WLAN fuer IoT-Gerate (isoliert).
+    group: wifi
+    target: vm
+    playbook: wireless-iot.yml
+    param_mapping:
+      radio: iot_wlandev
+      ssid: iot_wlan_ssid
+      key: iot_wlan_key
+    params:
+      - name: radio
+        type: select
+        label: Radio
+        detect: detect-radios.sh
+        required: true
+      - name: ssid
+        type: text
+        label: SSID
+        required: true
+      - name: key
+        type: password
+        label: WPA3 Key
+        required: true
+        min_length: 8
+
+  - id: wifi_passthrough
+    name: WLAN-Durchreichung
+    icon: usb
+    description: USB/PCI WLAN-Adapter vom Host an die VM durchreichen.
+    group: wifi
+    target: host
+    playbook: host-passthrough.yml
+    param_mapping:
+      devices: devices
+    params:
+      - name: devices
+        type: multi-select
+        label: WLAN-Adapter
+        detect: detect-wifi.sh
+
+  # ── VPN ───────────────────────────────────────────────────────────────
+  - id: wireguard
+    name: WireGuard
+    icon: vpn
+    description: WireGuard VPN Server fuer sicheren Fernzugang.
+    group: vpn
+    target: vm
+    playbook: wireguard-lan.yml
+    param_mapping: {}
+    params: []
+
+  # ── Security ──────────────────────────────────────────────────────────
+  - id: dnscrypt
+    name: DNS over HTTPS
+    icon: lock
+    description: Verschlusselte DNS-Auflosung via dnscrypt-proxy.
+    group: security
+    target: vm
+    playbook: dnscrypt-proxy.yml
+    param_mapping: {}
+    params: []
+
+  # ── DNS ───────────────────────────────────────────────────────────────
+  - id: ddns_ipv4
+    name: DynDNS IPv4
+    icon: globe
+    description: Dynamischer DNS-Eintrag fuer die IPv4-Adresse.
+    group: dns
+    target: vm
+    playbook: ddns-ipv4.yml
+    param_mapping:
+      hostname: localhostname
+      domain: domainname
+      apikey: apikey
+    params:
+      - name: hostname
+        type: text
+        label: Hostname
+        required: true
+      - name: domain
+        type: text
+        label: Domain (z.B. dedyn.io)
+        required: true
+      - name: apikey
+        type: password
+        label: deSEC API-Key
+        required: true
+
+  - id: ddns_ipv6
+    name: DynDNS IPv6
+    icon: globe
+    description: Dynamischer DNS-Eintrag fuer die IPv6-Adresse.
+    group: dns
+    target: vm
+    playbook: ddns-ipv6.yml
+    param_mapping:
+      domain: domainname
+      apikey: apikey
+    params:
+      - name: domain
+        type: text
+        label: Domain (z.B. dedyn.io)
+        required: true
+      - name: apikey
+        type: password
+        label: deSEC API-Key
+        required: true
+
+  - id: dhcp_host
+    name: DHCP-Host
+    icon: hdd-network
+    description: Statische DHCP-Reservation und DNS-Eintrag.
+    group: dns
+    target: vm
+    playbook: dhcp-hosts.yml
+    param_mapping:
+      name: host
+      ip: ip
+      mac: mac
+    params:
+      - name: name
+        type: text
+        label: Hostname
+        required: true
+      - name: ip
+        type: text
+        label: IPv4-Adresse
+        required: true
+      - name: mac
+        type: text
+        label: MAC-Adresse
+        required: true
+        pattern: "^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$"
+
+  - id: dns_record
+    name: DNS-Eintrag
+    icon: globe
+    description: A-, AAAA- oder CNAME-Eintrag hinzufuegen.
+    group: dns
+    target: vm
+    playbook: dns_a.yml
+    param_mapping:
+      hostname: host
+      ip: ip
+    params:
+      - name: hostname
+        type: text
+        label: Hostname
+        required: true
+      - name: ip
+        type: text
+        label: IPv4-Adresse
+        required: true
+
+  # ── Services ──────────────────────────────────────────────────────────
+  - id: ssh
+    name: SSH-Zugang
+    icon: key
+    description: SSH-Zugang konfigurieren (inkl. vom Internet).
+    group: services
+    target: vm
+    playbook: ssh.yml
+    param_mapping: {}
+    params: []
+
+  - id: logserver
+    name: Syslog-Server
+    icon: journal
+    description: Remote-Logging an einen Syslog-Server senden.
+    group: services
+    target: vm
+    playbook: logserver.yml
+    param_mapping:
+      server: logserver
+    params:
+      - name: server
+        type: text
+        label: Syslog-Server IP
+        required: true
+
+  - id: smtp
+    name: SMTP-Mailversand
+    icon: envelope
+    description: E-Mail-Versand ueber einen SMTP-Relay.
+    group: services
+    target: vm
+    playbook: smtp.yml
+    param_mapping:
+      server: mailserver
+      port: mailserver_port
+      username: username
+      password: password
+    params:
+      - name: server
+        type: text
+        label: SMTP-Server
+        required: true
+      - name: port
+        type: number
+        label: Port
+        default: 587
+      - name: username
+        type: text
+        label: Benutzername
+        required: true
+      - name: password
+        type: password
+        label: Passwort
+        required: true

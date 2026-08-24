@@ -1,0 +1,46 @@
+---
+- name: ssh settings with access from internet
+  hosts: all
+  gather_facts: no
+
+  vars:
+    uci_vars:
+      - { key: "dropbear.main.Port", value: "22" }
+      - { key: "dropbear.main.Interface", value: "lan" }
+      - { key: "dropbear.main.PasswordAuth", value: "off" }
+      - { key: "dropbear.main.RootPasswordAuth", value: "off" }
+      - { key: "dropbear.global", value: "dropbear" }
+      - { key: "dropbear.global.Port", value: "44" }
+      - { key: "dropbear.global.PasswordAuth", value: "off" }
+      - { key: "dropbear.global.RootPasswordAuth", value: "off" }
+      # Allow port 44 from internet
+      - { key: "firewall.rule_allow_ssh_global",      value: "rule" }
+      - { key: "firewall.rule_allow_ssh_global.name",      value: "ansible_allow_ssh_global" }
+      - { key: "firewall.rule_allow_ssh_global.src",       value: "wan" }
+      - { key: "firewall.rule_allow_ssh_global.proto",     value: "tcp" }
+      - { key: "firewall.rule_allow_ssh_global.dest_port", value: "44" }
+      - { key: "firewall.rule_allow_ssh_global.target",    value: "ACCEPT" }
+
+  tasks:
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: commit enable and restart
+      raw: "{{ item }}"
+      loop:
+        - "uci commit"
+        - "/etc/init.d/dropbear restart"
+      when: uci_set_result.changed
+

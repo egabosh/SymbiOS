@@ -26,6 +26,7 @@ import shlex
 from django.contrib import messages as flash_messages
 from .decorators import login_required
 from .playbook_catalog import get_catalog, get_playbook
+from .plugin_catalog import has_plugin
 from .utils.ssh_exec import (
     stream_log,
     stop_log,
@@ -322,6 +323,9 @@ def services_detail(request, playbook):
     from .views_external import _load_systems
     all_systems = _load_systems()
     compatible_systems = [s for s in all_systems if s.get('type') == playbook_target_type] if playbook_target_type else []
+    # Check if this service has a feature plugin (Services/Features tab).
+    svc_name = playbook.replace('.yml', '').split('/')[-1]
+    has_feature_plugin = has_plugin(svc_name)
     response = render(request, 'main/services_detail.html', {
         'item': item,
         'action_list': action_list,
@@ -332,6 +336,8 @@ def services_detail(request, playbook):
         'all_ldap_users': access_ctx['users'],
         'compatible_systems': compatible_systems,
         'playbook_target_type': playbook_target_type,
+        'has_feature_plugin': has_feature_plugin,
+        'feature_service': svc_name,
         **_sidebar_context(all_catalog),
     })
     # Never cache: the inline JS/logic changes frequently during development

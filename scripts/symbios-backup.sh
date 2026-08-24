@@ -120,6 +120,25 @@ function f_run_g_backup {
   } > "$f_wrapper/ssh"
   chmod 700 "$f_wrapper/ssh"
 
+  # gaboshlib's g_backup hardcodes rsync --timeout=180. On slow local disks
+  # (Raspberry Pi + USB) even building the full file list can exceed 180s,
+  # which aborts the snapshot with "io timeout". For LOCAL snapshots install
+  # an rsync shim that drops the timeout; remote transfers keep the stall
+  # detection on purpose.
+  if [[ -z "$f_srv" ]]
+  then
+    {
+      echo '#!/bin/bash'
+      echo 'f_args=()'
+      echo 'for f_a in "$@"'
+      echo 'do'
+      echo '  [[ "$f_a" == --timeout=* ]] || f_args+=("$f_a")'
+      echo 'done'
+      echo 'exec /usr/bin/rsync "${f_args[@]}"'
+    } > "$f_wrapper/rsync"
+    chmod 700 "$f_wrapper/rsync"
+  fi
+
   # shellcheck disable=SC2086
   PATH="$f_wrapper:$PATH" g_backup "$g_data_root" "$f_dest" "$f_excl" \
     "$f_srv" "$f_port" "$f_user"
@@ -172,6 +191,18 @@ function f_run_encrypted_archive {
 
 ### Main ###
 
+# Target label used by the interrupt handler below.
+g_bk_cur_target="local"
+
+# gaboshlib's g_echo_error_exit raises SIGHUP on fatal errors. The default
+# SIGHUP action kills the script instantly - no EXIT trap, status JSON would
+# stay "running" forever and locks/tmp dirs leak. Intercept it instead.
+function f_bk_on_hup {
+  f_write_status "error" "$g_bk_cur_target" "" "Backup was interrupted - see syslog."
+  exit 1
+}
+trap f_bk_on_hup HUP
+
 g_echo_note "Starting $0 (host=$(hostname), target=$(f_bk_is_remote && echo "remote:${g_bk_host}" || echo local))"
 
 # Excludes are shared between dump modules and the engines below.
@@ -186,6 +217,7 @@ then
   if [[ "$g_bk_encrypt" == "true" ]]
   then
     # Remote + at-rest encryption -> daily encrypted archives
+    g_bk_cur_target="remote-encrypted"
     f_write_status "running" "remote-encrypted" "" ""
     f_ensure_passphrase
     if f_run_encrypted_archive "${g_tmp}/excludes.rsync"
@@ -200,6 +232,7 @@ then
     fi
   else
     # Remote without encryption -> hardlink snapshots via rsync/SSH
+    g_bk_cur_target="remote"
     f_write_status "running" "remote" "" ""
     if f_run_g_backup "$g_bk_path" "${g_tmp}/excludes.rsync" "$g_bk_host" "$g_bk_port" "$g_bk_user"
     then
@@ -214,6 +247,7 @@ then
   fi
 else
   # No server configured -> local snapshot below ${data_root}/backup
+  g_bk_cur_target="local"
   f_write_status "running" "local" "" ""
   if f_run_g_backup "${g_data_root}/backup" "${g_tmp}/excludes.rsync" "" "" ""
   then

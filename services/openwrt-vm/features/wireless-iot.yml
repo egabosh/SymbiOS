@@ -1,0 +1,60 @@
+---
+- name: create iot WLAN
+  hosts: all
+  gather_facts: no
+
+  vars:
+    openwrt_packages:
+      - luci-app-openvpn
+      - luci-i18n-openvpn-de
+      - openvpn
+
+    uci_vars:
+      - { key: "wireless.wifinet1", value: "wifi-iface" }
+      - { key: "wireless.wifinet1.device", value: "{{ iot_wlandev }}" }
+      - { key: "wireless.wifinet1.mode", value: "ap" }
+      - { key: "wireless.wifinet1.key", value: "{{ iot_wlan_key }}" }
+      - { key: "wireless.wifinet1.isolate", value: "1" }
+      - { key: "wireless.wifinet1.ssid", value: "{{ iot_wlan_ssid }}" }
+      - { key: "wireless.wifinet1.network", value: "iot" }
+      - { key: "wireless.wifinet1.encryption", value: "sae-mixed" }
+
+  tasks:
+
+    - name: update opkg db
+      raw: opkg update
+      changed_when: false
+
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "wifi reload"
+          when: uci_set_result.changed

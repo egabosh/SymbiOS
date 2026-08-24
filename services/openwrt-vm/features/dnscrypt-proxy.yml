@@ -1,0 +1,362 @@
+---
+- name: dnscrypt-proxy2
+  hosts: all
+  gather_facts: no
+
+  vars:
+    openwrt_packages:
+      - dnscrypt-proxy2
+   
+    uci_vars:
+      - { key: "network.lan.dns", value: "127.0.0.55" }
+  
+  tasks:
+
+    - name: update opkg db
+      raw: opkg update
+      changed_when: false
+
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: write /etc/dnscrypt-proxy2/dnscrypt-proxy.toml
+      raw: |
+        cat << 'EOF' > /etc/dnscrypt-proxy2/dnscrypt-proxy.toml
+        # Documentation https://github.com/DNSCrypt/dnscrypt-proxy/wiki
+
+        # listen on all interfaces
+        listen_addresses = ['127.0.0.55:53']
+
+        # DoH server list
+        server_names = ['doh.mullvad.net-194.242.2.2', 'doh.ffmuc.net-185.150.99.255', 'doh.ffmuc.net-5.1.66.255', 'dns.digitale-gesellschaft.ch-185.95.218.42', 'dns.digitale-gesellschaft.ch-185.95.218.43', 'anycast.uncensoreddns.org-91.239.100.100']
+
+        # server names to avoid even if they match all criteria
+        # disabled_server_names = []
+
+        ## what kinds of server do we want to resolve from?
+        doh_servers = true
+        ipv4_servers = false
+        ipv6_servers = false
+        dnscrypt_servers = false
+
+        # do we support IPv6 accressing?
+        block_ipv6 = false
+
+        # dont let weird queries & typos leak upstream
+        block_unqualified = true
+        block_undelegated = true
+
+        # TTL for synthetic responses sent when a request has been blocked
+        reject_ttl = 600
+
+        # request DoH servers which offer DNSSEC / tamperproofing
+        require_dnssec = true
+
+        # we are using tor, so we should not care about logging
+        require_nolog = false
+
+        # request DoH servers that advertise themselves as unfiltered
+        require_nofilter = true
+
+        # use tor
+        force_tcp = true
+        proxy = 'socks5://127.0.0.1:9050'
+
+        # how long (ms) a DNS query will wait for a response; reasonable max 10s
+        timeout = 10000
+
+        # keepalive for HTTP (HTTPS, HTTP/2) queries, in seconds; default: 30
+        keepalive = 30
+
+        # loadbalancing; p2 strategy, and continuous farming of the list
+        lb_strategy = 'p2'
+        lb_estimator = true
+
+        # logging: approx 1 month of weekly logs, capped-out/force-rotated at 64Mb
+        log_level = 2
+        use_syslog = true
+        #log_files_max_size = 64
+        #log_files_max_age = 7
+        #log_files_max_backups = 4
+
+        # delay, in minutes, after which certificates are reloaded; this also
+        # drives the latency logger, so we poll/log every hour
+        cert_refresh_delay = 60
+
+        # less linkability / more privacy at slight performance impact;
+        # see the notes in the above-cited documentation
+        tls_disable_session_tickets = true
+        tls_cipher_suite = [52392, 49199]
+
+        # for healthcheck, heartbeat and bootstrap, dnscrypt-proxy MUST be
+        # able to probe the internet, so we must configure our firewall so
+        # that it is the only one which can use port 53 to the internet;
+        # dnscrypt-proxy claims that it will only use these services in very
+        # limited circumstances. Regards option naming, see:
+        # https://github.com/DNSCrypt/dnscrypt-proxy/commit/c500287498a05b07c3af8effa23a0ba4c42f00f1
+        fallback_resolvers = ['46.182.19.48:53']
+        netprobe_address = '46.182.19.48:53'
+        netprobe_timeout = 60
+        ignore_system_dns = true
+
+        # explicit caching
+        cache = true
+        cache_size = 4096
+        cache_min_ttl = 60
+        cache_max_ttl = 86400
+        cache_neg_min_ttl = 60
+        cache_neg_max_ttl = 1800
+
+        # Static DoH DNS Servers from inspired by https://www.kuketz-blog.de/empfehlungsecke/#dns
+        # Stamps from https://dnscrypt.info/stamps/
+        [static]
+
+        [static.'doh.mullvad.net-194.242.2.2']
+        stamp = 'sdns://AgcAAAAAAAAACzE5NC4yNDIuMi4yAA9kb2gubXVsbHZhZC5uZXQKL2Rucy1xdWVyeQ'
+
+        [static.'doh.ffmuc.net-185.150.99.255']
+        stamp = 'sdns://AgcAAAAAAAAADjE4NS4xNTAuOTkuMjU1AA1kb2guZmZtdWMubmV0Ci9kbnMtcXVlcnk'
+
+        [static.'doh.ffmuc.net-5.1.66.255']
+        stamp = 'sdns://AgcAAAAAAAAACjUuMS42Ni4yNTUADWRvaC5mZm11Yy5uZXQKL2Rucy1xdWVyeQ'
+         
+        [static.'dns.digitale-gesellschaft.ch-185.95.218.42']
+        stamp = 'sdns://AgcAAAAAAAAADTE4NS45NS4yMTguNDIAHGRucy5kaWdpdGFsZS1nZXNlbGxzY2hhZnQuY2gKL2Rucy1xdWVyeQ'
+
+        [static.'dns.digitale-gesellschaft.ch-185.95.218.43']
+        stamp = 'sdns://AgcAAAAAAAAADTE4NS45NS4yMTguNDMAHGRucy5kaWdpdGFsZS1nZXNlbGxzY2hhZnQuY2gKL2Rucy1xdWVyeQ'
+
+        [static.'anycast.uncensoreddns.org-91.239.100.100']
+        stamp = 'sdns://AgcAAAAAAAAADjkxLjIzOS4xMDAuMTAwABlhbnljYXN0LnVuY2Vuc29yZWRkbnMub3JnCi9kbnMtcXVlcnk'
+        EOF
+
+        cp /etc/dnscrypt-proxy2/dnscrypt-proxy.toml /etc/dnscrypt-proxy2/dnscrypt-proxy-max.toml
+        echo "
+        [blocked_names]
+        blocked_names_file = 'blocked-names-fakenews-gambling.txt'
+        log_file = '/var/log/dnscrypt-proxy/blocked-names-fakenews-gambling.log'
+
+        [query_log]
+        file = '/var/log/dnscrypt-proxy/query.log'
+        # ignored_qtypes = ['DNSKEY', 'NS']
+
+        [nx_log]
+        file = '/var/log/dnscrypt-proxy/nx.log'
+
+        [blocked_ips]
+        # blocked_ips_file = 'blocked-ips.txt'
+        # log_file = '/var/log/dnscrypt-proxy/blocked-ips.log'
+
+        [allowed_names]
+        # allowed_names_file = 'allowed-names.txt'
+        # log_file = '/var/log/dnscrypt-proxy/allowed-names.log'
+
+        [allowed_ips]
+        # allowed_ips_file = 'allowed-ips.txt'
+        # log_file = '/var/log/dnscrypt-proxy/allowed-ips.log'
+        
+        " >>/etc/dnscrypt-proxy2/dnscrypt-proxy.toml
+
+        echo "
+        [blocked_names]
+        blocked_names_file = 'blocked-names-fakenews-gambling-porn-social.txt'
+        log_file = '/var/log/dnscrypt-proxy/blocked-names-fakenews-gambling-porn-social.log'
+
+        [query_log]
+        file = '/var/log/dnscrypt-proxy/query-max.log'
+        # ignored_qtypes = ['DNSKEY', 'NS']
+
+        [nx_log]
+        file = '/var/log/dnscrypt-proxy/nx-max.log'
+
+        [blocked_ips]
+        # blocked_ips_file = 'blocked-ips-max.txt'
+        # log_file = '/var/log/dnscrypt-proxy/blocked-ips-max.log'
+
+        [allowed_names]
+        # allowed_names_file = 'allowed-names-max.txt'
+        # log_file = '/var/log/dnscrypt-proxy/allowed-names-max.log'
+
+        [allowed_ips]
+        # allowed_ips_file = 'allowed-ips-max.txt'
+        # log_file = '/var/log/dnscrypt-proxy/allowed-ips-max.log'
+        
+        " >>/etc/dnscrypt-proxy2/dnscrypt-proxy-max.toml
+        sed -i "s/127\.0\.0\.55/127.0.0.56/g" /etc/dnscrypt-proxy2/dnscrypt-proxy-max.toml
+        cp -p /etc/init.d/dnscrypt-proxy /etc/init.d/dnscrypt-proxy-max
+        sed -i "s/dnscrypt-proxy.toml/dnscrypt-proxy-max.toml/g" /etc/init.d/dnscrypt-proxy-max
+        /etc/init.d/dnscrypt-proxy-max enable
+        
+      changed_when: false
+
+    - name: write, run and create cronjob /etc/scripts/dnscrypt-proxy-blocklist-update.sh
+      raw: |
+        mkdir -p /etc/scripts
+        cat << 'EOF' > /etc/scripts/dnscrypt-proxy-blocklist-update.sh
+        #!/bin/bash
+
+        cd /etc/dnscrypt-proxy2
+        g_tmp=/tmp
+
+        touch blocked-names-local-whitelist.txt
+        chmod 660 blocked-names-local-whitelist.txt
+        chown root: blocked-names-local-whitelist.txt
+        # get hosts blocklist from https://github.com/StevenBlack/hosts
+        for list in \
+         https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts \
+         https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling/hosts
+        do
+          target=$(echo $list | cut -d/ -f 8)
+          wget -q $list -O - | grep "^0\.0\.0\.0 " | cut -d" " -f2 | grep "\." | egrep -v '^\.|\.$' | egrep -v -f blocked-names-local-whitelist.txt >${g_tmp}/blocked-names.txt
+          numhosts=$(cat ${g_tmp}/blocked-names.txt | wc -l)
+          if [ "$numhosts" -gt 50000 ]
+          then
+            sed 's/^/=/' ${g_tmp}/blocked-names.txt >"blocked-names-${target}.txt"
+          else
+            echo "Not enough lines in hosts blocklist from https://github.com/StevenBlack/hosts -> ${g_tmp}/blocked-names.txt"
+          fi
+        done
+
+        # get doh hosts
+        wget -q https://github.com/curl/curl/wiki/DNS-over-HTTPS -O - | grep -v '^</td>$' | grep '✔️' -B1 | sed 's#" rel="nofollow">https://#\nhttps://#g; s#<#/#g' | grep ^https:// | cut -d/ -f3 | sort -u >blocked-names-doh.txt
+
+        # cleanup
+        rm -f ${g_tmp}/blocked-names.txt
+        touch blocked-names-local-additions.txt
+        chmod 660 blocked-names-local-additions.txt
+        chown root: blocked-names-local-additions.txt
+       
+        # additional hosts
+        [ -s blocked-names-doh.txt ] && cat blocked-names-doh.txt >>blocked-names-fakenews-gambling.txt
+        [ -s blocked-names-local-additions.txt ] && cat blocked-names-local-additions.txt >>blocked-names-fakenews-gambling.txt
+        echo "steering.nextdns.io" >>blocked-names-fakenews-gambling.txt
+        [ -s blocked-names-doh.txt ] && cat blocked-names-doh.txt >>blocked-names-fakenews-gambling-porn-social.txt
+        [ -s blocked-names-local-additions.txt ] && cat blocked-names-local-additions.txt >>blocked-names-fakenews-gambling-porn-social.txt
+        echo "steering.nextdns.io" >>blocked-names-fakenews-gambling-porn-social.txt
+
+        # use new files
+        /etc/init.d/dnscrypt-proxy restart
+        /etc/init.d/dnscrypt-proxy-max restart
+
+
+        ## list of public doh servers
+        # Public doh servers
+        wget -q https://raw.githubusercontent.com/DNSCrypt/dnscrypt-resolvers/refs/heads/master/v3/public-resolvers.md -O - | \
+         grep '^sdns://' | \
+         sed 's#^sdns://##' | \
+        while read dns; 
+        do 
+          echo -n "$dns" | base64 -d 2>/dev/null | cut -d" " -f1
+        done | \
+         sed 's/[^[:print:]]/ /g ; s/^ *//' | \
+         egrep -a '^[0-9]|^\[' | cut -d" " -f1 | \
+         sed 's/:[[:digit:]]\+$//' | \
+         sed 's/[][]//g' | \
+         sort -u >/etc/ips-doh1.txt.new
+
+        # more Public doh servers
+        >/etc/ips-doh2.txt.new
+        wget -q https://github.com/curl/curl/wiki/DNS-over-HTTPS -O - | grep -v '^</td>$' | grep '✔️' -B1 | sed 's#" rel="nofollow">https://#\nhttps://#g; s#<#/#g' | grep ^https:// | cut -d/ -f3 | sort -u >blocked-names-doh.txt
+        cat blocked-names-doh.txt | while read dns
+        do
+          host "$dns" | egrep "has .*address " | sed 's/IPv6 //' | cut -d" " -f4 >>/etc/ips-doh2.txt.new
+        done
+
+        # merge doh lists
+        cat /etc/ips-doh1.txt.new /etc/ips-doh2.txt.new | sort -u >/etc/ips-doh.txt.new
+
+
+        ## list of public tor servers
+        # download default tor entry and exit node list and block them
+        wget -qO /etc/ips-tor.txt.new https://www.dan.me.uk/torlist/
+
+
+        # split lists to ipv4 and ipv6 lists
+        numips=$(cat /etc/ips-doh.txt.new | wc -l)
+        if [ "$numips" -gt 300 ]
+        then
+          egrep -h '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' /etc/ips-doh.txt.new /etc/ips-doh-ipv4.txt | sort -u >/etc/ips-doh-ipv4.txt.tmp
+          mv /etc/ips-doh-ipv4.txt.tmp /etc/ips-doh-ipv4.txt
+          egrep -h '^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$' /etc/ips-doh.txt.new /etc/ips-doh-ipv6.txt | sort -u >/etc/ips-doh-ipv6.txt.tmp
+          mv /etc/ips-doh-ipv6.txt.tmp /etc/ips-doh-ipv6.txt 
+        fi
+
+        # create block rules from downloaded ip lists (tor, doh)
+        for proto in ipv4 ipv6
+        do
+          file="/etc/ips-doh-${proto}.txt"
+          [ -s "$file" ] || continue
+          
+          # renew ipsets (lists)
+          uci -q delete firewall.doh_${proto}
+          uci set firewall.doh_${proto}=ipset
+          uci set firewall.doh_${proto}.name="doh_${proto}"
+          uci set firewall.doh_${proto}.match="dst_ip"  
+          uci set firewall.doh_${proto}.family="${proto}"
+          awk '{printf "add_list firewall.'doh_${proto}'.entry=\047%s\047\n", $0}' "$file" >"${file}_uci_batch"
+          uci batch < "${file}_uci_batch"
+          # renew block rules
+          uci -q delete firewall.doh_${proto}_rule
+          uci set firewall.doh_${proto}_rule=rule
+          uci set firewall.doh_${proto}_rule.name="doh_${proto}_block"
+          uci set firewall.doh_${proto}_rule.src="*"
+          uci set firewall.doh_${proto}_rule.dest="wan"
+          uci set firewall.doh_${proto}_rule.ipset="doh_${proto}"
+          uci set firewall.doh_${proto}_rule.target="REJECT"
+          uci set firewall.doh_${proto}_rule.family="${proto}"
+        done
+
+        ## commit changes
+        uci commit firewall
+        /etc/init.d/firewall reload
+              
+        EOF
+
+        chmod 700 /etc/scripts/dnscrypt-proxy-blocklist-update.sh
+        [ -s /etc/ips-doh-ipv6.txt ] || /etc/scripts/dnscrypt-proxy-blocklist-update.sh
+
+        cronjob="15 6 * * *   /etc/scripts/dnscrypt-proxy-blocklist-update.sh"
+        grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+
+      changed_when: false
+
+    - name: commit enable and restart
+      raw: "{{ item }}"
+      loop:
+        - "/etc/init.d/dnscrypt-proxy restart"
+        - "/etc/init.d/dnscrypt-proxy-max restart"
+      changed_when: false
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/network reload"
+          when: uci_set_result.changed
+
+

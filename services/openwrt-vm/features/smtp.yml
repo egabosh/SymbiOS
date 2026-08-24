@@ -1,0 +1,48 @@
+---
+- name: SMTP Config for sending Mails
+  hosts: all
+  gather_facts: no
+
+  vars:
+    openwrt_packages:
+      - msmtp
+      - msmtp-mta
+ 
+  tasks:
+
+    - name: update opkg db
+      raw: opkg update
+      changed_when: false
+
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: write /etc/msmtprc
+      raw: |
+        cat << 'EOF' > /etc/msmtprc
+        defaults
+        tls on
+        tls_trust_file /etc/ssl/certs/ca-certificates.crt
+        syslog LOG_MAIL
+
+        account mail
+          host {{ mailserver }}
+          port {{ mailserver_port }}
+          auth on
+          user {{ username }}
+          password {{ password }}
+          from {{ username }}
+
+        account default : mail
+        EOF
+        chmod 644 /etc/msmtprc
+        chown root:root /etc/msmtprc
+      changed_when: false
+

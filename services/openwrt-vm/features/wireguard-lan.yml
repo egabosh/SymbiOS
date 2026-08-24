@@ -1,0 +1,93 @@
+---
+- name: wireguard server for br-lan
+  hosts: all
+  gather_facts: no
+
+  vars:
+    openwrt_packages:
+      - luci-proto-wireguard
+      - kmod-wireguard
+
+    uci_vars:
+      # Interface wg_lan
+      - { key: "network.wg_lan", value: "interface" }
+      - { key: "network.wg_lan.proto", value: "wireguard" }
+      - { key: "network.wg_lan.listen_port", value: "59666" }
+      - { key: "network.wg_lan.mtu", value: "1450" }
+      - { key: "network.wg_lan.addresses", value: "fdaa:a192:b168:cd44::1/64" }
+      - { key: "network.wg_lan.addresses", value: "192.168.44.1/24" }
+      - { key: "network.wg_lan.ip6assign", value: "64" }
+      - { key: "network.wg_lan.ipv6", value: "1" }
+
+      # allow connections from internet
+      - { key: "firewall.wireguard_allow_lan", value: "rule" }
+      - { key: "firewall.wireguard_allow_lan.name", value: "ansible_allow_wireguard_lan" }
+      - { key: "firewall.wireguard_allow_lan.src", value: "wan" }
+      - { key: "firewall.wireguard_allow_lan.proto", value: "udp" }
+      - { key: "firewall.wireguard_allow_lan.dest_port", value: "59666" }
+      - { key: "firewall.wireguard_allow_lan.target", value: "ACCEPT" }
+
+      # add to zone lan and allow intra zone forward
+      - { key: "firewall.zone_lan.network", value: "wg_lan" }
+      - { key: "firewall.zone_lan.forward", value: "ACCEPT" }
+  
+  tasks:
+    - name: update opkg db
+      raw: opkg update
+      changed_when: false
+  
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+
+        # gen server keypair if not exist
+        if [[ {{ item.key }} = network.wg_lan.proto ]]
+        then
+          if ! uci get network.wg_lan.private_key
+          then
+            mkdir -p /etc/wg_lan
+            cd /etc/wg_lan
+            wg genkey | tee server_privatekey | wg pubkey > server_publickey
+            uci set network.wg_lan.private_key="$(cat server_privatekey)"
+          fi
+        fi
+
+        if ! echo "$current" | grep "$desired"
+        then
+          if echo "{{ item.key }}" | egrep -q "listen_address|\.addresses|\.allowed_ips|firewall\..+\.network"
+          then
+            uci add_list {{ item.key }}="{{ item.value }}"
+          else
+            uci set {{ item.key }}="{{ item.value }}"
+          fi
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/network reload"
+            - "/etc/init.d/firewall reload"
+#            - "/etc/init.d/dnsmasq restart"
+#            - "/etc/init.d/odhcpd restart"
+          when: uci_set_result.changed
+

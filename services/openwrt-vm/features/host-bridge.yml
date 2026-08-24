@@ -1,0 +1,78 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# host-bridge.yml - Add physical host interfaces to the OpenWrt VM bridge.
+#
+# This playbook runs on the SymbiOS host (not the VM). It adds the specified
+# physical interfaces to the br-ow-lan Linux bridge, making them available
+# to the OpenWrt VM's LAN segment.
+#
+# Required extra-vars:
+#   interfaces - comma-separated list of interface names (e.g. "eth1,eth2")
+
+---
+- name: Add host interfaces to OpenWrt LAN bridge
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    interfaces: ''
+    bridge_name: br-ow-lan
+  tasks:
+    # Ensure the bridge exists (should be created by openwrt-vm.yml).
+    - name: Check if bridge exists
+      ansible.builtin.command: ip link show {{ bridge_name }}
+      register: bridge_check
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if bridge does not exist
+      ansible.builtin.fail:
+        msg: "Bridge {{ bridge_name }} does not exist. Run openwrt-vm.yml first."
+      when: bridge_check.rc != 0
+
+    # Parse the comma-separated interface list.
+    - name: Parse interface list
+      ansible.builtin.set_fact:
+        iface_list: "{{ interfaces.split(',') | map('trim') | select('match', '^.+$') | list }}"
+
+    # Add each interface to the bridge.
+    - name: Add interfaces to bridge
+      ansible.builtin.shell: |
+        set -e
+        IFACE="{{ item }}"
+        # Check if already a bridge member.
+        if ip link show master {{ bridge_name }} 2>/dev/null | grep -q "^[0-9]*: ${IFACE}:"; then
+          echo "${IFACE}: already in bridge"
+          exit 0
+        fi
+        # Bring interface down, add to bridge, bring back up.
+        ip link set "$IFACE" down
+        ip link set "$IFACE" master {{ bridge_name }}
+        ip link set "$IFACE" up
+        echo "${IFACE}: added to {{ bridge_name }}"
+      loop: "{{ iface_list }}"
+      when: iface_list | length > 0
+
+    # Show current bridge members.
+    - name: Show bridge members
+      ansible.builtin.command: brctl show {{ bridge_name }}
+      register: bridge_show
+      changed_when: false
+
+    - name: Display bridge status
+      ansible.builtin.debug:
+        msg: "{{ bridge_show.stdout_lines }}"

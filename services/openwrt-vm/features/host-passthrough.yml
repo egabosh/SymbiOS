@@ -1,0 +1,105 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# host-passthrough.yml - Pass through USB/PCI WiFi adapters to the OpenWrt VM.
+#
+# This playbook runs on the SymbiOS host. It detaches specified WiFi adapters
+# from the host and attaches them to the libvirt VM for direct passthrough.
+#
+# Required extra-vars:
+#   devices - comma-separated list of device identifiers (e.g. "usb:Bus 001 Device 003", "pci:01:00.0")
+#   vm_name - libvirt VM name (default: openwrt)
+
+---
+- name: Pass through WiFi adapters to OpenWrt VM
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    devices: ''
+    vm_name: openwrt
+  tasks:
+    # Parse the comma-separated device list.
+    - name: Parse device list
+      ansible.builtin.set_fact:
+        device_list: "{{ devices.split(',') | map('trim') | select('match', '^.+$') | list }}"
+
+    # Process USB devices.
+    - name: Attach USB devices
+      ansible.builtin.shell: |
+        set -e
+        DEV="{{ item }}"
+        # Extract USB bus:device from value (format: "usb:Bus 001 Device 003").
+        BUSDEV=$(echo "$DEV" | sed -n 's/^usb:.*Bus \([0-9]*\) Device \([0-9]*\).*/\1:\2/p')
+        if [[ -z "$BUSDEV" ]]; then
+          echo "Skipping non-USB device: $DEV"
+          exit 0
+        fi
+        BUS=$(echo "$BUSDEV" | cut -d: -f1)
+        DEVICE=$(echo "$BUSDEV" | cut -d: -f2)
+        # Check if already attached.
+        if virsh dumpxml {{ vm_name }} 2>/dev/null | grep -q "vendor.*product.*${BUS}:${DEVICE}"; then
+          echo "USB ${BUS}:${DEVICE}: already attached"
+          exit 0
+        fi
+        # Attach device to VM.
+        virsh attach-device {{ vm_name }} --file /dev/stdin --persistent <<< \
+          "<hostdev mode='subsystem' type='usb' managed='yes'>
+            <source>
+              <address bus='${BUS}' device='${DEVICE}'/>
+            </source>
+          </hostdev>"
+        echo "USB ${BUS}:${DEVICE}: attached to {{ vm_name }}"
+      loop: "{{ device_list }}"
+      when: device_list | length > 0
+      failed_when: false
+
+    # Process PCI devices.
+    - name: Attach PCI devices
+      ansible.builtin.shell: |
+        set -e
+        DEV="{{ item }}"
+        # Extract PCI address from value (format: "pci:01:00.0").
+        PCIADDR=$(echo "$DEV" | sed -n 's/^pci:\([0-9a-f:.]*\).*/\1/p')
+        if [[ -z "$PCIADDR" ]]; then
+          echo "Skipping non-PCI device: $DEV"
+          exit 0
+        fi
+        # Check if already attached.
+        if virsh dumpxml {{ vm_name }} 2>/dev/null | grep -q "address.*domain.*bus.*slot.*function"; then
+          echo "PCI ${PCIADDR}: already attached"
+          exit 0
+        fi
+        # Extract bus, slot, function from PCI address (e.g. 01:00.0).
+        PCI_BUS=$(echo "$PCIADDR" | cut -d: -f1)
+        PCI_SLOT=$(echo "$PCIADDR" | cut -d: -f2 | cut -d. -f1)
+        PCI_FUNC=$(echo "$PCIADDR" | cut -d. -f2)
+        # Bind to vfio-pci if not already bound.
+        driver=$(lspci -s "$PCIADDR" -k 2>/dev/null | awk '/Driver:/{print $2}')
+        if [[ "$driver" != "vfio-pci" ]]; then
+          echo "$PCIADDR" > /sys/bus/pci/drivers/vfio-pci/bind 2>/dev/null || true
+        fi
+        # Attach device to VM.
+        virsh attach-device {{ vm_name }} --file /dev/stdin --persistent <<< \
+          "<hostdev mode='subsystem' type='pci' managed='yes'>
+            <source>
+              <address domain='0x0000' bus='0x${PCI_BUS}' slot='0x${PCI_SLOT}' function='0x${PCI_FUNC}'/>
+            </source>
+          </hostdev>"
+        echo "PCI ${PCIADDR}: attached to {{ vm_name }}"
+      loop: "{{ device_list }}"
+      when: device_list | length > 0
+      failed_when: false

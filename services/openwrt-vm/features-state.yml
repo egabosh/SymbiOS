@@ -1,0 +1,131 @@
+# OpenWrt VM feature state - tracks enabled/disabled status and parameter values
+# for each feature defined in plugin.yml.
+# Managed by the WebUI and symbios-feature-apply.sh.
+#
+# Status values:
+#   null     - feature not configured
+#   draft    - parameters saved but not yet applied
+#   applied  - playbook executed successfully
+#   error    - last apply failed (check error field)
+
+interfaces:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params:
+    bridge_interfaces: []
+
+iot:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params: {}
+
+wireless:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params:
+    radio: ''
+    ssid: ''
+    key: ''
+    country: DE
+
+wireless_iot:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params:
+    radio: ''
+    ssid: ''
+    key: ''
+
+wifi_passthrough:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params:
+    devices: []
+
+wireguard:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params: {}
+
+dnscrypt:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params: {}
+
+ddns_ipv4:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params:
+    hostname: ''
+    domain: ''
+    apikey: ''
+
+ddns_ipv6:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params:
+    domain: ''
+    apikey: ''
+
+dhcp_host:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params:
+    name: ''
+    ip: ''
+    mac: ''
+
+dns_record:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params:
+    hostname: ''
+    ip: ''
+
+ssh:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params: {}
+
+logserver:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params:
+    server: ''
+
+smtp:
+  enabled: false
+  status: null
+  error: null
+  last_applied: null
+  params:
+    server: ''
+    port: 587
+    username: ''
+    password: ''
