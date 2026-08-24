@@ -44,7 +44,7 @@
 #       - /symbios/base-services/traefik/providers/kodidb.yml
 #       - /symbios/runchecks.d/symbios-healthcheck-kodidb.check
 #       - /symbios/autoupdate.d/kodidb-ssl.update
-#       - /usr/local/sbin/backup.d/kodidb-docker.backup
+#       - /symbios/backup.d/kodidb-docker.backup
 #   actions:
 #     start: docker compose -f /symbios/services/kodidb/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/kodidb/docker-compose.yml down
@@ -326,9 +326,9 @@
         backup: yes
       notify: Restart authelia
 
-    - name: /usr/local/sbin/backup.d/kodidb-docker.backup
+    - name: "{{ data_root }}/backup.d/kodidb-docker.backup"
       blockinfile:
-        path: /usr/local/sbin/backup.d/kodidb-docker.backup
+        path: "{{ data_root }}/backup.d/kodidb-docker.backup"
         create: yes
         mode: 0550 
         owner: root
