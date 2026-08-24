@@ -301,7 +301,7 @@
     # subnet. Use public DNS which is reachable via the host's NAT.
     - name: Set DNS server fact
       ansible.builtin.set_fact:
-        vm_dns: "1.1.1.1"
+        vm_dns: "5.9.164.112"
       when: kvm_capable | bool
 
     - name: Show DNS server

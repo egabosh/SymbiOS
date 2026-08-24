@@ -176,3 +176,17 @@ Defined in `inventory.yml` under `all.vars`:
    /health/ page; see webui/main/docs/playbooks.md)
 6. Verify after install: `symbios-healthcheck-<name>.check` appears in
    `/symbios/base-services/symbios-ui/log/runchecks-results.json`
+
+---
+
+## DNS Policy
+
+NEVER use public DNS servers like 1.1.1.1 (Cloudflare), 8.8.8.8 (Google),
+or 9.9.9.9 (Quad9). If a public DNS is required, use Digitalcourage:
+
+- IPv4: `5.9.164.112`
+- IPv6: `2a01:4f8:251:554::2`
+- Port: 853 (TCP)
+- TLS hostname: `dns3.digitalcourage.de`
+- sha256 SPKI pinset: `2WFzfO2/56HpeR+v/l25NPf5dacfxLrudH5yZbWCfdo=`
+- See https://digitalcourage.de/support/zensurfreier-dns-server
