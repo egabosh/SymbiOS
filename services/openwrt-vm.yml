@@ -768,11 +768,14 @@
     # host answer NDP for ::1 on the bridge.
     - name: Enable proxy_ndp sysctl for VM
       ansible.posix.sysctl:
-        name: net.ipv6.conf.all.proxy_ndp
+        name: "{{ item }}"
         value: "1"
         sysctl_set: yes
         state: present
         reload: yes
+      loop:
+        - net.ipv6.conf.all.proxy_ndp
+        - "net.ipv6.conf.{{ bridge_name | default('base-services') }}.proxy_ndp"
       when:
         - kvm_capable | bool
         - host_ipv6_available | bool
@@ -804,20 +807,23 @@
           # - NAT66 masquerade + FORWARD rules
           PREFIX="{{ host_ipv6_prefix }}"
           UP="{{ uplink_interface }}"
+          BR="{{ bridge_name | default('base-services') }}"
           [ -z "$PREFIX" ] && exit 0
+          # Enable proxy_ndp on the bridge interface
+          sysctl -w "net.ipv6.conf.${BR}.proxy_ndp=1" >/dev/null
           # Host route
-          ip -6 route replace "$PREFIX::201/128" dev base-services
+          ip -6 route replace "$PREFIX::201/128" dev "$BR"
           # NDP proxy: host answers for $PREFIX::1 (gateway) on the bridge
-          ip -6 neigh add proxy "$PREFIX::1" dev base-services 2>/dev/null || \
-            ip -6 neigh replace "$PREFIX::1" dev base-services nud permanent
+          ip -6 neigh add proxy "$PREFIX::1" dev "$BR" 2>/dev/null || \
+            ip -6 neigh replace "$PREFIX::1" dev "$BR" 2>/dev/null
           # NAT66 masquerade
           ip6tables -t nat -C POSTROUTING -s "$PREFIX::/64" ! -d "$PREFIX::/64" -j MASQUERADE 2>/dev/null || \
             ip6tables -t nat -A POSTROUTING -s "$PREFIX::/64" ! -d "$PREFIX::/64" -j MASQUERADE
           # FORWARD rules
-          ip6tables -C FORWARD -i base-services -o "$UP" -j ACCEPT 2>/dev/null || \
-            ip6tables -I FORWARD -i base-services -o "$UP" -j ACCEPT
-          ip6tables -C FORWARD -i "$UP" -o base-services -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
-            ip6tables -I FORWARD -i "$UP" -o base-services -m state --state RELATED,ESTABLISHED -j ACCEPT
+          ip6tables -C FORWARD -i "$BR" -o "$UP" -j ACCEPT 2>/dev/null || \
+            ip6tables -I FORWARD -i "$BR" -o "$UP" -j ACCEPT
+          ip6tables -C FORWARD -i "$UP" -o "$BR" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+            ip6tables -I FORWARD -i "$UP" -o "$BR" -m state --state RELATED,ESTABLISHED -j ACCEPT
       when:
         - kvm_capable | bool
         - host_ipv6_available | bool
