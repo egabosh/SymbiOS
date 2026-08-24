@@ -74,6 +74,17 @@
         - { path: 'ldap-config', owner: 10001, group: 10001, mode: '0770' }
         - { path: 'ldap-db', owner: 10001, group: 10001, mode: '0770' }
 
+    # Generic infrastructure: hooks executed by the LDAP group-change
+    # dispatcher (see f_ldap_groups_hooks in scripts/symbios-lib.sh) whenever
+    # a group or membership changes. Services drop their *.hook files here.
+    - name: Create LDAP group-change hook directory
+      ansible.builtin.file:
+        dest: "{{ data_root }}/ldap-groups.d"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+
 
 
 

@@ -48,6 +48,7 @@
 #       - /symbios/base-services/traefik/providers/nextcloud.yml
 #       - /symbios/runchecks.d/symbios-healthcheck-nextcloud.check
 #       - /symbios/autoupdate.d/nextcloud.update
+#       - /symbios/ldap-groups.d/nextcloud-admin-sync.hook
 #     ldap_groups:
 #       - nextcloud-users
 #       - nextcloud-admins
@@ -743,17 +744,26 @@
         chdir: /symbios/services/nextcloud
         creates: /symbios/services/nextcloud/nextcloud.init.log
 
-    - name: /etc/cron.d/symbios-nextcloud-sync (periodic admin sync)
+    - name: Deploy LDAP group-change hook (immediate admin sync on membership changes)
       ansible.builtin.copy:
-        dest: /etc/cron.d/symbios-nextcloud-sync
+        dest: "{{ data_root }}/ldap-groups.d/nextcloud-admin-sync.hook"
         content: |
-          # SymbIOS - periodic Nextcloud admin sync (deployed by services/nextcloud.yml)
-          SHELL=/bin/bash
-          PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-          */5 * * * * root {{ git_root }}/scripts/symbios-nextcloud-admin-sync.sh >>{{ data_root }}/base-services/symbios-ui/log/nextcloud-admin-sync.log 2>&1
-        mode: '0644'
+          #!/bin/bash
+          # SymbIOS hook - keep Nextcloud admins in sync with LDAP group nextcloud-admins.
+          # Executed by the shared LDAP group-change dispatcher (see symbios-lib.sh,
+          # called by symbios-ldap-groups.sh for CLI and WebUI changes) whenever a
+          # group or a membership changes. Args: $1=event $2=group $3=uid
+          # Only react to changes of the Nextcloud admin group (incl. group deletion).
+          [[ "${2:-}" == "nextcloud-admins" ]] || exit 0
+          exec "{{ git_root }}/scripts/symbios-nextcloud-admin-sync.sh"
+        mode: '0755'
         owner: root
         group: root
+
+    - name: Remove obsolete periodic sync cron job (replaced by group-change hook)
+      ansible.builtin.file:
+        dest: /etc/cron.d/symbios-nextcloud-sync
+        state: absent
 
     # Deploy the shared autoupdate script (services/tasks/autoupdate.yml)
     - name: Deploy autoupdate script
