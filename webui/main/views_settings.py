@@ -972,6 +972,15 @@ def settings_config(request):
     })
 
 
+def _backup_status():
+    """Read the backup status JSON written by the host's backup job."""
+    try:
+        with open('/log/backup-status.json') as fh:
+            return json.load(fh)
+    except (FileNotFoundError, PermissionError, json.JSONDecodeError, ValueError):
+        return None
+
+
 @login_required
 def settings_backup(request):
     config = _get_inventory_config()
@@ -988,6 +997,14 @@ def settings_backup(request):
             vars_['backup_server_port'] = request.POST.get('backup_server_port', '').strip() or '22'
             vars_['backup_server_user'] = request.POST.get('backup_server_user', '').strip() or 'root'
             vars_['backup_server_path'] = request.POST.get('backup_server_path', '').strip()
+            vars_['backup_encryption'] = request.POST.get('backup_encryption') == 'on'
+            # Exclude list: one rsync pattern per line; comments allowed
+            excludes = []
+            for line in request.POST.get('backup_exclude', '').splitlines():
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    excludes.append(line)
+            vars_['backup_exclude'] = excludes
             _save_inventory_config(config)
             if is_ajax:
                 job_id, title, cmd = _start_reapply(playbooks=['base-services/backup.yml'])
@@ -1003,8 +1020,22 @@ def settings_backup(request):
             messages.error(request, f'Error: {e}')
         return redirect('settings_backup')
 
+    # GET: collect snapshot list, service scopes and the SSH public key
+    data = {'snapshots': [], 'services': [], 'mode': '', 'warning': '', 'pubkey': ''}
+    try:
+        ok, stdout, stderr = run_command('symbios-backup-list.sh', timeout=90)
+        if ok and stdout:
+            parsed = json.loads(stdout)
+            if isinstance(parsed, dict):
+                data.update(parsed)
+    except Exception:
+        pass
     return render(request, 'main/settings_backup.html', {
         'vars': vars_,
+        'status': _backup_status(),
+        'data': data,
+        'snapshots_json': json.dumps(data.get('snapshots') or []),
+        'services_json': json.dumps(data.get('services') or []),
     })
 
 
@@ -1041,6 +1072,109 @@ def settings_backup_test(request):
             return JsonResponse({'ok': False, 'error': stderr or 'SSH test failed'})
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)})
+
+
+def _validate_backup_date_scope(date_str, scope):
+    """Validate a snapshot date and restore scope. Returns an error or None."""
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', date_str or ''):
+        return 'Invalid date format (expected YYYY-MM-DD)'
+    if scope != '--full' and not re.match(r'^[\w.-]+$', scope or ''):
+        return 'Invalid service name'
+    return None
+
+
+@login_required
+def settings_backup_snapshots(request):
+    """AJAX GET - refresh the list of available snapshots."""
+    try:
+        ok, stdout, stderr = run_command('symbios-backup-list.sh', timeout=90)
+        if ok and stdout:
+            return JsonResponse(json.loads(stdout))
+        return JsonResponse({'ok': False, 'error': stderr or 'Listing failed'})
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)})
+
+
+@login_required
+def settings_backup_passphrase(request):
+    """AJAX POST - show or generate the backup encryption passphrase.
+
+    The passphrase is generated on the host and stored in the config dir;
+    it never appears in a shell command line or audit log.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=400)
+    action = request.POST.get('action', 'show')
+    cmd = ('symbios-backup.sh gen-passphrase' if action == 'generate'
+           else 'symbios-backup.sh get-passphrase')
+    try:
+        ok, stdout, stderr = run_command(cmd, timeout=20)
+        if ok and stdout:
+            return JsonResponse(json.loads(stdout))
+        return JsonResponse({'ok': False, 'error': stderr or 'Command failed'})
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)})
+
+
+@login_required
+def settings_backup_restore_plan(request):
+    """AJAX POST - show what a restore of <date>/<scope> would do."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=400)
+    date_str = request.POST.get('date', '').strip()
+    scope = request.POST.get('scope', '--full').strip() or '--full'
+    err = _validate_backup_date_scope(date_str, scope)
+    if err:
+        return JsonResponse({'ok': False, 'error': err}, status=400)
+    cmd = f'symbios-restore.sh plan {shlex.quote(date_str)} {shlex.quote(scope)}'
+    try:
+        ok, stdout, stderr = run_command(cmd, timeout=120)
+        if ok and stdout:
+            return JsonResponse(json.loads(stdout))
+        return JsonResponse({'ok': False, 'error': stderr or 'Plan failed'})
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)})
+
+
+@login_required
+def settings_backup_restore(request):
+    """AJAX POST - start a restore as a detached background job."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=400)
+    date_str = request.POST.get('date', '').strip()
+    scope = request.POST.get('scope', '--full').strip() or '--full'
+    err = _validate_backup_date_scope(date_str, scope)
+    if err:
+        return JsonResponse({'ok': False, 'error': err}, status=400)
+    from .utils.jobs import create_job
+    cmd = (f'symbios-restore.sh restore {shlex.quote(date_str)} '
+           f'{shlex.quote(scope)} --yes')
+    job_id = create_job(cmd, timeout=3600)
+    target = 'the whole system' if scope == '--full' else f'"{scope}"'
+    return JsonResponse({
+        'ok': True,
+        'job': job_id,
+        'title': f'Restoring {target} from {date_str}...',
+        'message': 'Restore started.',
+        'command': cmd,
+    })
+
+
+@login_required
+def settings_backup_runnow(request):
+    """AJAX POST - start a backup run right now (as a background job)."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=400)
+    from .utils.jobs import create_job
+    cmd = 'backup.sh'
+    job_id = create_job(cmd, timeout=3600)
+    return JsonResponse({
+        'ok': True,
+        'job': job_id,
+        'title': 'Running backup...',
+        'message': 'Backup started.',
+        'command': cmd,
+    })
 
 
 # ---------------------------------------------------------------------------

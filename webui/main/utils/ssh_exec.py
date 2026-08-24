@@ -148,21 +148,31 @@ def _exec(cmd, timeout=300, stdin_data=None):
 
         channel = client.get_transport().open_session(timeout=SSH_CONNECT_TIMEOUT)
         channel.settimeout(timeout)
-        channel.exec_command(_wrap(cmd))
-        # Write stdin data if provided (e.g. SSH keys for
-        # write-authorized-keys.sh). Small payloads; closing the single writer
-        # signals EOF so the remote process can proceed.
-        if stdin_data is not None:
-            writer = channel.makefile('w')
-            writer.write(stdin_data)
-            writer.close()
-        # Always signal EOF on stdin: scripts like symbios-run-detached.sh start
-        # read stdin (`cat > .input`) until EOF, and a still-open channel would
-        # block them until the command timeout.
-        channel.shutdown_write()
-        exit_status = channel.recv_exit_status()
-        stdout = channel.makefile('r', -1).read()
-        stderr = channel.makefile_stderr('r', -1).read()
+        try:
+            channel.exec_command(_wrap(cmd))
+            # Write stdin data if provided (e.g. SSH keys for
+            # write-authorized-keys.sh). Small payloads; closing the single writer
+            # signals EOF so the remote process can proceed.
+            if stdin_data is not None:
+                writer = channel.makefile('w')
+                writer.write(stdin_data)
+                writer.close()
+            # Always signal EOF on stdin: scripts like symbios-run-detached.sh start
+            # read stdin (`cat > .input`) until EOF, and a still-open channel would
+            # block them until the command timeout.
+            channel.shutdown_write()
+            exit_status = channel.recv_exit_status()
+            stdout = channel.makefile('r', -1).read()
+            stderr = channel.makefile_stderr('r', -1).read()
+        finally:
+            # Explicitly close the channel: without this, channels linger on the
+            # shared transport until GC and pile up against sshd's MaxSessions
+            # limit ("Secsh channel N open FAILED: Connect failed") once pages
+            # poll frequently (e.g. the exec job modal).
+            try:
+                channel.close()
+            except Exception:
+                pass
         if isinstance(stdout, bytes):
             stdout = stdout.decode('utf-8', errors='replace')
         if isinstance(stderr, bytes):

@@ -64,6 +64,10 @@ all:
     backup_server_port: ''
     backup_server_path: ''
     backup_server_user: ''
+    # main backup (scripts/symbios-backup.sh): encrypt archives on the
+    # remote target and extra exclude patterns (rsync syntax, one per item)
+    backup_encryption: false
+    backup_exclude: []
   hosts:
     # SymbiOS server
     localhost:

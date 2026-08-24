@@ -47,6 +47,13 @@
 #       - /symbios/base-services/traefik/providers/matrix.yml
 #       - /symbios/runchecks.d/symbios-healthcheck-matrix.check
 #       - /symbios/runchecks.d/matrix.check
+#     ldap_groups:
+#       - matrix-users
+#       - matrix-admins
+#     authelia_blocks:
+#       - "OIDC matrix"
+#       - "matrix-admin ACCESS CONTROL"
+#       - "matrix-web ACCESS CONTROL"
 #   actions:
 #     start: docker compose -f /symbios/services/matrix/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/matrix/docker-compose.yml down

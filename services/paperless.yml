@@ -49,6 +49,11 @@
 #       - /etc/samba/smb-{{ ansible_facts['hostname'] }}.conf
 #     commands:
 #       - userdel paperless
+#     ldap_groups:
+#       - paperless-users
+#       - paperless-admins
+#     authelia_blocks:
+#       - "paperless ACCESS CONTROL"
 #   actions:
 #     start: docker compose -f /symbios/services/paperless/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/paperless/docker-compose.yml down

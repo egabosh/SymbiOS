@@ -39,6 +39,13 @@
 #   commands       - optional list of whitelisted cleanup commands, executed
 #                    in full mode only (docker compose/systemctl/ufw/userdel/
 #                    groupdel/smbpasswd/deluser/delgroup)
+#   ldap_groups    - optional list of LDAP groups deleted in full mode (even
+#                    if they still have members); defaults to the groups
+#                    named in docs.access (admin_group/user_group)
+#   authelia_blocks- optional list of Ansible managed block marker suffixes
+#                    ("OIDC nextcloud", "dabo ACCESS CONTROL", ...) removed
+#                    from the Authelia configuration.yml in full mode;
+#                    Authelia is restarted afterwards if something changed
 #   service_dir    - optional explicit service dir (default for playbooks
 #                    below services/: $services_root/<name>/); must live
 #                    below the services root
@@ -193,7 +200,131 @@ then
   fi
 fi
 
-# --- Step 3: Resolve the service dir ---
+# --- Step 3: Delete LDAP groups (full mode only) ---
+if [[ "$f_mode" == "full" ]]
+then
+  f_ldap_groups=$(yq eval '.docs.uninstall.ldap_groups[]' "$f_tmp" 2>/dev/null)
+  # Fallback: derive the groups from docs.access (naming convention).
+  if [[ -z "$f_ldap_groups" ]]
+  then
+    f_ldap_groups=$(printf '%s\n%s\n' \
+      "$(yq eval '.docs.access.admin_group // ""' "$f_tmp" 2>/dev/null)" \
+      "$(yq eval '.docs.access.user_group // ""' "$f_tmp" 2>/dev/null)" | sed '/^$/d')
+  fi
+  if [[ -z "$f_ldap_groups" ]]
+  then
+    g_echo_note "No LDAP groups defined, skipping group deletion"
+  else
+    while IFS= read -r f_group
+    do
+      if [[ -z "$f_group" ]]
+      then
+        continue
+      fi
+      # Group names are plain identifiers; be defensive before passing on.
+      if [[ ! "$f_group" =~ ^[a-zA-Z0-9._-]+$ ]]
+      then
+        g_echo_warn "Skipping invalid LDAP group name: $f_group"
+        continue
+      fi
+      # Deletes the group even if it still has members.
+      g_echo_note "Deleting LDAP group: $f_group"
+      if ! "$g_script_dir/symbios-ldap-groups.sh" --delete --name "$f_group"
+      then
+        # Group may already be gone or LDAP unreachable - never fatal.
+        g_echo_warn "LDAP group deletion failed (continuing): $f_group"
+      fi
+    done <<< "$f_ldap_groups"
+  fi
+fi
+
+# Remove Authelia managed blocks (by marker suffix) from the Authelia
+# configuration. Works on a backup copy, validates the YAML result before
+# accepting it and restarts Authelia when something was removed.
+function f_remove_authelia_blocks {
+  local f_conf="${g_base_services_root}/authelia/authelia-data/configuration.yml"
+  local f_backup="${f_conf}.pre-uninstall"
+  local f_snap f_suffix f_changed=0
+  if [[ ! -f "$f_conf" ]]
+  then
+    g_echo_note "Authelia configuration not found (${f_conf}), skipping block removal"
+    return 0
+  fi
+  cp -p "$f_conf" "${f_backup}"
+  f_snap=$(mktemp)
+  cp -p "$f_conf" "$f_snap"
+  while IFS= read -r f_suffix
+  do
+    if [[ -z "$f_suffix" ]]
+    then
+      continue
+    fi
+    # Marker suffixes are plain names like "OIDC nextcloud"; be defensive.
+    local f_re='^[a-zA-Z0-9][a-zA-Z0-9 ._+-]*$'
+    if [[ ! "$f_suffix" =~ ${f_re} ]]
+    then
+      g_echo_warn "Skipping suspicious Authelia block name: $f_suffix"
+      continue
+    fi
+    awk -v b="^# BEGIN ANSIBLE MANAGED BLOCK ${f_suffix}[[:space:]]*\$" \
+        -v e="^# END ANSIBLE MANAGED BLOCK ${f_suffix}[[:space:]]*\$" '
+      $0 ~ b {inskip=1; next}
+      $0 ~ e {inskip=0; next}
+      !inskip {print}
+    ' "$f_conf" > "${f_conf}.tmp.$$" \
+      && chmod --reference="$f_conf" "${f_conf}.tmp.$$" \
+      && mv "${f_conf}.tmp.$$" "$f_conf"
+  done <<< "$f_authelia_blocks"
+  if ! cmp -s "$f_conf" "$f_snap"
+  then
+    # Only accept the change when the result is still valid YAML.
+    if python3 -c "import yaml; yaml.safe_load(open('${f_conf}'))" 2>/dev/null
+    then
+      f_changed=1
+      g_echo_note "Removed Authelia configuration blocks (backup: ${f_backup})"
+    else
+      g_echo_error "Authelia configuration invalid after block removal - restoring backup"
+      cp -p "${f_backup}" "$f_conf"
+      rm -f "$f_snap"
+      return 1
+    fi
+  else
+    g_echo_note "No Authelia configuration changes made"
+  fi
+  rm -f "$f_snap"
+  if [[ "$f_changed" -eq 1 ]] && docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^symbios-base-authelia$'
+  then
+    g_echo_note "Restarting Authelia to apply the configuration changes"
+    if (cd "${g_base_services_root}/authelia" && docker compose restart authelia >/dev/null 2>&1) \
+       || docker restart symbios-base-authelia >/dev/null 2>&1
+    then
+      g_echo_note "Authelia restarted"
+    else
+      g_echo_warn "Could not restart Authelia automatically"
+    fi
+  fi
+  return 0
+}
+
+# --- Step 4: Remove Authelia managed blocks (full mode only) ---
+if [[ "$f_mode" == "full" ]]
+then
+  f_authelia_blocks=$(yq eval '.docs.uninstall.authelia_blocks[]' "$f_tmp" 2>/dev/null)
+  if [[ -z "$f_authelia_blocks" ]]
+  then
+    g_echo_note "No Authelia blocks defined, skipping block removal"
+  else
+    if ! f_remove_authelia_blocks
+    then
+      # Configuration could not be modified safely - abort the uninstall
+      # before anything else gets deleted.
+      g_echo_error "Aborting uninstall (Authelia configuration could not be updated safely)"
+      exit 1
+    fi
+  fi
+fi
+
+# --- Step 5: Resolve the service dir ---
 # Explicit docs key wins, otherwise playbooks below services/ map to
 # $g_services_root/<name>/. It must stay below the services root for safety:
 # the service dir is deleted wholesale in full/reset mode.
@@ -280,7 +411,7 @@ function f_delete_paths {
   done <<< "$f_paths"
 }
 
-# --- Step 4: Delete paths ---
+# --- Step 6: Delete paths ---
 case "$f_mode" in
   full)
     g_echo_note "Mode: full - removing program paths, userdata and the service dir"
@@ -305,7 +436,7 @@ case "$f_mode" in
     ;;
 esac
 
-# --- Step 5: State handling / reprovisioning ---
+# --- Step 7: State handling / reprovisioning ---
 if [[ "$f_mode" == "reset" ]]
 then
   # The service stays installed: re-run the playbook so compose files,

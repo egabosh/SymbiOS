@@ -48,6 +48,11 @@
 #       - /symbios/base-services/traefik/providers/nextcloud.yml
 #       - /symbios/runchecks.d/symbios-healthcheck-nextcloud.check
 #       - /symbios/autoupdate.d/nextcloud.update
+#     ldap_groups:
+#       - nextcloud-users
+#       - nextcloud-admins
+#     authelia_blocks:
+#       - "OIDC nextcloud"
 #   actions:
 #     start: docker compose -f /symbios/services/nextcloud/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/nextcloud/docker-compose.yml down

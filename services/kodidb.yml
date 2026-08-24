@@ -45,6 +45,10 @@
 #       - /symbios/runchecks.d/symbios-healthcheck-kodidb.check
 #       - /symbios/autoupdate.d/kodidb-ssl.update
 #       - /symbios/backup.d/kodidb-docker.backup
+#     ldap_groups:
+#       - kodidb
+#     authelia_blocks:
+#       - "kodidb ACCESS CONTROL"
 #   actions:
 #     start: docker compose -f /symbios/services/kodidb/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/kodidb/docker-compose.yml down

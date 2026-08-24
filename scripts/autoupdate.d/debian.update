@@ -1,7 +1,12 @@
 # Debian system update - check for and install security/feature updates
 g_echo_ok "Checking for systemupdates"
 export DEBIAN_FRONTEND=noninteractive
-apt-get -yy update --allow-releaseinfo-change || g_echo_error "apt-get update failed"
+
+# Refresh package lists quietly: full apt output is only interesting when it fails
+if ! apt-get -yy update --allow-releaseinfo-change >$g_tmp/apt-update 2>&1
+then
+  g_echo_error "apt-get update failed: $(tail -n 5 $g_tmp/apt-update)"
+fi
 if ! hostname | grep -q ".mint."
 then
 
@@ -15,7 +20,11 @@ then
     done
   fi
 
-  if ! apt-get -s dist-upgrade 2>&1 | sed -e "s/'/'\\\\''/g; 1s/^/'/; \$s/\$/'/" | tee $g_tmp/sys-updatelist | egrep "^0.+, 0 .+, 0 .+ 0 .+\."
+  # Simulate the dist-upgrade and store it shell-quoted in sys-updatelist
+  # (the quoting keeps $(cat ...) safe when it is echoed back later).
+  # Nothing is printed here - the summary is only shown when updates exist.
+  apt-get -s dist-upgrade 2>&1 | sed -e "s/'/'\\\\''/g; 1s/^/'/; \$s/\$/'/" > $g_tmp/sys-updatelist
+  if ! egrep -q "^0.+, 0 .+, 0 .+ 0 .+\." $g_tmp/sys-updatelist
   then
     g_echo_warn "Systemupdate will be installed: $(cat $g_tmp/sys-updatelist)"
     apt-get -yy dist-upgrade | sed -e "s/'/'\\\\''/g; 1s/^/'/; \$s/\$/'/" | tee $g_tmp/sys-update || g_echo_error "apt-get -yy dist-upgrade failed $($g_tmp/sys-update)"
@@ -26,7 +35,8 @@ then
     apt-get purge '~o'
   fi
 
-  if grep -qr bookworm /etc/apt/sources.list /etc/apt/sources.list.d
+  # 2>/dev/null: /etc/apt/sources.list does not exist on deb822 (trixie) systems
+  if grep -qr bookworm /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null
   then
     g_echo_warn "Distributionupdate from bookworm to trixie will be installed!!!"
     rm -f /etc/apt/sources.list.d/deb_debian_org_debian.list
@@ -41,7 +51,12 @@ then
 
 fi
 
-[ -x /usr/bin/flatpak ] && flatpak update --system --noninteractive --force-remove
+# Update flatpak apps, but suppress the pointless "Nothing to do." output
+if [ -x /usr/bin/flatpak ]
+then
+  g_flatpak_out="$(flatpak update --system --noninteractive --force-remove 2>&1 | grep -v "^$" | grep -v "^Nothing to do\.$")"
+  [[ -n "${g_flatpak_out}" ]] && g_echo_note "${g_flatpak_out}"
+fi
 
 # run all defined playbooks if available
 if ! [[ $1 = "noplaybooks" ]]

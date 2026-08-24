@@ -17,9 +17,9 @@
 # docs:
 #   name: Backup
 #   short_description: Configure automated backups
-#   description: Installs a scheduled backup job (cron) that backs up SymbiOS configuration and service data to the configured backup target.
+#   description: Installs a nightly backup job (cron) that dumps databases/LDAP and snapshots the whole /symbios data root - locally, to an SSH/SFTP server or as encrypted archive. Restores are possible per service or for the whole system via the WebUI (Settings -> Backup).
 #   author: Oliver Bohlen
-#   version: '1.0'
+#   version: '2.0'
 #   license: GPLv3
 #   copyright: Copyright (c) 2026, Oliver Bohlen
 #   min_ansible_version: '2.11'
@@ -50,6 +50,7 @@
       apt:
         name:
           - rsync
+          - openssl
         update_cache: no
         install_recommends: no
 
@@ -71,6 +72,16 @@
         state: directory
         mode: '0700'
 
+    # Local snapshot destination for the main backup engine
+    # (scripts/symbios-backup.sh) when no backup server is configured.
+    - name: Create local snapshot dir {{ data_root }}/backup
+      ansible.builtin.file:
+        path: "{{ data_root }}/backup"
+        owner: root
+        group: root
+        state: directory
+        mode: '0700'
+
     - name: /etc/cron.d/backup_local
       blockinfile:
         path: /etc/cron.d/backup_local
@@ -84,7 +95,8 @@
           5 0 * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/backup.sh ]] && backup.sh
         backup: yes
 
-
+    # The backup healthcheck lives in scripts/runchecks.d/ and is picked
+    # up automatically (runchecks.sh scans the git tree).
 
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/backup.yml"
