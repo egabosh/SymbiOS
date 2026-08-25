@@ -191,7 +191,7 @@
     var msgHtml = message
       ? '<div class="check-message text-danger small mt-1">' + escapeHtml(message) + '</div>'
       : '';
-    return '<div class="card check-card" onclick="toggleCheckDetail(this)" data-status="' + r.status + '">'
+    return '<div class="card svc-base-card check-card" onclick="toggleCheckDetail(this)" data-status="' + r.status + '">'
       + '<div class="card-body py-2 px-3">'
       + '<div class="d-flex align-items-start gap-2">'
       + '<div class="check-dot ' + dotClass + ' mt-1"></div>'

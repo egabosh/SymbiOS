@@ -2,7 +2,135 @@
 {% load markdown_extras %}
 {% block sidebar %}{% include "main/sidebar_services.html" %}{% endblock %}
 {% block content %}
-<h2>Services</h2>
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h2 class="mb-0">Services</h2>
+  {% if sidebar_available %}
+  <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="collapse"
+          data-bs-target="#add-service-tiles" aria-expanded="false" aria-controls="add-service-tiles">
+    <i class="bi bi-plus-lg"></i> Add Service
+  </button>
+  {% endif %}
+</div>
+
+{# --- Available services (collapsed by default) --- #}
+{% if sidebar_available %}
+<div class="collapse mb-4" id="add-service-tiles">
+  <div class="svc-tiles-section">
+    <h6 class="svc-tiles-section-title text-muted mb-2">Available Services</h6>
+    <div class="row g-3">
+      {% regroup sidebar_available by group as avail_groups %}
+      {% for g in avail_groups %}
+        {% for svc in g.list %}
+        <div class="col-sm-6 col-lg-4 col-xl-3">
+          <a href="/services/{{ svc.playbook }}/" class="svc-base-card svc-tile svc-tile-available">
+            <div class="svc-tile-icon">
+              <i class="bi bi-plus-circle"></i>
+            </div>
+            <div class="svc-tile-body">
+              <div class="svc-tile-name">{{ svc.menu_label }}</div>
+              {% if svc.docs.short_description %}
+              <div class="svc-tile-desc">{{ svc.docs.short_description }}</div>
+              {% endif %}
+            </div>
+          </a>
+        </div>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# --- Installed services tiles --- #}
+<div class="row g-3 mb-4">
+  {% regroup sidebar_installed by group as installed_groups %}
+  {% for g in installed_groups %}
+    {% if g.grouper != 'base-services' %}
+      {% for svc in g.list %}
+        {% with svc_hc=svc.playbook|hc_name %}
+        <div class="col-sm-6 col-lg-4 col-xl-3">
+          <a href="/services/{{ svc.playbook }}/" class="svc-base-card svc-tile">
+            <div class="svc-tile-icon">
+              {% if g.grouper == 'user-playbooks' %}
+                <i class="bi bi-journal-plus"></i>
+              {% elif g.grouper == 'external-services' %}
+                <i class="bi bi-hdd-network"></i>
+              {% else %}
+                <i class="bi bi-box-seam"></i>
+              {% endif %}
+            </div>
+            <div class="svc-tile-body">
+              <div class="svc-tile-name">{{ svc.menu_label }}</div>
+              {% if svc.docs.short_description %}
+              <div class="svc-tile-desc">{{ svc.docs.short_description }}</div>
+              {% endif %}
+            </div>
+            <div class="svc-tile-badges">
+              {% with hc_status=healthcheck_status|dict_get:svc_hc %}
+                {% if hc_status == "ok" %}
+                  <span class="svc-tile-hc svc-hc-ok" title="Healthcheck OK"><i class="bi bi-heart-pulse"></i></span>
+                {% elif hc_status == "error" %}
+                  <span class="svc-tile-hc svc-hc-error" title="Healthcheck error"><i class="bi bi-exclamation-triangle-fill"></i></span>
+                {% endif %}
+              {% endwith %}
+            </div>
+          </a>
+        </div>
+        {% endwith %}
+      {% endfor %}
+    {% endif %}
+  {% empty %}
+    <div class="col-12">
+      <p class="text-muted">No services installed yet.</p>
+    </div>
+  {% endfor %}
+</div>
+
+{# --- Base services tiles (collapsed) --- #}
+{% for g in installed_groups %}
+  {% if g.grouper == 'base-services' %}
+  <div class="mb-4">
+    <a class="svc-tiles-section-toggle" data-bs-toggle="collapse" href="#base-services-tiles"
+       role="button" aria-expanded="false" aria-controls="base-services-tiles">
+      <i class="bi bi-gear-wide-connected"></i> Base Services
+      <i class="bi bi-chevron-down svc-tiles-chevron"></i>
+    </a>
+    <div class="collapse mt-2" id="base-services-tiles">
+      <div class="row g-3">
+        {% for svc in g.list %}
+          {% with svc_hc=svc.playbook|hc_name %}
+          <div class="col-sm-6 col-lg-4 col-xl-3">
+            <a href="/services/{{ svc.playbook }}/" class="svc-base-card svc-tile svc-tile-base">
+              <div class="svc-tile-icon">
+                <i class="bi bi-gear-wide-connected"></i>
+              </div>
+              <div class="svc-tile-body">
+                <div class="svc-tile-name">{{ svc.menu_label }}</div>
+                {% if svc.docs.short_description %}
+                <div class="svc-tile-desc">{{ svc.docs.short_description }}</div>
+                {% endif %}
+              </div>
+              <div class="svc-tile-badges">
+                {% with hc_status=healthcheck_status|dict_get:svc_hc %}
+                  {% if hc_status == "ok" %}
+                    <span class="svc-tile-hc svc-hc-ok" title="Healthcheck OK"><i class="bi bi-heart-pulse"></i></span>
+                  {% elif hc_status == "error" %}
+                    <span class="svc-tile-hc svc-hc-error" title="Healthcheck error"><i class="bi bi-exclamation-triangle-fill"></i></span>
+                  {% endif %}
+                {% endwith %}
+              </div>
+            </a>
+          </div>
+          {% endwith %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+{% endfor %}
+
+<hr>
 
 <div class="services-docs">
   {{ docs_md|markdown }}
