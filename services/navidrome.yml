@@ -103,7 +103,6 @@
                 - symbios_services
               user: "33"
               volumes:
-                - /data-crypt/share/Musik/Uploaddatum:/music:ro
                 - ./navidrome-data:/data
                 - /etc/localtime:/etc/localtime:ro
 
