@@ -563,7 +563,8 @@ the service directory (`services/<name>/plugin.yml`).
 
 4. **Application**: The WebUI saves parameters, then runs `symbios-feature-apply.sh`
    which reads the manifest, maps parameters via `param_mapping`, and executes the
-   playbook against the target (VM via SSH or host locally).
+   playbook against the target (VM via SSH or host locally). A background thread
+   monitors the job and updates `features-state.yml` with the result.
 
 ### Directory structure
 
@@ -577,6 +578,13 @@ services/<name>/
     host-bridge.yml
     ...
 ```
+
+### Path resolution
+
+- `plugin.yml` + `features/` live in the **git repo** (read-only source)
+- `features-state.yml` lives in the **config dir** (writable, maps to container `/config`)
+- Feature playbooks run via `symbios-feature-apply.sh` which resolves paths from
+  `g_git_root` (playbooks) and `g_config_dir` (state)
 
 ### Adding a new feature
 
