@@ -37,6 +37,7 @@ to know: title, description, available actions, status checks, and log streams.
 #       - /symbios/base-services/traefik/providers/nextcloud.yml
 #       - /usr/local/sbin/runchecks.d/symbios-healthcheck-nextcloud.check
 #       - /usr/local/sbin/autoupdate.d/nextcloud.update
+#       - /symbios/ldap-groups.d/nextcloud-admin-sync.hook
 #   actions:
 #     start:    docker compose -f /symbios/services/nextcloud/docker-compose.yml up -d
 #     stop:     docker compose -f /symbios/services/nextcloud/docker-compose.yml down
@@ -288,6 +289,51 @@ The CHECK_* variables feed the /health/ overview page:
         backup: yes
         validate: /bin/bash -n %s
 ```
+
+## LDAP group-change hooks
+
+When a service needs to react to LDAP group or membership changes (e.g. syncing
+Nextcloud admin rights when users are added to/removed from `nextcloud-admins`),
+drop a `*.hook` file into `/symbios/ldap-groups.d/`. The shared dispatcher
+`f_ldap_groups_hooks` in `scripts/symbios-lib.sh` runs all hooks from that
+directory after every successful mutation in `symbios-ldap-groups.sh` (CLI and
+WebUI group management pages).
+
+Each hook receives three positional arguments:
+
+| Arg | Content |
+|-----|---------|
+| `$1` | Event: `group-created`, `group-deleted`, `member-added`, or `member-removed` |
+| `$2` | Group name (e.g. `nextcloud-admins`) |
+| `$3` | User ID (empty string for group create/delete events) |
+
+Hook errors are logged but never abort the calling mutation or other hooks.
+
+### Deploying a hook from a service playbook
+
+```yaml
+    - name: "{{ data_root }}/ldap-groups.d/{{ service_name }}-admin-sync.hook"
+      ansible.builtin.copy:
+        dest: "{{ data_root }}/ldap-groups.d/{{ service_name }}-admin-sync.hook"
+        content: |
+          #!/bin/bash
+          # React only to changes of our own group
+          [[ "${2:-}" == "{{ service_name }}-admins" ]] || exit 0
+          exec "{{ git_root }}/scripts/{{ service_name }}-admin-sync.sh"
+        mode: '0755'
+        owner: root
+        group: root
+```
+
+The `program_paths` section in the docs block should include the hook file so it
+is removed on uninstall:
+
+```yaml
+#     program_paths:
+#       - /symbios/ldap-groups.d/nextcloud-admin-sync.hook
+```
+
+The directory `/symbios/ldap-groups.d/` is created by `base-services/ldap.yml`.
 
 ### Non-web services (Docker containers)
 
