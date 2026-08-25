@@ -161,14 +161,14 @@ def get_page_badge(page_key, inventory_vars):
     return ('none', 'Not set up yet', 'This service is not set up yet.')
 
 
-def setup_steps(inventory_vars):
+def setup_steps(inventory_vars, ldap_users=None):
     """Compute the ordered list of setup steps for the /setup/ assistant.
 
     The steps must be completed in order: the server connection type first
     (it decides which of the following steps are needed), then localization,
-    DNS and port forwarding. Optional settings (disk, TLS, SMTP, 2FA) are
-    handled on their own settings pages and are deliberately not part of the
-    assistant.
+    DNS, port forwarding and user creation. Optional settings (disk, TLS,
+    SMTP, 2FA) are handled on their own settings pages and are deliberately
+    not part of the assistant.
 
     Each step is a dict: key, title, subtitle, optional, status
     ('done' / 'pending' / 'optional') and url.
@@ -198,7 +198,7 @@ def setup_steps(inventory_vars):
         'subtitle': 'Foundation for correct times and input.',
         'optional': False,
         'status': 'done' if loc_done else 'pending',
-        'url': '/settings/localization/',
+        'url': '/settings/localization/?setup=1',
     })
 
     # Step 3: DNS - done after the user explicitly saved the DNS settings in
@@ -218,7 +218,7 @@ def setup_steps(inventory_vars):
         'subtitle': dns_subtitle,
         'optional': False,
         'status': 'done' if dns_done else 'pending',
-        'url': '/settings/dns/',
+        'url': '/settings/dns/?setup=1',
     })
 
     # Step 4: Internet reachability (port forwarding) - only needed on a home
@@ -248,15 +248,31 @@ def setup_steps(inventory_vars):
         'subtitle': ports_subtitle,
         'optional': ports_optional,
         'status': ports_status,
-        'url': '/settings/port-forwarding/',
+        'url': '/settings/port-forwarding/?setup=1',
+    })
+
+    # Step 5: Users - create standard accounts so the admin does not have to
+    # work with the admin user everywhere. Done when at least one non-admin
+    # user exists in LDAP.
+    if ldap_users is None:
+        ldap_users = []
+    users_done = any(u.get('uid') != 'admin' for u in ldap_users)
+    steps.append({
+        'key': 'users',
+        'title': 'Create Users',
+        'subtitle': ('Create standard user accounts so you don\'t have to '
+                     'work as admin everywhere.'),
+        'optional': False,
+        'status': 'done' if users_done else 'pending',
+        'url': '/users/',
     })
 
     return steps
 
 
-def is_setup_complete(inventory_vars):
+def is_setup_complete(inventory_vars, ldap_users=None):
     """True when all non-optional steps are done."""
-    for step in setup_steps(inventory_vars):
+    for step in setup_steps(inventory_vars, ldap_users=ldap_users):
         if not step['optional'] and step['status'] != 'done':
             return False
     return True

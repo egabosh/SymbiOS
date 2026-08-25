@@ -25,14 +25,12 @@
 </div>
 
 <!-- Step 1: Server connection type -->
-<div class="card mt-3 border-start border-primary border-4" id="step-network">
+<div class="card mt-3" id="step-network">
   <div class="card-header d-flex align-items-center gap-2">
-    <span class="badge rounded-pill text-bg-primary step-badge">Step 1</span>
+    <span class="badge rounded-pill text-bg-secondary step-badge">Step 1</span>
     <i class="bi bi-diagram-3"></i> Server connection type
     {% if network_step.status == 'done' %}
     <span class="badge bg-success ms-auto"><i class="bi bi-check-circle-fill"></i> Done</span>
-    {% else %}
-    <span class="badge bg-warning ms-auto"><i class="bi bi-exclamation-triangle-fill"></i> Required</span>
     {% endif %}
   </div>
   <div class="card-body small">

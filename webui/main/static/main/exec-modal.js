@@ -29,6 +29,7 @@ Also intercepts all forms with data-exec="true" attribute:
   let currentJob = null;
   let rawLen = 0;
   let _needsReload = false;
+  let _redirectUrl = null;
   let _pollRetries = 0;
   /* The job keeps running on the host even when it is unreachable from the
      browser (Traefik/Authelia restarts mid-job, flaky links). Retry for a
@@ -124,6 +125,7 @@ Also intercepts all forms with data-exec="true" attribute:
     outputEl.dataset.rawLen = '0';
     rawLen = 0;
     _pollRetries = 0;
+    _redirectUrl = null;
     titleEl.innerHTML = '<i class="bi bi-terminal me-2"></i>' + escapeHtml(title || 'Running command...');
     if (command) {
       showCommand(command);
@@ -143,7 +145,12 @@ Also intercepts all forms with data-exec="true" attribute:
     running = false;
     overlay.classList.add('d-none');
     document.body.style.overflow = '';
-    if (_needsReload) {
+    if (_redirectUrl) {
+      var url = _redirectUrl;
+      _redirectUrl = null;
+      _needsReload = false;
+      window.location.href = url;
+    } else if (_needsReload) {
       _needsReload = false;
       window.location.reload();
     }
@@ -223,6 +230,7 @@ Also intercepts all forms with data-exec="true" attribute:
         }
         if (d.job) {
           start(d.job, d.title || 'Running...', d.command);
+          if (d.redirect) _redirectUrl = d.redirect;
           if (d.message) showAlert(d.message, 'success');
         } else if (d.redirect) {
           close();

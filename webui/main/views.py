@@ -157,9 +157,10 @@ def setup(request):
         if is_ajax:
             return JsonResponse({'ok': False, 'error': 'Invalid network type'}, status=400)
 
-    steps = setup_steps(vars_)
+    ldap_users = _get_ldap_users()
+    steps = setup_steps(vars_, ldap_users=ldap_users)
     pending = [s for s in steps if not s['optional'] and s['status'] != 'done']
-    complete = is_setup_complete(vars_)
+    complete = is_setup_complete(vars_, ldap_users=ldap_users)
     network_step = next((s for s in steps if s['key'] == 'network'), None)
     main_steps = [s for s in steps if s['key'] != 'network']
 
@@ -204,10 +205,11 @@ def health(request):
     from .setup_status import setup_steps, is_setup_complete
     config = _get_inventory_config()
     vars_ = config.get('all', {}).get('vars', {})
-    steps = setup_steps(vars_)
+    ldap_users = _get_ldap_users()
+    steps = setup_steps(vars_, ldap_users=ldap_users)
     pending = [s for s in steps if not s['optional'] and s['status'] != 'done']
     return render(request, 'main/health.html', {
-        'setup_incomplete': not is_setup_complete(vars_),
+        'setup_incomplete': not is_setup_complete(vars_, ldap_users=ldap_users),
         'setup_pending': len(pending),
     })
 
