@@ -103,10 +103,13 @@ def settings_dns(request):
                     from .utils.jobs import create_job
                     cmd = 'symbios-reapply.sh'
                     job_id = create_job(cmd, timeout=3600)
-                    return JsonResponse({'ok': True, 'job': job_id,
-                                         'title': 'Removing DNS config and reapplying...',
-                                         'message': 'DNS configuration removed.',
-                                         'command': cmd})
+                    resp = {'ok': True, 'job': job_id,
+                            'title': 'Removing DNS config and reapplying...',
+                            'message': 'DNS configuration removed.',
+                            'command': cmd}
+                    if 'setup' in request.GET:
+                        resp['redirect'] = '/setup/'
+                    return JsonResponse(resp)
                 messages.success(request, 'DNS configuration removed.')
                 messages.info(request, 'Reapplying all playbooks in the background...')
                 _start_reapply()
@@ -127,9 +130,12 @@ def settings_dns(request):
                 if is_ajax:
                     job_id, title, cmd = _start_reapply(playbooks=_DNS_CHAIN,
                                                         force=True)
-                    return JsonResponse({'ok': True, 'job': job_id, 'title': title,
-                                         'message': f'DNS settings saved for {self_domain}.',
-                                         'command': cmd})
+                    resp = {'ok': True, 'job': job_id, 'title': title,
+                            'message': f'DNS settings saved for {self_domain}.',
+                            'command': cmd}
+                    if 'setup' in request.GET:
+                        resp['redirect'] = '/setup/'
+                    return JsonResponse(resp)
                 messages.success(request, f'DNS settings saved for {self_domain}.')
                 # Apply the domain-dependent playbooks (Traefik, ACME, Authelia)
                 # in the background, with the new domain.
@@ -155,9 +161,12 @@ def settings_dns(request):
                 if is_ajax:
                     job_id, title, cmd = _start_reapply(playbooks=_DNS_CHAIN_DESEC,
                                                         force=True)
-                    return JsonResponse({'ok': True, 'job': job_id, 'title': title,
-                                         'message': 'DNS settings saved.',
-                                         'command': cmd})
+                    resp = {'ok': True, 'job': job_id, 'title': title,
+                            'message': 'DNS settings saved.',
+                            'command': cmd}
+                    if 'setup' in request.GET:
+                        resp['redirect'] = '/setup/'
+                    return JsonResponse(resp)
                 messages.success(request, 'DNS settings saved.')
                 # Apply the domain-dependent playbooks (DDNS, Traefik, ACME,
                 # Authelia) in the background, with the new domain.
@@ -167,6 +176,8 @@ def settings_dns(request):
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)
             messages.error(request, f'Error: {e}')
+        if 'setup' in request.GET:
+            return redirect('setup')
         return redirect('settings_dns')
 
     badge = get_page_badge('dns', vars_)
@@ -653,9 +664,12 @@ def settings_localization(request):
             if is_ajax:
                 job_id, title, cmd = _start_reapply(
                     playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'])
-                return JsonResponse({'ok': True, 'job': job_id, 'title': title,
-                                     'message': 'Localization settings saved.',
-                                     'command': cmd})
+                resp = {'ok': True, 'job': job_id, 'title': title,
+                        'message': 'Localization settings saved.',
+                        'command': cmd}
+                if 'setup' in request.GET:
+                    resp['redirect'] = '/setup/'
+                return JsonResponse(resp)
             messages.success(request, 'Localization settings saved.')
             messages.info(request, 'Reapplying localization playbooks in the background...')
             _start_reapply(playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'])
@@ -663,6 +677,8 @@ def settings_localization(request):
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)
             messages.error(request, f'Error: {e}')
+        if 'setup' in request.GET:
+            return redirect('setup')
         return redirect('settings_localization')
 
     return render(request, 'main/settings_localization.html', {

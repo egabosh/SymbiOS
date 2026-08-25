@@ -213,7 +213,12 @@ def settings_port_forwarding(request):
                         vars_['port_forwarding_static_ip_configured'] = False
                     _save_inventory_config(config)
                 if is_ajax:
-                    return JsonResponse({'ok': True})
+                    resp = {'ok': True}
+                    if 'setup' in request.GET and method == 'manual':
+                        resp['redirect'] = '/setup/'
+                    return JsonResponse(resp)
+                if 'setup' in request.GET and method == 'manual':
+                    return redirect('setup')
                 return redirect('settings_port_forwarding')
 
             elif action == 'save-credentials':
@@ -278,14 +283,19 @@ def settings_port_forwarding(request):
                     _add_ufw_extra_inbound(443, 'TCP')
                 if is_ajax:
                     job_id = create_job(cmd, timeout=90)
-                    return JsonResponse({'ok': True, 'job': job_id,
-                                         'title': 'Enabling port forwarding...',
-                                         'message': f'Ensuring static IP and opening ports {port_list} on the router.'})
+                    resp = {'ok': True, 'job': job_id,
+                            'title': 'Enabling port forwarding...',
+                            'message': f'Ensuring static IP and opening ports {port_list} on the router.'}
+                    if 'setup' in request.GET:
+                        resp['redirect'] = '/setup/'
+                    return JsonResponse(resp)
                 ok, stdout, stderr = run_command(cmd, timeout=90)
                 if ok:
                     messages.success(request, 'Port forwarding rules added.')
                 else:
                     messages.error(request, f'Failed: {stderr or stdout}')
+                if ok and 'setup' in request.GET:
+                    return redirect('setup')
                 return redirect('settings_port_forwarding')
 
             elif action == 'secure-static-ip':
