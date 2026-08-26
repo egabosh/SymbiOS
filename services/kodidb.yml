@@ -313,7 +313,6 @@
       vars:
         authelia_subjects:
           - "group:kodidb"
-        authelia_deny_fallback: false
 
     - name: "{{ data_root }}/backup.d/kodidb-docker.backup"
       blockinfile:
