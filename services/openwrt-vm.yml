@@ -936,6 +936,8 @@
                 policy: two_factor
                 subject:
                   - 'group:openwrt-vm'
+              - domain: "openwrt.{{ base_domain }}"
+                policy: deny
 
         insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         backup: yes

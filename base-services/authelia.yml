@@ -313,6 +313,21 @@
         backup: yes
       notify: Restart authelia
 
+    - name: "{{ service_path }}/authelia-data/configuration.yml traefik deny rule"
+      blockinfile:
+        path: "{{ service_path }}/authelia-data/configuration.yml"
+        mode: "0600"
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK TRAEFIK ACCESS CONTROL"
+        block: |2
+              - domain: "{{ traefik_domain }}"
+                policy: deny
+
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+      notify: Restart authelia
+
     - name: "{{ service_path }}/docker-compose.yml Container Configuration"
       blockinfile:
         path: "{{ service_path }}/docker-compose.yml"
