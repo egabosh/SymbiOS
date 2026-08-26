@@ -271,6 +271,8 @@
                 policy: two_factor
                 subject:
                   - 'group:dabo'
+              - domain: "dabo.{{ base_domain }}"
+                policy: deny
 
         insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         backup: yes

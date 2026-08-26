@@ -99,6 +99,8 @@
                 ND_LASTFM_ENABLED: false
                 ND_LISTENBRAINZ_ENABLED: false
                 ND_SCANNER_PURGEMISSING: always
+                ND_EXTAUTH_TRUSTEDSOURCES: "0.0.0.0/0"
+                ND_ENABLEUSEREDITING: "false"
               networks:
                 - symbios_services
               user: "33"
@@ -133,6 +135,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+                  - "authelia@file"
 
             services:
               navidrome:
@@ -140,6 +143,26 @@
                   servers:
                     - url: "http://navidrome:4533"
         backup: yes
+
+    - name: Ensure LDAP groups for OIDC login (navidrome-users / navidrome-admins)
+      include_tasks: tasks/oidc-groups.yml
+
+    - name: write Authelia access_control for navidrome group restriction
+      blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK navidrome ACCESS CONTROL"
+        block: |2
+              - domain: "navidrome.{{ base_domain }}"
+                policy: one_factor
+                subject:
+                  - - 'group:navidrome-users'
+                  - - 'group:navidrome-admins'
+              - domain: "navidrome.{{ base_domain }}"
+                policy: deny
+
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+      notify: Restart authelia
 
     # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck
@@ -160,4 +183,9 @@
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /symbios/services/navidrome
+
+    - name: Restart authelia
+      ansible.builtin.shell: docker compose restart
+      args:
+        chdir: /symbios/base-services/authelia
 

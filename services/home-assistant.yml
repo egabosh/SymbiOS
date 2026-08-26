@@ -152,12 +152,7 @@
           automation: !include automations.yaml
           script: !include scripts.yaml
           scene: !include scenes.yaml
-          
-          http:
-            use_x_forwarded_for: true
-            trusted_proxies:
-              - {{ traefik_ip }} # traefik
-          
+
           auth_oidc:
             client_id: 'home-assistant'
             client_secret: '{{ lookup('file', '/symbios/services/home-assistant/oidc_password') }}'
@@ -168,6 +163,8 @@
             roles:
               admin: 'home-assistant-admins'
               user: 'home-assistant-users'
+            features:
+              default_redirect: true
 
         backup: yes
       notify: Restart home-assistant
@@ -292,6 +289,26 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           http:
+            middlewares:
+              # HA OIDC serves static assets (CSS) with wrong MIME types;
+              # contentTypeNosniff causes browsers to reject them.  Use a
+              # dedicated middleware without that header for HA only.
+              secHeadersHA:
+                compress: false
+                headers:
+                  browserXssFilter: true
+                  contentTypeNosniff: false
+                  frameDeny: true
+                  forceSTSHeader: true
+                  stsIncludeSubdomains: true
+                  stsPreload: true
+                  stsSeconds: 31536000
+                  customFrameOptionsValue: "SAMEORIGIN"
+                  sslProxyHeaders:
+                    X-Forwarded-Proto: "https"
+                  customResponseHeaders:
+                    X-Content-Type-Options: ""
+
             routers:
               home-assistant:
                 rule: "Host(`home-assistant.{{ base_domain }}`)"
@@ -300,8 +317,9 @@
                   - "https"
                 tls:
                   certResolver: {{ acme_resolver }}
-                middlewares: 
-                  - "secHeaders@file"
+                middlewares:
+                  - "secHeadersHA@file"
+                  - "authelia@file"
 
               matter:
                 rule: "Host(`matter.{{ base_domain }}`)"
@@ -310,7 +328,7 @@
                   - "https"
                 tls:
                   certResolver: {{ acme_resolver }}
-                middlewares: 
+                middlewares:
                   - "secHeaders@file"
                   - "allowlocalipsonly"
 
@@ -335,6 +353,38 @@
       changed_when: false
       failed_when: false
 
+    - name: Deploy LDAP group-change hook for HA admin sync
+      ansible.builtin.copy:
+        dest: "{{ data_root }}/ldap-groups.d/home-assistant-admin-sync.hook"
+        content: |
+          #!/bin/bash
+          # Sync HA admin/user role when either HA LDAP group changes
+          case "${2:-}" in
+            home-assistant-admins|home-assistant-users) ;;
+            *) exit 0 ;;
+          esac
+          exec "{{ git_root }}/scripts/symbios-home-assistant-admin-sync.sh"
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: write Authelia access_control for home-assistant group restriction
+      blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK home-assistant ACCESS CONTROL"
+        block: |2
+              - domain: "home-assistant.{{ base_domain }}"
+                policy: one_factor
+                subject:
+                  - - 'group:home-assistant-users'
+                  - - 'group:home-assistant-admins'
+              - domain: "home-assistant.{{ base_domain }}"
+                policy: deny
+
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+      notify: Restart authelia
+
     - name: Clone hass-oidc-auth repo
       git:
         repo: "https://github.com/christiaangoossens/hass-oidc-auth.git"
@@ -353,6 +403,34 @@
       copy:
         src: "/tmp/hass-oidc-auth/custom_components/auth_oidc"
         dest: "/symbios/services/home-assistant/config/custom_components"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart home-assistant
+
+    # hass-oidc-auth v1.2+ ships input.css (Tailwind source) but not the
+    # compiled style.css.  Build it with npx so the login page has styles.
+    # The input.css @source directive references ../views/templates so we
+    # must run from the cloned repo directory where both exist.
+    - name: Compile hass-oidc-auth CSS
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cd /tmp/hass-oidc-auth
+        if [ ! -d node_modules ]; then
+          npm init -y >/dev/null 2>&1
+          npm install --save tailwindcss@4 @tailwindcss/cli@4 2>&1
+        fi
+        npx tailwindcss \
+          -i ./custom_components/auth_oidc/static/input.css \
+          -o ./custom_components/auth_oidc/static/style.css \
+          --minify
+      register: css_build
+      changed_when: "'Done' in css_build.stdout"
+
+    - name: Install compiled style.css
+      copy:
+        src: "/tmp/hass-oidc-auth/custom_components/auth_oidc/static/style.css"
+        dest: "/symbios/services/home-assistant/config/custom_components/auth_oidc/static/style.css"
         owner: root
         group: root
         mode: "0644"
@@ -437,6 +515,62 @@
       args:
         chdir: /symbios/services/home-assistant
         creates: /symbios/services/home-assistant/home-assistant.init.log
+
+    # HA 2026.8+ migrated HTTP config from YAML to UI (.storage/http).
+    # The YAML http: block is ignored; instead we write the trusted proxy
+    # settings directly into the storage file and promote pending -> stable.
+    - name: Configure HA reverse proxy settings in .storage/http
+      ansible.builtin.shell: |
+        docker exec home-assistant python3 -c "
+        import json, os
+
+        path = '/config/.storage/http'
+        traefik_ip = '{{ traefik_ip }}'
+
+        with open(path) as f:
+            data = json.load(f)
+
+        stable = data['data'].get('stable') or {}
+        changed = False
+
+        if not stable.get('use_x_forwarded_for'):
+            stable['use_x_forwarded_for'] = True
+            changed = True
+
+        trusted = stable.get('trusted_proxies') or []
+        if traefik_ip not in trusted and traefik_ip + '/32' not in trusted:
+            trusted.append(traefik_ip)
+            stable['trusted_proxies'] = trusted
+            changed = True
+
+        if changed:
+            stable['error'] = None
+            stable['error_message'] = None
+            data['data']['stable'] = stable
+            with open(path, 'w') as f:
+                json.dump(data, f, indent=2)
+            print('HTTP config updated')
+        else:
+            print('HTTP config already correct')
+        "
+      register: ha_http_config
+      changed_when: "'updated' in ha_http_config.stdout"
+
+    - name: Restart home-assistant if HTTP config changed
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: /symbios/services/home-assistant
+      when: ha_http_config.changed
+
+    - name: Wait for home-assistant to be ready after HTTP config change
+      ansible.builtin.uri:
+        url: "http://{{ home_assistant_ip }}:8123/"
+        status_code: [200, 302, 401]
+      register: ha_ready
+      until: ha_ready.status | default(0) in [200, 302, 401]
+      retries: 30
+      delay: 2
+      when: ha_http_config.changed
 
     - name: Allow port 8123/tcp on iot0 interface for healthchecks for example for shelly switches
       community.general.ufw:
