@@ -381,6 +381,7 @@
         repo: "https://github.com/christiaangoossens/hass-oidc-auth.git"
         dest: "/tmp/hass-oidc-auth"
         version: "main"
+        force: yes
 
     - name: Create custom_components dir
       file:
