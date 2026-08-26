@@ -37,10 +37,9 @@ the WebUI - each one stronger together than alone. SymbiOS stands for
 11. [User-uploaded playbooks](#11-user-uploaded-playbooks)
 12. [Naming conventions](#12-naming-conventions)
 13. [Feature plugin system](#13-feature-plugin-system)
-14. [License](#14-license)
-    - [Further reading](#further-reading)
-13. [License](#license)
-14. [Disclaimer](#disclaimer)
+14. [Third-party software](#14-third-party-software)
+15. [License](#15-license)
+16. [Disclaimer](#16-disclaimer)
 
 ---
 
@@ -611,7 +610,64 @@ services/<name>/
 
 ---
 
-## License
+## 14. Third-party software
+
+SymbiOS includes or depends on the following third-party software components.
+Each is included under its respective license.
+
+### Frontend (CDN)
+
+| Component | License | Source |
+|-----------|---------|--------|
+| Bootstrap | MIT | <https://getbootstrap.com/> |
+| Bootstrap Icons | MIT | <https://icons.getbootstrap.com/> |
+
+### Python dependencies
+
+| Component | License | Source |
+|-----------|---------|--------|
+| Django | BSD-3-Clause | <https://www.djangoproject.com/> |
+| gunicorn | MIT | <https://gunicorn.org/> |
+| uvicorn | BSD-3-Clause | <https://www.uvicorn.org/> |
+| whitenoise | MIT | <https://github.com/evansd/whitenoise> |
+| PyYAML | MIT | <https://pyyaml.org/> |
+| ansible-core | GPL-3.0 | <https://github.com/ansible/ansible> |
+| paramiko | LGPL-2.1 | <https://www.paramiko.org/> |
+| markdown | BSD-3-Clause | <https://python-markdown.github.io/> |
+
+### Docker service images
+
+| Component | License | Source |
+|-----------|---------|--------|
+| traefik | MIT | <https://github.com/traefik/traefik> |
+| authelia | Apache-2.0 | <https://github.com/authelia/authelia> |
+| openldap (via Bitnami) | OPL | <https://www.openldap.org/> |
+
+### Container base image
+
+| Component | License | Source |
+|-----------|---------|--------|
+| python:3-slim | PSF (Python) / Debian component licenses | <https://hub.docker.com/_/python/> |
+
+### Runtime dependencies (apt in WebUI container)
+
+| Component | License |
+|-----------|---------|
+| curl | MIT/X-derived |
+| procps | LGPL-2.1+ |
+| ldap-utils | OpenLDAP Public License |
+| openssl | Apache-2.0 |
+| sshpass | GPL-2.0+ |
+
+### Ansible community collections
+
+| Component | License | Source |
+|-----------|---------|--------|
+| community.general | GPL-3.0 | <https://github.com/ansible-collections/community.general> |
+
+---
+
+## 15. License
 
 SymbiOS is licensed under the [GNU General Public License v3.0](LICENSE).
 
@@ -634,7 +690,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ---
 
-## Disclaimer
+## 16. Disclaimer
 
 SymbiOS is provided **"as is"**, without warranty of any kind, express or
 implied, including but not limited to the warranties of merchantability,
