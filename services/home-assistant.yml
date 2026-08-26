@@ -403,6 +403,13 @@
     # compiled style.css.  Build it with npx so the login page has styles.
     # The input.css @source directive references ../views/templates so we
     # must run from the cloned repo directory where both exist.
+    - name: Install nodejs and npm for CSS compilation
+      ansible.builtin.apt:
+        name:
+          - nodejs
+          - npm
+        state: present
+
     - name: Compile hass-oidc-auth CSS
       ansible.builtin.shell: |
         set -euo pipefail
