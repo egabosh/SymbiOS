@@ -1,0 +1,17 @@
+# Shared task: create a single LDAP group for services that use Authelia
+# forward-auth (no OIDC admin/user distinction). Creates the group and adds
+# the admin user to it.
+#
+# Required var:  service_name
+# Optional var:  git_root         (default from playbook vars)
+# Optional var:  ldap_admin_uid   (defaults to admin)
+
+- name: "Create LDAP group {{ service_name }}"
+  ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name {{ service_name }}"
+  changed_when: false
+  failed_when: false
+
+- name: "Add user {{ ldap_admin_uid | default('admin') }} to LDAP group {{ service_name }}"
+  ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --add-user --name {{ service_name }} --uid {{ ldap_admin_uid | default('admin') }}"
+  changed_when: false
+  failed_when: false

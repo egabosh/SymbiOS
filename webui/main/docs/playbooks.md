@@ -290,6 +290,138 @@ The CHECK_* variables feed the /health/ overview page:
         validate: /bin/bash -n %s
 ```
 
+## Shared tasks
+
+Service playbooks can reuse shared task files from `services/tasks/` via
+`include_tasks`. This avoids duplicating common patterns (LDAP groups,
+Authelia config, healthchecks) across 13+ playbooks.
+
+### `tasks/oidc-groups.yml` - dual-group LDAP setup
+
+Creates `<service>-users` and `<service>-admins` LDAP groups and adds
+the `admin` user to the admins group. Use for services with OIDC admin/user
+distinction.
+
+```yaml
+    # Required vars: service_name, git_root
+    - name: Create OIDC groups
+      include_tasks: tasks/oidc-groups.yml
+```
+
+### `tasks/ldap-single-group.yml` - single-group LDAP setup
+
+Creates a single LDAP group (e.g. `dabo`) and adds the admin user. Use for
+forward-auth services without OIDC admin/user distinction.
+
+```yaml
+    # Required vars: service_name, git_root
+    # Optional vars: ldap_admin_uid (default: admin)
+    - name: Create LDAP group
+      include_tasks: tasks/ldap-single-group.yml
+```
+
+### `tasks/authelia-acl.yml` - Authelia access control
+
+Writes an Authelia `access_control` block for a service domain. Supports
+single-group (forward-auth) and dual-group (OIDC) subject patterns.
+
+```yaml
+    # Required vars: service_name, service_domain, authelia_subjects
+    # Optional vars: authelia_policy (default: two_factor), authelia_deny_fallback (default: true)
+
+    # Single-group forward-auth (dabo, kodidb):
+    - name: Write Authelia access_control
+      include_tasks: tasks/authelia-acl.yml
+      vars:
+        authelia_subjects:
+          - "group:dabo"
+
+    # Dual-group OIDC (home-assistant):
+    - name: Write Authelia access_control
+      include_tasks: tasks/authelia-acl.yml
+      vars:
+        authelia_policy: one_factor
+        authelia_subjects:
+          - - "group:home-assistant-users"
+          - - "group:home-assistant-admins"
+```
+
+### `tasks/authelia-oidc.yml` - Authelia OIDC client config
+
+Writes an OIDC client configuration block in Authelia's `configuration.yml`.
+
+```yaml
+    # Required vars: service_name, service_domain
+    # Optional vars: oidc_client_name, oidc_redirect_uris (list), oidc_consent_mode,
+    #                oidc_require_pkce, oidc_pkce_challenge_method, oidc_scopes (list)
+
+    - name: Write OIDC config
+      include_tasks: tasks/authelia-oidc.yml
+      vars:
+        oidc_client_name: "Nextcloud"
+        oidc_consent_mode: "implicit"
+        oidc_redirect_uris:
+          - "https://nextcloud.{{ base_domain }}/apps/user_oidc/code"
+```
+
+### `tasks/runcheck.yml` - HTTP healthcheck probe
+
+Deploys a wget-based healthcheck for HTTP services (documented in detail in
+the [Healthcheck scripts](#healthcheck-scripts) section above).
+
+### `tasks/runcheck-docker.yml` - Docker container healthcheck
+
+Deploys a `docker ps` based healthcheck for non-HTTP services (TCP/UDP
+relays, SSH tunnels, etc.).
+
+```yaml
+    # Required vars: service_name
+    # Optional vars: check_command, check_desc
+    - name: Deploy healthcheck
+      include_tasks: tasks/runcheck-docker.yml
+```
+
+### `tasks/autoupdate.yml` - autoupdate script deployment
+
+Deploys an autoupdate module to `/symbios/autoupdate.d/`. The caller provides
+the full script content via `autoupdate_content`.
+
+```yaml
+    # Required vars: service_name, autoupdate_content (full script text)
+    # Optional vars: autoupdate_name (default: service_name), autoupdate_mode (default: "0400")
+    - name: Deploy autoupdate module
+      include_tasks: tasks/autoupdate.yml
+      vars:
+        autoupdate_content: |
+          #!/bin/bash
+          source /etc/bash/gaboshlib.include
+          source symbios-lib.sh
+          # ... update logic ...
+```
+
+### `tasks/docker-start.yml` - start Docker Compose stack
+
+Starts the service's Docker Compose stack.
+
+```yaml
+    # Required vars: service_name
+    # Optional vars: docker_compose_args (extra args, e.g. --force-recreate)
+    - name: Ensure service is running
+      include_tasks: tasks/docker-start.yml
+```
+
+### `tasks/state-register.yml` - register playbook in state file
+
+Registers the playbook as installed via `symbios-state.sh set`.
+
+```yaml
+    # Required vars: service_name, git_root
+    - name: Register playbook as installed
+      include_tasks: tasks/state-register.yml
+```
+
+---
+
 ## LDAP group-change hooks
 
 When a service needs to react to LDAP group or membership changes (e.g. syncing
@@ -337,9 +469,16 @@ The directory `/symbios/ldap-groups.d/` is created by `base-services/ldap.yml`.
 
 ### Non-web services (Docker containers)
 
-Services without a web UI deploy an inline check with the same 5-minute
-cooldown wrapper and CHECK_* metadata (see `rustdesk.yml`, `sftp-share.yml`,
-`openwrt-vm.yml`):
+Services without a web UI deploy a `docker ps` based healthcheck. Use the
+shared task `tasks/runcheck-docker.yml`:
+
+```yaml
+    - name: Deploy healthcheck
+      include_tasks: tasks/runcheck-docker.yml
+```
+
+For custom check commands (e.g. `openwrt-vm` with virsh), write the check
+inline with the same 5-minute cooldown wrapper and CHECK_* metadata:
 
 ```yaml
     - name: "{{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check"
@@ -424,6 +563,14 @@ section under **Custom Playbooks**.
 ---
 
 ## State-file install tracking
+
+Use the shared task `tasks/state-register.yml` to register a playbook at the
+end of its task list (requires `service_name` and `git_root` vars):
+
+```yaml
+    - name: Register playbook as installed
+      include_tasks: tasks/state-register.yml
+```
 
 SymbiOS keeps a persistent record of which playbooks are currently installed in
 `/symbios/base-services/symbios-ui/config/installed-playbooks.yml`. Each line contains a

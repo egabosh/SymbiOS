@@ -249,34 +249,16 @@
       changed_when: false
       failed_when: false
 
-    # Create LDAP group for dabo access control
-    - name: Create LDAP group dabo
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name dabo"
-      changed_when: false
-      failed_when: false
-
-    # Add admin user to the dabo LDAP group
-    - name: Add admin to LDAP group dabo
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --add-user --name dabo --uid admin"
-      changed_when: false
-      failed_when: false
+    # Create LDAP group for dabo access control (forward-auth)
+    - name: Create LDAP group for dabo access control
+      include_tasks: tasks/ldap-single-group.yml
 
     # Write Authelia access_control for dabo group restriction
-    - name: write Authelia access_control for dabo group restriction
-      blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK dabo ACCESS CONTROL"
-        block: |2
-              - domain: "dabo.{{ base_domain }}"
-                policy: two_factor
-                subject:
-                  - 'group:dabo'
-              - domain: "dabo.{{ base_domain }}"
-                policy: deny
-
-        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
-        backup: yes
-      notify: Restart authelia
+    - name: Write Authelia access_control for dabo group restriction
+      include_tasks: tasks/authelia-acl.yml
+      vars:
+        authelia_subjects:
+          - "group:dabo"
 
     # Run initiate.sh to set up SSH keys and directories
     - name: Run initiate.sh
@@ -287,9 +269,7 @@
 
     # Ensure the dabo container is running
     - name: Ensure dabo is running
-      ansible.builtin.shell: docker compose up -d
-      args:
-        chdir: /symbios/services/dabo
+      include_tasks: tasks/docker-start.yml
 
     # Deploy healthcheck script
     # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
@@ -298,8 +278,7 @@
 
     # Register playbook as installed in the state file
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/dabo.yml"
-      changed_when: false
+      include_tasks: tasks/state-register.yml
 
   handlers:
 

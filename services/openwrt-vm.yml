@@ -921,27 +921,13 @@
     # ── Traefik integration ──────────────────────────────────────────────
     # Traefik file-provider route for LuCI (Authelia-protected)
     - name: Create LDAP group for openwrt-vm access control
-      ansible.builtin.shell: |
-        "{{ git_root }}/scripts/symbios-ldap-groups.sh" --create --name openwrt-vm
-        "{{ git_root }}/scripts/symbios-ldap-groups.sh" --add-user --name openwrt-vm --uid admin
-      changed_when: false
-      failed_when: false
+      include_tasks: tasks/ldap-single-group.yml
 
-    - name: write Authelia access_control for openwrt-vm group restriction
-      ansible.builtin.blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK openwrt-vm ACCESS CONTROL"
-        block: |2
-              - domain: "openwrt.{{ base_domain }}"
-                policy: two_factor
-                subject:
-                  - 'group:openwrt-vm'
-              - domain: "openwrt.{{ base_domain }}"
-                policy: deny
-
-        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
-        backup: yes
-      notify: Restart authelia
+    - name: Write Authelia access_control for openwrt-vm group restriction
+      include_tasks: tasks/authelia-acl.yml
+      vars:
+        authelia_subjects:
+          - "group:openwrt-vm"
 
     - name: /symbios/base-services/traefik/providers/openwrt-vm.yml Traefik routing
       ansible.builtin.blockinfile:
@@ -1002,8 +988,7 @@
 
     # ── Register playbook ────────────────────────────────────────────────
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/openwrt-vm.yml"
-      changed_when: false
+      include_tasks: tasks/state-register.yml
       when: kvm_capable | bool
 
   handlers:

@@ -368,22 +368,13 @@
         owner: root
         group: root
 
-    - name: write Authelia access_control for home-assistant group restriction
-      blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK home-assistant ACCESS CONTROL"
-        block: |2
-              - domain: "home-assistant.{{ base_domain }}"
-                policy: one_factor
-                subject:
-                  - - 'group:home-assistant-users'
-                  - - 'group:home-assistant-admins'
-              - domain: "home-assistant.{{ base_domain }}"
-                policy: deny
-
-        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
-        backup: yes
-      notify: Restart authelia
+    - name: Write Authelia access_control for home-assistant group restriction
+      include_tasks: tasks/authelia-acl.yml
+      vars:
+        authelia_policy: one_factor
+        authelia_subjects:
+          - - "group:home-assistant-users"
+          - - "group:home-assistant-admins"
 
     - name: Clone hass-oidc-auth repo
       git:
@@ -436,36 +427,19 @@
         mode: "0644"
       notify: Restart home-assistant
 
-    - name: write OIDC config in authelias configuration.yml
-      ansible.builtin.blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC home-assistant"
-        block: |2
-                # home-assistant
-                - client_id: 'home-assistant'
-                  client_name: 'Home Assistant'
-                  client_secret: '{{ lookup('file', '/symbios/services/home-assistant/oidc_digest') }}'
-                  public: false
-                  require_pkce: true
-                  pkce_challenge_method: 'S256'
-                  authorization_policy: '{{ lookup('file', '/symbios/base-services/authelia/authorization_policy') }}'
-                  consent_mode: 'implicit'
-                  redirect_uris:
-                    - 'https://home-assistant.{{ base_domain }}/auth/oidc/callback'
-                  scopes:
-                    - 'openid'
-                    - 'profile'
-                    - 'groups'
-                  response_types:
-                    - 'code'
-                  grant_types:
-                    - 'authorization_code'
-                  access_token_signed_response_alg: 'none'
-                  userinfo_signed_response_alg: 'none'
-                  token_endpoint_auth_method: 'client_secret_post'
-        insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
-        backup: yes
-      notify: Restart authelia
+    - name: Write OIDC config in authelias configuration.yml for home-assistant
+      include_tasks: tasks/authelia-oidc.yml
+      vars:
+        oidc_client_name: "Home Assistant"
+        oidc_require_pkce: true
+        oidc_pkce_challenge_method: "S256"
+        oidc_consent_mode: "implicit"
+        oidc_redirect_uris:
+          - "https://home-assistant.{{ base_domain }}/auth/oidc/callback"
+        oidc_scopes:
+          - "openid"
+          - "profile"
+          - "groups"
 
     - name: Start home-assistant
       ansible.builtin.shell: docker compose up -d
@@ -701,8 +675,7 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/home-assistant.yml"
-      changed_when: false
+      include_tasks: tasks/state-register.yml
 
   handlers:
     - name: run genpw.sh

@@ -1,0 +1,9 @@
+# Shared task: start the Docker Compose stack for a service.
+#
+# Required var:  service_name
+# Optional var:  docker_compose_args (extra args for docker compose, e.g. --force-recreate)
+
+- name: "Ensure {{ service_name }} is running"
+  ansible.builtin.shell: docker compose up -d {{ docker_compose_args | default('') }}
+  args:
+    chdir: "/symbios/services/{{ service_name }}"

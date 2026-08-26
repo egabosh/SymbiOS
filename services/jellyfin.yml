@@ -158,10 +158,8 @@
         backup: yes
       notify: Restart jellyfin
 
-    - name: Start jellyfin
-      ansible.builtin.shell: docker compose up -d
-      args:
-        chdir: /symbios/services/jellyfin
+    - name: Ensure jellyfin is running
+      include_tasks: tasks/docker-start.yml
 
     - name: /symbios/base-services/traefik/providers/jellyfin.yml Routing Configuration
       blockinfile:
@@ -236,8 +234,7 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/jellyfin.yml"
-      changed_when: false
+      include_tasks: tasks/state-register.yml
 
   handlers:
 

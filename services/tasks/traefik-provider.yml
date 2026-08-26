@@ -1,0 +1,37 @@
+# Shared task: deploy a simple Traefik file-provider snippet for a service.
+# Covers the common case of a single HTTP router with HTTPS + ACME + middlewares.
+#
+# For complex setups (multiple routers, custom middlewares, sub-domain routing)
+# write the blockinfile task directly in the playbook.
+#
+# Required vars:  service_name, service_domain, traefik_backend_url
+# Optional vars:  traefik_middlewares (list; default: ["secHeaders@file", "authelia@file"])
+
+- name: "/symbios/base-services/traefik/providers/{{ service_name }}.yml Routing Configuration"
+  ansible.builtin.blockinfile:
+    path: /symbios/base-services/traefik/providers/{{ service_name }}.yml
+    create: yes
+    mode: "0444"
+    owner: root
+    group: docker
+    marker: "# {mark} ANSIBLE MANAGED BLOCK"
+    block: |
+      http:
+        routers:
+          {{ service_name }}:
+            rule: "Host(`{{ service_domain }}`)"
+            service: {{ service_name }}
+            entryPoints:
+              - "https"
+            tls:
+              certResolver: {{ acme_resolver }}
+            middlewares:
+{% for mw in traefik_middlewares | default(['secHeaders@file', 'authelia@file']) %}
+              - "{{ mw }}"
+{% endfor %}
+        services:
+          {{ service_name }}:
+            loadBalancer:
+              servers:
+                - url: "{{ traefik_backend_url }}"
+    backup: yes

@@ -147,35 +147,23 @@
     - name: Ensure LDAP groups for OIDC login (navidrome-users / navidrome-admins)
       include_tasks: tasks/oidc-groups.yml
 
-    - name: write Authelia access_control for navidrome group restriction
-      blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK navidrome ACCESS CONTROL"
-        block: |2
-              - domain: "navidrome.{{ base_domain }}"
-                policy: one_factor
-                subject:
-                  - - 'group:navidrome-users'
-                  - - 'group:navidrome-admins'
-              - domain: "navidrome.{{ base_domain }}"
-                policy: deny
-
-        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
-        backup: yes
-      notify: Restart authelia
+    - name: Write Authelia access_control for navidrome group restriction
+      include_tasks: tasks/authelia-acl.yml
+      vars:
+        authelia_policy: one_factor
+        authelia_subjects:
+          - - "group:navidrome-users"
+          - - "group:navidrome-admins"
 
     # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck
       include_tasks: tasks/runcheck.yml
 
     - name: Ensure navidrome is running
-      ansible.builtin.shell: docker compose up -d
-      args:
-        chdir: /symbios/services/navidrome
+      include_tasks: tasks/docker-start.yml
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/navidrome.yml"
-      changed_when: false
+      include_tasks: tasks/state-register.yml
 
   handlers:
 

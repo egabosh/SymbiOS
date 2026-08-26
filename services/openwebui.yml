@@ -361,34 +361,12 @@
       changed_when: false
       failed_when: false
 
-    - name: write OIDC config in authelias configuration.yml
-      ansible.builtin.blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC openwebui"
-        block: |2
-                # Open WebUI
-                - client_id: 'openwebui'
-                  client_name: 'Open WebUI'
-                  client_secret: '{{ lookup('file', '/symbios/services/openwebui/oidc_digest') }}'
-                  public: false
-                  authorization_policy: '{{ lookup('file', '/symbios/base-services/authelia/authorization_policy') }}'
-                  redirect_uris:
-                    - 'https://openwebui.{{ base_domain }}/oauth/oidc'
-                  scopes:
-                    - 'openid'
-                    - 'profile'
-                    - 'email'
-                    - 'groups'
-                  response_types:
-                    - 'code'
-                  grant_types:
-                    - 'authorization_code'
-                  access_token_signed_response_alg: 'none'
-                  userinfo_signed_response_alg: 'none'
-                  token_endpoint_auth_method: 'client_secret_post'
-        insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
-        backup: yes
-      notify: Restart authelia
+    - name: Write OIDC config in authelias configuration.yml for openwebui
+      include_tasks: tasks/authelia-oidc.yml
+      vars:
+        oidc_client_name: "Open WebUI"
+        oidc_redirect_uris:
+          - "https://openwebui.{{ base_domain }}/oauth/oidc"
 
 ###########################
 #### OpenWebUI Automation #
@@ -578,13 +556,10 @@
         healthcheck_url: "https://ai.{{ base_domain }}"
 
     - name: Ensure openwebui is running
-      ansible.builtin.shell: docker compose up -d
-      args:
-        chdir: /symbios/services/openwebui
+      include_tasks: tasks/docker-start.yml
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/openwebui.yml"
-      changed_when: false
+      include_tasks: tasks/state-register.yml
 
   handlers:
 

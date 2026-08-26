@@ -247,31 +247,8 @@
     notify:
     - Restart sftp-share
 
-  - name: "{{ data_root }}/runchecks.d/symbios-healthcheck-sftp-share.check"
-    ansible.builtin.blockinfile:
-      path: "{{ data_root }}/runchecks.d/symbios-healthcheck-sftp-share.check"
-      mode: "0400"
-      owner: root
-      group: root
-      create: yes
-      marker: "# {mark} ANSIBLE MANAGED BLOCK"
-      block: |
-        CHECK_CATEGORY="services"
-        CHECK_TITLE="sftp-share"
-        CHECK_DESC="Healthcheck for the sftp-share service."
-        CHECK_DETAIL="Verifies that a sftp-share container is listed in docker ps.|Container missing marks the check as failed."
-        g_check_file="${g_tmp}/symbios-healthcheck-sftp-share"
-        if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
-        then
-          return 2>/dev/null || true
-        fi
-        date > "$g_check_file"
-        if ! docker ps | grep -q "sftp-share"
-        then
-          g_echo_error "Healthcheck failed for sftp-share: container not running"
-        fi
-      backup: yes
-      validate: /bin/bash -n %s
+  - name: Deploy healthcheck
+    include_tasks: tasks/runcheck-docker.yml
 
   
   - name: Ensure sftp-share is running
@@ -280,8 +257,7 @@
       chdir: /symbios/services/sftp-share
 
   - name: Register playbook as installed
-    ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/sftp-share.yml"
-    changed_when: false
+    include_tasks: tasks/state-register.yml
 
   handlers:
 
