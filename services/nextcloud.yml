@@ -490,35 +490,13 @@
       changed_when: false
       failed_when: false
 
-    - name: write OIDC config in authelias configuration.yml for Nextcloud
-      ansible.builtin.blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC nextcloud"
-        block: |2
-                # Nextcloud
-                - client_id: 'nextcloud'
-                  client_name: 'Nextcloud'
-                  client_secret: '{{ lookup('file', '/symbios/services/nextcloud/oidc_digest') }}'
-                  public: false
-                  authorization_policy: '{{ lookup('file', '/symbios/base-services/authelia/authorization_policy') }}'
-                  consent_mode: 'implicit'
-                  redirect_uris:
-                    - 'https://nextcloud.{{ base_domain }}/apps/user_oidc/code'
-                  scopes:
-                    - 'openid'
-                    - 'profile'
-                    - 'email'
-                    - 'groups'
-                  response_types:
-                    - 'code'
-                  grant_types:
-                    - 'authorization_code'
-                  access_token_signed_response_alg: 'none'
-                  userinfo_signed_response_alg: 'none'
-                  token_endpoint_auth_method: 'client_secret_post'
-        insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
-        backup: yes
-      notify: Restart authelia
+    - name: Write OIDC config in authelias configuration.yml for nextcloud
+      include_tasks: tasks/authelia-oidc.yml
+      vars:
+        oidc_client_name: "Nextcloud"
+        oidc_consent_mode: "implicit"
+        oidc_redirect_uris:
+          - "https://nextcloud.{{ base_domain }}/apps/user_oidc/code"
 
 
     - name: Start nextcloud
@@ -823,8 +801,7 @@
       include_tasks: tasks/runcheck.yml
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/nextcloud.yml"
-      changed_when: false
+      include_tasks: tasks/state-register.yml
 
   handlers:
     - name: run genpw.sh

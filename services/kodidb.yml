@@ -303,32 +303,17 @@
         chdir: /symbios/services/kodidb
         creates: /symbios/services/kodidb/ssl/certificate.pem
 
-    # Create LDAP group for kodidb access control (no admin/user distinction)
-    - name: Create LDAP group kodidb
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name kodidb"
-      changed_when: false
-      failed_when: false
-
-    # Add admin user to the kodidb LDAP group
-    - name: Add admin to LDAP group kodidb
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --add-user --name kodidb --uid admin"
-      changed_when: false
-      failed_when: false
+    # Create LDAP group for kodidb access control (forward-auth)
+    - name: Create LDAP group for kodidb access control
+      include_tasks: tasks/ldap-single-group.yml
 
     # Write Authelia access_control for kodidb group restriction
-    - name: write Authelia access_control for kodidb group restriction
-      ansible.builtin.blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK kodidb ACCESS CONTROL"
-        block: |2
-              - domain: "kodidb.{{ base_domain }}"
-                policy: two_factor
-                subject:
-                  - 'group:kodidb'
-
-        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
-        backup: yes
-      notify: Restart authelia
+    - name: Write Authelia access_control for kodidb group restriction
+      include_tasks: tasks/authelia-acl.yml
+      vars:
+        authelia_subjects:
+          - "group:kodidb"
+        authelia_deny_fallback: false
 
     - name: "{{ data_root }}/backup.d/kodidb-docker.backup"
       blockinfile:
@@ -374,13 +359,10 @@
       include_tasks: tasks/runcheck.yml
 
     - name: Ensure mariadb is running
-      ansible.builtin.shell: docker compose up -d
-      args:
-        chdir: /symbios/services/kodidb
+      include_tasks: tasks/docker-start.yml
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/kodidb.yml"
-      changed_when: false
+      include_tasks: tasks/state-register.yml
 
   handlers:
 

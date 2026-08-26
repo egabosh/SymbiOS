@@ -1,0 +1,7 @@
+# Shared task: register a playbook as installed in the state file.
+#
+# Required var:  service_name (used to derive services/<name>.yml)
+
+- name: Register playbook as installed
+  ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/{{ service_name }}.yml"
+  changed_when: false

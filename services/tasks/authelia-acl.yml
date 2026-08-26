@@ -1,0 +1,28 @@
+# Shared task: write an Authelia access_control block for a service domain.
+#
+# Two modes:
+#   Single-group (forward-auth):
+#     authelia_subjects = ["group:<service_name>"]
+#   Dual-group (OIDC users/admins):
+#     authelia_subjects = [["group:<service_name>-users"], ["group:<service_name>-admins"]]
+#
+# Required vars:  service_name, service_domain, authelia_subjects (list)
+# Optional vars:  authelia_policy (default "two_factor")
+# Optional vars:  authelia_deny_fallback (default true - adds explicit deny rule)
+
+- name: "write Authelia access_control for {{ service_name }} group restriction"
+  ansible.builtin.blockinfile:
+    path: /symbios/base-services/authelia/authelia-data/configuration.yml
+    marker: "# {mark} ANSIBLE MANAGED BLOCK {{ service_name }} ACCESS CONTROL"
+    block: |2
+          - domain: "{{ service_domain }}"
+            policy: {{ authelia_policy | default('two_factor') }}
+            subject: {{ authelia_subjects | to_json }}
+{% if authelia_deny_fallback | default(true) | bool %}
+          - domain: "{{ service_domain }}"
+            policy: deny
+{% endif %}
+
+    insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+    backup: yes
+  notify: Restart authelia

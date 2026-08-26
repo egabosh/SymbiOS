@@ -625,66 +625,29 @@
       changed_when: false
       failed_when: false
 
-    - name: Write OIDC config in authelias configuration.yml for Matrix
-      ansible.builtin.blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC matrix"
-        block: |2
-                # Matrix Synapse
-                - client_id: 'matrix'
-                  client_name: 'Matrix'
-                  client_secret: '{{ lookup('file', '/symbios/services/matrix/oidc_digest') }}'
-                  public: false
-                  authorization_policy: '{{ lookup('file', '/symbios/base-services/authelia/authorization_policy') }}'
-                  redirect_uris:
-                    - 'https://matrix.{{ base_domain }}/_synapse/client/oidc/callback'
-                  scopes:
-                    - 'openid'
-                    - 'profile'
-                    - 'email'
-                    - 'groups'
-                  response_types:
-                    - 'code'
-                  grant_types:
-                    - 'authorization_code'
-                  access_token_signed_response_alg: 'none'
-                  userinfo_signed_response_alg: 'none'
-                  token_endpoint_auth_method: 'client_secret_post'
-        insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
-        backup: yes
-      notify: Restart authelia
+    - name: Write OIDC config in authelias configuration.yml for matrix
+      include_tasks: tasks/authelia-oidc.yml
+      vars:
+        oidc_client_name: "Matrix"
+        oidc_redirect_uris:
+          - "https://matrix.{{ base_domain }}/_synapse/client/oidc/callback"
 
     # Access control for Matrix web UIs (Element + admin panel)
     # Note: matrix and matrix-synapse routers stay unprotected for federation + OIDC callback
-    - name: write Authelia access_control for matrix-admin group restriction
-      ansible.builtin.blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK matrix-admin ACCESS CONTROL"
-        block: |2
-              - domain: "matrix-admin.{{ base_domain }}"
-                policy: two_factor
-                subject:
-                  - 'group:matrix-users'
-                  - 'group:matrix-admins'
+    - name: Write Authelia access_control for matrix-admin group restriction
+      include_tasks: tasks/authelia-acl.yml
+      vars:
+        authelia_subjects:
+          - "group:matrix-users"
+          - "group:matrix-admins"
 
-        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
-        backup: yes
-      notify: Restart authelia
-
-    - name: write Authelia access_control for matrix-web group restriction
-      ansible.builtin.blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK matrix-web ACCESS CONTROL"
-        block: |2
-              - domain: "matrix-web.{{ base_domain }}"
-                policy: two_factor
-                subject:
-                  - 'group:matrix-users'
-                  - 'group:matrix-admins'
-
-        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
-        backup: yes
-      notify: Restart authelia
+    - name: Write Authelia access_control for matrix-web group restriction
+      include_tasks: tasks/authelia-acl.yml
+      vars:
+        service_name: matrix-web
+        authelia_subjects:
+          - "group:matrix-users"
+          - "group:matrix-admins"
 
     - name: Start matrix
       ansible.builtin.shell: docker compose up -d
@@ -860,8 +823,7 @@
       include_tasks: tasks/runcheck.yml
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set services/matrix.yml"
-      changed_when: false
+      include_tasks: tasks/state-register.yml
 
   handlers:
     - name: run genpw.sh

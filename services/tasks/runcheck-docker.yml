@@ -1,0 +1,32 @@
+# Shared task: deploy a docker-ps-based healthcheck for non-HTTP services.
+# Checks whether a container matching service_name is listed in docker ps.
+#
+# Required var:  service_name
+# Optional var:  check_command   (shell expression; default: docker ps | grep -q "service_name")
+# Optional var:  check_desc      (human-readable description of what is checked)
+
+- name: "{{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check"
+  ansible.builtin.blockinfile:
+    path: "{{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check"
+    mode: "0400"
+    owner: root
+    group: root
+    create: yes
+    marker: "# {mark} ANSIBLE MANAGED BLOCK"
+    block: |
+      CHECK_CATEGORY="services"
+      CHECK_TITLE="{{ service_name }}"
+      CHECK_DESC="Healthcheck for the {{ service_name }} service."
+      CHECK_DETAIL="{{ check_desc | default('Verifies that a ' ~ service_name ~ ' container is listed in docker ps. Container missing marks the check as failed.') }}"
+      g_check_file="${g_tmp}/symbios-healthcheck-{{ service_name }}"
+      if [ -f "$g_check_file" ] && find "$g_check_file" -mmin -5 | grep -q "$g_check_file"
+      then
+        return 2>/dev/null || true
+      fi
+      date > "$g_check_file"
+      if ! {{ check_command | default('docker ps | grep -q "' ~ service_name ~ '"') }}
+      then
+        g_echo_error "Healthcheck failed for {{ service_name }}: container not running"
+      fi
+    backup: yes
+    validate: /bin/bash -n %s
