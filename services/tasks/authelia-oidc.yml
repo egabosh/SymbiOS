@@ -1,44 +1,38 @@
 # Shared task: write an OIDC client configuration block in Authelia's
 # configuration.yml. The block is idempotent (blockinfile marker).
 #
-# Required vars:  service_name, service_domain
-# Optional vars:  oidc_client_name    (default: service_name, display name)
-# Optional vars:  oidc_redirect_uris  (list; default: ["https://<service_domain>/..."])
-# Optional vars:  oidc_consent_mode   (e.g. "implicit"; omit to use Authelia default)
-# Optional vars:  oidc_require_pkce   (default false)
-# Optional vars:  oidc_pkce_challenge_method (default unset; set to "S256" when pkce required)
-# Optional vars:  oidc_scopes         (list; default: openid, profile, email, groups)
+# NOTE: Jinja2 conditionals ({% if %}, {% for %}) do NOT work inside
+# block: | in blockinfile. The content is treated as a literal string.
+# All variable substitution happens at the block: parameter level.
+#
+# Required vars:  service_name, service_domain, oidc_redirect_uris (list)
+# Optional vars:  oidc_client_name        (default: service_name)
+# Optional vars:  oidc_consent_mode       (default: "intersect")
+# Optional vars:  oidc_require_pkce       (default true)
+# Optional vars:  oidc_pkce_challenge_method (default "S256")
+# Optional vars:  oidc_scopes             (list; default: openid,profile,email,groups)
 
 - name: "write OIDC config in authelias configuration.yml for {{ service_name }}"
   ansible.builtin.blockinfile:
     path: /symbios/base-services/authelia/authelia-data/configuration.yml
     marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC {{ service_name }}"
-    block: |2
+    block: |
             # {{ oidc_client_name | default(service_name) }}
             - client_id: '{{ service_name }}'
               client_name: '{{ oidc_client_name | default(service_name) }}'
-              client_secret: '{{ lookup('file', '{{ data_root }}/services/{{ service_name }}/oidc_digest') }}'
+              client_secret: '{{ lookup('file', data_root ~ '/services/' ~ service_name ~ '/oidc_digest') }}'
               public: false
-{% if oidc_require_pkce | default(false) | bool %}
-              require_pkce: true
-              pkce_challenge_method: '{{ oidc_pkce_challenge_method | default("S256") }}'
-{% endif %}
-              authorization_policy: '{{ lookup('file', '{{ data_root }}/base-services/authelia/authorization_policy') }}'
-{% if oidc_consent_mode | default('') | length > 0 %}
-              consent_mode: '{{ oidc_consent_mode }}'
-{% endif %}
+              require_pkce: {{ oidc_require_pkce | default(true) | lower }}
+              pkce_challenge_method: '{{ oidc_pkce_challenge_method | default('S256') }}'
+              authorization_policy: '{{ lookup('file', data_root ~ '/base-services/authelia/authorization_policy') }}'
+              consent_mode: '{{ oidc_consent_mode | default('intersect') }}'
               redirect_uris:
-{% if oidc_redirect_uris | default([]) | length > 0 %}
-{% for uri in oidc_redirect_uris %}
-                - '{{ uri }}'
-{% endfor %}
-{% else %}
-                - 'https://{{ service_domain }}/{{ oidc_redirect_path | default('') }}'
-{% endif %}
+                - '{{ oidc_redirect_uris | first }}'
               scopes:
-{% for scope in oidc_scopes | default(['openid', 'profile', 'email', 'groups']) %}
-                - '{{ scope }}'
-{% endfor %}
+                - '{{ (oidc_scopes | default(['openid', 'profile', 'email', 'groups']))[0] }}'
+                - '{{ (oidc_scopes | default(['openid', 'profile', 'email', 'groups']))[1] }}'
+                - '{{ (oidc_scopes | default(['openid', 'profile', 'email', 'groups']))[2] }}'
+                - '{{ (oidc_scopes | default(['openid', 'profile', 'email', 'groups']))[3] }}'
               response_types:
                 - 'code'
               grant_types:
