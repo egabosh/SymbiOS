@@ -8,7 +8,6 @@
 #
 # Required vars:  service_name, service_domain, authelia_subjects (list)
 # Optional vars:  authelia_policy (default "two_factor")
-# Optional vars:  authelia_deny_fallback (default true - adds explicit deny rule)
 
 - name: "write Authelia access_control for {{ service_name }} group restriction"
   ansible.builtin.blockinfile:
@@ -18,10 +17,8 @@
           - domain: "{{ service_domain }}"
             policy: {{ authelia_policy | default('two_factor') }}
             subject: {{ authelia_subjects | to_json }}
-{% if authelia_deny_fallback | default(true) | bool %}
           - domain: "{{ service_domain }}"
             policy: deny
-{% endif %}
 
     insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
     backup: yes
