@@ -108,33 +108,13 @@ def _get_healthcheck_status():
     return status
 
 
-def _get_running_containers():
-    """Return a set of running Docker container names on the host."""
-    from .utils.ssh_exec import run_command
-    try:
-        ok, stdout, _ = run_command('docker ps --format {{.Names}}', timeout=5)
-        if ok and stdout:
-            return set(stdout.strip().splitlines())
-    except Exception:
-        pass
-    return set()
-
-
 def _sidebar_context(catalog):
-    """Build context data for the sidebar: installed set and healthcheck status."""
+    """Build context data for the sidebar: installed set and healthcheck status.
+
+    A playbook is considered installed if and only if it is registered in the
+    installed-playbooks.yml state file (managed by symbios-state.sh).
+    """
     installed = _get_installed_playbooks()
-    running_names = _get_running_containers()
-    for item in catalog:
-        pb = item.get('playbook', '')
-        if pb in installed:
-            continue
-        svc_names = set()
-        for svc in (item.get('docs') or {}).get('service_control', {}).get('services', []):
-            name = svc.get('name')
-            if name:
-                svc_names.add(name)
-        if svc_names & running_names:
-            installed.add(pb)
     ordered = _order_catalog(catalog)
     # The sidebar lists installed services only; everything else is reachable
     # via the collapsible "Add Service" section at the top. Base services are
@@ -642,8 +622,8 @@ def services_status(request, playbook):
     states = [s['state'] for s in out]
     overall = _aggregate_state(states)
 
-    # A service is "installed" if the state file tracks it, OR if any
-    # unit is running/stopped (installed outside SymbiOS).
+    # A service is "installed" if and only if it is registered in the
+    # installed-playbooks.yml state file (managed by symbios-state.sh).
     installed = False
     try:
         from .utils.ssh_exec import run_command as _run_command
@@ -651,8 +631,6 @@ def services_status(request, playbook):
         installed = ok
     except Exception:
         pass
-    if not installed:
-        installed = overall in ('running', 'stopped')
 
     return JsonResponse({
         'services': out,
