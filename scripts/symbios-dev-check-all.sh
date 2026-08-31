@@ -4,12 +4,25 @@
 # Dynamically reads # docs: metadata from each services/*.yml playbook
 # and runs all defined actions (install, stop, start, restart, uninstall, etc.).
 #
+# Also performs Authelia integration tests for services that declare access
+# groups in their # docs metadata:
+#   - Unauth redirect (HTTP 302 to Authelia)
+#   - admin login via /api/firstfactor + service access
+#   - ephemeral test user (symbios-dev-testuser created with a random pwgen
+#     password, added to the service user group -> access granted, removed from
+#     the group -> access denied)
+# The test user and its group memberships are cleaned up at the end.
+#
+# This script runs DIRECTLY ON the SymbiOS host (no SSH involved). The
+# hostname argument is optional; base_domain defaults to the value from
+# /symbios/base-services/symbios-ui/config/inventory.yml.
+#
 # Usage:
-#   symbios-dev-check-all.sh <hostname> [base_domain] [--service <name>]
+#   symbios-dev-check-all.sh [--service <name>]
 #
 # Examples:
-#   symbios-dev-check-all.sh symbios-dev.dedyn.io
-#   symbios-dev-check-all.sh symbios-dev.dedyn.io symbios-dev.dedyn.io --service navidrome
+#   symbios-dev-check-all.sh
+#   symbios-dev-check-all.sh --service dabo
 
 source /etc/bash/gaboshlib.include 2>/dev/null || true
 
@@ -37,28 +50,20 @@ declare -A g_results
 g_filter_services=()
 g_services_json=""
 
-# --- Helper: SSH ---
+# --- Helper: Local command execution ---
+# The script runs directly on the SymbiOS host (no SSH needed). The hostname
+# argument is kept for backwards compatibility but only used for display /
+# domain logic.
 
 function f_ssh {
   local f_cmd="$1"
-  ssh \
-    -o StrictHostKeyChecking=no \
-    -o ConnectTimeout=10 \
-    -o BatchMode=yes \
-    -p "$g_ssh_port" \
-    "${g_ssh_user}@${g_hostname}" \
-    "export PATH=\"/symbios/git/SymbiOS/scripts:\$PATH\"; bash -c \"$f_cmd\"" 2>/dev/null
+  eval "$f_cmd" 2>/dev/null
 }
 
 function f_ssh_sudo {
+  # Running as root on the host: identical to f_ssh.
   local f_cmd="$1"
-  ssh \
-    -o StrictHostKeyChecking=no \
-    -o ConnectTimeout=10 \
-    -o BatchMode=yes \
-    -p "$g_ssh_port" \
-    "${g_sudo_user}@${g_hostname}" \
-    "export PATH=\"/symbios/git/SymbiOS/scripts:\$PATH\"; sudo bash -c \"export PATH=\\\"/symbios/git/SymbiOS/scripts:\\\$PATH\\\"; $f_cmd\"" 2>/dev/null
+  eval "$f_cmd" 2>/dev/null
 }
 
 function f_ssh_try {
@@ -75,18 +80,14 @@ function f_ssh_try {
   return $f_rc
 }
 
-function f_ssh_ok {
-  f_ssh "echo ok" &>/dev/null
-}
-
 # --- Helper: Display ---
 
 function f_usage {
-  echo "Usage: $(basename "$0") <hostname> [base_domain] [--service <name>]"
+  echo "Usage: $(basename "$0") [--service <name>]"
+  echo ""
+  echo "Runs directly on the SymbiOS host (no SSH)."
   echo ""
   echo "Arguments:"
-  echo "  hostname      SymbiOS server hostname or IP"
-  echo "  base_domain   Domain for HTTP checks (e.g. symbios-dev.dedyn.io)"
   echo "  --service X   Only test service X (can be repeated)"
   echo ""
   echo "Discovers services dynamically from services/*.yml playbook # docs: blocks."
@@ -191,13 +192,9 @@ echo "]"
 EXTRACT_SCRIPT
   chmod +x "$f_script"
 
-  # SCP to host, run, clean up
-  scp -o StrictHostKeyChecking=no -P "$g_ssh_port" \
-    "$f_script" "${g_ssh_user}@${g_hostname}:/tmp/symbios-extract.sh" 2>/dev/null
+  # Run the extraction script locally (script runs directly on the host)
+  bash "$f_script"
   rm -f "$f_script"
-
-  f_ssh_try "chmod +x /tmp/symbios-extract.sh && bash /tmp/symbios-extract.sh"
-  f_ssh_try "rm -f /tmp/symbios-extract.sh"
 }
 
 function f_json_get {
@@ -325,6 +322,45 @@ function f_http_check {
   [[ "$f_code" == "$f_expected" ]]
 }
 
+# --- Helper: Authelia authentication tests ---
+
+function f_authelia_login {
+  # Authenticate against Authelia API (first factor) and save session cookie.
+  # Usage: f_authelia_login <username> <password> <authelia_domain> <cookie_jar>
+  # Returns HTTP status code of the /api/firstfactor response.
+  local f_user="$1"
+  local f_pass="$2"
+  local f_auth_domain="$3"
+  local f_cookie="$4"
+  local f_code
+  # Escape single quotes in password for shell safety
+  local f_safe_pass="${f_pass//\'/\'\\\'\'}"
+  f_code=$(f_ssh_try "curl -sk -o /dev/null -w '%{http_code}' \
+    -c '$f_cookie' \
+    -X POST 'https://${f_auth_domain}/api/firstfactor' \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -d '{\"username\":\"${f_user}\",\"password\":\"${f_safe_pass}\",\"keepMeLoggedIn\":false}' \
+    --connect-timeout 10 --max-time 15 2>/dev/null" 2>/dev/null)
+  f_code="${f_code//[^0-9]/}"
+  echo "$f_code"
+}
+
+function f_auth_check {
+  # Test access to a service URL using a session cookie.
+  # Usage: f_auth_check <url> <cookie_jar> [expected_code]
+  # Returns the actual HTTP status code.
+  local f_url="$1"
+  local f_cookie="$2"
+  local f_expected="${3:-200}"
+  local f_code
+  f_code=$(f_ssh_try "curl -sk -o /dev/null -w '%{http_code}' \
+    -b '$f_cookie' \
+    --connect-timeout 10 --max-time 15 '$f_url' 2>/dev/null" 2>/dev/null)
+  f_code="${f_code//[^0-9]/}"
+  echo "$f_code"
+}
+
 # --- Parse arguments ---
 
 while [[ $# -gt 0 ]]
@@ -353,13 +389,13 @@ done
 
 if [[ -z "$g_hostname" ]]
 then
-  f_usage
-  exit 1
+  g_hostname="$(hostname)"
 fi
 
 if [[ -z "$g_base_domain" ]]
 then
-  g_base_domain="$g_hostname"
+  # Read base_domain from the local inventory (script runs on the host)
+  g_base_domain="$(yq -r '.all.vars.base_domain' /symbios/base-services/symbios-ui/config/inventory.yml 2>/dev/null || echo "")"
 fi
 
 mkdir -p "$g_log_dir"
@@ -374,16 +410,23 @@ echo "=================================================================="
 # =========================================================================
 f_section "Phase 0: Pre-flight checks"
 
-if f_ssh_ok
+if [[ "$(id -u)" -eq 0 ]]
 then
-  f_result "SSH connectivity" PASS
+  f_result "Running as root" PASS
 else
-  f_result "SSH connectivity" FAIL "Cannot SSH to $g_hostname:$g_ssh_port"
-  echo -e "\n${f_red}Cannot proceed without SSH access. Aborting.${f_reset}"
+  f_result "Running as root" FAIL "Run as root (sudo)"
+  echo -e "\n${f_red}Cannot proceed without root rights. Aborting.${f_reset}"
   exit 1
 fi
 
-for f_container in traefik openldap authelia symbios-webui
+if [[ -n "$g_base_domain" ]]
+then
+  f_result "base_domain resolution" PASS "$g_base_domain"
+else
+  f_result "base_domain resolution" FAIL "No base_domain found in inventory.yml"
+fi
+
+for f_container in symbios-base-traefik symbios-base-ldap symbios-base-authelia symbios-base-webui
 do
   if f_check_container_running "$f_container"
   then
@@ -421,6 +464,64 @@ else
   f_result "yq on host" FAIL "yq not found - cannot extract playbook metadata"
   echo -e "\n${f_red}Cannot proceed without yq. Aborting.${f_reset}"
   exit 1
+fi
+
+# =========================================================================
+# Phase: Auth test user setup
+# =========================================================================
+f_section "Phase: Auth test user setup"
+
+# Generate a random password that satisfies all password policies (including
+# paranoid: >=32 chars, letter+digit+special) but is shell-safe (no quotes,
+# backticks, dollar signs, backslashes) so it flows safely through the SSH
+# exec layers. Base pwgen is alphanumeric; appending X1! guarantees an
+# uppercase letter, a digit and a special character.
+g_test_pw="$(pwgen -s 31 1)X1!"
+
+# Delete any leftover test user from a previous run first (idempotent), so a
+# fresh user with a fresh random password is always created.
+f_ssh_try "symbios-ldap-user.sh --delete --uid symbios-dev-testuser" >/dev/null 2>&1
+
+# Create test user with random password
+f_create_output=$(f_ssh_try "echo '${g_test_pw}' > /tmp/.symbios-dev-test-pw && \
+  symbios-ldap-user.sh --create --uid symbios-dev-testuser \
+  --password-file /tmp/.symbios-dev-test-pw \
+  --displayname 'SymbiOS Dev Testuser' --group users && \
+  rm -f /tmp/.symbios-dev-test-pw" 2>&1)
+f_create_rc=$?
+
+if [[ $f_create_rc -eq 0 ]] && ! echo "$f_create_output" | grep -qi "error\|failed"
+then
+  f_result "Create test user symbios-dev-testuser" PASS
+else
+  f_result "Create test user symbios-dev-testuser" FAIL "Could not create user (see output)"
+  echo "        $f_create_output" | head -5
+fi
+
+# Clean up the test user on exit so an aborted run never leaves it behind
+function f_cleanup_testuser {
+  f_ssh_try "symbios-ldap-user.sh --delete --uid symbios-dev-testuser" >/dev/null 2>&1
+  rm -f "$g_log_dir"/cookie-* 2>/dev/null
+}
+trap f_cleanup_testuser EXIT
+
+# Verify Authelia can authenticate the test user (smoke test)
+f_authelia_domain="auth.${g_base_domain}"
+f_auth_test_code=$(f_authelia_login "symbios-dev-testuser" "$g_test_pw" "$f_authelia_domain" "/dev/null")
+if [[ "$f_auth_test_code" == "200" ]]
+then
+  f_result "Authelia first-factor login (testuser)" PASS
+else
+  f_result "Authelia first-factor login (testuser)" FAIL "HTTP $f_auth_test_code (expected 200)"
+fi
+
+# Verify admin can still authenticate
+f_admin_auth_code=$(f_authelia_login "admin" "test1234" "$f_authelia_domain" "/dev/null")
+if [[ "$f_admin_auth_code" == "200" ]]
+then
+  f_result "Authelia first-factor login (admin)" PASS
+else
+  f_result "Authelia first-factor login (admin)" FAIL "HTTP $f_admin_auth_code (expected 200)"
 fi
 
 # =========================================================================
@@ -475,6 +576,10 @@ do
   f_action_restart=$(f_json_get "$f_svc_json" ".actions.restart" "")
   f_action_reload=$(f_json_get "$f_svc_json" ".actions.reload" "")
 
+  # Extract access control groups for Authelia login tests
+  f_admin_group=$(f_json_get "$f_svc_json" ".access.admin_group" "")
+  f_user_group=$(f_json_get "$f_svc_json" ".access.user_group" "")
+
   # Extract program_paths and userdata_paths arrays
   f_program_paths=$(f_json_get_array "$f_svc_json" ".uninstall.program_paths")
   f_userdata_paths=$(f_json_get_array "$f_svc_json" ".uninstall.userdata_paths")
@@ -504,6 +609,10 @@ do
   [[ -n "$f_action_stop" ]] && echo "  Stop: $f_action_stop"
   [[ -n "$f_action_restart" ]] && echo "  Restart: $f_action_restart"
   [[ -n "$f_action_reload" ]] && echo "  Reload: $f_action_reload"
+  if [[ -n "$f_user_group" ]]
+  then
+    echo "  Access: user_group=$f_user_group admin_group=$f_admin_group"
+  fi
   echo -e "${f_bold}------------------------------------------------------------------${f_reset}"
 
   # Validate required fields
@@ -809,26 +918,113 @@ do
   fi
 
   # =========================================================================
-  # Phase 7: HTTP check (only if url is defined)
+  # Phase 7: HTTP + Authelia authentication check
   # =========================================================================
   if [[ -n "$f_url" ]]
   then
-    echo -e "\n  ${f_blue}--- Phase 7: HTTP check ---${f_reset}"
+    echo -e "\n  ${f_blue}--- Phase 7: HTTP + Auth check ---${f_reset}"
 
     # Give Traefik time to detect new container labels
     sleep 5
 
-    if f_http_check "$f_url" "200"
+    # --- 7a: Unauthenticated access (should get redirect to Authelia) ---
+    f_unauth_code=$(f_ssh_try "curl -sk -o /dev/null -w '%{http_code}' \
+      --connect-timeout 10 --max-time 15 '$f_url' 2>/dev/null" 2>/dev/null)
+    f_unauth_code="${f_unauth_code//[^0-9]/}"
+
+    if [[ "$f_unauth_code" == "302" || "$f_unauth_code" == "401" ]]
     then
-      f_result "Phase 7: HTTP -> 200" PASS
-    elif f_http_check "$f_url" "302" || f_http_check "$f_url" "401"
+      f_result "Phase 7a: Unauth -> redirect (HTTP $f_unauth_code)" PASS
+    elif [[ "$f_unauth_code" == "200" ]]
     then
-      f_result "Phase 7: HTTP -> auth redirect (expected)" PASS
+      # Some services return 200 (e.g. login page) - acceptable for OIDC services
+      f_result "Phase 7a: Unauth -> HTTP 200 (login page or open service)" PASS
     else
-      f_result "Phase 7: HTTP check" FAIL "Not reachable: $f_url"
+      f_result "Phase 7a: Unauth check" FAIL "HTTP $f_unauth_code (expected 302/401/200)"
+    fi
+
+    # --- Auth tests only if access groups are defined ---
+    if [[ -n "$f_user_group" ]]
+    then
+      f_auth_domain="auth.${g_base_domain}"
+      f_cookie_admin="${g_log_dir}/cookie-admin-${f_name}"
+      f_cookie_testuser="${g_log_dir}/cookie-testuser-${f_name}"
+
+      # --- 7b: Admin login (admin is always in admin_group after install) ---
+      f_admin_code=$(f_authelia_login "admin" "test1234" "$f_auth_domain" "$f_cookie_admin")
+      if [[ "$f_admin_code" == "200" ]]
+      then
+        f_result "Phase 7b: Admin Authelia login" PASS
+      else
+        f_result "Phase 7b: Admin Authelia login" FAIL "HTTP $f_admin_code (expected 200)"
+      fi
+
+      # Test admin access to service
+      if [[ "$f_admin_code" == "200" ]]
+      then
+        f_admin_svc_code=$(f_auth_check "$f_url" "$f_cookie_admin" "200")
+        if [[ "$f_admin_svc_code" == "200" ]]
+        then
+          f_result "Phase 7b: Admin -> service access (HTTP $f_admin_svc_code)" PASS
+        else
+          f_result "Phase 7b: Admin -> service access" FAIL "HTTP $f_admin_svc_code (expected 200)"
+        fi
+      fi
+
+      # --- 7c: TestUser IN group -> should get access ---
+      # Add testuser to the service's user group
+      f_ssh_try "symbios-ldap-groups.sh --add-user \
+        --name '$f_user_group' --uid symbios-dev-testuser" >/dev/null 2>&1
+      sleep 1
+
+      f_testuser_code=$(f_authelia_login "symbios-dev-testuser" "$g_test_pw" \
+        "$f_auth_domain" "$f_cookie_testuser")
+      if [[ "$f_testuser_code" == "200" ]]
+      then
+        f_result "Phase 7c: TestUser Authelia login" PASS
+      else
+        f_result "Phase 7c: TestUser Authelia login" FAIL "HTTP $f_testuser_code (expected 200)"
+      fi
+
+      # Test testuser access to service (should be granted)
+      if [[ "$f_testuser_code" == "200" ]]
+      then
+        f_testuser_svc_code=$(f_auth_check "$f_url" "$f_cookie_testuser" "200")
+        if [[ "$f_testuser_svc_code" == "200" ]]
+        then
+          f_result "Phase 7c: TestUser IN '$f_user_group' -> access (HTTP $f_testuser_svc_code)" PASS
+        else
+          f_result "Phase 7c: TestUser IN '$f_user_group' -> access" FAIL "HTTP $f_testuser_svc_code (expected 200)"
+        fi
+      fi
+
+      # --- 7d: TestUser NOT IN group -> should be denied ---
+      f_ssh_try "symbios-ldap-groups.sh --remove-user \
+        --name '$f_user_group' --uid symbios-dev-testuser" >/dev/null 2>&1
+      sleep 1
+
+      # Re-login to get a fresh session (Authelia checks group membership on each request,
+      # but the cached session may still work until the next forward-auth call)
+      f_testuser_denied_code=$(f_auth_check "$f_url" "$f_cookie_testuser" "302")
+      if [[ "$f_testuser_denied_code" == "302" || "$f_testuser_denied_code" == "401" ]]
+      then
+        f_result "Phase 7d: TestUser NOT IN '$f_user_group' -> denied (HTTP $f_testuser_denied_code)" PASS
+      else
+        f_result "Phase 7d: TestUser NOT IN '$f_user_group' -> denied" FAIL "HTTP $f_testuser_denied_code (expected 302/401)"
+      fi
+
+      # Remove testuser from the service group after all tests so the
+      # next service iteration gets a clean state (it will re-add in 7c).
+      f_ssh_try "symbios-ldap-groups.sh --remove-user \
+        --name '$f_user_group' --uid symbios-dev-testuser" >/dev/null 2>&1
+
+      # Clean up cookie files
+      rm -f "$f_cookie_admin" "$f_cookie_testuser" 2>/dev/null
+    else
+      f_result "Phase 7b-7d: Auth tests" SKIP "No access groups defined in docs metadata"
     fi
   else
-    echo -e "\n  ${f_blue}--- Phase 7: HTTP check ---${f_reset}"
+    echo -e "\n  ${f_blue}--- Phase 7: HTTP + Auth check ---${f_reset}"
     f_result "Phase 7: HTTP check" SKIP "No url defined (service uses raw ports)"
   fi
 
@@ -840,6 +1036,25 @@ do
   f_result "Cleanup: $f_name uninstalled" PASS
 
 done
+
+# =========================================================================
+# Phase: Auth test user cleanup
+# =========================================================================
+f_section "Phase: Auth test user cleanup"
+
+# Delete test user from LDAP
+f_delete_output=$(f_ssh_try "symbios-ldap-user.sh --delete --uid symbios-dev-testuser" 2>&1)
+f_delete_rc=$?
+
+if [[ $f_delete_rc -eq 0 ]] && ! echo "$f_delete_output" | grep -qi "error\|failed"
+then
+  f_result "Delete test user symbios-dev-testuser" PASS
+else
+  f_result "Delete test user symbios-dev-testuser" FAIL "Could not delete user"
+fi
+
+# Clean up any remaining cookie files
+rm -f "$g_log_dir"/cookie-* 2>/dev/null
 
 # =========================================================================
 # Summary
