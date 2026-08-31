@@ -444,10 +444,6 @@
         oidc_consent_mode: "implicit"
         oidc_redirect_uris:
           - "https://home-assistant.{{ base_domain }}/auth/oidc/callback"
-        oidc_scopes:
-          - "openid"
-          - "profile"
-          - "groups"
 
     - name: Start home-assistant
       ansible.builtin.shell: docker compose up -d

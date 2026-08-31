@@ -254,9 +254,12 @@
       include_tasks: tasks/ldap-single-group.yml
 
     # Write Authelia access_control for dabo group restriction
+    # The enforced factor count follows the central twofa_enabled variable
+    # (inventory.yml): two_factor when 2FA is enabled, otherwise one_factor.
     - name: Write Authelia access_control for dabo group restriction
       include_tasks: tasks/authelia-acl.yml
       vars:
+        authelia_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
         authelia_subjects:
           - "group:dabo"
 
