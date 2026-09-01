@@ -363,9 +363,6 @@
           gpu_mem=256
           disable_fw_kms_setup=1
           
-          dtoverlay=w1-gpio
-
-
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/raspberry.yml"
       changed_when: false
