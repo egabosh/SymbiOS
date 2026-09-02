@@ -53,7 +53,14 @@ def users(request):
 def groups(request):
     groups = _get_ldap_groups()
     users = _get_ldap_users()
-    return render(request, 'main/groups.html', {'groups': groups, 'group_members': users})
+    group_available_users = {}
+    for g in groups:
+        group_available_users[g] = [u for u in users if g in u.get('available_groups', [])]
+    return render(request, 'main/groups.html', {
+        'groups': groups,
+        'group_members': users,
+        'group_available_users': group_available_users,
+    })
 
 
 @login_required
@@ -172,9 +179,10 @@ def group_add_user(request):
     if request.method == 'POST':
         uid = request.POST.get('uid', '')
         group = request.POST.get('group', '')
+        next_page = request.POST.get('next', 'users')
         if uid and group:
             cmd = f'symbios-ldap-groups.sh --add-user --name {shlex.quote(group)} --uid {shlex.quote(uid)}'
-            return _exec_ldap_command(request, cmd, f'Adding "{uid}" to "{group}"...', f'"{uid}" added to "{group}".')
+            return _exec_ldap_command(request, cmd, f'Adding "{uid}" to "{group}"...', f'"{uid}" added to "{group}".', redirect_to=next_page)
     return redirect('users')
 
 
@@ -183,7 +191,8 @@ def group_remove_user(request):
     if request.method == 'POST':
         uid = request.POST.get('uid', '')
         group = request.POST.get('group', '')
+        next_page = request.POST.get('next', 'users')
         if uid and group:
             cmd = f'symbios-ldap-groups.sh --remove-user --name {shlex.quote(group)} --uid {shlex.quote(uid)}'
-            return _exec_ldap_command(request, cmd, f'Removing "{uid}" from "{group}"...', f'"{uid}" removed from "{group}".')
+            return _exec_ldap_command(request, cmd, f'Removing "{uid}" from "{group}"...', f'"{uid}" removed from "{group}".', redirect_to=next_page)
     return redirect('users')

@@ -1,4 +1,5 @@
 {% extends "main/base.html" %}
+{% load plugin_extras %}
 {% block sidebar %}{% endblock %}
 {% block sidebar_col_class %}d-none{% endblock %}
 {% block content %}
@@ -24,9 +25,38 @@
                     <td>
                         {% for u in group_members %}
                             {% if group in u.groups %}
-                            <span class="badge bg-secondary">{{ u.uid }}</span>
+                            <span class="badge bg-secondary">
+                                {{ u.uid }}
+                                <form method="post" action="/users/group/remove-user/" class="d-inline" data-exec="true">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="uid" value="{{ u.uid }}">
+                                    <input type="hidden" name="group" value="{{ group }}">
+                                    <input type="hidden" name="next" value="groups">
+                                    <button type="submit" class="btn-close btn-close-white ms-1" style="font-size:0.55rem;vertical-align:middle;" title="Remove from {{ group }}"></button>
+                                </form>
+                            </span>
                             {% endif %}
                         {% endfor %}
+                        {% with available=group_available_users|dict_get:group %}
+                        {% if available %}
+                        <span class="dropdown">
+                            <button class="btn btn-outline-success btn-sm" style="padding:0 5px;font-size:0.7rem;vertical-align:middle;" title="Add user to {{ group }}" data-bs-toggle="dropdown">+</button>
+                            <ul class="dropdown-menu">
+                                {% for u in available %}
+                                <li>
+                                    <form method="post" action="/users/group/add-user/" data-exec="true">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="uid" value="{{ u.uid }}">
+                                        <input type="hidden" name="group" value="{{ group }}">
+                                        <input type="hidden" name="next" value="groups">
+                                        <button type="submit" class="dropdown-item">{{ u.uid }}</button>
+                                    </form>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </span>
+                        {% endif %}
+                        {% endwith %}
                     </td>
                     <td class="text-end">
                         <form method="post" action="/groups/{{ group }}/delete/" class="d-inline" data-exec-confirm="Really delete group &quot;{{ group }}&quot;? All members will be removed first." data-exec="true">
