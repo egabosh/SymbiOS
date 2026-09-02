@@ -18,11 +18,12 @@
 # /symbios/base-services/symbios-ui/config/inventory.yml.
 #
 # Usage:
-#   symbios-dev-check-all.sh [--service <name>]
+#   symbios-dev-check-all.sh [--service <name>] [--list-services]
 #
 # Examples:
 #   symbios-dev-check-all.sh
 #   symbios-dev-check-all.sh --service dabo
+#   symbios-dev-check-all.sh --list-services
 
 source /etc/bash/gaboshlib.include 2>/dev/null || true
 
@@ -99,15 +100,16 @@ trap f_handle_signal INT TERM HUP
 # --- Helper: Display ---
 
 function f_usage {
-  echo "Usage: $(basename "$0") [--service <name>]"
+  echo "Usage: $(basename "$0") [--service <name>] [--list-services]"
   echo ""
   echo "Runs directly on the SymbiOS host (no SSH)."
   echo ""
   echo "Arguments:"
-  echo "  --service X   Only test service X (can be repeated)"
+  echo "  --service X       Only test service X (can be repeated)"
+  echo "  --list-services   List discovered services and exit (no tests)"
   echo ""
   echo "Discovers services dynamically from services/*.yml playbook # docs: blocks."
-  echo "Standard password: test1234"
+  echo "Admin password for Authelia tests: test1234"
 }
 
 function f_result {
@@ -403,12 +405,17 @@ function f_oidc_flow_check {
 
 # --- Parse arguments ---
 
+g_list_services=0
+
 while [[ $# -gt 0 ]]
 do
   case "$1" in
     --service)
       shift
       g_filter_services+=("$1")
+      ;;
+    --list-services)
+      g_list_services=1
       ;;
     -*)
       f_usage
@@ -441,6 +448,47 @@ fi
 # data_root is where the runchecks.d healthchecks live (host layout)
 g_data_root="$(yq -r '.all.vars.data_root // "/symbios"' /symbios/base-services/symbios-ui/config/inventory.yml 2>/dev/null || echo "/symbios")"
 g_data_root="${g_data_root%/}"
+
+# --- Handle --list-services ---
+if [[ "$g_list_services" -eq 1 ]]
+then
+  echo -e "${f_bold}SymbiOS Service Discovery${f_reset}"
+  echo "Domain: $g_base_domain"
+  echo ""
+
+  g_services_json=$(f_extract_services_json 2>/dev/null)
+  f_count=$(echo "$g_services_json" | jq 'length' 2>/dev/null)
+  f_count="${f_count:-0}"
+
+  if [[ "$f_count" == "0" ]]
+  then
+    echo -e "${f_yellow}No services with # docs: blocks found.${f_reset}"
+    exit 0
+  fi
+
+  echo -e "${f_bold}Found $f_count service(s):${f_reset}"
+  echo ""
+
+  for f_i in $(seq 0 $(( f_count - 1 )))
+  do
+    f_svc_json=$(echo "$g_services_json" | jq ".[$f_i]" 2>/dev/null)
+    f_svc_name=$(f_json_get "$f_svc_json" ".playbook" "?")
+    f_svc_url=$(f_json_get "$f_svc_json" .url "")
+    f_svc_compose=$(f_json_get "$f_svc_json" ".service_control.services[0].compose_file" "")
+    f_svc_user_group=$(f_json_get "$f_svc_json" ".access.user_group" "")
+    f_svc_admin_group=$(f_json_get "$f_svc_json" ".access.admin_group" "")
+
+    echo -e "${f_green}${f_svc_name}${f_reset}"
+    [[ -n "$f_svc_url" ]] && echo "  URL:     $f_svc_url"
+    [[ -n "$f_svc_compose" ]] && echo "  Compose: $f_svc_compose"
+    if [[ -n "$f_svc_user_group" ]]
+    then
+      echo "  Access:  user_group=$f_svc_user_group  admin_group=$f_svc_admin_group"
+    fi
+  done
+
+  exit 0
+fi
 
 mkdir -p "$g_log_dir"
 
