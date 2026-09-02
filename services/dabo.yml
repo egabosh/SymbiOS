@@ -268,6 +268,7 @@
       ansible.builtin.shell: ./initiate.sh
       args:
         chdir: /symbios/services/dabo
+      changed_when: false
       notify: Restart dabo
 
     # Ensure the dabo container is running
