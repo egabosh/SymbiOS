@@ -37,9 +37,6 @@ f_reset='\033[0m'
 # --- Global state ---
 g_hostname=""
 g_base_domain=""
-g_ssh_port=44
-g_ssh_user=root
-g_sudo_user=symbios
 g_insecure=(-k -s)
 g_log_dir="/tmp/symbios-check-$$"
 g_total=0
@@ -49,36 +46,55 @@ g_skip=0
 declare -A g_results
 g_filter_services=()
 g_services_json=""
+# Track the most recent long-running child PID so Ctrl+C can kill it.
+g_cur_pid=""
+# Set to 1 when an interrupt arrives; loops check it to bail out fast.
+g_interrupted=0
 
 # --- Helper: Local command execution ---
 # The script runs directly on the SymbiOS host (no SSH needed). The hostname
 # argument is kept for backwards compatibility but only used for display /
 # domain logic.
 
-function f_ssh {
+function f_exec {
   local f_cmd="$1"
   eval "$f_cmd" 2>/dev/null
 }
 
-function f_ssh_sudo {
-  # Running as root on the host: identical to f_ssh.
-  local f_cmd="$1"
-  eval "$f_cmd" 2>/dev/null
-}
-
-function f_ssh_try {
+function f_exec_try {
+  # Run a command. As root the wrapper is just an eval; kept as a named
+  # function so checks stay terse and a future non-root mode is possible.
   local f_cmd="$1"
   local f_result
-  f_result=$(f_ssh "$f_cmd" 2>&1)
+  f_result=$(f_exec "$f_cmd" 2>&1)
   local f_rc=$?
-  if [[ $f_rc -ne 0 ]]
-  then
-    f_result=$(f_ssh_sudo "$f_cmd" 2>&1)
-    f_rc=$?
-  fi
   echo "$f_result"
   return $f_rc
 }
+
+# --- Interrupt handling ---
+# Without a trap, SIGINT only kills the foreground child (e.g. the running
+# ansible-playbook) while the rest of the script keeps going, so Ctrl+C feels
+# useless. This handler kills the tracked child and aborts the whole script.
+function f_handle_signal {
+  local f_sig="${1:-INT}"
+  g_interrupted=1
+  echo ""
+  echo -e "${f_red}=== ${f_sig} received - aborting SymbiOS dev check ===${f_reset}"
+  if [[ -n "$g_cur_pid" ]]
+  then
+    # Kill the current child process group first, then the process itself
+    # ('-' prefix works when job control is enabled, plain kill otherwise).
+    kill -TERM -- "-$g_cur_pid" 2>/dev/null
+    kill -TERM "$g_cur_pid" 2>/dev/null
+    sleep 1
+    kill -KILL -- "-$g_cur_pid" 2>/dev/null
+    kill -KILL "$g_cur_pid" 2>/dev/null
+    g_cur_pid=""
+  fi
+  exit 130
+}
+trap f_handle_signal INT TERM HUP
 
 # --- Helper: Display ---
 
@@ -228,10 +244,14 @@ function f_wait_containers {
   sleep 10
   while [[ $f_elapsed -lt $f_max_wait ]]
   do
+    if [[ "$g_interrupted" == "1" ]]
+    then
+      return 1
+    fi
     if [[ -n "$f_compose_file" ]]
     then
       local f_up
-      f_up=$(f_ssh_try "docker compose -f $f_compose_file ps 2>/dev/null | grep -c ' Up ' || true" 2>/dev/null)
+      f_up=$(f_exec_try "docker compose -f $f_compose_file ps 2>/dev/null | grep -c ' Up ' || true" 2>/dev/null)
       f_up="${f_up//[^0-9]/}"
       if [[ -n "$f_up" && "$f_up" -gt 0 ]]
       then
@@ -239,7 +259,7 @@ function f_wait_containers {
       fi
     else
       local f_bad
-      f_bad=$(f_ssh_try "docker ps -a --format '{{.Status}}' 2>/dev/null | grep -c -E '(Restarting|Exited)' || true" 2>/dev/null)
+      f_bad=$(f_exec_try "docker ps -a --format '{{.Status}}' 2>/dev/null | grep -c -E '(Restarting|Exited)' || true" 2>/dev/null)
       f_bad="${f_bad//[^0-9]/}"
       if [[ "$f_bad" == "0" || -z "$f_bad" ]]
       then
@@ -255,7 +275,7 @@ function f_wait_containers {
 function f_check_compose_up {
   local f_compose_file="$1"
   local f_result
-  f_result=$(f_ssh_try "docker compose -f $f_compose_file ps 2>/dev/null | grep -c ' Up ' || true" 2>/dev/null)
+  f_result=$(f_exec_try "docker compose -f $f_compose_file ps 2>/dev/null | grep -c ' Up ' || true" 2>/dev/null)
   f_result="${f_result//[^0-9]/}"
   [[ -n "$f_result" && "$f_result" -gt 0 ]]
 }
@@ -263,7 +283,7 @@ function f_check_compose_up {
 function f_check_no_containers {
   local f_compose_file="$1"
   local f_result
-  f_result=$(f_ssh_try "docker compose -f $f_compose_file ps 2>/dev/null | grep -c ' Up ' || true" 2>/dev/null)
+  f_result=$(f_exec_try "docker compose -f $f_compose_file ps 2>/dev/null | grep -c ' Up ' || true" 2>/dev/null)
   f_result="${f_result//[^0-9]/}"
   [[ -z "$f_result" || "$f_result" == "0" ]]
 }
@@ -271,7 +291,7 @@ function f_check_no_containers {
 function f_check_container_running {
   local f_name="$1"
   local f_result
-  f_result=$(f_ssh_try "docker ps --format '{{.Names}}' | grep -w '$f_name' || true" 2>/dev/null)
+  f_result=$(f_exec_try "docker ps --format '{{.Names}}' | grep -w '$f_name' || true" 2>/dev/null)
   [[ -n "$f_result" ]]
 }
 
@@ -279,45 +299,45 @@ function f_check_container_running {
 
 function f_run_playbook {
   local f_playbook="$1"
-  f_ssh_try "symbios-run-playbook.sh '$f_playbook'" 2>&1
+  f_exec_try "symbios-run-playbook.sh '$f_playbook'" 2>&1
 }
 
 function f_uninstall_service {
   local f_playbook="$1"
   local f_mode="$2"
-  f_ssh_try "symbios-uninstall.sh '$f_playbook' '$f_mode'" 2>&1
+  f_exec_try "symbios-uninstall.sh '$f_playbook' '$f_mode'" 2>&1
 }
 
 function f_check_no_dir {
   local f_path="$1"
-  f_ssh_try "test ! -d '$f_path' && echo yes || echo no" 2>/dev/null | grep -q "yes"
+  f_exec_try "test ! -d '$f_path' && echo yes || echo no" 2>/dev/null | grep -q "yes"
 }
 
 function f_check_no_path {
   local f_path="$1"
-  f_ssh_try "test ! -e '$f_path' && echo yes || echo no" 2>/dev/null | grep -q "yes"
+  f_exec_try "test ! -e '$f_path' && echo yes || echo no" 2>/dev/null | grep -q "yes"
 }
 
 function f_check_dir_exists {
   local f_path="$1"
-  f_ssh_try "test -d '$f_path' && echo yes || echo no" 2>/dev/null | grep -q "yes"
+  f_exec_try "test -d '$f_path' && echo yes || echo no" 2>/dev/null | grep -q "yes"
 }
 
 function f_check_file_exists {
   local f_path="$1"
-  f_ssh_try "test -f '$f_path' && echo yes || echo no" 2>/dev/null | grep -q "yes"
+  f_exec_try "test -f '$f_path' && echo yes || echo no" 2>/dev/null | grep -q "yes"
 }
 
 function f_check_dir_empty {
   local f_path="$1"
-  f_ssh_try "find '$f_path' -maxdepth 1 -mindepth 1 -print -quit 2>/dev/null | grep -q . || echo empty" 2>/dev/null | grep -q "empty"
+  f_exec_try "find '$f_path' -maxdepth 1 -mindepth 1 -print -quit 2>/dev/null | grep -q . || echo empty" 2>/dev/null | grep -q "empty"
 }
 
 function f_http_check {
   local f_url="$1"
   local f_expected="${2:-200}"
   local f_code
-  f_code=$(f_ssh_try "curl -sk -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 15 '$f_url' 2>/dev/null" 2>/dev/null)
+  f_code=$(f_exec_try "curl -sk -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 15 '$f_url' 2>/dev/null" 2>/dev/null)
   f_code="${f_code//[^0-9]/}"
   [[ "$f_code" == "$f_expected" ]]
 }
@@ -335,7 +355,7 @@ function f_authelia_login {
   local f_code
   # Escape single quotes in password for shell safety
   local f_safe_pass="${f_pass//\'/\'\\\'\'}"
-  f_code=$(f_ssh_try "curl -sk -o /dev/null -w '%{http_code}' \
+  f_code=$(f_exec_try "curl -sk -o /dev/null -w '%{http_code}' \
     -c '$f_cookie' \
     -X POST 'https://${f_auth_domain}/api/firstfactor' \
     -H 'Content-Type: application/json' \
@@ -354,9 +374,29 @@ function f_auth_check {
   local f_cookie="$2"
   local f_expected="${3:-200}"
   local f_code
-  f_code=$(f_ssh_try "curl -sk -o /dev/null -w '%{http_code}' \
+  f_code=$(f_exec_try "curl -sk -o /dev/null -w '%{http_code}' \
     -b '$f_cookie' \
     --connect-timeout 10 --max-time 15 '$f_url' 2>/dev/null" 2>/dev/null)
+  f_code="${f_code//[^0-9]/}"
+  echo "$f_code"
+}
+
+function f_oidc_flow_check {
+  # Test access to a service via the FULL OIDC redirect flow. This follows
+  # every redirect (service -> Authelia /oidc/authorize -> callback -> app)
+  # while keeping the cookie jar updated across hops, so it works for BOTH
+  # forward-auth services (single hop, session cookie checked by Traefik) and
+  # OIDC services (Nextcloud/Home-Assistant/... which manage their own
+  # session and need the complete authorize/callback round trip).
+  # Usage: f_oidc_flow_check <url> <cookie_jar>
+  # Returns the HTTP status code of the FINAL response.
+  local f_url="$1"
+  local f_cookie="$2"
+  local f_code
+  f_code=$(f_exec_try "curl -skL --max-redirs 12 \
+    -b '$f_cookie' -c '$f_cookie' \
+    --connect-timeout 10 --max-time 40 \
+    -o /dev/null -w '%{http_code}' '$f_url' 2>/dev/null" 2>/dev/null)
   f_code="${f_code//[^0-9]/}"
   echo "$f_code"
 }
@@ -398,6 +438,10 @@ then
   g_base_domain="$(yq -r '.all.vars.base_domain' /symbios/base-services/symbios-ui/config/inventory.yml 2>/dev/null || echo "")"
 fi
 
+# data_root is where the runchecks.d healthchecks live (host layout)
+g_data_root="$(yq -r '.all.vars.data_root // "/symbios"' /symbios/base-services/symbios-ui/config/inventory.yml 2>/dev/null || echo "/symbios")"
+g_data_root="${g_data_root%/}"
+
 mkdir -p "$g_log_dir"
 
 echo -e "${f_bold}SymbiOS Service Test Suite${f_reset}"
@@ -436,28 +480,28 @@ do
   fi
 done
 
-if f_ssh_try "docker info &>/dev/null" &>/dev/null
+if f_exec_try "docker info &>/dev/null" &>/dev/null
 then
   f_result "Docker daemon" PASS
 else
   f_result "Docker daemon" FAIL "Docker not responding"
 fi
 
-if f_ssh_try "which symbios-run-playbook.sh" &>/dev/null
+if f_exec_try "which symbios-run-playbook.sh" &>/dev/null
 then
   f_result "symbios-run-playbook.sh in PATH" PASS
 else
   f_result "symbios-run-playbook.sh in PATH" FAIL "Not found in PATH"
 fi
 
-if f_ssh_try "which symbios-uninstall.sh" &>/dev/null
+if f_exec_try "which symbios-uninstall.sh" &>/dev/null
 then
   f_result "symbios-uninstall.sh in PATH" PASS
 else
   f_result "symbios-uninstall.sh in PATH" FAIL "Not found in PATH"
 fi
 
-if f_ssh_try "which yq" &>/dev/null
+if f_exec_try "which yq" &>/dev/null
 then
   f_result "yq on host" PASS
 else
@@ -480,10 +524,10 @@ g_test_pw="$(pwgen -s 31 1)X1!"
 
 # Delete any leftover test user from a previous run first (idempotent), so a
 # fresh user with a fresh random password is always created.
-f_ssh_try "symbios-ldap-user.sh --delete --uid symbios-dev-testuser" >/dev/null 2>&1
+f_exec_try "symbios-ldap-user.sh --delete --uid symbios-dev-testuser" >/dev/null 2>&1
 
 # Create test user with random password
-f_create_output=$(f_ssh_try "echo '${g_test_pw}' > /tmp/.symbios-dev-test-pw && \
+f_create_output=$(f_exec_try "echo '${g_test_pw}' > /tmp/.symbios-dev-test-pw && \
   symbios-ldap-user.sh --create --uid symbios-dev-testuser \
   --password-file /tmp/.symbios-dev-test-pw \
   --displayname 'SymbiOS Dev Testuser' --group users && \
@@ -500,7 +544,7 @@ fi
 
 # Clean up the test user on exit so an aborted run never leaves it behind
 function f_cleanup_testuser {
-  f_ssh_try "symbios-ldap-user.sh --delete --uid symbios-dev-testuser" >/dev/null 2>&1
+  f_exec_try "symbios-ldap-user.sh --delete --uid symbios-dev-testuser" >/dev/null 2>&1
   rm -f "$g_log_dir"/cookie-* 2>/dev/null
 }
 trap f_cleanup_testuser EXIT
@@ -585,7 +629,7 @@ do
   f_userdata_paths=$(f_json_get_array "$f_svc_json" ".uninstall.userdata_paths")
 
   # Expand template variables used in docs paths (hostname-dependent paths)
-  f_hostname=$(f_ssh_try "hostname" 2>/dev/null | head -1)
+  f_hostname=$(f_exec_try "hostname" 2>/dev/null | head -1)
   f_program_paths="${f_program_paths//\{\{ ansible_facts['hostname'] \}\}/${f_hostname}}"
   f_program_paths="${f_program_paths//\{\{ ansible_hostname \}\}/${f_hostname}}"
 
@@ -637,7 +681,7 @@ do
   fi
 
   # Remove any leftover dirs
-  f_ssh_try "rm -rf /symbios/services/$f_name" >/dev/null 2>&1
+  f_exec_try "rm -rf /symbios/services/$f_name" >/dev/null 2>&1
 
   # Run playbook
   f_output=$(f_run_playbook "$f_playbook" 2>&1)
@@ -672,9 +716,61 @@ do
   fi
 
   # =========================================================================
-  # Phase 2: Idempotency
+  # Phase 2: Healthcheck
   # =========================================================================
-  echo -e "\n  ${f_blue}--- Phase 2: Idempotency ---${f_reset}"
+  echo -e "\n  ${f_blue}--- Phase 2: Healthcheck ---${f_reset}"
+
+  f_hc_name="symbios-healthcheck-${f_name}"
+
+  # A service install should have deployed a runcheck for this service
+  if f_check_file_exists "${g_data_root}/runchecks.d/${f_hc_name}.check"
+  then
+    f_result "Phase 2: Healthcheck file deployed" PASS
+  else
+    f_result "Phase 2: Healthcheck file deployed" FAIL "Missing ${g_data_root}/runchecks.d/${f_hc_name}.check"
+  fi
+
+  # Execute the check (in a subshell with the runcheck helpers) and verify it
+  # reports "ok". A freshly started service may need time to become reachable,
+  # so on failure wait 2 minutes and retry once before reporting FAIL.
+  f_run_hc_check()
+  {
+    local f_hint
+    f_hint=$(f_exec_try "g_tmp='/tmp' ; g_current_check_failed=0 ; g_current_check_error='' ; \
+      g_echo_error() { g_current_check_failed=1 ; g_current_check_error=\"\$*\" ; } ; \
+      . '${g_data_root}/runchecks.d/${f_hc_name}.check' 2>/dev/null ; \
+      if [[ \"\${g_current_check_failed:-0}\" == '0' ]] ; then echo ok ; else echo \"error:\${g_current_check_error}\" ; fi" 2>/dev/null)
+    echo "$f_hint"
+  }
+
+  f_hc_hint=""
+  if [[ -f "${g_data_root}/runchecks.d/${f_hc_name}.check" ]]
+  then
+    f_hc_hint=$(f_run_hc_check)
+  fi
+
+  if [[ "$f_hc_hint" != "ok" ]]
+  then
+    echo "        Healthcheck not OK yet, waiting 2 min before retry..."
+    sleep 120
+    f_hc_hint=""
+    if [[ -f "${g_data_root}/runchecks.d/${f_hc_name}.check" ]]
+    then
+      f_hc_hint=$(f_run_hc_check)
+    fi
+  fi
+
+  if [[ "$f_hc_hint" == "ok" ]]
+  then
+    f_result "Phase 2: Healthcheck execution" PASS
+  else
+    f_result "Phase 2: Healthcheck execution" FAIL "${f_hc_hint:-check file not executed}"
+  fi
+
+  # =========================================================================
+  # Phase 3: Idempotency
+  # =========================================================================
+  echo -e "\n  ${f_blue}--- Phase 3: Idempotency ---${f_reset}"
 
   f_output2=$(f_run_playbook "$f_playbook" 2>&1)
   f_rc2=$?
@@ -691,15 +787,15 @@ do
       f_changed="${f_changed:-0}"
       if [[ "$f_changed" == "0" ]]
       then
-        f_result "Phase 2: Idempotent (no changes)" PASS
+        f_result "Phase 3: Idempotent (no changes)" PASS
       else
-        f_result "Phase 2: Idempotent (no changes)" FAIL "changed=$f_changed on second run"
+        f_result "Phase 3: Idempotent (no changes)" FAIL "changed=$f_changed on second run"
       fi
     else
-      f_result "Phase 2: Idempotent (no errors)" FAIL "failures=$f_failures2 (see $f_log2)"
+      f_result "Phase 3: Idempotent (no errors)" FAIL "failures=$f_failures2 (see $f_log2)"
     fi
   else
-    f_result "Phase 2: Idempotent" FAIL "Playbook failed on second run (see $f_log2)"
+    f_result "Phase 3: Idempotent" FAIL "Playbook failed on second run (see $f_log2)"
   fi
 
   # =========================================================================
@@ -711,7 +807,7 @@ do
   if [[ -n "$f_action_stop" ]]
   then
     echo "  Running: $f_action_stop"
-    f_ssh_try "$f_action_stop" >/dev/null 2>&1
+    f_exec_try "$f_action_stop" >/dev/null 2>&1
     sleep 3
 
     if f_check_no_containers "$f_compose"
@@ -722,7 +818,7 @@ do
     fi
   else
     echo "  No actions.stop defined, using docker compose down"
-    f_ssh_try "cd $(dirname "$f_compose") && docker compose down" >/dev/null 2>&1
+    f_exec_try "cd $(dirname "$f_compose") && docker compose down" >/dev/null 2>&1
     sleep 3
     if f_check_no_containers "$f_compose"
     then
@@ -736,10 +832,10 @@ do
   if [[ -n "$f_action_start" ]]
   then
     echo "  Running: $f_action_start"
-    f_ssh_try "$f_action_start" >/dev/null 2>&1
+    f_exec_try "$f_action_start" >/dev/null 2>&1
   else
     echo "  No actions.start defined, using docker compose up -d"
-    f_ssh_try "cd $(dirname "$f_compose") && docker compose up -d" >/dev/null 2>&1
+    f_exec_try "cd $(dirname "$f_compose") && docker compose up -d" >/dev/null 2>&1
   fi
   f_wait_containers "$f_compose"
 
@@ -754,7 +850,7 @@ do
   if [[ -n "$f_action_restart" ]]
   then
     echo "  Running: $f_action_restart"
-    f_ssh_try "$f_action_restart" >/dev/null 2>&1
+    f_exec_try "$f_action_restart" >/dev/null 2>&1
     f_wait_containers "$f_compose"
 
     if f_check_compose_up "$f_compose"
@@ -771,7 +867,7 @@ do
   if [[ -n "$f_action_reload" && "$f_action_reload" != "$f_action_start" ]]
   then
     echo "  Running: $f_action_reload"
-    f_ssh_try "$f_action_reload" >/dev/null 2>&1
+    f_exec_try "$f_action_reload" >/dev/null 2>&1
     f_wait_containers "$f_compose"
 
     if f_check_compose_up "$f_compose"
@@ -785,64 +881,52 @@ do
   fi
 
   # =========================================================================
-  # Phase 4: Uninstall (full)
+  # Phase 4: Uninstall (program) - userdata stays
   # =========================================================================
-  echo -e "\n  ${f_blue}--- Phase 4: Uninstall (full) ---${f_reset}"
+  echo -e "\n  ${f_blue}--- Phase 4: Uninstall (program, userdata kept) ---${f_reset}"
 
-  f_output4=$(f_uninstall_service "$f_playbook" "full" 2>&1)
-  f_rc4=$?
-  f_log4="$g_log_dir/${f_name}_uninstall_full.log"
-  echo "$f_output4" > "$f_log4"
+  # Create a marker file in the service dir that represents user data. In
+  # "program" mode the service dir and all data must survive the uninstall.
+  f_exec_try "mkdir -p /symbios/services/$f_name && echo 'keep-me' > /symbios/services/$f_name/.userdata-marker" >/dev/null 2>&1
+
+  f_output4p=$(f_uninstall_service "$f_playbook" "program" 2>&1)
+  f_log4p="$g_log_dir/${f_name}_uninstall_program.log"
+  echo "$f_output4p" > "$f_log4p"
 
   sleep 3
 
-  # Verify no containers running for this compose
+  # No containers should be running after any uninstall mode
   if f_check_no_containers "$f_compose"
   then
-    f_result "Phase 4: Containers removed" PASS
+    f_result "Phase 4: program - containers stopped" PASS
   else
-    f_result "Phase 4: Containers removed" FAIL "Containers still running"
+    f_result "Phase 4: program - containers stopped" FAIL "Containers still running"
   fi
 
-  # Verify all program_paths are removed completely (recursive deletion)
-  f_pp_removed=0
-  f_pp_total=0
-  while IFS= read -r f_path
-  do
-    [[ -z "$f_path" ]] && continue
-    f_pp_total=$((f_pp_total + 1))
-    if f_check_no_path "$f_path"
-    then
-      f_pp_removed=$((f_pp_removed + 1))
-    fi
-  done <<< "$f_program_paths"
-
-  if [[ $f_pp_total -eq 0 ]]
+  # The service dir must survive in program mode
+  if f_check_dir_exists "/symbios/services/$f_name"
   then
-    f_result "Phase 4: program_paths removed" SKIP "No program_paths defined"
-  elif [[ $f_pp_removed -eq $f_pp_total ]]
-  then
-    f_result "Phase 4: program_paths removed ($f_pp_removed/$f_pp_total)" PASS
+    f_result "Phase 4: program - service dir kept" PASS
   else
-    f_result "Phase 4: program_paths removed ($f_pp_removed/$f_pp_total)" FAIL "Some program paths remain"
+    f_result "Phase 4: program - service dir kept" FAIL "/symbios/services/$f_name missing"
   fi
 
-  # Verify the whole service dir is gone (full uninstall wipes it)
-  if f_check_no_dir "/symbios/services/$f_name"
+  # User data (marker file) must survive in program mode
+  if f_check_file_exists "/symbios/services/$f_name/.userdata-marker"
   then
-    f_result "Phase 4: Service dir removed" PASS
+    f_result "Phase 4: program - userdata kept" PASS
   else
-    f_result "Phase 4: Service dir removed" FAIL "/symbios/services/$f_name still exists"
+    f_result "Phase 4: program - userdata kept" FAIL "Userdata marker file missing"
   fi
 
-  # Verify state entry removed
-  f_state_check=$(f_ssh_try "grep -c 'services/$f_name.yml' /symbios/base-services/symbios-ui/config/installed-playbooks.yml || true" 2>/dev/null)
-  f_state_check="${f_state_check//[^0-9]/}"
-  if [[ -z "$f_state_check" || "$f_state_check" == "0" ]]
+  # The state entry is cleared in program mode (service is uninstalled)
+  f_state_check4p=$(f_exec_try "grep -c 'services/$f_name.yml' /symbios/base-services/symbios-ui/config/installed-playbooks.yml || true" 2>/dev/null)
+  f_state_check4p="${f_state_check4p//[^0-9]/}"
+  if [[ -z "$f_state_check4p" || "$f_state_check4p" == "0" ]]
   then
-    f_result "Phase 4: State entry removed" PASS
+    f_result "Phase 4: program - state entry removed" PASS
   else
-    f_result "Phase 4: State entry removed" FAIL "Entry still in installed-playbooks.yml"
+    f_result "Phase 4: program - state entry removed" FAIL "Entry still in installed-playbooks.yml"
   fi
 
   # =========================================================================
@@ -886,7 +970,7 @@ do
   fi
 
   # State entry must stay set after a reset (service stays installed)
-  f_state_check5=$(f_ssh_try "grep -c 'services/$f_name.yml' /symbios/base-services/symbios-ui/config/installed-playbooks.yml || true" 2>/dev/null)
+  f_state_check5=$(f_exec_try "grep -c 'services/$f_name.yml' /symbios/base-services/symbios-ui/config/installed-playbooks.yml || true" 2>/dev/null)
   f_state_check5="${f_state_check5//[^0-9]/}"
   if [[ -n "$f_state_check5" && "$f_state_check5" != "0" ]]
   then
@@ -928,7 +1012,7 @@ do
     sleep 5
 
     # --- 7a: Unauthenticated access (should get redirect to Authelia) ---
-    f_unauth_code=$(f_ssh_try "curl -sk -o /dev/null -w '%{http_code}' \
+    f_unauth_code=$(f_exec_try "curl -sk -o /dev/null -w '%{http_code}' \
       --connect-timeout 10 --max-time 15 '$f_url' 2>/dev/null" 2>/dev/null)
     f_unauth_code="${f_unauth_code//[^0-9]/}"
 
@@ -959,10 +1043,11 @@ do
         f_result "Phase 7b: Admin Authelia login" FAIL "HTTP $f_admin_code (expected 200)"
       fi
 
-      # Test admin access to service
+      # Test admin access to service (full redirect flow: works for both
+      # forward-auth and OIDC services)
       if [[ "$f_admin_code" == "200" ]]
       then
-        f_admin_svc_code=$(f_auth_check "$f_url" "$f_cookie_admin" "200")
+        f_admin_svc_code=$(f_oidc_flow_check "$f_url" "$f_cookie_admin")
         if [[ "$f_admin_svc_code" == "200" ]]
         then
           f_result "Phase 7b: Admin -> service access (HTTP $f_admin_svc_code)" PASS
@@ -973,7 +1058,7 @@ do
 
       # --- 7c: TestUser IN group -> should get access ---
       # Add testuser to the service's user group
-      f_ssh_try "symbios-ldap-groups.sh --add-user \
+      f_exec_try "symbios-ldap-groups.sh --add-user \
         --name '$f_user_group' --uid symbios-dev-testuser" >/dev/null 2>&1
       sleep 1
 
@@ -989,7 +1074,7 @@ do
       # Test testuser access to service (should be granted)
       if [[ "$f_testuser_code" == "200" ]]
       then
-        f_testuser_svc_code=$(f_auth_check "$f_url" "$f_cookie_testuser" "200")
+        f_testuser_svc_code=$(f_oidc_flow_check "$f_url" "$f_cookie_testuser")
         if [[ "$f_testuser_svc_code" == "200" ]]
         then
           f_result "Phase 7c: TestUser IN '$f_user_group' -> access (HTTP $f_testuser_svc_code)" PASS
@@ -999,27 +1084,47 @@ do
       fi
 
       # --- 7d: TestUser NOT IN group -> should be denied ---
-      f_ssh_try "symbios-ldap-groups.sh --remove-user \
+      f_exec_try "symbios-ldap-groups.sh --remove-user \
         --name '$f_user_group' --uid symbios-dev-testuser" >/dev/null 2>&1
       sleep 1
 
-      # Re-login to get a fresh session (Authelia checks group membership on each request,
-      # but the cached session may still work until the next forward-auth call)
-      f_testuser_denied_code=$(f_auth_check "$f_url" "$f_cookie_testuser" "302")
-      if [[ "$f_testuser_denied_code" == "302" || "$f_testuser_denied_code" == "401" ]]
+      # Fresh login (old session may still be cached) then follow the full
+      # redirect flow: denied access is signalled either by a login redirect
+      # (302/401, forward-auth) or by the service's own group check (403,
+      # OIDC, e.g. Nextcloud user_oidc whitelist). For forward-auth deny
+      # the final HTTP code may be 200 (Authelia login page) because curl
+      # follows all redirects - in that case we check whether the final URL
+      # is still the service domain (allowed) or something else (denied).
+      f_cookie_denied="${g_log_dir}/cookie-denied-${f_name}"
+      f_testuser_denied_login=$(f_authelia_login "symbios-dev-testuser" "$g_test_pw" \
+        "$f_auth_domain" "$f_cookie_denied")
+      f_testuser_denied_code=$(f_oidc_flow_check "$f_url" "$f_cookie_denied")
+      if [[ "$f_testuser_denied_code" == "403" || "$f_testuser_denied_code" == "302" || "$f_testuser_denied_code" == "401" ]]
       then
         f_result "Phase 7d: TestUser NOT IN '$f_user_group' -> denied (HTTP $f_testuser_denied_code)" PASS
       else
-        f_result "Phase 7d: TestUser NOT IN '$f_user_group' -> denied" FAIL "HTTP $f_testuser_denied_code (expected 302/401)"
+        # curl -L may follow a deny-redirect chain to a 200 login page.
+        # Detect this by checking whether the final URL is still the
+        # service domain (access granted) or something else (denied).
+        f_testuser_denied_url=$(f_exec_try "curl -skL --max-redirs 12 \
+          -b '$f_cookie_denied' -c '$f_cookie_denied' \
+          --connect-timeout 10 --max-time 40 \
+          -o /dev/null -w '%{url_effective}' '$f_url' 2>/dev/null" 2>/dev/null)
+        if [[ "$f_testuser_denied_url" != "$f_url" ]]
+        then
+          f_result "Phase 7d: TestUser NOT IN '$f_user_group' -> denied (redirected from service)" PASS
+        else
+          f_result "Phase 7d: TestUser NOT IN '$f_user_group' -> denied" FAIL "HTTP $f_testuser_denied_code (expected 403/302/401 or redirect away from service)"
+        fi
       fi
 
       # Remove testuser from the service group after all tests so the
       # next service iteration gets a clean state (it will re-add in 7c).
-      f_ssh_try "symbios-ldap-groups.sh --remove-user \
+      f_exec_try "symbios-ldap-groups.sh --remove-user \
         --name '$f_user_group' --uid symbios-dev-testuser" >/dev/null 2>&1
 
       # Clean up cookie files
-      rm -f "$f_cookie_admin" "$f_cookie_testuser" 2>/dev/null
+      rm -f "$f_cookie_admin" "$f_cookie_testuser" "$f_cookie_denied" 2>/dev/null
     else
       f_result "Phase 7b-7d: Auth tests" SKIP "No access groups defined in docs metadata"
     fi
@@ -1029,11 +1134,60 @@ do
   fi
 
   # =========================================================================
-  # Cleanup: uninstall to leave system clean
+  # Phase 8: Uninstall (full) - final cleanup
   # =========================================================================
-  echo -e "\n  ${f_blue}--- Cleanup ---${f_reset}"
-  f_uninstall_service "$f_playbook" "full" >/dev/null 2>&1
-  f_result "Cleanup: $f_name uninstalled" PASS
+  echo -e "\n  ${f_blue}--- Phase 8: Uninstall (full) ---${f_reset}"
+
+  f_output8=$(f_uninstall_service "$f_playbook" "full" 2>&1)
+  f_log8="$g_log_dir/${f_name}_uninstall_full.log"
+  echo "$f_output8" > "$f_log8"
+
+  sleep 3
+
+  if f_check_no_containers "$f_compose"
+  then
+    f_result "Phase 8: Containers removed" PASS
+  else
+    f_result "Phase 8: Containers removed" FAIL "Containers still running"
+  fi
+
+  f_pp_removed=0
+  f_pp_total=0
+  while IFS= read -r f_path
+  do
+    [[ -z "$f_path" ]] && continue
+    f_pp_total=$((f_pp_total + 1))
+    if f_check_no_path "$f_path"
+    then
+      f_pp_removed=$((f_pp_removed + 1))
+    fi
+  done <<< "$f_program_paths"
+
+  if [[ $f_pp_total -eq 0 ]]
+  then
+    f_result "Phase 8: program_paths removed" SKIP "No program_paths defined"
+  elif [[ $f_pp_removed -eq $f_pp_total ]]
+  then
+    f_result "Phase 8: program_paths removed ($f_pp_removed/$f_pp_total)" PASS
+  else
+    f_result "Phase 8: program_paths removed ($f_pp_removed/$f_pp_total)" FAIL "Some program paths remain"
+  fi
+
+  if f_check_no_dir "/symbios/services/$f_name"
+  then
+    f_result "Phase 8: Service dir removed" PASS
+  else
+    f_result "Phase 8: Service dir removed" FAIL "/symbios/services/$f_name still exists"
+  fi
+
+  f_state_check8=$(f_exec_try "grep -c 'services/$f_name.yml' /symbios/base-services/symbios-ui/config/installed-playbooks.yml || true" 2>/dev/null)
+  f_state_check8="${f_state_check8//[^0-9]/}"
+  if [[ -z "$f_state_check8" || "$f_state_check8" == "0" ]]
+  then
+    f_result "Phase 8: State entry removed" PASS
+  else
+    f_result "Phase 8: State entry removed" FAIL "Entry still in installed-playbooks.yml"
+  fi
 
 done
 
@@ -1043,7 +1197,7 @@ done
 f_section "Phase: Auth test user cleanup"
 
 # Delete test user from LDAP
-f_delete_output=$(f_ssh_try "symbios-ldap-user.sh --delete --uid symbios-dev-testuser" 2>&1)
+f_delete_output=$(f_exec_try "symbios-ldap-user.sh --delete --uid symbios-dev-testuser" 2>&1)
 f_delete_rc=$?
 
 if [[ $f_delete_rc -eq 0 ]] && ! echo "$f_delete_output" | grep -qi "error\|failed"

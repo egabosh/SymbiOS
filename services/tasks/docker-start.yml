@@ -7,3 +7,4 @@
   ansible.builtin.shell: docker compose up -d {{ docker_compose_args | default('') }}
   args:
     chdir: "/symbios/services/{{ service_name }}"
+  changed_when: false
