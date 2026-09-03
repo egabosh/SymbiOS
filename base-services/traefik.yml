@@ -253,8 +253,15 @@
                     - "fe80::/10"
                     - "fc00::/7"
                     - "::1/128"
-                  ipStrategy:
-                    ipv6Subnet: 64
+              ratelimit:
+                rateLimit:
+                  average: 10       # max 10 req/s per IP
+                  burst: 20         # max 20
+                  period: 1s
+                  sourceCriterion:
+                    ipStrategy:
+                      ipv6Subnet: 64
+
       notify: Restart traefik
 
     - name: "{{ docker_path }}/providers/symbios-services.yml Routing Configuration"
