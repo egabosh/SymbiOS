@@ -153,7 +153,7 @@
           media_retention:
             local_media_lifetime: 28d
             remote_media_lifetime: 14d
-          turn_uris: 
+          turn_uris:
             - "turns:turn.{{ base_domain }}:5349?transport=udp"
             - "turns:turn.{{ base_domain }}:5349?transport=tcp"
           turn_shared_secret: "{{turnsecret.stdout}}"
@@ -199,7 +199,8 @@
         create: yes
         block: |
           [User]
-          SystemAccount=true                              
+          SystemAccount=true
+
         backup: no
 
     - name: Create matrix User

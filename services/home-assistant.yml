@@ -449,7 +449,7 @@
       ansible.builtin.shell: docker compose up -d
       args:
         chdir: /symbios/services/home-assistant
-        creates: /symbios/services/home-assistant/config/home-assistant_v2.db
+      changed_when: false
      
     - name: Wait until home-assistant install is finished
       wait_for:

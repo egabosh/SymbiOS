@@ -64,6 +64,7 @@
 #     stop: virsh destroy openwrt; virsh undefine openwrt --nvram
 #     program_paths:
 #       - /symbios/services/openwrt-vm/
+#       - /symbios/runchecks.d/symbios-healthcheck-openwrt-vm.check
 #     ldap_groups:
 #       - openwrt-vm
 #     authelia_blocks:

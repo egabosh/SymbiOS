@@ -241,7 +241,7 @@ function f_json_get_array {
 
 function f_wait_containers {
   local f_compose_file="${1:-}"
-  local f_max_wait=120
+  local f_max_wait=180
   local f_elapsed=0
   sleep 10
   while [[ $f_elapsed -lt $f_max_wait ]]
@@ -255,7 +255,13 @@ function f_wait_containers {
       local f_up
       f_up=$(f_exec_try "docker compose -f $f_compose_file ps 2>/dev/null | grep -c ' Up ' || true" 2>/dev/null)
       f_up="${f_up//[^0-9]/}"
-      if [[ -n "$f_up" && "$f_up" -gt 0 ]]
+      # Also require healthchecks to settle: some services (e.g. paperless)
+      # report "Up (health: starting)" long before their backend accepts
+      # connections, which would cause false 502 failures in Phase 7.
+      local f_pending
+      f_pending=$(f_exec_try "docker compose -f $f_compose_file ps 2>/dev/null | grep -E ' Up .*(health: starting|unhealthy)' || true" 2>/dev/null)
+      f_pending="${f_pending//[^0-9]/}"
+      if [[ -n "$f_up" && "$f_up" -gt 0 && -z "$f_pending" ]]
       then
         return 0
       fi
@@ -710,8 +716,10 @@ do
   # Validate required fields
   if [[ -z "$f_compose" ]]
   then
-    f_result "Metadata: compose_file" FAIL "No compose_file in # docs:"
-    echo "        Skipping $f_name"
+    # Non-docker services (e.g. libvirt/KVM VMs like openwrt-vm) have no
+    # compose_file; there is nothing to test with the docker-compose phases.
+    f_result "Metadata: compose_file" SKIP "No compose_file (non-docker service, e.g. libvirt VM)"
+    echo "        Skipping $f_name (non-docker service)"
     continue
   fi
 

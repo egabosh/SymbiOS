@@ -1,0 +1,45 @@
+{# Single service tile partial. Included with: svc, grouper, tile_class, show_badges, healthcheck_status. #}
+{% load markdown_extras %}
+{% with svc_hc=svc.playbook|hc_name %}
+<div class="col-sm-6 col-lg-4 col-xl-3">
+  <a href="/services/{{ svc.playbook }}/" class="svc-base-card svc-tile {{ tile_class }}">
+    <div class="svc-tile-icon">
+      {% if tile_class == 'svc-tile-available' %}
+        <i class="bi bi-plus-circle"></i>
+      {% elif grouper == 'user-playbooks' %}
+        <i class="bi bi-journal-plus"></i>
+      {% elif grouper == 'external-services' %}
+        <i class="bi bi-hdd-network"></i>
+      {% elif grouper == 'base-services' %}
+        <i class="bi bi-gear-wide-connected"></i>
+      {% else %}
+        <i class="bi bi-box-seam"></i>
+      {% endif %}
+    </div>
+    <div class="svc-tile-body">
+      <div class="svc-tile-name">{{ svc.menu_label }}</div>
+      {% if svc.docs.short_description %}
+      <div class="svc-tile-desc">{{ svc.docs.short_description }}</div>
+      {% endif %}
+      {% with svc_url=svc|service_url %}
+      {% if svc_url %}
+      <div class="svc-tile-url">
+        <i class="bi bi-box-arrow-up-right"></i> {{ svc_url }}
+      </div>
+      {% endif %}
+      {% endwith %}
+    </div>
+    {% if show_badges %}
+    <div class="svc-tile-badges">
+      {% with hc_status=healthcheck_status|dict_get:svc_hc %}
+        {% if hc_status == "ok" %}
+          <span class="svc-tile-hc svc-hc-ok" title="Healthcheck OK"><i class="bi bi-heart-pulse"></i></span>
+        {% elif hc_status == "error" %}
+          <span class="svc-tile-hc svc-hc-error" title="Healthcheck error"><i class="bi bi-exclamation-triangle-fill"></i></span>
+        {% endif %}
+      {% endwith %}
+    </div>
+    {% endif %}
+  </a>
+</div>
+{% endwith %}

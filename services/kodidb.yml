@@ -140,7 +140,7 @@
             echo "db_user_pw=$(pwgen -s 32 1)" >env.kodidb
             . ./env.kodidb
             db_host=localhost
-            . /symbios/services/_defaults/mariadb/envroot.db
+            . {{ base_services_root }}/_defaults/mariadb/envroot.db
             
             echo "grant all privileges on *.* TO '${db_user}'@'%' identified by '${db_user_pw}';" \
              | mariadb -u root -h $db_host --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD}
@@ -232,13 +232,13 @@
               volumes:
                 - ./db-data:/var/lib/mysql
                 - /etc/localtime:/etc/localtime:ro
-                - /symbios/services/_defaults/mariadb/99-server.cnf:/etc/mysql/mariadb.conf.d/99-server.cnf:ro
+                - {{ base_services_root }}/_defaults/mariadb/99-server.cnf:/etc/mysql/mariadb.conf.d/99-server.cnf:ro
                 - ./ssl.cnf:/etc/mysql/mariadb.conf.d/99-ssl.cnf:ro
                 - ./ssl/certificate.pem:/etc/mysql/certificate.pem:ro
                 - ./ssl/key.pem:/etc/mysql/key.pem:ro
               env_file:
-                - /symbios/services/_defaults/mariadb/envroot.db
-                - /symbios/services/_defaults/mariadb/mariadb.env
+                - {{ base_services_root }}/_defaults/mariadb/envroot.db
+                - {{ base_services_root }}/_defaults/mariadb/mariadb.env
               ports:
                 - 0.0.0.0:3307:3306
 
@@ -246,7 +246,7 @@
               image: phpmyadmin:latest
               container_name: kodidb--phpmyadmin
               restart: unless-stopped
-              env_file: /symbios/services/_defaults/mariadb/env.rootphpmyadmin
+              env_file: {{ base_services_root }}/_defaults/mariadb/env.rootphpmyadmin
               environment:
                 - PMA_ARBITRARY=0
                 - PMA_HOST=kodidb
@@ -323,7 +323,7 @@
         group: root 
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          . /symbios/services/_defaults/mariadb/envroot.db
+          . {{ base_services_root }}/_defaults/mariadb/envroot.db
 
           DAYS=7
           TIMESTAMP=$(date +"%Y%m%d%H%M")

@@ -22,6 +22,7 @@ from . import views_users
 from . import views_logs
 from . import views_change_password
 from . import views_services
+from . import views_home
 from . import views_exec
 from . import views_port_forwarding
 from . import views_external
@@ -42,7 +43,7 @@ urlpatterns = [
     re_path(r'^services/(?P<playbook>.+\.yml)/access/$', views_services.services_access, name='services_access'),
     path('health/data/', views.health_data, name='health_data'),
     path('health/recheck/<str:check_name>/', views.health_recheck, name='health_recheck'),
-    path('', views.health, name='home'),
+    path('', views_home.home, name='home'),
     path('setup/', views.setup, name='setup'),
     path('settings/', views.settings, name='settings'),
     path('settings/dns/', views_settings.settings_dns, name='settings_dns'),
