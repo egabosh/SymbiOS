@@ -110,11 +110,12 @@
         chdir: /symbios/services/paperless
         creates: /symbios/services/paperless/docker-compose.env
 
-    - name: Gen OIDC client secret if not exists
-      ansible.builtin.shell: pwgen -s 64 1 | tr -d '\n' > oidc_digest
+    - name: Generate OIDC client secret for Paperless
+      ansible.builtin.shell: /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/paperless
       args:
         chdir: /symbios/services/paperless
-        creates: /symbios/services/paperless/oidc_digest
+      changed_when: false
+      failed_when: false
 
     - name: /symbios/services/paperless/docker-compose.yml Container Configuration
       blockinfile:
@@ -125,9 +126,8 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-        
           name: ""
-
+        
           services:
             paperless:
               image: ghcr.io/paperless-ngx/paperless-ngx:latest
@@ -156,7 +156,7 @@
                 - PAPERLESS_DEBUG=false
                 - PAPERLESS_OIDC_ENABLED=true
                 - PAPERLESS_OIDC_CLIENT_ID=paperless
-                - PAPERLESS_OIDC_CLIENT_SECRET={{ lookup('file', '/symbios/services/paperless/oidc_digest') }}
+                - PAPERLESS_OIDC_CLIENT_SECRET={{ lookup('file', '/symbios/services/paperless/oidc_password') }}
                 - PAPERLESS_OIDC_PROVIDER_URL=https://auth.{{ base_domain }}
                 - PAPERLESS_OIDC_REDIRECT_URI=https://{{ service_domain }}/oidc/callback/
                 - PAPERLESS_OIDC_USERNAME_CLAIM=preferred_username
@@ -192,6 +192,7 @@
       args:
         chdir: /symbios/services/paperless
         creates: /symbios/services/paperless/data/db.sqlite3
+      changed_when: false
 
     - name: Create paperless User
       ansible.builtin.user:
@@ -261,11 +262,6 @@
     - name: Ensure LDAP groups for OIDC login (paperless-users / paperless-admins)
       include_tasks: tasks/oidc-groups.yml
 
-    - name: Generate OIDC client secret for Paperless
-      ansible.builtin.shell: /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/paperless
-      changed_when: false
-      failed_when: false
-
     - name: Write OIDC config in authelias configuration.yml for paperless
       include_tasks: tasks/authelia-oidc.yml
       vars:
@@ -276,6 +272,7 @@
     - name: Write Authelia access_control for paperless group restriction
       include_tasks: tasks/authelia-acl.yml
       vars:
+        authelia_policy: "one_factor"
         authelia_subjects:
           - "group:paperless-users"
           - "group:paperless-admins"
@@ -300,9 +297,10 @@
         chdir: /symbios/services/paperless
 
     - name: Restart samba
-      service:
+      ansible.builtin.service:
         name: samba-{{ ansible_facts['hostname'] }}
         state: restarted
+      failed_when: false
 
     - name: Restart authelia
       ansible.builtin.shell: docker compose restart

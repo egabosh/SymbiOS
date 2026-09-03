@@ -52,6 +52,9 @@
 ---
 - name: sftp-share
   hosts: all
+  vars:
+    service_name: sftp-share
+    service_domain: "{{ service_name }}.{{ base_domain }}"
   tasks:
 
   - name: Allow all access to tcp port 28
@@ -249,12 +252,15 @@
 
   - name: Deploy healthcheck
     include_tasks: tasks/runcheck-docker.yml
+    vars:
+      service_name: sftp-share
 
   
   - name: Ensure sftp-share is running
     ansible.builtin.shell: docker compose up -d
     args:
       chdir: /symbios/services/sftp-share
+    changed_when: false
 
   - name: Register playbook as installed
     include_tasks: tasks/state-register.yml

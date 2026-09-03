@@ -264,6 +264,13 @@
           no-multicast-peers
         backup: yes
 
+    - name: Read Redis password for compose
+      ansible.builtin.shell: grep '^REDIS_PASSWORD=' env | cut -d= -f2-
+      args:
+        chdir: /symbios/services/nextcloud
+      register: redis_pw
+      changed_when: false
+
     - name: /symbios/services/nextcloud/docker-compose.yml Container Configuration
       blockinfile:
         path: /symbios/services/nextcloud/docker-compose.yml
@@ -298,7 +305,7 @@
                 - NEXTCLOUD_TRUSTED_DOMAINS=nextcloud.{{ base_domain }}
                 - TRUSTED_PROXIES={{ trusted_proxies_cidr }}
                 - REDIS_HOST=nextcloud-redis
-                - REDIS_HOST_PASSWORD=$${REDIS_PASSWORD}
+                - REDIS_HOST_PASSWORD={{ redis_pw.stdout }}
                 - SMTP_HOST=mail.{{ base_domain }}
                 - SMTP_PORT=25
                 - MAIL_FROM_ADDRESS=nextcloud
@@ -334,7 +341,7 @@
               image: redis:latest
               container_name: nextcloud-redis
               restart: unless-stopped
-              command: redis-server --requirepass $${REDIS_PASSWORD}
+              command: redis-server --requirepass {{ redis_pw.stdout }}
               env_file: env
               networks:
                 - nextcloud
@@ -414,6 +421,7 @@
         fi
       args:
         chdir: /symbios/services/nextcloud
+      changed_when: false
 
     - name: /symbios/base-services/traefik/providers/nextcloud.yml Routing Configuration
       blockinfile:
@@ -503,7 +511,7 @@
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /symbios/services/nextcloud
-        creates: /symbios/services/nextcloud/nextcloud-data/config/config.php
+      changed_when: false
 
     - name: Wait until nextcloud install is finished
       wait_for:

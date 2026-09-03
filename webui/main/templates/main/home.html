@@ -1,0 +1,104 @@
+{% extends "main/base.html" %}
+{% load markdown_extras %}
+{% block sidebar %}{% endblock %}
+{% block sidebar_col_class %}d-none{% endblock %}
+{% block content %}
+
+{% if setup_incomplete %}
+<div class="alert alert-warning d-flex align-items-center gap-3 mb-3">
+  <i class="bi bi-magic fs-4"></i>
+  <div class="flex-grow-1">
+    <strong>Your server is not fully set up yet.</strong>
+    <span class="small text-muted">{{ setup_pending }} step{{ setup_pending|pluralize }} remaining &mdash; reachable in a few minutes.</span>
+  </div>
+  <a href="/setup/" class="btn btn-warning btn-sm">
+    <i class="bi bi-arrow-right-circle"></i> Set up now
+  </a>
+</div>
+{% endif %}
+
+{# --- Health Status --- #}
+{% if failing_checks %}
+<div class="mb-4">
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <i class="bi bi-exclamation-triangle-fill text-danger"></i>
+    <h5 class="mb-0">Health Warnings</h5>
+    <a href="/health/" class="ms-auto small text-muted text-decoration-none">View all <i class="bi bi-arrow-right"></i></a>
+  </div>
+  <div class="row g-2">
+    {% for check in failing_checks %}
+    <div class="col-sm-6 col-lg-4">
+      <div class="card svc-base-card" style="border-left: 3px solid {% if check.status == 'error' %}var(--bs-danger){% else %}var(--bs-warning){% endif %};">
+        <div class="card-body py-2 px-3">
+          <div class="d-flex align-items-center gap-2">
+            {% if check.status == 'error' %}
+              <i class="bi bi-x-circle-fill text-danger"></i>
+            {% else %}
+              <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+            {% endif %}
+            <div class="flex-grow-1 min-width-0">
+              <div class="fw-semibold" style="font-size:0.88rem;">{{ check.title }}</div>
+              {% if check.message %}
+              <div class="text-danger" style="font-size:0.76rem;">{{ check.message }}</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<div class="mb-4">
+  <div class="d-flex align-items-center gap-2 py-2 px-3 svc-base-card" style="border-left: 3px solid var(--bs-success);">
+    <i class="bi bi-heart-pulse text-success"></i>
+    <span class="fw-semibold">System health OK</span>
+    <a href="/health/" class="ms-auto small text-muted text-decoration-none">Details <i class="bi bi-arrow-right"></i></a>
+  </div>
+</div>
+{% endif %}
+
+{# --- Installed Services --- #}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h2 class="mb-0">Services</h2>
+  {% if available_services %}
+  <button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="collapse"
+          data-bs-target="#add-service-tiles" aria-expanded="false" aria-controls="add-service-tiles">
+    <i class="bi bi-plus-lg"></i> Add Service
+  </button>
+  {% endif %}
+</div>
+
+{# --- Available services (collapsed by default) --- #}
+{% if available_services %}
+<div class="collapse mb-4" id="add-service-tiles">
+  <div class="svc-tiles-section">
+    <h6 class="svc-tiles-section-title text-muted mb-2">Available Services</h6>
+    <div class="row g-3">
+      {% regroup available_services by group as avail_groups %}
+      {% for g in avail_groups %}
+        {% for svc in g.list %}
+        {% include "main/svc_tile.html" with svc=svc grouper=g.grouper tile_class="svc-tile-available" show_badges=False healthcheck_status=healthcheck_status %}
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# --- Installed services tiles --- #}
+<div class="row g-3 mb-4">
+  {% regroup installed_services by group as installed_groups %}
+  {% for g in installed_groups %}
+    {% for svc in g.list %}
+      {% include "main/svc_tile.html" with svc=svc grouper=g.grouper tile_class="" show_badges=True healthcheck_status=healthcheck_status %}
+    {% endfor %}
+  {% empty %}
+    <div class="col-12">
+      <p class="text-muted">No services installed yet.</p>
+    </div>
+  {% endfor %}
+</div>
+
+{% endblock %}

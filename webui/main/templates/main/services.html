@@ -22,19 +22,7 @@
       {% regroup sidebar_available by group as avail_groups %}
       {% for g in avail_groups %}
         {% for svc in g.list %}
-        <div class="col-sm-6 col-lg-4 col-xl-3">
-          <a href="/services/{{ svc.playbook }}/" class="svc-base-card svc-tile svc-tile-available">
-            <div class="svc-tile-icon">
-              <i class="bi bi-plus-circle"></i>
-            </div>
-            <div class="svc-tile-body">
-              <div class="svc-tile-name">{{ svc.menu_label }}</div>
-              {% if svc.docs.short_description %}
-              <div class="svc-tile-desc">{{ svc.docs.short_description }}</div>
-              {% endif %}
-            </div>
-          </a>
-        </div>
+          {% include "main/svc_tile.html" with svc=svc grouper=g.grouper tile_class="svc-tile-available" show_badges=False healthcheck_status=healthcheck_status %}
         {% endfor %}
       {% endfor %}
     </div>
@@ -48,36 +36,7 @@
   {% for g in installed_groups %}
     {% if g.grouper != 'base-services' %}
       {% for svc in g.list %}
-        {% with svc_hc=svc.playbook|hc_name %}
-        <div class="col-sm-6 col-lg-4 col-xl-3">
-          <a href="/services/{{ svc.playbook }}/" class="svc-base-card svc-tile">
-            <div class="svc-tile-icon">
-              {% if g.grouper == 'user-playbooks' %}
-                <i class="bi bi-journal-plus"></i>
-              {% elif g.grouper == 'external-services' %}
-                <i class="bi bi-hdd-network"></i>
-              {% else %}
-                <i class="bi bi-box-seam"></i>
-              {% endif %}
-            </div>
-            <div class="svc-tile-body">
-              <div class="svc-tile-name">{{ svc.menu_label }}</div>
-              {% if svc.docs.short_description %}
-              <div class="svc-tile-desc">{{ svc.docs.short_description }}</div>
-              {% endif %}
-            </div>
-            <div class="svc-tile-badges">
-              {% with hc_status=healthcheck_status|dict_get:svc_hc %}
-                {% if hc_status == "ok" %}
-                  <span class="svc-tile-hc svc-hc-ok" title="Healthcheck OK"><i class="bi bi-heart-pulse"></i></span>
-                {% elif hc_status == "error" %}
-                  <span class="svc-tile-hc svc-hc-error" title="Healthcheck error"><i class="bi bi-exclamation-triangle-fill"></i></span>
-                {% endif %}
-              {% endwith %}
-            </div>
-          </a>
-        </div>
-        {% endwith %}
+        {% include "main/svc_tile.html" with svc=svc grouper=g.grouper tile_class="" show_badges=True healthcheck_status=healthcheck_status %}
       {% endfor %}
     {% endif %}
   {% empty %}
@@ -99,30 +58,7 @@
     <div class="collapse mt-2" id="base-services-tiles">
       <div class="row g-3">
         {% for svc in g.list %}
-          {% with svc_hc=svc.playbook|hc_name %}
-          <div class="col-sm-6 col-lg-4 col-xl-3">
-            <a href="/services/{{ svc.playbook }}/" class="svc-base-card svc-tile svc-tile-base">
-              <div class="svc-tile-icon">
-                <i class="bi bi-gear-wide-connected"></i>
-              </div>
-              <div class="svc-tile-body">
-                <div class="svc-tile-name">{{ svc.menu_label }}</div>
-                {% if svc.docs.short_description %}
-                <div class="svc-tile-desc">{{ svc.docs.short_description }}</div>
-                {% endif %}
-              </div>
-              <div class="svc-tile-badges">
-                {% with hc_status=healthcheck_status|dict_get:svc_hc %}
-                  {% if hc_status == "ok" %}
-                    <span class="svc-tile-hc svc-hc-ok" title="Healthcheck OK"><i class="bi bi-heart-pulse"></i></span>
-                  {% elif hc_status == "error" %}
-                    <span class="svc-tile-hc svc-hc-error" title="Healthcheck error"><i class="bi bi-exclamation-triangle-fill"></i></span>
-                  {% endif %}
-                {% endwith %}
-              </div>
-            </a>
-          </div>
-          {% endwith %}
+          {% include "main/svc_tile.html" with svc=svc grouper="base-services" tile_class="svc-tile-base" show_badges=True healthcheck_status=healthcheck_status %}
         {% endfor %}
       </div>
     </div>
