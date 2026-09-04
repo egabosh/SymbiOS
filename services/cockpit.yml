@@ -1,0 +1,266 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Cockpit is a host-installed (systemd, NOT containerized) service. It is
+# exposed via Traefik on port 9090, bound to the base-services Docker bridge
+# only. All authentication happens through Authelia (OIDC / forward-auth):
+# only LDAP users in the cockpit-users / cockpit-admins groups reach the
+# web route. Cockpit itself never sees LDAP users - it uses a single fixed
+# local 'cockpit' system user whose credentials Traefik injects as a Basic
+# auth header after the Authelia gate. No PAM/LDAP/NSS host accounts are
+# created; user administration stays in the SymbiOS WebUI.
+#
+# docs:
+#   name: Cockpit
+#   short_description: Cockpit web console for host and RAID/storage management
+#   description: 'Deploys the Cockpit web console on the host (systemd service on port 9090, bound to the Traefik bridge network). Provides the Storaged, Machines and NetworkManager modules. Login is exclusively via Authelia (LDAP groups cockpit-users / cockpit-admins); a single fixed local cockpit system user backs the backend session, no LDAP host accounts are created.'
+#   url: "https://cockpit.{{ base_domain }}"
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   access:
+#     admin_group: cockpit-admins
+#     user_group: cockpit-users
+#   service_control:
+#     services:
+#     - name: cockpit
+#       type: systemd
+#       unit: cockpit.socket
+#       status: systemctl is-active cockpit.socket
+#     logs:
+#     - name: cockpit
+#       command: journalctl -fu cockpit.service -n 1000
+#   uninstall:
+#     stop: systemctl stop cockpit.socket
+#     program_paths:
+#       - /symbios/base-services/traefik/providers/cockpit.yml
+#       - /symbios/runchecks.d/symbios-healthcheck-cockpit.check
+#       - /etc/cockpit/cockpit.conf
+#       - /etc/cockpit/.symbios-basic-auth
+#       - /etc/systemd/system/cockpit.socket.d/
+#     ldap_groups:
+#       - cockpit-users
+#       - cockpit-admins
+#     authelia_blocks:
+#       - "cockpit ACCESS CONTROL"
+#     commands:
+#       - systemctl disable cockpit.socket
+#       - deluser cockpit
+#   actions:
+#     start: systemctl start cockpit.socket
+#     stop: systemctl stop cockpit.socket
+#     restart: systemctl restart cockpit.socket
+#
+---
+- name: Cockpit web console deployment
+  hosts: all
+  vars:
+    service_name: cockpit
+    service_domain: "{{ service_name }}.{{ base_domain }}"
+  tasks:
+
+    # Install Cockpit management console on the host
+    - name: Install Cockpit packages
+      ansible.builtin.apt:
+        name:
+          - cockpit
+          - cockpit-storaged
+          - cockpit-machines
+          - cockpit-networkmanager
+        state: present
+        update_cache: yes
+        cache_valid_time: 3600
+        install_recommends: no
+
+    # Create the service directory under /symbios/services (WebUI convention)
+    - name: Create /symbios/services/cockpit dir
+      ansible.builtin.file:
+        path: /symbios/services/cockpit
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    # Generate a strong fixed password for the backend cockpit system user.
+    # The secret file is written once and reused on every reapply so the
+    # Traefik Basic auth header stays stable.
+    - name: Generate cockpit basic-auth secret (once)
+      ansible.builtin.shell: |
+        f_pass=$(openssl rand -base64 30 | tr -d '\n')
+        printf 'cockpit:%s' "$f_pass" > /etc/cockpit/.symbios-basic-auth
+        chmod 0600 /etc/cockpit/.symbios-basic-auth
+        chown root:root /etc/cockpit/.symbios-basic-auth
+      args:
+        creates: /etc/cockpit/.symbios-basic-auth
+      changed_when: false
+
+    # Split the persisted secret into username and password
+    - name: Split basic-auth secret into user and password
+      ansible.builtin.set_fact:
+        cockpit_auth_user: "{{ lookup('file', '/etc/cockpit/.symbios-basic-auth').split(':')[0] }}"
+        cockpit_auth_pass: "{{ lookup('file', '/etc/cockpit/.symbios-basic-auth').split(':', 1)[1] }}"
+
+    # Base64 header value for the Traefik customRequestHeaders middleware
+    - name: Compute cockpit Basic auth header
+      ansible.builtin.shell: printf '%s' "$(cat /etc/cockpit/.symbios-basic-auth)" | base64 -w0
+      register: cockpit_basic_b64
+      changed_when: false
+
+    # Fixed local cockpit session user (shell required by cockpit-session).
+    # LDAP users do NOT get host accounts - they only authenticate via Authelia.
+    - name: Ensure fixed local cockpit session user
+      ansible.builtin.user:
+        name: "{{ cockpit_auth_user }}"
+        shell: /bin/bash
+        home: /var/lib/cockpit
+        create_home: true
+        groups: sudo
+        append: true
+        password: "{{ cockpit_auth_pass | password_hash('sha512') }}"
+        update_password: on_create
+
+    # TLS is terminated by Traefik; cockpit-tls serves plaintext on the bridge.
+    # ProtocolHeader makes cockpit generate https URLs from the proxy header.
+    - name: /etc/cockpit/cockpit.conf WebService configuration
+      ansible.builtin.blockinfile:
+        path: /etc/cockpit/cockpit.conf
+        create: yes
+        mode: '0644'
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          [WebService]
+          AllowUnencrypted = true
+          ProtocolHeader = X-Forwarded-Proto
+          LoginTo = false
+        backup: yes
+      notify: Restart cockpit
+
+    # Bind cockpit.socket to the base-services Docker bridge only (Traefik).
+    # The Address setting in cockpit.conf is ignored for socket activation,
+    # so the ListenStream override must go into a systemd drop-in.
+    - name: Create cockpit.socket drop-in dir
+      ansible.builtin.file:
+        path: /etc/systemd/system/cockpit.socket.d
+        state: directory
+        mode: '0755'
+
+    - name: Bind cockpit.socket to traefik network gateway
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/cockpit.socket.d/listen.conf
+        mode: '0644'
+        content: |
+          [Socket]
+          ListenStream=
+          ListenStream={{ traefik_network_gateway }}:9090
+        backup: yes
+      notify: Restart cockpit
+
+    # Enable and start the socket (daemon-reload picks up the new ListenStream)
+    - name: Ensure cockpit.socket is enabled and started
+      ansible.builtin.systemd:
+        name: cockpit.socket
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # Traefik routing: Authelia forward-auth gates LDAP groups, then the
+    # Basic auth header for the fixed cockpit user is injected for the backend.
+    # X-Forwarded-Proto is pinned to https so cockpit's WebSocket Origin check
+    # (scheme must match) accepts the browser handshake behind the TLS proxy.
+    - name: /symbios/base-services/traefik/providers/cockpit.yml Traefik Routing Configuration
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/traefik/providers/cockpit.yml
+        create: yes
+        mode: '0444'
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            middlewares:
+              cockpit-basic:
+                headers:
+                  customRequestHeaders:
+                    Authorization: "Basic {{ cockpit_basic_b64.stdout }}"
+                    X-Forwarded-Proto: https
+            routers:
+              cockpit:
+                rule: "Host(`cockpit.{{ base_domain }}`)"
+                service: cockpit
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+                  - "authelia@file"
+                  - "cockpit-basic@file"
+            services:
+              cockpit:
+                loadBalancer:
+                  servers:
+                    - url: "http://{{ traefik_network_gateway }}:9090"
+        backup: yes
+
+ ##################
+ #### Authelia ####
+ ##################
+
+    # Create cockpit-users / cockpit-admins LDAP groups for web login
+    - name: Ensure LDAP groups for Cockpit login (cockpit-users / cockpit-admins)
+      include_tasks: tasks/oidc-groups.yml
+
+    # Restrict the cockpit web route to either LDAP group via Authelia.
+    # NOTE: subject must be a FLAT list - Authelia treats nested lists as
+    # AND (user must be in all groups), so a user only in <svc>-admins
+    # would be denied (redirect loop). Flat list = OR.
+    # NOTE: policy must be one_factor when 2FA is disabled (totp/webauthn
+    # off, twofa_enabled=false) - a two_factor rule can never be satisfied
+    # and produces the same redirect loop for every authentified user.
+    - name: Write Authelia access_control for cockpit group restriction
+      include_tasks: tasks/authelia-acl.yml
+      vars:
+        authelia_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
+        authelia_subjects:
+          - "group:cockpit-users"
+          - "group:cockpit-admins"
+
+    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
+    - name: Deploy healthcheck
+      include_tasks: tasks/runcheck.yml
+
+    # Register playbook as installed
+    - name: Register playbook as installed
+      include_tasks: tasks/state-register.yml
+
+  handlers:
+
+    - name: Restart cockpit
+      ansible.builtin.shell: systemctl daemon-reload && systemctl restart cockpit.socket
+
+    - name: Restart authelia
+      ansible.builtin.shell: docker compose restart
+      args:
+        chdir: /symbios/base-services/authelia
