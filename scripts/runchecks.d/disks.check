@@ -1,39 +1,371 @@
 CHECK_CATEGORY="system"
 CHECK_TITLE="Disk Health"
-CHECK_DESC="Checks hard drives and SSDs for errors and overheating."
-CHECK_DETAIL="Scans /dev/nvme? and /dev/sd? block devices.|Runs smartctl -H for SMART health status.|Checks disk temperature via smartctl -x (warns above 55C).|Skips suspended disks (unchanged IO stats)|and USB disks with unsupported SMART."
+CHECK_DESC="Checks all hard drives, SSDs and NVMe devices for SMART errors, temperature and wear - plus kernel-reported disk and filesystem errors."
+CHECK_DETAIL="Scans all block devices and queries SMART via smartctl.|Auto-detects SATA, SATA-over-USB (-d sat with fallback types), NVMe,|SCSI/SAS drives and reports model/transport per device.|Alerts on failed SMART health, USB bridge and CRC problems, ATA error-log|growth and failed or stale self-test results.|Counter changes are trend-checked against a baseline (only increases alert),|so long-known problem disks stay silent unless they get worse.|Acknowledged devices can be quieted via config/runchecks-snooze.conf until a date.|Also: SSD life, high temperatures, excessive spin-up/load cycles,|filesystems force-mounted read-only, btrfs/mdadm state (see RAID check)|and new kernel-log filesystem and disk I/O errors."
 
-# Check each block device for SMART health and temperature
-for g_disk in $(find /dev/ \( -name "nvme?" -o -name "sd?" \) \( -type b -o -type c \))
-do
-  # Determine if the disk is active (not suspended) by comparing IO stats
-  g_dev=$(basename $g_disk)
-  [[ -f /tmp/${g_dev}-stat ]] || cat /sys/block/${g_dev}/stat | perl -pe 's/ +/ /g' | cut -d" " -f1,2,3,4,5,6,7,8 > /tmp/${g_dev}-stat
-  cat /sys/block/${g_dev}/stat | perl -pe 's/ +/ /g' | cut -d" " -f1,2,3,4,5,6,7,8 > /tmp/${g_dev}-stat-now
-  # If stats are unchanged, disk might be suspended - skip SMART checks
-  if diff /tmp/${g_dev}-stat-now /tmp/${g_dev}-stat >/dev/null 2>&1
+# Persistent per-check state (config dir on SymbiOS host, /tmp elsewhere)
+if [[ -n "${g_config_dir:-}" && -d "${g_config_dir}" ]]
+then
+  g_runcheck_state="${g_config_dir}/runchecks"
+else
+  g_runcheck_state="${g_tmp}"
+fi
+mkdir -p "$g_runcheck_state"
+
+# ---- Snooze / acknowledgement (D) ----
+# Optional file ${g_config_dir}/runchecks-snooze.conf with one line per device:
+#   /dev/sdb 2026-12-31 known-dying WD Red (reason is informational)
+# A device whose expiry date is still in the future is quiet for persistent
+# alerts. Trend detection still runs, so it keeps alerting when counters grow.
+declare -A g_snooze_until=()
+if [[ -n "${g_config_dir:-}" && -r "${g_config_dir}/runchecks-snooze.conf" ]]
+then
+  while read -r g_sdev g_suntil g_srest
+  do
+    [[ -n "$g_sdev" ]] || continue
+    [[ "$g_sdev" == \#* ]] && continue
+    g_snooze_until["$g_sdev"]="$g_suntil"
+  done < "${g_config_dir}/runchecks-snooze.conf"
+fi
+
+function f_disk_alert
+{
+  # Persistent (absolute) alert - suppressed for acknowledged devices.
+  local f_msg="$*"
+  if [[ "${g_dev_snoozed:-0}" -eq 1 ]]
   then
-    cat /tmp/${g_dev}-stat-now >/tmp/${g_dev}-stat
-    # Run SMART health check on the disk
-    g_opt=""
-    g_is_usb=false
-    udevadm info --query=all -n $g_disk 2>/dev/null | grep -q usb- && g_opt="-d sat" && g_is_usb=true
-    g_smart=$(smartctl -H $g_opt $g_disk 2>&1)
-    if echo "$g_smart" | grep -E -iq "SMART overall-health self-assessment test result: PASSED|SMART Health Status: OK"
+    return 0
+  fi
+  g_echo_error "$f_msg"
+}
+
+# Kernel-reported disk and filesystem problems (dmesg). SMART cannot see
+# transient I/O errors, filesystem errors or controller failures - the kernel
+# reports them. Only messages that appeared since the previous check run are
+# evaluated, so a clean system does not keep re-alerting on old boot messages.
+if command -v dmesg >/dev/null 2>&1
+then
+  g_dmesg_now="${g_runcheck_state}/dmesg-now"
+  g_dmesg_prev="${g_runcheck_state}/dmesg-prev"
+  dmesg -k 2>/dev/null | sort > "$g_dmesg_now"
+  if [[ -f "$g_dmesg_prev" ]]
+  then
+    g_dmesg_new=$(comm -13 "$g_dmesg_prev" "$g_dmesg_now" 2>/dev/null)
+  else
+    g_dmesg_new=$(cat "$g_dmesg_now")
+  fi
+  mv -f "$g_dmesg_now" "$g_dmesg_prev"
+
+  # Kernel log patterns for disk and filesystem problems (C adds the read-only
+  # emergency remount markers to the plain filesystem-error patterns)
+  g_dmesg_pat='I/O error|Buffer I/O error|blk_update_request|EXT[234]-fs error|'
+  g_dmesg_pat+='XFS.*(error|corrupt)|JBD2.*error|BTRFS (error|critical|corruption)|'
+  g_dmesg_pat+='ata[0-9.]+:.*(exception Emask|failed command)|Sense Key : (Medium Error|Hardware Error)|'
+  g_dmesg_pat+='FAILED Result|nvme[0-9].* (timeout|controller is down|aborting)|'
+  g_dmesg_pat+='mmc[0-9]+:.*(error|timeout)|mmcblk[0-9]+:.*(error|timeout)|'
+  g_dmesg_pat+='Remounting filesystem read-only|previous I/O error detected|re-mounted\. Opts'
+  g_dmesg_errs=$(echo "$g_dmesg_new" | grep -E -i "$g_dmesg_pat")
+  if [[ -n "$g_dmesg_errs" ]]
+  then
+    g_dmesg_cnt=$(echo "$g_dmesg_errs" | wc -l)
+    g_dmesg_err=$(head -1 <<< "$g_dmesg_errs" | sed 's/^[[:space:]]*\[[0-9.]*\] //')
+    g_echo_error "Kernel log reports ${g_dmesg_cnt} disk/filesystem error(s), e.g.: ${g_dmesg_err}"
+  fi
+fi
+
+# Filesystems that were force-remounted read-only after I/O errors (C).
+# Fire only when the mount is NOT explicitly ro in /etc/fstab.
+if command -v findmnt >/dev/null 2>&1
+then
+  while read -r g_fs_mnt g_fs_type
+  do
+    case "$g_fs_type" in
+      ext2|ext3|ext4|btrfs|xfs|f2fs|nilfs2|jfs|reiserfs|ocfs2)
+        g_fs_opts=$(findmnt -n -o OPTIONS "$g_fs_mnt" 2>/dev/null)
+        # Match the exact option token "ro" (not substrings like remount-ro)
+        if echo "$g_fs_opts" | tr ',' '\n' | grep -qx 'ro'
+        then
+          if ! awk -v m="$g_fs_mnt" '$2 == m { print $4 }' /etc/fstab 2>/dev/null | tr ',' '\n' | grep -qx 'ro'
+          then
+            g_echo_error "Filesystem $g_fs_mnt ($g_fs_type) is mounted read-only - possible emergency remount after errors"
+          fi
+        fi
+        ;;
+    esac
+  done < <(awk '{print $2, $3}' /proc/mounts 2>/dev/null)
+fi
+
+# Without smartctl there is nothing more to check. Use return (not exit) so
+# the check can never terminate the sourcing runchecks daemon.
+command -v smartctl >/dev/null 2>&1 || return 0
+
+# Collect the ATA attribute table as pipe-separated records.
+# A|<id>|<name>|<value>|<worst>|<raw> for monitored attributes and
+# F|<id>|<name>|<when-failed> for any attribute that has started failing.
+f_get_ata_attributes()
+{
+  awk '
+    /^ *[0-9]+ [A-Za-z]/ {
+      id=$1; name=$2; value=$4; when=$9; raw=$10
+      sub(/[^0-9].*/, "", raw)
+      if (id ~ /^(4|5|9|10|12|177|192|193|194|196|197|198|199|231|232|233|248)$/)
+        print "A|" id "|" name "|" value "|" $5 "|" raw
+      if (when != "-" && when != "")
+        print "F|" id "|" name "|" when
+    }
+  ' "$1"
+}
+
+# Enumerate all whole block devices dynamically from /sys/block
+for g_name in $(ls /sys/block | sort)
+do
+  # Skip virtual and non-SMART capable block device classes
+  case "$g_name" in
+    loop*|ram*|dm-*|md*|zram*|sr*|scd*|nbd*|rbd*)
+      continue
+      ;;
+  esac
+  g_dev="/dev/${g_name}"
+  [[ -e "$g_dev" ]] || continue
+
+  # Remember devices that do not support SMART so they are not probed again
+  [[ -e "${g_runcheck_state}/smart-unsupported-${g_name}" ]] && continue
+
+  # Device model + transport for readable alert messages (E)
+  g_dev_model=$(sed 's/ *$//' "/sys/block/${g_name}/device/model" 2>/dev/null)
+  [[ -z "$g_dev_model" ]] && g_dev_model=$(sed 's/ *$//' "/sys/block/${g_name}/device/name" 2>/dev/null)
+  g_dev_trans=""
+  for g_t in usb nvme mmc ata
+  do
+    if readlink -f "/sys/block/${g_name}" | grep -q "/${g_t}"
     then
-      true
-    elif echo "$g_smart" | grep -E -iq "Read Device Identity failed: scsi error no medium present|USB|unsupported|Device or resource busy"
-    then
-      true
-    elif [[ "$g_is_usb" == true ]]
-    then
-      true
-    else
-      g_echo_error "SMART of $g_disk unhealthy: smartctl -H $g_opt $g_disk $g_smart"
+      g_dev_trans="${g_t^^}"
+      break
     fi
-    # Check disk temperature
-    g_temperature=$(smartctl -x $g_opt $g_disk | perl -pe 's/ +/ /g; s/^ //' | grep -E "^194 Temperature_Celsius " | cut -d" " -f 8)
-    [[ -z "$g_temperature" ]] && continue
-    [[ $g_temperature -gt 55 ]] && g_echo_error "SMART temperature of disk $g_disk high ($g_temperature Celsius)"
+  done
+  g_dev_label="$g_dev"
+  [[ -n "$g_dev_model" ]] && g_dev_label="$g_dev [${g_dev_trans:+${g_dev_trans} }${g_dev_model}]"
+
+  # Snooze flag for this device (D)
+  g_dev_snoozed=0
+  if [[ -n "${g_snooze_until[$g_dev]:-}" ]]
+  then
+    [[ "${g_snooze_until[$g_dev]}" > "$(date -u +%Y-%m-%d)" ]] && g_dev_snoozed=1
+  fi
+
+  # Skip idle disks: unchanged I/O statistics means the disk is spun down or
+  # suspended. Run SMART on first sight and whenever the disk is active.
+  g_statfile="${g_runcheck_state}/diskstat-${g_name}"
+  if [[ -f "$g_statfile" ]]
+  then
+    awk '{print $1,$2,$3,$4,$5,$6,$7,$8}' "/sys/block/${g_name}/stat" > "${g_runcheck_state}/diskstat-${g_name}-now"
+    if diff -q "$g_statfile" "${g_runcheck_state}/diskstat-${g_name}-now" >/dev/null 2>&1
+    then
+      continue
+    fi
+    mv -f "${g_runcheck_state}/diskstat-${g_name}-now" "$g_statfile"
+  else
+    awk '{print $1,$2,$3,$4,$5,$6,$7,$8}' "/sys/block/${g_name}/stat" > "$g_statfile"
+  fi
+
+  # USB-connected bridges need forced SCSI/ATA translation (SAT). Try a chain
+  # of device types because many bridges only answer to one of them (E).
+  if [[ "$g_name" != nvme* && "$g_name" != mmcblk* ]]
+  then
+    if readlink -f "/sys/block/${g_name}" | grep -q "/usb"
+    then
+      g_device_types=("sat" "sat,12" "usbjmicron" "usbprolific" "auto")
+    else
+      g_device_types=("")
+    fi
+  else
+    g_device_types=("")
+  fi
+
+  # Query SMART with the first device type that yields usable output
+  g_smart=""
+  for g_dtype in "${g_device_types[@]}"
+  do
+    if [[ -n "$g_dtype" ]]
+    then
+      smartctl -a -d "$g_dtype" "$g_dev" > "${g_runcheck_state}/smart-${g_name}.txt" 2>&1
+    else
+      smartctl -a "$g_dev" > "${g_runcheck_state}/smart-${g_name}.txt" 2>&1
+    fi
+    if grep -E -qi "lacks SMART capability|SMART support is: *Unavailable|Read Device Identity failed|no medium present|device does not support SMART|Mandatory SMART command failed: exiting|Device or resource busy|unsupported field in scsi command|Inappropriate ioctl" "${g_runcheck_state}/smart-${g_name}.txt"
+    then
+      if [[ "$g_dtype" != "${g_device_types[-1]}" ]]
+      then
+        continue
+      fi
+      : > "${g_runcheck_state}/smart-unsupported-${g_name}"
+      g_smart=""
+      break
+    fi
+    g_smart="${g_runcheck_state}/smart-${g_name}.txt"
+    break
+  done
+  [[ -n "$g_smart" ]] || continue
+
+  # 1) Overall SMART health self-assessment (ATA and NVMe)
+  g_health=$(grep -E -i "SMART overall-health self-assessment test result:" "$g_smart" | head -1)
+  if [[ -n "$g_health" ]] && ! echo "$g_health" | grep -E -q -i "PASSED|OK"
+  then
+    f_disk_alert "SMART health of $g_dev_label failed: $g_health"
+    continue
+  fi
+
+  # SCSI/SAS drives report their health separately
+  g_shealth=$(grep -m1 "SMART Health Status:" "$g_smart")
+  if [[ -n "$g_shealth" ]] && ! echo "$g_shealth" | grep -q "OK"
+  then
+    f_disk_alert "SMART health of $g_dev_label failed: $g_shealth"
+  fi
+
+  # 2) NVMe health info (different attribute model than ATA)
+  if grep -q "SMART/Health Information (NVMe Log" "$g_smart"
+  then
+    g_critwarn=$(grep -m1 "^Critical Warning:" "$g_smart" | awk '{print $3}')
+    [[ -n "$g_critwarn" && "$g_critwarn" != "0x00" ]] && \
+      f_disk_alert "NVMe $g_dev_label reports critical warning: $g_critwarn"
+    g_nvmetemp=$(grep -m1 "^Temperature:" "$g_smart" | awk '{print $2}')
+    [[ -n "$g_nvmetemp" && "$g_nvmetemp" =~ ^[0-9]+$ && "$g_nvmetemp" -gt 60 ]] && \
+      f_disk_alert "NVMe $g_dev_label temperature high: ${g_nvmetemp} Celsius"
+    g_nvspare=$(grep -m1 "^Available Spare:" "$g_smart" | awk '{print $3}')
+    g_nvspare=${g_nvspare%\%}
+    [[ -n "$g_nvspare" && "$g_nvspare" =~ ^[0-9]+$ && "$g_nvspare" -lt 10 ]] && \
+      f_disk_alert "NVMe $g_dev_label available spare low: ${g_nvspare}%"
+    g_nvused=$(grep -m1 "^Percentage Used:" "$g_smart" | awk '{print $3}')
+    g_nvused=${g_nvused%\%}
+    [[ -n "$g_nvused" && "$g_nvused" =~ ^[0-9]+$ && "$g_nvused" -ge 100 ]] && \
+      f_disk_alert "NVMe $g_dev_label lifetime usage reached 100%"
+    g_nvmedia=$(grep -m1 "^Media and Data Integrity Errors:" "$g_smart" | awk '{print $6}')
+    [[ -n "$g_nvmedia" && "$g_nvmedia" =~ ^[0-9]+$ && "$g_nvmedia" -gt 0 ]] && \
+      f_disk_alert "NVMe $g_dev_label media and data integrity errors: $g_nvmedia"
+    g_nverr=$(grep -m1 "^Error Information Log Entries:" "$g_smart" | awk '{print $5}')
+    [[ -n "$g_nverr" && "$g_nverr" =~ ^[0-9]+$ && "$g_nverr" -gt 0 ]] && \
+      f_disk_alert "NVMe $g_dev_label error-log entries: $g_nverr"
+    continue
+  fi
+
+  # 3) ATA/SATA attribute based checks.
+  #    Monotonic defect counters (5/10/196/197/198) and the CRC count (199)
+  #    are collected for trend comparison against the baseline (A), so a
+  #    known-broken disk only alerts again when it gets worse. Life attributes
+  #    keep their absolute threshold plus a decreasing-trend check.
+  declare -A g_attr_names=()
+  g_temp=""
+  g_poh=""
+  g_starts=""
+  g_loads=""
+  g_attrs_now="${g_runcheck_state}/smart-now-${g_name}"
+  : > "$g_attrs_now"
+  while IFS='|' read -r g_rec g_attr_id g_attr_name g_attr_val g_attr_worst g_attr_raw
+  do
+    if [[ "$g_rec" == "F" ]]
+    then
+      f_disk_alert "SMART attribute $g_attr_name (id $g_attr_id) of $g_dev_label failing: $g_attr_val"
+      continue
+    fi
+    g_attr_names[$g_attr_id]="$g_attr_name"
+    case "$g_attr_id" in
+      5|10|196|197|198|199)
+        echo "attr_${g_attr_id}=${g_attr_raw}" >> "$g_attrs_now"
+        ;;
+      177|231|232|233|248)
+        echo "life_${g_attr_id}=${g_attr_val}" >> "$g_attrs_now"
+        [[ "$g_attr_val" =~ ^[0-9]+$ && "$g_attr_val" -le 10 ]] && \
+          f_disk_alert "SMART $g_attr_name (id $g_attr_id) of $g_dev_label low: value=$g_attr_val"
+        ;;
+      194)
+        g_temp="$g_attr_raw"
+        ;;
+      9)
+        g_poh="$g_attr_raw"
+        ;;
+      4)
+        g_starts="$g_attr_raw"
+        ;;
+      193)
+        g_loads="$g_attr_raw"
+        ;;
+    esac
+  done < <(f_get_ata_attributes "$g_smart")
+
+  # 4) ATA error log (command/protocol errors incl. CRC and aborts)
+  g_ataerr=$(grep -m1 "^ATA Error Count:" "$g_smart" | awk '{print $4}')
+  [[ "$g_ataerr" =~ ^[0-9]+$ ]] && echo "ataerr=$g_ataerr" >> "$g_attrs_now"
+
+  # 5) Failed entries in the drive self-test log. Count only so the trend check
+  #    reports NEW failures (the autoupdate smart-selftest module (F) keeps the
+  #    log populated with monthly short tests).
+  g_self_fail=$(sed -n '/Self-test log structure/,/Selective self-test log/p' "$g_smart" | grep -c -E -i "read failure|write failure|FAILED")
+  echo "selftestfail=$g_self_fail" >> "$g_attrs_now"
+
+  # 6) Trend comparison against the baseline (A): alert only when a counter
+  #    increased (defects/CRC/error log/selftest) or a life attribute dropped.
+  g_base="${g_runcheck_state}/smart-baseline-${g_name}"
+  if [[ -f "$g_base" ]]
+  then
+    while IFS='=' read -r g_key g_val
+    do
+      [[ -n "$g_key" ]] || continue
+      g_prev=$(grep "^${g_key}=" "$g_base" | tail -1 | cut -d= -f2)
+      [[ -n "$g_prev" ]] || continue
+      if [[ "$g_val" =~ ^[0-9]+$ && "$g_prev" =~ ^[0-9]+$ ]]
+      then
+        case "$g_key" in
+          attr_5)   g_aname="Reallocated_Sector_Ct" ;;
+          attr_10)  g_aname="Reallocated_Event_Count" ;;
+          attr_196) g_aname="Reallocated_Event_Count" ;;
+          attr_197) g_aname="Current_Pending_Sector" ;;
+          attr_198) g_aname="Offline_Uncorrectable" ;;
+          attr_199) g_aname="UDMA_CRC_Error_Count" ;;
+          *)        g_aname="${g_attr_names[${g_key#attr_}]:-attribute}" ;;
+        esac
+        if [[ "$g_key" == attr_* && "$g_val" -gt "$g_prev" ]]
+        then
+          if [[ "$g_key" == "attr_199" ]]
+          then
+            g_echo_error "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val - check cable/USB bridge"
+          else
+            g_echo_error "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val"
+          fi
+        elif [[ "$g_key" == life_* && "$g_val" -lt "$g_prev" ]]
+        then
+          g_echo_error "SMART life attribute ${g_attr_names[${g_key#life_}]:-} (id ${g_key#life_}) of $g_dev_label decreased from $g_prev to $g_val"
+        elif [[ "$g_key" == "ataerr" && "$g_val" -gt "$g_prev" ]]
+        then
+          g_echo_error "SMART $g_dev_label ATA error log grew from $g_prev to $g_val entries"
+        elif [[ "$g_key" == "selftestfail" && "$g_val" -gt "$g_prev" ]]
+        then
+          g_echo_error "SMART $g_dev_label self-test failures grew from $g_prev to $g_val"
+        fi
+      fi
+    done < "$g_attrs_now"
+  fi
+  mv -f "$g_attrs_now" "$g_base"
+
+  # 7) Temperature (SCSI/SAS devices report it in the SMART data section)
+  if [[ -z "$g_temp" ]]
+  then
+    g_temp=$(grep -m1 "^Current Drive Temperature:" "$g_smart" | awk '{print $4}')
+  fi
+  if [[ -n "$g_temp" && "$g_temp" =~ ^[0-9]+$ && "$g_temp" -gt 55 ]]
+  then
+    f_disk_alert "SMART temperature of disk $g_dev_label high (${g_temp} Celsius)"
+  fi
+
+  # 8) Excessive spin-up/load cycles relative to power-on time (spindown wear)
+  g_spin_sum=0
+  [[ -n "$g_starts" && "$g_starts" =~ ^[0-9]+$ ]] && g_spin_sum=$((g_spin_sum + g_starts))
+  [[ -n "$g_loads" && "$g_loads" =~ ^[0-9]+$ ]] && g_spin_sum=$((g_spin_sum + g_loads))
+  if [[ -n "$g_poh" && "$g_poh" =~ ^[0-9]+$ && "$g_poh" -gt 100 && "$g_spin_sum" -gt 0 ]]
+  then
+    g_spins=$((g_spin_sum / 2))
+    if [[ $((g_spins * 24)) -gt $((g_poh * 6)) ]]
+    then
+      f_disk_alert "Disk $g_dev_label has excessive spin-up/load cycles (~$((g_spins * 24 / g_poh)) per day in ${g_poh} hours)"
+    fi
   fi
 done

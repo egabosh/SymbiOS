@@ -12,11 +12,18 @@ g_staleumount
 
 g_json_file="${g_log_dir}/runchecks-results.json"
 
-# Override g_echo_error to capture failures for JSON output
+# Override g_echo_error to capture failures for JSON output. All errors of a
+# single check are accumulated (separated by " | ") instead of overwriting,
+# so e.g. multiple failing disks are all reported.
 function g_echo_error {
   logger -t runchecks "ERROR: $*"
   g_current_check_failed=1
-  g_current_check_error="$*"
+  if [[ -n "$g_current_check_error" ]]
+  then
+    g_current_check_error="${g_current_check_error} | $*"
+  else
+    g_current_check_error="$*"
+  fi
 }
 
 # Exit cleanly on systemd stop (TERM/INT) and never write error results
