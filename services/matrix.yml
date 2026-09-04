@@ -85,7 +85,7 @@
         mode: '0750'
 
     - name: Gen initial passwords if not exists
-      ansible.builtin.shell: docker run --rm -v ./data:/data -e SYNAPSE_SERVER_NAME=matrix.{{ base_domain }} -e SYNAPSE_HTTP_PORT=8008 -e SYNAPSE_REPORT_STATS=no -e UID=3000 -e GUID=3000 matrixdotorg/synapse:latest generate
+      ansible.builtin.shell: docker run --rm -v ./data:/data -e SYNAPSE_SERVER_NAME=matrix.{{ base_domain }} -e SYNAPSE_HTTP_PORT=8008 -e SYNAPSE_REPORT_STATS=no -e UID=3000 -e GID=3000 matrixdotorg/synapse:latest generate
       args:
         chdir: /symbios/services/matrix
         creates: /symbios/services/matrix/data/homeserver.yaml
@@ -95,10 +95,11 @@
       register: turnsecret
       changed_when: false
 
-    - name: Gen OIDC client secret if not exists
-      ansible.builtin.shell: pwgen -s 64 1 | tr -d '\n' > /symbios/services/matrix/oidc_digest
-      args:
-        creates: /symbios/services/matrix/oidc_digest
+    - name: Create oidc client secret for Matrix
+      ansible.builtin.shell: |
+        /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/matrix
+      changed_when: false
+      failed_when: false
 
     - name: Edit Matrix/Synapse config
       blockinfile:
@@ -164,7 +165,7 @@
               idp_name: Authelia
               issuer: "https://auth.{{ base_domain }}"
               client_id: "matrix"
-              client_secret: "{{ lookup('file', '/symbios/services/matrix/oidc_digest') }}"
+              client_secret: "{{ lookup('file', '/symbios/services/matrix/oidc_password') }}"
               authorization_endpoint: "https://auth.{{ base_domain }}/api/oidc/authorization"
               token_endpoint: "https://auth.{{ base_domain }}/api/oidc/token"
               userinfo_endpoint: "https://auth.{{ base_domain }}/api/oidc/userinfo"
@@ -271,7 +272,7 @@
           sed -i "s/\!POSTGRESUSER\!/$postgresqluser/g" env env.db
           sed -i "s/\!POSTGRESPASSWORD\!/$postgresqlpassword/g" env env.db
           sed -i "s/\!MATRIX_SEV_USER_PASSWORD\!/$matrixsrvuserpassword/g" env.user
-          
+
           if ! grep -q "name: psycopg2" data/homeserver.yaml
           then
             # Remove sqlite config
@@ -318,7 +319,7 @@
           server {
             listen         80 default_server;
             server_name    matrix.{{ base_domain }};
-          
+
             location / {
               proxy_pass http://matrix-synapse:8008;
               proxy_set_header X-Forwarded-For $remote_addr;
@@ -332,7 +333,7 @@
             }
           }
         backup: yes
-      notify: Restart matrix  
+      notify: Restart matrix
 
     - name: Create /symbios/services/matrix/well-known dir
       ansible.builtin.file:
@@ -370,7 +371,7 @@
 
 
     - name: Element Web configuration
-      copy: 
+      copy:
         dest: /symbios/services/matrix/element-web-config.json
         owner: root
         group: root
@@ -620,12 +621,6 @@
     - name: Ensure LDAP groups for OIDC login (matrix-users / matrix-admins)
       include_tasks: tasks/oidc-groups.yml
 
-    - name: Create oidc client secret for Matrix
-      ansible.builtin.shell: |
-        /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/matrix
-      changed_when: false
-      failed_when: false
-
     - name: Write OIDC config in authelias configuration.yml for matrix
       include_tasks: tasks/authelia-oidc.yml
       vars:
@@ -671,7 +666,7 @@
         block: |
           # matrix
           sleep 120
-          cd /symbios/services/matrix || exit 1 
+          cd /symbios/services/matrix || exit 1
           . ./env
           . ./env.user
           date >>matrix.init.log
