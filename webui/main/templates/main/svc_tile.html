@@ -23,9 +23,11 @@
       {% endif %}
       {% with svc_url=svc|service_url %}
       {% if svc_url %}
-      <div class="svc-tile-url">
+      <span class="svc-tile-url" role="link" tabindex="0" data-href="{{ svc_url }}"
+            onclick="event.preventDefault(); event.stopPropagation(); window.location.href = this.dataset.href;"
+            onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); window.location.href = this.dataset.href; }">
         <i class="bi bi-box-arrow-up-right"></i> {{ svc_url }}
-      </div>
+      </span>
       {% endif %}
       {% endwith %}
     </div>
