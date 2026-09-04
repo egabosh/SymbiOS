@@ -1,0 +1,54 @@
+# Autoupdate module: monthly btrfs data-integrity scan (scrub).
+#
+# Runs a read-only scrub on every mounted (unique) btrfs filesystem on the 1st
+# of each month, blocking until it completes, and records the outcome in
+# ${g_config_dir}/btrfs-scrub-state so the raid-mdadm.check entry can warn
+# when the last finished scan goes stale (see CHECK_DETAIL there).
+#
+# Forcing: BTRFS_SCRUB_NOW=1 autoupdate.sh btrfs-scrub
+
+if [[ "${BTRFS_SCRUB_NOW:-0}" != "1" && "$(date -u +%d)" != "01" ]]
+then
+  return 0
+fi
+
+command -v btrfs >/dev/null 2>&1 || return 0
+
+g_scrub_state_file="${g_data_root:-/symbios}/base-services/symbios-ui/config/btrfs-scrub-state"
+[[ -n "${g_config_dir:-}" ]] && g_scrub_state_file="${g_config_dir}/btrfs-scrub-state"
+
+g_scrub_rc=0
+g_scrub_seen=""
+for g_mnt in $(awk '$3 == "btrfs" {print $2}' /proc/mounts 2>/dev/null | sort -u)
+do
+  [[ -n "$g_mnt" ]] || continue
+  g_uuid=$(btrfs filesystem show "$g_mnt" 2>/dev/null | grep -m1 "uuid:" | sed 's/.*uuid:[[:space:]]*//')
+  [[ -n "$g_uuid" ]] || continue
+  [[ " $g_scrub_seen " == *" $g_uuid "* ]] && continue
+  g_scrub_seen="${g_scrub_seen} ${g_uuid}"
+
+  g_started=$(date -u +%FT%TZ)
+  g_output=$(btrfs scrub start -B "$g_mnt" 2>&1)
+  g_status=$(echo "$g_output" | grep -E -m1 "^[[:space:]]*status:" | sed 's/^[[:space:]]*//')
+  [[ -z "$g_status" ]] && g_status="status: no status reported"
+
+  # Aborted scrubs or command errors are real problems; "finished with errors"
+  # is a completed scan and handled by the corruption counters in the check.
+  if echo "$g_output" | grep -E -qi "aborted|^ERROR:|failed to"
+  then
+    g_scrub_rc=1
+    g_status="${g_status} (ERROR)"
+  fi
+
+  g_echo "btrfs scrub ${g_uuid} (${g_mnt}): ${g_status} started ${g_started}"
+
+  # Record completion (also for failed attempts) so freshness can be judged
+  if mkdir -p "$(dirname "$g_scrub_state_file")" 2>/dev/null
+  then
+    grep -v "^${g_uuid} " "$g_scrub_state_file" 2>/dev/null > "${g_scrub_state_file}.tmp" || true
+    echo "${g_uuid} ${g_mnt} ${g_started} ${g_status}" >> "${g_scrub_state_file}.tmp"
+    mv -f "${g_scrub_state_file}.tmp" "$g_scrub_state_file"
+  fi
+done
+
+return ${g_scrub_rc}

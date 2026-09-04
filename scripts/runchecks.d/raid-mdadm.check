@@ -1,15 +1,157 @@
 CHECK_CATEGORY="system"
-CHECK_TITLE="RAID Array"
-CHECK_DESC="Checks if RAID arrays are healthy."
-CHECK_DETAIL="Scans for mdadm RAID arrays via mdadm --D --scan.|Verifies each array state is clean, active, or checking.|A degraded or broken RAID array risks data loss."
+CHECK_TITLE="RAID Arrays"
+CHECK_DESC="Checks mdadm and btrfs RAID arrays for health, degraded state, IO/CRC errors and scrub freshness."
+CHECK_DETAIL="mdadm: parses /proc/mdstat for inactive, degraded or failed arrays.|btrfs: scans mounted filesystems for missing devices, device I/O and corruption|error counters, aborted scrubs and stale data-integrity scans|(a monthly btrfs scrub is started by the autoupdate btrfs-scrub module).|Arrays, disks and filesystems are detected dynamically, no config needed."
 
-# Check each mdadm RAID array for healthy state
-mdadm -D --scan | grep -E "^ARRAY" | cut -d" " -f2 | while read g_array
-do
-  mdadm -D $g_array >$g_tmp/raiddetails
-  # Verify array state is clean, active or checking
-  if ! cat $g_tmp/raiddetails | grep -E "^ +State : " | grep -E -q "^ +State : clean $|^ +State : active $|^ +State : active, checking $|^ +State : clean, checking $"
+# ---------- Part 1: mdadm arrays ----------
+if [[ -r /proc/mdstat ]]
+then
+  # Parse each array block of /proc/mdstat into a pipe-separated record:
+  # name|state|level|ndev|fail|active|total|missing
+  g_md_scan=$(awk '
+    function emit()
+    {
+      if (g_name == "") return
+      g_missing = 0
+      if (g_bits != "") {
+        for (g_i = 1; g_i <= length(g_bits); g_i++) {
+          if (substr(g_bits, g_i, 1) == "_") g_missing++
+        }
+      }
+      printf "%s|%s|%s|%d|%d|%d|%d|%d\n", \
+        g_name, g_state, g_level, g_ndev, g_fail, g_active, g_total, g_missing
+    }
+    /^md[0-9]+ : / {
+      emit()
+      g_name = $1
+      sub(":", "", g_name)
+      g_state = $3
+      g_level = $4
+      g_ndev = 0
+      g_fail = 0
+      for (g_i = 5; g_i <= NF; g_i++) {
+        g_ndev++
+        if ($(g_i) ~ /\(F\)$/) g_fail++
+      }
+      g_active = ""
+      g_total = ""
+      g_bits = ""
+      g_have = 0
+      next
+    }
+    /^[[:space:]]*[0-9]+ blocks/ {
+      if (g_have) next
+      if (match($0, /\[[0-9]+\/[0-9]+\]/)) {
+        g_t = substr($0, RSTART, RLENGTH)
+        gsub(/[\[\]]/, "", g_t)
+        split(g_t, g_c, "/")
+        g_active = g_c[1]
+        g_total = g_c[2]
+      }
+      if (match($0, /\[[U_]+[^]]*\]/)) {
+        g_t = substr($0, RSTART, RLENGTH)
+        gsub(/[\[\]]/, "", g_t)
+        g_bits = g_t
+      }
+      g_have = 1
+      next
+    }
+    END { emit() }
+  ' /proc/mdstat)
+
+  # Only parse when at least one array exists (<<< would otherwise feed one
+  # empty line and produce a bogus record on systems without md arrays)
+  if [[ -n "$g_md_scan" ]]
   then
-    g_echo_error "RAID $g_array state unhealthy - mdadm -D $g_array: $(cat $g_tmp/raiddetails)"
+    while IFS='|' read -r g_md_name g_md_state g_md_level g_md_ndev g_md_fail g_md_active g_md_total g_md_missing
+    do
+      [[ -n "$g_md_name" ]] || continue
+      # Build a problem description from every unhealthy detail found
+      g_md_prob=""
+      [[ "$g_md_state" != "active" ]] && g_md_prob="state=$g_md_state"
+      if [[ "$g_md_fail" -gt 0 ]]
+      then
+        g_md_prob="${g_md_prob:+${g_md_prob}, }failed-devices=$g_md_fail"
+      fi
+      if [[ -n "$g_md_total" && "$g_md_total" -gt 0 && "$g_md_active" -lt "$g_md_total" ]]
+      then
+        g_md_prob="${g_md_prob:+${g_md_prob}, }active=$g_md_active-of-$g_md_total"
+      fi
+      if [[ "$g_md_missing" -gt 0 ]]
+      then
+        g_md_prob="${g_md_prob:+${g_md_prob}, }missing-slots=$g_md_missing"
+      fi
+      [[ -n "$g_md_prob" ]] && \
+        g_echo_error "RAID $g_md_name ($g_md_level) unhealthy: $g_md_prob"
+    done <<< "$g_md_scan"
   fi
-done
+fi
+
+# ---------- Part 2: btrfs filesystems ----------
+if command -v btrfs >/dev/null 2>&1
+then
+  g_seen_uuids=""
+  # Btrfs filesystems may be mounted multiple times (subvolumes) - check unique
+  g_btrfs_mnts=$(awk '$3 == "btrfs" {print $2}' /proc/mounts 2>/dev/null | sort -u)
+  for g_mnt in $g_btrfs_mnts
+  do
+    [[ -n "$g_mnt" ]] || continue
+    g_uuid=$(btrfs filesystem show "$g_mnt" 2>/dev/null | grep -m1 "uuid:" | sed 's/.*uuid:[[:space:]]*//')
+    [[ -n "$g_uuid" ]] || continue
+    if [[ " $g_seen_uuids " == *" $g_uuid "* ]]
+    then
+      continue
+    fi
+    g_seen_uuids="${g_seen_uuids} ${g_uuid}"
+
+    # Missing devices mean the filesystem is running degraded
+    g_missing=$(btrfs filesystem show "$g_mnt" 2>/dev/null | grep -c "Some devices missing")
+    g_devmissing=$(btrfs filesystem usage "$g_mnt" 2>/dev/null | grep "Device missing:" | awk '{print $NF}')
+    if [[ "$g_missing" -gt 0 || ( -n "$g_devmissing" && "$g_devmissing" != "0.00B" ) ]]
+    then
+      g_echo_error "Btrfs filesystem $g_uuid ($g_mnt) degraded: missing device"
+    fi
+
+    # Kernel-maintained per-device I/O and corruption error counters
+    read -r g_io_w g_io_r g_io_f g_io_c g_io_g < <(btrfs device stats "$g_mnt" 2>/dev/null | awk '
+      /write_io_errs/   { g_w += $2 }
+      /read_io_errs/    { g_r += $2 }
+      /flush_io_errs/   { g_f += $2 }
+      /corruption_errs/ { g_c += $2 }
+      /generation_errs/ { g_g += $2 }
+      END { print g_w+0, g_r+0, g_f+0, g_c+0, g_g+0 }
+    ')
+    if [[ "${g_io_w:-0}" -gt 0 || "${g_io_r:-0}" -gt 0 || "${g_io_f:-0}" -gt 0 || "${g_io_c:-0}" -gt 0 || "${g_io_g:-0}" -gt 0 ]]
+    then
+      g_echo_error "Btrfs filesystem $g_uuid ($g_mnt) device errors: write_io=${g_io_w:-0} read_io=${g_io_r:-0} flush=${g_io_f:-0} corruption=${g_io_c:-0} generation=${g_io_g:-0}"
+    fi
+
+    # A scrub that aborted means data integrity was never verified
+    g_scrub=$(btrfs scrub status "$g_mnt" 2>/dev/null)
+    if echo "$g_scrub" | grep -E -qi "status: *aborted"
+    then
+      g_echo_error "Btrfs filesystem $g_uuid ($g_mnt): last scrub aborted"
+    fi
+
+    # Scrub freshness (B): the autoupdate btrfs-scrub module records every
+    # completed read scan in ${g_config_dir}/btrfs-scrub-state. If the newest
+    # completion is older than the expected monthly interval, the filesystem
+    # has been running unchecked for too long.
+    g_scrub_state_file="/symbios/base-services/symbios-ui/config/btrfs-scrub-state"
+    [[ -n "${g_config_dir:-}" ]] && g_scrub_state_file="${g_config_dir}/btrfs-scrub-state"
+    g_scrub_line=$(grep "^${g_uuid} " "$g_scrub_state_file" 2>/dev/null | tail -1)
+    if [[ -n "$g_scrub_line" ]]
+    then
+      # fields: uuid mountpoint start-time status
+      g_scrub_started=$(echo "$g_scrub_line" | awk '{print $3}')
+      if [[ "$g_scrub_started" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]]
+      then
+        g_scrub_age_days=$(( ($(date -u +%s) - $(date -u -d "$g_scrub_started" +%s)) / 86400 ))
+        if [[ "$g_scrub_age_days" -gt 40 ]]
+        then
+          g_echo_error "Btrfs filesystem $g_uuid ($g_mnt): no completed scrub for ${g_scrub_age_days} days (last: ${g_scrub_started})"
+        fi
+      fi
+    fi
+  done
+fi
