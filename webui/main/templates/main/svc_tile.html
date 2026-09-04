@@ -2,7 +2,7 @@
 {% load markdown_extras %}
 {% with svc_hc=svc.playbook|hc_name %}
 <div class="col-sm-6 col-lg-4 col-xl-3">
-  <a href="/services/{{ svc.playbook }}/" class="svc-base-card svc-tile {{ tile_class }}">
+  <div class="svc-base-card svc-tile {{ tile_class }}">
     <div class="svc-tile-icon">
       {% if tile_class == 'svc-tile-available' %}
         <i class="bi bi-plus-circle"></i>
@@ -23,11 +23,9 @@
       {% endif %}
       {% with svc_url=svc|service_url %}
       {% if svc_url %}
-      <span class="svc-tile-url" role="link" tabindex="0" data-href="{{ svc_url }}"
-            onclick="event.preventDefault(); event.stopPropagation(); window.location.href = this.dataset.href;"
-            onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); window.location.href = this.dataset.href; }">
+      <a class="svc-tile-url" href="{{ svc_url }}" target="_blank" rel="noopener">
         <i class="bi bi-box-arrow-up-right"></i> {{ svc_url }}
-      </span>
+      </a>
       {% endif %}
       {% endwith %}
     </div>
@@ -42,6 +40,7 @@
       {% endwith %}
     </div>
     {% endif %}
-  </a>
+    <a class="svc-tile-overlay" href="/services/{{ svc.playbook }}/" aria-label="{{ svc.menu_label }}"></a>
+  </div>
 </div>
 {% endwith %}

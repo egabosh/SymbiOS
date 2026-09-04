@@ -221,6 +221,7 @@
 
 /* Services tiles (main content area) */
 .svc-tile {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -228,6 +229,12 @@
   background: var(--bs-body-bg);
   text-decoration: none;
   color: var(--bs-body-color);
+}
+.svc-tile-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
 }
 .svc-tile:hover {
   color: var(--bs-body-color);
@@ -274,6 +281,8 @@
   margin-top: 0.1rem;
 }
 .svc-tile-url {
+  position: relative;
+  z-index: 2;
   display: block;
   cursor: pointer;
   font-size: 0.72rem;
