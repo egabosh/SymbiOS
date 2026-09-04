@@ -188,10 +188,9 @@
       notify: Restart paperless
 
     - name: Start paperless
-      ansible.builtin.shell: docker compose up -d --force-recreate
+      ansible.builtin.shell: docker compose up -d
       args:
         chdir: /symbios/services/paperless
-        creates: /symbios/services/paperless/data/db.sqlite3
       changed_when: false
 
     - name: Create paperless User
@@ -228,7 +227,7 @@
       ansible.builtin.file:
         path: /symbios/services/paperless/consume
         owner: 998
-        group: root
+        group: '1003'
         mode: '0770'
 
     - name: /symbios/base-services/traefik/providers/paperless.yml Routing Configuration
