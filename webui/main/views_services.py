@@ -150,9 +150,10 @@ _UNINSTALL_ACTIONS = {'uninstall-full', 'uninstall-program', 'uninstall-reset'}
 
 
 def _action_button(name):
+    label = name.replace('_', ' ')
     return {
         'name': name,
-        'label': name[0].upper() + name[1:] if name else name,
+        'label': label[0].upper() + label[1:] if label else label,
         'cls': _ACTION_CLS.get(name, 'btn-outline-secondary'),
     }
 
