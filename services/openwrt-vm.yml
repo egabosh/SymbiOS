@@ -509,8 +509,12 @@
             uci set network.wan.ip6gw="${PREFIX}::1"
           fi
 
+          # Attended sysupgrade: only check for upgrades when logged in
+          uci set attendedsysupgrade.client.login_check_for_upgrades='1'
+
           uci commit network
           uci commit firewall
+          uci commit attendedsysupgrade
 
           # ── Disable DAD for IPv6 stability ──
           cat > /etc/sysctl.d/99-no-dad.conf << SYSCTLEOF
@@ -578,7 +582,11 @@
         then
           echo "root password already set"
         else
-          sed -i '1s|^root:.*|root:{{ openwrt_root_password_hash.stdout }}:0:99999:7:::|' \
+          # Full 9-field shadow line required by shadow-utils/login:
+          # login:passwd:lastchg:min:max:warn:inactive:expire:flag
+          # The default factory line is root::0:0:99999:7::: so we must keep
+          # the extra min-age field (0) or LuCI/auth cannot parse the entry.
+          sed -i '1s|^root:.*|root:{{ openwrt_root_password_hash.stdout }}:0:0:99999:7:::|' \
             /tmp/ow-mount/etc/shadow
           echo "root password set"
         fi
@@ -927,6 +935,7 @@
     - name: Write Authelia access_control for openwrt-vm group restriction
       include_tasks: tasks/authelia-acl.yml
       vars:
+        authelia_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
         authelia_subjects:
           - "group:openwrt-vm"
 
