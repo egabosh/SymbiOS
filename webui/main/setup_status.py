@@ -89,6 +89,11 @@ PAGE_EXPLAIN = {
         'updates manually at any time - for example right now, without '
         'waiting for the nightly run.'
     ),
+    'ai': (
+        'Here you can configure an OpenAI-compatible AI endpoint. The '
+        'server URL is stored in the inventory, and an optional API key '
+        'can be added if the endpoint requires authentication.'
+    ),
 }
 
 # Map settings page -> runchecks check name (for the status badge).
@@ -137,6 +142,13 @@ def get_page_badge(page_key, inventory_vars):
                     'The DNS name is set up.')
         return ('missing', 'Not configured',
                 'The server has no name on the internet yet.')
+
+    if page_key == 'ai':
+        if inventory_vars.get('ai_server'):
+            return ('ok', 'Configured',
+                    'An OpenAI-compatible endpoint is configured.')
+        return ('missing', 'Not configured',
+                'No AI endpoint is configured yet.')
 
     if page_key == 'port-forwarding':
         if inventory_vars.get('port_forwarding_configured'):

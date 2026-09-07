@@ -696,6 +696,117 @@ def settings_localization(request):
 
 
 @login_required
+def settings_ai(request):
+    config = _get_inventory_config()
+    if 'all' not in config:
+        config['all'] = {}
+    if 'vars' not in config['all']:
+        config['all']['vars'] = {}
+    vars_ = config['all']['vars']
+
+    if request.method == 'POST':
+        is_ajax = is_ajax_request(request)
+        try:
+            server = request.POST.get('ai_server', '').strip()
+            apikey = request.POST.get('ai_apikey', '').strip()
+            if server:
+                vars_['ai_server'] = server
+            else:
+                vars_.pop('ai_server', None)
+            if apikey:
+                vars_['ai_apikey'] = apikey
+            else:
+                vars_.pop('ai_apikey', None)
+            _save_inventory_config(config)
+            if is_ajax:
+                return JsonResponse({'ok': True,
+                                     'message': 'AI settings saved.',
+                                     'redirect': '/settings/ai/'})
+            messages.success(request, 'AI settings saved.')
+        except Exception as e:
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+            messages.error(request, f'Error: {e}')
+        return redirect('settings_ai')
+
+    return render(request, 'main/settings_ai.html', {
+        'vars': vars_,
+        'page_key': 'ai',
+        'page_icon': 'bi-cpu',
+        'page_title': 'AI',
+        'page_explain': PAGE_EXPLAIN['ai'],
+        'page_status': get_page_badge('ai', vars_)[0],
+        'page_status_label': get_page_badge('ai', vars_)[1],
+        'page_status_text': get_page_badge('ai', vars_)[2],
+    })
+
+
+@login_required
+def settings_ai_test(request):
+    """AJAX POST - optional connection check against an OpenAI-compatible server.
+
+    Probes the /models endpoint (also tries /v1/models for servers entered
+    without the /v1 prefix) with the given API key. Does not save anything.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'valid': False, 'error': 'POST required'}, status=400)
+
+    config = _get_inventory_config()
+    vars_ = config.get('all', {}).get('vars', {})
+    server = request.POST.get('ai_server', '').strip() or vars_.get('ai_server', '')
+    apikey = request.POST.get('ai_apikey', '').strip() or vars_.get('ai_apikey', '')
+
+    if not server:
+        return JsonResponse({'valid': False,
+                             'error': 'No AI server URL. Enter one or save first.'})
+    if not server.startswith(('http://', 'https://')):
+        server = 'https://' + server
+
+    base = server.rstrip('/')
+    candidates = [base + '/models']
+    if not base.endswith('/v1'):
+        candidates.append(base + '/v1/models')
+
+    last_error = None
+    for url in candidates:
+        ok, detail = _probe_openai_models(url, apikey)
+        if ok:
+            return JsonResponse({'valid': True, 'message': detail})
+        last_error = detail
+    return JsonResponse({'valid': False, 'error': last_error or 'Connection check failed.'})
+
+
+def _probe_openai_models(url, apikey):
+    """Probe an OpenAI-compatible /models endpoint, return (ok, message)."""
+    headers = {'Accept': 'application/json'}
+    if apikey:
+        headers['Authorization'] = f'Bearer {apikey}'
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            count = None
+            try:
+                data = json.loads(resp.read().decode('utf-8', errors='replace'))
+                count = len(data.get('data', [])) if isinstance(data, dict) else None
+            except Exception:
+                pass
+            msg = f'Server reachable ({url}).'
+            if count is not None:
+                msg += f' {count} model(s) available.'
+            return True, msg
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return False, f'HTTP {e.code} - invalid or missing API key.'
+        if e.code == 404:
+            return False, f'No /models endpoint found at {url} (HTTP 404).'
+        return False, f'HTTP {e.code} from {url}.'
+    except urllib.error.URLError as e:
+        return False, f'Could not reach {url}: {e.reason}'
+    except Exception as e:
+        return False, f'Could not reach {url}: {e}'
+
+
+@login_required
 def settings_auth(request):
     config = _get_inventory_config()
     vars_ = config.get('all', {}).get('vars', {})
