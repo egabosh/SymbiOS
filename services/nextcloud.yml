@@ -386,6 +386,12 @@
                 - SYS_ADMIN
                 - SYS_CHROOT
               restart: unless-stopped
+              deploy:
+                resources:
+                  limits:
+                    memory: 2048m
+                    cpus: "1.5"
+                    pids: 100
               volumes:
                 - /etc/localtime:/etc/localtime:ro
                 - /etc/hosts:/etc/hosts:ro
@@ -394,6 +400,7 @@
                 - aliasgroup1=https://nextcloud.{{ base_domain }}
                 - extra_params=--o:ssl.enable=false --o:ssl.termination=true --o:storage.wopi{wopi://}@enable=true --o:auth.allow_known=true --o:net.proto=websocket
                 - DONT_GEN_SSL_CERTS=true
+                - COOL_MAX_MEMORY=1024
               networks:
                 nextcloud: {}
                 symbios_services: null

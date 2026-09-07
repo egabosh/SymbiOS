@@ -689,7 +689,7 @@
         validate: /bin/bash -n %s
 #      notify: run matrix.init
 
-    - name: Script to crate pipes and containers for existing rooms
+    - name: Script to create pipes and the single pipes-runner container for existing rooms
       blockinfile:
         path: /symbios/services/matrix/pipe-rooms.sh
         mode: "0500"
@@ -699,7 +699,13 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           cd /symbios/services/matrix
-          echo "services:" >docker-compose.override.yml.new
+
+          # No per-room pipe containers anymore - the single pipes-runner
+          # (compose project pipelistener) handles all rooms.
+          echo "services: {}" >docker-compose.override.yml.new
+
+          : >pipes.json.rooms.new
+          : >compose.volumes.new
 
           # go through existing rooms (ids) of matrix-commander user
           for roomid in $(docker run -t -v ./matrix-commander-data:/data:rw -v /etc/hosts:/etc/hosts:ro  matrixcommander/matrix-commander  --joined-rooms --output text | grep ":matrix.{{ base_domain }}")
@@ -719,29 +725,19 @@
             echo "== Room: $room"
 
             # define/create pipe
-            pipe="/usr/local/share/matrix-room-${room}.fifo"
-            pipebasename="matrix-room-${room}.fifo"
+            roomnospace=${room// /_}
+            pipe="/usr/local/share/matrix-room-${roomnospace}.fifo"
             [ -e "$pipe" ] || mkfifo "$pipe"
             chown root:matrix "$pipe"
             chmod 660 "$pipe"
 
-            # roomname for scripts
-            roomnospace=${room// /_}
+            # pipes.json entry for this room
+            printf '{"name":"%s","alias":"#%s:matrix.{{ base_domain }}","data":"/data/%s","fifo":"/fifos/matrix-room-%s.fifo","forward_history":true}\n' \
+              "${roomnospace}" "${room}" "${roomnospace}" "${roomnospace}" >>pipes.json.rooms.new
 
-            # container config for room-pipe
-            echo "  matrix.room-pipe-${roomnospace}:
-              image: matrixcommander/matrix-commander
-              volumes:
-                - /etc/localtime:/etc/localtime:ro
-                - /etc/hosts:/etc/hosts:ro
-                - ./matrix-commander-data-${roomnospace}:/data:rw
-                - ${pipe}:/${pipebasename}
-              entrypoint: /bin/bash -c 'cd /data && tail -F \"/${pipebasename}\" | /app/matrix_commander/matrix-commander -m _ --html --room \"$room\" --log-level INFO INFO'
-              restart: unless-stopped
-              depends_on:
-                matrix-synapse:
-                  condition: service_healthy
-              " >> docker-compose.override.yml.new
+            # compose volume lines for this room (store dir + fifo)
+            printf '        - ./matrix-commander-data-%s:/data/%s:rw\n' "${roomnospace}" "${roomnospace}" >>compose.volumes.new
+            printf '        - %s:/fifos/matrix-room-%s.fifo\n' "$pipe" "${roomnospace}" >>compose.volumes.new
 
             # Auth commander instance if not exists
             declare -a newrooms
@@ -751,14 +747,41 @@
 
           mv docker-compose.override.yml.new docker-compose.override.yml
 
+          # assemble pipes.json (list of rooms, comma separated entries)
+          {
+            echo '{"rooms":['
+            paste -sd, pipes.json.rooms.new
+            echo ']}'
+          } >pipes.json
+          rm -f pipes.json.rooms.new
+
+          # compose file for the single pipes-runner container
+          {
+            echo "name: pipelistener"
+            echo ""
+            echo "services:"
+            echo "  matrix.pipes-runner:"
+            echo "    image: matrixcommander/matrix-commander"
+            echo "    volumes:"
+            echo "      - /etc/localtime:/etc/localtime:ro"
+            echo "      - /etc/hosts:/etc/hosts:ro"
+            echo "      - ./pipes_runner.py:/app/pipes_runner.py:ro"
+            echo "      - ./pipes.json:/app/pipes.json:ro"
+            cat compose.volumes.new
+            echo "    entrypoint: python3 -u /app/pipes_runner.py /app/pipes.json"
+            echo "    restart: unless-stopped"
+          } >docker-compose.pipes-runner.yml
+          rm -f compose.volumes.new
+
           for newroom in "${newrooms[@]}"
           do
             echo "== Auth new root/matrix-commander instance ${newroom}"
             . ./env.user
             docker run -t -v ./matrix-commander-data-${newroom}:/data:rw -v /etc/hosts:/etc/hosts:ro matrixcommander/matrix-commander --login password --homeserver matrix.{{ base_domain }} --user-login $MATRIX_SRV_USER --password $MATRIX_SRV_USER_PASSWORD --device {{ base_domain }} --room-default {{ base_domain }}
-            docker compose down matrix.room-pipe-${newroom}
-            docker compose up -d matrix.room-pipe-${newroom}
           done
+
+          # start the single pipes-runner container for all rooms
+          docker compose -p pipelistener -f ./docker-compose.pipes-runner.yml up -d
 
           docker compose up -d --remove-orphans
         backup: yes
@@ -786,33 +809,118 @@
 #        validate: /bin/bash -n %s
 #      notify: run matrix.update
 
-    - name: "{{ data_root }}/runchecks.d/matrix.check"
-      blockinfile:
-        path: "{{ data_root }}/runchecks.d/matrix.check"
-        mode: "0400"
+#    - name: "{{ data_root }}/runchecks.d/matrix.check"
+#      blockinfile:
+#        path: "{{ data_root }}/runchecks.d/matrix.check"
+#        mode: "0400"
+#        owner: root
+#        group: root
+#        create: yes
+#        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+#        block: |
+#          CHECK_CATEGORY="services"
+#          CHECK_TITLE="matrix watchdog"
+#          CHECK_DESC="Kills the synapse server when zombie curls pile up."
+#          CHECK_DETAIL="Scans /proc for long-running zombie/stopped synapse processes.|Restarts synapse when zombie curls block it for more than 30 minutes."
+#          egrep "^State:.+D \(|^State:.+Z \(|^State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read dzpid
+#          do
+#            if find ${g_tmp}/proc-check/$dzpid -mmin +30 | grep -q $dzpid
+#            then
+#              if ps auxn | egrep -q "3000.*$dzpid.+ Z "
+#              then
+#                #g_echo_warn "Killing synapse server because of zombie curls"
+#                kill $(pgrep -f "/usr/local/bin/python -m synapse.app.homeserver --config-path /data/homeserver.yaml")
+#               sleep 2
+#              fi
+#            fi
+#          done
+#        backup: yes
+#        validate: /bin/bash -n %s
+
+    - name: Deploy pipes_runner.py (single-process replacement for per-room pipe containers)
+      ansible.builtin.copy:
+        src: files/pipes_runner.py
+        dest: /symbios/services/matrix/pipes_runner.py
+        mode: "0644"
         owner: root
         group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          CHECK_CATEGORY="services"
-          CHECK_TITLE="matrix watchdog"
-          CHECK_DESC="Kills the synapse server when zombie curls pile up."
-          CHECK_DETAIL="Scans /proc for long-running zombie/stopped synapse processes.|Restarts synapse when zombie curls block it for more than 30 minutes."
-          egrep "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read dzpid
-          do
-            if find ${g_tmp}/proc-check/$dzpid -mmin +30 | grep -q $dzpid
-            then
-              if ps auxn | egrep -q "3000.*$dzpid.+ Z "
-              then
-                #g_echo_warn "Killing synapse server because of zombie curls"
-                kill $(pgrep -f "/usr/local/bin/python -m synapse.app.homeserver --config-path /data/homeserver.yaml")
-               sleep 2
-              fi
-            fi
-          done
-        backup: yes
+
+    - name: Deploy matrix-recreate-room.sh (room state corruption repair)
+      ansible.builtin.template:
+        src: files/matrix-recreate-room.sh.j2
+        dest: /usr/local/sbin/matrix-recreate-room.sh
+        mode: "0755"
+        owner: root
+        group: root
         validate: /bin/bash -n %s
+        backup: yes
+
+    - name: /symbios/services/matrix/synapse-purge.sh (safe Synapse cleanup)
+      ansible.builtin.template:
+        src: files/synapse-purge.sh.j2
+        dest: /usr/local/sbin/synapse-purge.sh
+        mode: "0755"
+        owner: root
+        group: root
+        validate: /bin/bash -n %s
+        backup: yes
+
+    - name: /usr/local/sbin/fix-matrix-ignored-devices.sh (ignored-device watchdog)
+      ansible.builtin.template:
+        src: files/fix-matrix-ignored-devices.sh.j2
+        dest: /usr/local/sbin/fix-matrix-ignored-devices.sh
+        mode: "0755"
+        owner: root
+        group: root
+        validate: /bin/bash -n %s
+        backup: yes
+
+    - name: /usr/local/sbin/matrix-device-health.sh (E2EE deleted-device watchdog)
+      ansible.builtin.template:
+        src: files/matrix-device-health.sh.j2
+        dest: /usr/local/sbin/matrix-device-health.sh
+        mode: "0755"
+        owner: root
+        group: root
+        validate: /bin/bash -n %s
+        backup: yes
+
+    - name: Cron fix ignored matrix-commander devices daily
+      ansible.builtin.cron:
+        name: "Fix ignored matrix-commander devices"
+        minute: "30"
+        hour: "4"
+        job: /usr/local/sbin/fix-matrix-ignored-devices.sh >>/symbios/services/matrix/fix-ignored-devices.log 2>&1
+
+    - name: Cron matrix-device-health daily (unmark stale deleted E2EE devices)
+      ansible.builtin.cron:
+        name: "Matrix device health"
+        minute: "15"
+        hour: "4"
+        job: /usr/local/sbin/matrix-device-health.sh >>/symbios/services/matrix/device-health.log 2>&1
+
+    - name: Cron synapse-purge daily (safe vacuum/analyze)
+      ansible.builtin.cron:
+        name: "synapse-purge daily"
+        minute: "30"
+        hour: "3"
+        job: /usr/local/sbin/synapse-purge.sh daily >/symbios/services/matrix/purge.log 2>&1
+
+    - name: Cron synapse-purge weekly (vacuum_full_tables, stops synapse briefly)
+      ansible.builtin.cron:
+        name: "synapse-purge weekly"
+        weekday: "0"
+        minute: "0"
+        hour: "5"
+        job: /usr/local/sbin/synapse-purge.sh weekly >/symbios/services/matrix/purge.log 2>&1
+
+    - name: Cron synapse-purge monthly (vacuum_full_state, longest downtime)
+      ansible.builtin.cron:
+        name: "synapse-purge monthly"
+        day: "1"
+        minute: "0"
+        hour: "6"
+        job: /usr/local/sbin/synapse-purge.sh monthly >/symbios/services/matrix/purge.log 2>&1
 
     # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck

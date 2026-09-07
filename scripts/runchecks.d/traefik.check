@@ -34,8 +34,10 @@ do
   if ! wget --dns-timeout=120 -t5 --waitretry=120 --connect-timeout=300 --read-timeout=15 "http://${f_host}" >"${g_tmp}/traefik-wget-check" -O /dev/null 2>&1
   then
     # Report error only if it is not a known-auth response
-    if ! grep -E -q "401 Unauthorized|403 Forbidden" "${g_tmp}/traefik-wget-check"
+    if ! grep -E -q "401 Unauthorized|403 Forbidden|415 Unsupported Media Type" "${g_tmp}/traefik-wget-check"
     then
+      # Skip llm hosts that are still waking up (502 via WoL is expected)
+      echo "$f_host" | grep -qE "^llm\." && grep -qE "502 Bad Gateway" "${g_tmp}/traefik-wget-check" && continue
       g_echo_error "Error while connecting ${f_host} with wget:
 
 $(cat ${g_tmp}/traefik-wget-check)"
@@ -48,6 +50,7 @@ $(cat ${g_tmp}/traefik-wget-check)"
     # Track persistent 502 errors
     if grep -E -q "502 Bad Gateway" "${g_tmp}/traefik-wget-check"
     then
+      echo "$f_host" | grep -qE "^llm\." && continue
       if [[ -s "${g_tmp}/$f_host-502" ]] && find "${g_tmp}/$f_host-502" | grep "$f_host-502" -mmin +15
       then
         g_echo_error "Error while connecting ${f_host} with wget:

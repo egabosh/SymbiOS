@@ -1,0 +1,112 @@
+name: ""
+
+services:
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui
+    container_name: openwebui
+    restart: unless-stopped
+    environment:
+      # Global
+      - GLOBAL_LOG_LEVEL=WARNING
+      - USER_AGENT=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+      - CORS_ALLOW_ORIGIN=https://ai.{{ base_domain }}
+      # UI
+      - ENABLE_LOGIN_FORM=false
+      - ENABLE_FOLLOW_UP_GENERATION=false
+      - ENABLE_AUTOCOMPLETE_GENERATION=false
+      - ENABLE_EVALUATION_ARENA_MODELS=false
+      - ENABLE_MESSAGE_RATING=false
+      - ENABLE_TAGS_GENERATION=false
+      - WEBUI_NAME=AI
+      # Auth / OIDC
+      - WEBUI_AUTH=true
+      - ENABLE_SIGNUP=false
+      - ENABLE_OAUTH_SIGNUP=true
+      - ENABLE_OAUTH_ROLE_MAPPING=true
+      - ENABLE_API_KEYS=true
+      - OAUTH_MERGE_ACCOUNTS_BY_EMAIL=false
+      - OAUTH_SCOPES=openid profile email groups
+      - OAUTH_CLIENT_ID=openwebui
+      - OAUTH_CLIENT_SECRET={{ lookup('file', '/symbios/services/openwebui/oidc_password') }}
+      - OAUTH_PROVIDER_URL=https://auth.{{ base_domain }}
+      - OAUTH_REDIRECT_URI=https://openwebui.{{ base_domain }}/oauth/oidc
+      - OAUTH_PROVIDER_NAME=Authelia
+      - OPENID_PROVIDER_URL=https://auth.{{ base_domain }}/.well-known/openid-configuration
+      - OAUTH_ALLOWED_ROLES=openwebui-users,openwebui-admins
+      - OAUTH_ADMIN_ROLES=openwebui-admins
+      - OAUTH_ROLES_CLAIM=groups
+      - OAUTH_EMAIL_REQUIRED=false
+      - OAUTH_MAP_EMAIL_TO_USERNAME=true
+      - AUTO_APPROVE_OAUTH_ACCOUNTS=true
+      - DEFAULT_USER_ROLE=user
+      # RAG / Document Processing (Tika runs as Docker container on ai.lan)
+      - CONTENT_EXTRACTION_ENGINE=tika
+      - TIKA_SERVER_URL=http://{{ ai_host }}:9998
+      - TIKA_SERVER_VERSION=4
+      - PDF_EXTRACT_IMAGES=true
+      - ENABLE_IMAGE_INTERPRETATION=true
+      - BYPASS_EMBEDDING_AND_RETRIEVAL=true
+      # Web Search (SearXNG runs as Docker container on ai.lan)
+      - ENABLE_WEB_SEARCH=true
+      - WEB_SEARCH_ENGINE=searxng
+      - WEB_SEARCH_RESULT_COUNT=3
+      - SEARXNG_QUERY_URL=http://{{ ai_host }}:8081/search?format=json&q=<query>
+      - ENABLE_RAG_LOCAL_WEB_FETCH=false
+      - BYPASS_WEB_SEARCH_WEB_LOADER=true
+      # Model Defaults (OpenAI-compatible API, endpoint from Settings -> AI)
+      - OLLAMA_BASE_URL=
+{% if ai_server | default('', true) %}
+      - OPENAI_API_BASE_URL={{ ai_server }}
+{% endif %}
+{% if ai_apikey | default('', true) %}
+      - OPENAI_API_KEY={{ ai_apikey }}
+{% endif %}
+      - ENABLE_OPENAI_API=true
+      - BYPASS_MODEL_ACCESS_CONTROL=true
+      - DEFAULT_MODEL_METADATA={"capabilities":{"vision":true,"web_search":true,"image_generation":true,"builtin_tools":true}}
+      #- DEFAULT_MODEL_PARAMS={"function_calling":"native"}
+      - DEFAULT_USER_SYSTEM_PROMPT=Antworte IMMER ausschließlich auf Deutsch oder Englisch. Schreibe niemals in einer anderen Sprache außer es ist ausdrücklich erwünscht. Sei präzise und halte Antworten kurz, es sei denn, der Nutzer wünscht detaillierte Erklärungen.
+      - DEFAULT_MODEL=llamacpp-default
+      - ENABLE_MESSAGE_RATING=false
+      - ENABLE_FOLLOW_UP_GENERATION=false
+      - DEFAULT_CONTEXT_LENGTH=262144
+      - DEFAULT_MODEL_PARAMS={"function_calling":"native","max_tokens":32768}
+      - DEFAULT_PROMPT_SUGGESTIONS=[]
+      - OPENAI_API_REQUEST_TIMEOUT=180
+      - ENABLE_CONTEXT_COMPACTION=true
+      - CONTEXT_COMPACTION_TOKEN_THRESHOLD=200000
+      # Image Generation (ComfyUI)
+      - ENABLE_IMAGE_GENERATION=true
+      - IMAGE_GENERATION_ENGINE=comfyui
+      - IMAGE_GENERATION_MODEL=sd15.safetensors
+      - COMFYUI_BASE_URL=http://{{ ai_host }}:8188
+      - ENABLE_IMAGE_EDIT=true
+      - IMAGE_EDIT_ENGINE=comfyui
+      - IMAGE_EDIT_MODEL=sd15.safetensors
+      - IMAGES_EDIT_COMFYUI_BASE_URL=http://{{ ai_host }}:8188
+      # Speech-to-Text (Whisper)
+      - STT_WHISPER_API_BASE_URL=http://{{ ai_host }}:8082/v1
+      - STT_WHISPER_API_KEY=
+      - STT_WHISPER_MODEL=ggml-large-v3-turbo.bin
+      # Text-to-Speech (Piper)
+      - AUDIO_TTS_ENGINE=openai
+      - AUDIO_TTS_OPENAI_API_BASE_URL=http://{{ ai_host }}:8083/v1
+      - AUDIO_TTS_MODEL=tts-1
+      - AUDIO_TTS_OPENAI_API_KEY=sk-placeholder
+      # Other
+      - ENABLE_OLLAMA_API=false
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./openwebui-data:/app/backend/data
+    networks:
+      openwebui--network: {}
+      symbios_services: null
+
+networks:
+  openwebui--network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-openwebui
+  symbios_services:
+    external: true

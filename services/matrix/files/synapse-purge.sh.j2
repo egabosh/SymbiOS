@@ -1,0 +1,428 @@
+#!/bin/bash
+
+# Safe Synapse cleanup: vacuum/analyze in safe modes; destructive DB
+# operations only via explicit manual modes (they ask for confirmation).
+# Deployed via Ansible (matrix.yml) as a template under files/.
+# Host-agnostic: paths/domain are injected by the playbook.
+
+. /etc/bash/gaboshlib.include
+
+cd "{{ data_root }}/services/matrix"
+source ./env
+
+DOMAIN="matrix.{{ base_domain }}"
+SYNAPSE_URL="https://${DOMAIN}"
+ADMIN="@mx-admin:${DOMAIN}"
+POSTGRES_DB="synapse"
+
+ROOMLIST_PURGE="${g_tmp}/roompurgelist"
+
+# DANGER ZONE
+# The functions below manipulate the Synapse database directly and can break
+# E2EE key distribution, federation device lists or corrupt event/state data:
+#   cleanup_device_inbox()      TRUNCATES device_inbox (pending to-device keys/requests are lost)
+#   cleanup_old_device_lists()  DELETEs rows from device_lists_remote_pending (federation sync queue)
+#   cleanup_orphaned_state()    DELETEs state_groups (can corrupt event DAGs)
+#   purge_empty_rooms()         DELETEs whole rooms via admin API
+#   cleanup_non_whitelisted()   DELETEs foreign rooms and kicks non-whitelisted members
+# They are NOT executed by daily/weekly/monthly anymore. Run them only manually
+# via their explicit mode names below (they ask for confirmation).
+
+confirm_destructive() {
+  g_echo_warn "This operation is DESTRUCTIVE and can break E2EE decryption and federation."
+  read -r -p "Type YES to continue: " g_confirm
+  [ "$g_confirm" = "YES" ]
+}
+
+get_admin_token() {
+  TOKEN=$(docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -t -A --dbname=$POSTGRES_DB --user=$POSTGRES_USER --command="select token from access_tokens where user_id='$ADMIN' order by id desc limit 1;" 2>/dev/null)
+  if [ -z "$TOKEN" ]; then
+    g_echo_error "Failed to retrieve admin token"
+    exit 1
+  fi
+}
+
+db_query() {
+  docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -t -A -h localhost --dbname=$POSTGRES_DB --user=$POSTGRES_USER --command="$1" 2>/dev/null | grep -v "^$"
+}
+
+db_exec() {
+  docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -h localhost --dbname=$POSTGRES_DB --user=$POSTGRES_USER -c "$1" >/dev/null 2>&1
+}
+
+purge_empty_rooms() {
+  g_echo_note "Searching for empty rooms (no local members)..."
+
+  get_admin_token
+
+  g_echo "Querying database..."
+  db_query "SELECT room_id FROM rooms WHERE NOT EXISTS (SELECT 1 FROM room_memberships rm WHERE rm.room_id = rooms.room_id AND split_part(rm.user_id, ':', 2) = '${DOMAIN}' AND rm.membership = 'join');" > "$ROOMLIST_PURGE"
+
+  local empty_count
+  empty_count=$(wc -l < "$ROOMLIST_PURGE" | tr -d ' ')
+
+  if [ "$empty_count" = "0" ]; then
+    g_echo_ok "No empty rooms found"
+    return
+  fi
+
+  g_echo "Found $empty_count empty rooms"
+  local purged=0
+
+  while IFS= read -r ROOM_ID; do
+    [ -z "$ROOM_ID" ] && continue
+
+    local encoded_room
+    encoded_room=$(echo "$ROOM_ID" | sed 's/:/%3A/g')
+
+    local http_code
+    http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 300 \
+      --header "Authorization: Bearer $TOKEN" \
+      -X DELETE --header 'Content-Type: application/json' \
+      --data '{ "purge": true, "force": true }' \
+      "${SYNAPSE_URL}/_synapse/admin/v1/rooms/${encoded_room}")
+
+    if [ "$http_code" = "200" ] || [ "$http_code" = "202" ]; then
+      purged=$((purged + 1))
+      g_echo_ok "  Purged: $ROOM_ID"
+    else
+      g_echo_warn "  Failed: $ROOM_ID (HTTP $http_code)"
+    fi
+  done < "$ROOMLIST_PURGE"
+
+  g_echo_ok "Room purge done: $purged/$empty_count"
+}
+
+cleanup_non_whitelisted() {
+  g_echo_note "Cleaning up non-whitelisted federation..."
+
+  # Allowlist dynamisch aus homeserver.yaml lesen
+  local allowed_domains
+  allowed_domains=$(grep -A 20 'federation_domain_whitelist' {{ data_root }}/services/matrix/data/homeserver.yaml | grep '^\s*-' | sed 's/.*- "//;s/"$//' | tr '\n' ' ')
+  allowed_domains=("$DOMAIN" ${allowed_domains[*]})
+
+  local domain_list
+  domain_list=$(printf "%s,'" "${allowed_domains[@]}" | sed "s/,'/','/g")
+  domain_list="'${domain_list:0:-2}'"
+
+  g_echo "Allowlist: ${allowed_domains[*]}"
+
+  get_admin_token
+
+  local all_rooms
+  all_rooms=$(db_query "SELECT DISTINCT room_id FROM room_memberships;")
+
+  local rooms_purged=0
+  local members_left=0
+
+  while IFS= read -r ROOM_ID; do
+    [ -z "$ROOM_ID" ] && continue
+
+    # Room-Domain extrahieren (Teil nach letztem ':')
+    local room_domain
+    room_domain=$(echo "$ROOM_ID" | sed 's/.*://')
+
+    # Prüfen: Ist Room-Domain in Allowlist oder Local?
+    local domain_allowed=0
+    for d in "${allowed_domains[@]}"; do
+      if [ "$room_domain" = "$d" ]; then
+        domain_allowed=1
+        break
+      fi
+    done
+
+    if [ "$domain_allowed" = "0" ]; then
+      # Room ist auf einem nicht-gelisteten Server → purgen
+      local total_members
+      total_members=$(db_query "SELECT COUNT(DISTINCT user_id) FROM room_memberships WHERE room_id = '$ROOM_ID';")
+
+      local encoded_room
+      encoded_room=$(echo "$ROOM_ID" | sed 's/:/%3A/g')
+      local http_code
+      http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 300 \
+        --header "Authorization: Bearer $TOKEN" \
+        -X DELETE --header 'Content-Type: application/json' \
+        --data '{ "purge": true, "force": true }' \
+        "${SYNAPSE_URL}/_synapse/admin/v1/rooms/${encoded_room}")
+
+      if [ "$http_code" = "200" ] || [ "$http_code" = "202" ]; then
+        rooms_purged=$((rooms_purged + 1))
+        g_echo_ok "  Purged (foreign): $room_domain $ROOM_ID ($total_members members)"
+      else
+        g_echo_warn "  Failed: $ROOM_ID (HTTP $http_code)"
+      fi
+    else
+      # Room ist lokal/allowlisted → nicht-gelistete Mitglieder entfernen
+      local non_whitelisted
+      non_whitelisted=$(db_query "SELECT DISTINCT user_id FROM room_memberships WHERE room_id = '$ROOM_ID' AND membership = 'join' AND NOT (split_part(user_id, ':', 2) IN ($domain_list));")
+
+      local members_removed=0
+      while IFS= read -r user_id; do
+        [ -z "$user_id" ] && continue
+        local encoded_user
+        encoded_user=$(echo "$user_id" | sed 's/:/%3A/g')
+        local http_code
+        http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 300 \
+          --header "Authorization: Bearer $TOKEN" \
+          -X POST --header 'Content-Type: application/json' \
+          --data "{ \"reason\": \"Non-whitelisted federation server\" }" \
+          "${SYNAPSE_URL}/_synapse/admin/v1/rooms/${encoded_room}/kick/${encoded_user}")
+
+        if [ "$http_code" = "200" ]; then
+          members_removed=$((members_removed + 1))
+        fi
+      done <<< "$non_whitelisted"
+      if [ "$members_removed" -gt 0 ]; then
+        members_left=$((members_left + members_removed))
+        g_echo_ok "  Removed $members_removed non-whitelisted members from $ROOM_ID"
+      fi
+    fi
+  done <<< "$all_rooms"
+
+  g_echo_ok "Non-whitelisted cleanup done: $rooms_purged rooms purged, $members_left members left"
+}
+
+cleanup_device_inbox() {
+  g_echo_note "Cleaning up device_inbox..."
+
+  local count
+  count=$(db_query "SELECT COUNT(*) FROM device_inbox;")
+
+  if [ -z "$count" ] || [ "$count" = "0" ] 2>/dev/null; then
+    g_echo_ok "device_inbox is empty"
+    return
+  fi
+
+  g_echo "  $count entries found, truncating..."
+  db_exec "TRUNCATE device_inbox;"
+  g_echo_ok "device_inbox truncated ($count entries removed)"
+}
+
+cleanup_orphaned_state() {
+  g_echo_note "Cleaning up orphaned state_groups..."
+
+  local result
+  result=$(docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -t -A -h localhost --dbname=$POSTGRES_DB --user=$POSTGRES_USER -c "
+    CREATE TEMPORARY TABLE orphaned_state_groups AS
+    SELECT sg.id FROM state_groups sg
+    WHERE NOT EXISTS (SELECT 1 FROM event_to_state_groups etsg WHERE etsg.state_group = sg.id);
+
+    DELETE FROM state_groups_state 
+    WHERE state_group IN (SELECT id FROM orphaned_state_groups);
+
+    DELETE FROM state_groups 
+    WHERE id IN (SELECT id FROM orphaned_state_groups);
+
+    SELECT (SELECT COUNT(*) FROM state_groups) as remaining;
+  " 2>/dev/null | grep -v "^$" | tail -1)
+
+  g_echo_ok "Remaining state_groups: $result"
+}
+
+cleanup_old_device_lists() {
+  g_echo_note "Cleaning up old device_lists_remote_pending (older 50%)..."
+
+  local max_stream
+  max_stream=$(db_query "SELECT MAX(stream_id) FROM device_lists_remote_pending;")
+
+  if [ -z "$max_stream" ] || [ "$max_stream" = "0" ] 2>/dev/null; then
+    g_echo_ok "No device_lists_remote_pending data to clean"
+    return
+  fi
+
+  local threshold=$((max_stream / 2))
+  db_exec "DELETE FROM device_lists_remote_pending WHERE stream_id < $threshold;"
+  g_echo_ok "Deleted entries with stream_id < $threshold"
+}
+
+vacuum_tables() {
+  g_echo_note "Running VACUUM (non-blocking)..."
+
+  local tables=(
+    "device_inbox"
+    "device_lists_remote_cache"
+    "device_lists_stream"
+    "device_lists_remote_pending"
+    "room_memberships"
+    "event_search"
+    "event_auth_chain_links"
+    "event_auth_chains"
+    "state_events"
+    "receipts_linearized"
+    "stream_ordering_to_exterm"
+    "current_state_delta_stream"
+    "e2e_room_keys"
+    "e2e_cross_signing_keys"
+  )
+
+  local total
+  total=$(printf '%s\n' "${tables[@]}" | wc -l | tr -d ' ')
+  local i=0
+
+  for table in "${tables[@]}"; do
+    i=$((i + 1))
+    g_echo "  [$i/$total] $table"
+    db_exec "VACUUM $table;"
+  done
+
+  g_echo_ok "VACUUM completed"
+}
+
+analyze_tables() {
+  g_echo_note "Running ANALYZE..."
+
+  local tables=(
+    "state_groups_state"
+    "event_json"
+    "device_inbox"
+    "events"
+    "event_edges"
+    "event_to_state_groups"
+    "e2e_room_keys"
+    "device_lists_remote_cache"
+    "stream_ordering_to_exterm"
+    "event_auth"
+    "current_state_delta_stream"
+    "e2e_cross_signing_keys"
+    "device_lists_stream"
+    "room_memberships"
+    "device_lists_remote_pending"
+    "event_search"
+    "event_auth_chain_links"
+    "state_events"
+    "receipts_linearized"
+    "event_auth_chains"
+  )
+
+  local total
+  total=$(printf '%s\n' "${tables[@]}" | wc -l | tr -d ' ')
+  local i=0
+
+  for table in "${tables[@]}"; do
+    i=$((i + 1))
+    g_echo "  [$i/$total] $table"
+    db_exec "ANALYZE $table;"
+  done
+
+  g_echo_ok "ANALYZE completed"
+}
+
+vacuum_full_tables() {
+  g_echo_note "Running VACUUM FULL (Synapse will be stopped)..."
+
+  docker compose stop matrix-synapse
+  g_echo "Synapse stopped"
+
+  local tables=(
+    "event_json"
+    "event_edges"
+    "event_to_state_groups"
+    "event_auth"
+    "event_auth_chain_links"
+    "device_inbox"
+    "device_lists_remote_pending"
+    "current_state_delta_stream"
+  )
+
+  local total
+  total=$(printf '%s\n' "${tables[@]}" | wc -l | tr -d ' ')
+  local i=0
+
+  for table in "${tables[@]}"; do
+    i=$((i + 1))
+    g_echo "  [$i/$total] $table"
+    db_exec "VACUUM FULL $table;"
+  done
+
+  g_echo_ok "VACUUM FULL completed"
+  docker compose start matrix-synapse
+  g_echo_ok "Synapse started"
+}
+
+vacuum_full_state() {
+  g_echo_note "Running VACUUM FULL on state_groups (largest table)..."
+
+  docker compose stop matrix-synapse
+  g_echo "Synapse stopped"
+
+  g_echo "  [1/2] state_groups_state"
+  db_exec "VACUUM FULL state_groups_state;"
+  g_echo "  [2/2] events"
+  db_exec "VACUUM FULL events;"
+
+  g_echo_ok "VACUUM FULL completed"
+  docker compose start matrix-synapse
+  g_echo_ok "Synapse started"
+}
+
+db_size() {
+  local size
+  size=$(db_query "SELECT pg_size_pretty(pg_database_size('synapse'));")
+  g_echo_ok "Database size: $size"
+}
+
+# ============================================================
+# MAIN
+# ============================================================
+
+MODE="${1:-daily}"
+
+g_echo_note "=========================================="
+g_echo "Synapse cleanup started (mode: $MODE)"
+g_echo_note "=========================================="
+
+case "$MODE" in
+  daily)
+    vacuum_tables
+    analyze_tables
+    db_size
+    ;;
+  weekly)
+    vacuum_tables
+    vacuum_full_tables
+    analyze_tables
+    db_size
+    ;;
+  monthly)
+    vacuum_tables
+    vacuum_full_tables
+    vacuum_full_state
+    analyze_tables
+    db_size
+    ;;
+  purge)
+    confirm_destructive && purge_empty_rooms
+    ;;
+  non-whitelisted)
+    confirm_destructive && cleanup_non_whitelisted
+    ;;
+  device-inbox)
+    confirm_destructive && cleanup_device_inbox
+    ;;
+  device-lists)
+    confirm_destructive && cleanup_old_device_lists
+    ;;
+  orphaned-state)
+    confirm_destructive && cleanup_orphaned_state
+    ;;
+  vacuum)
+    vacuum_tables
+    analyze_tables
+    ;;
+  vacuum-full)
+    vacuum_full_tables
+    analyze_tables
+    ;;
+  vacuum-state)
+    vacuum_full_state
+    analyze_tables
+    ;;
+  *)
+    echo "Usage: $0 {daily|weekly|monthly|purge|non-whitelisted|device-inbox|device-lists|orphaned-state|vacuum|vacuum-full|vacuum-state}"
+    exit 1
+    ;;
+esac
+
+g_echo_note "=========================================="
+g_echo_ok "Synapse cleanup finished"
+g_echo_note "=========================================="

@@ -51,6 +51,12 @@ all:
     # how the ports are opened: '' (not decided), 'auto' (router is set up by
     # SymbiOS) or 'manual' (forwards entered in the router by hand)
     port_forwarding_method: ''
+    # OpenAI-compatible AI endpoint (optional, managed by the WebUI under
+    # Settings → AI). When ai_server is set, the openwebui/opencode playbooks
+    # configure their OpenAI provider with it; an optional ai_apikey is only
+    # written when set. Both vars are removed again when cleared in the WebUI.
+    ai_server: ''
+    ai_apikey: ''
     # router UPnP/TR-064 credentials (FRITZ!Box WebUI user/password).
     # Stored only in the deployed inventory.yml (see symbios-router-upnp.sh);
     # these placeholders keep the template clean for new installs.
