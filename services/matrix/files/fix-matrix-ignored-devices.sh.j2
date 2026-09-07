@@ -1,0 +1,80 @@
+#!/bin/bash
+
+# Fix ignored matrix-commander devices automatically.
+# Scans all pipe stores. Devices of users that are still members of a room on
+# this server are removed from the nio ignored_devices lists. Ignoring a device
+# of an active member blocks m.room_key sharing and makes that user unable to
+# decrypt messages. Stale devices (users no longer in any room) are left
+# untouched.
+# After a change the single pipes-runner container (project pipelistener,
+# service matrix.pipes-runner) is restarted so the change takes effect.
+# Run via cron (see matrix.yml) or manually.
+# Deployed via Ansible (matrix.yml) as a template under files/.
+# Host-agnostic: paths are injected by the playbook.
+
+. /etc/bash/gaboshlib.include
+
+g_lockfile
+
+MATRIX_DIR="{{ data_root }}/services/matrix"
+cd "${MATRIX_DIR}" || exit 1
+source ./env
+
+POSTGRES_DB="synapse"
+
+READONLY_SQL="docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -t -A -h localhost --dbname=${POSTGRES_DB} --user=${POSTGRES_USER}"
+
+JOINED_USERS="${g_tmp}/matrix-joined-users-$(date +%s)"
+CHANGED_COUNT=0
+RESTART_SERVICES=""
+
+g_echo_note "Scanning ignored_devices in ${MATRIX_DIR}"
+
+# Build set of users currently joined to any room (local and federated).
+# All room memberships are stored locally, so this works for remote users too.
+${READONLY_SQL} --command="SELECT DISTINCT user_id FROM room_memberships WHERE membership = 'join';" 2>/dev/null | grep -v "^$" | sort -u > "${JOINED_USERS}"
+
+if [ ! -s "${JOINED_USERS}" ]; then
+  g_echo_error "Membership query returned no users - aborting without changes"
+  rm -f "${JOINED_USERS}"
+  exit 1
+fi
+
+for STORE_FILE in ${MATRIX_DIR}/matrix-commander-data-*/store/@*.ignored_devices
+do
+  [ -f "${STORE_FILE}" ] || continue
+
+  PIPE_ROOM=${STORE_FILE%%/store/*}
+  PIPE_ROOM=${PIPE_ROOM##*/matrix-commander-data-}
+
+  # Keep only entries whose user is no member of any room, drop the rest.
+  while IFS= read -r g_line
+  do
+    [ -n "${g_line}" ] || continue
+    g_user=${g_line%% *}
+    if ! grep -Fqx "${g_user}" "${JOINED_USERS}"; then
+      printf '%s\n' "${g_line}"
+    fi
+  done < "${STORE_FILE}" > "${STORE_FILE}.new"
+
+  if cmp -s "${STORE_FILE}" "${STORE_FILE}.new"; then
+    rm -f "${STORE_FILE}.new"
+    continue
+  fi
+
+  cp -a "${STORE_FILE}" "${STORE_FILE}.bak.$(date +%Y%m%d)"
+  mv "${STORE_FILE}.new" "${STORE_FILE}"
+
+  CHANGED_COUNT=$((CHANGED_COUNT + 1))
+  g_echo_warn "Removed ignored entries of active members from ${STORE_FILE} -> runner restart required"
+done
+
+rm -f "${JOINED_USERS}"
+
+if [ "${CHANGED_COUNT}" -gt 0 ]; then
+  g_echo "Restarting pipes-runner container to apply ignored-device changes"
+  docker compose -p pipelistener -f ./docker-compose.pipes-runner.yml restart matrix.pipes-runner >/dev/null 2>&1
+  echo "Fixed ignored devices in ${CHANGED_COUNT} store(s), restarted runner" | notify.sh -s "Matrix: ignored-device fix"
+else
+  g_echo_ok "No ignored-device fixes required"
+fi

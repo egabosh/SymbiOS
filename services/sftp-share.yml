@@ -180,8 +180,8 @@
           # Extract username from user:password pair
           g_sftpuser=$(echo "${g_sftpuserpw}" | cut -d ":" -f1)
 
-          # Create system user with sftp-share group and supplementary groups
-          useradd -g sftp-share -G 33,101 -m -s /usr/sbin/nologin "$g_sftpuser"
+          # Create system user with sftp-share group and supplementary groups (skip if already exists)
+          id "$g_sftpuser" &>/dev/null || useradd -g sftp-share -G 33,101 -m -s /usr/sbin/nologin "$g_sftpuser"
 
           # Set password for the user
           echo "${g_sftpuserpw}" | chpasswd

@@ -207,9 +207,16 @@
             "provider": {
               "ai": {
                 "npm": "@ai-sdk/openai-compatible",
-                "name": "ai.lan",
+                "name": "local-llm",
                 "options": {
-                  "baseURL": "http://ai.lan:8080/v1"
+                {% if ai_server | default('', true) %}
+                  "baseURL": "{{ ai_server }}",
+                  {% if ai_apikey | default('', true) %}
+                  "apiKey": "{{ ai_apikey }}",
+                  {% endif %}
+                {% endif %}
+                  "timeout": 180000,
+                  "chunkTimeout": 1800000
                 },
                 "models": {
                   "llamacpp-default": {
@@ -241,16 +248,10 @@
         owner: root
         group: root
         #backup: yes
+      no_log: true
       #args:
       #  creates: /symbios/services/opencode/opencode-config/opencode.json
       notify: Restart opencode
-
-    - name: Add opencode to WoL hosts file
-      ansible.builtin.lineinfile:
-        path: /usr/local/etc/ai-wol-hosts.txt
-        line: opencode.{{ base_domain }}
-        create: true
-        mode: '0644'
 
 
 ##################

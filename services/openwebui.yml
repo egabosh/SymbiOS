@@ -75,91 +75,6 @@
         state: directory
         mode: '0550'
 
-    - name: Create searxng data dir
-      ansible.builtin.file:
-        path: /symbios/services/openwebui/searxng-data
-        owner: root
-        group: docker
-        state: directory
-        mode: '0750'
-      changed_when: false
-
-    - name: Generate searxng secret key
-      ansible.builtin.shell: |
-        [ -s /symbios/services/openwebui/searxng_secret ] || \
-        tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 64 \
-        > /symbios/services/openwebui/searxng_secret
-      changed_when: false
-
-    - name: Load searxng secret key
-      ansible.builtin.slurp:
-        path: /symbios/services/openwebui/searxng_secret
-      register: searxng_secret
-
-    - name: Write searxng limiter.toml (suppress missing config warning)
-      ansible.builtin.copy:
-        dest: /symbios/services/openwebui/searxng-data/limiter.toml
-        force: false
-        owner: root
-        group: docker
-        mode: '0640'
-        content: |
-          # minimal limiter config – suppresses WARNING about missing limiter.toml
-          [botdetection.ip_limit]
-
-    - name: Write searxng settings.yml
-      ansible.builtin.copy:
-        dest: /symbios/services/openwebui/searxng-data/settings.yml
-        owner: root
-        group: docker
-        mode: '0640'
-        content: |
-          use_default_settings: true
-
-          general:
-            instance_name: "SearXNG ai.{{ base_domain }}"
-            debug: false
-
-          server:
-            secret_key: "{{ searxng_secret['content'] | b64decode }}"
-            bind_address: "0.0.0.0"
-            port: 8080
-            rateLimit: true
-
-          search:
-            safe_search: 0
-            default_lang: ''
-            formats:
-              - html
-              - json
-            engines:
-              - name: google
-                disabled: false
-              - name: duckduckgo
-                disabled: false
-              - name: wikipedia
-                disabled: false
-              - name: bing
-                disabled: false
-              # deactivate failing engines
-              - name: ahmia
-                disabled: true
-              - name: torch
-                disabled: true
-              - name: radio browser
-                disabled: true
-
-          ui:
-            static_use_hash: true
-      changed_when: false
-
-    - name: Add ai.{{ base_domain }} to WoL hosts file
-      ansible.builtin.lineinfile:
-        path: /usr/local/etc/ai-wol-hosts.txt
-        line: ai.{{ base_domain }}
-        create: true
-        mode: '0644'
-
     - name: Ensure OIDC secret files exist (placeholder for template)
       ansible.builtin.copy:
         dest: "/symbios/services/openwebui/{{ item }}"
@@ -172,146 +87,12 @@
       changed_when: false
 
     - name: /symbios/services/openwebui/docker-compose.yml Container Configuration
-      ansible.builtin.blockinfile:
-        path: /symbios/services/openwebui/docker-compose.yml
-        create: yes
+      ansible.builtin.template:
+        src: openwebui/files/docker-compose.yml.j2
+        dest: /symbios/services/openwebui/docker-compose.yml
         mode: 0440
         owner: root
         group: docker
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-
-          name: ""
-
-          services:
-
-            openwebui:
-              image: ghcr.io/open-webui/open-webui
-              container_name: openwebui
-              restart: unless-stopped
-              environment:
-                # Global
-                - GLOBAL_LOG_LEVEL=WARNING
-                - USER_AGENT=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
-                - CORS_ALLOW_ORIGIN=https://ai.{{ base_domain }}
-                # UI
-                - ENABLE_LOGIN_FORM=false
-                - ENABLE_FOLLOW_UP_GENERATION=false
-                - ENABLE_AUTOCOMPLETE_GENERATION=false
-                - ENABLE_EVALUATION_ARENA_MODELS=false
-                - ENABLE_MESSAGE_RATING=false
-                - ENABLE_TAGS_GENERATION=false
-                - WEBUI_NAME=AI
-                # Auth / OIDC
-                - WEBUI_AUTH=true
-                - ENABLE_SIGNUP=false
-                - ENABLE_OAUTH_SIGNUP=true
-                - ENABLE_OAUTH_ROLE_MAPPING=true
-                - ENABLE_API_KEYS=true
-                - OAUTH_MERGE_ACCOUNTS_BY_EMAIL=false
-                - OAUTH_SCOPES=openid profile email groups
-                - OAUTH_CLIENT_ID=openwebui
-                - OAUTH_CLIENT_SECRET={{ lookup('file', '/symbios/services/openwebui/oidc_password') }}
-                - OAUTH_PROVIDER_URL=https://auth.{{ base_domain }}
-                - OAUTH_REDIRECT_URI=https://openwebui.{{ base_domain }}/oauth/oidc
-                - OAUTH_PROVIDER_NAME=Authelia
-                - OPENID_PROVIDER_URL=https://auth.{{ base_domain }}/.well-known/openid-configuration
-                - OAUTH_ALLOWED_ROLES=openwebui-users,openwebui-admins
-                - OAUTH_ADMIN_ROLES=openwebui-admins
-                - OAUTH_ROLES_CLAIM=groups
-                - OAUTH_EMAIL_REQUIRED=false
-                - OAUTH_MAP_EMAIL_TO_USERNAME=true
-                - AUTO_APPROVE_OAUTH_ACCOUNTS=true
-                - DEFAULT_USER_ROLE=user
-                # RAG / Document Processing
-                - CONTENT_EXTRACTION_ENGINE=external
-                - PDF_EXTRACT_IMAGES=true
-                - ENABLE_IMAGE_INTERPRETATION=true
-                - BYPASS_EMBEDDING_AND_RETRIEVAL=true
-                # Web Search (SearXNG)
-                - ENABLE_WEB_SEARCH=true
-                - WEB_SEARCH_ENGINE=searxng
-                - WEB_SEARCH_RESULT_COUNT=3
-                - SEARXNG_QUERY_URL=http://searxng:8080/search?format=json&q=<query>
-                - ENABLE_RAG_LOCAL_WEB_FETCH=false
-                - BYPASS_WEB_SEARCH_WEB_LOADER=true
-                # Model Defaults (llama.cpp via OpenAI-compatible API)
-                - OLLAMA_BASE_URL=
-                - OPENAI_API_BASE_URL=http://{{ ai_host }}:8080/v1
-                - OPENAI_API_KEY=
-                - ENABLE_OPENAI_API=true
-                - BYPASS_MODEL_ACCESS_CONTROL=true
-                - DEFAULT_MODEL_METADATA={"capabilities":{"vision":true,"web_search":true,"image_generation":true,"builtin_tools":true}}
-                #- DEFAULT_MODEL_PARAMS={"function_calling":"native"}
-                - DEFAULT_USER_SYSTEM_PROMPT=Antworte IMMER ausschließlich auf Deutsch oder Englisch. Schreibe niemals in einer anderen Sprache außer es ist ausdrücklich erwünscht. Sei präzise und halte Antworten kurz, es sei denn, der Nutzer wünscht detaillierte Erklärungen.
-                - DEFAULT_MODEL=llamacpp-default
-                - ENABLE_MESSAGE_RATING=false
-                - ENABLE_FOLLOW_UP_GENERATION=false
-                - DEFAULT_CONTEXT_LENGTH=262144
-                - DEFAULT_MODEL_PARAMS={"function_calling":"native","max_tokens":8192}
-                - DEFAULT_PROMPT_SUGGESTIONS=[]
-                - OPENAI_API_REQUEST_TIMEOUT=180
-                - ENABLE_CONTEXT_COMPACTION=true
-                - CONTEXT_COMPACTION_TOKEN_THRESHOLD=200000
-                # Image Generation (ComfyUI)
-                - ENABLE_IMAGE_GENERATION=true
-                - IMAGE_GENERATION_ENGINE=comfyui
-                - IMAGE_GENERATION_MODEL=sd15.safetensors
-                - COMFYUI_BASE_URL=http://{{ ai_host }}:8188
-                - ENABLE_IMAGE_EDIT=true
-                - IMAGE_EDIT_ENGINE=comfyui
-                - IMAGE_EDIT_MODEL=sd15.safetensors
-                - IMAGES_EDIT_COMFYUI_BASE_URL=http://{{ ai_host }}:8188
-                # Speech-to-Text (Whisper)
-                - STT_WHISPER_API_BASE_URL=http://{{ ai_host }}:8082/v1
-                - STT_WHISPER_API_KEY=
-                - STT_WHISPER_MODEL=ggml-large-v3-turbo.bin
-                # Text-to-Speech (Piper)
-                - AUDIO_TTS_ENGINE=openai
-                - AUDIO_TTS_OPENAI_API_BASE_URL=http://{{ ai_host }}:8083/v1
-                - AUDIO_TTS_MODEL=tts-1
-                - AUDIO_TTS_OPENAI_API_KEY=sk-placeholder
-                # Other
-                - ENABLE_OLLAMA_API=false
-              volumes:
-                - /etc/localtime:/etc/localtime:ro
-                - ./openwebui-data:/app/backend/data
-              depends_on:
-                searxng:
-                  condition: service_started
-              networks:
-                openwebui--network: {}
-                symbios_services: null
-
-            searxng:
-              image: searxng/searxng:latest
-              container_name: searxng
-              restart: unless-stopped
-              networks:
-                - openwebui--network
-              volumes:
-                - ./searxng-data:/etc/searxng:rw
-              cap_drop:
-                - ALL
-              cap_add:
-                - CHOWN
-                - SETGID
-                - SETUID
-                - DAC_OVERRIDE
-              logging:
-                driver: json-file
-                options:
-                  max-size: 1m
-                  max-file: 1
-
-          networks:
-            openwebui--network:
-              driver: bridge
-              driver_opts:
-                com.docker.network.bridge.name: br-openwebui
-            symbios_services:
-              external: true
-
       notify: Restart openwebui
 
     - name: /symbios/base-services/traefik/providers/openwebui.yml OpenWebUI<->Traefik provider
@@ -531,10 +312,12 @@
         upsert("ui.prompt_suggestions", [])
 
         needs_restart = False
-        if "openai.enable" not in existing:
+        ai_server = "{{ ai_server | default('') }}"
+        ai_apikey = "{{ ai_apikey | default('') }}"
+        if ai_server and "openai.enable" not in existing:
             upsert("openai.enable", True)
-            upsert("openai.api_base_urls", ["http://{{ ai_host }}:8080/v1"])
-            upsert("openai.api_keys", [""])
+            upsert("openai.api_base_urls", [ai_server])
+            upsert("openai.api_keys", [ai_apikey])
             upsert("openai.api_configs", {})
             needs_restart = True
 
@@ -545,6 +328,30 @@
       register: db_config_result
       changed_when: '"restart" in db_config_result.stdout'
       notify: Restart openwebui
+
+    # Keep openai.base_url/api_key in sync after the inventory changed
+    # (openai.enable is written once on first run by the task above).
+    - name: Store OpenAI settings in OpenWebUI DB (base_url/api_key sync)
+      ansible.builtin.shell: |
+        DB=/symbios/services/openwebui/openwebui-data/webui.db
+        NEW_BASE='["{{ ai_server }}"]'
+        NEW_KEY='["{{ ai_apikey }}"]'
+        CUR_BASE=$(sqlite3 "$DB" "SELECT value FROM config WHERE key='openai.api_base_urls'")
+        CUR_KEY=$(sqlite3 "$DB" "SELECT value FROM config WHERE key='openai.api_keys'")
+        if [ "$CUR_BASE" != "$NEW_BASE" ] || [ "$CUR_KEY" != "$NEW_KEY" ]; then
+          sqlite3 "$DB" \
+            "INSERT INTO config (key, value, updated_at) VALUES
+               ('openai.enable', 'true', strftime('%s','now')*1000),
+               ('openai.api_base_urls', '$NEW_BASE', strftime('%s','now')*1000),
+               ('openai.api_keys', '$NEW_KEY', strftime('%s','now')*1000)
+             ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;"
+          echo changed
+        fi
+      register: openai_db_result
+      changed_when: "'changed' in openai_db_result.stdout"
+      notify: Restart openwebui
+      no_log: true
+      when: ai_server | default('', true) | bool
 
     - name: Flush handlers - restart OpenWebUI to pick up DB config
       ansible.builtin.meta: flush_handlers
@@ -565,11 +372,6 @@
 
     - name: Restart openwebui
       ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/services/openwebui
-
-    - name: Restart searxng
-      ansible.builtin.shell: docker compose up -d --force-recreate searxng
       args:
         chdir: /symbios/services/openwebui
 

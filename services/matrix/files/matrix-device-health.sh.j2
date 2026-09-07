@@ -1,0 +1,132 @@
+#!/bin/bash
+
+# matrix-device-health.sh - E2EE device health watchdog for all room stores.
+#
+# nio marks a member device as "deleted" when it is missing from the
+# homeserver's device-key response during sync (e.g. after the federation
+# key cache was lost). Deleted devices are excluded from megolm key
+# sharing, so that user can no longer decrypt new messages.
+#
+# This script checks every deleted device in every runner store against
+# the homeserver (POST /keys/query, which also re-primes an empty
+# federation key cache) and unmarks devices that still exist on the
+# server. After changes the single pipes-runner container is restarted
+# so the stores are reloaded.
+#
+# Run via cron (see matrix.yml) or manually:
+#   /usr/local/sbin/matrix-device-health.sh
+
+. /etc/bash/gaboshlib.include
+
+g_lockfile
+
+MATRIX_DIR="{{ data_root }}/services/matrix"
+DOMAIN="matrix.{{ base_domain }}"
+SYNAPSE_URL="https://${DOMAIN}"
+POSTGRES_DB="synapse"
+
+cd "${MATRIX_DIR}" || exit 1
+source ./env
+
+# admin token for API calls (same lookup as matrix-recreate-room.sh)
+get_admin_token() {
+  TOKEN=$(docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -t -A --dbname=$POSTGRES_DB --user=$POSTGRES_USER --command="select token from access_tokens where user_id='@mx-admin:${DOMAIN}' order by id desc limit 1;" 2>/dev/null)
+  if [ -z "${TOKEN}" ]; then
+    g_echo_error "Failed to retrieve admin token"
+    exit 1
+  fi
+}
+
+# list deleted devices of a store: one "user_id device_id" per line
+store_deleted_devices() {
+  python3 -c '
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+for user_id, device_id in con.execute(
+    "SELECT user_id, device_id FROM devicekeys WHERE deleted = 1"
+):
+    print(user_id, device_id)
+' "$1" 2>/dev/null
+}
+
+# current (live) device ids of a user according to the homeserver
+server_live_devices() {
+  curl -s --max-time 30 "${SYNAPSE_URL}/_matrix/client/v3/keys/query" -X POST \
+    --header "Authorization: Bearer ${TOKEN}" \
+    --header 'Content-Type: application/json' \
+    --data "{\"device_keys\":{\"$1\":[]}}" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+keys = data.get("device_keys", {}).get(sys.argv[1], {})
+print(" ".join(sorted(keys.keys())))
+' "$1" 2>/dev/null
+}
+
+# unmark one device in one store
+unmark_device() {
+  python3 -c '
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.execute(
+    "UPDATE devicekeys SET deleted = 0 WHERE user_id = ? AND device_id = ?",
+    (sys.argv[2], sys.argv[3]),
+)
+con.commit()
+' "$1" "$2" "$3" 2>/dev/null
+}
+
+get_admin_token
+
+CHANGED_COUNT=0
+
+g_echo_note "Checking deleted devices in ${MATRIX_DIR}"
+
+for STORE_DB in ${MATRIX_DIR}/matrix-commander-data-*/store/@*.db
+do
+  [ -f "${STORE_DB}" ] || continue
+
+  ROOM=${STORE_DB%%/store/*}
+  ROOM=${ROOM##*/}
+
+  DELETED_DEVICES=$(store_deleted_devices "${STORE_DB}")
+  if [ -z "${DELETED_DEVICES}" ]; then
+    continue
+  fi
+
+  # collect unique users with deleted devices in this store
+  USERS=$(printf '%s\n' "${DELETED_DEVICES}" | cut -d' ' -f1 | sort -u)
+
+  # build "user device" set of devices that are alive on the server
+  LIVE_DEVICES=""
+  for USER in ${USERS}
+  do
+    for DEVICE in $(server_live_devices "${USER}")
+    do
+      LIVE_DEVICES="${LIVE_DEVICES}${USER} ${DEVICE}
+"
+    done
+  done
+
+  while read -r USER DEVICE
+  do
+    [ -n "${USER}" ] || continue
+    if printf '%s' "${LIVE_DEVICES}" | grep -Fqx "${USER} ${DEVICE}"; then
+      unmark_device "${STORE_DB}" "${USER}" "${DEVICE}"
+      CHANGED_COUNT=$((CHANGED_COUNT + 1))
+      g_echo_warn "Unmarked deleted device ${DEVICE} of ${USER} in room store ${ROOM}"
+    else
+      g_echo_debug "Device ${DEVICE} of ${USER} is gone on the server - keeping it marked as deleted (${ROOM})"
+    fi
+  done <<< "${DELETED_DEVICES}"
+done
+
+if [ "${CHANGED_COUNT}" -gt 0 ]; then
+  g_echo "Fixed ${CHANGED_COUNT} device(s), restarting pipes-runner container"
+  docker compose -p pipelistener -f ./docker-compose.pipes-runner.yml restart matrix.pipes-runner >/dev/null 2>&1
+  echo "Matrix: unmarked ${CHANGED_COUNT} stale deleted device(s) in E2EE stores" | notify.sh -s "Matrix: device-health fix"
+else
+  g_echo_ok "No stale deleted devices found"
+fi
