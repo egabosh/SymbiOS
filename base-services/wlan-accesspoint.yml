@@ -1,0 +1,210 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   name: WLAN Access Point
+#   short_description: Configure a wireless LAN access point via hostapd
+#   description: Sets up a simple wireless LAN access point using hostapd. Provides WiFi connectivity only - no routing, DNS or DHCP.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Network
+#   service_control:
+#     services:
+#     - name: hostapd
+#       type: systemd
+#       status: systemctl is-active hostapd 2>/dev/null || exit 4
+#   actions:
+#     start: systemctl start hostapd
+#     stop: systemctl stop hostapd
+#     restart: systemctl restart hostapd
+---
+- name: Configure WLAN Access Point (hostapd)
+  hosts: localhost
+  become: true
+  vars:
+    # Config paths (derived from inventory layout vars). The actual AP settings
+    # (ap_interface/ap_name/ap_passphrase) are read from inventory vars in each
+    # task with default() - we must not re-declare them as play vars, because
+    # a self-referencing play var (ap_interface: "{{ ap_interface }}") triggers
+    # an Ansible template recursion loop.
+    ap_conf_dir: "{{ base_services_root }}/wlan-accesspoint"
+    ap_conf_file: "{{ ap_conf_dir }}/hostapd.conf"
+  tasks:
+    - name: Install hostapd and iw
+      ansible.builtin.apt:
+        name:
+          - hostapd
+          - iw
+        state: present
+        update_cache: true
+      changed_when: true
+
+    - name: Unmask hostapd service (managed by SymbiOS)
+      ansible.builtin.systemd:
+        name: hostapd
+        masked: false
+
+    - name: Create hostapd config directory
+      ansible.builtin.file:
+        path: "{{ ap_conf_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Determine WiFi channel from current frequency
+      ansible.builtin.shell: |
+        IW_OUTPUT=$(iw dev {{ ap_interface | default('wlan0') }} info 2>/dev/null || true)
+        FREQ=$(echo "$IW_OUTPUT" | awk '/freq/{print $2}')
+        if [ -n "$FREQ" ] && [ "$FREQ" -ge 2400 ] 2>/dev/null && [ "$FREQ" -le 2500 ]; then
+          echo "6"
+        elif [ -n "$FREQ" ] && [ "$FREQ" -ge 5000 ] 2>/dev/null; then
+          echo "36"
+        else
+          echo "6"
+        fi
+      register: _ap_channel
+      changed_when: false
+      failed_when: false
+
+    - name: Set hostapd configuration
+      ansible.builtin.copy:
+        content: |
+          # SymbiOS WLAN Access Point - managed by Ansible
+          interface={{ ap_interface | default('wlan0') }}
+          driver=nl80211
+
+          ssid={{ ap_name | default('SymbiOS-AP') }}
+          hw_mode=g
+          channel={{ _ap_channel.stdout | default('6') }}
+
+          {% set ap_country_code = ap_country | default('', true) | upper or keyboard | default('', true) | upper %}
+          {% if ap_country_code %}
+          country_code={{ ap_country_code }}
+          ieee80211d=1
+          {% endif %}
+
+          wmm_enabled=0
+          macaddr_acl=0
+          auth_algs=1
+          ignore_broadcast_ssid=0
+
+          # Security
+          {% if ap_passphrase | default('') %}
+          wpa=2
+          wpa_passphrase={{ ap_passphrase | default('') }}
+          wpa_key_mgmt=WPA-PSK
+          wpa_pairwise=TKIP
+          rsn_pairwise=CCMP
+          {% else %}
+          # No passphrase - open network
+          {% endif %}
+        dest: "{{ ap_conf_file }}"
+        owner: root
+        group: root
+        mode: '0600'
+      notify: restart hostapd
+
+    - name: Ensure hostapd config points to our config
+      ansible.builtin.lineinfile:
+        path: /etc/default/hostapd
+        regexp: '^DAEMON_CONF='
+        line: 'DAEMON_CONF="{{ ap_conf_file }}"'
+        create: true
+      notify: restart hostapd
+
+    # The data partition (/symbios, fstab noauto) is unlocked after boot via the
+    # LUKS boot-unlock page. hostapd is therefore NOT auto-started by systemd
+    # (enabled: false) - instead rc.local starts it once /symbios is mounted.
+    - name: Remove hostapd systemd wait drop-in (superseded by rc.local)
+      ansible.builtin.file:
+        path: /etc/systemd/system/hostapd.service.d/symbios-wait-for-data.conf
+        state: absent
+
+    - name: Insert hostapd start into rc.local boot sequence
+      ansible.builtin.blockinfile:
+        path: /etc/rc.local
+        create: true
+        mode: '0755'
+        insertbefore: 'exit 0'
+        marker: "# {mark} SymbiOS WLAN Access Point start"
+        block: |
+          # Start hostapd (WLAN Access Point) once /symbios is mounted.
+          # Only when the AP is configured and not disabled in the inventory.
+          if grep -qE '^[[:space:]]*ap_configured:[[:space:]]*true' "{{ base_services_root }}/symbios-ui/config/inventory.yml" && \
+             ! grep -qE '^[[:space:]]*ap_enabled:[[:space:]]*(false|False|no)' "{{ base_services_root }}/symbios-ui/config/inventory.yml"
+          then
+            systemctl start hostapd 2>/dev/null || true
+          fi
+      notify: restart hostapd
+
+    - name: Start hostapd (not enabled for boot - rc.local starts it after mount)
+      ansible.builtin.systemd:
+        name: hostapd
+        state: started
+        enabled: false
+        daemon_reload: true
+      when: ap_enabled | default(true) | bool
+
+    - name: Stop and disable hostapd
+      ansible.builtin.systemd:
+        name: hostapd
+        state: stopped
+        enabled: false
+        daemon_reload: true
+      when: not (ap_enabled | default(true) | bool)
+
+    - name: Deploy hostapd healthcheck
+      ansible.builtin.copy:
+        content: |
+          CHECK_CATEGORY="services"
+          CHECK_TITLE="WLAN Access Point"
+          CHECK_DESC="Checks if the wireless LAN access point (hostapd) is running."
+          CHECK_DETAIL="Verifies hostapd.service is active via systemctl.|hostapd provides the wireless access point.|If down, WiFi clients cannot connect."
+
+          # Healthcheck for hostapd (WLAN Access Point)
+          f_check_cache "symbios-healthcheck-wlan-ap" || return 2>/dev/null || true
+          # Only relevant while the AP is enabled (ap_enabled in inventory).
+          # When the master switch is off, a stopped hostapd is the expected state.
+          f_ap_enabled="$(f_symbios_var ap_enabled true)"
+          if [[ "${f_ap_enabled}" == "true" ]] && ! systemctl is-active hostapd.service >/dev/null 2>&1
+          then
+            g_echo_error "Healthcheck failed for wlan-ap: hostapd not active"
+          fi
+        dest: "{{ data_root }}/runchecks.d/symbios-healthcheck-wlan-ap.check"
+        owner: root
+        group: root
+        mode: '0400'
+      changed_when: true
+
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/wlan-accesspoint.yml"
+      changed_when: false
+
+  handlers:
+    - name: restart hostapd
+      ansible.builtin.systemd:
+        name: hostapd
+        state: restarted
+        daemon_reload: true
+      when: ap_enabled | default(true) | bool

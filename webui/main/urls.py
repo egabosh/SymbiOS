@@ -27,6 +27,7 @@ from . import views_exec
 from . import views_port_forwarding
 from . import views_external
 from . import views_plugins
+from . import views_wlan_ap
 from .utils.log_utils import logs_stream
 
 urlpatterns = [
@@ -41,6 +42,7 @@ urlpatterns = [
     re_path(r'^services/(?P<playbook>.+\.yml)/status/$', views_services.services_status, name='services_status'),
     re_path(r'^services/(?P<playbook>.+\.yml)/source/$', views_services.services_source, name='services_source'),
     re_path(r'^services/(?P<playbook>.+\.yml)/access/$', views_services.services_access, name='services_access'),
+    path('settings/wlan-accesspoint/', views_wlan_ap.settings_wlan_ap, name='settings_wlan_ap'),
     path('health/data/', views.health_data, name='health_data'),
     path('health/recheck/<str:check_name>/', views.health_recheck, name='health_recheck'),
     path('', views_home.home, name='home'),

@@ -30,6 +30,29 @@
 </div>
 {% endif %}
 
+{# --- Network submenu --- #}
+<div class="mb-4">
+  <a class="svc-tiles-section-toggle" data-bs-toggle="collapse" href="#network-services-tiles"
+     role="button" aria-expanded="false" aria-controls="network-services-tiles">
+    <i class="bi bi-hdd-network"></i> Network
+    <i class="bi bi-chevron-down svc-tiles-chevron"></i>
+  </a>
+  <div class="collapse mt-2" id="network-services-tiles">
+    <div class="row g-3">
+      <div class="col-md-4 col-lg-3">
+        <a href="/settings/wlan-accesspoint/" class="text-decoration-none">
+          <div class="card h-100 svc-tile">
+            <div class="card-body">
+              <h6 class="card-title mb-1"><i class="bi bi-wifi"></i> WLAN Access Point</h6>
+              <p class="card-text small text-muted mb-0">Configure a wireless LAN access point via hostapd.</p>
+            </div>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
 {# --- Installed services tiles --- #}
 <div class="row g-3 mb-4">
   {% regroup sidebar_installed by group as installed_groups %}

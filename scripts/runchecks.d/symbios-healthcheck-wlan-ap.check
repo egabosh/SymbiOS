@@ -1,0 +1,14 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="WLAN Access Point"
+CHECK_DESC="Checks if the wireless LAN access point (hostapd) is running."
+CHECK_DETAIL="Verifies hostapd.service is active via systemctl.|hostapd provides the wireless access point.|If down, WiFi clients cannot connect."
+
+# Healthcheck for hostapd (WLAN Access Point)
+f_check_cache "symbios-healthcheck-wlan-ap" || return 2>/dev/null || true
+# Only relevant while the AP is enabled (ap_enabled in inventory).
+# When the master switch is off, a stopped hostapd is the expected state.
+f_ap_enabled="$(f_symbios_var ap_enabled true)"
+if [[ "${f_ap_enabled}" == "true" ]] && ! systemctl is-active hostapd.service >/dev/null 2>&1
+then
+  g_echo_error "Healthcheck failed for wlan-ap: hostapd not active"
+fi
