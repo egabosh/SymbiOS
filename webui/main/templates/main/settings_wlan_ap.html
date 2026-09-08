@@ -1,0 +1,184 @@
+{% extends "main/base.html" %}
+{% load static %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/settings/">Settings</a></li>
+    <li class="breadcrumb-item active">WLAN Access Point</li>
+  </ol>
+</nav>
+
+{% include "main/_page_header.html" %}
+
+<div class="row">
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-body">
+        <form method="post" data-exec="true">
+          {% csrf_token %}
+
+          <!-- Access Point enabled -->
+          <div class="mb-4">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" name="ap_enabled"
+                     id="ap-enabled" role="switch"
+                     {% if ap_enabled %}checked{% endif %}>
+              <label class="form-check-label fw-semibold" for="ap-enabled">
+                Access Point enabled
+              </label>
+            </div>
+            <div class="form-text">
+              <i class="bi bi-info-circle"></i>
+              When disabled, hostapd is stopped and the WiFi network is not broadcast.
+            </div>
+          </div>
+
+          <!-- Wireless Interface -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold">Wireless Interface</label>
+            {% if wireless_ifaces %}
+            <select class="form-select" name="ap_interface" required>
+              <option value="" disabled {% if not vars.ap_interface %}selected{% endif %} hidden>Choose interface...</option>
+              {% for iface in wireless_ifaces %}
+                <option value="{{ iface }}" {% if vars.ap_interface == iface %}selected{% endif %}>{{ iface }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">
+              <i class="bi bi-info-circle"></i>
+              Detected {{ wireless_ifaces|length }} wireless interface{{ wireless_ifaces|length|pluralize }}.
+            </div>
+            {% else %}
+            <input type="text" class="form-control" name="ap_interface"
+                   placeholder="e.g. wlan0"
+                   value="{% if vars.ap_interface %}{{ vars.ap_interface }}{% endif %}"
+                   required>
+            <div class="form-text text-warning">
+              <i class="bi bi-exclamation-triangle"></i>
+              No wireless interfaces detected automatically. Enter the interface name manually (e.g. wlan0).
+            </div>
+            {% endif %}
+          </div>
+
+          <!-- WLAN Name (SSID) -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold">WLAN Name (SSID)</label>
+            <input type="text" class="form-control" name="ap_name"
+                   placeholder="e.g. MyWiFi"
+                   maxlength="32"
+                   value="{% if vars.ap_name %}{{ vars.ap_name }}{% endif %}"
+                   required>
+            <div class="form-text">The network name that will be broadcast (max 32 characters).</div>
+          </div>
+
+          <!-- Country code -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold">Country Code</label>
+            <input type="text" class="form-control" name="ap_country"
+                   id="ap-country"
+                   placeholder="e.g. DE"
+                   maxlength="2"
+                   value="{% if default_country %}{{ default_country }}{% endif %}"
+                   pattern="[A-Za-z]{2}" title="Two-letter ISO country code">
+            <div class="form-text">
+              <i class="bi bi-info-circle"></i>
+              Two-letter ISO 3166 country code (e.g. DE, US). Leave empty to derive
+              from the keyboard layout ({{ vars.keyboard|default:'?' }} &rarr; {{ vars.keyboard|default:'?'|upper }}).
+            </div>
+          </div>
+
+          <!-- Passphrase -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold">Passphrase</label>
+            <div class="input-group">
+              <input type="password" class="form-control" name="ap_passphrase"
+                     id="ap-passphrase"
+                     placeholder="Enter passphrase (min 8 chars, or leave empty for open network)"
+                     value="{% if vars.ap_passphrase %}{{ vars.ap_passphrase }}{% endif %}">
+              <button class="btn btn-outline-secondary" type="button"
+                      onclick="togglePassphrase()" title="Show/hide passphrase">
+                <i class="bi bi-eye" id="pw-toggle-icon"></i>
+              </button>
+            </div>
+            <div class="form-text">
+              WPA2 security. Leave empty for an open (unencrypted) network.
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-save"></i> Save &amp; Apply
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status sidebar -->
+  <div class="col-md-4">
+    <div class="card">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-info-circle"></i> Current Configuration
+      </div>
+      <div class="card-body">
+        {% if vars.ap_configured %}
+        <table class="table table-sm table-borderless mb-0">
+          <tr>
+            <td class="text-muted">Status</td>
+            <td>
+              {% if ap_enabled %}
+                <span class="badge bg-success">Enabled</span>
+              {% else %}
+                <span class="badge bg-warning text-dark">Disabled</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="text-muted">Interface</td>
+            <td><code>{{ vars.ap_interface|default:"-" }}</code></td>
+          </tr>
+          <tr>
+            <td class="text-muted">SSID</td>
+            <td><code>{{ vars.ap_name|default:"-" }}</code></td>
+          </tr>
+          <tr>
+            <td class="text-muted">Country</td>
+            <td><code>{{ default_country|default:"-" }}</code></td>
+          </tr>
+          <tr>
+            <td class="text-muted">Security</td>
+            <td>
+              {% if vars.ap_passphrase %}
+                <span class="badge bg-success">WPA2</span>
+              {% else %}
+                <span class="badge bg-warning text-dark">Open</span>
+              {% endif %}
+            </td>
+          </tr>
+        </table>
+        {% else %}
+        <div class="text-muted small">
+          <i class="bi bi-exclamation-circle"></i>
+          No configuration saved yet. Fill in the form and click Save &amp; Apply.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function togglePassphrase() {
+  const input = document.getElementById('ap-passphrase');
+  const icon = document.getElementById('pw-toggle-icon');
+  if (input.type === 'password') {
+    input.type = 'text';
+    icon.className = 'bi bi-eye-slash';
+  } else {
+    input.type = 'password';
+    icon.className = 'bi bi-eye';
+  }
+}
+</script>
+{% endblock %}

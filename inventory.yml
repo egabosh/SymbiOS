@@ -62,6 +62,17 @@ all:
     # these placeholders keep the template clean for new installs.
     router_upnp_user: ''
     router_upnp_password: ''
+    # WLAN Access Point (base-services/wlan-accesspoint.yml, managed by the WebUI
+    # under Settings -> WLAN Access Point). ap_configured is true once the
+    # hostapd config has been applied. ap_enabled stops/starts hostapd (off when
+    # the AP is disabled). ap_country is the two-letter ISO country code
+    # (uppercase); empty derives it from the keyboard layout var.
+    ap_interface: ''
+    ap_name: ''
+    ap_passphrase: ''
+    ap_country: ''
+    ap_enabled: true
+    ap_configured: false
     # ansible defaults
     ansible_user: "root"
     ansible_python_interpreter: "/usr/bin/python3"
