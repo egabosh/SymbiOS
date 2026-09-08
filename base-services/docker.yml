@@ -206,12 +206,17 @@
         install_recommends: no
 
     # https://github.com/nextcloud/docker/issues/1103
-    - name: writing daemon.json (ipv6 settings + data-root)
+    # default-address-pools: hand out only a /24 (10.42.0.0/24, 10.42.1.0/24, ...)
+    # per bridge network instead of a whole /16 per bridge.
+    - name: writing daemon.json (ipv6 settings + data-root + /24 bridge pools)
       copy:
         dest: "/etc/docker/daemon.json"
         content: |
           {
             "data-root": "{{ docker_root }}",
+            "default-address-pools": [
+              {"base": "10.42.0.0/16", "size": 24}
+            ],
             "ipv6": true,
             "fixed-cidr-v6": "fdab::/64",
             "experimental": true,
