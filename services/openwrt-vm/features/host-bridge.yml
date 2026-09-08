@@ -44,10 +44,12 @@
         msg: "Bridge {{ bridge_name }} does not exist. Run openwrt-vm.yml first."
       when: bridge_check.rc != 0
 
-    # Parse the comma-separated interface list.
+    # Parse the interface list (accepts a comma-separated string or a YAML list).
     - name: Parse interface list
       ansible.builtin.set_fact:
-        iface_list: "{{ interfaces.split(',') | map('trim') | select('match', '^.+$') | list }}"
+        iface_list: >-
+          {{ (interfaces if interfaces is string else (interfaces | join(',')))
+             | split(',') | map('trim') | select('match', '^.+$') | list }}
 
     # Add each interface to the bridge.
     - name: Add interfaces to bridge

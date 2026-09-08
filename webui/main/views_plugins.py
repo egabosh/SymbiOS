@@ -20,7 +20,6 @@ API endpoints for toggling, saving, applying, and detecting feature parameters.
 Features are rendered inline in services_detail.html.
 """
 import json
-import os
 import threading
 
 from django.http import JsonResponse
@@ -171,18 +170,22 @@ def plugin_feature_detect(request, service, feature_id, param_name):
     if not detect_script:
         return JsonResponse({"ok": True, "options": []})
 
-    script_path = os.path.join(plugin["plugin_dir"], "features", detect_script)
-    if not os.path.isfile(script_path):
-        return JsonResponse({"ok": False, "error": "Detect script not found"}, status=404)
-
-    ok, stdout, stderr = run_command("bash %s" % shlex_quote(script_path), timeout=15)
-    if not ok:
-        return JsonResponse({"ok": False, "error": stderr or "Detection failed"}, status=500)
+    # Detect scripts run on the host (run_command goes through symbios-exec.sh),
+    # so use the host-side helper: it resolves plugin.yml and features/ from the
+    # host repo copy instead of a container-local /repo path that does not exist
+    # on the host.
+    cmd = "symbios-feature-detect.sh %s %s %s" % (
+        shlex_quote(service), shlex_quote(feature_id), shlex_quote(param_name)
+    )
+    ok, stdout, stderr = run_command(cmd, timeout=15)
 
     try:
         options = json.loads(stdout.strip())
     except (json.JSONDecodeError, ValueError):
         options = []
+
+    if not ok and not options:
+        return JsonResponse({"ok": False, "error": stderr or "Detection failed"}, status=500)
 
     return JsonResponse({"ok": True, "options": options})
 

@@ -404,7 +404,11 @@ document.querySelectorAll('.feat-save-apply').forEach(btn => {
     if (!form || !form.reportValidity()) return;
     const data = {};
     const fd = new FormData(form);
-    for (const [k,v] of fd.entries()) { data[k] = v; }
+    for (const [k,v] of fd.entries()) {
+      // Multi-select entries share one key; collect them as a list.
+      if (data[k] !== undefined) { data[k] = [].concat(data[k], v); }
+      else { data[k] = v; }
+    }
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
     fetch('/plugins/' + FEATURE_SERVICE + '/features/' + fid + '/save/', { method:'POST', credentials:'same-origin', headers:{'X-CSRFToken':getCsrfToken(),'Content-Type':'application/json'}, body:JSON.stringify(data) })
@@ -480,6 +484,15 @@ function loadStatus() {
     });
 }
 loadStatus();
+
+// Populate detected options for already-enabled features on page load.
+// detectFeatOptions only runs on toggle change otherwise, leaving the
+// dropdown empty for features that are already switched on.
+document.querySelectorAll('.feat-toggle').forEach(function(toggle) {
+  if (!toggle.checked) return;
+  const cfg = document.getElementById('config-area-' + toggle.dataset.feature);
+  if (cfg) detectFeatOptions(cfg, toggle.dataset.feature);
+});
 
 function runRemote() {
   const select = document.getElementById('external-target');

@@ -20,7 +20,8 @@ then
   exit 1
 fi
 
-PLUGIN_DIR="${g_services_root}/${SERVICE}"
+# plugin.yml and features/ live in the git repo (same as symbios-feature-apply.sh).
+PLUGIN_DIR="${g_git_root}/services/${SERVICE}"
 PLUGIN_YML="${PLUGIN_DIR}/plugin.yml"
 
 if [[ ! -f "$PLUGIN_YML" ]]
@@ -30,7 +31,8 @@ then
 fi
 
 # Read the detect script path from plugin.yml.
-SCRIPT=$(yq ".features[] | select(.id == \"$FEATURE\") | .params[] | select(.name == \"$PARAM\") | .detect // empty" "$PLUGIN_YML" 2>/dev/null)
+# yq v4 syntax: no '// empty' (invalid in v4); missing paths print nothing.
+SCRIPT=$(yq ".features[] | select(.id == \"$FEATURE\") | .params[] | select(.name == \"$PARAM\") | .detect" "$PLUGIN_YML" 2>/dev/null)
 
 if [[ -z "$SCRIPT" ]] || [[ "$SCRIPT" = "null" ]]
 then
