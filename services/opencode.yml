@@ -102,7 +102,7 @@
               networks:
                 opencode: {}
                 symbios_services: null
-              entrypoint: ["/root/.opencode/bin/opencode", "serve", "--hostname=0.0.0.0", "--port=80", "--print-logs", "--log-level", "WARN"]
+              entrypoint: ["tini", "-g", "--", "/root/.opencode/bin/opencode", "serve", "--hostname=0.0.0.0", "--port=80", "--print-logs", "--log-level", "WARN"]
 
           networks:
             opencode:
@@ -155,7 +155,7 @@
           ENV DEBIAN_FRONTEND=noninteractive
           # opencode and tools
           RUN apt-get update \
-           && apt-get install -y bash curl nodejs git vim htop tree \
+           && apt-get install -y bash curl nodejs git vim htop tree tini \
            && rm -rf /var/lib/apt/lists/* \
            && unset VERSION \
            && curl -fsSL https://opencode.ai/install | bash
