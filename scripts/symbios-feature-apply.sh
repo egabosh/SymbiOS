@@ -59,18 +59,25 @@ fi
 
 # Build Ansible extra-vars by mapping state values through param_mapping.
 # Format: {"webui_param": "ansible_var", ...}
-EXTRA_ARGS=""
+# Values are merged into a JSON file and passed via -e @file so that any value
+# type (string, number, list) survives shell quoting intact.
+EXTRA_VARS_FILE="$(mktemp /tmp/symbios-feature-vars.XXXXXX)"
+echo '{}' > "$EXTRA_VARS_FILE"
+trap 'rm -f "$EXTRA_VARS_FILE"' EXIT
 if [[ "$MAPPING" != "{}" ]] && [[ -n "$MAPPING" ]]
 then
   for ROW in $(echo "$MAPPING" | jq -r 'to_entries[] | "\(.key)|\(.value)"' 2>/dev/null)
   do
     WEBUI_PARAM="${ROW%%|*}"
     ANSIBLE_VAR="${ROW#*|}"
-    VALUE=$(yq ".$FEATURE.params.$WEBUI_PARAM // .${FEATURE}.${WEBUI_PARAM} // empty" "$STATE_YML" 2>/dev/null)
-    if [[ -n "$VALUE" ]] && [[ "$VALUE" != "null" ]] && [[ "$VALUE" != "" ]]
-    then
-      EXTRA_ARGS="$EXTRA_ARGS -e ${ANSIBLE_VAR}=${VALUE}"
-    fi
+    # yq v4 syntax: no '// empty' (invalid in v4); missing paths print "null".
+    VALUE_JSON=$(yq -o=json ".$FEATURE.params.$WEBUI_PARAM" "$STATE_YML" 2>/dev/null)
+    case "$VALUE_JSON" in
+      ""|null|"[]"|"{}") continue ;;
+    esac
+    # Merge the value into the extra-vars JSON (jq handles escaping).
+    NEW_JSON=$(jq -c --arg k "$ANSIBLE_VAR" --argjson v "$VALUE_JSON" '.[$k] = $v' "$EXTRA_VARS_FILE")
+    echo "$NEW_JSON" > "$EXTRA_VARS_FILE"
   done
 fi
 
@@ -88,7 +95,7 @@ if [[ "$TARGET" = "host" ]]
 then
   # Host-side playbook: runs locally with Ansible's local connection.
   ansible-playbook -i localhost, --connection=local \
-    $EXTRA_ARGS \
+    -e "@$EXTRA_VARS_FILE" \
     "$PLAYBOOK_PATH"
 else
   # VM-side playbook: SSH into the target (default).
@@ -96,7 +103,7 @@ else
   VM_IP="${VM_IP:-192.168.41.201}"
   ansible-playbook -i "${VM_IP}," -u root \
     -T 30 \
-    $EXTRA_ARGS \
+    -e "@$EXTRA_VARS_FILE" \
     "$PLAYBOOK_PATH"
 fi
 
