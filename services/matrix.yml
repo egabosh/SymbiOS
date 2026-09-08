@@ -839,7 +839,7 @@
 
     - name: Deploy pipes_runner.py (single-process replacement for per-room pipe containers)
       ansible.builtin.copy:
-        src: files/pipes_runner.py
+        src: matrix/files/pipes_runner.py
         dest: /symbios/services/matrix/pipes_runner.py
         mode: "0644"
         owner: root
@@ -847,7 +847,7 @@
 
     - name: Deploy matrix-recreate-room.sh (room state corruption repair)
       ansible.builtin.template:
-        src: files/matrix-recreate-room.sh.j2
+        src: matrix/files/matrix-recreate-room.sh.j2
         dest: /usr/local/sbin/matrix-recreate-room.sh
         mode: "0755"
         owner: root
@@ -857,7 +857,7 @@
 
     - name: /symbios/services/matrix/synapse-purge.sh (safe Synapse cleanup)
       ansible.builtin.template:
-        src: files/synapse-purge.sh.j2
+        src: matrix/files/synapse-purge.sh.j2
         dest: /usr/local/sbin/synapse-purge.sh
         mode: "0755"
         owner: root
@@ -867,7 +867,7 @@
 
     - name: /usr/local/sbin/fix-matrix-ignored-devices.sh (ignored-device watchdog)
       ansible.builtin.template:
-        src: files/fix-matrix-ignored-devices.sh.j2
+        src: matrix/files/fix-matrix-ignored-devices.sh.j2
         dest: /usr/local/sbin/fix-matrix-ignored-devices.sh
         mode: "0755"
         owner: root
@@ -877,7 +877,7 @@
 
     - name: /usr/local/sbin/matrix-device-health.sh (E2EE deleted-device watchdog)
       ansible.builtin.template:
-        src: files/matrix-device-health.sh.j2
+        src: matrix/files/matrix-device-health.sh.j2
         dest: /usr/local/sbin/matrix-device-health.sh
         mode: "0755"
         owner: root
