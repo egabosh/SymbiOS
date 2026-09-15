@@ -68,6 +68,12 @@ PAGE_EXPLAIN = {
         'SymbiOS can open these ports for you automatically on the router '
         '(or you can do it manually).'
     ),
+    'network-bridges': (
+        'Physical network interfaces that are not in use (e.g. <code>wlan0</code>) '
+        'can be attached to an existing Linux bridge. The assignment is applied '
+        'immediately and restored after every reboot from <code>/etc/rc.local</code>. '
+        'Docker and SymbiOS-managed bridges are hidden so they cannot be modified.'
+    ),
     'disk': (
         'By default, all data is stored on the system SD card. A separate '
         'hard disk provides more space and \u2014 optionally encrypted \u2014 '

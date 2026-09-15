@@ -1,0 +1,109 @@
+{% extends "main/base.html" %}
+{% load static %}
+{% load plugin_extras %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<div class="row">
+  <!-- Main form -->
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-diagram-3"></i> Interface to Bridge Assignments
+      </div>
+      <div class="card-body">
+        {% if not interfaces %}
+        <div class="alert alert-info">
+          No assignable interfaces were found. If you expected to see e.g.
+          <code>wlan0</code>, make sure the interface exists on the host.
+        </div>
+        {% else %}
+        <form method="post" data-exec="true">
+          {% csrf_token %}
+
+          {% if not bridges %}
+          <div class="alert alert-warning">
+            No assignable bridges were found. Create a bridge first, e.g.
+            <code>sudo ip link add name br-lan type bridge</code>, then reload
+            this page. Docker and SymbiOS-managed bridges are hidden because
+            they must not be modified manually.
+          </div>
+          {% endif %}
+
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th style="width:40%">Interface</th>
+                <th>Assign to Bridge</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for iface in interfaces %}
+              <tr>
+                <td>
+                  <code>{{ iface }}</code>
+                  {% if forloop.first %}
+                  <span class="badge text-bg-light ms-1">unused interface</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <select name="bridge_{{ iface }}" class="form-select form-select-sm" {% if not bridges %}disabled{% endif %}>
+                    <option value="">-- no bridge --</option>
+                    {% for br in bridges %}
+                    <option value="{{ br }}" {% if current|dict_get:iface == br %}selected{% endif %}>{{ br }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+
+          <button type="submit" class="btn btn-primary" {% if not bridges and not current %}disabled{% endif %}>
+            <i class="bi bi-save"></i> Save
+          </button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Info column -->
+  <div class="col-md-4">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-info-circle"></i> How it works</div>
+      <div class="card-body small">
+        <p class="mb-2">
+          Assign a physical interface (e.g. <code>wlan0</code>) to an existing
+          Linux bridge. The assignment is applied immediately with
+          <code>ip link</code> and restored after every reboot via
+          <code>/etc/rc.local</code>.
+        </p>
+        <p class="mb-2">
+          The bridge must already exist and must <strong>not</strong> be managed
+          by Docker or SymbiOS (bridges named <code>br-*</code>,
+          <code>docker*</code>, <code>symbios_base_services</code>,
+          <code>symbios_services</code>, <code>base-services</code> or
+          <code>services</code> are hidden).
+        </p>
+        <p class="mb-0">
+          Removing the assignment detaches the interface from the bridge and
+          removes it from the boot sequence.
+        </p>
+      </div>
+    </div>
+    {% if current %}
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-list-check"></i> Current assignments</div>
+      <div class="card-body small">
+        {% for iface, br in current.items %}
+        <div class="mb-1">
+          <code>{{ iface }}</code> <i class="bi bi-arrow-right"></i> <code>{{ br }}</code>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
