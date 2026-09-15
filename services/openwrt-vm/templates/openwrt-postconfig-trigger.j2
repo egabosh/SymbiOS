@@ -1,0 +1,20 @@
+#!/bin/sh
+# OpenWrt QEMU VM - run the online postconfig once the WAN is up (first boot)
+# Guard: /etc/openwrt-postconfig.done is only written by the script when the
+# package phase succeeded; a failed run is retried on the next "wan" ifup.
+[ "$ACTION" = "ifup" ] || exit 0
+[ "$INTERFACE" = "wan" ] || exit 0
+[ -f /etc/openwrt-postconfig.done ] && exit 0
+
+if command -v flock >/dev/null 2>&1
+then
+  flock -n /tmp/openwrt-postconfig.lock \
+    /etc/openwrt-postconfig.sh >/tmp/openwrt-postconfig.log 2>&1 &
+else
+  [ -e /tmp/openwrt-postconfig.lock ] && exit 0
+  touch /tmp/openwrt-postconfig.lock
+  ( /etc/openwrt-postconfig.sh >/tmp/openwrt-postconfig.log 2>&1
+    rm -f /tmp/openwrt-postconfig.lock ) &
+fi
+
+exit 0

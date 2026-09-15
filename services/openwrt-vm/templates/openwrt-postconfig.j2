@@ -1,0 +1,312 @@
+#!/bin/sh
+# OpenWrt QEMU VM - online postconfiguration (first boot, WAN up)
+#
+# Started from /etc/hotplug.d/iface/80-openwrt-postconfig once the WAN
+# interface comes up (guard: /etc/openwrt-postconfig.done). All the steps
+# here need the internet, so they run after boot instead of in uci-defaults.
+#
+#   1. Package install via apk (OpenWrt 25.x; opkg has been replaced by apk
+#      in OpenWrt 25) with opkg fallback for pre-25 images. A temporary
+#      resolv.conf pointing at {{ vm_dns }} makes apk/opkg resolve while the
+#      router itself has no working resolver yet; it is restored right after.
+#   2. WireGuard server keys (lan + tor).
+#   3. dh.pem + easy-rsa PKI for both OpenVPN servers (background; the
+#      easyrsa scripts restart openvpn themselves once certs exist).
+#   4. Service enable/restart: log, tor, privoxy, dnscrypt-proxy(+max),
+#      dnsmasq, odhcpd, network, firewall, openvpn, avahi-daemon.
+#   5. Blocklist + netboot first-run (background; re-run daily via cron).
+#
+# Idempotent: on a re-run already-installed packages and existing keys are
+# skipped. /etc/openwrt-postconfig.done is only written when the package
+# phase succeeded, otherwise the next "wan" ifup retries.
+
+DONE="/etc/openwrt-postconfig.done"
+RUNNING="/tmp/openwrt-postconfig.running"
+[[ -f "$DONE" ]] && exit 0
+[[ -f "$RUNNING" ]] && exit 0
+touch "$RUNNING"
+trap 'rm -f "$RUNNING"' EXIT
+
+LOG="/tmp/openwrt-postconfig.log"
+exec >>"$LOG" 2>&1
+echo "=== openwrt-postconfig start: $(date) ==="
+
+# ---------------------------------------------------------------
+# 0) package manager detection (apk on OpenWrt 25.x, opkg fallback)
+# ---------------------------------------------------------------
+if command -v apk >/dev/null 2>&1
+then
+  PKGMGR=apk
+elif command -v opkg >/dev/null 2>&1
+then
+  PKGMGR=opkg
+else
+  echo "ERROR: neither apk nor opkg found"
+  exit 1
+fi
+echo "package manager: $PKGMGR"
+
+pkg_update() {
+  if [ "$PKGMGR" = "apk" ]
+  then
+    apk update
+  else
+    opkg update
+  fi
+}
+
+pkg_installed() {
+  if [ "$PKGMGR" = "apk" ]
+  then
+    apk list -I "$1" 2>/dev/null | grep -q "^${1}-"
+  else
+    opkg list-installed 2>/dev/null | grep -q "^${1} "
+  fi
+}
+
+pkg_install() {
+  if [ "$PKGMGR" = "apk" ]
+  then
+    apk add --no-interactive "$1"
+  else
+    opkg install "$1"
+  fi
+}
+
+# ---------------------------------------------------------------
+# 1) bootstrap DNS + package install
+# ---------------------------------------------------------------
+rm -f /etc/resolv.conf.stash
+cat /etc/resolv.conf > /etc/resolv.conf.stash
+cat > /etc/resolv.conf << EOF
+nameserver {{ vm_dns }}
+EOF
+
+echo "--- refreshing package index"
+pkg_update || echo "WARN: package index refresh failed (continuing)"
+
+# list: base tools + service packages + (conditional) smtp + kernel modules.
+# kernel modules (kmod-*) may not exist on every target/version; failures are
+# logged to /var/log/openwrt-package-errors.log and retried on the next ifup.
+PKGS="{{ openwrt_packages | join(' ') }}
+{% if smtp_server | default('') | length > 0 %}msmtp msmtp-mta{% endif %}
+{{ openwrt_kernel_packages | join(' ') }}"
+
+PACKAGES_OK=1
+for p in $PKGS
+do
+  if pkg_installed "$p"
+  then
+    echo "installed: $p"
+    continue
+  fi
+  ok=0
+  for attempt in 1 2 3
+  do
+    if pkg_install "$p"
+    then
+      ok=1
+      echo "ok: $p (attempt $attempt)"
+      break
+    fi
+    echo "attempt $attempt failed: $p"
+    sleep 5
+  done
+  if [ "$ok" = "0" ]
+  then
+    PACKAGES_OK=0
+    echo "GIVING UP: $p"
+    echo "$p" >> /var/log/openwrt-package-errors.log
+  fi
+done
+
+# restore the local resolver (real file on stock layouts, but this works even
+# if /etc/resolv.conf is a symlink to /tmp/resolv.conf - never use mv here)
+cat /etc/resolv.conf.stash > /etc/resolv.conf
+rm -f /etc/resolv.conf.stash
+
+# ---------------------------------------------------------------
+# 2) WireGuard server keys (lan + tor)
+# ---------------------------------------------------------------
+for w in wg_lan wg_tor
+do
+  dir="/etc/$w"
+  mkdir -p "$dir"
+  if [ -s "$dir/server_privatekey" ]
+  then
+    echo "wireguard key present: $w"
+  elif command -v wg >/dev/null 2>&1
+  then
+    wg genkey | tee "$dir/server_privatekey" | wg pubkey > "$dir/server_publickey"
+    chmod 600 "$dir/server_privatekey" "$dir/server_publickey"
+    echo "wireguard key generated: $w"
+  else
+    echo "wireguard key generation skipped (wg not available): $w"
+  fi
+done
+if [ -s /etc/wg_lan/server_privatekey ]
+then
+  uci set network.wg_lan.private_key="$(cat /etc/wg_lan/server_privatekey)"
+fi
+if [ -s /etc/wg_tor/server_privatekey ]
+then
+  uci set network.wg_tor.private_key="$(cat /etc/wg_tor/server_privatekey)"
+fi
+uci commit network
+
+# ---------------------------------------------------------------
+# 3) OpenVPN dh.pem + PKI (background; easyrsa restarts openvpn itself)
+# ---------------------------------------------------------------
+# dh.pem is shared by both servers, so generate it once *before* spawning the
+# easyrsa scripts (they would otherwise race writing the same file).
+if [ ! -s /etc/openvpn/dh.pem ] && command -v openssl >/dev/null 2>&1
+then
+  echo "generating /etc/openvpn/dh.pem (one-time, this may take a few minutes)"
+  openssl dhparam -out /etc/openvpn/dh.pem 2048
+  chmod 600 /etc/openvpn/dh.pem
+fi
+
+# PKI regenerates daily via cron (09:15 tor / 10:15 iot); do the first run now
+(
+  /etc/scripts/openvpn-tor-easyrsa.sh > /tmp/openvpn-tor-easyrsa.log 2>&1
+  /etc/scripts/openvpn-iot-easyrsa.sh > /tmp/openvpn-iot-easyrsa.log 2>&1
+) &
+
+# dnscrypt-proxy2 installs a single /etc/init.d/dnscrypt-proxy. Create the
+# second instance "dnscrypt-proxy-max" (reads dnscrypt-proxy-max.toml on
+# 127.0.0.56, heavier blocklists) mirroring the linux-setups DNSCrypt playbook.
+# Offline (preconfig) this cannot run yet because the package is installed
+# here - only after the apk install does /etc/init.d/dnscrypt-proxy exist.
+if [ -x /etc/init.d/dnscrypt-proxy ] && [ ! -e /etc/init.d/dnscrypt-proxy-max ]
+then
+  cp -p /etc/init.d/dnscrypt-proxy /etc/init.d/dnscrypt-proxy-max
+  sed -i 's/dnscrypt-proxy.toml/dnscrypt-proxy-max.toml/g' /etc/init.d/dnscrypt-proxy-max
+  echo "created init script: dnscrypt-proxy-max"
+fi
+
+# ---------------------------------------------------------------
+# openvpn UCI (openvpn.torvpn/iotvpn + wan allow rules). Applied HERE, not in
+# the offline preconfig, because the openvpn package ships a default
+# /etc/config/openvpn that replaces any sections written before the package
+# install.
+# ---------------------------------------------------------------
+uci set openvpn.torvpn='openvpn'
+uci set openvpn.torvpn.enabled='1'
+uci set openvpn.torvpn.port='1194'
+uci set openvpn.torvpn.local='{{ vm_ip }}'
+uci set openvpn.torvpn.proto='udp'
+uci set openvpn.torvpn.dev='tap2'
+uci set openvpn.torvpn.mode='server'
+uci set openvpn.torvpn.client_to_client='1'
+uci set openvpn.torvpn.ca='/etc/openvpn/tor-easy-rsa/pki/ca.crt'
+uci set openvpn.torvpn.cert='/etc/openvpn/tor-easy-rsa/pki/issued/openvpn-server.crt'
+uci set openvpn.torvpn.key='/etc/openvpn/tor-easy-rsa/pki/private/openvpn-server.key'
+uci set openvpn.torvpn.dh='/etc/openvpn/dh.pem'
+uci set openvpn.torvpn.keepalive='10 120'
+uci set openvpn.torvpn.cipher='AES-256-CBC'
+uci set openvpn.torvpn.auth='SHA256'
+uci set openvpn.torvpn.tls_server='1'
+uci set openvpn.torvpn.user='nobody'
+uci set openvpn.torvpn.group='nogroup'
+uci set openvpn.torvpn.persist_key='1'
+uci set openvpn.torvpn.persist_tun='1'
+uci set openvpn.torvpn.status='/var/log/openvpn-tor-status.log'
+uci set openvpn.torvpn.verb='3'
+uci set openvpn.torvpn.explicit_exit_notify='1'
+uci set openvpn.torvpn.script_security='2'
+uci set openvpn.torvpn.up='/etc/openvpn/tor-dev2bridge.sh'
+
+uci set openvpn.iotvpn='openvpn'
+uci set openvpn.iotvpn.enabled='1'
+uci set openvpn.iotvpn.port='1195'
+uci set openvpn.iotvpn.local='{{ vm_ip }}'
+uci set openvpn.iotvpn.proto='udp'
+uci set openvpn.iotvpn.dev='tap1'
+uci set openvpn.iotvpn.mode='server'
+uci set openvpn.iotvpn.client_to_client='1'
+uci set openvpn.iotvpn.ca='/etc/openvpn/iot-easy-rsa/pki/ca.crt'
+uci set openvpn.iotvpn.cert='/etc/openvpn/iot-easy-rsa/pki/issued/openvpn-server.crt'
+uci set openvpn.iotvpn.key='/etc/openvpn/iot-easy-rsa/pki/private/openvpn-server.key'
+uci set openvpn.iotvpn.dh='/etc/openvpn/dh.pem'
+uci set openvpn.iotvpn.keepalive='10 120'
+uci set openvpn.iotvpn.cipher='AES-256-CBC'
+uci set openvpn.iotvpn.auth='SHA256'
+uci set openvpn.iotvpn.tls_server='1'
+uci set openvpn.iotvpn.user='nobody'
+uci set openvpn.iotvpn.group='nogroup'
+uci set openvpn.iotvpn.persist_key='1'
+uci set openvpn.iotvpn.persist_tun='1'
+uci set openvpn.iotvpn.status='/var/log/openvpn-iot-status.log'
+uci set openvpn.iotvpn.verb='3'
+uci set openvpn.iotvpn.explicit_exit_notify='1'
+uci set openvpn.iotvpn.script_security='2'
+uci set openvpn.iotvpn.up='/etc/openvpn/iot-dev2bridge.sh'
+
+uci set firewall.rule_allow_openvpn_tor='rule'
+uci set firewall.rule_allow_openvpn_tor.name='ansible_allow_openvpn_tor'
+uci set firewall.rule_allow_openvpn_tor.src='wan'
+uci set firewall.rule_allow_openvpn_tor.proto='tcp udp'
+uci set firewall.rule_allow_openvpn_tor.dest_port='1194'
+uci set firewall.rule_allow_openvpn_tor.target='ACCEPT'
+
+uci set firewall.rule_allow_openvpn_iot='rule'
+uci set firewall.rule_allow_openvpn_iot.name='ansible_allow_openvpn_iot'
+uci set firewall.rule_allow_openvpn_iot.src='wan'
+uci set firewall.rule_allow_openvpn_iot.proto='tcp udp'
+uci set firewall.rule_allow_openvpn_iot.dest_port='1195'
+uci set firewall.rule_allow_openvpn_iot.target='ACCEPT'
+
+uci commit
+echo "openvpn UCI + firewall rules applied ($(uci show openvpn | grep -c 'openvpn.torvpn\|openvpn.iotvpn') vpn sections)"
+
+# ---------------------------------------------------------------
+# 4) enable + restart services
+# ---------------------------------------------------------------
+# irqbalance ships a uci config with enabled='0'; the preconfig value was
+# committed before the package install, so apk's post-install config file
+# (installed over it) must be flipped back to 1 here.
+uci set irqbalance.irqbalance.enabled='1' 2>/dev/null || true
+uci commit irqbalance 2>/dev/null || true
+for s in log irqbalance tor privoxy dnscrypt-proxy dnscrypt-proxy-max dnsmasq odhcpd openvpn avahi-daemon
+do
+  if [ -x "/etc/init.d/$s" ]
+  then
+    /etc/init.d/$s enable 2>/dev/null
+    /etc/init.d/$s restart >/dev/null 2>&1 || true
+    echo "service restarted: $s"
+  else
+    echo "service missing (no init script): $s"
+  fi
+done
+# load the kernel modules needed by wireguard (wg_lan/wg_tor) and openvpn
+# (tap/tun); the kmod packages were only just installed, the boot-time netifd
+# already failed to create the wg devices and needs them present at reload
+modprobe wireguard 2>/dev/null || true
+modprobe tun 2>/dev/null || true
+# pick up the wg_lan/wg_tor interfaces + reload the firewall with the new rules
+/etc/init.d/network reload >/dev/null 2>&1 || true
+/etc/init.d/firewall reload >/dev/null 2>&1 || true
+
+# ---------------------------------------------------------------
+# 5) blocklist + netboot first-run (background, sequential to avoid
+#    concurrent `uci commit firewall`/firewall reload races)
+# ---------------------------------------------------------------
+(
+  /etc/scripts/netboot.sh > /tmp/openwrt-netboot.log 2>&1
+  /etc/scripts/dnscrypt-proxy-blocklist-update.sh > /tmp/openwrt-dnscrypt-blocklist.log 2>&1
+  /etc/scripts/tor-nodes-blocklist-update.sh > /tmp/openwrt-tor-blocklist.log 2>&1
+) &
+
+# ---------------------------------------------------------------
+# done
+# ---------------------------------------------------------------
+if [ "$PACKAGES_OK" = "1" ]
+then
+  touch "$DONE"
+  echo "=== openwrt-postconfig completed: $(date) ==="
+else
+  echo "=== openwrt-postconfig COMPLETED WITH PACKAGE ERRORS (retry on next wan ifup) ==="
+  echo "see /var/log/openwrt-package-errors.log"
+fi
+
+exit 0

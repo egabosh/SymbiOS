@@ -16,37 +16,67 @@
 
 # docs:
 #   name: OpenWrt VM
-#   short_description: OpenWrt QEMU/KVM virtual machine with Traefik access
+#   short_description: OpenWrt QEMU/KVM router VM with preconfigured routing, DNS, Tor and VPNs
 #   url: "https://openwrt.{{ base_domain }}"
 #   description: |
-#     Deploys an OpenWrt VM (latest stable release) as a QEMU/KVM virtual
-#     machine with UEFI boot, serial console, and two NICs.
+#     Deploys an OpenWrt VM (latest stable release) as a QEMU/KVM router with
+#     UEFI boot, serial console and five NICs. The VM owns the .1 / ::1
+#     gateway on each internal segment; the host bridges are pure L2.
 #
 #     Requirements:
 #       - KVM base playbook (base-services/kvm.yml)
 #       - Traefik base playbook (base-services/traefik.yml)
 #
 #     Networks:
-#       WAN: base-services bridge (192.168.41.201/24) - same L2 as Docker containers
-#       LAN: isolated bridge (172.18.0.0/24) - OpenWrt acts as gateway
+#       WAN: base-services bridge (192.168.41.201/24) - same L2 as Docker
+#       Internal (4 host bridges, pure L2, the VM owns the gateways):
+#         - openwrt-lan  (172.18.0.0/24):  VM eth1        = 172.18.0.1
+#         - openwrt-iot  (172.18.1.0/24):  VM br-iot      = 172.18.1.1 (bridged; port eth2, OpenVPN tap1 attaches here)
+#         - openwrt-tor  (172.18.2.0/24):  VM br-tor      = 172.18.2.1 (bridged; port eth3, OpenVPN tap2 attaches here)
+#         - openwrt-misc (172.18.3.0/24):  VM eth4        = 172.18.3.1
+#       Every internal segment runs its own dnsmasq/DHCP on the VM and gets a
+#       ULA /64 (fd00:18:<n>::/64). Clients set their gateway to 172.18.x.1.
+#
+#     Preconfiguration (mirrors the linux-setups/openwrt playbooks, adapted
+#     to the VM and to OpenWrt 25.x / apk). Three files are injected into the
+#     image and run on first boot:
+#       - /etc/uci-defaults/98-openwrt-network:  WAN + internal interfaces
+#       - /etc/uci-defaults/99-openwrt-preconfig: firewall (wan/lan/iot/tor
+#         zones), DHCP/DNS (lan/misc/iot/tor dnsmasq instances, DoH hijack
+#         redirects), dnscrypt-proxy(+max) through Tor, Tor + privoxy,
+#         bridged OpenVPN servers (1194/1195) incl. easy-rsa + dev2bridge,
+#         WireGuard servers (59666/59667), SSH (dropbear 22 lan + 44 wan),
+#         remote syslog to the host, avahi mDNS reflector, netboot TFTP,
+#         and, when inventory SMTP is set, an msmtp relay.
+#       - /etc/hotplug.d/iface/80-openwrt-postconfig + /etc/openwrt-postconfig.sh:
+#         online part once the WAN is up (apk package install, WireGuard keys,
+#         dh.pem + PKI, service enable/restart, blocklist + netboot first-run).
 #
 #     Access:
 #       Web interface (LuCI): https://openwrt.{{ base_domain }}
 #         - Protected by Authelia (2FA)
 #         - Credentials: root / password stored in env file
 #       Serial console: virsh console openwrt
-#       SSH: root@192.168.41.201 (public key from host)
-#       LAN clients: attach to openwrt-lan network for DHCP + internet
+#       SSH: root@192.168.41.201 (dropbear, lan 22 / internet 44, keys only)
+#       OpenVPN: wan UDP 1194 (tor) / 1195 (iot) - bridged into br-tor/br-iot
+#       WireGuard: wan UDP 59666 (wg_lan) / 59667 (wg_tor)
+#       LAN clients: attach to openwrt-lan, gateway = 172.18.0.1 (VM)
 #
-#     First boot: The VM auto-configures WAN (192.168.41.201) and LAN (172.18.0.1)
-#     via uci-defaults, sets root password, and deploys the host SSH public key.
-#     IPv6 is configured via UCI (ip6addr/ip6gw) with a host-detected prefix.
+#     First boot: 98 + 99 configure everything offline, the postconfig trigger
+#     installs packages when the WAN is up (completion marker
+#     /etc/openwrt-postconfig.done; on package errors it is retried on the
+#     next wan ifup). Blocklists + netboot refresh daily via cron.
+#     IPv6: WAN uses a host-detected GUA prefix (::201, gw ::1 via NDP proxy).
+#     Disk: {{ vm_disk_gb }} GB (sparse qcow2, rootfs grown at build time).
 #
 #     Features: This service exposes configurable features via the feature plugin
-#     system (services/openwrt-vm/plugin.yml). Features include network interfaces,
-#     WiFi, VPN, DNS, and more. Configure via the WebUI Features tab.
+#     system (services/openwrt-vm/plugin.yml). The remaining features cover only
+#     what the build-time preconfig does not hardcode: host-side interfaces/WiFi
+#     passthrough and user-specific DynDNS/DHCP/DNS entries. VM-side network
+#     features (iot, wireguard, dnscrypt, ssh, logserver, smtp) were removed -
+#     they are now baked into the VM at build time. Configure via the WebUI Features tab.
 #   author: Oliver Bohlen
-#   version: '2.0'
+#   version: '3.0'
 #   license: GPLv3
 #   copyright: Copyright (c) 2026, Oliver Bohlen
 #   min_ansible_version: '2.11'
@@ -62,6 +92,9 @@
 #       status: virsh list --name | grep -q openwrt
 #   uninstall:
 #     stop: virsh destroy openwrt; virsh undefine openwrt --nvram
+#     commands:
+#       - rm -f /etc/network/interfaces.d/openwrt-lan /etc/network/interfaces.d/openwrt-iot /etc/network/interfaces.d/openwrt-tor /etc/network/interfaces.d/openwrt-misc
+#       - for b in openwrt-lan openwrt-iot openwrt-tor openwrt-misc; do ip link del "$b" 2>/dev/null || true; done
 #     program_paths:
 #       - /symbios/services/openwrt-vm/
 #       - /symbios/runchecks.d/symbios-healthcheck-openwrt-vm.check
@@ -92,10 +125,92 @@
     vm_ip: "192.168.41.201"
     vm_netmask: "255.255.255.0"
     vm_gateway: "192.168.41.1"
-    # LAN: isolated, OpenWrt is the gateway
-    lan_subnet: "172.18.0"
+    # Internal networks: the VM owns the .1 / ::1 gateways (mirrors the
+    # linux-setups router role). The host bridges are pure L2 (no IPs),
+    # so there are no address conflicts between host and VM.
     lan_netmask: "255.255.255.0"
-    lan_host_ip: "172.18.0.1"
+    # VM root filesystem size (sparse qcow2, grown at image build time).
+    vm_disk_gb: 5
+    # The four internal segments. device = interface inside the VM; the iot
+    # and tor segments are bridged (br-iot/br-tor with eth2/eth3 as bridge
+    # ports) so the OpenVPN tap devices can be attached later. ip/ip6 are the
+    # VM-side gateways; the host bridge carries the same name with no address.
+    # tor_ip/tor_ip6 must stay in sync with the tor entry above (used by the
+    # nftables tor-routing script).
+    tor_ip: "172.18.2.1"
+    tor_ip6: "fd00:18:2::1"
+    ow_networks:
+      - { name: openwrt-lan, bridge: openwrt-lan, device: eth1, uci: lan, ip: "172.18.0.1", ip6: "fd00:18:0::1/64" }
+      - { name: openwrt-iot, bridge: openwrt-iot, device: br-iot, bridge_ports: "eth2", uci: iot, ip: "172.18.1.1", ip6: "fd00:18:1::1/64" }
+      - { name: openwrt-tor, bridge: openwrt-tor, device: br-tor, bridge_ports: "eth3", uci: tor, ip: "{{ tor_ip }}", ip6: "{{ tor_ip6 }}/64" }
+      - { name: openwrt-misc, bridge: openwrt-misc, device: eth4, uci: misc, ip: "172.18.3.1", ip6: "fd00:18:3::1/64" }
+    # ── OpenWrt preconfiguration variables (rendered into the first-boot
+    #    scripts, see services/openwrt-vm.md + templates/). ────────────────
+    openwrt_hostname: "openwrt"
+    # zonename = TZ database name; timezone is the POSIX form expected by UCI.
+    # The stock OpenWrt (musl) accepts the tzdb name in /etc/TZ too, so both
+    # default to the inventory timezone; override openwrt_timezone with a
+    # POSIX string (e.g. 'EST5EDT,M3.2.0,M11.1.0') for glibc images.
+    openwrt_zonename: "{{ timezone | default('UTC') }}"
+    openwrt_timezone: "{{ openwrt_zonename }}"
+    openwrt_ntp_servers: "0.openwrt.pool.ntp.org"
+    # Upstream resolver for the main lan/misc dnsmasq instance (mirror of the
+    # OpenWrt router's dhcp.yml `upstream_dns`): dnscrypt-proxy on 127.0.0.55,
+    # which resolves through Tor (socks5://127.0.0.1:9050). The WAN interface
+    # resolver and the online postconfig bootstrap use vm_dns instead
+    # (network.wan.dns + the temporary resolv.conf during the apk install).
+    openwrt_upstream_lan_dns: "127.0.0.55"
+    # remote syslog: the VM sends its logs to the host gateway (192.168.41.1)
+    openwrt_logserver_ip: "{{ vm_gateway }}"
+    # avahi mDNS reflector scope (lan + iot/tor bridges + misc)
+    openwrt_internal_interfaces: "eth1 br-iot br-tor eth4"
+    # OpenVPN client hostnames baked into the easy-rsa scripts (empty = none)
+    openvpn_tor_clients: []
+    openvpn_iot_clients: []
+    # packages installed by the postconfig via apk/opkg once the WAN is up.
+    # Adapted from linux-setups/openwrt (basics minus USB-stick packages,
+    # plus the per-service packages); MSMTP is appended when inventory SMTP
+    # is configured. kmod packages live in openwrt_kernel_packages because
+    # they may not exist on every target/version (soft-fail, logged).
+    openwrt_packages:
+      - strace
+      - rsync
+      - tmux
+      - htop
+      - diffutils
+      - bash
+      - fdisk
+      - bind-host
+      - whois
+      - coreutils-date
+      - openssh-client
+      - openssh-keygen
+      - vim
+      - procps-ng-watch
+      - coreutils-nice
+      - curl
+      - coreutils-df
+      - tcpdump
+      - e2fsprogs
+      - irqbalance
+      - telnet-bsd
+      - coreutils-base64
+      - nano-full
+      - less
+      - blkid
+      - luci-mod-rpc
+      - dnscrypt-proxy2
+      - tor
+      - tor-geoip
+      - privoxy
+      - openvpn
+      - openvpn-easy-rsa
+      - avahi-daemon
+      - avahi-dbus-daemon
+      - avahi-utils
+      - wireguard-tools
+    openwrt_kernel_packages:
+      - kmod-wireguard
 
   tasks:
 
@@ -211,6 +326,11 @@
       ansible.builtin.apt:
         name:
           - qemu-utils
+          - parted
+          - gdisk
+          - e2fsprogs
+          - ifupdown
+          - bridge-utils
           - "{{ 'qemu-efi-aarch64' if is_arm64 else 'ovmf' }}"
         state: present
         update_cache: yes
@@ -241,10 +361,8 @@
     # losetup -fP creates partition devices (e.g. /dev/loop0p1, /dev/loop0p2).
     - name: Decompress OpenWrt firmware image
       ansible.builtin.shell: |
-        zcat "{{ service_root }}/iso/{{ openwrt_image_filename }}" > "{{ service_root }}/iso/{{ openwrt_image_decompressed }}" || true
+        zcat "{{ service_root }}/iso/{{ openwrt_image_filename }}" > "{{ service_root }}/iso/{{ openwrt_image_decompressed }}"
         test -s "{{ service_root }}/iso/{{ openwrt_image_decompressed }}"
-      args:
-        creates: "{{ service_root }}/iso/{{ openwrt_image_decompressed }}"
       when:
         - kvm_capable | bool
         - not qcow2_image.stat.exists | default(false) | bool
@@ -389,148 +507,46 @@
       changed_when: false
       no_log: true
 
-    # Write uci-defaults to temp (avoids heredoc-in-shell escaping issues)
-    - name: Write uci-defaults network config script
-      ansible.builtin.copy:
-        dest: /tmp/openwrt-uci-defaults
+    # Render the first-boot scripts to /tmp (they are injected into the image
+    # below). Jinja renders them from services/openwrt-vm/templates/.
+    - name: Render uci-defaults 98-openwrt-network script
+      ansible.builtin.template:
+        src: openwrt-vm/templates/openwrt-uci-network.j2
+        dest: /tmp/ow-uci-network
         mode: "0755"
-        content: |
-          #!/bin/sh
-          # OpenWrt QEMU VM - WAN + LAN network config (first boot only)
-          # eth0 = WAN (static 192.168.41.201/24 on base-services bridge)
-          # eth1 = LAN (static 172.18.0.1/24, internal network)
-          # IPv6: static global address + default route via UCI
-          # Root password + SSH key are injected directly into the image
-
-          # Remove default bridge device and LAN interface
-          while uci delete network.@device[0] 2>/dev/null; do :; done
-          uci delete network.lan 2>/dev/null
-          uci delete network.wan6 2>/dev/null
-
-          # WAN interface on eth0 (static IPv4 + IPv6 on base-services)
-          uci set network.wan=interface
-          uci set network.wan.proto=static
-          uci set network.wan.device=eth0
-          uci set network.wan.ipaddr={{ vm_ip }}
-          uci set network.wan.netmask={{ vm_netmask }}
-          uci set network.wan.gateway={{ vm_gateway }}
-          uci set network.wan.dns={{ vm_dns }}
-
-          # LAN interface on eth1 (static)
-          uci set network.lan=interface
-          uci set network.lan.proto=static
-          uci set network.lan.device=eth1
-          uci set network.lan.ipaddr=172.18.0.1
-          uci set network.lan.netmask=255.255.255.0
-          uci set network.lan.ip6assign=64
-
-          # LAN6: static ULA prefix for LAN clients
-          uci set network.lan.ip6addr=fd00:18::1/64
-
-          # Clean firewall and rebuild zones
-          while uci delete firewall.@zone[0] 2>/dev/null; do :; done
-          while uci delete firewall.@forwarding[0] 2>/dev/null; do :; done
-          while uci delete firewall.@rule[0] 2>/dev/null; do :; done
-
-          uci set firewall.defaults=syn_flood
-          uci set firewall.defaults.syn_flood=1
-          uci set firewall.defaults.input=REJECT
-          uci set firewall.defaults.output=ACCEPT
-          uci set firewall.defaults.forward=REJECT
-
-          # WAN zone - input ACCEPT (VM behind Traefik+SSO)
-          uci set firewall.wan=zone
-          uci set firewall.wan.name=wan
-          uci set firewall.wan.network="wan"
-          uci set firewall.wan.input=ACCEPT
-          uci set firewall.wan.output=ACCEPT
-          uci set firewall.wan.forward=REJECT
-          uci set firewall.wan.masq=1
-          uci set firewall.wan.mtu_fix=1
-
-          # LAN zone (IPv4 + IPv6)
-          uci set firewall.lan=zone
-          uci set firewall.lan.name=lan
-          uci set firewall.lan.network="lan lan6"
-          uci set firewall.lan.input=ACCEPT
-          uci set firewall.lan.output=ACCEPT
-          uci set firewall.lan.forward=ACCEPT
-
-          # Forwarding: LAN -> WAN
-          uci set firewall.wan_forward=forwarding
-          uci set firewall.wan_forward.src=lan
-          uci set firewall.wan_forward.dest=wan
-
-          # Allow ping on WAN (IPv4)
-          uci set firewall.allow_ping=rule
-          uci set firewall.allow_ping.name=Allow-Ping
-          uci set firewall.allow_ping.src=wan
-          uci set firewall.allow_ping.proto=icmp
-          uci set firewall.allow_ping.icmp_type=echo-request
-          uci set firewall.allow_ping.family=ipv4
-          uci set firewall.allow_ping.target=ACCEPT
-
-          # Allow ICMPv6 on WAN (NDP, PMTUD, echo-request)
-          uci set firewall.allow_icmpv6=rule
-          uci set firewall.allow_icmpv6.name=Allow-ICMPv6
-          uci set firewall.allow_icmpv6.src=wan
-          uci set firewall.allow_icmpv6.proto=icmpv6
-          uci set firewall.allow_icmpv6.icmp_type="echo-request neighbor-solicitation neighbor-advertisement router-solicitation router-advertisement destination-unreachable packet-too-big time-exceeded"
-          uci set firewall.allow_icmpv6.family=ipv6
-          uci set firewall.allow_icmpv6.target=ACCEPT
-
-          # Allow HTTP/HTTPS on WAN for Traefik access
-          uci set firewall.allow_http=rule
-          uci set firewall.allow_http.name=Allow-HTTP
-          uci set firewall.allow_http.src=wan
-          uci set firewall.allow_http.proto=tcp
-          uci set firewall.allow_http.dest_port=80
-          uci set firewall.allow_http.target=ACCEPT
-
-          uci set firewall.allow_https=rule
-          uci set firewall.allow_https.name=Allow-HTTPS
-          uci set firewall.allow_https.src=wan
-          uci set firewall.allow_https.proto=tcp
-          uci set firewall.allow_https.dest_port=443
-          uci set firewall.allow_https.target=ACCEPT
-
-          # Allow SSH on WAN for management
-          uci set firewall.allow_ssh=rule
-          uci set firewall.allow_ssh.name=Allow-SSH
-          uci set firewall.allow_ssh.src=wan
-          uci set firewall.allow_ssh.proto=tcp
-          uci set firewall.allow_ssh.dest_port=22
-          uci set firewall.allow_ssh.target=ACCEPT
-
-          # IPv6 static address + default route
-          PREFIX="{{ host_ipv6_prefix | default('') }}"
-          if [ -n "$PREFIX" ]; then
-            uci set network.wan.ip6addr="${PREFIX}::201/64"
-            uci set network.wan.ip6gw="${PREFIX}::1"
-          fi
-
-          # Attended sysupgrade: only check for upgrades when logged in
-          uci set attendedsysupgrade.client.login_check_for_upgrades='1'
-
-          uci commit network
-          uci commit firewall
-          uci commit attendedsysupgrade
-
-          # ── Disable DAD for IPv6 stability ──
-          cat > /etc/sysctl.d/99-no-dad.conf << SYSCTLEOF
-          net.ipv6.conf.eth0.accept_dad=0
-          net.ipv6.conf.all.accept_dad=0
-          SYSCTLEOF
-          sysctl -p /etc/sysctl.d/99-no-dad.conf 2>/dev/null || true
-
-          exit 0
       when: kvm_capable | bool
 
-    # Patch raw image: GRUB serial console + uci-defaults injection
-    - name: Patch raw image (serial console + uci-defaults + credentials)
+    - name: Render uci-defaults 99-openwrt-preconfig script
+      ansible.builtin.template:
+        src: openwrt-vm/templates/openwrt-uci-preconfig.j2
+        dest: /tmp/ow-uci-preconfig
+        mode: "0755"
+      when: kvm_capable | bool
+
+    - name: Render postconfig hotplug trigger
+      ansible.builtin.template:
+        src: openwrt-vm/templates/openwrt-postconfig-trigger.j2
+        dest: /tmp/ow-postconfig-trigger
+        mode: "0644"
+      when: kvm_capable | bool
+
+    - name: Render /etc/openwrt-postconfig.sh
+      ansible.builtin.template:
+        src: openwrt-vm/templates/openwrt-postconfig.j2
+        dest: /tmp/ow-postconfig
+        mode: "0755"
+      when: kvm_capable | bool
+
+    # Patch raw image: GRUB serial console + first-boot scripts + credentials
+    - name: Patch raw image (serial console + uci-defaults + postconfig + credentials)
       ansible.builtin.shell: |
         set -e
         RAW="{{ service_root }}/iso/{{ openwrt_image_decompressed }}"
+
+        # Grow the raw image file to the requested disk size. The filesystem
+        # and rootfs partition (p2) are grown below to fill the whole disk,
+        # so the resulting qcow2 presents vm_disk_gb GB to the VM.
+        truncate -s {{ vm_disk_gb }}G "$RAW"
 
         # Attach raw image to loop device with partition scanning
         LOOP=$(losetup -fP --show "$RAW")
@@ -548,6 +564,16 @@
           exit 1
         fi
 
+        # --- Grow rootfs partition (p2) + filesystem to full disk size ---
+        # After truncate the backup GPT is no longer at the end of the disk.
+        # sgdisk -e relocates it, then parted can resize non-interactively.
+        sgdisk -e "$LOOP"
+        parted -s "$LOOP" resizepart 2 100%
+        partprobe "$LOOP" 2>/dev/null || partx -u "$LOOP"
+        e2fsck -fy "${LOOP}p2" >/dev/null 2>&1 || true
+        resize2fs "${LOOP}p2" >/dev/null
+        echo "rootfs-grown"
+
         # --- Patch GRUB for serial console ---
         mkdir -p /tmp/ow-mount
         mount "${LOOP}p1" /tmp/ow-mount
@@ -562,47 +588,50 @@
         cat /tmp/ow-mount/EFI/openwrt/grub.cfg
         umount /tmp/ow-mount
 
-        # --- Patch root filesystem (p2): uci-defaults + credentials ---
+        # --- Patch root filesystem (p2): first-boot scripts + credentials ---
         mkdir -p /tmp/ow-mount
         mount "${LOOP}p2" /tmp/ow-mount
 
-        # Inject uci-defaults network config
-        if [ -f /tmp/ow-mount/etc/uci-defaults/99-openwrt-network ]
-        then
-          echo "uci-defaults already injected"
-        else
+        # Inject the first-boot scripts (98 network, 99 preconfig, postconfig
+        # hotplug trigger + main script). Always overwrite so a previously
+        # baked raw image gets the current templates (no stale first-boot
+        # config from an older build).
+        for f in \
+          98-openwrt-network:/tmp/ow-uci-network \
+          99-openwrt-preconfig:/tmp/ow-uci-preconfig
+        do
+          NAME="${f%%:*}"; SRC="${f#*:}"
           mkdir -p /tmp/ow-mount/etc/uci-defaults
-          cp /tmp/openwrt-uci-defaults /tmp/ow-mount/etc/uci-defaults/99-openwrt-network
-          chmod 755 /tmp/ow-mount/etc/uci-defaults/99-openwrt-network
-          echo "uci-defaults injected"
-        fi
+          cp "$SRC" "/tmp/ow-mount/etc/uci-defaults/$NAME"
+          chmod 755 "/tmp/ow-mount/etc/uci-defaults/$NAME"
+          echo "uci-defaults injected: $NAME"
+        done
+        mkdir -p /tmp/ow-mount/etc/hotplug.d/iface
+        cp /tmp/ow-postconfig-trigger /tmp/ow-mount/etc/hotplug.d/iface/80-openwrt-postconfig
+        chmod 644 /tmp/ow-mount/etc/hotplug.d/iface/80-openwrt-postconfig
+        echo "postconfig trigger injected"
+        cp /tmp/ow-postconfig /tmp/ow-mount/etc/openwrt-postconfig.sh
+        chmod 755 /tmp/ow-mount/etc/openwrt-postconfig.sh
+        echo "openwrt-postconfig.sh injected"
 
-        # Set root password in /etc/shadow (pre-computed SHA-512 hash)
-        if grep -q 'root:\$6\$' /tmp/ow-mount/etc/shadow 2>/dev/null
-        then
-          echo "root password already set"
-        else
-          # Full 9-field shadow line required by shadow-utils/login:
-          # login:passwd:lastchg:min:max:warn:inactive:expire:flag
-          # The default factory line is root::0:0:99999:7::: so we must keep
-          # the extra min-age field (0) or LuCI/auth cannot parse the entry.
-          sed -i '1s|^root:.*|root:{{ openwrt_root_password_hash.stdout }}:0:0:99999:7:::|' \
-            /tmp/ow-mount/etc/shadow
-          echo "root password set"
-        fi
+        # Set root password in /etc/shadow (pre-computed SHA-512 hash).
+        # Applied unconditionally so a re-baked image always matches the env
+        # file even if a previous bake already hashed a different password.
+        # Full 9-field shadow line required by shadow-utils/login:
+        # login:passwd:lastchg:min:max:warn:inactive:expire:flag
+        # The default factory line is root::0:0:99999:7::: so we must keep
+        # the extra min-age field (0) or LuCI/auth cannot parse the entry.
+        sed -i '1s|^root:.*|root:{{ openwrt_root_password_hash.stdout }}:0:0:99999:7:::|' \
+          /tmp/ow-mount/etc/shadow
+        echo "root password set"
 
-        # Deploy host SSH public key
+        # Deploy host SSH public key (idempotent overwrite)
         mkdir -p /tmp/ow-mount/etc/dropbear
-        if [ -f /tmp/ow-mount/etc/dropbear/authorized_keys ]
-        then
-          echo "SSH key already deployed"
-        else
-          cat > /tmp/ow-mount/etc/dropbear/authorized_keys << 'SSHEOF'
+        cat > /tmp/ow-mount/etc/dropbear/authorized_keys << 'SSHEOF'
         {{ lookup('file', '/root/.ssh/id_ed25519.pub') }}
         SSHEOF
-          chmod 600 /tmp/ow-mount/etc/dropbear/authorized_keys
-          echo "SSH key deployed"
-        fi
+        chmod 600 /tmp/ow-mount/etc/dropbear/authorized_keys
+        echo "SSH key deployed"
 
         umount /tmp/ow-mount
         rmdir /tmp/ow-mount || true
@@ -611,7 +640,7 @@
         losetup -d "$LOOP"
         echo "image-patched"
       register: image_patch_result
-      changed_when: "'GRUB patched' in image_patch_result.stdout or 'uci-defaults injected' in image_patch_result.stdout or 'root password set' in image_patch_result.stdout or 'SSH key deployed' in image_patch_result.stdout"
+      changed_when: "'GRUB patched' in image_patch_result.stdout or 'uci-defaults injected' in image_patch_result.stdout or 'postconfig trigger injected' in image_patch_result.stdout or 'openwrt-postconfig.sh injected' in image_patch_result.stdout or 'root password set' in image_patch_result.stdout or 'SSH key deployed' in image_patch_result.stdout or 'rootfs-grown' in image_patch_result.stdout"
       when:
         - kvm_capable | bool
         - not qcow2_image.stat.exists | default(false) | bool
@@ -663,34 +692,74 @@
         mode: "0640"
       when: kvm_capable | bool
 
-    # ── Libvirt networks ─────────────────────────────────────────────────
-    # LAN network: isolated (no forward), OpenWrt acts as gateway
-    - name: Check if openwrt-lan network exists
-      ansible.builtin.command: virsh net-info openwrt-lan
-      register: ow_lan_net
-      changed_when: false
-      failed_when: false
+    # ── Host bridges (ifupdown, pure L2) ─────────────────────────────────
+    # The four internal segments are Linux bridges managed via ifupdown so
+    # they persist across reboots. They are pure L2: the VM owns the .1 / ::1
+    # gateway on every segment (controller-role split, mirrors linux-setups).
+    # libvirt networks would drop the <ipv6> element for isolated bridges, so
+    # we configure the bridges directly here. VM NICs attach to them via
+    # <interface type='bridge'>.
+
+    # Remove legacy libvirt network definitions (migrated to ifupdown).
+    - name: Remove legacy OpenWrt libvirt networks
+      ansible.builtin.shell: |
+        set -e
+        N="{{ item.name }}"
+        if virsh net-info "$N" >/dev/null 2>&1; then
+          virsh net-destroy "$N" 2>/dev/null || true
+          virsh net-undefine "$N" 2>/dev/null || true
+          echo "legacy-network-removed: $N"
+        else
+          echo "no-legacy-network: $N"
+        fi
+      loop: "{{ ow_networks }}"
+      register: ow_net_cleanup
+      changed_when: "'legacy-network-removed' in ow_net_cleanup.stdout"
       when: kvm_capable | bool
 
-    - name: Define openwrt-lan libvirt network
+    # Write ifupdown bridge config for each internal segment (no addresses -
+    # the VM is the gateway on the segment, the Linux bridge is just a switch).
+    - name: Write pure-L2 ifupdown bridge config for OpenWrt networks
+      ansible.builtin.copy:
+        dest: "/etc/network/interfaces.d/{{ item.name }}"
+        content: |
+          auto {{ item.bridge }}
+          iface {{ item.bridge }} inet manual
+              bridge_ports none
+              bridge_stp off
+              bridge_fd 0
+              post-up /usr/sbin/sysctl -w "net.ipv6.conf.{{ item.bridge }}.disable_ipv6=0" >/dev/null 2>&1 || true
+          iface {{ item.bridge }} inet6 manual
+              accept_ra 0
+              autoconf 0
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ ow_networks }}"
+      when: kvm_capable | bool
+
+    # Ensure ifupdown reads the per-bridge files in interfaces.d.
+    - name: Ensure /etc/network/interfaces sources OpenWrt bridges
+      ansible.builtin.blockinfile:
+        path: /etc/network/interfaces
+        marker: "# {mark} ANSIBLE MANAGED BLOCK openwrt-vm-bridges"
+        insertafter: EOF
+        block: |
+          source /etc/network/interfaces.d/*
+      when: kvm_capable | bool
+
+    # Bring the bridges up. ifupdown (bridge-ports) creates each bridge; the
+    # VM connects at boot and the IPv6 link-local is enough for NDP routing.
+    - name: Bring up OpenWrt bridges (ifupdown)
       ansible.builtin.shell: |
-        cat > /tmp/ow-lan-net.xml << LANEOF
-        <network>
-          <name>openwrt-lan</name>
-          <bridge name="br-ow-lan"/>
-          <ip address="{{ lan_host_ip }}" netmask="{{ lan_netmask }}"/>
-        </network>
-        LANEOF
-        virsh net-define /tmp/ow-lan-net.xml
-        virsh net-start openwrt-lan
-        virsh net-autostart openwrt-lan
-        rm -f /tmp/ow-lan-net.xml
-        echo "lan-network-created"
-      register: lan_net_create
-      changed_when: "'lan-network-created' in lan_net_create.stdout"
-      when:
-        - kvm_capable | bool
-        - ow_lan_net.rc | default(1) != 0
+        set -e
+        for b in openwrt-lan openwrt-iot openwrt-tor openwrt-misc; do
+          ifup "$b" 2>/dev/null || true
+        done
+        echo "bridges-up"
+      register: ow_bridges_up
+      changed_when: false
+      when: kvm_capable | bool
 
     # ── UFW: NAT and route forwarding ────────────────────────────────────
     # MASQUERADE traffic from base-services to uplink (VM internet access).
@@ -859,8 +928,11 @@
 
     # ── Create VM ────────────────────────────────────────────────────────
     # Define VM via libvirt XML.
-    # NIC1: base-services bridge (same L2 as Docker, Traefik, Authelia)
-    # NIC2: openwrt-lan (isolated, OpenWrt is gateway for LAN clients)
+    # NIC1: base-services bridge (same L2 as Docker, Traefik, Authelia) = WAN
+    # NIC2: openwrt-lan (VM owns 172.18.0.1, pure-L2 host bridge) = eth1
+    # NIC3: openwrt-iot (VM br-iot: 172.18.1.1, OpenVPN tap1) = eth2
+    # NIC4: openwrt-tor (VM br-tor: 172.18.2.1, OpenVPN tap2) = eth3
+    # NIC5: openwrt-misc (VM owns 172.18.3.1, pure-L2 host bridge) = eth4
     - name: Define OpenWrt VM
       ansible.builtin.shell: |
         cat > /tmp/openwrt-vm.xml << 'XMLEOF'
@@ -891,8 +963,23 @@
               <model type='virtio'/>
               <rom bar='off'/>
             </interface>
-            <interface type='network'>
-              <source network='openwrt-lan'/>
+            <interface type='bridge'>
+              <source bridge='openwrt-lan'/>
+              <model type='virtio'/>
+              <rom bar='off'/>
+            </interface>
+            <interface type='bridge'>
+              <source bridge='openwrt-iot'/>
+              <model type='virtio'/>
+              <rom bar='off'/>
+            </interface>
+            <interface type='bridge'>
+              <source bridge='openwrt-tor'/>
+              <model type='virtio'/>
+              <rom bar='off'/>
+            </interface>
+            <interface type='bridge'>
+              <source bridge='openwrt-misc'/>
               <model type='virtio'/>
               <rom bar='off'/>
             </interface>
@@ -911,20 +998,20 @@
         - kvm_capable | bool
         - vm_dominfo.rc | default(1) != 0
 
-    - name: Start OpenWrt VM if stopped
-      ansible.builtin.command: virsh start openwrt
+    - name: Ensure OpenWrt VM is running
+      ansible.builtin.shell: |
+        if virsh list --state-running --name | grep -qx openwrt; then
+          echo "vm-already-running"
+        else
+          if virsh start openwrt; then
+            echo "vm-started"
+          else
+            echo "vm-start-failed"
+            exit 1
+          fi
+        fi
       register: vm_start
-      changed_when: "'started' in vm_start.stdout"
-      failed_when: false
-      when:
-        - kvm_capable | bool
-        - vm_dominfo.rc | default(1) == 0
-        - vm_define is skipped | default(true)
-
-    - name: Ensure OpenWrt VM is set to autostart
-      ansible.builtin.command: virsh autostart openwrt
-      changed_when: false
-      failed_when: false
+      changed_when: "'vm-started' in vm_start.stdout"
       when: kvm_capable | bool
 
     # ── Traefik integration ──────────────────────────────────────────────
