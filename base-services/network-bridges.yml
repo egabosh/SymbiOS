@@ -1,0 +1,60 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   name: Network Bridges
+#   short_description: Assign physical interfaces to Linux bridges
+#   description: Manages the assignment of unused physical interfaces (e.g. wlan0) to existing Linux bridges. Assignments are applied via ip link and persisted in /etc/rc.local so they survive a reboot.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Network
+#   service_control:
+#     services: []
+#     logs: []
+#   actions: {}
+---
+- name: Network Bridge Assignments
+  hosts: localhost
+  become: true
+  tasks:
+    - name: Ensure iproute2 is installed (bridge support via ip link)
+      ansible.builtin.apt:
+        name:
+          - iproute2
+        state: present
+        update_cache: true
+      changed_when: false
+
+    # The healthcheck lives in git (scripts/runchecks.d/...) and is picked up
+    # automatically by runchecks.sh; no host copy is needed. The assignment
+    # script itself applies and persists the interface-to-bridge mapping.
+    - name: Apply configured bridge assignments (idempotent reapply)
+      ansible.builtin.command:
+        cmd: "{{ git_root }}/scripts/symbios-bridge-assign.sh"
+      register: _bridge_apply
+      changed_when: _bridge_apply.rc == 0
+      failed_when: _bridge_apply.rc != 0
+
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/network-bridges.yml"
+      changed_when: false

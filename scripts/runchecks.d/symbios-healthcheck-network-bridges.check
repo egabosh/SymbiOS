@@ -1,0 +1,44 @@
+CHECK_CATEGORY="network"
+CHECK_TITLE="Network Bridges"
+CHECK_DESC="Checks that configured interface-to-bridge assignments are active."
+CHECK_DETAIL="Verifies every interface listed in bridge_assignments is attached|to its assigned Linux bridge.|A mismatch means the assignment was lost (e.g. after a reboot)."
+
+# Healthcheck for interface-to-bridge assignments
+f_check_cache "symbios-healthcheck-network-bridges" || return 2>/dev/null || true
+
+# Read bridge_assignments from the inventory and verify each interface is a
+# member of its assigned bridge. Done in python3 (robust for flow/block YAML).
+f_bad="$(python3 - "${g_inventory}" <<'PYEOF' 2>/dev/null
+import subprocess
+import sys
+import yaml
+
+path = sys.argv[1]
+try:
+    with open(path) as f:
+        cfg = yaml.safe_load(f) or {}
+except Exception:
+    sys.exit(0)
+assignments = (cfg.get('all', {}).get('vars', {})
+               .get('bridge_assignments') or {})
+if not assignments:
+    sys.exit(0)  # feature unused
+bad = []
+for iface, bridge in assignments.items():
+    try:
+        out = subprocess.check_output(
+            ['ip', '-o', 'link', 'show', str(iface)],
+            stderr=subprocess.DEVNULL).decode()
+    except Exception:
+        bad.append('{} (missing)'.format(iface))
+        continue
+    if (' master ' + str(bridge)) not in out:
+        bad.append('{}->{}'.format(iface, bridge))
+if bad:
+    print('\n'.join(bad))
+PYEOF
+)"
+if [[ -n "${f_bad}" ]]
+then
+  g_echo_error "Bridge assignments not active: ${f_bad}"
+fi
