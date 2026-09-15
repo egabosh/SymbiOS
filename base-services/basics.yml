@@ -778,6 +778,18 @@
           /usr/bin/apt-get autoclean -y >/dev/null 2>&1
 
 
+    - name: /etc/cron.d/symbios-dashboard-snapshot (minutely dashboard refresh)
+      ansible.builtin.copy:
+        dest: /etc/cron.d/symbios-dashboard-snapshot
+        mode: 0644
+        owner: root
+        group: root
+        content: |
+          # Refresh the Host System + Network Devices dashboard snapshots so the
+          # WebUI reads pre-computed files instead of blocking on live commands.
+          * * * * * root {{ git_root }}/scripts/symbios-dashboard-snapshot.sh >/dev/null 2>&1
+
+
     - name: Install yq binary (YAML processor for service uninstall)
       block:
         - name: Check if yq is already installed

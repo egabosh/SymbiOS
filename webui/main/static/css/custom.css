@@ -440,6 +440,17 @@
 }
 .filter-btn { font-size: 0.8rem; }
 
+/* Top processes + load trend (Health page) */
+.top-proc-list { font-size: 0.78rem; }
+.top-proc-row { padding: 0.1rem 0; }
+.top-proc-rank {
+  width: 1.2em;
+  text-align: right;
+  font-weight: 600;
+  color: var(--bs-secondary);
+  font-size: 0.72rem;
+}
+
 /* Standalone pages (change password, logout) */
 .standalone-page {
   background: #343a40;

@@ -51,7 +51,7 @@
 </div>
 {% else %}
 <div class="mb-4">
-  <div class="d-flex align-items-center gap-2 py-2 px-3 svc-base-card" style="border-left: 3px solid var(--bs-success);">
+  <div class="d-flex align-items-center gap-2 py-2 px-3 svc-base-card" style="border-left: 3px solid var(--bs-success); height:auto">
     <i class="bi bi-heart-pulse text-success"></i>
     <span class="fw-semibold">System health OK</span>
     <a href="/health/" class="ms-auto small text-muted text-decoration-none">Details <i class="bi bi-arrow-right"></i></a>
@@ -101,4 +101,276 @@
   {% endfor %}
 </div>
 
+{# --- System --- #}
+<h2 class="mb-2">System</h2>
+
+{# --- Host system stats: 3 separate tiles --- #}
+<div class="d-flex align-items-center gap-2 mb-2">
+  <i class="bi bi-cpu text-muted"></i>
+  <span class="fw-semibold">Host System</span>
+  <span class="ms-auto small text-muted" id="stats-time"></span>
+</div>
+<div id="host-stats" class="mb-3">
+  {% if host_stats.cores %}
+  <div class="row g-2">
+    <div class="col-md-4">
+      <div class="card svc-base-card" style="height:auto">
+        <div class="card-body py-2">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="small text-muted">CPU <span class="text-dark">({{ host_stats.cores }} cores)</span></span>
+            <span class="fw-semibold">{{ host_stats.cpu_percent|floatformat:1 }}%</span>
+          </div>
+          <div class="progress mb-1" style="height:5px">
+            <div class="progress-bar bg-success" role="progressbar" style="width:{{ host_stats.cpu_percent }}%"></div>
+          </div>
+          <div class="small text-muted">
+            load {{ host_stats.load1 }} / {{ host_stats.load5 }} / {{ host_stats.load15 }}
+            <span class="ms-2">iowait {{ host_stats.cpu_iowait|floatformat:1 }}%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card svc-base-card" style="height:auto">
+        <div class="card-body py-2">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="small text-muted">Memory</span>
+            <span class="fw-semibold">{{ host_stats.mem_percent }}% ({{ host_stats.mem_used_mb }} / {{ host_stats.mem_total_mb }} MB)</span>
+          </div>
+          <div class="progress mb-1" style="height:5px">
+            <div class="progress-bar bg-success" role="progressbar" style="width:{{ host_stats.mem_percent }}%"></div>
+          </div>
+          {% if host_stats.swap_total_mb > 0 %}
+          <div class="small text-muted">swap {{ host_stats.swap_used_mb }} / {{ host_stats.swap_total_mb }} MB</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card svc-base-card" style="height:auto">
+        <div class="card-body py-2">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="small text-muted">Disk I/O</span>
+            <span class="fw-semibold">{{ host_stats.io_read_mb|floatformat:1 }} / {{ host_stats.io_write_mb|floatformat:1 }} MB/s</span>
+          </div>
+          <div class="progress mb-1" style="height:5px">
+            <div class="progress-bar bg-success" role="progressbar" style="width:{{ host_stats.io_bar }}%"></div>
+          </div>
+          {% if host_stats.io_devices %}
+          <div class="small text-muted">
+            {% for dev in host_stats.io_devices %}
+            <div class="d-flex justify-content-between">
+              <span><code>{{ dev.name }}</code></span>
+              <span>{{ dev.rmb }} / {{ dev.wmb }} MB/s</span>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-12">
+      <div class="small text-muted border-top pt-1"><i class="bi bi-clock"></i> Uptime: {{ host_stats.uptime }}</div>
+    </div>
+  </div>
+  {% else %}
+  <div class="text-muted small">Host statistics unavailable.</div>
+  {% endif %}
+</div>
+
+{# --- Network overview (full width) --- #}
+<div class="card svc-base-card mb-3" style="height:auto">
+  <div class="card-header d-flex align-items-center gap-2 py-1">
+    <i class="bi bi-hdd-network"></i>
+    <span class="fw-semibold">Network Devices</span>
+    <span class="ms-auto small text-muted" id="net-meta"></span>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>IP</th>
+            <th>Hostname</th>
+            <th>MAC</th>
+            <th>Vendor</th>
+            <th>Interface</th>
+            <th>Subnet</th>
+          </tr>
+        </thead>
+        <tbody id="net-devices">
+          {% for d in network.devices %}
+          <tr>
+            <td class="text-nowrap">
+              {% if d.self %}<span class="badge text-bg-primary me-1">self</span>{% endif %}
+              {% if d.gateway %}<span class="badge text-bg-warning me-1">router</span>{% endif %}
+              {% if d.wifi %}<i class="bi bi-wifi text-success me-1" title="{{ d.ap }} AP"></i>{% endif %}
+              <code>{{ d.ip }}</code>
+            </td>
+            <td>{{ d.hostname }}</td>
+            <td>{% if d.mac %}<code class="text-uppercase">{{ d.mac }}</code>{% else %}<span class="text-muted">&ndash;</span>{% endif %}</td>
+            <td class="text-muted">{{ d.vendor }}{% if d.wifi %} <span class="text-nowrap">({{ d.signal }} dBm)</span>{% endif %}</td>
+            <td>{% if d.interface %}<code>{{ d.interface }}</code>{% else %}<span class="text-muted">&ndash;</span>{% endif %}</td>
+            <td class="text-muted">{{ d.subnet }}</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="6" class="text-center text-muted py-3">
+              {% if network.subnets %}
+              No devices found.
+              {% else %}
+              Network overview unavailable.
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Data is pre-computed every minute by symbios-dashboard-snapshot.sh (cron).
+  const DASH_STATS_INTERVAL = 60000;
+  const DASH_NETWORK_INTERVAL = 60000;
+
+  function dashBar(v) {
+    v = Math.max(0, Math.min(100, Number(v) || 0));
+    let cls = v >= 80 ? 'bg-danger' : (v >= 60 ? 'bg-warning' : 'bg-success');
+    return '<div class="progress mb-1" style="height:5px"><div class="progress-bar ' + cls + '" role="progressbar" style="width:' + v + '%"></div></div>';
+  }
+
+  function dashInt(v) {
+    const n = Number(v);
+    return isFinite(n) ? String(Math.round(n)) : (v == null ? '-' : v);
+  }
+
+  function dashLinked(t) {
+    if (!t) return '';
+    return t.replace('T', ' ').replace('Z', ' UTC');
+  }
+
+  // The Disk I/O gauge is scaled so a fully saturated bar equals 20 MB/s.
+  const IO_MAX_MB = 20;
+  const KBS_PER_MBS = 1024;
+
+  function renderStats(s) {
+    const el = document.getElementById('host-stats');
+    const t = document.getElementById('stats-time');
+    if (!s || !s.cores) {
+      if (el) el.innerHTML = '<div class="text-muted small">Host statistics unavailable.</div>';
+      if (t) t.textContent = '';
+      return;
+    }
+    if (t) t.textContent = 'updated ' + dashLinked(s.timestamp);
+    const cpu = (Number(s.cpu_percent) || 0).toFixed(1);
+    const iow = (Number(s.cpu_iowait) || 0).toFixed(1);
+    const rmb = (Number(s.io_read_kbs) || 0) / KBS_PER_MBS;
+    const wmb = (Number(s.io_write_kbs) || 0) / KBS_PER_MBS;
+    const iobar = Math.min(100, Math.max(rmb, wmb) / IO_MAX_MB * 100);
+    const devices = (s.io_devices || []).map(function (d) {
+      return '<div class="d-flex justify-content-between small text-muted"><span><code>' + escapeHtml(d.name) + '</code></span><span>' + (d.rkbs / KBS_PER_MBS).toFixed(1) + ' / ' + (d.wkbs / KBS_PER_MBS).toFixed(1) + ' MB/s</span></div>';
+    }).join('');
+    const wrap = function (inner) {
+      return '<div class="card svc-base-card" style="height:auto"><div class="card-body py-2">' + inner + '</div></div>';
+    };
+    let cpuInner = '<div class="d-flex justify-content-between align-items-center mb-1">'
+      + '<span class="small text-muted">CPU <span class="text-dark">(' + dashInt(s.cores) + ' cores)</span></span>'
+      + '<span class="fw-semibold">' + cpu + '%</span></div>';
+    cpuInner += dashBar(s.cpu_percent);
+    cpuInner += '<div class="small text-muted">load ' + escapeHtml(s.load1 + ' / ' + s.load5 + ' / ' + s.load15)
+      + ' <span class="ms-2">iowait ' + iow + '%</span></div>';
+    let memInner = '<div class="d-flex justify-content-between align-items-center mb-1">'
+      + '<span class="small text-muted">Memory</span>'
+      + '<span class="fw-semibold">' + dashInt(s.mem_percent) + '% (' + dashInt(s.mem_used_mb) + ' / ' + dashInt(s.mem_total_mb) + ' MB)</span></div>';
+    memInner += dashBar(s.mem_percent);
+    if (Number(s.swap_total_mb) > 0) {
+      memInner += '<div class="small text-muted">swap ' + dashInt(s.swap_used_mb) + ' / ' + dashInt(s.swap_total_mb) + ' MB</div>';
+    }
+    let ioInner = '<div class="d-flex justify-content-between align-items-center mb-1">'
+      + '<span class="small text-muted">Disk I/O</span>'
+      + '<span class="fw-semibold">' + rmb.toFixed(1) + ' / ' + wmb.toFixed(1) + ' MB/s</span></div>';
+    ioInner += dashBar(iobar);
+    ioInner += '<div class="small text-muted">' + devices + '</div>';
+    let html = '<div class="row g-2">';
+    html += '<div class="col-md-4">' + wrap(cpuInner) + '</div>';
+    html += '<div class="col-md-4">' + wrap(memInner) + '</div>';
+    html += '<div class="col-md-4">' + wrap(ioInner) + '</div>';
+    html += '<div class="col-12"><div class="small text-muted border-top pt-1"><i class="bi bi-clock"></i> Uptime: '
+      + escapeHtml(s.uptime || '') + '</div></div></div>';
+    el.innerHTML = html;
+  }
+
+  function renderNetwork(n) {
+    const tb = document.getElementById('net-devices');
+    const meta = document.getElementById('net-meta');
+    const devices = (n && n.devices) || [];
+    const subnets = (n && n.subnets) || [];
+    if (meta) {
+      const sub = subnets.length ? escapeHtml(String(subnets.length) + ' subnets') : '';
+      const at = (n && n.scanned_at) ? dashLinked(n.scanned_at) : '';
+      meta.innerHTML = sub ? '<span class="small text-muted">' + sub + ' &middot; updated ' + escapeHtml(at) + '</span>' : '';
+    }
+    if (!devices.length) {
+      tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">' + (subnets.length ? 'No devices found.' : 'Network overview unavailable.') + '</td></tr>';
+      return;
+    }
+    let rows = '';
+    devices.forEach(function (d) {
+      let badges = '';
+      if (d.self) badges += '<span class="badge text-bg-primary me-1">self</span>';
+      if (d.gateway) badges += '<span class="badge text-bg-warning me-1">router</span>';
+      if (d.wifi) badges += '<i class="bi bi-wifi text-success me-1" title="' + escapeHtml((d.ap || '') + ' AP') + '"></i>';
+      const mac = d.mac ? '<code class="text-uppercase">' + escapeHtml(d.mac) + '</code>' : '<span class="text-muted">&ndash;</span>';
+      const sig = d.wifi ? ' <span class="text-nowrap">(' + escapeHtml(d.signal + ' dBm') + ')</span>' : '';
+      const iface = d.interface ? '<code>' + escapeHtml(d.interface) + '</code>' : '<span class="text-muted">&ndash;</span>';
+      rows += '<tr><td class="text-nowrap">' + badges + '<code>' + escapeHtml(d.ip) + '</code></td>'
+        + '<td>' + escapeHtml(d.hostname || '') + '</td>'
+        + '<td>' + mac + '</td>'
+        + '<td class="text-muted">' + escapeHtml(d.vendor || '') + sig + '</td>'
+        + '<td>' + iface + '</td>'
+        + '<td class="text-muted">' + escapeHtml(d.subnet || '') + '</td></tr>';
+    });
+    tb.innerHTML = rows;
+  }
+
+  async function fetchStats() {
+    try {
+      const r = await fetch('/dashboard/stats/');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      renderStats(await r.json());
+    } catch (e) {
+      const el = document.getElementById('host-stats');
+      if (el) el.innerHTML = '<div class="text-muted small">Host statistics unavailable.</div>';
+    }
+  }
+
+  async function fetchNetwork() {
+    try {
+      const r = await fetch('/dashboard/network/');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      renderNetwork(await r.json());
+    } catch (e) {
+      handleNetworkError();
+    }
+  }
+
+  function handleNetworkError() {
+    const tb = document.getElementById('net-devices');
+    const meta = document.getElementById('net-meta');
+    if (tb && !tb.querySelector('tr td')) {
+      tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Network overview unavailable.</td></tr>';
+    }
+    if (meta) meta.innerHTML = '';
+  }
+
+  fetchStats();
+  fetchNetwork();
+  setInterval(fetchStats, DASH_STATS_INTERVAL);
+  setInterval(fetchNetwork, DASH_NETWORK_INTERVAL);
+</script>
 {% endblock %}

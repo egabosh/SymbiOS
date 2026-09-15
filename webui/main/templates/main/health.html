@@ -61,6 +61,49 @@
   </div>
 </div>
 
+<!-- Top Processes + 24h Trend -->
+<div id="top-procs-section" class="row g-3 mb-4">
+  <div class="col-lg-8">
+    <div class="card svc-base-card">
+      <div class="card-body py-2 px-3">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <i class="bi bi-cpu"></i>
+          <span class="fw-semibold">Top Processes</span>
+          <span class="text-muted small" id="top-updated"></span>
+          <span class="ms-auto text-muted small" id="top-measuring"></span>
+        </div>
+        <div class="row g-2">
+          <div class="col-md-4">
+            <div class="small text-muted mb-1">CPU</div>
+            <div id="top-cpu" class="top-proc-list"></div>
+          </div>
+          <div class="col-md-4">
+            <div class="small text-muted mb-1">Memory (RSS)</div>
+            <div id="top-mem" class="top-proc-list"></div>
+          </div>
+          <div class="col-md-4">
+            <div class="small text-muted mb-1">Disk I/O</div>
+            <div id="top-io" class="top-proc-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card svc-base-card h-100">
+      <div class="card-body py-2 px-3">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <i class="bi bi-graph-up"></i>
+          <span class="fw-semibold">Load Trend</span>
+          <span class="ms-auto text-muted small">last 24h</span>
+        </div>
+        <div id="trend-current" class="small mb-1"></div>
+        <div id="trend-charts"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Filter Tabs -->
 <div class="d-flex align-items-center gap-2 mb-3 flex-wrap" id="filter-bar">
   <button class="btn btn-sm btn-primary filter-btn active" data-filter="all">All</button>
@@ -81,6 +124,32 @@
     <div class="spinner-border" role="status">
       <span class="visually-hidden">Loading...</span>
     </div>
+  </div>
+</div>
+
+<!-- Docker Stats -->
+<div class="mt-4 mb-3">
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <i class="bi bi-box-seam"></i>
+    <span class="fw-semibold">Docker Containers</span>
+    <span class="ms-auto text-muted small" id="docker-updated"></span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-borderless align-middle mb-0" id="docker-table">
+      <thead class="table-light">
+        <tr>
+          <th>Container</th>
+          <th class="text-end">CPU</th>
+          <th>Memory</th>
+          <th class="text-end">Net I/O (MB)</th>
+          <th class="text-end">Block I/O (MB)</th>
+          <th class="text-end">PIDs</th>
+        </tr>
+      </thead>
+      <tbody id="docker-body">
+        <tr><td colspan="6" class="text-muted text-center py-2">Loading...</td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
@@ -209,6 +278,141 @@
       + '</div></div>';
   }
 
+  function renderTopProcs(top) {
+    var cpuEl = document.getElementById('top-cpu');
+    var memEl = document.getElementById('top-mem');
+    var ioEl = document.getElementById('top-io');
+    var updEl = document.getElementById('top-updated');
+    var measuringEl = document.getElementById('top-measuring');
+
+    if (!top || top.status === 'warn') {
+      cpuEl.innerHTML = '<div class="small text-muted">' + (top ? escapeHtml(top.message) : 'No data.') + '</div>';
+      memEl.innerHTML = '';
+      ioEl.innerHTML = '';
+      if (updEl) updEl.textContent = '';
+      if (measuringEl) measuringEl.textContent = '';
+      return;
+    }
+
+    updEl.textContent = 'updated ' + formatTimestamp(top.updated);
+    measuringEl.textContent = top.measuring_io ? 'I/O: measuring...' : (top.interval_sec ? 'sampled every ' + top.interval_sec + 's' : '');
+
+    var row = function(rank, name, value, cmd) {
+      var tooltip = cmd && cmd.trim() ? (name + ' :: ' + cmd.trim()) : name;
+      return '<div class="top-proc-row d-flex align-items-center gap-2">'
+        + '<span class="top-proc-rank">' + rank + '</span>'
+        + '<span class="text-truncate flex-grow-1" title="' + escapeHtml(tooltip) + '">' + escapeHtml(name) + '</span>'
+        + '<span class="text-muted flex-shrink-0">' + value + '</span>'
+        + '</div>';
+    };
+
+    var cpuHtml = '';
+    (top.cpu || []).forEach(function(p, i) {
+      cpuHtml += row(i + 1, p.name, p.cpu + '%', p.cmd);
+    });
+    if (!cpuHtml) cpuHtml = '<div class="small text-muted">No processes</div>';
+    cpuEl.innerHTML = cpuHtml;
+
+    var memHtml = '';
+    (top.mem || []).forEach(function(p, i) {
+      memHtml += row(i + 1, p.name, p.rss_mb + ' MB', p.cmd);
+    });
+    if (!memHtml) memHtml = '<div class="small text-muted">No processes</div>';
+    memEl.innerHTML = memHtml;
+
+    var ioHtml = '';
+    (top.io || []).forEach(function(p, i) {
+      ioHtml += row(i + 1, p.name, (p.read_kbs + p.write_kbs).toFixed(0) + ' kB/s', p.cmd);
+    });
+    if (!ioHtml) ioHtml = '<div class="small text-muted">No I/O this minute</div>';
+    ioEl.innerHTML = ioHtml;
+  }
+
+  // Minimal inline SVG sparkline (no external chart library).
+  function renderSparkline(values, color, extraLabel) {
+    if (!values || values.length < 2) return '';
+    var w = 260, h = 34, pad = 2;
+    var min = Math.min.apply(null, values);
+    var max = Math.max.apply(null, values);
+    var span = (max - min) || 1;
+    var pts = values.map(function(v, i) {
+      var x = pad + i * (w - 2 * pad) / (values.length - 1);
+      var y = h - pad - (v - min) * (h - 2 * pad) / span;
+      return Math.round(x * 10) / 10 + ',' + Math.round(y * 10) / 10;
+    }).join(' ');
+    var last = values[values.length - 1];
+    return '<div class="small d-flex align-items-center gap-2">'
+      + '<span class="flex-shrink-0" style="width:4.5em">' + (extraLabel || '') + '</span>'
+      + '<svg class="flex-grow-1" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" style="height:' + h + 'px">'
+      + '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="1.5"/>'
+      + '</svg>'
+      + '<span class="flex-shrink-0 text-muted" style="width:4em;text-align:right">' + last + '</span>'
+      + '</div>';
+  }
+
+  function renderTrend(trend, current) {
+    var chartEl = document.getElementById('trend-charts');
+    var curEl = document.getElementById('trend-current');
+    if (curEl && current) {
+      var parts = [];
+      if (current.load1 !== '' && current.load1 != null) {
+        parts.push('<span class="fw-semibold text-warning">Load now: ' + current.load1 + '</span>');
+      }
+      if (current.cpu_percent !== '' && current.cpu_percent != null) {
+        parts.push('CPU ' + current.cpu_percent + '%');
+      }
+      if (current.mem_percent !== '' && current.mem_percent != null) {
+        parts.push('Mem ' + current.mem_percent + '%');
+      }
+      if (parts.length) {
+        parts.push('<span class="text-muted">' + formatTimestamp(current.updated) + '</span>');
+        curEl.innerHTML = parts.join(' \u00B7 ');
+      }
+    }
+    if (!trend || !trend.length) {
+      chartEl.innerHTML = '<div class="small text-muted">Collecting data... (snapshot cron running)</div>';
+      return;
+    }
+    chartEl.innerHTML =
+      renderSparkline(trend.map(function(p) { return p.cpu; }), 'var(--bs-primary)', 'CPU %')
+      + '<div class="mb-1"></div>'
+      + renderSparkline(trend.map(function(p) { return p.mem; }), 'var(--bs-success)', 'Mem %')
+      + '<div class="mb-1"></div>'
+      + renderSparkline(trend.map(function(p) { return p.load; }), 'var(--bs-warning)', 'Load 1m');
+  }
+
+  function renderDocker(ds) {
+    var tbody = document.getElementById('docker-body');
+    var updEl = document.getElementById('docker-updated');
+    if (!ds || ds.status === 'warn') {
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-2">'
+        + escapeHtml(ds ? ds.message : 'No data.') + '</td></tr>';
+      if (updEl) updEl.textContent = '';
+      return;
+    }
+    if (updEl) updEl.textContent = 'updated ' + formatTimestamp(ds.updated);
+    var containers = ds.containers || [];
+    if (!containers.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-2">No containers found.</td></tr>';
+      return;
+    }
+    var rows = '';
+    containers.forEach(function(c) {
+      var cpuCls = c.cpu_percent >= 80 ? 'text-danger' : c.cpu_percent >= 50 ? 'text-warning' : '';
+      var memCls = c.mem_percent >= 80 ? 'text-danger' : c.mem_percent >= 50 ? 'text-warning' : '';
+      rows += '<tr>'
+        + '<td class="text-nowrap"><code class="text-muted me-1">' + escapeHtml(c.id) + '</code>' + escapeHtml(c.name) + '</td>'
+        + '<td class="text-end text-nowrap"><span class="' + cpuCls + '">' + c.cpu_percent.toFixed(2) + '%</span></td>'
+        + '<td class="text-nowrap"><span class="' + memCls + '">' + c.mem_percent.toFixed(1) + '%</span>'
+        + ' <span class="text-muted small">' + c.mem_used_mb + '/' + c.mem_limit_mb + ' MB</span></td>'
+        + '<td class="text-end text-muted text-nowrap">' + c.net_rx_mb + '/' + c.net_tx_mb + '</td>'
+        + '<td class="text-end text-muted text-nowrap">' + c.block_read_mb + '/' + c.block_write_mb + '</td>'
+        + '<td class="text-end">' + c.pids + '</td>'
+        + '</tr>';
+    });
+    tbody.innerHTML = rows;
+  }
+
   async function fetchHealth() {
     try {
       var resp = await fetch('/health/data/');
@@ -256,6 +460,10 @@
       }
 
       document.getElementById('last-run-label').textContent = 'Last run: ' + formatTimestamp(lastRun);
+
+      renderTopProcs(data.top_procs);
+      renderTrend(data.history_trend, data.current_stats);
+      renderDocker(data.docker_stats);
 
       // Group checks by category from JSON
       var byCat = {};
