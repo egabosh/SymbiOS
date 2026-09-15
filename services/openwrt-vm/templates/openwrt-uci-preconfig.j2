@@ -1,0 +1,1471 @@
+#!/bin/sh
+# OpenWrt QEMU VM - preconfiguration (uc_set, files, firewall, services)
+#
+# Runs once at first boot right after 98-openwrt-network. Everything here is
+# offline (uci + static files). Network-dependent steps (package install,
+# key/cert generation, blocklist + netboot downloads) run from the injected
+# /etc/hotplug.d/iface/80-openwrt-postconfig as soon as the WAN is up.
+#
+# This is the consolidated first-boot equivalent of the linux-setups/openwrt
+# playbooks adapted to the VM context:
+#   basics, logserver, firewall, firewall_allow_internet,
+#   firewall_hijack_connections, dnscrypt-proxy, dhcp, tor, iot,
+#   openvpn-tor, openvpn-iot, ssh, smtp (only if inventory SMTP is set),
+#   avahi, wireguard-lan, wireguard-tor, netboot
+#
+# Package management uses apk (OpenWrt 25.x: opkg has been replaced by apk);
+# the online postconfig falls back to opkg only on pre-25 images.
+
+# Interface IPs (resolved from the network config committed by the network
+# script so the preconfig never duplicates the literals).
+LAN4="$(uci get network.lan.ipaddr 2>/dev/null)"
+LAN6="$(uci get network.lan.ip6addr 2>/dev/null | cut -d/ -f1)"
+IOT4="$(uci get network.iot.ipaddr 2>/dev/null)"
+IOT6="$(uci get network.iot.ip6addr 2>/dev/null | cut -d/ -f1)"
+TOR4="$(uci get network.tor.ipaddr 2>/dev/null)"
+TOR6="$(uci get network.tor.ip6addr 2>/dev/null | cut -d/ -f1)"
+MISC4="$(uci get network.misc.ipaddr 2>/dev/null)"
+MISC6="$(uci get network.misc.ip6addr 2>/dev/null | cut -d/ -f1)"
+
+# Shared helper directories. /etc/scripts and /etc/openvpn are not part of the
+# base image (openvpn package installs later in the postconfig), but several
+# heredocs below write into them - create them up front so those writes
+# succeed instead of silently failing.
+mkdir -p /etc/scripts /etc/openvpn
+
+# Subnets (/24 v4, sd::s/64 v6) derived from the gateway addresses
+_g4net() { echo "$1" | cut -d. -f1-3; }
+_g6net() { echo "$1" | sed 's#/.*##; s#::1$#::/64#'; }
+LANNET4="$(_g4net "$LAN4").0/24"
+IOTNET4="$(_g4net "$IOT4").0/24"
+TORNET4="$(_g4net "$TOR4").0/24"
+MISCNET4="$(_g4net "$MISC4").0/24"
+LANNET6="$(_g6net "$LAN6")"
+IOTNET6="$(_g6net "$IOT6")"
+TORNET6="$(_g6net "$TOR6")"
+MISCNET6="$(_g6net "$MISC6")"
+
+# =============================================================
+# 1) basics.yml (VM-adapted: no USB stick / fstab mount)
+# =============================================================
+uci set system.@system[0].timezone='{{ openwrt_timezone }}'
+uci set system.@system[0].hostname='{{ openwrt_hostname }}'
+uci set system.@system[0].zonename='{{ openwrt_zonename }}'
+uci set system.ntp.enable_server='1'
+uci set system.ntp.server='{{ openwrt_ntp_servers }}'
+uci set irqbalance.irqbalance.enabled='1'
+uci set fstab.@global[0].anon_mount='0'
+uci set fstab.@global[0].anon_swap='0'
+uci set fstab.@global[0].auto_swap='1'
+uci set fstab.@global[0].auto_mount='1'
+uci set fstab.@global[0].from_fstab='1'
+
+# =============================================================
+# 2) logserver.yml (remote syslog to the host gateway)
+# =============================================================
+uci set system.@system[0].log_ip='{{ openwrt_logserver_ip }}'
+uci set system.@system[0].log_proto='udp'
+uci set system.@system[0].cronloglevel='5'
+uci set system.@system[0].log_size='0'
+
+# =============================================================
+# 3) ssh.yml (dropbear: lan only on 22, internet on 44)
+# =============================================================
+uci set dropbear.main.Port='22'
+uci set dropbear.main.Interface='lan'
+uci set dropbear.main.PasswordAuth='off'
+uci set dropbear.main.RootPasswordAuth='off'
+uci set dropbear.global='dropbear'
+uci set dropbear.global.Port='44'
+uci set dropbear.global.PasswordAuth='off'
+uci set dropbear.global.RootPasswordAuth='off'
+
+# =============================================================
+# 4) firewall.yml + allowed internet + hijacked connections
+#    Firewall is fully rebuilt so all zones/rules live in one place.
+# =============================================================
+while uci delete firewall.@defaults[0] 2>/dev/null
+do
+  :
+done
+for sec in zone forwarding rule redirect include ipset
+do
+  while uci delete firewall.@${sec}[0] 2>/dev/null
+  do
+    :
+  done
+done
+
+# -- defaults (flow offloading off: virtio NIC, avoids flowtable issues)
+uci set firewall.defaults='defaults'
+uci set firewall.defaults.input='DROP'
+uci set firewall.defaults.output='ACCEPT'
+uci set firewall.defaults.forward='DROP'
+uci set firewall.defaults.synflood_protect='1'
+uci set firewall.defaults.drop_invalid='1'
+uci set firewall.defaults.flow_offloading='0'
+
+# -- zones: wan (internet), lan (+misc), iot (restricted), tor (isolated)
+uci set firewall.zone_wan='zone'
+uci set firewall.zone_wan.name='wan'
+uci set firewall.zone_wan.network='wan'
+uci set firewall.zone_wan.input='ACCEPT'
+uci set firewall.zone_wan.output='ACCEPT'
+uci set firewall.zone_wan.forward='REJECT'
+uci set firewall.zone_wan.masq='1'
+uci set firewall.zone_wan.mtu_fix='1'
+
+uci set firewall.zone_lan='zone'
+uci set firewall.zone_lan.name='lan'
+uci set firewall.zone_lan.network='lan misc'
+uci set firewall.zone_lan.input='ACCEPT'
+uci set firewall.zone_lan.output='ACCEPT'
+uci set firewall.zone_lan.forward='ACCEPT'
+uci set firewall.zone_lan.log='1'
+uci set firewall.zone_lan.masq='0'
+uci set firewall.zone_lan.mtu_fix='0'
+
+uci set firewall.zone_iot='zone'
+uci set firewall.zone_iot.name='iot'
+uci set firewall.zone_iot.network='iot'
+uci set firewall.zone_iot.input='REJECT'
+uci set firewall.zone_iot.output='ACCEPT'
+uci set firewall.zone_iot.forward='ACCEPT'
+uci set firewall.zone_iot.log='1'
+uci set firewall.zone_iot.masq='0'
+uci set firewall.zone_iot.mtu_fix='0'
+
+uci set firewall.zone_tor='zone'
+uci set firewall.zone_tor.name='tor'
+uci set firewall.zone_tor.network='tor'
+uci set firewall.zone_tor.input='REJECT'
+uci set firewall.zone_tor.output='ACCEPT'
+uci set firewall.zone_tor.forward='ACCEPT'
+uci set firewall.zone_tor.log='1'
+uci set firewall.zone_tor.masq='0'
+uci set firewall.zone_tor.mtu_fix='0'
+
+# -- forwardings: lan -> wan/internet, lan -> iot, lan -> tor
+uci set firewall.wan_forward='forwarding'
+uci set firewall.wan_forward.src='lan'
+uci set firewall.wan_forward.dest='wan'
+
+uci set firewall.forwarding_lan_iot='forwarding'
+uci set firewall.forwarding_lan_iot.src='lan'
+uci set firewall.forwarding_lan_iot.dest='iot'
+
+uci set firewall.forwarding_lan_tor='forwarding'
+uci set firewall.forwarding_lan_tor.src='lan'
+uci set firewall.forwarding_lan_tor.dest='tor'
+
+# -- allow everything from lan to the internet (firewall_allow_internet.yml)
+uci set firewall.rule_forward_internet_all='rule'
+uci set firewall.rule_forward_internet_all.src='lan'
+uci set firewall.rule_forward_internet_all.dest='wan'
+uci set firewall.rule_forward_internet_all.target='ACCEPT'
+uci set firewall.rule_forward_internet_all.proto='tcp udp'
+uci set firewall.rule_forward_internet_all.name='ansible_forward_internet_all'
+uci set firewall.rule_forward_internet_all.dest_port='1-65535'
+
+# -- WAN input: ping, ICMPv6, HTTP/HTTPS (Traefik), SSH 44 (ssh.yml)
+uci set firewall.rule_allow_ping='rule'
+uci set firewall.rule_allow_ping.name='Allow-Ping-WAN'
+uci set firewall.rule_allow_ping.src='wan'
+uci set firewall.rule_allow_ping.proto='icmp'
+uci set firewall.rule_allow_ping.icmp_type='echo-request'
+uci set firewall.rule_allow_ping.family='ipv4'
+uci set firewall.rule_allow_ping.target='ACCEPT'
+
+uci set firewall.rule_allow_icmpv6='rule'
+uci set firewall.rule_allow_icmpv6.name='Allow-ICMPv6-WAN'
+uci set firewall.rule_allow_icmpv6.src='wan'
+uci set firewall.rule_allow_icmpv6.proto='icmpv6'
+uci set firewall.rule_allow_icmpv6.icmp_type="echo-request neighbor-solicitation neighbor-advertisement router-solicitation router-advertisement destination-unreachable packet-too-big time-exceeded"
+uci set firewall.rule_allow_icmpv6.family='ipv6'
+uci set firewall.rule_allow_icmpv6.target='ACCEPT'
+
+uci set firewall.rule_allow_http='rule'
+uci set firewall.rule_allow_http.name='Allow-HTTP-WAN'
+uci set firewall.rule_allow_http.src='wan'
+uci set firewall.rule_allow_http.proto='tcp'
+uci set firewall.rule_allow_http.dest_port='80'
+uci set firewall.rule_allow_http.target='ACCEPT'
+
+uci set firewall.rule_allow_https='rule'
+uci set firewall.rule_allow_https.name='Allow-HTTPS-WAN'
+uci set firewall.rule_allow_https.src='wan'
+uci set firewall.rule_allow_https.proto='tcp'
+uci set firewall.rule_allow_https.dest_port='443'
+uci set firewall.rule_allow_https.target='ACCEPT'
+
+uci set firewall.rule_allow_ssh='rule'
+uci set firewall.rule_allow_ssh.name='Allow-SSH-WAN'
+uci set firewall.rule_allow_ssh.src='wan'
+uci set firewall.rule_allow_ssh.proto='tcp'
+uci set firewall.rule_allow_ssh.dest_port='22'
+uci set firewall.rule_allow_ssh.target='ACCEPT'
+
+uci set firewall.rule_allow_ssh_global='rule'
+uci set firewall.rule_allow_ssh_global.name='ansible_allow_ssh_global'
+uci set firewall.rule_allow_ssh_global.src='wan'
+uci set firewall.rule_allow_ssh_global.proto='tcp'
+uci set firewall.rule_allow_ssh_global.dest_port='44'
+uci set firewall.rule_allow_ssh_global.target='ACCEPT'
+
+# -- DNS/NTP hijack redirection (firewall_hijack_connections.yml)
+#    empty dest_ip -> redirect to the router itself (the .1 gateways)
+uci set firewall.redirect_hijack__dns='redirect'
+uci set firewall.redirect_hijack__dns.target='DNAT'
+uci set firewall.redirect_hijack__dns.name='ansible_hijack__dns'
+uci set firewall.redirect_hijack__dns.src=''
+uci set firewall.redirect_hijack__dns.dest='wan'
+uci set firewall.redirect_hijack__dns.src_dport='53'
+uci set firewall.redirect_hijack__dns.dest_ip=''
+uci set firewall.redirect_hijack__dns.dest_port='53'
+
+uci set firewall.redirect_hijack__ntp='redirect'
+uci set firewall.redirect_hijack__ntp.target='DNAT'
+uci set firewall.redirect_hijack__ntp.name='ansible_hijack__ntp'
+uci set firewall.redirect_hijack__ntp.src=''
+uci set firewall.redirect_hijack__ntp.dest='wan'
+uci set firewall.redirect_hijack__ntp.src_dport='123'
+uci set firewall.redirect_hijack__ntp.dest_ip=''
+uci set firewall.redirect_hijack__ntp.dest_port='123'
+
+uci set firewall.redirect_hijack_iot_dns='redirect'
+uci set firewall.redirect_hijack_iot_dns.target='DNAT'
+uci set firewall.redirect_hijack_iot_dns.name='ansible_hijack_iot_dns'
+uci set firewall.redirect_hijack_iot_dns.src='iot'
+uci set firewall.redirect_hijack_iot_dns.dest='wan'
+uci set firewall.redirect_hijack_iot_dns.src_dport='53'
+uci set firewall.redirect_hijack_iot_dns.dest_ip="${IOT4}"
+uci set firewall.redirect_hijack_iot_dns.dest_port='53'
+
+uci set firewall.redirect_hijack_iot_ntp='redirect'
+uci set firewall.redirect_hijack_iot_ntp.target='DNAT'
+uci set firewall.redirect_hijack_iot_ntp.name='ansible_hijack_iot_ntp'
+uci set firewall.redirect_hijack_iot_ntp.src='iot'
+uci set firewall.redirect_hijack_iot_ntp.dest='wan'
+uci set firewall.redirect_hijack_iot_ntp.src_dport='123'
+uci set firewall.redirect_hijack_iot_ntp.dest_ip="${IOT4}"
+uci set firewall.redirect_hijack_iot_ntp.dest_port='123'
+
+uci set firewall.redirect_hijack_tor_dns='redirect'
+uci set firewall.redirect_hijack_tor_dns.target='DNAT'
+uci set firewall.redirect_hijack_tor_dns.name='ansible_hijack_tor_dns'
+uci set firewall.redirect_hijack_tor_dns.src='tor'
+uci set firewall.redirect_hijack_tor_dns.dest='wan'
+uci set firewall.redirect_hijack_tor_dns.src_dport='53'
+uci set firewall.redirect_hijack_tor_dns.dest_ip="${TOR4}"
+uci set firewall.redirect_hijack_tor_dns.dest_port='53'
+
+uci set firewall.redirect_hijack_tor_ntp='redirect'
+uci set firewall.redirect_hijack_tor_ntp.target='DNAT'
+uci set firewall.redirect_hijack_tor_ntp.name='ansible_hijack_tor_ntp'
+uci set firewall.redirect_hijack_tor_ntp.src='tor'
+uci set firewall.redirect_hijack_tor_ntp.dest='wan'
+uci set firewall.redirect_hijack_tor_ntp.src_dport='123'
+uci set firewall.redirect_hijack_tor_ntp.dest_ip="${TOR4}"
+uci set firewall.redirect_hijack_tor_ntp.dest_port='123'
+
+# =============================================================
+# 5) iot.yml (br-iot network, DHCP/DNS, firewall rules)
+# =============================================================
+# Reset the DHCP/DNS config once *before* building the section set. The
+# factory image ships a default dhcp config (lan pool + unnamed dnsmasq
+# instance); if this reset ran after iot/tor were defined it would delete
+# those sections again (each subsequent §x defines its own dhcp pools and
+# dnsmasq instances, the first section here must start from a clean slate).
+while uci delete dhcp.@dnsmasq[0] 2>/dev/null
+do
+  :
+done
+while uci delete dhcp.@dhcp[0] 2>/dev/null
+do
+  :
+done
+
+uci set network.iot.dns="${IOT4}"
+uci set network.iot.ipv6='1'
+uci set network.iot.ip6assign='64'
+
+uci set dhcp.iot='dhcp'
+uci set dhcp.iot.interface='iot'
+uci set dhcp.iot.start='50'
+uci set dhcp.iot.limit='150'
+uci set dhcp.iot.leasetime='1h'
+uci set dhcp.iot.rebind_protection='0'
+uci set dhcp.iot.dhcpv4='server'
+uci set dhcp.iot.dhcpv6='server'
+uci set dhcp.iot.ra='server'
+uci set dhcp.iot.ra_management='1'
+uci set dhcp.iot.ra_default='1'
+uci set dhcp.iot.ra_lifetime='1800'
+uci set dhcp.iot.force='1'
+uci -q delete dhcp.iot.dhcp_option
+uci add_list dhcp.iot.dhcp_option='119,iot,lan'
+uci add_list dhcp.iot.dhcp_option="6,${IOT4}"
+uci set dhcp.iot.dns="${IOT6}"
+
+uci set dhcp.iot_dnsmasq='dnsmasq'
+uci set dhcp.iot_dnsmasq.domain='iot'
+uci set dhcp.iot_dnsmasq.resolvfile='/etc/resolv.dnsmasq.iot'
+uci set dhcp.iot_dnsmasq.leasefile='/tmp/dhcp.iot.leases'
+uci add_list dhcp.iot_dnsmasq.listen_address="${IOT4}"
+uci add_list dhcp.iot_dnsmasq.listen_address="${IOT6}"
+uci set dhcp.iot_dnsmasq.logqueries='1'
+uci set dhcp.iot_dnsmasq.authoritative='1'
+uci set dhcp.iot_dnsmasq.sequential_ip='1'
+uci set dhcp.iot_dnsmasq.readethers='1'
+uci set dhcp.iot_dnsmasq.server="/.lan/${LAN4}"
+
+# -- iot firewall rules
+uci set firewall.rule_allow_dhcp_iot='rule'
+uci set firewall.rule_allow_dhcp_iot.name='ansible_Allow-DHCP-iot'
+uci set firewall.rule_allow_dhcp_iot.src='iot'
+uci set firewall.rule_allow_dhcp_iot.proto='udp'
+uci set firewall.rule_allow_dhcp_iot.dest_port='67-68'
+uci set firewall.rule_allow_dhcp_iot.target='ACCEPT'
+
+uci set firewall.rule_allow_dns_iot='rule'
+uci set firewall.rule_allow_dns_iot.name='ansible_Allow-DNS-iot'
+uci set firewall.rule_allow_dns_iot.src='iot'
+uci set firewall.rule_allow_dns_iot.proto='udp'
+uci set firewall.rule_allow_dns_iot.dest_port='53'
+uci set firewall.rule_allow_dns_iot.target='ACCEPT'
+uci set firewall.rule_allow_dns_iot.src_ip="${IOTNET4}"
+uci set firewall.rule_allow_dns_iot.dest_ip="${IOT4}"
+
+uci set firewall.rule_allow_dns_iot6='rule'
+uci set firewall.rule_allow_dns_iot6.name='ansible_allow_dns_iot6'
+uci set firewall.rule_allow_dns_iot6.src='iot'
+uci set firewall.rule_allow_dns_iot6.proto='udp'
+uci set firewall.rule_allow_dns_iot6.dest_port='53'
+uci set firewall.rule_allow_dns_iot6.target='ACCEPT'
+uci set firewall.rule_allow_dns_iot6.family='ipv6'
+uci set firewall.rule_allow_dns_iot6.src_ip="${IOTNET6}"
+uci set firewall.rule_allow_dns_iot6.dest_ip="${IOT6}"
+
+uci set firewall.rule_allow_ntp_iot='rule'
+uci set firewall.rule_allow_ntp_iot.name='ansible_allow_ntp_iot'
+uci set firewall.rule_allow_ntp_iot.src='iot'
+uci set firewall.rule_allow_ntp_iot.proto='udp'
+uci set firewall.rule_allow_ntp_iot.dest_port='123'
+uci set firewall.rule_allow_ntp_iot.target='ACCEPT'
+uci set firewall.rule_allow_ntp_iot.src_ip="${IOTNET4}"
+uci set firewall.rule_allow_ntp_iot.dest_ip="${IOT4}"
+
+uci set firewall.rule_allow_ntpv6_iot='rule'
+uci set firewall.rule_allow_ntpv6_iot.name='ansible_allow_ntpv6_iot'
+uci set firewall.rule_allow_ntpv6_iot.src='iot'
+uci set firewall.rule_allow_ntpv6_iot.proto='udp'
+uci set firewall.rule_allow_ntpv6_iot.dest_port='123'
+uci set firewall.rule_allow_ntpv6_iot.src_ip="${IOTNET6}"
+uci set firewall.rule_allow_ntpv6_iot.dest_ip="${IOT6}"
+uci set firewall.rule_allow_ntpv6_iot.family='ipv6'
+uci set firewall.rule_allow_ntpv6_iot.target='ACCEPT'
+
+uci set firewall.rule_allow_icmpv6_nd_iot='rule'
+uci set firewall.rule_allow_icmpv6_nd_iot.name='ansible_allow_icmpv6_nd_iot'
+uci set firewall.rule_allow_icmpv6_nd_iot.src='iot'
+uci set firewall.rule_allow_icmpv6_nd_iot.family='ipv6'
+uci set firewall.rule_allow_icmpv6_nd_iot.proto='icmp'
+uci set firewall.rule_allow_icmpv6_nd_iot.icmp_type='135 136 133'
+uci set firewall.rule_allow_icmpv6_nd_iot.target='ACCEPT'
+
+uci set firewall.rule_allow_icmp_ping_iot='rule'
+uci set firewall.rule_allow_icmp_ping_iot.name='ansible_allow_icmp_ping_iot'
+uci set firewall.rule_allow_icmp_ping_iot.src='iot'
+uci set firewall.rule_allow_icmp_ping_iot.proto='icmp'
+uci set firewall.rule_allow_icmp_ping_iot.icmp_type='echo-request'
+uci set firewall.rule_allow_icmp_ping_iot.target='ACCEPT'
+uci set firewall.rule_allow_icmp_ping_iot.src_ip="${IOTNET4}"
+uci set firewall.rule_allow_icmp_ping_iot.dest_ip="${IOT4}"
+
+uci set firewall.rule_allow_icmpv6_ping_iot='rule'
+uci set firewall.rule_allow_icmpv6_ping_iot.name='ansible_allow_icmpv6_ping_iot'
+uci set firewall.rule_allow_icmpv6_ping_iot.src='iot'
+uci set firewall.rule_allow_icmpv6_ping_iot.family='ipv6'
+uci set firewall.rule_allow_icmpv6_ping_iot.proto='icmp'
+uci set firewall.rule_allow_icmpv6_ping_iot.icmp_type='echo-request'
+uci set firewall.rule_allow_icmpv6_ping_iot.target='ACCEPT'
+uci set firewall.rule_allow_icmpv6_ping_iot.src_ip="${IOTNET6}"
+uci set firewall.rule_allow_icmpv6_ping_iot.dest_ip="${IOT6}"
+
+# =============================================================
+# 6) tor.yml (br-tor network, DHCP/DNS, tor, privoxy, routing)
+# =============================================================
+uci set network.tor.dns='127.0.0.56'
+uci set network.tor.ipv6='1'
+uci set network.tor.ip6assign='64'
+
+uci set dhcp.tor='dhcp'
+uci set dhcp.tor.interface='tor'
+uci set dhcp.tor.start='50'
+uci set dhcp.tor.limit='150'
+uci set dhcp.tor.leasetime='1h'
+uci set dhcp.tor.rebind_protection='0'
+uci set dhcp.tor.dhcpv4='server'
+uci set dhcp.tor.dhcpv6='server'
+uci set dhcp.tor.ra='server'
+uci set dhcp.tor.ra_management='1'
+uci set dhcp.tor.ra_default='1'
+uci set dhcp.tor.ra_lifetime='1800'
+uci set dhcp.tor.force='1'
+uci -q delete dhcp.tor.dhcp_option
+uci add_list dhcp.tor.dhcp_option='119,tor,lan'
+uci add_list dhcp.tor.dhcp_option="6,${TOR4}"
+uci set dhcp.tor.dns="${TOR6}"
+
+uci set dhcp.tor_dnsmasq='dnsmasq'
+uci set dhcp.tor_dnsmasq.domain='tor'
+uci set dhcp.tor_dnsmasq.resolvfile='/etc/resolv.dnsmasq.tor'
+uci set dhcp.tor_dnsmasq.leasefile='/tmp/dhcp.tor.leases'
+uci add_list dhcp.tor_dnsmasq.listen_address="${TOR4}"
+uci add_list dhcp.tor_dnsmasq.listen_address="${TOR6}"
+uci set dhcp.tor_dnsmasq.logqueries='1'
+uci set dhcp.tor_dnsmasq.authoritative='1'
+uci set dhcp.tor_dnsmasq.sequential_ip='1'
+uci set dhcp.tor_dnsmasq.readethers='1'
+uci set dhcp.tor_dnsmasq.server='/.onion/127.0.0.1#9053'
+uci set dhcp.tor_dnsmasq.server="/.lan/${LAN4}"
+
+# -- privoxy (filters local HTTP proxy on the tor network)
+uci set privoxy.privoxy.listen_address='0.0.0.0:8118'
+uci set privoxy.privoxy.forward_socks5t='/ localhost:9050 .'
+uci set privoxy.privoxy.permit_access='0.0.0.0/0'
+
+# -- tor firewall rules
+uci set firewall.rule_allow_dhcp_tor='rule'
+uci set firewall.rule_allow_dhcp_tor.name='ansible_allow_dhcp_tor'
+uci set firewall.rule_allow_dhcp_tor.src='tor'
+uci set firewall.rule_allow_dhcp_tor.proto='udp'
+uci set firewall.rule_allow_dhcp_tor.dest_port='67-68'
+uci set firewall.rule_allow_dhcp_tor.target='ACCEPT'
+
+uci set firewall.rule_allow_dns_tor='rule'
+uci set firewall.rule_allow_dns_tor.name='ansible_allow_dns_tor'
+uci set firewall.rule_allow_dns_tor.src='tor'
+uci set firewall.rule_allow_dns_tor.proto='udp'
+uci set firewall.rule_allow_dns_tor.dest_port='53'
+uci set firewall.rule_allow_dns_tor.target='ACCEPT'
+uci set firewall.rule_allow_dns_tor.src_ip="${TORNET4}"
+uci set firewall.rule_allow_dns_tor.dest_ip="${TOR4}"
+
+uci set firewall.rule_allow_dns_tor6='rule'
+uci set firewall.rule_allow_dns_tor6.name='ansible_allow_dns_tor6'
+uci set firewall.rule_allow_dns_tor6.src='tor'
+uci set firewall.rule_allow_dns_tor6.proto='udp'
+uci set firewall.rule_allow_dns_tor6.dest_port='53'
+uci set firewall.rule_allow_dns_tor6.target='ACCEPT'
+uci set firewall.rule_allow_dns_tor6.family='ipv6'
+uci set firewall.rule_allow_dns_tor6.src_ip="${TORNET6}"
+uci set firewall.rule_allow_dns_tor6.dest_ip="${TOR6}"
+
+uci set firewall.rule_allow_ntp_tor='rule'
+uci set firewall.rule_allow_ntp_tor.name='ansible_allow_ntp_tor'
+uci set firewall.rule_allow_ntp_tor.src='tor'
+uci set firewall.rule_allow_ntp_tor.proto='udp'
+uci set firewall.rule_allow_ntp_tor.dest_port='123'
+uci set firewall.rule_allow_ntp_tor.target='ACCEPT'
+uci set firewall.rule_allow_ntp_tor.src_ip="${TORNET4}"
+uci set firewall.rule_allow_ntp_tor.dest_ip="${TOR4}"
+
+uci set firewall.rule_allow_ntpv6_tor='rule'
+uci set firewall.rule_allow_ntpv6_tor.name='ansible_allow_ntpv6_tor'
+uci set firewall.rule_allow_ntpv6_tor.src='tor'
+uci set firewall.rule_allow_ntpv6_tor.proto='udp'
+uci set firewall.rule_allow_ntpv6_tor.dest_port='123'
+uci set firewall.rule_allow_ntpv6_tor.src_ip="${TORNET6}"
+uci set firewall.rule_allow_ntpv6_tor.dest_ip="${TOR6}"
+uci set firewall.rule_allow_ntpv6_tor.family='ipv6'
+uci set firewall.rule_allow_ntpv6_tor.target='ACCEPT'
+
+uci set firewall.rule_allow_icmpv6_nd_tor='rule'
+uci set firewall.rule_allow_icmpv6_nd_tor.name='ansible_allow_icmpv6_nd_tor'
+uci set firewall.rule_allow_icmpv6_nd_tor.src='tor'
+uci set firewall.rule_allow_icmpv6_nd_tor.family='ipv6'
+uci set firewall.rule_allow_icmpv6_nd_tor.proto='icmp'
+uci set firewall.rule_allow_icmpv6_nd_tor.icmp_type='135 136 133'
+uci set firewall.rule_allow_icmpv6_nd_tor.target='ACCEPT'
+
+uci set firewall.rule_allow_icmp_ping_tor='rule'
+uci set firewall.rule_allow_icmp_ping_tor.name='ansible_allow_icmp_ping_tor'
+uci set firewall.rule_allow_icmp_ping_tor.src='tor'
+uci set firewall.rule_allow_icmp_ping_tor.proto='icmp'
+uci set firewall.rule_allow_icmp_ping_tor.icmp_type='echo-request'
+uci set firewall.rule_allow_icmp_ping_tor.target='ACCEPT'
+uci set firewall.rule_allow_icmp_ping_tor.src_ip="${TORNET4}"
+uci set firewall.rule_allow_icmp_ping_tor.dest_ip="${TOR4}"
+
+uci set firewall.rule_allow_icmpv6_ping_tor='rule'
+uci set firewall.rule_allow_icmpv6_ping_tor.name='ansible_allow_icmpv6_ping_tor'
+uci set firewall.rule_allow_icmpv6_ping_tor.src='tor'
+uci set firewall.rule_allow_icmpv6_ping_tor.family='ipv6'
+uci set firewall.rule_allow_icmpv6_ping_tor.proto='icmp'
+uci set firewall.rule_allow_icmpv6_ping_tor.icmp_type='echo-request'
+uci set firewall.rule_allow_icmpv6_ping_tor.target='ACCEPT'
+uci set firewall.rule_allow_icmpv6_ping_tor.src_ip="${TORNET6}"
+uci set firewall.rule_allow_icmpv6_ping_tor.dest_ip="${TOR6}"
+
+# -- transparent tor proxy access (SOCKS/TransPort on the router)
+uci set firewall.rule_allow_tor_proxy='rule'
+uci set firewall.rule_allow_tor_proxy.name='ansible_allow_tor_proxy'
+uci set firewall.rule_allow_tor_proxy.src='tor'
+uci set firewall.rule_allow_tor_proxy.target='ACCEPT'
+uci set firewall.rule_allow_tor_proxy.proto='tcp'
+uci set firewall.rule_allow_tor_proxy.src_ip="${TORNET4}"
+uci set firewall.rule_allow_tor_proxy.dest_ip="${TOR4}"
+uci set firewall.rule_allow_tor_proxy.dest_port='9040'
+
+uci set firewall.rule_allow_tor_proxy_v6='rule'
+uci set firewall.rule_allow_tor_proxy_v6.name='ansible_allow_tor_proxy_v6'
+uci set firewall.rule_allow_tor_proxy_v6.src='tor'
+uci set firewall.rule_allow_tor_proxy_v6.target='ACCEPT'
+uci set firewall.rule_allow_tor_proxy_v6.proto='tcp'
+uci set firewall.rule_allow_tor_proxy_v6.src_ip="${TORNET6}"
+uci set firewall.rule_allow_tor_proxy_v6.dest_ip="${TOR6}"
+uci set firewall.rule_allow_tor_proxy_v6.dest_port='9040'
+uci set firewall.rule_allow_tor_proxy_v6.family='ipv6'
+
+# -- allow whitelisted TCP for whitelisted destinations (tor exceptions)
+uci set firewall.rule_forwarding_exceptions_tor='rule'
+uci set firewall.rule_forwarding_exceptions_tor.name='ansible_forwarding_exceptions_tor'
+uci set firewall.rule_forwarding_exceptions_tor.src='tor'
+uci set firewall.rule_forwarding_exceptions_tor.dest='wan'
+uci set firewall.rule_forwarding_exceptions_tor.proto='tcp'
+uci set firewall.rule_forwarding_exceptions_tor.dest_port='80 443 993 587 465'
+uci set firewall.rule_forwarding_exceptions_tor.family='ipv4'
+uci set firewall.rule_forwarding_exceptions_tor.ipset='tor_whitelist'
+uci set firewall.rule_forwarding_exceptions_tor.target='ACCEPT'
+
+# -- transparent proxy include (runs at every firewall reload)
+uci set firewall.include_tor_routing='include'
+uci set firewall.include_tor_routing.path='/etc/nftables.d/10-tor_routing.sh'
+uci set firewall.include_tor_routing.type='script'
+uci set firewall.include_tor_routing.enabled='1'
+
+# -- empty ipsets so fw4 always finds them; filled by blocklist cron scripts
+for proto in ipv4 ipv6
+do
+  uci set firewall.doh_${proto}='ipset'
+  uci set firewall.doh_${proto}.name="doh_${proto}"
+  uci set firewall.doh_${proto}.match='dst_ip'
+  uci set firewall.doh_${proto}.family="${proto}"
+  uci set firewall.tor_${proto}='ipset'
+  uci set firewall.tor_${proto}.name="tor_${proto}"
+  uci set firewall.tor_${proto}.match='dst_ip'
+  uci set firewall.tor_${proto}.family="${proto}"
+done
+uci set firewall.tor_whitelist='ipset'
+uci set firewall.tor_whitelist.name='tor_whitelist'
+uci set firewall.tor_whitelist.match='dst_ip'
+uci set firewall.tor_whitelist.family='ipv4'
+
+# =============================================================
+# 7) avahi.yml (mDNS reflector, mDNS firewall rules)
+# =============================================================
+uci set firewall.rule_allow_mdns_avahi='rule'
+uci set firewall.rule_allow_mdns_avahi.name='ansible_allow_mdns_avahi'
+uci set firewall.rule_allow_mdns_avahi.target='ACCEPT'
+uci set firewall.rule_allow_mdns_avahi.proto='udp'
+uci set firewall.rule_allow_mdns_avahi.src='*'
+uci set firewall.rule_allow_mdns_avahi.dest_port='5353'
+uci set firewall.rule_allow_mdns_avahi.dest_ip='224.0.0.251'
+uci set firewall.rule_allow_mdns_avahi.family='ipv4'
+
+uci set firewall.rule_allow_mdns_avahi_v6='rule'
+uci set firewall.rule_allow_mdns_avahi_v6.name='ansible_allow_mdns_avahi_v6'
+uci set firewall.rule_allow_mdns_avahi_v6.target='ACCEPT'
+uci set firewall.rule_allow_mdns_avahi_v6.proto='udp'
+uci set firewall.rule_allow_mdns_avahi_v6.src='*'
+uci set firewall.rule_allow_mdns_avahi_v6.dest_port='5353'
+uci set firewall.rule_allow_mdns_avahi_v6.dest_ip='ff02::fb'
+uci set firewall.rule_allow_mdns_avahi_v6.family='ipv6'
+
+mkdir -p /etc/avahi
+cat << 'EOF' > /etc/avahi/avahi-daemon.conf
+[server]
+allow-interfaces={{ openwrt_internal_interfaces }}
+
+[reflector]
+enable-reflector=yes
+EOF
+
+# =============================================================
+# 8) wireguard-lan.yml + wireguard-tor.yml (VPN servers)
+#    Keys are generated in postconfig (needs `wg` from packages).
+# =============================================================
+uci set network.wg_lan='interface'
+uci set network.wg_lan.proto='wireguard'
+uci set network.wg_lan.listen_port='59666'
+uci set network.wg_lan.mtu='1450'
+uci add_list network.wg_lan.addresses='fdaa:a192:b168:cd44::1/64'
+uci add_list network.wg_lan.addresses='192.168.44.1/24'
+uci set network.wg_lan.ip6assign='64'
+uci set network.wg_lan.ipv6='1'
+uci add_list firewall.zone_lan.network='wg_lan'
+
+uci set firewall.wireguard_allow_lan='rule'
+uci set firewall.wireguard_allow_lan.name='ansible_allow_wireguard_lan'
+uci set firewall.wireguard_allow_lan.src='wan'
+uci set firewall.wireguard_allow_lan.proto='udp'
+uci set firewall.wireguard_allow_lan.dest_port='59666'
+uci set firewall.wireguard_allow_lan.target='ACCEPT'
+
+uci set network.wg_tor='interface'
+uci set network.wg_tor.proto='wireguard'
+uci set network.wg_tor.listen_port='59667'
+uci set network.wg_tor.mtu='1450'
+uci add_list network.wg_tor.addresses='fdaa:a192:b168:cd45::1/64'
+uci add_list network.wg_tor.addresses='192.168.45.1/24'
+uci set network.wg_tor.ip6assign='64'
+uci set network.wg_tor.ipv6='1'
+uci add_list firewall.zone_tor.network='wg_tor'
+
+uci set firewall.wireguard_allow_tor='rule'
+uci set firewall.wireguard_allow_tor.name='ansible_allow_wireguard_tor'
+uci set firewall.wireguard_allow_tor.src='wan'
+uci set firewall.wireguard_allow_tor.proto='udp'
+uci set firewall.wireguard_allow_tor.dest_port='59667'
+uci set firewall.wireguard_allow_tor.target='ACCEPT'
+
+# =============================================================
+# 9) openvpn-tor.yml + openvpn-iot.yml (bridged VPN servers)
+#    The OpenWrt UCI config (openvpn.torvpn/iotvpn + the wan allow rules for
+#    1194/1195) is applied by the postconfig AFTER the openvpn package is
+#    installed: the package ships a default /etc/config/openvpn that would
+#    otherwise replace our sections at install time.
+#    The helper scripts (easyrsa, tap-in-bridge, dev2bridge) and their cron
+#    entries live below; the dev2bridge scripts need /etc/openvpn (created at
+#    the top of this script).
+# =============================================================
+
+# =============================================================
+# 10) DHCP/DNS (dhcp.yml) - lan + misc pools mirrored on the main instance
+# =============================================================
+uci set dhcp.lan='dhcp'
+uci set dhcp.lan.interface='lan'
+uci set dhcp.lan.start='50'
+uci set dhcp.lan.limit='200'
+uci set dhcp.lan.leasetime='1h'
+uci set dhcp.lan.rebind_protection='1'
+uci set dhcp.lan.dhcpv4='server'
+uci set dhcp.lan.dhcpv6='server'
+uci set dhcp.lan.ra='server'
+uci set dhcp.lan.ra_management='1'
+uci set dhcp.lan.ra_default='1'
+uci set dhcp.lan.ra_lifetime='1800'
+uci set dhcp.lan.force='1'
+uci -q delete dhcp.lan.dhcp_option
+uci add_list dhcp.lan.dhcp_option='119,lan,iot,tor,wan'
+uci add_list dhcp.lan.dhcp_option="6,${LAN4}"
+uci set dhcp.lan.dns="${LAN6}"
+
+# misc joins the main lan dnsmasq instance (openwrt-misc segment)
+uci set dhcp.misc='dhcp'
+uci set dhcp.misc.interface='misc'
+uci set dhcp.misc.start='50'
+uci set dhcp.misc.limit='200'
+uci set dhcp.misc.leasetime='1h'
+uci set dhcp.misc.rebind_protection='1'
+uci set dhcp.misc.dhcpv4='server'
+uci set dhcp.misc.dhcpv6='server'
+uci set dhcp.misc.ra='server'
+uci set dhcp.misc.ra_management='1'
+uci set dhcp.misc.ra_default='1'
+uci set dhcp.misc.ra_lifetime='1800'
+uci set dhcp.misc.force='1'
+uci -q delete dhcp.misc.dhcp_option
+uci add_list dhcp.misc.dhcp_option='119,misc,lan'
+uci add_list dhcp.misc.dhcp_option="6,${MISC4}"
+uci set dhcp.misc.dns="${MISC6}"
+
+uci set dhcp.lan_dnsmasq='dnsmasq'
+uci set dhcp.lan_dnsmasq.domain='lan'
+uci set dhcp.lan_dnsmasq.resolvfile='/etc/resolv.dnsmasq.lan'
+uci set dhcp.lan_dnsmasq.leasefile='/tmp/dhcp.lan.leases'
+uci add_list dhcp.lan_dnsmasq.listen_address='127.0.0.1'
+uci add_list dhcp.lan_dnsmasq.listen_address="${LAN4}"
+uci add_list dhcp.lan_dnsmasq.listen_address="${LAN6}"
+uci add_list dhcp.lan_dnsmasq.listen_address="${MISC4}"
+uci add_list dhcp.lan_dnsmasq.listen_address="${MISC6}"
+uci set dhcp.lan_dnsmasq.logqueries='1'
+uci set dhcp.lan_dnsmasq.authoritative='1'
+uci set dhcp.lan_dnsmasq.sequential_ip='1'
+uci set dhcp.lan_dnsmasq.readethers='1'
+
+# =============================================================
+# 11) netboot.yml (PXE boot files served via dnsmasq tftp)
+# =============================================================
+uci set dhcp.lan_dnsmasq.tftp_root='/srv/tftp'
+uci set dhcp.lan_dnsmasq.enable_tftp='1'
+uci add_list dhcp.lan.dhcp_option="66,${LAN4}"
+uci add_list dhcp.lan.dhcp_option='67,netboot.xyz.efi'
+uci add_list dhcp.lan.dhcp_option='67,netboot.xyz-arm64.efi'
+uci add_list dhcp.lan.dhcp_option='67,netboot.xyz.kpxe'
+
+mkdir -p /srv/tftp
+cat << 'EOF' > /etc/scripts/netboot.sh
+#!/bin/sh
+mkdir -p /srv/tftp
+cd /srv/tftp
+wget -O netboot.xyz.efi  https://boot.netboot.xyz/ipxe/netboot.xyz.efi
+wget -O netboot.xyz.kpxe https://boot.netboot.xyz/ipxe/netboot.xyz.kpxe
+wget -O netboot.xyz-arm64.efi https://boot.netboot.xyz/ipxe/netboot.xyz-arm64.efi
+EOF
+chmod 700 /etc/scripts/netboot.sh
+cronjob="15 4 * * *   /etc/scripts/netboot.sh"
+grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+
+# =============================================================
+# 12) DNS/DoH config files (dnscrypt-proxy, resolv files)
+# =============================================================
+# Resolver files for the per-zone dnsmasq instances (mirror of the router):
+# lan/misc resolve through dnscrypt-proxy (127.0.0.55); iot/tor through the
+# -max instance (127.0.0.56).  Both instances forward over Tor to the 6 DoH
+# resolvers from dnscrypt-proxy.yml.  openwrt_upstream_lan_dns (127.0.0.55)
+# only drives this file and the dnsmasq resolv chain; the WAN interface and
+# the postconfig package-install bootstrap use vm_dns instead (network.wan.dns
+# + temporary /etc/resolv.conf in the postconfig script).
+cat << 'EOF' > /etc/resolv.dnsmasq.lan
+nameserver {{ openwrt_upstream_lan_dns }}
+EOF
+cat << 'EOF' > /etc/resolv.dnsmasq.iot
+nameserver 127.0.0.56
+EOF
+cat << 'EOF' > /etc/resolv.dnsmasq.tor
+nameserver 127.0.0.56
+EOF
+rm -f /etc/resolv.conf
+cat > /etc/resolv.conf << EOF
+nameserver 127.0.0.1
+search lan iot tor wan misc
+EOF
+chmod 644 /etc/resolv.conf
+
+mkdir -p /etc/dnscrypt-proxy2 /var/log/dnscrypt-proxy
+cat << 'EOF' > /etc/dnscrypt-proxy2/dnscrypt-proxy.toml
+# Documentation https://github.com/DNSCrypt/dnscrypt-proxy/wiki
+
+# listen on all interfaces (lan dnsmasq forwards here)
+listen_addresses = ['127.0.0.55:53']
+
+# DoH server list (mirror of the OpenWrt router)
+server_names = ['doh.mullvad.net-194.242.2.2', 'doh.ffmuc.net-185.150.99.255', 'doh.ffmuc.net-5.1.66.255', 'dns.digitale-gesellschaft.ch-185.95.218.42', 'dns.digitale-gesellschaft.ch-185.95.218.43', 'anycast.uncensoreddns.org-91.239.100.100']
+
+# what kinds of server do we want to resolve from?
+doh_servers = true
+ipv4_servers = false
+ipv6_servers = false
+dnscrypt_servers = false
+
+# do we support IPv6 addressing?
+block_ipv6 = false
+
+# dont let weird queries & typos leak upstream
+block_unqualified = true
+block_undelegated = true
+
+# TTL for synthetic responses sent when a request has been blocked
+reject_ttl = 600
+
+# request DoH servers which offer DNSSEC / tamperproofing
+require_dnssec = true
+
+# we are using tor, so we should not care about logging
+require_nolog = false
+
+# request DoH servers that advertise themselves as unfiltered
+require_nofilter = true
+
+# use tor
+force_tcp = true
+proxy = 'socks5://127.0.0.1:9050'
+
+# how long (ms) a DNS query will wait for a response; reasonable max 10s
+timeout = 10000
+
+# keepalive for HTTP (HTTPS, HTTP/2) queries, in seconds; default: 30
+keepalive = 30
+
+# loadbalancing; p2 strategy, and continuous farming of the list
+lb_strategy = 'p2'
+lb_estimator = true
+
+# logging: approx 1 month of weekly logs, capped-out/force-rotated at 64Mb
+log_level = 2
+use_syslog = true
+
+# delay, in minutes, after which certificates are reloaded; this also
+# drives the latency logger, so we poll/log every hour
+cert_refresh_delay = 60
+
+# less linkability / more privacy at slight performance impact
+tls_disable_session_tickets = true
+tls_cipher_suite = [52392, 49199]
+
+# for healthcheck, heartbeat and bootstrap, dnscrypt-proxy MUST be
+# able to probe the internet, so we must configure our firewall so
+# that it is the only one which can use port 53 to the internet
+fallback_resolvers = ['46.182.19.48:53']
+netprobe_address = '46.182.19.48:53'
+netprobe_timeout = 60
+ignore_system_dns = true
+
+# explicit caching
+cache = true
+cache_size = 4096
+cache_min_ttl = 60
+cache_max_ttl = 86400
+cache_neg_min_ttl = 60
+cache_neg_max_ttl = 1800
+
+# Static DoH DNS Servers (mirror of the OpenWrt router's dnscrypt-proxy).
+# Reached exclusively through Tor (proxy above); the router firewall
+# exempts our WAN IP (172.23.0.228) from the doh/tor ipset REJECT blocks,
+# so the full 6-resolver list is reachable from behind the FRITZ!Box.
+# Stamps from https://dnscrypt.info/stamps/
+[static]
+
+[static.'doh.mullvad.net-194.242.2.2']
+stamp = 'sdns://AgcAAAAAAAAACzE5NC4yNDIuMi4yAA9kb2gubXVsbHZhZC5uZXQKL2Rucy1xdWVyeQ'
+
+[static.'doh.ffmuc.net-185.150.99.255']
+stamp = 'sdns://AgcAAAAAAAAADjE4NS4xNTAuOTkuMjU1AA1kb2guZmZtdWMubmV0Ci9kbnMtcXVlcnk'
+
+[static.'doh.ffmuc.net-5.1.66.255']
+stamp = 'sdns://AgcAAAAAAAAACjUuMS42Ni4yNTUADWRvaC5mZm11Yy5uZXQKL2Rucy1xdWVyeQ'
+
+[static.'dns.digitale-gesellschaft.ch-185.95.218.42']
+stamp = 'sdns://AgcAAAAAAAAADTE4NS45NS4yMTguNDIAHGRucy5kaWdpdGFsZS1nZXNlbGxzY2hhZnQuY2gKL2Rucy1xdWVyeQ'
+
+[static.'dns.digitale-gesellschaft.ch-185.95.218.43']
+stamp = 'sdns://AgcAAAAAAAAADTE4NS45NS4yMTguNDMAHGRucy5kaWdpdGFsZS1nZXNlbGxzY2hhZnQuY2gKL2Rucy1xdWVyeQ'
+
+[static.'anycast.uncensoreddns.org-91.239.100.100']
+stamp = 'sdns://AgcAAAAAAAAADjkxLjIzOS4xMDAuMTAwABlhbnljYXN0LnVuY2Vuc29yZWRkbnMub3JnCi9kbnMtcXVlcnk'
+EOF
+
+cp /etc/dnscrypt-proxy2/dnscrypt-proxy.toml /etc/dnscrypt-proxy2/dnscrypt-proxy-max.toml
+echo "
+[blocked_names]
+blocked_names_file = 'blocked-names-fakenews-gambling.txt'
+log_file = '/var/log/dnscrypt-proxy/blocked-names-fakenews-gambling.log'
+
+[query_log]
+file = '/var/log/dnscrypt-proxy/query.log'
+
+[nx_log]
+file = '/var/log/dnscrypt-proxy/nx.log'
+
+[blocked_ips]
+[allowed_names]
+[allowed_ips]
+" >>/etc/dnscrypt-proxy2/dnscrypt-proxy.toml
+
+echo "
+[blocked_names]
+blocked_names_file = 'blocked-names-fakenews-gambling-porn-social.txt'
+log_file = '/var/log/dnscrypt-proxy/blocked-names-fakenews-gambling-porn-social.log'
+
+[query_log]
+file = '/var/log/dnscrypt-proxy/query-max.log'
+
+[nx_log]
+file = '/var/log/dnscrypt-proxy/nx-max.log'
+
+[blocked_ips]
+[allowed_names]
+[allowed_ips]
+" >>/etc/dnscrypt-proxy2/dnscrypt-proxy-max.toml
+sed -i 's/127\.0\.0\.55/127.0.0.56/g' /etc/dnscrypt-proxy2/dnscrypt-proxy-max.toml
+# The dnscrypt-proxy2 package is installed online (postconfig), so the -max
+# init script copy happens there. Offline this is a no-op guard.
+[ -x /etc/init.d/dnscrypt-proxy ] && cp -p /etc/init.d/dnscrypt-proxy /etc/init.d/dnscrypt-proxy-max
+[ -x /etc/init.d/dnscrypt-proxy-max ] && sed -i 's/dnscrypt-proxy\.toml/dnscrypt-proxy-max.toml/g' /etc/init.d/dnscrypt-proxy-max
+
+# Bootstrap empty blocklist files: dnscrypt-proxy aborts with "no such file
+# or directory" when a blocked_names_file does not exist yet. The blocklist
+# updater cron fills them; until then an empty list keeps dnscrypt running.
+for f_bf in blocked-names-fakenews-gambling.txt blocked-names-fakenews-gambling-porn-social.txt
+do
+  [ -f "/etc/dnscrypt-proxy2/$f_bf" ] || > "/etc/dnscrypt-proxy2/$f_bf"
+done
+
+# dnscrypt blocklist updater (writes ipsets doh_ipv4/6, tor_ipv4/6)
+cat << 'EOF' > /etc/scripts/dnscrypt-proxy-blocklist-update.sh
+#!/bin/bash
+cd /etc/dnscrypt-proxy2
+g_tmp=/tmp
+
+touch blocked-names-local-whitelist.txt
+chmod 660 blocked-names-local-whitelist.txt
+chown root: blocked-names-local-whitelist.txt
+# get hosts blocklist from https://github.com/StevenBlack/hosts
+for list in \
+ https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts \
+ https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling/hosts
+do
+  target=$(echo $list | cut -d/ -f 8)
+  wget -q $list -O - | grep "^0\.0\.0\.0 " | cut -d" " -f2 | grep "\." | egrep -v '^\.|\.$' | egrep -v -f blocked-names-local-whitelist.txt >${g_tmp}/blocked-names.txt
+  numhosts=$(cat ${g_tmp}/blocked-names.txt | wc -l)
+  if [ "$numhosts" -gt 50000 ]
+  then
+    sed 's/^/=/' ${g_tmp}/blocked-names.txt >"blocked-names-${target}.txt"
+  else
+    echo "Not enough lines in hosts blocklist -> ${g_tmp}/blocked-names.txt"
+  fi
+done
+
+# get doh hosts
+wget -q https://github.com/curl/curl/wiki/DNS-over-HTTPS -O - | grep -v '^</td>$' | grep '✔' -B1 | sed 's#" rel="nofollow">https://#\nhttps://#g; s#<#/#g' | grep ^https:// | cut -d/ -f3 | sort -u >blocked-names-doh.txt
+
+# cleanup
+rm -f ${g_tmp}/blocked-names.txt
+touch blocked-names-local-additions.txt
+chmod 660 blocked-names-local-additions.txt
+chown root: blocked-names-local-additions.txt
+
+# additional hosts
+[ -s blocked-names-doh.txt ] && cat blocked-names-doh.txt >>blocked-names-fakenews-gambling.txt
+[ -s blocked-names-local-additions.txt ] && cat blocked-names-local-additions.txt >>blocked-names-fakenews-gambling.txt
+echo "steering.nextdns.io" >>blocked-names-fakenews-gambling.txt
+[ -s blocked-names-doh.txt ] && cat blocked-names-doh.txt >>blocked-names-fakenews-gambling-porn-social.txt
+[ -s blocked-names-local-additions.txt ] && cat blocked-names-local-additions.txt >>blocked-names-fakenews-gambling-porn-social.txt
+echo "steering.nextdns.io" >>blocked-names-fakenews-gambling-porn-social.txt
+
+# use new files
+/etc/init.d/dnscrypt-proxy restart
+/etc/init.d/dnscrypt-proxy-max restart
+
+# public DoH server IPs (split into ipv4/ipv6 lists)
+wget -q https://raw.githubusercontent.com/DNSCrypt/dnscrypt-resolvers/master/v3/public-resolvers.md -O - | \
+ grep '^sdns://' | sed 's#^sdns://##' | \
+while read dns
+do
+  echo -n "$dns" | base64 -d 2>/dev/null | cut -d" " -f1
+done | \
+ sed 's/[^[:print:]]/ /g ; s/^ *//' | \
+ egrep -a '^[0-9]|^\[' | cut -d" " -f1 | \
+ sed 's/:[[:digit:]]\+$//' | \
+ sed 's/[][]//g' | \
+ sort -u >/etc/ips-doh1.txt.new
+
+>/etc/ips-doh2.txt.new
+wget -q https://github.com/curl/curl/wiki/DNS-over-HTTPS -O - | grep -v '^</td>$' | grep '✔' -B1 | sed 's#" rel="nofollow">https://#\nhttps://#g; s#<#/#g' | grep ^https:// | cut -d/ -f3 | sort -u >blocked-names-doh.txt
+cat blocked-names-doh.txt | while read dns
+do
+  host "$dns" | egrep "has .*address " | sed 's/IPv6 //' | cut -d" " -f4 >>/etc/ips-doh2.txt.new
+done
+
+# merge doh lists
+cat /etc/ips-doh1.txt.new /etc/ips-doh2.txt.new | sort -u >/etc/ips-doh.txt.new
+
+# list of public tor servers (block tor entry/exit nodes directly)
+wget -qO /etc/ips-tor.txt.new https://www.dan.me.uk/torlist/
+
+# split lists to ipv4 and ipv6 lists
+numips=$(cat /etc/ips-doh.txt.new | wc -l)
+if [ "$numips" -gt 300 ]
+then
+  egrep -h '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' /etc/ips-doh.txt.new /etc/ips-doh-ipv4.txt | sort -u >/etc/ips-doh-ipv4.txt.tmp
+  mv /etc/ips-doh-ipv4.txt.tmp /etc/ips-doh-ipv4.txt
+  egrep -h '^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$' /etc/ips-doh.txt.new /etc/ips-doh-ipv6.txt | sort -u >/etc/ips-doh-ipv6.txt.tmp
+  mv /etc/ips-doh-ipv6.txt.tmp /etc/ips-doh-ipv6.txt
+fi
+
+# create block rules from downloaded ip lists (doh)
+for proto in ipv4 ipv6
+do
+  file="/etc/ips-doh-${proto}.txt"
+  [ -s "$file" ] || continue
+  uci -q delete firewall.doh_${proto}
+  uci set firewall.doh_${proto}=ipset
+  uci set firewall.doh_${proto}.name="doh_${proto}"
+  uci set firewall.doh_${proto}.match="dst_ip"
+  uci set firewall.doh_${proto}.family="${proto}"
+  awk '{printf "add_list firewall.'doh_${proto}'.entry=\047%s\047\n", $0}' "$file" >"${file}_uci_batch"
+  uci batch < "${file}_uci_batch"
+  uci -q delete firewall.doh_${proto}_rule
+  uci set firewall.doh_${proto}_rule=rule
+  uci set firewall.doh_${proto}_rule.name="doh_${proto}_block"
+  uci set firewall.doh_${proto}_rule.src="*"
+  uci set firewall.doh_${proto}_rule.dest="wan"
+  uci set firewall.doh_${proto}_rule.ipset="doh_${proto}"
+  uci set firewall.doh_${proto}_rule.target="REJECT"
+  uci set firewall.doh_${proto}_rule.family="${proto}"
+done
+
+uci commit firewall
+/etc/init.d/firewall reload
+EOF
+chmod 700 /etc/scripts/dnscrypt-proxy-blocklist-update.sh
+cronjob="15 6 * * *   /etc/scripts/dnscrypt-proxy-blocklist-update.sh"
+grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+
+# =============================================================
+# 13) tor config + blocklists (tor.yml)
+# =============================================================
+cat << 'EOF' > /etc/tor/torrc
+# individual Tor-Config
+Log notice syslog
+DataDirectory /var/lib/tor
+User tor
+BridgeRelay 0
+SOCKSPort 0.0.0.0:9050
+SOCKSPort [::]:9050
+ExitPolicy reject *:*
+#ControlPort 0.0.0.0:9051
+#ControlPort [::]:9051
+#HashedControlPassword 16:F7222A0CBC254E536056DCBBD27A7D051D68BCF1E9020681C0A3656B84
+# Setting up TOR transparent proxy for tor-router
+#VirtualAddrNetwork 10.192.0.0/10
+VirtualAddrNetworkIPv6 [FC00::]/7
+AutomapHostsOnResolve 1
+TransPort 0.0.0.0:9040 IPv4Traffic
+TransPort [::]:9040 IPv4Traffic IPv6Traffic
+SafeLogging 0
+ClientUseIPv6 1
+DNSPort 9053
+DNSListenAddress 127.0.0.1
+ExitNodes {de}
+StrictNodes 1
+EOF
+chmod 600 /etc/tor/torrc
+
+# tor node blocklist updater (fills firewall.tor_ipv4/6)
+cat << 'EOF' > /etc/scripts/tor-nodes-blocklist-update.sh
+#!/bin/bash
+# download tor entry/exit node list and block them
+wget -qO /etc/ips-tor.txt.new https://www.dan.me.uk/torlist/
+
+numips=$(cat /etc/ips-tor.txt.new | wc -l)
+if [ "$numips" -gt 300 ]
+then
+  egrep -h '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' /etc/ips-tor.txt.new /etc/ips-tor-ipv4.txt | sort -u >/etc/ips-tor-ipv4.txt.tmp
+  mv /etc/ips-tor-ipv4.txt.tmp /etc/ips-tor-ipv4.txt
+  egrep -h '^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$' /etc/ips-tor.txt.new /etc/ips-tor-ipv6.txt | sort -u >/etc/ips-tor-ipv6.txt.tmp
+  mv /etc/ips-tor-ipv6.txt.tmp /etc/ips-tor-ipv6.txt
+fi
+
+for proto in ipv4 ipv6
+do
+  file="/etc/ips-tor-${proto}.txt"
+  [ -s "$file" ] || continue
+  uci -q delete firewall.tor_${proto}
+  uci set firewall.tor_${proto}=ipset
+  uci set firewall.tor_${proto}.name="tor_${proto}"
+  uci set firewall.tor_${proto}.match="dst_ip"
+  uci set firewall.tor_${proto}.family="${proto}"
+  awk '{printf "add_list firewall.'tor_${proto}'.entry=\047%s\047\n", $0}' "$file" >"${file}_uci_batch"
+  uci batch < "${file}_uci_batch"
+  uci -q delete firewall.tor_${proto}_rule
+  uci set firewall.tor_${proto}_rule=rule
+  uci set firewall.tor_${proto}_rule.name="tor_${proto}_block"
+  uci set firewall.tor_${proto}_rule.src="*"
+  uci set firewall.tor_${proto}_rule.dest="wan"
+  uci set firewall.tor_${proto}_rule.ipset="tor_${proto}"
+  uci set firewall.tor_${proto}_rule.target="REJECT"
+  uci set firewall.tor_${proto}_rule.family="${proto}"
+done
+
+uci commit firewall
+/etc/init.d/firewall reload
+EOF
+chmod 700 /etc/scripts/tor-nodes-blocklist-update.sh
+cronjob="15 5 * * *   /etc/scripts/tor-nodes-blocklist-update.sh"
+grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+
+# whitelist for destinations reachable directly (bypass tor)
+cat << 'EOF' > /etc/scripts/tor_whitelist.sh
+#!/bin/bash
+[[ -s /etc/tor_whitelist ]] || exit 0
+>/etc/tor_whitelist_ips
+cat /etc/tor_whitelist | while read notor
+do
+  host "$notor" | egrep "has address " | cut -d" " -f4 >>/etc/tor_whitelist_ips
+done
+uci -q delete firewall.tor_whitelist
+uci set firewall.tor_whitelist=ipset
+uci set firewall.tor_whitelist.name="tor_whitelist"
+uci set firewall.tor_whitelist.match="dst_ip"
+uci set firewall.tor_whitelist.family="ipv4"
+awk '{printf "add_list firewall.'tor_whitelist'.entry=\047%s\047\n", $0}' "/etc/tor_whitelist_ips" >"/etc/tor_whitelist_ips_uci_batch"
+uci batch < "/etc/tor_whitelist_ips_uci_batch"
+uci commit
+/etc/init.d/firewall reload
+EOF
+chmod 700 /etc/scripts/tor_whitelist.sh
+cronjob="*/15 * * * *   /etc/scripts/tor_whitelist.sh"
+grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+
+# transparent proxy routing rules (nftables, runs on each firewall reload)
+mkdir -p /etc/nftables.d
+cat << 'EOF' > /etc/nftables.d/10-tor_routing.sh
+#!/bin/sh
+
+# wait for fw4 Chains
+while ! nft list chain inet fw4 dstnat >/dev/null 2>&1
+do
+ sleep 0.1
+done
+
+# check for chain and create if not exists
+nft list chain inet fw4 dstnat_tor >/dev/null 2>&1 || \
+    nft 'add chain inet fw4 dstnat_tor { type nat hook prerouting priority dstnat; policy accept; }'
+
+# clean chain
+nft flush chain inet fw4 dstnat_tor
+
+# log
+nft add rule inet fw4 dstnat_tor iifname "br-tor" log prefix "TOR_ROUTING_DROP: "
+
+# allow DHCP
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol udp udp sport 68 udp dport 67 accept
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr udp udp dport {546,547,548} accept
+
+# allow mDNS service discovery for example for printers or chromecast
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip daddr 224.0.0.251 udp dport 5353 accept
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 daddr ff02::fb udp dport 5353 accept
+
+# hijack DNS and NTP / redirect to router
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol udp udp dport {123} dnat to {{ tor_ip }}:123
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr udp udp dport {123} dnat to [{{ tor_ip6 }}]:123
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol udp udp dport {53} dnat to {{ tor_ip }}:53
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr udp udp dport {53} dnat to [{{ tor_ip6 }}]:53
+
+# allow local traffic
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } accept
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 daddr { fc00::/7, fd00::/8 } accept
+
+# redirect ping
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol icmp icmp type echo-request dnat to {{ tor_ip }}
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr icmpv6 icmpv6 type echo-request dnat to "[::1]"
+
+# do not allow tor in tor
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol tcp ip daddr @tor_ipv4 log prefix "TOR_ROUTING_IPV4_DROP: " drop
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr tcp ip6 daddr @tor_ipv6 log prefix "TOR_ROUTING_IPV6_DROP: " drop
+
+# exceptions
+nft list set inet fw4 tor_whitelist >/dev/null 2>&1 && nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol tcp ip daddr @tor_whitelist tcp dport 443 accept
+
+# send all tcp traffic but local IPs through tor
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol tcp ip daddr != {127.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 0.0.0.0/8, 240.0.0.0/4} dnat to {{ tor_ip }}:9040
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr tcp ip6 daddr != { fd00::/8, fc00::/7, ::1/128, fe80::/10, ff00::/8, 2001::/23, 2001:db8::/32, 2001:10::/28, 2002::/16 } dnat to [{{ tor_ip6 }}]:9040
+
+# all the rest of network traffic will be dropped by policy drop
+nft add rule inet fw4 dstnat_tor iifname "br-tor" log prefix "TOR_ROUTING_DROP" drop
+EOF
+chmod +x /etc/nftables.d/10-tor_routing.sh
+
+# =============================================================
+# 14) firewall port-forward duplication helper (firewall.yml)
+#     re-opens wan redirects for iot/tor zones (cron)
+# =============================================================
+mkdir -p /etc/scripts
+cat << 'EOF' > /etc/scripts/firewall_port_forwards_from_wan_to_newzone.sh
+#!/bin/sh
+
+# Duplicate all port forwards from zone 'wan' to new zone given by $1
+newzone="$1"
+
+if [ -z "$newzone" ]
+then
+  echo "no new zone specified"
+  exit 1
+fi
+
+changed=0
+while read -r name
+do
+  src=$(uci get firewall."$name".src 2>/dev/null)
+  [ "$src" != "wan" ] && continue
+  newname="$(echo "$name" | sed 's/^redirect_//')_${newzone}"
+  # skip if already exists
+  uci get firewall."$newname" >/dev/null 2>&1 && continue
+  uci set firewall."$newname"=rule
+  uci set firewall."$newname".src="$newzone"
+  uci set firewall."$newname".name="$newname"
+  uci set firewall."$newname".target="ACCEPT"
+  for param in proto dest dest_ip dest_port
+  do
+    val=$(uci get firewall."$name"."$param" 2>/dev/null)
+    if [ -n "$val" ]
+    then
+      uci set firewall."$newname"."$param"="$val"
+    fi
+  done
+  changed=1
+done << EOI
+$(uci show firewall | grep -E "^firewall\.[a-zA-Z0-9_]+=redirect$" | cut -d. -f2 | cut -d= -f1)
+EOI
+
+if [ "$changed" = "1" ]
+then
+  uci commit firewall
+  /etc/init.d/firewall reload
+fi
+EOF
+chmod 700 /etc/scripts/firewall_port_forwards_from_wan_to_newzone.sh
+cronjob="1 4 * * *   /etc/scripts/firewall_port_forwards_from_wan_to_newzone.sh iot"
+grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+cronjob="1 5 * * *   /etc/scripts/firewall_port_forwards_from_wan_to_newzone.sh tor"
+grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+
+# =============================================================
+# 15) SMTP (smtp.yml) - only when a relay is configured in inventory.yml
+# =============================================================
+{% if smtp_server | default('') | length > 0 %}
+cat << 'EOF' > /etc/msmtprc
+defaults
+tls on
+tls_trust_file /etc/ssl/certs/ca-certificates.crt
+syslog LOG_MAIL
+
+account mail
+  host {{ smtp_server }}
+  port {{ smtp_port | default(587) }}
+  auth on
+  user {{ smtp_user }}
+  password {{ smtp_password }}
+  from {{ smtp_user }}
+
+account default : mail
+EOF
+chmod 644 /etc/msmtprc
+chown root:root /etc/msmtprc
+{% endif %}
+
+# =============================================================
+# 16) openvpn bridging helpers + PKI/cron scripts (openvpn-*)
+# =============================================================
+cat << 'EOF' > /etc/openvpn/tor-dev2bridge.sh
+#!/bin/bash
+# OpenVPN Up Script to add tap device to the tor bridge
+tap=$dev
+echo 1 >/proc/sys/net/ipv6/conf/${dev}/disable_ipv6
+/sbin/ip link set dev $tap up
+/sbin/ip addr flush dev $tap
+/sbin/ip link set dev $tap master br-tor
+/sbin/ip link set dev $tap promisc on
+EOF
+chmod 500 /etc/openvpn/tor-dev2bridge.sh
+
+cat << 'EOF' > /etc/hotplug.d/iface/99-openvpn-br-tor
+[ "$ACTION" = "ifup" -a "$INTERFACE" = "br-tor" ] && {
+  /sbin/ip link set dev tap2 master br-tor
+}
+EOF
+chmod 644 /etc/hotplug.d/iface/99-openvpn-br-tor
+
+cat << 'EOF' > /etc/openvpn/iot-dev2bridge.sh
+#!/bin/bash
+# OpenVPN Up Script to add tap device to the iot bridge
+tap=$dev
+echo 1 >/proc/sys/net/ipv6/conf/${dev}/disable_ipv6
+/sbin/ip link set dev $tap up
+/sbin/ip addr flush dev $tap
+/sbin/ip link set dev $tap master br-iot
+/sbin/ip link set dev $tap promisc on
+EOF
+chmod 500 /etc/openvpn/iot-dev2bridge.sh
+
+cat << 'EOF' > /etc/hotplug.d/iface/99-openvpn-br-iot
+[ "$ACTION" = "ifup" -a "$INTERFACE" = "br-iot" ] && {
+  /sbin/ip link set dev tap1 master br-iot
+}
+EOF
+chmod 644 /etc/hotplug.d/iface/99-openvpn-br-iot
+
+cat << 'EOF' > /etc/scripts/openvpn-tor-tap-in-bridge.sh
+#!/bin/bash
+DEV="tap2"
+BR="br-tor"
+if ! ip link show "$DEV" >/dev/null 2>&1
+then
+  echo "Error: Device $DEV does not exist"
+  exit 1
+fi
+if ! brctl show "$BR" 2>/dev/null | grep -q "^$BR"
+then
+  echo "Error: Bridge $BR does not exist"
+  exit 2
+fi
+if ! brctl show "$BR" | grep -q "$DEV"
+then
+  brctl addif "$BR" "$DEV"
+fi
+ip link set dev "$DEV" promisc on
+ip link set dev "$DEV" up
+EOF
+chmod 500 /etc/scripts/openvpn-tor-tap-in-bridge.sh
+cronjob="*/5 * * * *   /etc/scripts/openvpn-tor-tap-in-bridge.sh"
+grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+
+cat << 'EOF' > /etc/scripts/openvpn-iot-tap-in-bridge.sh
+#!/bin/bash
+DEV="tap1"
+BR="br-iot"
+if ! ip link show "$DEV" >/dev/null 2>&1
+then
+  echo "Error: Device $DEV does not exist"
+  exit 1
+fi
+if ! brctl show "$BR" 2>/dev/null | grep -q "^$BR"
+then
+  echo "Error: Bridge $BR does not exist"
+  exit 2
+fi
+if ! brctl show "$BR" | grep -q "$DEV"
+then
+  brctl addif "$BR" "$DEV"
+fi
+ip link set dev "$DEV" promisc on
+ip link set dev "$DEV" up
+EOF
+chmod 500 /etc/scripts/openvpn-iot-tap-in-bridge.sh
+cronjob="*/5 * * * *   /etc/scripts/openvpn-iot-tap-in-bridge.sh"
+grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+
+# easy-rsa PKI generator for the tor OpenVPN server
+cat << 'EOF' > /etc/scripts/openvpn-tor-easyrsa.sh
+#!/bin/bash
+VPNNAME="tor"
+EASYRSA_DIR="/etc/openvpn/${VPNNAME}-easy-rsa.tmp"
+EASYRSA_DIR_FINAL="/etc/openvpn/${VPNNAME}-easy-rsa"
+OPENVPN_DIR="/etc/openvpn"
+CLIENT_NAME="${1}.${VPNNAME}"
+CERT_DAYS=30
+
+cd /tmp
+rm -rf ${EASYRSA_DIR}
+mkdir -p ${EASYRSA_DIR}
+chmod 700 ${EASYRSA_DIR}
+cd ${EASYRSA_DIR} || exit 1
+
+/usr/bin/easyrsa --batch init-pki || exit 2
+/usr/bin/easyrsa --batch --days=${CERT_DAYS} build-ca nopass || exit 3
+[ -s "${OPENVPN_DIR}/dh.pem" ] || openssl dhparam -out ${OPENVPN_DIR}/dh.pem 2048 || exit 4
+/usr/bin/easyrsa --batch --days=${CERT_DAYS} build-server-full openvpn-server nopass || exit 5
+
+for CLIENT_HOSTNAME in {{ openvpn_tor_clients | join(' ') }}
+do
+  CLIENT_NAME=${CLIENT_HOSTNAME}.${VPNNAME}
+  /usr/bin/easyrsa --batch --days="$CERT_DAYS" build-client-full "$CLIENT_NAME" nopass || exit 6
+  CA_CRT="$EASYRSA_DIR/pki/ca.crt"
+  CLIENT_CRT="$EASYRSA_DIR/pki/issued/$CLIENT_NAME.crt"
+  CLIENT_KEY="$EASYRSA_DIR/pki/private/$CLIENT_NAME.key"
+  echo "client
+dev tap2
+proto udp
+remote {{ vm_ip }} 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+ca [inline]
+cert [inline]
+key [inline]
+cipher AES-256-CBC
+auth SHA256
+verb 3
+remote-cert-tls server
+script-security 2
+up /etc/openvpn/${VPNNAME}-dev2bridge.sh
+<ca>
+$(cat "$CA_CRT")
+</ca>
+<cert>
+$(cat "$CLIENT_CRT")
+</cert>
+<key>
+$(cat "$CLIENT_KEY")
+</key>" >"${CLIENT_NAME}.ovpn"
+  sed -i 's/^[[:space:]]*-----/-----/' "${CLIENT_NAME}.ovpn"
+done
+
+# use/activate new pki
+rm -rf ${EASYRSA_DIR_FINAL}.old
+[ -e "${EASYRSA_DIR_FINAL}" ] && mv ${EASYRSA_DIR_FINAL} ${EASYRSA_DIR_FINAL}.old
+mv ${EASYRSA_DIR} ${EASYRSA_DIR_FINAL}
+/etc/init.d/openvpn restart
+EOF
+chmod 500 /etc/scripts/openvpn-tor-easyrsa.sh
+cronjob="15 9 * * *   /etc/scripts/openvpn-tor-easyrsa.sh"
+grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+
+# easy-rsa PKI generator for the iot OpenVPN server
+cat << 'EOF' > /etc/scripts/openvpn-iot-easyrsa.sh
+#!/bin/bash
+VPNNAME="iot"
+EASYRSA_DIR="/etc/openvpn/${VPNNAME}-easy-rsa.tmp"
+EASYRSA_DIR_FINAL="/etc/openvpn/${VPNNAME}-easy-rsa"
+OPENVPN_DIR="/etc/openvpn"
+CLIENT_NAME="${1}.${VPNNAME}"
+CERT_DAYS=30
+
+cd /tmp
+rm -rf ${EASYRSA_DIR}
+mkdir -p ${EASYRSA_DIR}
+chmod 700 ${EASYRSA_DIR}
+cd ${EASYRSA_DIR} || exit 1
+
+/usr/bin/easyrsa --batch init-pki || exit 2
+/usr/bin/easyrsa --batch --days=${CERT_DAYS} build-ca nopass || exit 3
+[ -s "${OPENVPN_DIR}/dh.pem" ] || openssl dhparam -out ${OPENVPN_DIR}/dh.pem 2048 || exit 4
+/usr/bin/easyrsa --batch --days=${CERT_DAYS} build-server-full openvpn-server nopass || exit 5
+
+for CLIENT_HOSTNAME in {{ openvpn_iot_clients | join(' ') }}
+do
+  CLIENT_NAME=${CLIENT_HOSTNAME}.${VPNNAME}
+  /usr/bin/easyrsa --batch --days="$CERT_DAYS" build-client-full "$CLIENT_NAME" nopass || exit 6
+  CA_CRT="$EASYRSA_DIR/pki/ca.crt"
+  CLIENT_CRT="$EASYRSA_DIR/pki/issued/$CLIENT_NAME.crt"
+  CLIENT_KEY="$EASYRSA_DIR/pki/private/$CLIENT_NAME.key"
+  echo "client
+dev tap1
+proto udp
+remote {{ vm_ip }} 1195
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+ca [inline]
+cert [inline]
+key [inline]
+cipher AES-256-CBC
+auth SHA256
+verb 3
+remote-cert-tls server
+script-security 2
+up /etc/openvpn/${VPNNAME}-dev2bridge.sh
+<ca>
+$(cat "$CA_CRT")
+</ca>
+<cert>
+$(cat "$CLIENT_CRT")
+</cert>
+<key>
+$(cat "$CLIENT_KEY")
+</key>" >"${CLIENT_NAME}.ovpn"
+  sed -i 's/^[[:space:]]*-----/-----/' "${CLIENT_NAME}.ovpn"
+done
+
+# use/activate new pki
+rm -rf ${EASYRSA_DIR_FINAL}.old
+[ -e "${EASYRSA_DIR_FINAL}" ] && mv ${EASYRSA_DIR_FINAL} ${EASYRSA_DIR_FINAL}.old
+mv ${EASYRSA_DIR} ${EASYRSA_DIR_FINAL}
+/etc/init.d/openvpn restart
+EOF
+chmod 500 /etc/scripts/openvpn-iot-easyrsa.sh
+cronjob="15 10 * * *   /etc/scripts/openvpn-iot-easyrsa.sh"
+grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+
+# =============================================================
+# 17) commit + notify postconfig trigger
+# =============================================================
+uci commit
+/etc/init.d/dropbear restart 2>/dev/null || true
+
+exit 0
