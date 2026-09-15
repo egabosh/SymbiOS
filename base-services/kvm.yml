@@ -202,7 +202,153 @@
       failed_when: false
       when: kvm_capable | default(false) | bool and host_arch.stdout | default('') == 'x86_64'
 
+    # ── Boot restore for VMs ────────────────────────────────────────────
+    # VM images live on /symbios (LUKS), which is only mounted by rc.local
+    # after the boot-unlock (fstab entry is noauto). libvirt/systemd must NOT
+    # auto-start VMs at boot before the mount. Restore is handled as:
+    #   - clean shutdown: libvirt-guests managedsave (running VMs only)
+    #   - boot after mount: rc.local starts libvirt-guests (resumes VMs with
+    #     a managed save; a stopped VM has no save and stays stopped)
+    #   - power loss / crash: no managed save exists, but the qemu hook
+    #     recorded the last known state in /var/lib/symbios-vm-state/ -
+    #     rc.local cold-starts VMs whose flag says they were running
+    - name: Disable libvirt autostart for all VMs (restore handled by rc.local + hook)
+      ansible.builtin.shell: |
+        for f_vm in $(virsh list --all --name)
+        do
+          [ -n "$f_vm" ] || continue
+          virsh autostart --disable "$f_vm" 2>/dev/null
+        done
+        echo "autostart-disabled"
+      register: vm_autostart_all
+      changed_when: false
+      failed_when: false
+      when: kvm_capable | default(false) | bool
+
+    # libvirt-guests: save running guests on host shutdown as managedsave,
+    # restore them on host boot. Must NOT run at systemd boot time (the
+    # /symbios data root may still be locked) - start it from rc.local
+    # instead, so it is disabled here and only active after the mount.
+    - name: Configure libvirt-guests to suspend running guests on shutdown
+      ansible.builtin.lineinfile:
+        path: /etc/default/libvirt-guests
+        regexp: '^ON_SHUTDOWN='
+        line: 'ON_SHUTDOWN=suspend'
+        create: yes
+      when: kvm_capable | default(false) | bool
+
+    - name: Configure libvirt-guests to restore guests on boot
+      ansible.builtin.lineinfile:
+        path: /etc/default/libvirt-guests
+        regexp: '^ON_BOOT='
+        line: 'ON_BOOT=start'
+        create: yes
+      when: kvm_capable | default(false) | bool
+
+    # libvirt-guests must not resume guests before /symbios is mounted - it
+    # would try to open the qcow2 on an unmounted volume. Since it is disabled
+    # here and only started from rc.local (after mount), that cannot happen.
+    - name: Disable libvirt-guests boot autostart (started by rc.local)
+      ansible.builtin.systemd:
+        name: libvirt-guests
+        enabled: false
+        daemon_reload: true
+      when: kvm_capable | default(false) | bool
+
+    # qemu hook: record the last running state of every VM in
+    # /var/lib/symbios-vm-state/<domain> (root fs, survives reboot). This
+    # allows rc.local to cold-start VMs after a power loss, where no managed
+    # save was written by libvirt-guests.
+    - name: Ensure /var/lib/symbios-vm-state directory exists
+      ansible.builtin.file:
+        path: /var/lib/symbios-vm-state
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      when: kvm_capable | default(false) | bool
+
+    - name: Deploy libvirt qemu hook to record VM last states
+      ansible.builtin.copy:
+        dest: /etc/libvirt/hooks/qemu
+        mode: '0755'
+        owner: root
+        group: root
+        content: |
+          #!/bin/bash
+          # SymbiOS - record the last running state of every qemu VM.
+          # Called by libvirt for each qemu domain lifecycle event.
+          # On start -> "running", on stop -> "stopped", stored on the root
+          # filesystem (survives reboots) in /var/lib/symbios-vm-state/.
+          # rc.local reads these after boot to cold-start VMs that were
+          # running when power was lost (no managed save exists then).
+          f_dom="$1"
+          f_op="$2"
+          [ -n "$f_dom" ] || exit 0
+          case "$f_op" in
+            start|started|prepare|restore)
+              mkdir -p /var/lib/symbios-vm-state
+              echo running > "/var/lib/symbios-vm-state/$f_dom"
+              ;;
+            stopped|release)
+              mkdir -p /var/lib/symbios-vm-state
+              echo stopped > "/var/lib/symbios-vm-state/$f_dom"
+              ;;
+          esac
+          exit 0
+      notify: Restart libvirtd to activate qemu hook
+      when: kvm_capable | default(false) | bool
+
+    # Remove the legacy openwrt-specific rc.local block that the old
+    # openwrt-vm playbook inserted (superseded by the generic block below).
+    - name: Remove legacy OpenWrt rc.local restore block
+      ansible.builtin.blockinfile:
+        path: /etc/rc.local
+        state: absent
+        marker: "# {mark} SymbiOS OpenWrt VM start"
+      when: kvm_capable | default(false) | bool
+
+    # rc.local mounts /symbios after the LUKS boot-unlock, so the VM restore
+    # must happen there (after the mount), not by systemd at boot.
+    - name: Insert VM restore into rc.local boot sequence
+      ansible.builtin.blockinfile:
+        path: /etc/rc.local
+        create: true
+        mode: '0755'
+        insertbefore: 'exit 0'
+        marker: "# {mark} SymbiOS VM restore"
+        block: |
+          # Restore libvirt VMs once /symbios is mounted (LUKS boot-unlock).
+          # 1) libvirt-guests resumes VMs with a managed save from a clean
+          #    host shutdown (a stopped VM has no save and stays stopped).
+          # 2) Power-loss / crash fallback: if no managed save was written but
+          #    the qemu hook recorded "running", cold-start those VMs.
+          systemctl start libvirt-guests 2>/dev/null || true
+          for f_state in /var/lib/symbios-vm-state/*
+          do
+            [ -f "$f_state" ] || continue
+            f_vm="$(basename "$f_state")"
+            if [ "$(cat "$f_state")" = "running" ] && \
+               ! virsh list --state-running --name | grep -qx "$f_vm"
+            then
+              if virsh dominfo "$f_vm" >/dev/null 2>&1
+              then
+                virsh start "$f_vm" 2>/dev/null || true
+              fi
+            fi
+          done
+      when: kvm_capable | default(false) | bool
+
     # Register playbook as installed
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/kvm.yml"
       changed_when: false
+
+  handlers:
+    # libvirtd reads the qemu hook path on each event, but there is a catch:
+    # if the hook file did not exist when libvirtd started, it is not picked
+    # up until the daemon (re)starts. Restart after (re)deploying the hook.
+    - name: Restart libvirtd to activate qemu hook
+      ansible.builtin.service:
+        name: libvirtd
+        state: restarted

@@ -38,7 +38,7 @@
 #   stop           - whitelisted stop command (docker compose/systemctl/virsh)
 #   commands       - optional list of whitelisted cleanup commands, executed
 #                    in full mode only (docker compose/systemctl/ufw/userdel/
-#                    groupdel/smbpasswd/deluser/delgroup)
+#                    groupdel/smbpasswd/deluser/delgroup/virsh)
 #   ldap_groups    - optional list of LDAP groups deleted in full mode (even
 #                    if they still have members); defaults to the groups
 #                    named in docs.access (admin_group/user_group)
@@ -185,7 +185,7 @@ then
       fi
       f_cmd=$(f_expand_vars "$f_raw_cmd")
       # Whitelist: only allow known cleanup commands
-      if [[ ! "$f_cmd" =~ ^(docker\ compose|systemctl|ufw|userdel|groupdel|smbpasswd|deluser|delgroup)([[:space:]]|$) ]]
+      if [[ ! "$f_cmd" =~ ^(docker\ compose|systemctl|ufw|userdel|groupdel|smbpasswd|deluser|delgroup|virsh)([[:space:]]|$) ]]
       then
         g_echo_error "Invalid cleanup command (only docker compose/systemctl/ufw/userdel/groupdel/smbpasswd/deluser/delgroup allowed): $f_cmd"
         exit 1
