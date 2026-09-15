@@ -73,6 +73,11 @@ all:
     ap_country: ''
     ap_enabled: true
     ap_configured: false
+    # Network bridge assignments (managed by the WebUI under Settings ->
+    # Network Bridges). Maps physical interfaces to Linux bridges,
+    # e.g. {wlan0: br-lan, eth1: br-lan}. Persisted to /etc/rc.local by
+    # scripts/symbios-bridge-assign.sh so assignments survive a reboot.
+    bridge_assignments: {}
     # ansible defaults
     ansible_user: "root"
     ansible_python_interpreter: "/usr/bin/python3"
