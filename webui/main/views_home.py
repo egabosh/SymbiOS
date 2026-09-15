@@ -15,10 +15,125 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import json
+import os
+from datetime import datetime
+from django.http import JsonResponse
 from django.shortcuts import render
+from zoneinfo import ZoneInfo
 from .decorators import login_required
 from .playbook_catalog import get_catalog
 from .views_services import _get_installed_playbooks, _get_healthcheck_status, _order_catalog
+
+# Snapshot files in the /log volume, written minutely by the
+# symbios-dashboard-snapshot.sh cron job so the WebUI never blocks on live
+# host commands (see /log/runchecks-results.json for the same pattern).
+_STATS_SNAPSHOT = 'dashboard-stats.json'
+_NETWORK_SNAPSHOT = 'dashboard-network.json'
+
+# Full scale of the Disk I/O gauge in the dashboard (MB/s).
+_IO_MAX_MB = 20
+
+
+def _timezone_name():
+    """Timezone from inventory.yml (``all.vars.timezone``), if any."""
+    from .views import _get_inventory_config
+    config = _get_inventory_config()
+    return str(config.get('all', {}).get('vars', {}).get('timezone') or '')
+
+
+def _localize_time(value):
+    """Convert a UTC timestamp (``...Z``) to the inventory timezone.
+
+    Returns a ``YYYY-MM-DD HH:MM:SS`` string in the local zone, or the
+    original value unchanged when no timezone is configured in inventory.yml.
+    """
+    tz = _timezone_name()
+    if not value or not tz:
+        return value
+    try:
+        dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        return dt.astimezone(ZoneInfo(tz)).strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return value
+
+
+def _read_snapshot(name):
+    """Read a dashboard snapshot JSON file from the /log volume mount."""
+    try:
+        with open(os.path.join('/log', name)) as fh:
+            return json.load(fh)
+    except (FileNotFoundError, PermissionError, json.JSONDecodeError):
+        return {}
+
+
+def _get_host_stats():
+    """Load the Host System snapshot (CPU/memory/load/disk I/O statistics).
+
+    Adds derived fields for the server-side template rendering:
+    ``io_read_mb``/``io_write_mb`` (throughput in MB/s), ``io_bar`` (the
+    Disk I/O gauge width in percent, scaled to ``_IO_MAX_MB``) and per
+    device ``rmb``/``wmb`` (MB/s values).
+    """
+    data = _read_snapshot(_STATS_SNAPSHOT)
+    if not data:
+        return {}
+    try:
+        data['timestamp'] = _localize_time(data.get('timestamp'))
+        rmb = float(data.get('io_read_kbs', 0) or 0) / 1024.0
+        wmb = float(data.get('io_write_kbs', 0) or 0) / 1024.0
+        data['io_read_mb'] = round(rmb, 1)
+        data['io_write_mb'] = round(wmb, 1)
+        data['io_max_mb'] = _IO_MAX_MB
+        data['io_bar'] = round(min(100.0, max(rmb, wmb) * 100.0 / _IO_MAX_MB), 1)
+        for dev in data.get('io_devices') or []:
+            dev['rmb'] = round(float(dev.get('rkbs', 0) or 0) / 1024.0, 1)
+            dev['wmb'] = round(float(dev.get('wkbs', 0) or 0) / 1024.0, 1)
+        return data
+    except Exception:
+        return {}
+
+
+def _get_network_devices():
+    """Load the Network Devices snapshot.
+
+    The scan covers every interface with a private IPv4 (default-route LAN,
+    OpenWrt VM bridges, ...) except the intentionally internal networks
+    (Docker bridges ``br-*``/``docker0`` and the SymbiOS service networks
+    ``base-services``/``services``). WiFi stations currently associated to
+    the hostapd access point are included as well. The scan itself runs
+    minutely via cron (symbios-dashboard-snapshot.sh); this loader never
+    triggers it.
+    """
+    data = _read_snapshot(_NETWORK_SNAPSHOT)
+    if not data:
+        return {}
+    try:
+        data['scanned_at'] = _localize_time(data.get('scanned_at'))
+
+        # Sort by subnet (the physical default-route LAN first), then IP.
+        subnet_order = {s.get('cidr', ''): i
+                        for i, s in enumerate(data.get('subnets') or [])}
+        devices = data.get('devices') or []
+
+        def _sort_key(device):
+            subnet = str(device.get('subnet', ''))
+            order = subnet_order.get(subnet, len(subnet_order))
+            return [order] + _ip_key(device)
+
+        data['devices'] = sorted(devices, key=_sort_key)
+        return data
+    except Exception:
+        return {}
+
+
+def _ip_key(device):
+    """Sort key so IPv4 addresses are ordered numerically, not lexically."""
+    octets = str(device.get('ip', '0.0.0.0')).split('.')
+    try:
+        numeric = [int(x) for x in octets]
+    except ValueError:
+        numeric = [0, 0, 0, 0]
+    return numeric + [str(device.get('ip', ''))]
 
 
 def _get_failing_healthchecks():
@@ -77,4 +192,22 @@ def home(request):
         'installed_services': installed_services,
         'available_services': available_services,
         'healthcheck_status': healthcheck_status,
+        'host_stats': _get_host_stats(),
+        'network': _get_network_devices(),
     })
+
+
+@login_required
+def dashboard_stats(request):
+    """AJAX endpoint: fresh host CPU/memory/load/disk I/O statistics."""
+    return JsonResponse(_get_host_stats())
+
+
+@login_required
+def dashboard_network(request):
+    """AJAX endpoint: discovered external LAN devices.
+
+    The scan itself runs minutely via cron (symbios-dashboard-snapshot.sh);
+    this endpoint only reads the pre-computed snapshot file.
+    """
+    return JsonResponse(_get_network_devices())
