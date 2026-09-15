@@ -7,74 +7,11 @@
 #   draft    - parameters saved but not yet applied
 #   applied  - playbook executed successfully
 #   error    - last apply failed (check error field)
-
-interfaces:
-  enabled: false
-  status: null
-  error: null
-  last_applied: null
-  params:
-    bridge_interfaces: []
-
-iot:
-  enabled: false
-  status: null
-  error: null
-  last_applied: null
-  params: {}
-
-wireless:
-  enabled: false
-  status: null
-  error: null
-  last_applied: null
-  params:
-    radio: ''
-    ssid: ''
-    key: ''
-    country: DE
-
-wireless_iot:
-  enabled: false
-  status: null
-  error: null
-  last_applied: null
-  params:
-    radio: ''
-    ssid: ''
-    key: ''
-
-wifi_passthrough:
-  enabled: false
-  status: null
-  error: null
-  last_applied: null
-  params:
-    devices: []
-
-wireguard:
-  enabled: false
-  status: null
-  error: null
-  last_applied: null
-  params: {}
-
-dnscrypt:
-  enabled: false
-  status: null
-  error: null
-  last_applied: null
-  params: {}
-
-ddns_ipv4:
-  enabled: false
-  status: null
-  error: null
-  last_applied: null
-  params:
-    hostname: ''
-    domain: ''
-    apikey: ''
+#
+# Note: The former VM-side features (iot, wifi*, wireguard, dnscrypt, ssh,
+# syslog, SMTP, host bridge/passthrough, DynDNS IPv4) are either baked into the
+# VM at build time by the openwrt-vm playbook or no longer needed; only
+# user-specific DNS entries remain as features.
 
 ddns_ipv6:
   enabled: false
@@ -103,29 +40,3 @@ dns_record:
   params:
     hostname: ''
     ip: ''
-
-ssh:
-  enabled: false
-  status: null
-  error: null
-  last_applied: null
-  params: {}
-
-logserver:
-  enabled: false
-  status: null
-  error: null
-  last_applied: null
-  params:
-    server: ''
-
-smtp:
-  enabled: false
-  status: null
-  error: null
-  last_applied: null
-  params:
-    server: ''
-    port: 587
-    username: ''
-    password: ''
