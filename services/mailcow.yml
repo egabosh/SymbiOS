@@ -1,0 +1,756 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# docs:
+#   name: Mailcow
+#   short_description: Deploy the Mailcow mail server (mailcow-dockerized)
+#   description: Deploys Mailcow with Traefik integration, LDAP groups, and Authelia access control. TLS certificates are provided by Traefik (ACME) and synced into the mailcow nginx.
+#   url: "https://mail.{{ base_domain }}"
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   access:
+#     admin_group: mailcow-admins
+#     user_group: mailcow-users
+#   service_control:
+#     services:
+#     - name: mailcow
+#       type: docker
+#       compose_file: /symbios/services/mailcow/docker-compose.yml
+#       status: test -d /symbios/services/mailcow || exit 2; docker compose -f /symbios/services/mailcow/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: mailcow
+#       command: docker compose -f /symbios/services/mailcow/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/mailcow/docker-compose.yml down
+#     program_paths:
+#       - /symbios/services/mailcow/
+#       - /symbios/base-services/traefik/providers/mailcow.yml
+#       - /symbios/base-services/traefik/providers/mailcow-autoconfig.yml
+#       - /symbios/runchecks.d/symbios-healthcheck-mailcow.check
+#       - /symbios/autoupdate.d/mailcow.update
+#       - /symbios/backup.d/mailcow.backup
+#     ldap_groups:
+#       - mailcow-users
+#       - mailcow-admins
+#     authelia_blocks:
+#       - "mailcow ACCESS CONTROL"
+#   actions:
+#     start: docker compose -f /symbios/services/mailcow/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/mailcow/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/mailcow/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/mailcow/docker-compose.yml up -d
+#
+---
+- name: mailcow
+  hosts: all
+  vars:
+    service_name: mailcow
+    service_domain: "mail.{{ base_domain }}"
+    mailcow_root: "{{ services_root }}/mailcow"
+
+  pre_tasks:
+    # Fail early if no public domain is configured yet.
+    - name: Fail if base_domain is not configured
+      ansible.builtin.fail:
+        msg: >-
+          base_domain is not set. Configure a domain first via
+          the WebUI at /settings/ddns/ or edit inventory.yml directly.
+      when: base_domain is not defined or base_domain == '' or base_domain == 'none'
+
+  tasks:
+
+    # Create the service directory
+    - name: Create {{ services_root }}/mailcow dir
+      ansible.builtin.file:
+        path: "{{ mailcow_root }}"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    # Clone the mailcow-dockerized repository.
+    # Updates are handled by mailcow's own update.sh (autoupdate.d/mailcow.update),
+    # so the git module must never update the working tree.
+    - name: Clone mailcow-dockerized
+      ansible.builtin.git:
+        repo: 'https://github.com/mailcow/mailcow-dockerized.git'
+        version: "master"
+        umask: '022'
+        dest: "{{ mailcow_root }}"
+        update: false
+      notify: Restart mailcow
+
+    # Admin password helper: hashes a fresh random password with doveadm and
+    # (re)creates the 'admin' user in the mailcow database. Only executed on
+    # first setup (guarded by the .adminpw marker file).
+    - name: "{{ mailcow_root }}/adminpw.sh"
+      blockinfile:
+        path: "{{ mailcow_root }}/adminpw.sh"
+        create: yes
+        mode: '0550'
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          source {{ mailcow_root }}/mailcow.conf
+          if [[ -z ${DBUSER} ]] || [[ -z ${DBPASS} ]] || [[ -z ${DBNAME} ]]
+          then
+            echo "Cannot find mailcow.conf"
+            exit 1
+          fi
+          # Change password
+          random=$(pwgen -s 32 1)
+          password=$(docker exec -i $(docker ps -qf name=dovecot-mailcow) doveadm pw -s SSHA256 -p ${random} | tr -d '\r')
+          docker exec -i $(docker ps -qf name=mysql-mailcow) mysql -u${DBUSER} -p${DBPASS} ${DBNAME} -e "DELETE FROM admin WHERE username='admin';"
+          docker exec -i $(docker ps -qf name=mysql-mailcow) mysql -u${DBUSER} -p${DBPASS} ${DBNAME} -e "DELETE FROM domain_admins WHERE username='admin';"
+          docker exec -i $(docker ps -qf name=mysql-mailcow) mysql -u${DBUSER} -p${DBPASS} ${DBNAME} -e "INSERT INTO admin (username, password, superadmin, active) VALUES ('admin', '${password}', 1, 1);"
+          docker exec -i $(docker ps -qf name=mysql-mailcow) mysql -u${DBUSER} -p${DBPASS} ${DBNAME} -e "DELETE FROM tfa WHERE username='admin';"
+
+          echo "${random}" >{{ mailcow_root }}/.adminpw
+          chmod 400 {{ mailcow_root }}/.adminpw
+          chown root:docker {{ mailcow_root }}/.adminpw
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: "{{ mailcow_root }}/adminpw.sh shebang"
+      ansible.builtin.lineinfile:
+        path: "{{ mailcow_root }}/adminpw.sh"
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    # Generate mailcow.conf directly (bypasses the interactive generate_config.sh).
+    # Secrets are stored in per-service files so re-applies keep stable passwords.
+    # HTTP/HTTPS are bound to the symbios_services gateway; Traefik terminates TLS
+    # and talks plain HTTP to port 9080 (same pattern as cockpit.yml).
+    # SKIP_LETS_ENCRYPT=y because Traefik (ACME) provides the certificates.
+    - name: "{{ mailcow_root }}/mailcow.conf Mailcow Configuration"
+      blockinfile:
+        path: "{{ mailcow_root }}/mailcow.conf"
+        create: yes
+        mode: '0440'
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          MAILCOW_HOSTNAME={{ service_domain }}
+          MAILCOW_PASS_SCHEME=BLF-CRYPT
+          DBNAME=mailcow
+          DBUSER=mailcow
+          DBPASS={{ lookup('password', mailcow_root ~ '/.dbpass length=28 chars=ascii_letters,digits') }}
+          DBROOT={{ lookup('password', mailcow_root ~ '/.dbroot length=28 chars=ascii_letters,digits') }}
+          REDISPASS={{ lookup('password', mailcow_root ~ '/.redispass length=28 chars=ascii_letters,digits') }}
+          HTTP_PORT=9080
+          HTTP_BIND={{ traefik_network_gateway }}
+          HTTPS_PORT=9443
+          HTTPS_BIND={{ traefik_network_gateway }}
+          HTTP_REDIRECT=n
+          SMTP_PORT=25
+          SMTPS_PORT=465
+          SUBMISSION_PORT=587
+          IMAP_PORT=143
+          IMAPS_PORT=993
+          POP_PORT=110
+          POPS_PORT=995
+          SIEVE_PORT=4190
+          DOVEADM_PORT=127.0.0.1:19991
+          SQL_PORT=127.0.0.1:13306
+          REDIS_PORT=127.0.0.1:7654
+          TZ={{ timezone | default('Etc/UTC') }}
+          COMPOSE_PROJECT_NAME=mailcowdockerized
+          ACL_ANYONE=disallow
+          MAILDIR_GC_TIME=7200
+          ADDITIONAL_SAN=
+          AUTODISCOVER_SAN=y
+          ADDITIONAL_SERVER_NAMES=
+          SKIP_LETS_ENCRYPT=y
+          ACME_DNS_CHALLENGE=n
+          SKIP_IP_CHECK=n
+          SKIP_HTTP_VERIFICATION=n
+          SKIP_UNBOUND_HEALTHCHECK=n
+          SKIP_CLAMD=y
+          SKIP_OLEFY=n
+          SKIP_SOGO=n
+          # FTS = Flatcurve full-text search (successor of the removed Solr).
+          # Keep it disabled on small hosts to save memory; search still works
+          # on the raw MAILDIR when disabled.
+          SKIP_FTS=y
+          FTS_HEAP=128
+          FTS_PROCS=1
+          ALLOW_ADMIN_EMAIL_LOGIN=y
+          USE_WATCHDOG=y
+          WATCHDOG_NOTIFY_BAN=n
+          WATCHDOG_NOTIFY_START=y
+          WATCHDOG_EXTERNAL_CHECKS=n
+          WATCHDOG_VERBOSE=n
+          LOG_LINES=9999
+          IPV4_NETWORK=172.22.1
+          IPV6_NETWORK=fd4d:6169:6c63:6f77::/64
+          ENABLE_IPV6=n
+          DISABLE_NETFILTER_ISOLATION_RULE=n
+          MAILDIR_SUB=Maildir
+          SOGO_EXPIRE_SESSION=480
+          WEBAUTHN_ONLY_TRUSTED_VENDORS=n
+        backup: yes
+
+    # Docker Compose reads the project configuration from .env.
+    - name: Symlink .env to mailcow.conf
+      ansible.builtin.file:
+        src: "{{ mailcow_root }}/mailcow.conf"
+        dest: "{{ mailcow_root }}/.env"
+        state: link
+        force: yes
+
+    # mailcow's unbound must resolve auth.{{ base_domain }} and
+    # mail.{{ base_domain }} to the mailcow gateway (172.22.1.1, the netfilter
+    # container) so its OIDC token/userinfo calls and the SSO redirect stay on
+    # the internal Docker network instead of leaving through the public DNS.
+    # unbound.conf is owned here as a full file: mailcow's update.sh does a
+    # git pull that would revert partial blockinfile edits, and the defaults
+    # (root-hints recursion, IPv6) do not fit this setup.
+    - name: "{{ mailcow_root }}/data/conf/unbound/unbound.conf"
+      ansible.builtin.copy:
+        dest: "{{ mailcow_root }}/data/conf/unbound/unbound.conf"
+        owner: root
+        group: docker
+        mode: '0644'
+        content: |
+          server:
+            verbosity: 1
+            interface: 0.0.0.0
+            logfile: /dev/console
+            do-ip4: yes
+            do-ip6: no
+            do-udp: yes
+            do-tcp: yes
+            do-daemonize: no
+            #access-control: 0.0.0.0/0 allow
+            access-control: 10.0.0.0/8 allow
+            access-control: 172.16.0.0/12 allow
+            access-control: 192.168.0.0/16 allow
+            access-control: 127.0.0.0/8 allow
+            access-control: 192.168.188.0/24 allow
+            directory: "/etc/unbound"
+            username: unbound
+            auto-trust-anchor-file: trusted-key.key
+            cache-min-ttl: 5
+            cache-max-negative-ttl: 60
+            hide-identity: yes
+            hide-version: yes
+            max-udp-size: 4096
+            msg-buffer-size: 65552
+            unwanted-reply-threshold: 10000
+            ipsecmod-enabled: no
+            local-data: "auth.{{ base_domain }}. A 172.22.1.1"
+            local-data: "mail.{{ base_domain }}. A 172.22.1.1"
+
+          forward-zone:
+            name: "."
+            forward-addr: 192.168.188.1
+
+          remote-control:
+            control-enable: yes
+            control-interface: 127.0.0.1
+            control-port: 8953
+            server-key-file: "/etc/unbound/unbound_server.key"
+            server-cert-file: "/etc/unbound/unbound_server.pem"
+            control-key-file: "/etc/unbound/unbound_control.key"
+            control-cert-file: "/etc/unbound/unbound_control.pem"
+      notify: Restart unbound
+
+    # docker-compose.override.yml adds the autoconfig/autodiscover nginx
+    # container (for client autodiscovery, see config-v1.1.xml below).
+    # The container joins symbios_services so Traefik can reach it by name.
+    - name: "{{ mailcow_root }}/docker-compose.override.yml Autoconfig Container Configuration"
+      blockinfile:
+        path: "{{ mailcow_root }}/docker-compose.override.yml"
+        create: yes
+        mode: '0440'
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+
+          services:
+            autoconfig:
+              image: nginx:latest
+              container_name: symbios-mailcow-autoconfig
+              restart: unless-stopped
+              volumes:
+                - ./autoconfig/htdocs:/usr/share/nginx/html:ro
+                - /etc/localtime:/etc/localtime:ro
+              networks:
+                - autoconfig--network
+                - symbios_services
+
+          networks:
+            autoconfig--network:
+              driver: bridge
+              driver_opts:
+                com.docker.network.bridge.name: br-mcow-acfg
+            symbios_services:
+              external: true
+        backup: yes
+      notify: Restart mailcow
+
+    # Autodiscovery/autoconfig document root
+    - name: Create autoconfig htdocs directory
+      ansible.builtin.file:
+        path: "{{ mailcow_root }}/autoconfig/htdocs/mail"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: "{{ mailcow_root }}/autoconfig/htdocs/index.html"
+      ansible.builtin.copy:
+        dest: "{{ mailcow_root }}/autoconfig/htdocs/index.html"
+        content: "OK\n"
+        mode: '0644'
+
+    # Mozilla autoconfig XML for automatic client configuration. Served under
+    # https://autoconfig.{{ base_domain }}/mail/config-v1.1.xml (Thunderbird)
+    # and lookup of autodiscover.{{ base_domain }} for other clients.
+    - name: "{{ mailcow_root }}/autoconfig/htdocs/mail/config-v1.1.xml"
+      ansible.builtin.copy:
+        dest: "{{ mailcow_root }}/autoconfig/htdocs/mail/config-v1.1.xml"
+        mode: '0644'
+        content: |
+          <clientConfig version="1.1">
+            <emailProvider id="{{ service_domain }}">
+              <domain>{{ base_domain }}</domain>
+              <displayName>{{ base_domain }}</displayName>
+              <displayShortName>{{ base_domain.split('.')[0] }}</displayShortName>
+              <incomingServer type="imap">
+                <hostname>{{ service_domain }}</hostname>
+                <port>993</port>
+                <socketType>SSL</socketType>
+                <username>%EMAILADDRESS%</username>
+                <authentication>password-cleartext</authentication>
+              </incomingServer>
+              <outgoingServer type="smtp">
+                <hostname>{{ service_domain }}</hostname>
+                <port>465</port>
+                <socketType>SSL</socketType>
+                <username>%EMAILADDRESS%</username>
+                <authentication>password-cleartext</authentication>
+              </outgoingServer>
+            </emailProvider>
+          </clientConfig>
+
+    # Traefik file-provider for the mailcow Web UI.
+    # Authelia forward-auth protects the login page; the mailcow UI can later
+    # be connected to Authelia via Generic OIDC (System > Configuration >
+    # Access > Identity Provider) in addition to forward-auth.
+    - name: "/symbios/base-services/traefik/providers/mailcow.yml Routing Configuration"
+      blockinfile:
+        path: /symbios/base-services/traefik/providers/mailcow.yml
+        create: yes
+        mode: '0444'
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              mailcow:
+                rule: "Host(`{{ service_domain }}`)"
+                service: mailcow
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+                  - "authelia@file"
+            services:
+              mailcow:
+                loadBalancer:
+                  servers:
+                    - url: "http://{{ traefik_network_gateway }}:9080"
+        backup: yes
+
+    # Traefik file-provider for autoconfig/autodiscover. SymbiOS Traefik uses
+    # the file provider (no Docker provider), so routing must live in the
+    # provider directory, not in container labels.
+    - name: "/symbios/base-services/traefik/providers/mailcow-autoconfig.yml Routing Configuration"
+      blockinfile:
+        path: /symbios/base-services/traefik/providers/mailcow-autoconfig.yml
+        create: yes
+        mode: '0444'
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              autoconfig:
+                rule: "Host(`autoconfig.{{ base_domain }}`) || Host(`autodiscover.{{ base_domain }}`)"
+                service: autoconfig
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+            services:
+              autoconfig:
+                loadBalancer:
+                  servers:
+                    - url: "http://symbios-mailcow-autoconfig:80"
+        backup: yes
+
+    # Trigger Traefik to request an ACME certificate for mail.{{ base_domain }}.
+    # Traefik issues the certificate lazily on the first request, so we hit the
+    # HTTPS entrypoint directly (127.0.0.1 bypasses the public routing/Hairpin).
+    - name: Trigger Traefik certificate generation for {{ service_domain }}
+      ansible.builtin.shell: |
+        for i in $(seq 1 12)
+        do
+          if curl -sk --max-time 20 --resolve "{{ service_domain }}:443:127.0.0.1" "https://{{ service_domain }}/" >/dev/null 2>&1
+          then
+            exit 0
+          fi
+          sleep 10
+        done
+        exit 0
+      changed_when: false
+      failed_when: false
+
+    # Poll acme.json until the mailcow certificate has been issued.
+    - name: Wait for ACME certificate of {{ service_domain }}
+      ansible.builtin.shell: |
+        jq -r '.letsencrypt.Certificates[] | select(.domain.main=="{{ service_domain }}") | .certificate' \
+          {{ base_services_root }}/traefik/letsencrypt/acme.json 2>/dev/null | base64 -d 2>/dev/null | head -c 100
+      register: mailcow_acme_cert
+      until: mailcow_acme_cert.stdout | length > 0
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    # Copy the Traefik certificates into mailcow's nginx ssl directory so the
+    # Web UI can serve the mailcow hostname directly on its internal HTTPS port.
+    - name: Create mailcow ssl directory
+      ansible.builtin.file:
+        path: "{{ mailcow_root }}/data/assets/ssl"
+        state: directory
+        mode: '0750'
+        owner: root
+        group: docker
+
+    - name: Extract TLS private key from acme.json
+      ansible.builtin.shell: |
+        jq -r '.letsencrypt.Certificates[] | select(.domain.main=="{{ service_domain }}") | .key' \
+          {{ base_services_root }}/traefik/letsencrypt/acme.json | base64 -d \
+          > {{ mailcow_root }}/data/assets/ssl/key.pem
+      changed_when: false
+
+    - name: Extract TLS certificate from acme.json
+      ansible.builtin.shell: |
+        jq -r '.letsencrypt.Certificates[] | select(.domain.main=="{{ service_domain }}") | .certificate' \
+          {{ base_services_root }}/traefik/letsencrypt/acme.json | base64 -d \
+          > {{ mailcow_root }}/data/assets/ssl/cert.pem
+      changed_when: false
+
+    - name: Read permissions for mailcow ssl files
+      ansible.builtin.file:
+        path: "{{ mailcow_root }}/data/assets/ssl/{{ item }}"
+        mode: '0440'
+        owner: root
+        group: docker
+      loop:
+        - key.pem
+        - cert.pem
+
+    # dovecot REQUIRES /etc/ssl/mail/dhparams.pem (Envoy DH parameters); without
+    # it the container crash-loops with 'ssl_dh: Can't open file
+    # /etc/ssl/mail/dhparams.pem'. mailcow's generate_config.sh normally copies
+    # it from data/assets/ssl-example/dhparams.pem, but this playbook bypasses
+    # generate_config.sh - so copy it here idempotently (force=no keeps a
+    # user-provided dhparams.pem untouched).
+    - name: Ensure dovecot DH parameters (data/assets/ssl/dhparams.pem)
+      ansible.builtin.copy:
+        src: "{{ mailcow_root }}/data/assets/ssl-example/dhparams.pem"
+        dest: "{{ mailcow_root }}/data/assets/ssl/dhparams.pem"
+        remote_src: no
+        force: no
+        mode: '0640'
+        owner: root
+        group: docker
+
+    # mailcow binds the SMTP/IMAP services on all interfaces (no bind option in
+    # mailcow.conf for these ports). SMTP_PORT is 25; the SymbiOS host postfix
+    # is bound to loopback-only by basics.yml, so there is no conflict. If a
+    # port is in use the user is informed - postfix stays untouched by design.
+    - name: Check that required mail ports are free
+      ansible.builtin.shell: |
+        ss -tlnH | awk '{print $4}' | grep -oE ':(25|465|587|993|4190)$' | tr -d ':' | sort -u
+      register: mailcow_ports_in_use
+      changed_when: false
+      failed_when: false
+
+    - name: Report occupied mail ports (informational)
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: the following mail ports are already in use on this host:
+          {{ mailcow_ports_in_use.stdout }}. mailcow cannot bind these ports.
+          Stop the conflicting service before starting mailcow.
+      when: mailcow_ports_in_use.stdout | default('') | length > 0
+
+    # Start/initialize mailcow. The docker-compose.override.yml is picked up
+    # automatically by docker compose.
+    - name: Start mailcow
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: "{{ mailcow_root }}"
+      register: mailcow_start
+      changed_when: "'Created' in mailcow_start.stdout or 'Started' in mailcow_start.stdout or 'Recreated' in mailcow_start.stdout"
+      notify: Restart mailcow
+
+    # The admin password helper needs a working dovecot + mysql container.
+    - name: Wait for mailcow dovecot container to be running
+      ansible.builtin.shell: |
+        docker ps --filter name=dovecot-mailcow --filter status=running --quiet | grep -q .
+      register: mailcow_dovecot
+      until: mailcow_dovecot.rc == 0
+      retries: 36
+      delay: 5
+      changed_when: false
+
+    # First-run only: create/reset the 'admin' mailcow account.
+    - name: Generate mailcow admin password (first run only)
+      ansible.builtin.shell: "{{ mailcow_root }}/adminpw.sh"
+      args:
+        chdir: "{{ mailcow_root }}"
+        creates: "{{ mailcow_root }}/.adminpw"
+      changed_when: false
+
+    # Firewall rules for inbound mail. Ports 143/995/110 (plain IMAP/POP) are
+    # kept closed by default; modern clients use 993/465/587 with TLS.
+    - name: Allow SMTP (tcp 25)
+      community.general.ufw:
+        rule: allow
+        port: '25'
+        proto: tcp
+
+    - name: Allow SMTPS (tcp 465)
+      community.general.ufw:
+        rule: allow
+        port: '465'
+        proto: tcp
+
+    - name: Allow Submission (tcp 587)
+      community.general.ufw:
+        rule: allow
+        port: '587'
+        proto: tcp
+
+    - name: Allow IMAPS (tcp 993)
+      community.general.ufw:
+        rule: allow
+        port: '993'
+        proto: tcp
+
+    - name: Allow Sieve (tcp 4190)
+      community.general.ufw:
+        rule: allow
+        port: '4190'
+        proto: tcp
+
+    # Mailcow backup module. Uses mailcow's own backup_and_restore.sh which
+    # dumps the MySQL database, redis and crypto keys into BACKUPDIR.
+    - name: "{{ data_root }}/backup.d/mailcow.backup"
+      blockinfile:
+        path: "{{ data_root }}/backup.d/mailcow.backup"
+        create: yes
+        mode: '0550'
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          cd {{ mailcow_root }}
+          mkdir -p ${BACKUPDIR}/mailcow-backup
+          BACKUP_LOCATION=${BACKUPDIR}/mailcow-backup ./helper-scripts/backup_and_restore.sh backup all --delete-days 1 \
+            || g_echo_error "Mailcow backup failed"
+        backup: yes
+        validate: /bin/bash -n %s
+
+    # Autoupdate module: run mailcow's update.sh, then sync the Traefik
+    # certificates into mailcow and restart the mail services that read them.
+    - name: Deploy autoupdate script
+      include_tasks: tasks/autoupdate.yml
+      vars:
+        autoupdate_mode: '0550'
+        autoupdate_content: |
+          #!/bin/bash -e
+
+          # Sync TLS certificates from Traefik acme.json if a new one is present
+          f_new_cert=0
+          mkdir -p {{ mailcow_root }}/data/assets/ssl
+          for f_field in key certificate
+          do
+            f_out="{{ mailcow_root }}/data/assets/ssl/${f_field}.pem"
+            if jq -r --arg d "{{ service_domain }}" '.letsencrypt.Certificates[] | select(.domain.main==$d) | .'${f_field} \
+               {{ base_services_root }}/traefik/letsencrypt/acme.json 2>/dev/null | base64 -d 2>/dev/null > "${f_out}.new"
+            then
+              [ -s "${f_out}.new" ] || { rm -f "${f_out}.new"; continue; }
+              if ! cmp -s "${f_out}" "${f_out}.new"
+              then
+                mv "${f_out}.new" "${f_out}"
+                f_new_cert=1
+              else
+                rm -f "${f_out}.new"
+              fi
+            fi
+          done
+
+          if [ "${f_new_cert}" = "1" ]
+          then
+            chmod 440 {{ mailcow_root }}/data/assets/ssl/key.pem {{ mailcow_root }}/data/assets/ssl/cert.pem
+            chown root:docker {{ mailcow_root }}/data/assets/ssl/key.pem {{ mailcow_root }}/data/assets/ssl/cert.pem
+            docker restart $(docker ps -qaf name=nginx-mailcow) 2>/dev/null || true
+            docker restart $(docker ps -qaf name=postfix-mailcow) 2>/dev/null || true
+            docker restart $(docker ps -qaf name=dovecot-mailcow) 2>/dev/null || true
+          fi
+
+          # Update mailcow itself
+          cd {{ mailcow_root }}
+          if [ -f ./update.sh ]
+          then
+            g_echo_ok "Checking Mailcow update"
+            if ./update.sh -c
+            then
+              g_echo_warn "Installing Mailcow update"
+              if ! ./update.sh --no-update-compose -f 2>&1 | sed -e "s/'/'\\\\''/g; 1s/^/'/; \$s/\$/'/" | tee $g_tmp/mailcow-update
+              then
+                if grep -q "update.sh changed, please run this script again" $g_tmp/mailcow-update
+                then
+                  ./update.sh --no-update-compose -f 2>&1 | sed -e "s/'/'\\\\''/g; 1s/^/'/; \$s/\$/'/" | tee -a $g_tmp/mailcow-update \
+                    || g_echo_error "Mailcow update failed: $(cat $g_tmp/mailcow-update)"
+                else
+                  g_echo_error "Mailcow update failed: $(cat $g_tmp/mailcow-update)"
+                fi
+              fi
+              docker compose up -d --force-recreate
+            fi
+          fi
+
+    # LDAP groups for Authelia forward-auth access control
+    - name: Ensure LDAP groups for mailcow access control
+      include_tasks: tasks/oidc-groups.yml
+
+    # Authelia access_control: only mailcow-users and mailcow-admins may reach
+    # the mailcow Web UI. The enforced factor count follows the central
+    # twofa_enabled variable (inventory.yml).
+    - name: Write Authelia access_control for mailcow
+      include_tasks: tasks/authelia-acl.yml
+      vars:
+        authelia_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
+        authelia_subjects:
+          - - "group:mailcow-users"
+          - - "group:mailcow-admins"
+
+    # OIDC: register mailcow as an OpenID Connect client in Authelia so that
+    # mailbox users can log into the mailcow web UI via SSO (Generic-OIDC).
+    - name: Create oidc client secret for mailcow
+      ansible.builtin.shell: |
+        /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/mailcow
+      changed_when: false
+      failed_when: false
+
+    - name: Write OIDC config in authelias configuration.yml for mailcow
+      include_tasks: tasks/authelia-oidc.yml
+      vars:
+        service_name: "mailcow"
+        oidc_client_name: "Mailcow"
+        oidc_redirect_uris:
+          - "https://mail.{{ base_domain }}"
+        # Mailcow's Generic-OIDC does not send a PKCE code_challenge in its
+        # SSO flow. Both require_pkce and pkce_challenge_method must be
+        # disabled: a non-empty pkce_challenge_method would re-enable PKCE
+        # enforcement (see Authelia docs -> OIDC clients -> require_pkce).
+        oidc_require_pkce: false
+        oidc_pkce_challenge_method: ""
+
+    # Persist the mailcow Generic-OIDC identity provider configuration in the
+    # mailcow database. These rows are normally written by the WebUI
+    # (System > Configuration > Access > Identity Provider), but silently
+    # missing 'mappers'/'templates' rows make the OIDC login return an empty
+    # page with no mailbox provisioned (array_search on null in
+    # functions.inc.php). Enforce the full key set idempotently so a re-apply
+    # always yields a working SSO setup. Values other than client_secret are
+    # derived from base_domain; client_secret matches the Authelia OIDC client
+    # secret stored in {{ mailcow_root }}/oidc_password by gen-oidc-client-secret.sh.
+    - name: Persist mailcow identity_provider configuration
+      ansible.builtin.shell: |
+        set -e
+        . {{ mailcow_root }}/mailcow.conf
+        f_secret=$(cat {{ mailcow_root }}/oidc_password)
+        f_mysql="docker exec -i $(docker ps -qf name=mysql-mailcow) mysql -u${DBUSER} -p${DBPASS} ${DBNAME} -N -e"
+        for f_row in \
+          "authsource|generic-oidc" \
+          "authorize_url|https://auth.{{ base_domain }}/api/oidc/authorization" \
+          "token_url|https://auth.{{ base_domain }}/api/oidc/token" \
+          "userinfo_url|https://auth.{{ base_domain }}/api/oidc/userinfo" \
+          "client_id|mailcow" \
+          "client_secret|${f_secret}" \
+          "redirect_url|https://{{ service_domain }}" \
+          "client_scopes|openid profile email" \
+          "default_template|Default" \
+          "templates|[\"Default\"]" \
+          "mappers|[\"mailcow_template\"]" \
+          "login_provisioning|1" \
+          "ignore_ssl_error|0"
+        do
+          f_key="${f_row%%|*}"
+          f_val="${f_row#*|}"
+          ${f_mysql} "INSERT INTO identity_provider (\`key\`, \`value\`) VALUES ('${f_key}', '${f_val}') ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`);"
+        done
+      no_log: true
+      changed_when: false
+      run_once: true
+
+    # Docker-based healthcheck (non-HTTP; probes a core mailcow container)
+    - name: Deploy healthcheck
+      include_tasks: tasks/runcheck-docker.yml
+      vars:
+        check_desc: "Verifies that the mailcow mail server containers are listed in docker ps."
+
+    # Register playbook as installed in the state file
+    - name: Register playbook as installed
+      include_tasks: tasks/state-register.yml
+
+  handlers:
+
+    - name: Restart mailcow
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: "{{ mailcow_root }}"
+
+    - name: Restart unbound
+      ansible.builtin.shell: docker restart $(docker ps -qaf name=unbound-mailcow)
+      changed_when: false
+
+    - name: Restart authelia
+      ansible.builtin.shell: docker compose restart
+      args:
+        chdir: /symbios/base-services/authelia
