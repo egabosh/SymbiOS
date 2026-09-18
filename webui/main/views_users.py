@@ -46,7 +46,12 @@ def _exec_ldap_command(request, cmd, title, success_msg, redirect_to='users'):
 def users(request):
     users = _get_ldap_users()
     groups = _get_ldap_groups()
-    return render(request, 'main/users_groups.html', {'users': users, 'groups': groups})
+    from .views_services import _get_base_domain
+    return render(request, 'main/users_groups.html', {
+        'users': users,
+        'groups': groups,
+        'base_domain': _get_base_domain(),
+    })
 
 
 @login_required

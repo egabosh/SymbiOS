@@ -210,6 +210,25 @@
         update_cache: yes
         cache_valid_time: 3600
 
+    # Disable the Postfix SMTP listener on port 25 so it does not steal the
+    # port from mailcow. The `smtp inet` master.cf line is commented out; the
+    # outgoing `smtp unix` transport and local delivery via mail(1)/postdrop
+    # (Unix socket, no TCP) keep working. A reload does NOT free bound sockets,
+    # so a full restart is required after the change.
+    - name: Comment out smtp inet listener in Postfix master.cf
+      ansible.builtin.lineinfile:
+        path: /etc/postfix/master.cf
+        regexp: '^smtp      inet'
+        line: '#smtp      inet  n       -       y       -       -       smtpd'
+        backrefs: no
+      when: nocontainer.stat.exists
+      notify: Restart postfix
+
+    - name: Set Postfix inet_interfaces to loopback-only
+      ansible.builtin.command: postconf -e 'inet_interfaces = loopback-only'
+      when: nocontainer.stat.exists
+      notify: Restart postfix
+
     - name: Ensure /symbios data root and layout exist
       ansible.builtin.file:
         path: "{{ item.path }}"
@@ -840,6 +859,11 @@
     - name: Restart hd-idle
       service:
         name: hd-idle
+        state: restarted
+
+    - name: Restart postfix
+      ansible.builtin.service:
+        name: postfix
         state: restarted
 
     - name: Restart ssh
