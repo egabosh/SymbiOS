@@ -562,3 +562,22 @@
 }
 .setup-option-title { font-size: 1rem; }
 .setup-option-desc { color: var(--bs-secondary); font-size: 0.85rem; }
+
+/* ---- File manager page ---- */
+.fm-name:hover {
+  text-decoration: underline;
+  color: var(--bs-primary);
+}
+#fileTable .fm-cb {
+  vertical-align: middle;
+}
+#fileTable td {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+#editorContent {
+  min-height: 55vh;
+}
+#breadcrumb .breadcrumb-item + .breadcrumb-item::before {
+  content: "/";
+}
