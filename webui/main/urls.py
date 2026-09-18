@@ -29,6 +29,7 @@ from . import views_external
 from . import views_plugins
 from . import views_wlan_ap
 from . import views_network_bridges
+from . import views_filemanager
 from .utils.log_utils import logs_stream
 
 urlpatterns = [
@@ -43,6 +44,7 @@ urlpatterns = [
     re_path(r'^services/(?P<playbook>.+\.yml)/status/$', views_services.services_status, name='services_status'),
     re_path(r'^services/(?P<playbook>.+\.yml)/source/$', views_services.services_source, name='services_source'),
     re_path(r'^services/(?P<playbook>.+\.yml)/access/$', views_services.services_access, name='services_access'),
+    re_path(r'^services/(?P<playbook>.+\.yml)/instances/save/$', views_services.services_instances_save, name='services_instances_save'),
     path('settings/wlan-accesspoint/', views_wlan_ap.settings_wlan_ap, name='settings_wlan_ap'),
     path('settings/network-bridges/', views_network_bridges.settings_network_bridges, name='settings_network_bridges'),
     path('settings/network-bridges/list/', views_network_bridges.settings_network_bridges_list, name='settings_network_bridges_list'),
@@ -123,6 +125,9 @@ urlpatterns = [
     re_path(r'^external-systems/(?P<system_id>[\w-]+)/test/$', views_external.external_system_test, name='external_system_test'),
     path('external-systems/api/public-key/', views_external.external_system_public_key, name='external_system_public_key'),
     path('external-systems/api/types/', views_external.external_types_api, name='external_types_api'),
+    path('filemanager/', views_filemanager.filemanager, name='filemanager'),
+    path('filemanager/api/', views_filemanager.filemanager_api, name='filemanager_api'),
+    path('filemanager/download/', views_filemanager.filemanager_download, name='filemanager_download'),
     # Feature plugin routes (API only - features rendered inline in services_detail).
     re_path(r'^plugins/(?P<service>[\w-]+)/features/status/$', views_plugins.plugin_feature_status, name='plugin_feature_status'),
     re_path(r'^plugins/(?P<service>[\w-]+)/features/(?P<feature_id>[\w-]+)/toggle/$', views_plugins.plugin_feature_toggle, name='plugin_feature_toggle'),

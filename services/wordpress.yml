@@ -18,15 +18,15 @@
 #   name: WordPress
 #   short_description: Deploy multiple WordPress instances
 #   description: >-
-#     Deploys every instance listed under the "wordpress_instances" variable
-#     in inventory.yml. Each instance gets its own WordPress container, its
-#     own database and user on ONE shared MariaDB, a Traefik route (domain
-#     plus optional aliases) and a healthcheck. Instances without the
-#     "public" flag are protected by Authelia forward-auth (LDAP group
-#     wordpress-<name>); optional phpMyAdmin (wp-phpmyadmin.<domain>) is
-#     always protected.
+#     Deploys every instance stored in the WebUI under the Instances tab (the
+#     data lives in <config>/services/wordpress/instances.yml, not in
+#     inventory.yml). Each instance gets its own WordPress container, its own
+#     database and user on ONE shared MariaDB, a Traefik route (domain plus
+#     optional aliases) and a healthcheck. Instances without the "public" flag
+#     are protected by Authelia forward-auth (LDAP group wordpress-<name>);
+#     optional phpMyAdmin (wp-phpmyadmin.<domain>) is always protected.
 #   author: Oliver Bohlen
-#   version: '1.0'
+#   version: '1.1'
 #   license: GPLv3
 #   copyright: Copyright (c) 2026, Oliver Bohlen
 #   min_ansible_version: '2.11'
@@ -35,6 +35,32 @@
 #     versions:
 #     - '13'
 #   category: Service
+#   config:
+#     title: Instances
+#     file: services/wordpress/instances.yml
+#     fields:
+#       name:
+#         label: Name
+#         type: text
+#         required: true
+#         pattern: '^[a-z0-9][a-z0-9-]*$'
+#         placeholder: my-blog
+#       domain:
+#         label: Domain
+#         type: text
+#         required: true
+#         pattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
+#         placeholder: blog.example.com
+#       aliases:
+#         label: Aliases
+#         type: list
+#         placeholder: alt1.example.com, alt2.example.com
+#       public:
+#         label: Public
+#         type: bool
+#       phpmyadmin:
+#         label: phpMyAdmin
+#         type: bool
 #   service_control:
 #     services:
 #     - name: wordpress
@@ -53,7 +79,7 @@
 #     start: docker compose -f /symbios/services/wordpress/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/wordpress/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/wordpress/docker-compose.yml restart
-#     reload: docker compose -f /symbios/services/wordpress/docker-compose.yml up -d
+#     reload: docker compose -f /symbios/services/wordpress/docker-compose.yml up -d --remove-orphans
 #
 ---
 - name: wordpress
@@ -69,7 +95,24 @@
     #   when: not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool)
     # Authelia policy follows the central twofa_enabled variable.
     wp_auth_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
+    # Instance list is managed by the WebUI (Instances tab) and stored in the
+    # writable config dir, NOT in inventory.yml (which stays base-system only).
+    wp_instances_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/wordpress/instances.yml"
   tasks:
+
+    # Load the instance list from the WebUI-managed config file. When the file
+    # does not exist yet (service not configured), wordpress_instances stays an
+    # empty list and the loops simply render no WordPress containers.
+    - name: Read instance config file
+      ansible.builtin.slurp:
+        src: "{{ wp_instances_file }}"
+      register: wp_instances_slurp
+      failed_when: false
+
+    - name: Set wordpress_instances from config file
+      ansible.builtin.set_fact:
+        wordpress_instances: "{{ (wp_instances_slurp.content | default('') | b64decode) | from_yaml | default([]) }}"
+      when: wp_instances_slurp.content | default('') | length > 0
 
     # Create the service directory (compose projects must exist before .env)
     - name: Create /symbios/services/wordpress dir
@@ -184,11 +227,10 @@
       when: wordpress_instances | default([]) | length > 0
 
     - name: Start WordPress instances
-      ansible.builtin.shell: docker compose up -d
+      ansible.builtin.shell: docker compose up -d --remove-orphans
       args:
         chdir: /symbios/services/wordpress
       changed_when: false
-      when: wordpress_instances | default([]) | length > 0
 
     # Deploy one HTTP healthcheck per instance (https://<domain> every 5 min)
     - name: Deploy healthcheck for each instance
@@ -204,9 +246,11 @@
 
   handlers:
 
-    # Apply the rendered compose file (up -d recreates changed containers)
+    # Apply the rendered compose file (up -d recreates changed containers;
+    # --remove-orphans drops containers whose instances were removed from the
+    # config file; their data dirs are NOT touched).
     - name: Restart wordpress
-      ansible.builtin.shell: docker compose up -d
+      ansible.builtin.shell: docker compose up -d --remove-orphans
       args:
         chdir: /symbios/services/wordpress
 

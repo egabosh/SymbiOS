@@ -27,6 +27,13 @@ from django.contrib import messages as flash_messages
 from .decorators import login_required
 from .playbook_catalog import get_catalog, get_playbook
 from .plugin_catalog import has_plugin
+from .service_instances import (
+    get_config_meta,
+    get_service_name,
+    load_instances,
+    coerce_rows,
+    save_instances,
+)
 from .utils.ssh_exec import (
     stream_log,
     stop_log,
@@ -307,6 +314,9 @@ def services_detail(request, playbook):
     # Check if this service has a feature plugin (Features tab).
     svc_name = playbook.replace('.yml', '').split('/')[-1]
     has_feature_plugin = has_plugin(svc_name)
+    # Generic per-service instances config (docs.config block in the playbook).
+    config_meta = get_config_meta(item)
+    config_rows = load_instances(config_meta) if config_meta else []
     feature_groups = []
     feature_manifest_name = svc_name
     if has_feature_plugin:
@@ -365,6 +375,10 @@ def services_detail(request, playbook):
         'feature_service': svc_name,
         'feature_manifest_name': feature_manifest_name,
         'feature_groups': feature_groups,
+        'has_config': bool(config_meta),
+        'config_meta': config_meta,
+        'config_rows': config_rows,
+        'config_service': svc_name,
         **_sidebar_context(all_catalog),
     })
     # Never cache: the inline JS/logic changes frequently during development
@@ -685,4 +699,50 @@ def services_access(request, playbook):
         flash_messages.success(request, f'"{uid}" {"added to" if action == "add" else "removed from"} "{group}".')
     else:
         flash_messages.error(request, f'Error: {output}')
+    return redirect(f'/services/{playbook}/')
+
+
+@login_required
+def services_instances_save(request, playbook):
+    """Save the instance list of a service (docs.config block).
+
+    POST with JSON body or form-encoded rows. Validates every row against the
+    playbook's field schema, writes the YAML into the config dir and (when
+    requested) starts the playbook reapply as a tracked job. Dual-mode like the
+    other change views: AJAX -> job, regular POST -> flash + redirect.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid request'}, status=400)
+    item = get_playbook(playbook)
+    if item is None:
+        return JsonResponse({'error': 'Playbook not found'}, status=404)
+    meta = get_config_meta(item)
+    if not meta:
+        return JsonResponse({'error': 'No instance config defined in docs.config'}, status=400)
+    try:
+        import json as _json
+        if request.content_type and 'json' in request.content_type:
+            payload = _json.loads(request.body or '{}')
+        else:
+            payload = _json.loads(request.POST.get('rows', '[]') or '[]')
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid payload'}, status=400)
+    raw_rows = payload.get('rows') if isinstance(payload, dict) else payload
+    rows, err = coerce_rows(meta, raw_rows or [])
+    if err:
+        return JsonResponse({'error': err}, status=400)
+    ok, werr = save_instances(meta, rows)
+    if not ok:
+        return JsonResponse({'error': 'Could not write config: %s' % werr}, status=500)
+    from .utils.http import is_ajax_request
+    if is_ajax_request(request):
+        apply_now = bool(payload.get('apply')) if isinstance(payload, dict) else False
+        resp = {'ok': True, 'message': 'Instance config saved.'}
+        if apply_now:
+            cmd = f'symbios-reapply.sh --only services/{get_service_name(playbook)}.yml'
+            job_id = create_job(cmd, timeout=1800)
+            resp.update({'job': job_id, 'title': 'Deploying %s instances...' % meta['title'],
+                         'command': cmd})
+        return JsonResponse(resp)
+    flash_messages.success(request, 'Instance config saved.')
     return redirect(f'/services/{playbook}/')
