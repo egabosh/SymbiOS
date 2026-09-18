@@ -78,6 +78,18 @@ all:
     # e.g. {wlan0: br-lan, eth1: br-lan}. Persisted to /etc/rc.local by
     # scripts/symbios-bridge-assign.sh so assignments survive a reboot.
     bridge_assignments: {}
+    # WordPress instances (services/wordpress.yml): each entry deploys one
+    # WordPress container with its own database + user on a single shared
+    # MariaDB, a Traefik route (domain + optional aliases) and a healthcheck.
+    # Fields:
+    #   name       - short unique id (lowercase a-z0-9-, used in container names)
+    #   domain     - primary hostname (Traefik router + Let's Encrypt cert)
+    #   aliases    - optional list of extra hostnames routed to the instance
+    #   public     - true: reachable without login; false (default): Authelia
+    #                forward-auth, only LDAP group "wordpress-<name>" allowed
+    #   phpmyadmin - true: additionally expose wp-phpmyadmin.<domain> (always
+    #                behind Authelia, scoped to the instance's database)
+    wordpress_instances: []
     # ansible defaults
     ansible_user: "root"
     ansible_python_interpreter: "/usr/bin/python3"
