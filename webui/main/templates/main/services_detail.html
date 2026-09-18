@@ -471,7 +471,8 @@ function saveInstances(apply) {
   setInstancesError(null);
   fetch('/services/' + PLAYBOOK + '/instances/save/', {
     method: 'POST', credentials: 'same-origin',
-    headers: {'X-CSRFToken': getCsrfToken(), 'Content-Type': 'application/json'},
+    headers: {'X-CSRFToken': getCsrfToken(), 'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'},
     body: JSON.stringify(payload)
   }).then(r => r.json()).then(d => {
     if (!d.ok) { setInstancesError(d.error || 'Save failed'); return; }
