@@ -1,7 +1,7 @@
 CHECK_CATEGORY="services"
 CHECK_TITLE="Backup"
 CHECK_DESC="Checks that the nightly backup ran successfully."
-CHECK_DETAIL="Watches the success marker written by the nightly backup job.|Daily snapshots protect all data below /symbios (services, databases, configuration).|If this fails, no recent backup exists - check Settings -> Backup."
+CHECK_DETAIL="Watches the success marker written by the nightly backup job.|Daily snapshots protect all data below /symbios (services, databases, configuration).|If this fails, no recent backup exists - check Settings -> Backup.|Also warns when the snapshot count or backup tree size grow past the configured retention (disk full prevention)."
 
 # Healthcheck for the nightly backup job
 f_check_cache "symbios-healthcheck-backup" || return 2>/dev/null || true
@@ -24,4 +24,41 @@ fi
 if ! grep -q "backup.sh" /etc/cron.d/backup_local 2>/dev/null
 then
   g_echo_error "Backup cron entry /etc/cron.d/backup_local is missing."
+fi
+
+# Snapshot count + backup tree size as warning indicators (disk full
+# prevention). Values come from the status JSON written by the backup engine
+# (no expensive du on every runcheck tick).
+g_backup_status="${g_log_dir}/backup-status.json"
+if [[ -f "$g_backup_status" ]]
+then
+  g_bk_count=$(grep -o '"snapshot_count":[0-9]*' "$g_backup_status" | head -1 | cut -d: -f2)
+  g_bk_size_mb=$(grep -o '"snapshot_size_mb":[0-9]*' "$g_backup_status" | head -1 | cut -d: -f2)
+  # Expected max snapshot count = keep_daily + keep_weekly + keep_monthly
+  # plus a small slack for monthly-alias dailies. Configurable via inventory.
+  g_bk_keep_daily=$(f_symbios_var backup_keep_daily "7")
+  g_bk_keep_weekly=$(f_symbios_var backup_keep_weekly "4")
+  g_bk_keep_monthly=$(f_symbios_var backup_keep_monthly "6")
+  if [[ "$g_bk_count" =~ ^[0-9]+$ && "$g_bk_count" -gt $(( g_bk_keep_daily + g_bk_keep_weekly + g_bk_keep_monthly + 3 )) ]]
+  then
+    g_echo_error "Backup snapshot count ${g_bk_count} exceeds retention (${g_bk_keep_daily}d+${g_bk_keep_weekly}w+${g_bk_keep_monthly}m) - check Settings -> Backup."
+  fi
+  # Backup tree size vs total data partition: warn past ~30%, error past 50%.
+  # (30% of a 59G disk = ~18G of snapshots, well before the disk fills up;
+  # the 3GB/15% free-space guard then protects the last stretch.)
+  if [[ "$g_bk_size_mb" =~ ^[0-9]+$ && "$g_bk_size_mb" -gt 0 ]]
+  then
+    g_bk_total_mb=$(df -P -B1M "$g_data_root" 2>/dev/null | awk 'NR==2{print $2}')
+    if [[ "$g_bk_total_mb" =~ ^[0-9]+$ && "$g_bk_total_mb" -gt 0 ]]
+    then
+      g_bk_share=$(( g_bk_size_mb * 100 / g_bk_total_mb ))
+      if [[ "$g_bk_share" -gt 50 ]]
+      then
+        g_echo_error "Backup tree is ${g_bk_share}% of the data disk (${g_bk_size_mb} MB) - dangerously large, prune snapshots."
+      elif [[ "$g_bk_share" -gt 30 ]]
+      then
+        g_echo_error "Backup tree is ${g_bk_share}% of the data disk (${g_bk_size_mb} MB) - consider raising retention or freeing space."
+      fi
+    fi
+  fi
 fi

@@ -84,14 +84,19 @@ g_all-to-syslog
 set -o pipefail
 
 # Write the run status for the WebUI/healthcheck.
-# Usage: f_write_status <state> <target> <snapshot-date> <message>
+# Usage: f_write_status <state> <target> <snapshot-date> <message> [extra-json]
 function f_write_status {
-  local f_state="$1" f_target="$2" f_snap="$3" f_msg="$4"
+  local f_state="$1" f_target="$2" f_snap="$3" f_msg="$4" f_extra="$5"
   local f_now
   f_now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   {
-    printf '{"state":"%s","finished":"%s","target":"%s","snapshot":"%s","message":%s}' \
+    printf '{"state":"%s","finished":"%s","target":"%s","snapshot":"%s","message":%s' \
       "$f_state" "$f_now" "$f_target" "$f_snap" "$(printf '%s' "$f_msg" | f_json_escape)"
+    if [[ -n "$f_extra" ]]
+    then
+      printf ',%s' "$f_extra"
+    fi
+    printf '}'
   } > "${g_log_dir}/backup-status.json.tmp"
   mv "${g_log_dir}/backup-status.json.tmp" "${g_log_dir}/backup-status.json"
   # Success marker consumed by the healthcheck (epoch seconds).
@@ -140,8 +145,11 @@ function f_run_g_backup {
   fi
 
   # shellcheck disable=SC2086
+  # Pass --sparse as gaboshlib's $9 (appended to the rsync options):
+  # sparse files (e.g. the truncated OpenWrt VM image) stay sparse in the
+  # snapshot instead of being materialized into full-size copies.
   PATH="$f_wrapper:$PATH" g_backup "$g_data_root" "$f_dest" "$f_excl" \
-    "$f_srv" "$f_port" "$f_user"
+    "$f_srv" "$f_port" "$f_user" "" "" "--sparse"
 }
 
 # Encrypted archive push: tar the data root, encrypt with openssl and pipe
@@ -212,6 +220,16 @@ chown root:root "${g_data_root}/backup" 2>/dev/null
 f_bk_write_excludes "${g_tmp}/excludes.rsync"
 g_snapshot_date=""
 
+# Free-space guard: never let a run fill the disk (would break services).
+# Prunes the oldest snapshots first, aborts with an error if that is not
+# enough for the configured limits.
+if ! f_bk_guard_free_space
+then
+  g_bk_cur_target="$(f_bk_is_remote && echo "remote" || echo "local")"
+  f_write_status "error" "$g_bk_cur_target" "" "Disk below ${g_bk_min_free_gb}GB/${g_bk_min_free_percent}% free - aborting before the disk fills up."
+  exit 1
+fi
+
 if f_bk_is_remote
 then
   if [[ "$g_bk_encrypt" == "true" ]]
@@ -237,7 +255,8 @@ then
     if f_run_g_backup "$g_bk_path" "${g_tmp}/excludes.rsync" "$g_bk_host" "$g_bk_port" "$g_bk_user"
     then
       g_snapshot_date=$(date +%F)
-      f_write_status "ok" "remote" "$g_snapshot_date" "Snapshot synced to ${g_bk_host}:${g_bk_path}."
+      f_bk_prune_local
+      f_write_status "ok" "remote" "$g_snapshot_date" "Snapshot synced to ${g_bk_host}:${g_bk_path}." "$(f_bk_stats_json)"
       g_echo_ok "Backup finished (remote snapshot)"
     else
       f_write_status "error" "remote" "" "Remote snapshot failed - see syslog."
@@ -252,7 +271,8 @@ else
   if f_run_g_backup "${g_data_root}/backup" "${g_tmp}/excludes.rsync" "" "" ""
   then
     g_snapshot_date=$(date +%F)
-    f_write_status "ok" "local" "$g_snapshot_date" "Local snapshot created in ${g_data_root}/backup."
+    f_bk_prune_local
+    f_write_status "ok" "local" "$g_snapshot_date" "Local snapshot created in ${g_data_root}/backup." "$(f_bk_stats_json)"
     g_echo_ok "Backup finished (local snapshot)"
   else
     f_write_status "error" "local" "" "Local snapshot failed - see syslog."
