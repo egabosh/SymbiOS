@@ -24,15 +24,27 @@
 #   backup_server_path   remote target (empty host = local backups only)
 #   backup_encryption    true = encrypt remote archives (openssl aes-256-cbc)
 #   backup_exclude       list of extra rsync exclude patterns
+#   backup_keep_daily / backup_keep_weekly / backup_keep_monthly
+#                        local snapshot retention (grandfather-father-son)
+#   backup_min_free_gb / backup_min_free_percent
+#                        disk guard: abort before the disk fills up
 #
 # Snapshot layouts produced/consumed:
 #   rsync mode (g_backup):  <dest>/<hostname>/backup-YYYY-MM-DD/symbios/...
 #   archive mode:           <dest>/<hostname>/symbios-YYYY-MM-DD.tar.gz.enc
 
-# Retention policy for encrypted archives (grandfather-father-son).
+# Retention policy for remote encrypted archives AND local snapshots
+# (grandfather-father-son): keep the last N dailies, N Monday-weeklies and
+# N month-starts, prune everything older.
 g_bk_keep_daily=7
 g_bk_keep_weekly=4
 g_bk_keep_monthly=6
+
+# Local disk guard: the nightly backup aborts (or prunes old snapshots)
+# when free space on the data root drops below these limits. Reaching them
+# would otherwise break the running services while rsync fills the disk.
+g_bk_min_free_gb=3
+g_bk_min_free_percent=15
 
 # Encryption parameters (openssl, no extra packages needed).
 g_bk_cipher="aes-256-cbc"
@@ -53,6 +65,12 @@ function f_bk_read_vars {
   # SSH client key: reuse the WebUI gateway identity so one key works for
   # everything (Test Connection in the WebUI uses the same key).
   g_bk_ssh_key="${g_config_dir}/.ssh/id_symbios"
+  # Optional overrides from inventory.yml (retention + disk guard).
+  g_bk_keep_daily="$(f_symbios_var backup_keep_daily "$g_bk_keep_daily")"
+  g_bk_keep_weekly="$(f_symbios_var backup_keep_weekly "$g_bk_keep_weekly")"
+  g_bk_keep_monthly="$(f_symbios_var backup_keep_monthly "$g_bk_keep_monthly")"
+  g_bk_min_free_gb="$(f_symbios_var backup_min_free_gb "$g_bk_min_free_gb")"
+  g_bk_min_free_percent="$(f_symbios_var backup_min_free_percent "$g_bk_min_free_percent")"
 }
 
 # True if a remote backup server is configured.
@@ -154,6 +172,33 @@ function f_bk_list_remote_dates {
     | grep -E '^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$' | sort -r | sed 's/^backup-//'
 }
 
+# List local monthly snapshot dirs (newest first). g_backup anchors the first
+# daily of every month into backup-YYYY-MM-monthly and replaces the daily with
+# a symlink, so monthlies must be handled separately from plain dailies.
+function f_bk_list_local_monthly {
+  local f_base="$g_bk_snap_base"
+  [[ -d "$f_base" ]] || return 0
+  ls -d1 "$f_base"/backup-[0-9][0-9][0-9][0-9]-[0-9][0-9]-monthly 2>/dev/null \
+    | sed 's#^.*/backup-##; s/-monthly$//' | sort -r
+}
+
+# Snapshot stats as a JSON fragment for the backup status extra-arg:
+# "snapshot_count":N,"snapshot_size_mb":M (no leading comma; f_write_status
+# prepends one). Empty when no snapshot tree exists.
+function f_bk_stats_json {
+  local f_base="$g_bk_snap_base"
+  local f_count=0 f_size_mb=0
+  if [[ -d "$f_base" ]]
+  then
+    f_count=$(f_bk_list_local_dates | wc -l)
+    f_count=$(( f_count + $(f_bk_list_local_monthly | wc -l) ))
+    # du -sx counts hardlinked files once (-x: stay on the snapshot fs).
+    f_size_mb=$(du -sx -B1M "$f_base" 2>/dev/null | awk '{print $1}')
+    [[ "$f_size_mb" =~ ^[0-9]+$ ]] || f_size_mb=0
+  fi
+  printf '"snapshot_count":%s,"snapshot_size_mb":%s' "$f_count" "$f_size_mb"
+}
+
 # List archive dates found below a base path (local dir or remote prefix
 # command output is passed via stdin as plain filenames).
 function f_bk_dates_from_archive_names {
@@ -230,4 +275,165 @@ function f_bk_prune_archives {
     g_echo_warn "Removing old backup archive $f_name (retention)"
     f_bk_rsh "rm -f ${g_bk_path}/$(hostname)/$(f_bk_archive_name "$f_date")" >/dev/null 2>&1
   done
+}
+
+# Force-delete a local snapshot dir by name (handles the -monthly symlink
+# aliases: removing the monthly dir after the daily symlink is gone).
+# Usage: f_bk_remove_local_entry <basename-e.g.-backup-YYYY-MM-DD>
+function f_bk_remove_local_entry {
+  local f_base="$g_bk_snap_base"
+  local f_entry="$1"
+  [[ -e "$f_base/$f_entry" || -L "$f_base/$f_entry" ]] || return 0
+  if [[ -L "$f_base/$f_entry" ]]
+  then
+    # g_backup symlinks a month's first daily into backup-YYYY-MM-monthly.
+    # Resolve the (relative or absolute) target and remove the monthly dir
+    # too, otherwise the alias dead-ends and the space stays occupied.
+    local f_target
+    f_target=$(readlink "$f_base/$f_entry")
+    case "$f_target" in
+      /*) f_target="$f_target" ;;
+      *)  f_target="$f_base/$(dirname "$f_entry")/$f_target" ;;
+    esac
+    local f_real
+    f_real=$(cd "$(dirname "$f_target")" 2>/dev/null && pwd)/$(basename "$f_target")
+    if [[ -d "$f_real" && "$(basename "$f_real")" == *-monthly ]]
+    then
+      g_echo_warn "Removing monthly snapshot $f_real (retention)"
+      chmod -R +w "$f_real" 2>/dev/null
+      rm -rf "$f_real"
+    fi
+    rm -f "$f_base/$f_entry"
+  else
+    g_echo_warn "Removing old local snapshot $f_entry (retention)"
+    chmod -R +w "$f_base/$f_entry" 2>/dev/null
+    rm -rf "$f_base/$f_entry"
+  fi
+}
+
+# True if local snapshot <date> is a monthly alias (its symbios/ entry is a
+# symlink into backup-YYYY-MM-monthly, created by g_backup's monthly anchor).
+# Usage: f_bk_is_monthly_alias <date>
+function f_bk_is_monthly_alias {
+  local f_date="$1" f_base="$g_bk_snap_base"
+  if [[ -L "$f_base/backup-$f_date/symbios" ]]
+  then
+    case "$(readlink "$f_base/backup-$f_date/symbios")" in
+      *"backup-${f_date:0:7}-monthly"*) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
+# Prune local hardlink snapshots according to g_bk_keep_{daily,weekly,monthly}
+# (grandfather-father-son). The monthly dirs back the month-long retention;
+# dailies keep the newest N plus N Monday dailies. Monthly-alias dailies are
+# kept only for months whose monthly dir is still retained (they are the
+# restore entry point for those blocks). Runs after every snapshot so the
+# disk can never grow unbounded.
+function f_bk_prune_local {
+  local f_base="$g_bk_snap_base"
+  [[ -d "$f_base" ]] || return 0
+  local f_date f_dow f_week f_month f_ym
+  local -A f_seen_week=()
+  local f_days=0 f_weeks=0 f_keep_monthly="" f_m f_list
+  # Newest-first list of daily dates
+  f_list=$(f_bk_list_local_dates)
+  # Keep the newest g_bk_keep_monthly monthly dirs (by YYYY-MM)
+  f_keep_monthly=$(f_bk_list_local_monthly | head -n "$g_bk_keep_monthly")
+  # Pass 1: decide which dailies stay
+  for f_date in $f_list
+  do
+    f_month="${f_date:0:7}"
+    f_dow=$(date -d "$f_date" +%u 2>/dev/null) || continue
+    f_week=$(date -d "$f_date" +%G-W%V 2>/dev/null) || continue
+    if f_bk_is_monthly_alias "$f_date"
+    then
+      # Alias of a STILL-KEPT month: preserve as restore entry point.
+      # Alias of a dropped month: remove it (its monthly dir falls in pass 2).
+      if echo "$f_keep_monthly" | grep -q "^${f_month}$"
+      then
+        continue
+      fi
+      f_bk_remove_local_entry "backup-$f_date"
+      continue
+    fi
+    if [[ $f_days -lt $g_bk_keep_daily ]]
+    then
+      ((f_days++))
+      continue
+    fi
+    if [[ $f_weeks -lt $g_bk_keep_weekly && "$f_dow" == "1" && -z "${f_seen_week[$f_week]:-}" ]]
+    then
+      f_seen_week[$f_week]=1
+      ((f_weeks++))
+      continue
+    fi
+    # Daily is neither new enough for daily/weekly nor an alias of a kept
+    # monthly -> remove it
+    f_bk_remove_local_entry "backup-$f_date"
+  done
+  # Pass 2: drop monthly dirs beyond the retention window
+  for f_m in $(f_bk_list_local_monthly | tail -n +$(( $g_bk_keep_monthly + 1 )))
+  do
+    f_bk_remove_local_entry "backup-$f_m-monthly"
+  done
+}
+
+# Free space on the data root in MB (df on the mount that holds g_data_root).
+function f_bk_free_mb {
+  df -P -B1M "$g_data_root" 2>/dev/null | awk 'NR==2{print $4}'
+}
+
+# Free space on the data root in percent (100 - used).
+function f_bk_free_percent {
+  local f_free f_total
+  f_free=$(f_bk_free_mb)
+  f_total=$(df -P -B1M "$g_data_root" 2>/dev/null | awk 'NR==2{print $2}')
+  [[ "$f_free" =~ ^[0-9]+$ && "$f_total" =~ ^[0-9]+$ && "$f_total" -gt 0 ]] \
+    && echo $(( f_free * 100 / f_total )) || echo 0
+}
+
+# True if the data root is below the free-space guard limits.
+function f_bk_disk_low {
+  local f_free f_pct
+  f_free=$(f_bk_free_mb)
+  f_pct=$(f_bk_free_percent)
+  [[ "$f_free" =~ ^[0-9]+$ && "$f_free" -lt "$g_bk_min_free_gb" ]] && return 0
+  [[ "$f_pct" =~ ^[0-9]+$ && "$f_pct" -lt "$g_bk_min_free_percent" ]] && return 0
+  return 1
+}
+
+# Free-space guard: if the disk is low, prune the OLDEST local snapshots
+# (dailies first, then monthlies) until the guard is satisfied. Returns 1
+# when nothing more can be pruned and the backup must NOT run (disk full).
+function f_bk_guard_free_space {
+  f_bk_disk_low || return 0
+  g_echo_warn "Data root below free-space guard (min ${g_bk_min_free_gb}GB/${g_bk_min_free_percent}%) - pruning oldest snapshots first"
+  while f_bk_disk_low
+  do
+    local f_oldest f_oldest_monthly
+    f_oldest=$(f_bk_list_local_dates | tail -n 1)
+    if [[ -n "$f_oldest" ]]
+    then
+      # Prune the oldest daily first
+      f_bk_remove_local_entry "backup-$f_oldest"
+      continue
+    fi
+    # All dailies gone - fall back to the oldest monthly dirs
+    f_oldest_monthly=$(f_bk_list_local_monthly | tail -n 1)
+    if [[ -n "$f_oldest_monthly" ]]
+    then
+      f_bk_remove_local_entry "backup-$f_oldest_monthly-monthly"
+      continue
+    fi
+    break
+  done
+  if f_bk_disk_low
+  then
+    g_echo_error "Disk still below ${g_bk_min_free_gb}GB/${g_bk_min_free_percent}% even after pruning all snapshots - aborting backup"
+    return 1
+  fi
+  g_echo_ok "Free space guard satisfied after pruning snapshots"
+  return 0
 }
