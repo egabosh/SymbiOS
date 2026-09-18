@@ -27,6 +27,13 @@ all:
     docker_root: "/symbios/docker"
     containerd_root: "/symbios/containerd"
     backup_root: "/symbios/backups"
+    # WebUI FileManager - default start directory (must be an absolute path)
+    file_manager_root: "/symbios"
+    # WebUI FileManager - user-defined scripts (list of {name, command}). Each
+    # script is run as root with the selected file/dir passed shell-quoted to
+    # {{path}} (plus {{dir}}, {{name}}, {{stem}}). Managed in the WebUI under
+    # FileManager -> Scripts; empty by default.
+    file_manager_scripts: []
     # dns/ddns - dns_mode: '' (unset), 'desec' or 'self-managed'
     dns_mode: ''
     # ddns (desec.io)
