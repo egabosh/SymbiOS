@@ -37,7 +37,7 @@ g_env_file="${g_env_dir}/.env"
 
 # The playbook already creates the directory; be safe and ensure it exists too.
 mkdir -p "$g_env_dir"
-chmod 0750 "$g_env_dir"
+chmod 0550 "$g_env_dir"
 touch "$g_env_file"
 chmod 0600 "$g_env_file"
 
