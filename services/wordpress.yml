@@ -26,7 +26,7 @@
 #     are protected by Authelia forward-auth (LDAP group wordpress-<name>);
 #     optional phpMyAdmin (wp-phpmyadmin.<domain>) is always protected.
 #   author: Oliver Bohlen
-#   version: '1.1'
+#   version: '1.2'
 #   license: GPLv3
 #   copyright: Copyright (c) 2026, Oliver Bohlen
 #   min_ansible_version: '2.11'
@@ -206,6 +206,37 @@
         service_domain: "wp-phpmyadmin.{{ item.domain | regex_replace('^wp\\.', '') }}"
         authelia_subjects: ["group:wordpress-{{ item.name }}"]
         authelia_policy: "{{ wp_auth_policy | default('one_factor') }}"
+
+    # Prune Authelia access_control blocks of instances that were removed from
+    # the config (dead rules would otherwise accumulate in access_control).
+    - name: Read current Authelia access_control
+      ansible.builtin.slurp:
+        src: /symbios/base-services/authelia/authelia-data/configuration.yml
+      register: wp_acl_cfg
+
+    - name: Detect stale WordPress access_control blocks
+      ansible.builtin.set_fact:
+        wp_acl_stale: >-
+          {{ (wp_acl_cfg.content | b64decode | regex_findall('^# BEGIN ANSIBLE MANAGED BLOCK (wordpress-[^ ]+) ACCESS CONTROL$', multiline=True) | list)
+             | difference(_wp_acl_current) }}
+      vars:
+        _wp_acl_current: >-
+          {{ wordpress_instances | default([]) | map(attribute='name')
+             | map('regex_replace', '^', 'wordpress-')
+             | list
+             + wordpress_instances | default([]) | map(attribute='name')
+             | map('regex_replace', '^', 'wordpress-')
+             | map('regex_replace', '$', '-phpmyadmin')
+             | list }}
+
+    - name: Remove stale WordPress access_control blocks
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK {{ item }} ACCESS CONTROL"
+        state: absent
+        backup: yes
+      loop: "{{ wp_acl_stale }}"
+      notify: Restart authelia
 
     # Bring up the database first, provision instance DBs/users, then start
     # the WordPress containers (avoids an install race on very first boot).
