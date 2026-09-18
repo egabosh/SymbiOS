@@ -1,0 +1,1220 @@
+{% extends "main/base.html" %}
+{% block title %}FileManager - SymbiOS{% endblock %}
+
+{% block sidebar_col_class %}d-none{% endblock %}
+
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<div class="alert alert-info py-2 small">
+  <i class="bi bi-shield-exclamation me-2"></i>
+  All file operations execute on the host as <code>root</code> via the SSH exec
+  gateway. Text files up to 2 MB open in the built-in editor; downloads stream
+  incrementally and uploads are split into chunks, so file sizes are only
+  bounded by the host's disk. User-defined scripts run your own
+  commands on any file or directory with the path passed to the
+  <code>{{ ph.path }}</code> placeholder.
+</div>
+
+<!-- ======================= toolbar ======================= -->
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-center">
+      <div class="col-12 col-lg-6">
+        <form id="pathForm" class="input-group input-group-sm" autocomplete="off">
+          <button type="button" class="btn btn-outline-secondary" id="btnUp" title="Up one directory">
+            <i class="bi bi-arrow-up-short"></i>
+          </button>
+          <input type="text" class="form-control font-monospace" id="pathInput"
+                 placeholder="/" aria-label="Path">
+          <button type="submit" class="btn btn-secondary" id="btnGo">Go</button>
+        </form>
+        <nav class="mt-2 small" aria-label="Breadcrumb">
+          <ol class="breadcrumb mb-0" id="breadcrumb"></ol>
+        </nav>
+      </div>
+      <div class="col-12 col-lg-6 d-flex flex-wrap gap-1 justify-content-lg-end">
+        <button class="btn btn-sm btn-outline-secondary" id="btnNewFolder" title="New folder">
+          <i class="bi bi-folder-plus"></i> New Folder
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" id="btnNewFile" title="New file">
+          <i class="bi bi-file-earmark-plus"></i> New File
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" id="btnUpload" title="Upload file">
+          <i class="bi bi-upload"></i> Upload
+        </button>
+        <div class="btn-group">
+          <button class="btn btn-sm btn-outline-primary" id="btnDownload" disabled>
+            <i class="bi bi-download"></i> Download
+          </button>
+          <button class="btn btn-sm btn-outline-primary" id="btnEdit" disabled>
+            <i class="bi bi-pencil-square"></i> Edit
+          </button>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-sm btn-outline-secondary" id="btnRename" disabled title="Rename (single selection)">
+            <i class="bi bi-input-cursor-text"></i> Rename
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" id="btnPerms" disabled title="Change permissions (chmod)">
+            <i class="bi bi-shield-lock"></i> chmod
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" id="btnOwner" disabled title="Change owner/group (chown)">
+            <i class="bi bi-person-gear"></i> chown
+          </button>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" id="btnMove" disabled title="Move selection">
+          <i class="bi bi-arrows-move"></i> Move
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" id="btnCopy" disabled title="Copy selection">
+          <i class="bi bi-files"></i> Copy
+        </button>
+        <button class="btn btn-sm btn-outline-danger" id="btnDelete" disabled title="Delete selection">
+          <i class="bi bi-trash"></i> Delete
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" id="btnScripts" title="Run a user-defined script on the selection">
+          <i class="bi bi-terminal"></i> Scripts
+        </button>
+      </div>
+    </div>
+    <div class="mt-2 small text-muted" id="selectionInfo">
+      <span id="selCount">0</span> items selected.
+    </div>
+  </div>
+</div>
+
+<!-- ======================= file table ======================= -->
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover table-sm mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th style="width:34px"><input type="checkbox" id="selAll" aria-label="Select all"></th>
+          <th>Name</th>
+          <th style="width:110px">Size</th>
+          <th style="width:90px">Permissions</th>
+          <th style="width:110px">Owner</th>
+          <th style="width:110px">Group</th>
+          <th style="width:130px">Modified</th>
+          <th style="width:120px">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="fileTable">
+        <tr><td colspan="8" class="text-center text-muted py-4">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ======================= editor modal ======================= -->
+<div class="modal fade" id="editorModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title font-monospace text-truncate" id="editorTitle"><i class="bi bi-file-earmark-text me-2"></i></h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="editorForm" data-exec="true" method="post" action="/filemanager/api/">
+        <input type="hidden" name="action" value="write">
+        <input type="hidden" name="path" id="editorPath">
+        <div class="modal-body p-0">
+          <textarea id="editorContent" name="content" class="form-control border-0 font-monospace rounded-0"
+                    rows="26" spellcheck="false" style="resize:vertical"></textarea>
+        </div>
+        <div class="modal-footer py-2">
+          <span class="text-muted small me-auto" id="editorSize"></span>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-save me-1"></i>Save file</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= upload modal ======================= -->
+<div class="modal fade" id="uploadModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-upload me-2"></i>Upload file</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="uploadForm" data-exec="true" method="post" action="/filemanager/api/"
+            enctype="multipart/form-data">
+        <input type="hidden" name="action" value="upload">
+        <input type="hidden" name="dir" id="uploadDir">
+        <div class="modal-body">
+          <label class="form-label">Target directory</label>
+          <input type="text" class="form-control font-monospace form-control-sm mb-3" id="uploadDirLabel" readonly>
+          <input type="file" class="form-control form-control-sm" name="file" id="uploadFile" required>
+          <div class="form-text mt-2">Files up to 16 MB upload in one step; larger files
+            are split into 8 MB chunks and streamed with a progress indicator.</div>
+          <div class="d-none mt-2" id="uploadProgressWrap">
+            <div class="progress" style="height: 8px">
+              <div class="progress-bar progress-bar-striped progress-bar-animated" id="uploadProgressBar" style="width: 0%"></div>
+            </div>
+            <div class="small text-muted mt-1" id="uploadProgressText"></div>
+          </div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-primary" id="uploadSubmitBtn"><i class="bi bi-upload me-1"></i>Upload</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= new folder modal ======================= -->
+<div class="modal fade" id="mkdirModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-folder-plus me-2"></i>New folder</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="mkdirForm" data-exec="true" method="post" action="/filemanager/api/">
+        <input type="hidden" name="action" value="mkdir">
+        <input type="hidden" name="path" id="mkdirPath">
+        <div class="modal-body">
+          <label class="form-label">Folder name</label>
+          <input type="text" class="form-control font-monospace form-control-sm" id="mkdirName" required>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= new file modal ======================= -->
+<div class="modal fade" id="mkfileModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-file-earmark-plus me-2"></i>New file</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="mkfileForm" data-exec="true" method="post" action="/filemanager/api/">
+        <input type="hidden" name="action" value="create">
+        <input type="hidden" name="dir" id="mkfileDir">
+        <div class="modal-body">
+          <label class="form-label">File name</label>
+          <input type="text" class="form-control font-monospace form-control-sm" id="mkfileName" name="name" required>
+          <div class="form-text mt-1">The file is created empty and then opened in the editor.</div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= rename modal ======================= -->
+<div class="modal fade" id="renameModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-input-cursor-text me-2"></i>Rename</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="renameForm" data-exec="true" method="post" action="/filemanager/api/">
+        <input type="hidden" name="action" value="rename">
+        <input type="hidden" name="src" id="renameSrc">
+        <input type="hidden" name="dst" id="renameDst">
+        <div class="modal-body">
+          <label class="form-label">Selected item</label>
+          <input type="text" class="form-control font-monospace form-control-sm mb-3" id="renameSrcLabel" readonly>
+          <label class="form-label">New name</label>
+          <input type="text" class="form-control font-monospace form-control-sm" id="renameName" required>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg me-1"></i>Rename</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= chmod modal ======================= -->
+<div class="modal fade" id="permsModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-shield-lock me-2"></i>Change permissions (chmod)</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="permsForm" data-exec="true" method="post" action="/filemanager/api/">
+        <input type="hidden" name="action" value="chmod">
+        <input type="hidden" name="paths" id="permsPaths">
+        <input type="hidden" name="recursive" id="permsRecursive" value="0">
+        <input type="hidden" name="mode" id="permsMode">
+        <div class="modal-body">
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered mb-1 align-middle text-center">
+              <thead class="table-light">
+                <tr>
+                  <th></th>
+                  <th>Read</th>
+                  <th>Write</th>
+                  <th>Execute</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th class="text-start fw-semibold">Owner</th>
+                  <td><input type="checkbox" class="form-check-input perm-cb" id="perm-u-r" aria-label="Owner read"></td>
+                  <td><input type="checkbox" class="form-check-input perm-cb" id="perm-u-w" aria-label="Owner write"></td>
+                  <td><input type="checkbox" class="form-check-input perm-cb" id="perm-u-x" aria-label="Owner execute"></td>
+                </tr>
+                <tr>
+                  <th class="text-start fw-semibold">Group</th>
+                  <td><input type="checkbox" class="form-check-input perm-cb" id="perm-g-r" aria-label="Group read"></td>
+                  <td><input type="checkbox" class="form-check-input perm-cb" id="perm-g-w" aria-label="Group write"></td>
+                  <td><input type="checkbox" class="form-check-input perm-cb" id="perm-g-x" aria-label="Group execute"></td>
+                </tr>
+                <tr>
+                  <th class="text-start fw-semibold">Other</th>
+                  <td><input type="checkbox" class="form-check-input perm-cb" id="perm-o-r" aria-label="Other read"></td>
+                  <td><input type="checkbox" class="form-check-input perm-cb" id="perm-o-w" aria-label="Other write"></td>
+                  <td><input type="checkbox" class="form-check-input perm-cb" id="perm-o-x" aria-label="Other execute"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="small text-muted mb-2">
+            Resulting mode: <code id="permsOctal">000</code>
+          </div>
+          <div class="form-check form-switch mb-1">
+            <input class="form-check-input" type="checkbox" id="permsRecursiveSwitch">
+            <label class="form-check-label small" for="permsRecursiveSwitch">
+              Apply recursively</label>
+          </div>
+          <div class="text-muted small" id="permsTargets"></div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-primary">
+            <i class="bi bi-check-lg me-1"></i>Apply
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= chown modal ======================= -->
+<div class="modal fade" id="ownerModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-person-gear me-2"></i>Change owner/group (chown)</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="ownerForm" data-exec="true" method="post" action="/filemanager/api/">
+        <input type="hidden" name="action" value="chown">
+        <input type="hidden" name="paths" id="ownerPaths">
+        <input type="hidden" name="recursive" id="ownerRecursive" value="0">
+        <div class="modal-body">
+          <div class="row g-2 mb-2">
+            <div class="col">
+              <label class="form-label">Owner</label>
+              <select class="form-select form-select-sm font-monospace" name="owner" id="ownerSelect">
+                <option value="">-- unchanged --</option>
+              </select>
+            </div>
+            <div class="col">
+              <label class="form-label">Group</label>
+              <select class="form-select form-select-sm font-monospace" name="group" id="groupSelect">
+                <option value="">-- unchanged --</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-check form-switch mb-1">
+            <input class="form-check-input" type="checkbox" id="ownerRecursiveSwitch">
+            <label class="form-check-label small" for="ownerRecursiveSwitch">
+              Apply recursively</label>
+          </div>
+          <div class="text-muted small" id="ownerTargets"></div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-primary">
+            <i class="bi bi-check-lg me-1"></i>Apply
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= move / copy modal ======================= -->
+<div class="modal fade" id="destModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title" id="destTitle"><i class="bi bi-arrows-move me-2"></i></h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="destForm" data-exec="true" method="post" action="/filemanager/api/">
+        <input type="hidden" name="action" id="destAction">
+        <input type="hidden" name="paths" id="destPaths">
+        <div class="modal-body">
+          <label class="form-label">Destination directory</label>
+          <input type="text" class="form-control font-monospace form-control-sm" id="destPath"
+                 placeholder="/" required>
+          <div class="form-text mt-1">Absolute path of the target directory, e.g.
+            <code>/</code> or <code>/var/www</code>.</div>
+          <div class="text-muted small mt-2" id="destTargets"></div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-primary" id="destGo">
+            <i class="bi bi-check-lg me-1"></i>Move
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= scripts modal ======================= -->
+<div class="modal fade" id="scriptsModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title"><i class="bi bi-terminal me-2"></i>Run script</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="scriptsForm" data-exec="true" method="post" action="/filemanager/api/">
+        <input type="hidden" name="action" value="run-script">
+        <input type="hidden" name="script" id="scriptName">
+        <input type="hidden" name="paths" id="scriptPaths">
+        <div class="modal-body">
+          <label class="form-label">Target path</label>
+          <input type="text" class="form-control font-monospace form-control-sm" id="scriptPathInput" readonly>
+          <div class="form-text mb-3">
+            Passed to every script as <code>{{ ph.path }}</code>. Select items in the
+            table or use the <em>Run script...</em> entry from a row's action menu.
+          </div>
+          <label class="form-label d-block">Your scripts</label>
+          <div class="list-group list-group-flush mb-2 border rounded" id="scriptsList"></div>
+
+          <hr class="my-3">
+          <div class="small fw-semibold mb-2">Define scripts</div>
+          <div class="row g-2">
+            <div class="col-12 col-md-4">
+              <input type="text" class="form-control form-control-sm" id="scriptNameInput" placeholder="Display name">
+            </div>
+            <div class="col-12 col-md-8">
+              <input type="text" class="form-control form-control-sm font-monospace" id="scriptCmdInput"
+                     placeholder="Command, e.g. rsync -a --delete {{ ph.path }}/ user@host:/target/">
+            </div>
+          </div>
+          <div class="text-muted small mt-1 mb-1">
+            Placeholders in a script command are replaced with (shell-quoted) values of the selected target
+            <code>{{ ph.path }}</code>:
+          </div>
+          <ul class="list-unstyled small mb-1 ms-3 lh-lg">
+            <li><code>{{ ph.path }}</code> - full absolute path, e.g. <code>/symbios/data/photo.jpg</code></li>
+            <li><code>{{ ph.dir }}</code> - parent directory, e.g. <code>/symbios/data</code></li>
+            <li><code>{{ ph.name }}</code> - file name only, e.g. <code>photo.jpg</code></li>
+            <li><code>{{ ph.stem }}</code> - name without the last extension, e.g. <code>photo</code></li>
+          </ul>
+          <div class="d-flex gap-2 align-items-center mt-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="scriptResetBtn">
+              <i class="bi bi-eraser me-1"></i>New
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="scriptAddBtn">
+              <i class="bi bi-plus-lg me-1"></i>Add / Update
+            </button>
+            <button type="button" class="btn btn-sm btn-primary ms-auto" id="scriptSaveBtn">
+              <i class="bi bi-save me-1"></i>Save scripts
+            </button>
+            <span class="small text-muted" id="scriptsStatus"></span>
+          </div>
+        </div>
+        <div class="modal-footer py-2">
+          <span class="small text-muted me-auto">Run scripts when you need them - the
+            "Run" button starts one on the selected target. Scripts are stored in the
+            inventory and persist across restarts.</span>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= delete confirmation modal ======================= -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title text-danger"><i class="bi bi-trash me-2"></i>Delete items</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">You are about to delete <strong id="deleteCount">0</strong>
+          item(s). Directories are removed recursively and cannot be recovered.</p>
+        <div class="text-muted small font-monospace" id="deleteList"></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-danger" id="deleteConfirm">
+          <i class="bi bi-trash me-1"></i>Delete
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+(function () {
+  'use strict';
+
+  const API = '/filemanager/api/';
+  const DOWNLOAD = '/filemanager/download/';
+  const STORE_PATH = 'fm_path';
+  const STORE_EDITOR = 'fm_editor';
+
+  const state = {
+    path: '/',
+    entries: [],
+    selected: new Set(),
+    users: [],
+    groups: []
+  };
+
+  const $ = function (id) { return document.getElementById(id); };
+  const joinPath = function (base, name) {
+    return (base === '/' ? '' : base.replace(/\/+$/, '')) + '/' + name;
+  };
+
+  function sessionKey() { return sessionStorage; }
+
+  /* ---------------- JSON helper (GET + POST both send CSRF header) ------- */
+  function apiGet(params) {
+    return fetch(API + '?' + new URLSearchParams(params), {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    }).then(function (r) {
+      return r.json();
+    });
+  }
+
+  /* ---------------- formatting helpers ---------------- */
+  function fmtSize(n) {
+    n = n || 0;
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n : n.toFixed(1)) + ' ' + units[i];
+  }
+
+  function fmtDate(ts) {
+    if (!ts) return '';
+    const d = new Date(ts * 1000);
+    const pad = function (x) { return String(x).padStart(2, '0'); };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function itemIcon(e) {
+    if (e.type === 'dir') return '<i class="bi bi-folder-fill text-warning"></i>';
+    if (e.type === 'link') return '<i class="bi bi-arrow-up-right-square text-info"></i>';
+    return '<i class="bi bi-file-earmark text-secondary"></i>';
+  }
+
+  /* turn a perm string like "-rwxr-xr-x" (or "drwxr-xr-x") into octal "755".
+     Special bits (setuid/setgid/sticky) are ignored by the simple matrix. */
+  function permToOctal(perm) {
+    if (!perm || perm.length < 10) return '000';
+    const bits = perm.slice(1, 10);
+    let m = 0;
+    for (let i = 0; i < 3; i++) {
+      let v = 0;
+      if (bits.charAt(i * 3) === 'r') { v += 4; }
+      if (bits.charAt(i * 3 + 1) === 'w') { v += 2; }
+      const x = bits.charAt(i * 3 + 2);
+      if (x === 'x' || x === 's' || x === 't') { v += 1; }
+      m += v * Math.pow(8, 2 - i);
+    }
+    return String(m).padStart(3, '0');
+  }
+
+  /* ---------------- navigation ---------------- */
+  function loadPath(path) {
+    state.path = path === '' ? '/' : path;
+    sessionKey().setItem(STORE_PATH, state.path);
+    $('pathInput').value = state.path;
+    renderBreadcrumb();
+    $('fileTable').innerHTML =
+      '<tr><td colspan="8" class="text-center text-muted py-4">Loading...</td></tr>';
+    apiGet({ action: 'list', path: state.path }).then(function (d) {
+      if (!d.ok) {
+        $('fileTable').innerHTML =
+          '<tr><td colspan="8" class="text-center text-danger py-4">Cannot read directory: ' +
+          escapeHtml(d.error || 'unknown error') + '</td></tr>';
+        showError(d.error || 'Failed to list directory');
+        state.entries = [];
+        updateSelectionUI();
+        return;
+      }
+      state.entries = d.entries || [];
+      renderTable();
+    }).catch(function () {
+      $('fileTable').innerHTML =
+        '<tr><td colspan="8" class="text-center text-danger py-4">Network error while listing directory</td></tr>';
+      state.entries = [];
+      updateSelectionUI();
+      showError('Network error while listing directory');
+    });
+  }
+
+  function goDir(name) { loadPath(joinPath(state.path, name)); }
+
+  function goUp() {
+    if (state.path === '/') return;
+    const base = state.path.replace(/\/+$/, '');
+    const idx = base.lastIndexOf('/');
+    loadPath(idx <= 0 ? '/' : base.slice(0, idx));
+  }
+
+  function renderBreadcrumb() {
+    const ol = $('breadcrumb');
+    ol.innerHTML = '';
+    const parts = state.path.split('/').filter(function (p) { return p !== ''; });
+    let acc = '';
+    const crumb = function (label, full) {
+      const li = document.createElement('li');
+      li.className = 'breadcrumb-item';
+      const a = document.createElement('a');
+      a.href = '#';
+      a.textContent = label;
+      a.addEventListener('click', function (ev) { ev.preventDefault(); loadPath(full); });
+      li.appendChild(a);
+      ol.appendChild(li);
+    };
+    crumb('/', '/');
+    parts.forEach(function (p) {
+      acc = joinPath(acc === '' ? '/' : acc, p);
+      if (acc === state.path) {
+        const li = document.createElement('li');
+        li.className = 'breadcrumb-item active';
+        li.textContent = p;
+        ol.appendChild(li);
+      } else {
+        crumb(p, acc);
+      }
+    });
+  }
+
+  /* ---------------- selection ---------------- */
+  function toggleSelect(path) {
+    if (state.selected.has(path)) { state.selected.delete(path); }
+    else { state.selected.add(path); }
+    updateSelectionUI();
+  }
+
+  function updateSelectionUI() {
+    const n = state.selected.size;
+    $('selCount').textContent = n;
+    const one = n === 1;
+    $('btnDownload').disabled = !one;
+    $('btnEdit').disabled = !one;
+    $('btnRename').disabled = !one;
+    $('btnPerms').disabled = n === 0;
+    $('btnOwner').disabled = n === 0;
+    $('btnMove').disabled = n === 0;
+    $('btnCopy').disabled = n === 0;
+    $('btnDelete').disabled = n === 0;
+    $('btnScripts').disabled = n === 0;
+    state.entries.forEach(function (e) {
+      const cb = $('cb-' + encodeURIComponent(e.path));
+      if (cb) {
+        cb.checked = state.selected.has(e.path);
+        cb.closest('tr').classList.toggle('table-active', state.selected.has(e.path));
+      }
+    });
+  }
+
+  function selectedPaths() { return Array.from(state.selected); }
+  function selectedSingle() { return state.selected.size === 1 ? Array.from(state.selected)[0] : null; }
+
+  /* ---------------- table rendering ---------------- */
+  function renderTable() {
+    const tbody = $('fileTable');
+    if (!state.entries.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">Empty directory</td></tr>';
+      updateSelectionUI();
+      return;
+    }
+    let html = '';
+    html += '<tr>' +
+      '<td></td>' +
+      '<td><a href="#" class="text-decoration-none" data-up="1"><i class="bi bi-arrow-up-circle text-secondary"></i> ..</a></td>' +
+      '<td></td><td></td><td></td><td></td><td></td><td></td></tr>';
+    state.entries.forEach(function (e) {
+      const enc = encodeURIComponent(e.path);
+      const symlink = e.type === 'link' && e.link
+        ? '<div class="small text-muted"><i class="bi bi-arrow-right me-1"></i>' + escapeHtml(e.link) + '</div>'
+        : '';
+      const fileActions = e.type === 'file' &&
+        '<button class="btn btn-sm btn-outline-primary py-0 px-1" data-dl="' + enc + '" title="Download">' +
+        '<i class="bi bi-download"></i></button> ';
+      const rowMenu =
+        '<div class="btn-group">' +
+        '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false" title="Actions">' +
+        '<i class="bi bi-three-dots"></i></button>' +
+        '<ul class="dropdown-menu dropdown-menu-end shadow-sm">' +
+        (e.type === 'file' ?
+          '<li><a class="dropdown-item" href="#" data-row="edit" data-path="' + enc + '">' +
+          '<i class="bi bi-pencil-square me-2"></i>Edit</a></li>' +
+          '<li><a class="dropdown-item" href="#" data-row="download" data-path="' + enc + '">' +
+          '<i class="bi bi-download me-2"></i>Download</a></li>' +
+          '<li><hr class="dropdown-divider"></li>' : '') +
+        '<li><a class="dropdown-item" href="#" data-row="copy" data-path="' + enc + '">' +
+        '<i class="bi bi-files me-2"></i>Copy...</a></li>' +
+        '<li><a class="dropdown-item" href="#" data-row="move" data-path="' + enc + '">' +
+        '<i class="bi bi-arrows-move me-2"></i>Move...</a></li>' +
+        '<li><a class="dropdown-item" href="#" data-row="rename" data-path="' + enc + '">' +
+        '<i class="bi bi-input-cursor-text me-2"></i>Rename...</a></li>' +
+        '<li><hr class="dropdown-divider"></li>' +
+        '<li><a class="dropdown-item" href="#" data-row="chmod" data-path="' + enc + '" data-mode="' + permToOctal(e.perm) + '">' +
+        '<i class="bi bi-shield-lock me-2"></i>chmod...</a></li>' +
+        '<li><a class="dropdown-item" href="#" data-row="chown" data-path="' + enc + '">' +
+        '<i class="bi bi-person-gear me-2"></i>chown...</a></li>' +
+        '<li><hr class="dropdown-divider"></li>' +
+        '<li><a class="dropdown-item" href="#" data-row="scripts" data-path="' + enc + '">' +
+        '<i class="bi bi-terminal me-2"></i>Run script...</a></li>' +
+        '<li><a class="dropdown-item text-danger" href="#" data-row="delete" data-path="' + enc + '">' +
+        '<i class="bi bi-trash me-2"></i>Delete</a></li>' +
+        '</ul></div>';
+      html += '<tr>' +
+        '<td><input type="checkbox" class="fm-cb" data-cb="' + enc + '" id="cb-' + enc + '" aria-label="Select ' + escapeHtml(e.name) + '"></td>' +
+        '<td><span class="fm-name" data-nav="' + enc + '" style="cursor:pointer" title="' + escapeHtml(e.type === 'link' ? 'Symlink' : e.type === 'dir' ? 'Open folder' : 'Edit text file') + '">' +
+        itemIcon(e) + ' ' + escapeHtml(e.name) + '</span>' + symlink + '</td>' +
+        '<td class="text-muted small">' + (e.type === 'dir' ? '-' : fmtSize(e.size)) + '</td>' +
+        '<td><code>' + escapeHtml(e.perm) + '</code></td>' +
+        '<td class="small font-monospace">' + escapeHtml(e.owner) + '</td>' +
+        '<td class="small font-monospace">' + escapeHtml(e.group) + '</td>' +
+        '<td class="text-muted small">' + fmtDate(e.mtime) + '</td>' +
+        '<td class="text-nowrap">' + fileActions + rowMenu + '</td>' +
+        '</tr>';
+    });
+    tbody.innerHTML = html;
+    updateSelectionUI();
+  }
+
+  /* ---------------- modals (plain bootstrap) ---------------- */
+  let modalInstances = {};
+  function modal(id) {
+    if (!modalInstances[id]) { modalInstances[id] = new bootstrap.Modal($(id)); }
+    return modalInstances[id];
+  }
+
+  /* ---------------- editor ---------------- */
+  function openEditor(path) {
+    apiGet({ action: 'read', path: path }).then(function (d) {
+      if (!d.ok) { showError(d.error || 'Failed to read file'); return; }
+      if (d.too_large) {
+        showError('File is ' + fmtSize(d.size) + ' - too large for the editor (limit 2 MB). Use Download.');
+        return;
+      }
+      if (d.binary) {
+        showError('Binary file - cannot open in the text editor. Use Download.');
+        return;
+      }
+      let text = '';
+      try {
+        text = new TextDecoder('utf-8').decode(
+          Uint8Array.from(atob(d.content_b64), function (c) { return c.charCodeAt(0); }));
+      } catch (e) {
+        showError('Failed to decode file content.');
+        return;
+      }
+      $('editorPath').value = path;
+      $('editorTitle').textContent = path;
+      $('editorContent').value = text;
+      $('editorSize').textContent = fmtSize(d.size);
+      sessionKey().setItem(STORE_EDITOR, path);
+      modal('editorModal').show();
+    }).catch(function () { showError('Network error while reading file'); });
+  }
+
+  function closeEditor() { sessionKey().removeItem(STORE_EDITOR); }
+
+  /* ---------------- upload ---------------- */
+  const SMALL_UPLOAD_BYTES = 16 * 1024 * 1024;
+  const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+
+  function openUpload() {
+    $('uploadDir').value = state.path;
+    $('uploadDirLabel').value = state.path;
+    $('uploadFile').value = '';
+    $('uploadProgressWrap').classList.add('d-none');
+    $('uploadProgressBar').style.width = '0%';
+    $('uploadProgressText').textContent = '';
+    modal('uploadModal').show();
+  }
+
+  function setUploadProgress(sent, total, extra) {
+    $('uploadProgressWrap').classList.remove('d-none');
+    $('uploadProgressBar').style.width = total ? Math.round(sent / total * 100) + '%' : '0%';
+    $('uploadProgressText').textContent = fmtSize(sent) + ' / ' + fmtSize(total) + (extra ? ' - ' + extra : '');
+  }
+
+  /* Chunked upload: create a host staging file, stream the file in bounded
+     chunks, then atomically move it into place. Bypasses the single-request
+     path (and its memory-bounded limit) for large files. */
+  function startChunkedUpload(file) {
+    const dir = $('uploadDir').value;
+    const name = (file.name || '').replace(/\\/g, '/').split('/').filter(Boolean).pop() || '';
+    if (!name) { showError('Invalid file name.'); return; }
+    const total = file.size;
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+    const btn = $('uploadSubmitBtn');
+    const input = $('uploadFile');
+
+    function post(fields, fileField) {
+      const fd = new FormData();
+      Object.keys(fields).forEach(function (k) { fd.append(k, fields[k]); });
+      if (fileField) { fd.append('file', fileField); }
+      return fetch(API, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-CSRFToken': csrf
+        },
+        body: fd
+      }).then(function (r) {
+        return r.json().then(function (d) { return { status: r.status, data: d }; });
+      }).then(function (res) {
+        if (res.status >= 400 || !res.data.ok) {
+          throw new Error(res.data.error || 'server error ' + res.status);
+        }
+        return res.data;
+      });
+    }
+
+    btn.disabled = true;
+    input.disabled = true;
+    setUploadProgress(0, total, 'starting');
+    post({ action: 'upload-start', dir: dir, name: name }).then(function (st) {
+      const tmp = st.tmp;
+      let cursor = 0;
+      function nextPart() {
+        if (cursor >= total) return Promise.resolve();
+        const end = Math.min(cursor + UPLOAD_CHUNK_BYTES, total);
+        const blob = file.slice(cursor, end);
+        cursor = end;
+        return post({ action: 'upload-part', tmp: tmp }, blob).then(function () {
+          setUploadProgress(cursor, total, 'uploading');
+          return nextPart();
+        });
+      }
+      return nextPart().then(function () {
+        return post({ action: 'upload-finish', dir: dir, name: name, tmp: tmp });
+      }).then(function () {
+        setUploadProgress(total, total, 'done');
+        modal('uploadModal').hide();
+        loadPath(state.path);
+      });
+    }).catch(function (err) {
+      showError('Upload failed: ' + err.message);
+    }).finally(function () {
+      btn.disabled = false;
+      input.disabled = false;
+    });
+  }
+
+  /* Large files bypass the exec overlay (data-exec form) and stream chunked;
+     the element listener runs before the document-level exec-modal one and
+     stops propagation so the modal path is not taken. */
+  $('uploadForm').addEventListener('submit', function (ev) {
+    const file = $('uploadFile').files[0];
+    if (!file || file.size <= SMALL_UPLOAD_BYTES) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    startChunkedUpload(file);
+  });
+
+  /* ---------------- chmod (checkbox matrix) ---------------- */
+  function updatePermsFromBoxes() {
+    let m = 0;
+    ['u', 'g', 'o'].forEach(function (scope, i) {
+      let v = 0;
+      if ($('perm-' + scope + '-r').checked) { v += 4; }
+      if ($('perm-' + scope + '-w').checked) { v += 2; }
+      if ($('perm-' + scope + '-x').checked) { v += 1; }
+      m += v * Math.pow(8, 2 - i);
+    });
+    $('permsMode').value = String(m).padStart(3, '0');
+    $('permsOctal').textContent = String(m).padStart(3, '0');
+  }
+
+  function setPermsFromOctal(octal) {
+    const s = String(octal || '000').padStart(3, '0');
+    const digits = s.length >= 4 ? s.slice(s.length - 3) : s;
+    for (let i = 0; i < 3; i++) {
+      const d = parseInt(digits.charAt(i), 10);
+      const scope = ['u', 'g', 'o'][i];
+      $('perm-' + scope + '-r').checked = !!(d & 4);
+      $('perm-' + scope + '-w').checked = !!(d & 2);
+      $('perm-' + scope + '-x').checked = !!(d & 1);
+    }
+    updatePermsFromBoxes();
+  }
+
+  function openPerms(paths, octal) {
+    pendingPaths = paths || null;
+    paths = paths || selectedPaths();
+    $('permsTargets').textContent = paths.length + ' item(s)';
+    $('permsRecursive').value = '0';
+    $('permsRecursiveSwitch').checked = false;
+    setPermsFromOctal(octal || '000');
+    modal('permsModal').show();
+  }
+
+  /* ---------------- chown ---------------- */
+  function ensureIdList() {
+    if (state.users.length) return Promise.resolve();
+    return apiGet({ action: 'users' }).then(function (d) {
+      if (!d.ok) throw new Error(d.error || 'failed');
+      state.users = d.users || [];
+      state.groups = d.groups || [];
+      $('ownerSelect').innerHTML = '<option value="">-- unchanged --</option>' +
+        state.users.map(function (u) { return '<option>' + escapeHtml(u) + '</option>'; }).join('');
+      $('groupSelect').innerHTML = '<option value="">-- unchanged --</option>' +
+        state.groups.map(function (g) { return '<option>' + escapeHtml(g) + '</option>'; }).join('');
+    });
+  }
+
+  function openOwner(paths) {
+    pendingPaths = paths || null;
+    paths = paths || selectedPaths();
+    $('ownerTargets').textContent = paths.length + ' item(s)';
+    $('ownerRecursive').value = '0';
+    $('ownerRecursiveSwitch').checked = false;
+    $('ownerSelect').value = '';
+    $('groupSelect').value = '';
+    ensureIdList().then(function () { modal('ownerModal').show(); })
+      .catch(function () { showError('Failed to load users and groups.'); });
+  }
+
+  /* ---------------- move / copy ---------------- */
+  function openDest(action, paths) {
+    pendingPaths = paths || null;
+    paths = paths || selectedPaths();
+    const isMove = action === 'move';
+    $('destAction').value = action;
+    $('destTitle').innerHTML = '<i class="bi ' + (isMove ? 'bi-arrows-move' : 'bi-files') + ' me-2"></i>' +
+      (isMove ? 'Move' : 'Copy') + ' selection';
+    $('destGo').innerHTML = '<i class="bi bi-check-lg me-1"></i>' + (isMove ? 'Move' : 'Copy');
+    $('destPath').value = state.path;
+    $('destTargets').textContent = paths.length + ' item(s) selected';
+    modal('destModal').show();
+  }
+
+  /* ---------------- rename ---------------- */
+  function openRename(path) {
+    path = path || selectedSingle();
+    if (!path) return;
+    $('renameSrc').value = path;
+    $('renameSrcLabel').value = path;
+    $('renameName').value = path.split('/').filter(Boolean).pop() || path;
+    modal('renameModal').show();
+  }
+
+  /* ---------------- scripts ---------------- */
+  function openScripts(paths) {
+    paths = paths || selectedPaths();
+    const target = paths.length ? paths.join(', ') : state.path;
+    $('scriptPathInput').value = paths.length === 1 ? paths[0] : target;
+    modal('scriptsModal').show();
+  }
+
+  /* ---------------- delete ---------------- */
+  let deleteTargets = [];
+  let pendingPaths = null;
+  function targetPaths() { return pendingPaths !== null ? pendingPaths : selectedPaths(); }
+  function openDelete(paths) {
+    deleteTargets = paths || selectedPaths();
+    $('deleteCount').textContent = deleteTargets.length;
+    $('deleteList').innerHTML = deleteTargets.map(function (p) {
+      return '<div>' + escapeHtml(p) + '</div>';
+    }).join('');
+    modal('deleteModal').show();
+  }
+
+  function confirmDelete() {
+    modal('deleteModal').hide();
+    const paths = deleteTargets;
+    const form = document.createElement('form');
+    form.dataset.exec = 'true';
+    form.dataset.execConfirm = '';
+    const url = new URL(API, window.location.origin);
+    form.action = url.pathname + url.search;
+    form.method = 'POST';
+    form.innerHTML = '<input type="hidden" name="action" value="delete">' +
+      '<input type="hidden" name="paths" value="' + escapeHtml(JSON.stringify(paths)) + '">';
+    document.body.appendChild(form);
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    setTimeout(function () { form.remove(); }, 5000);
+  }
+
+  /* ---------------- generic: fill path fields before modal submit ------- */
+  function fillHidden(formId, hiddenId, value) {
+    $(hiddenId).value = value;
+  }
+
+  function showError(msg) {
+    if (window.SymbiOS && SymbiOS.exec.showAlert) {
+      SymbiOS.exec.showAlert(msg, 'danger');
+    } else {
+      alert(msg);
+    }
+  }
+
+  /* ---------------- refresh a directory helper for tool/ext prompts ------ */
+  function startJobFor(cmdForm) {
+    /* Forms with data-exec="true" are intercepted by exec-modal.js on submit.
+       We just dispatch submit so the shared overlay takes over. */
+    cmdForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  }
+
+  /* ---------------- event wiring ---------------- */
+  $('pathForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    loadPath($('pathInput').value.trim());
+  });
+  $('btnUp').addEventListener('click', goUp);
+  $('btnGo').addEventListener('click', function () { loadPath($('pathInput').value.trim()); });
+
+  $('btnNewFolder').addEventListener('click', function () {
+    $('mkdirPath').value = state.path + (state.path === '/' ? '' : '/');
+    $('mkdirName').value = '';
+    modal('mkdirModal').show();
+  });
+  $('btnNewFile').addEventListener('click', function () {
+    $('mkfileDir').value = state.path;
+    $('mkfileName').value = '';
+    modal('mkfileModal').show();
+  });
+  $('btnUpload').addEventListener('click', openUpload);
+  $('btnEdit').addEventListener('click', function () {
+    const p = selectedSingle();
+    if (p) openEditor(p);
+  });
+  $('btnDownload').addEventListener('click', function () {
+    const p = selectedSingle();
+    if (p) window.open(DOWNLOAD + '?path=' + encodeURIComponent(p), '_blank');
+  });
+  $('btnRename').addEventListener('click', function () {
+    openRename();
+  });
+  $('btnPerms').addEventListener('click', function () { openPerms(); });
+  $('btnOwner').addEventListener('click', function () { openOwner(); });
+  $('btnMove').addEventListener('click', function () { openDest('move'); });
+  $('btnCopy').addEventListener('click', function () { openDest('copy'); });
+  $('btnDelete').addEventListener('click', function () { openDelete(); });
+  $('btnScripts').addEventListener('click', function () { openScripts(); });
+
+  /* file table delegation */
+  $('fileTable').addEventListener('click', function (ev) {
+    const t = ev.target.closest('[data-nav],[data-cb],[data-dl],[data-row]');
+    if (!t) return;
+    if (t.dataset.nav !== undefined) {
+      const path = decodeURIComponent(t.dataset.nav);
+      const entry = state.entries.find(function (e) { return e.path === path; });
+      if (entry.type === 'dir') goDir(entry.name);
+      else if (entry.type === 'file') openEditor(path);
+      /* symlinks: do nothing on primary click */
+    } else if (t.dataset.dl) {
+      window.open(DOWNLOAD + '?path=' + t.dataset.dl, '_blank');
+    } else if (t.dataset.row !== undefined) {
+      ev.preventDefault();
+      const path = decodeURIComponent(t.dataset.path);
+      if (t.dataset.row === 'edit') { openEditor(path); }
+      else if (t.dataset.row === 'download') { window.open(DOWNLOAD + '?path=' + t.dataset.path, '_blank'); }
+      else if (t.dataset.row === 'copy') { openDest('copy', [path]); }
+      else if (t.dataset.row === 'move') { openDest('move', [path]); }
+      else if (t.dataset.row === 'rename') { openRename(path); }
+      else if (t.dataset.row === 'chmod') { openPerms([path], t.dataset.mode); }
+      else if (t.dataset.row === 'chown') { openOwner([path]); }
+      else if (t.dataset.row === 'scripts') { openScripts([path]); }
+      else if (t.dataset.row === 'delete') { openDelete([path]); }
+    }
+  });
+  /* checked state from checkbox element itself */
+  $('fileTable').addEventListener('change', function (ev) {
+    const cb = ev.target;
+    if (!cb.classList.contains('fm-cb')) return;
+    toggleSelect(decodeURIComponent(cb.dataset.cb));
+  });
+  $('selAll').addEventListener('change', function () {
+    const on = this.checked;
+    state.selected.clear();
+    if (on) state.entries.forEach(function (e) { state.selected.add(e.path); });
+    updateSelectionUI();
+  });
+
+  /* editor submit: remember path so it reopens after the page reload */
+  $('editorForm').addEventListener('submit', function () {
+    sessionKey().setItem(STORE_EDITOR, $('editorPath').value);
+  });
+  $('editorModal').addEventListener('hidden.bs.modal', closeEditor);
+
+  /* mkdir: build full path before submit */
+  $('mkdirForm').addEventListener('submit', function () {
+    const base = state.path === '/' ? '/' : state.path + '/';
+    $('mkdirPath').value = base + $('mkdirName').value.trim();
+  });
+  /* mkfile: remember the new file so the editor opens after reload */
+  $('mkfileForm').addEventListener('submit', function () {
+    const base = state.path === '/' ? '' : state.path.replace(/\/+$/, '');
+    const path = base + '/' + $('mkfileName').value.trim();
+    sessionKey().setItem(STORE_EDITOR, path);
+  });
+  /* rename: build dst before submit */
+  $('renameForm').addEventListener('submit', function () {
+    const src = $('renameSrc').value;
+    const base = src.replace(/\/+$/, '').replace(/\/[^/]+$/, '');
+    $('renameDst').value = base + '/' + $('renameName').value.trim();
+  });
+  /* fill paths fields before change submits */
+  $('permsForm').addEventListener('submit', function () {
+    updatePermsFromBoxes();
+    $('permsPaths').value = JSON.stringify(targetPaths());
+    $('permsRecursive').value = $('permsRecursiveSwitch').checked ? '1' : '0';
+    pendingPaths = null;
+  });
+  $('ownerForm').addEventListener('submit', function () {
+    $('ownerPaths').value = JSON.stringify(targetPaths());
+    $('ownerRecursive').value = $('ownerRecursiveSwitch').checked ? '1' : '0';
+    pendingPaths = null;
+  });
+  $('destForm').addEventListener('submit', function () {
+    $('destPaths').value = JSON.stringify(targetPaths());
+    pendingPaths = null;
+  });
+  $('scriptsForm').addEventListener('submit', function (ev) {
+    $('scriptPaths').value = JSON.stringify([$('scriptPathInput').value.trim() || state.path]);
+  });
+  /* chmod matrix recomputes the octal live */
+  document.querySelectorAll('.perm-cb').forEach(function (cb) {
+    cb.addEventListener('change', updatePermsFromBoxes);
+  });
+  /* delete confirm */
+  $('deleteConfirm').addEventListener('click', confirmDelete);
+
+  /* ---------------- scripts: list + persistence ---------------- */
+  function renderScripts() {
+    const box = $('scriptsList');
+    if (!state.scripts.length) {
+      box.innerHTML = '<div class="list-group-item text-muted small">No scripts defined yet.</div>';
+      return;
+    }
+    box.innerHTML = state.scripts.map(function (s, i) {
+      return '<div class="list-group-item d-flex flex-wrap align-items-center gap-2">' +
+        '<span class="fw-semibold">' + escapeHtml(s.name) + '</span>' +
+        '<code class="small text-truncate flex-grow-1">' + escapeHtml(s.command) + '</code>' +
+        '<button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2" data-run="' + i + '">' +
+        '<i class="bi bi-play me-1"></i>Run</button>' +
+        '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2" data-edit="' + i + '">' +
+        '<i class="bi bi-pencil me-1"></i>Edit</button>' +
+        '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-2" data-del="' + i + '">' +
+        '<i class="bi bi-x-lg"></i></button>' +
+        '</div>';
+    }).join('');
+  }
+
+  function status(msg) { $('scriptsStatus').textContent = msg || ''; }
+
+  $('scriptsList').addEventListener('click', function (ev) {
+    const run = ev.target.closest('[data-run]');
+    const edit = ev.target.closest('[data-edit]');
+    const del = ev.target.closest('[data-del]');
+    if (run) {
+      const s = state.scripts[Number(run.dataset.run)];
+      $('scriptName').value = s ? s.name : '';
+    } else if (edit) {
+      const s = state.scripts[Number(edit.dataset.edit)];
+      if (s) {
+        $('scriptNameInput').value = s.name;
+        $('scriptCmdInput').value = s.command;
+        state.scripts.splice(Number(edit.dataset.edit), 1);
+        status('');
+        renderScripts();
+      }
+    } else if (del) {
+      state.scripts.splice(Number(del.dataset.del), 1);
+      status('');
+      renderScripts();
+    }
+  });
+
+  $('scriptResetBtn').addEventListener('click', function () {
+    $('scriptNameInput').value = '';
+    $('scriptCmdInput').value = '';
+    status('');
+  });
+
+  $('scriptAddBtn').addEventListener('click', function () {
+    const name = $('scriptNameInput').value.trim();
+    const command = $('scriptCmdInput').value.trim();
+    if (!name || !command) { status('Name and command are required.'); return; }
+    state.scripts.push({ name: name, command: command });
+    $('scriptNameInput').value = '';
+    $('scriptCmdInput').value = '';
+    status('');
+    renderScripts();
+  });
+
+  $('scriptSaveBtn').addEventListener('click', function () {
+    const payload = state.scripts.map(function (s) {
+      return { name: s.name, command: s.command };
+    });
+    fetch(API, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-CSRFToken': (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || ''
+      },
+      body: new URLSearchParams({ action: 'save-scripts', scripts: JSON.stringify(payload) })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) {
+        status('Saved.');
+        state.scripts = d.scripts || [];
+        renderScripts();
+      } else {
+        status('Error: ' + (d.error || 'save failed'));
+      }
+    }).catch(function () { status('Network error while saving.'); });
+  });
+
+  /* ---------------- init ---------------- */
+  state.scripts = ({{ scripts_json|safe }}) || [];
+  renderScripts();
+
+  const initial = sessionKey().getItem(STORE_PATH) || ({{ default_path_json|safe }} || '/');
+  loadPath(initial);
+
+  /* reopen the editor if a save/creation left the editor open */
+  const editorPath = sessionKey().getItem(STORE_EDITOR);
+  if (editorPath) {
+    openEditor(editorPath);
+  }
+})();
+</script>
+{% endblock %}
