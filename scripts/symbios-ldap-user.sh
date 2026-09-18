@@ -42,7 +42,7 @@ Actions (exactly one required):
   --modify --uid <name> [--password-file <path>] [--email <addr>]  Modify user
 
 Create options:
-  --email <addr>        Email address
+  --email <addr>        Email address (default: <uid>@<base_domain>)
   --displayname <name>  Display name (defaults to uid)
   --group <group>       Initial group (default: users)
 
@@ -257,6 +257,14 @@ case "${f_action}" in
 
   create)
     g_echo_note "Creating user: ${f_uid}"
+
+    # Default email to <uid>@<base_domain> when not provided explicitly and a
+    # base domain is configured (e.g. for mailcow OIDC SSO provisioning).
+    if [[ -z "${f_email}" && -n "${g_base_domain:-}" ]]
+    then
+      f_email="${f_uid}@${g_base_domain}"
+      g_echo_note "No email given, defaulting to ${f_email}"
+    fi
 
     # Get next available UID number
     f_next_uid="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \

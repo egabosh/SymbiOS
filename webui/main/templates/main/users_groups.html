@@ -100,7 +100,8 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Email</label>
-                        <input type="email" class="form-control" name="email" placeholder="user@example.com">
+                        <input type="email" class="form-control" name="email" placeholder="{% if base_domain %}user@{{ base_domain }}{% else %}user@example.com{% endif %}">
+                        <div class="form-text">{% if base_domain %}Optional - defaults to &lt;uid&gt;@{{ base_domain }} when left empty.{% else %}Optional email address.{% endif %}</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Password</label>
