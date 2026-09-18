@@ -59,6 +59,7 @@
 #     stop: docker compose -f /symbios/services/mailcow/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/mailcow/docker-compose.yml restart
 #     reload: docker compose -f /symbios/services/mailcow/docker-compose.yml up -d
+#     show_admin_pw: cat /symbios/services/mailcow/.adminpw
 #
 ---
 - name: mailcow

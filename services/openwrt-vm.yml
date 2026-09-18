@@ -106,6 +106,7 @@
 #     start: virsh start openwrt
 #     stop: virsh destroy openwrt
 #     restart: virsh destroy openwrt; virsh start openwrt
+#     show_admin_pw: cat /symbios/services/openwrt-vm/env
 #
 
 ---
