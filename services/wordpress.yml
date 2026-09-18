@@ -237,6 +237,27 @@
         service_domain: "{{ item.domain }}"
       loop: "{{ wordpress_instances | default([]) }}"
 
+    # Remove healthcheck files of instances that were removed from the config
+    # file (the orphaned .check would otherwise keep failing every 5 min).
+    - name: Detect deployed WordPress instance healthchecks
+      ansible.builtin.find:
+        paths: "{{ data_root }}/runchecks.d"
+        patterns: "symbios-healthcheck-wordpress-*.check"
+      register: wp_hc_existing
+
+    - name: Remove healthchecks of removed WordPress instances
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ _wp_hc_stale }}"
+      vars:
+        _wp_hc_current: >-
+          {{ wordpress_instances | default([]) | map(attribute='name')
+             | map('regex_replace', '^', data_root ~ '/runchecks.d/symbios-healthcheck-wordpress-')
+             | map('regex_replace', '$', '.check')
+             | list }}
+        _wp_hc_stale: "{{ wp_hc_existing.files | map(attribute='path') | difference(_wp_hc_current) | list }}"
+
     # Register playbook as installed in the state file
     - name: Register playbook as installed
       include_tasks: tasks/state-register.yml
