@@ -407,6 +407,26 @@ function f_delete_paths {
       g_echo_note "Keeping ${f_label} (service dir stays intact): $f_expanded"
       continue
     fi
+    # Glob patterns (e.g. per-instance healthcheck files
+    # symbios-healthcheck-<service>-<instance>.check) expand to individual
+    # deletions. A pattern without matches is reported instead of deleting
+    # the literal glob string.
+    if [[ "$f_expanded" == *[\*\?]* ]]
+    then
+      shopt -s nullglob
+      f_matches=($f_expanded)
+      shopt -u nullglob
+      if [[ ${#f_matches[@]} -eq 0 ]]
+      then
+        g_echo_note "No matches for ${f_label} pattern: $f_expanded"
+      else
+        for f_match in "${f_matches[@]}"
+        do
+          f_delete_path "$f_match" "$f_label"
+        done
+      fi
+      continue
+    fi
     f_delete_path "$f_expanded" "$f_label"
   done <<< "$f_paths"
 }
