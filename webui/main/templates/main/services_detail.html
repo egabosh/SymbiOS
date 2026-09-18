@@ -67,6 +67,11 @@
     <button class="nav-link" id="tab-features" data-bs-toggle="tab" data-bs-target="#pane-features" type="button" role="tab">Features</button>
   </li>
   {% endif %}
+  {% if has_config %}
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-instances" data-bs-toggle="tab" data-bs-target="#pane-instances" type="button" role="tab">{{ config_meta.title }}</button>
+  </li>
+  {% endif %}
 </ul>
 <div class="tab-content">
   <div class="tab-pane fade show active" id="pane-output" role="tabpanel">
@@ -317,11 +322,183 @@
     </div>
   </div>
   {% endif %}
+  {% if has_config %}
+  <div class="tab-pane fade" id="pane-instances" role="tabpanel">
+    <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+      <h4 class="mb-0">{{ config_meta.title }}</h4>
+      <div>
+        <button type="button" class="btn btn-outline-success btn-sm" id="instances-save">
+          <i class="bi bi-save"></i> Save
+        </button>
+        <button type="button" class="btn btn-success btn-sm" id="instances-save-apply">
+          <i class="bi bi-rocket-takeoff"></i> Save &amp; Apply
+        </button>
+      </div>
+    </div>
+    <p class="text-muted small mb-2">Define one entry per instance. Saved to <code>{{ config_meta.file }}</code> and applied by the service playbook. Create the rows, then "Save &amp; Apply" to deploy.</p>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle" id="instances-table">
+        <thead>
+          <tr>
+            {% for fname in config_meta.field_order %}
+            <th>{{ config_meta.fields_json|dict_get:fname|dict_get:"label" }}</th>
+            {% endfor %}
+            <th style="width:40px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="instances-empty d-none"><td colspan="99" class="text-muted small py-3">No instances yet - click "Add" below.</td></tr>
+          {% for r in config_rows %}
+          <tr class="instances-row">
+            {% for fname in config_meta.field_order %}
+            {% with spec=config_meta.fields_json|dict_get:fname %}
+            <td>
+              {% if spec.type == 'bool' %}
+              <input type="checkbox" class="form-check-input mt-0 inst-input" data-fid="{{ fname }}" {% if r|dict_get:fname %}checked{% endif %}>
+              {% elif spec.type == 'number' %}
+              <input type="number" class="form-control form-control-sm inst-input" data-fid="{{ fname }}" value="{{ r|dict_get:fname }}">
+              {% elif spec.type == 'select' %}
+              <select class="form-select form-select-sm inst-input" data-fid="{{ fname }}">
+                <option value=""></option>
+                {% for opt in spec.options %}
+                <option value="{{ opt.value }}" {% if r|dict_get:fname == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+                {% endfor %}
+              </select>
+              {% elif spec.type == 'list' %}
+              <input type="text" class="form-control form-control-sm inst-input" data-fid="{{ fname }}" value="{{ r|dict_get:fname|join:', ' }}" placeholder="comma separated">
+              {% elif spec.type == 'password' %}
+              <input type="password" class="form-control form-control-sm inst-input" data-fid="{{ fname }}" value="{{ r|dict_get:fname }}">
+              {% else %}
+              <input type="text" class="form-control form-control-sm inst-input" data-fid="{{ fname }}" value="{{ r|dict_get:fname }}" placeholder="{{ spec.placeholder }}">
+              {% endif %}
+            </td>
+            {% endwith %}
+            {% endfor %}
+            <td><button type="button" class="btn btn-outline-danger btn-sm inst-del" title="Remove"><i class="bi bi-x-lg"></i></button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button type="button" class="btn btn-outline-primary btn-sm" id="instances-add">
+      <i class="bi bi-plus-circle"></i> Add
+    </button>
+    <div id="instances-error" class="alert alert-danger py-1 px-2 small mt-2 d-none"></div>
+  </div>
+  {% endif %}
 </div>
 
 {% endblock %}
 
 {% block scripts %}
+{{ config_meta|json_script:"config-meta" }}
+<script>
+const CFG = JSON.parse(document.getElementById('config-meta').textContent || 'null');
+
+function instanceField(fname, value) {
+  const spec = (CFG && CFG.fields && CFG.fields[fname]) || {type:'text'};
+  const type = spec.type ? String(spec.type).toLowerCase() : 'text';
+  const ph = spec.placeholder || '';
+  const val = (value === null || value === undefined) ? '' : String(value);
+  if (type === 'bool') {
+    return '<input type="checkbox" class="form-check-input mt-0 inst-input" data-fid="' + fname + '"' + (value ? ' checked' : '') + '>';
+  }
+  if (type === 'number') {
+    return '<input type="number" class="form-control form-control-sm inst-input" data-fid="' + fname + '" value="' + escapeHtml(val) + '">';
+  }
+  if (type === 'select') {
+    let opts = '<option value=""></option>';
+    (spec.options || []).forEach(o => {
+      opts += '<option value="' + escapeHtml(String(o.value)) + '"' + (String(o.value) === val ? ' selected' : '') + '>' + escapeHtml(o.label || o.value) + '</option>';
+    });
+    return '<select class="form-select form-select-sm inst-input" data-fid="' + fname + '">' + opts + '</select>';
+  }
+  if (type === 'list') {
+    const joined = Array.isArray(value) ? value.join(', ') : val;
+    return '<input type="text" class="form-control form-control-sm inst-input" data-fid="' + fname + '" value="' + escapeHtml(joined) + '" placeholder="' + escapeHtml(ph) + '">';
+  }
+  const inputType = type === 'password' ? 'password' : 'text';
+  return '<input type="' + inputType + '" class="form-control form-control-sm inst-input" data-fid="' + fname + '" value="' + escapeHtml(val) + '" placeholder="' + escapeHtml(ph) + '">';
+}
+
+function instanceRow(values) {
+  const tr = document.createElement('tr');
+  tr.className = 'instances-row';
+  let html = CFG.field_order.map(fname => '<td>' + instanceField(fname, values ? values[fname] : undefined) + '</td>').join('');
+  html += '<td><button type="button" class="btn btn-outline-danger btn-sm inst-del" title="Remove"><i class="bi bi-x-lg"></i></button></td>';
+  tr.innerHTML = html;
+  return tr;
+}
+
+function refreshInstancesEmpty() {
+  const rows = document.querySelectorAll('#instances-table .instances-row');
+  const empty = document.querySelector('.instances-empty');
+  if (empty) empty.classList.toggle('d-none', rows.length > 0);
+}
+
+function collectInstances() {
+  const rows = document.querySelectorAll('#instances-table .instances-row');
+  const out = [];
+  rows.forEach(tr => {
+    const row = {};
+    tr.querySelectorAll('.inst-input').forEach(inp => {
+      const fname = inp.dataset.fid;
+      const spec = CFG.fields[fname] || {};
+      if (inp.type === 'checkbox') {
+        row[fname] = inp.checked;
+      } else if ((spec.type || '').toLowerCase() === 'number') {
+        row[fname] = inp.value === '' ? null : (inp.value.indexOf('.') >= 0 ? parseFloat(inp.value) : parseInt(inp.value, 10));
+      } else if ((spec.type || '').toLowerCase() === 'list') {
+        row[fname] = inp.value.split(',').map(s => s.trim()).filter(Boolean);
+      } else {
+        row[fname] = inp.value;
+      }
+    });
+    out.push(row);
+  });
+  return out;
+}
+
+function setInstancesError(msg) {
+  const box = document.getElementById('instances-error');
+  if (!box) return;
+  box.textContent = msg || '';
+  box.classList.toggle('d-none', !msg);
+}
+
+function saveInstances(apply) {
+  const payload = {rows: collectInstances(), apply: !!apply};
+  setInstancesError(null);
+  fetch('/services/' + PLAYBOOK + '/instances/save/', {
+    method: 'POST', credentials: 'same-origin',
+    headers: {'X-CSRFToken': getCsrfToken(), 'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  }).then(r => r.json()).then(d => {
+    if (!d.ok) { setInstancesError(d.error || 'Save failed'); return; }
+    if (d.job && typeof SymbiOS !== 'undefined' && SymbiOS.exec) {
+      SymbiOS.exec.start(d.job, d.title, d.message || d.command);
+    } else {
+      location.reload();
+    }
+  }).catch(e => setInstancesError('Network error: ' + e));
+}
+
+if (CFG) {
+  document.getElementById('instances-add').addEventListener('click', function() {
+    if (!CFG.field_order.length) return;
+    document.querySelector('#instances-table tbody').insertBefore(
+      instanceRow({}), document.querySelector('.instances-empty'));
+    refreshInstancesEmpty();
+  });
+  document.addEventListener('click', function(e) {
+    const del = e.target.closest('.inst-del');
+    if (del) { del.closest('tr').remove(); refreshInstancesEmpty(); }
+  });
+  document.getElementById('instances-save').addEventListener('click', function() { saveInstances(false); });
+  document.getElementById('instances-save-apply').addEventListener('click', function() { saveInstances(true); });
+  refreshInstancesEmpty();
+}
+</script>
 <script>
 const FEATURE_SERVICE = "{{ feature_service }}";
 const PLAYBOOK_SOURCES = {};
