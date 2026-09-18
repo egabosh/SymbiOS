@@ -75,6 +75,7 @@
 #     program_paths:
 #       - /symbios/services/wordpress/
 #       - /symbios/base-services/traefik/providers/wordpress.yml
+#       - /symbios/runchecks.d/symbios-healthcheck-wordpress-*.check
 #   actions:
 #     start: docker compose -f /symbios/services/wordpress/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/wordpress/docker-compose.yml down
