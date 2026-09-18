@@ -185,31 +185,27 @@
       changed_when: false
       failed_when: false
 
-    - name: Write Authelia access_control for WordPress instance domains
-      ansible.builtin.blockinfile:
-        path: /symbios/base-services/authelia/authelia-data/configuration.yml
-        marker: "# {mark} ANSIBLE MANAGED BLOCK wordpress-{{ item.name }} ACCESS CONTROL"
-        block: |2
-          {% if not (item.public | default(false) | bool) %}
-          - domain: "{{ item.domain }}"
-            policy: {{ wp_auth_policy }}
-            subject: ["group:wordpress-{{ item.name }}"]
-          - domain: "{{ item.domain }}"
-            policy: deny
-          {% endif %}
-          {% if item.phpmyadmin | default(false) | bool %}
-          - domain: "wp-phpmyadmin.{{ item.domain | regex_replace('^wp\.', '') }}"
-            policy: {{ wp_auth_policy }}
-            subject: ["group:wordpress-{{ item.name }}"]
-          - domain: "wp-phpmyadmin.{{ item.domain | regex_replace('^wp\.', '') }}"
-            policy: deny
-          {% endif %}
-        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
-        backup: yes
+    - name: Write Authelia access_control for restricted WordPress domains
+      ansible.builtin.include_tasks: tasks/authelia-acl.yml
       loop: "{{ wordpress_instances | default([]) }}"
       when:
-        - not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool)
-      notify: Restart authelia
+        - not (item.public | default(false) | bool)
+      vars:
+        service_name: "wordpress-{{ item.name }}"
+        service_domain: "{{ item.domain }}"
+        authelia_subjects: ["group:wordpress-{{ item.name }}"]
+        authelia_policy: "{{ wp_auth_policy | default('one_factor') }}"
+
+    - name: Write Authelia access_control for WordPress phpMyAdmin domains
+      ansible.builtin.include_tasks: tasks/authelia-acl.yml
+      loop: "{{ wordpress_instances | default([]) }}"
+      when:
+        - item.phpmyadmin | default(false) | bool
+      vars:
+        service_name: "wordpress-{{ item.name }}-phpmyadmin"
+        service_domain: "wp-phpmyadmin.{{ item.domain | regex_replace('^wp\\.', '') }}"
+        authelia_subjects: ["group:wordpress-{{ item.name }}"]
+        authelia_policy: "{{ wp_auth_policy | default('one_factor') }}"
 
     # Bring up the database first, provision instance DBs/users, then start
     # the WordPress containers (avoids an install race on very first boot).
