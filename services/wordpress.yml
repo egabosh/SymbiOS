@@ -1,0 +1,217 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# docs:
+#   name: WordPress
+#   short_description: Deploy multiple WordPress instances
+#   description: >-
+#     Deploys every instance listed under the "wordpress_instances" variable
+#     in inventory.yml. Each instance gets its own WordPress container, its
+#     own database and user on ONE shared MariaDB, a Traefik route (domain
+#     plus optional aliases) and a healthcheck. Instances without the
+#     "public" flag are protected by Authelia forward-auth (LDAP group
+#     wordpress-<name>); optional phpMyAdmin (wp-phpmyadmin.<domain>) is
+#     always protected.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   service_control:
+#     services:
+#     - name: wordpress
+#       type: docker
+#       compose_file: /symbios/services/wordpress/docker-compose.yml
+#       status: test -d /symbios/services/wordpress || exit 2; docker compose -f /symbios/services/wordpress/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: wordpress
+#       command: docker compose -f /symbios/services/wordpress/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/wordpress/docker-compose.yml down
+#     program_paths:
+#       - /symbios/services/wordpress/
+#       - /symbios/base-services/traefik/providers/wordpress.yml
+#   actions:
+#     start: docker compose -f /symbios/services/wordpress/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/wordpress/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/wordpress/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/wordpress/docker-compose.yml up -d
+#
+---
+- name: wordpress
+  hosts: all
+  gather_facts: no
+  vars:
+    service_name: wordpress
+    service_domain: "{{ service_name }}.{{ base_domain }}"
+    # A WordPress instance needs a LDAP group + Authelia rule when it is NOT
+    # public (forward-auth on the site) or when phpMyAdmin is enabled (the
+    # phpMyAdmin endpoint is always protected). The restriction is expressed
+    # inline per task via:
+    #   when: not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool)
+    # Authelia policy follows the central twofa_enabled variable.
+    wp_auth_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
+  tasks:
+
+    # Create the service directory (compose projects must exist before .env)
+    - name: Create /symbios/services/wordpress dir
+      ansible.builtin.file:
+        path: /symbios/services/wordpress
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    # Data directories: per-instance wp content + shared database volume.
+    # Ownership is left to the WordPress entrypoint (chowns to www-data).
+    - name: Create database data dir
+      ansible.builtin.file:
+        path: /symbios/services/wordpress/db-data
+        owner: root
+        group: docker
+        state: directory
+        mode: '0750'
+
+    - name: Create per-instance wp-content dirs
+      ansible.builtin.file:
+        path: "/symbios/services/wordpress/{{ item.name }}-data"
+        state: directory
+        mode: '0755'
+      loop: "{{ wordpress_instances | default([]) }}"
+
+    # Generate/refresh the compose .env with root + per-instance credentials.
+    - name: Generate WordPress .env secrets
+      ansible.builtin.shell: >
+        {{ git_root }}/scripts/symbios-wordpress-env.sh
+        {{ wordpress_instances | default([]) | map(attribute='name') | join(' ') }}
+      changed_when: false
+
+    # Render the single compose stack (shared MariaDB + one container per instance)
+    - name: /symbios/services/wordpress/docker-compose.yml
+      ansible.builtin.template:
+        src: templates/docker-compose.yml.j2
+        dest: /symbios/services/wordpress/docker-compose.yml
+        mode: '0440'
+        owner: root
+        group: docker
+      notify: Restart wordpress
+
+    # Render the single Traefik file-provider snippet for all instances.
+    # Traefik watches the providers directory, so no reload is required.
+    - name: /symbios/base-services/traefik/providers/wordpress.yml
+      ansible.builtin.template:
+        src: templates/traefik-wordpress.yml.j2
+        dest: /symbios/base-services/traefik/providers/wordpress.yml
+        mode: '0444'
+        owner: root
+        group: docker
+
+    # LDAP groups + Authelia access_control for restricted instances
+    - name: Create LDAP group wordpress-<name> for restricted instances
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name wordpress-{{ item.name }}"
+      loop: "{{ wordpress_instances | default([]) }}"
+      when:
+        - not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool)
+      changed_when: false
+      failed_when: false
+
+    - name: Add admin user to WordPress LDAP groups
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --add-user --name wordpress-{{ item.name }} --uid {{ ldap_admin_uid | default('admin') }}"
+      loop: "{{ wordpress_instances | default([]) }}"
+      when:
+        - not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool)
+      changed_when: false
+      failed_when: false
+
+    - name: Write Authelia access_control for WordPress instance domains
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK wordpress-{{ item.name }} ACCESS CONTROL"
+        block: |2
+          {% if not (item.public | default(false) | bool) %}
+          - domain: "{{ item.domain }}"
+            policy: {{ wp_auth_policy }}
+            subject: ["group:wordpress-{{ item.name }}"]
+          - domain: "{{ item.domain }}"
+            policy: deny
+          {% endif %}
+          {% if item.phpmyadmin | default(false) | bool %}
+          - domain: "wp-phpmyadmin.{{ item.domain | regex_replace('^wp\.', '') }}"
+            policy: {{ wp_auth_policy }}
+            subject: ["group:wordpress-{{ item.name }}"]
+          - domain: "wp-phpmyadmin.{{ item.domain | regex_replace('^wp\.', '') }}"
+            policy: deny
+          {% endif %}
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+      loop: "{{ wordpress_instances | default([]) }}"
+      when:
+        - not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool)
+      notify: Restart authelia
+
+    # Bring up the database first, provision instance DBs/users, then start
+    # the WordPress containers (avoids an install race on very first boot).
+    - name: Start shared MariaDB
+      ansible.builtin.shell: docker compose up -d db
+      args:
+        chdir: /symbios/services/wordpress
+      changed_when: false
+      when: wordpress_instances | default([]) | length > 0
+
+    - name: Provision databases and users
+      ansible.builtin.shell: >
+        {{ git_root }}/scripts/symbios-wordpress-db.sh
+        {{ wordpress_instances | default([]) | map(attribute='name') | join(' ') }}
+      changed_when: false
+      when: wordpress_instances | default([]) | length > 0
+
+    - name: Start WordPress instances
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: /symbios/services/wordpress
+      changed_when: false
+      when: wordpress_instances | default([]) | length > 0
+
+    # Deploy one HTTP healthcheck per instance (https://<domain> every 5 min)
+    - name: Deploy healthcheck for each instance
+      ansible.builtin.include_tasks: tasks/runcheck.yml
+      vars:
+        service_name: "wordpress-{{ item.name }}"
+        service_domain: "{{ item.domain }}"
+      loop: "{{ wordpress_instances | default([]) }}"
+
+    # Register playbook as installed in the state file
+    - name: Register playbook as installed
+      include_tasks: tasks/state-register.yml
+
+  handlers:
+
+    # Apply the rendered compose file (up -d recreates changed containers)
+    - name: Restart wordpress
+      ansible.builtin.shell: docker compose up -d
+      args:
+        chdir: /symbios/services/wordpress
+
+    # Restart Authelia when access_control changes
+    - name: Restart authelia
+      ansible.builtin.shell: docker compose restart
+      args:
+        chdir: /symbios/base-services/authelia
