@@ -434,7 +434,8 @@ def filemanager_download(request):
                             status=400)
     size = int(meta.get('size') or 0)
     name = os.path.basename(path.rstrip('/'))
-    stream = run_command_bytes_stream('{0} download {1}'.format(_FM, _q(path)), timeout=900)
+    stream = run_command_bytes_stream('{0} download {1}'.format(_FM, _q(path)),
+                                      timeout=900, chunk_size=1024 * 1024)
     resp = StreamingHttpResponse(iter(stream), content_type='application/octet-stream')
     resp['Content-Disposition'] = 'attachment; filename="{0}"'.format(name)
     resp['Content-Length'] = str(size)
