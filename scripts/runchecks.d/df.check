@@ -4,7 +4,9 @@ CHECK_DESC="Checks if any filesystem is almost full (over 98%)."
 CHECK_DETAIL="Runs df -al and scans all mounted filesystems.|Alerts if any partition exceeds 98% usage.|Excludes pseudo-filesystems like /proc and /rom."
 
 # Alert when any filesystem exceeds 98% disk usage
-df -al | grep -E -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u | while read g_i
+# Process substitution keeps the loop in the current shell, so the error flag
+# set by g_echo_error is visible to runchecks.sh (a plain pipeline would lose it)
+while read g_i
 do
   g_disk=`echo $g_i | cut -d" " -f1`
   g_usa=`echo $g_i | cut -d" " -f2`
@@ -12,4 +14,4 @@ do
   then
     g_echo_error "Space of $g_disk full: $g_usa%"
   fi
-done
+done < <(df -al | grep -E -v ' - |Mounted on|/rom' | sed 's/  */ /g; s/\%//' | cut -d" " -f1,5 | sort -u)

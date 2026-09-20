@@ -14,7 +14,9 @@ do
   fi
 done
 # Report processes stuck in monitored state for more than 30 minutes
-grep -E "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3 | while read g_dzpid
+# Process substitution keeps the loop in the current shell, so the error flag
+# set by g_echo_error is visible to runchecks.sh (a plain pipeline would lose it)
+while read g_dzpid
 do
   if [[ -f ${g_tmp}/proc-check/$g_dzpid ]]
   then
@@ -31,4 +33,4 @@ do
   else
     date >${g_tmp}/proc-check/$g_dzpid
   fi
-done
+done < <(grep -E "^State:.+D \(|State:.+Z \(|State:.+R \(" /proc/[0-9]*/status | cut -d/ -f3)
