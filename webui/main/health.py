@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import json
+import os
 
 HEALTH_FILE = "/log/system-health.json"
 RUNCHECKS_FILE = "/log/runchecks-results.json"
@@ -104,6 +105,19 @@ def history_trend(hours=24, bucket_minutes=5, max_buckets=288):
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=hours)
     bucket_s = 60 * bucket_minutes
+
+    # Each history file is date-scoped and only appended to, so its mtime is
+    # the timestamp of its newest record. Files entirely older than the trend
+    # window can be skipped without parsing them (avoids re-parsing the full
+    # history volume on every Health page load).
+    cutoff_ts = cutoff.timestamp()
+    try:
+        files = [
+            path for path in files
+            if os.path.getmtime(path) >= (cutoff_ts - bucket_s)
+        ]
+    except OSError:
+        pass
 
     buckets = {}
     for path in files:
