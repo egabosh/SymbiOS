@@ -23,7 +23,9 @@ do
 done
 
 # Verify each host is reachable via HTTP
-cat "$g_tmp/hosts" | grep -v tcp | cut -d '`' -f2 | sort -u | while read f_host
+# Process substitution keeps the loop in the current shell, so the error flag
+# set by g_echo_error is visible to runchecks.sh (a plain pipeline would lose it)
+while read f_host
 do
   # Skip hosts checked within the last 5 minutes
   if find -mmin -5 "/tmp/$f_host" >/dev/null 2>&1 | grep -q "$f_host"
@@ -60,4 +62,4 @@ $(cat ${g_tmp}/traefik-wget-check)"
       fi
     fi
   fi
-done
+done < <(cat "$g_tmp/hosts" | grep -v tcp | cut -d '`' -f2 | sort -u)

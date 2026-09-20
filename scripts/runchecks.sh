@@ -94,7 +94,8 @@ do
     fi
 
     g_check_name=$(basename "$g_check" .check | sed 's/^symbios-healthcheck-//')
-    g_check_msg=$(echo "$g_current_check_error" | sed 's/"/\\"/g' | tr '\n' ' ')
+    # JSON-escape: backslash first, then double quotes (ps output contains \_)
+    g_check_msg=$(echo "$g_current_check_error" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
 
     # Build JSON entry with metadata
     g_meta="\"title\":\"${g_check_title}\",\"desc\":\"${g_check_desc}\",\"detail\":\"${g_check_detail}\",\"category\":\"${g_check_category}\""

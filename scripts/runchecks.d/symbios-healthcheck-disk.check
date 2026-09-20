@@ -9,7 +9,9 @@ f_check_cache "symbios-healthcheck-disk" || return 2>/dev/null || true
 g_df_targets="/ /config"
 [[ -d "/home" ]] && mountpoint -q /home 2>/dev/null && g_df_targets="/ /config /home"
 
-df $g_df_targets | tail -n +2 | while read g_line
+# Process substitution keeps the loop in the current shell, so the error flag
+# set by g_echo_error is visible to runchecks.sh (a plain pipeline would lose it)
+while read g_line
 do
   g_mount=$(echo "$g_line" | awk '{print $6}')
   g_pct=$(echo "$g_line" | awk '{print $5}' | tr -d '%')
@@ -20,4 +22,4 @@ do
   then
     g_echo_error "Disk ${g_mount} usage high: ${g_pct}%"
   fi
-done
+done < <(df $g_df_targets | tail -n +2)
