@@ -551,9 +551,22 @@
   }
 
   /* ---------------- navigation ---------------- */
-  function loadPath(path) {
+  /* Reflect state.path in the URL (?path=...) so every directory is linkable
+     and browser back/forward works.  The first load (replaceState) keeps the
+     referrer clean; every later navigation pushes a fresh history entry. */
+  function syncUrl(noPush) {
+    const u = new URL(window.location.href);
+    const p = state.path === '' || state.path === '/' ? '' : state.path;
+    if (p === '') { u.searchParams.delete('path'); }
+    else { u.searchParams.set('path', p); }
+    window.history[noPush ? 'replaceState' : 'pushState'](
+      { fmPath: state.path }, document.title, u.toString());
+  }
+
+  function loadPath(path, noPush) {
     state.path = path === '' ? '/' : path;
     sessionKey().setItem(STORE_PATH, state.path);
+    syncUrl(noPush);
     $('pathInput').value = state.path;
     renderBreadcrumb();
     $('fileTable').innerHTML =
@@ -1207,8 +1220,15 @@
   state.scripts = ({{ scripts_json|safe }}) || [];
   renderScripts();
 
-  const initial = sessionKey().getItem(STORE_PATH) || ({{ default_path_json|safe }} || '/');
-  loadPath(initial);
+  /* The ?path= query param (set by syncUrl) takes precedence over the
+     session-stored path so that shared/deep links always land on the linked
+     directory, even if the user had previously browsed elsewhere this session.
+     The first load uses replaceState so the referrer stays clean. */
+  const urlPath = new URLSearchParams(window.location.search).get('path');
+  const initial = (urlPath != null && urlPath !== '')
+    ? urlPath
+    : (sessionKey().getItem(STORE_PATH) || ({{ default_path_json|safe }} || '/'));
+  loadPath(initial, true);
 
   /* reopen the editor if a save/creation left the editor open */
   const editorPath = sessionKey().getItem(STORE_EDITOR);
