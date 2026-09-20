@@ -47,6 +47,13 @@ services:
       - PDF_EXTRACT_IMAGES=true
       - ENABLE_IMAGE_INTERPRETATION=true
       - BYPASS_EMBEDDING_AND_RETRIEVAL=true
+      # RAG/Embedding engine disabled: no local embedding model is loaded
+      - RAG_EMBEDDING_ENGINE=
+      - RAG_EMBEDDING_MODEL=
+      - AUXILIARY_EMBEDDING_MODEL=
+      - USE_EMBEDDING_MODEL_DOCKER=
+      - USE_AUXILIARY_EMBEDDING_MODEL_DOCKER=
+      - RAG_RERANKING_MODEL=
       # Web Search (SearXNG runs as Docker container on ai.lan)
       - ENABLE_WEB_SEARCH=true
       - WEB_SEARCH_ENGINE=searxng

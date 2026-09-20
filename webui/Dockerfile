@@ -23,4 +23,4 @@ RUN mkdir -p /log /config && chown -R symbios:symbios /app /log /config
 
 USER symbios
 EXPOSE 8080
-ENTRYPOINT ["sh", "-c", "exec gunicorn webui.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8080 --timeout 3600 --graceful-timeout 60"]
+ENTRYPOINT ["sh", "-c", "exec gunicorn webui.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8080 --timeout 3600 --graceful-timeout 60 --max-requests 1000 --max-requests-jitter 200"]
