@@ -126,11 +126,15 @@
 
     # Data directories: per-instance wp content + shared database volume.
     # Ownership is left to the WordPress entrypoint (chowns to www-data).
+    # Owned by uid/gid 999 (the "mysql" user of the official mariadb image):
+    # mariadbd drops privileges to it and must be able to read/write the
+    # datadir. root:docker ownership makes InnoDB fail with errno 13
+    # ("Can't read dir") and breaks every login including mysql.user lookups.
     - name: Create database data dir
       ansible.builtin.file:
         path: /symbios/services/wordpress/db-data
-        owner: root
-        group: docker
+        owner: '999'
+        group: '999'
         state: directory
         mode: '0750'
 

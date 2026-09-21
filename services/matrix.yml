@@ -169,7 +169,10 @@
               authorization_endpoint: "https://auth.{{ base_domain }}/api/oidc/authorization"
               token_endpoint: "https://auth.{{ base_domain }}/api/oidc/token"
               userinfo_endpoint: "https://auth.{{ base_domain }}/api/oidc/userinfo"
-              jwks_uri: "https://auth.{{ base_domain }}/api/oidc/jwks"
+              # Authelia serves its OIDC JWKS at /jwks.json (see the issuer's
+              # /.well-known/openid-configuration); /api/oidc/jwks is a 404 and
+              # makes synapse crash-loop on startup.
+              jwks_uri: "https://auth.{{ base_domain }}/jwks.json"
               scopes:
                 - openid
                 - profile
