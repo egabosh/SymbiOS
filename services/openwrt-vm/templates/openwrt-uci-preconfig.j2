@@ -124,6 +124,10 @@ uci set firewall.zone_lan.forward='ACCEPT'
 uci set firewall.zone_lan.log='1'
 uci set firewall.zone_lan.masq='0'
 uci set firewall.zone_lan.mtu_fix='0'
+# Explicit device list: fw4 may start before eth1/eth4 exist as netifd
+# devices; without it the zone misses the direct-eth segments on first boot.
+uci add_list firewall.zone_lan.device='eth1'
+uci add_list firewall.zone_lan.device='eth4'
 
 uci set firewall.zone_iot='zone'
 uci set firewall.zone_iot.name='iot'
@@ -291,6 +295,7 @@ uci set network.iot.ip6assign='64'
 
 uci set dhcp.iot='dhcp'
 uci set dhcp.iot.interface='iot'
+uci set dhcp.iot.instance='iot_dnsmasq'
 uci set dhcp.iot.start='50'
 uci set dhcp.iot.limit='150'
 uci set dhcp.iot.leasetime='1h'
@@ -313,10 +318,12 @@ uci set dhcp.iot_dnsmasq.resolvfile='/etc/resolv.dnsmasq.iot'
 uci set dhcp.iot_dnsmasq.leasefile='/tmp/dhcp.iot.leases'
 uci add_list dhcp.iot_dnsmasq.listen_address="${IOT4}"
 uci add_list dhcp.iot_dnsmasq.listen_address="${IOT6}"
+uci add_list dhcp.iot_dnsmasq.interface='br-iot'
+uci add_list dhcp.iot_dnsmasq.notinterface='lo'
 uci set dhcp.iot_dnsmasq.logqueries='1'
+uci set dhcp.iot_dnsmasq.logdhcp='1'
 uci set dhcp.iot_dnsmasq.authoritative='1'
 uci set dhcp.iot_dnsmasq.sequential_ip='1'
-uci set dhcp.iot_dnsmasq.readethers='1'
 uci set dhcp.iot_dnsmasq.server="/.lan/${LAN4}"
 
 # -- iot firewall rules
@@ -401,6 +408,7 @@ uci set network.tor.ip6assign='64'
 
 uci set dhcp.tor='dhcp'
 uci set dhcp.tor.interface='tor'
+uci set dhcp.tor.instance='tor_dnsmasq'
 uci set dhcp.tor.start='50'
 uci set dhcp.tor.limit='150'
 uci set dhcp.tor.leasetime='1h'
@@ -423,10 +431,12 @@ uci set dhcp.tor_dnsmasq.resolvfile='/etc/resolv.dnsmasq.tor'
 uci set dhcp.tor_dnsmasq.leasefile='/tmp/dhcp.tor.leases'
 uci add_list dhcp.tor_dnsmasq.listen_address="${TOR4}"
 uci add_list dhcp.tor_dnsmasq.listen_address="${TOR6}"
+uci add_list dhcp.tor_dnsmasq.interface='br-tor'
+uci add_list dhcp.tor_dnsmasq.notinterface='lo'
 uci set dhcp.tor_dnsmasq.logqueries='1'
+uci set dhcp.tor_dnsmasq.logdhcp='1'
 uci set dhcp.tor_dnsmasq.authoritative='1'
 uci set dhcp.tor_dnsmasq.sequential_ip='1'
-uci set dhcp.tor_dnsmasq.readethers='1'
 uci set dhcp.tor_dnsmasq.server='/.onion/127.0.0.1#9053'
 uci set dhcp.tor_dnsmasq.server="/.lan/${LAN4}"
 
@@ -646,6 +656,7 @@ uci set firewall.wireguard_allow_tor.target='ACCEPT'
 # =============================================================
 uci set dhcp.lan='dhcp'
 uci set dhcp.lan.interface='lan'
+uci set dhcp.lan.instance='lan_dnsmasq'
 uci set dhcp.lan.start='50'
 uci set dhcp.lan.limit='200'
 uci set dhcp.lan.leasetime='1h'
@@ -665,6 +676,7 @@ uci set dhcp.lan.dns="${LAN6}"
 # misc joins the main lan dnsmasq instance (openwrt-misc segment)
 uci set dhcp.misc='dhcp'
 uci set dhcp.misc.interface='misc'
+uci set dhcp.misc.instance='lan_dnsmasq'
 uci set dhcp.misc.start='50'
 uci set dhcp.misc.limit='200'
 uci set dhcp.misc.leasetime='1h'
@@ -685,15 +697,23 @@ uci set dhcp.lan_dnsmasq='dnsmasq'
 uci set dhcp.lan_dnsmasq.domain='lan'
 uci set dhcp.lan_dnsmasq.resolvfile='/etc/resolv.dnsmasq.lan'
 uci set dhcp.lan_dnsmasq.leasefile='/tmp/dhcp.lan.leases'
-uci add_list dhcp.lan_dnsmasq.listen_address='127.0.0.1'
 uci add_list dhcp.lan_dnsmasq.listen_address="${LAN4}"
 uci add_list dhcp.lan_dnsmasq.listen_address="${LAN6}"
 uci add_list dhcp.lan_dnsmasq.listen_address="${MISC4}"
 uci add_list dhcp.lan_dnsmasq.listen_address="${MISC6}"
+# Run the lan/misc DHCP sockets exclusively on the direct-eth interfaces
+# (SO_BINDTODEVICE). Without interface= dnsmasq binds wildcard 0.0.0.0:67
+# and the kernel picks only one of the three instances for broadcasts ->
+# lan/misc never see DISCOVERs (iot/tor won by luck on their bridges).
+uci add_list dhcp.lan_dnsmasq.interface='eth1'
+uci add_list dhcp.lan_dnsmasq.interface='eth4'
+# Never bind the 127.0.0.1:53 loopback DNS socket: the first of the three
+# instances grabs it and the others fail with "Address in use".
+uci add_list dhcp.lan_dnsmasq.notinterface='lo'
 uci set dhcp.lan_dnsmasq.logqueries='1'
+uci set dhcp.lan_dnsmasq.logdhcp='1'
 uci set dhcp.lan_dnsmasq.authoritative='1'
 uci set dhcp.lan_dnsmasq.sequential_ip='1'
-uci set dhcp.lan_dnsmasq.readethers='1'
 
 # =============================================================
 # 11) netboot.yml (PXE boot files served via dnsmasq tftp)
@@ -1119,7 +1139,11 @@ nft list chain inet fw4 dstnat_tor >/dev/null 2>&1 || \
 nft flush chain inet fw4 dstnat_tor
 
 # log
-nft add rule inet fw4 dstnat_tor iifname "br-tor" log prefix "TOR_ROUTING_DROP: "
+# NOTE: the "TOR_ROUTING_DROP" prefixes must stay plain without ":"+space -
+# unquoted colons inside `nft log prefix` make `fw4 reload` choke with a
+# syntax error. The IPv4/IPv6 drop prefixes below are escaped for the same
+# reason (they survive the shell-quoting inside the nft expression).
+nft add rule inet fw4 dstnat_tor iifname "br-tor" log prefix "TOR_ROUTING_DROP" drop
 
 # allow DHCP
 nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol udp udp sport 68 udp dport 67 accept
@@ -1144,8 +1168,11 @@ nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol icmp icmp type ech
 nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr icmpv6 icmpv6 type echo-request dnat to "[::1]"
 
 # do not allow tor in tor
-nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol tcp ip daddr @tor_ipv4 log prefix "TOR_ROUTING_IPV4_DROP: " drop
-nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr tcp ip6 daddr @tor_ipv6 log prefix "TOR_ROUTING_IPV6_DROP: " drop
+# (the prefix value is shell-escaped on purpose - a bare '"..."' with ": "
+# makes the reloaded /etc/nftables.d script fail; the live VM runs with the
+# backslashes in place, keep them identical here)
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol tcp ip daddr @tor_ipv4 log prefix \"TOR_ROUTING_IPV4_DROP: \" drop
+nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr tcp ip6 daddr @tor_ipv6 log prefix \"TOR_ROUTING_IPV6_DROP: \" drop
 
 # exceptions
 nft list set inet fw4 tor_whitelist >/dev/null 2>&1 && nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol tcp ip daddr @tor_whitelist tcp dport 443 accept
