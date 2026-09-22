@@ -21,7 +21,9 @@
 #   description: |
 #     Deploys an OpenWrt VM (latest stable release) as a QEMU/KVM router with
 #     UEFI boot, serial console and five NICs. The VM owns the .1 / ::1
-#     gateway on each internal segment; the host bridges are pure L2.
+#     gateway on each internal segment; the host bridges are L2 switches that
+#     additionally take a DHCP address from the segment's dnsmasq, so the host
+#     is directly reachable inside every segment.
 #
 #     Requirements:
 #       - KVM base playbook (base-services/kvm.yml)
@@ -29,7 +31,7 @@
 #
 #     Networks:
 #       WAN: base-services bridge (192.168.41.201/24) - same L2 as Docker
-#       Internal (4 host bridges, pure L2, the VM owns the gateways):
+#       Internal (4 host bridges, L2 + per-bridge DHCP for host presence, the VM owns the gateways):
 #         - openwrt-lan  (172.18.0.0/24):  VM eth1        = 172.18.0.1
 #         - openwrt-iot  (172.18.1.0/24):  VM br-iot      = 172.18.1.1 (bridged; port eth2, OpenVPN tap1 attaches here)
 #         - openwrt-tor  (172.18.2.0/24):  VM br-tor      = 172.18.2.1 (bridged; port eth3, OpenVPN tap2 attaches here)
@@ -95,6 +97,7 @@
 #     commands:
 #       - rm -f /etc/network/interfaces.d/openwrt-lan /etc/network/interfaces.d/openwrt-iot /etc/network/interfaces.d/openwrt-tor /etc/network/interfaces.d/openwrt-misc
 #       - for b in openwrt-lan openwrt-iot openwrt-tor openwrt-misc; do ip link del "$b" 2>/dev/null || true; done
+#       - systemctl disable --now symbios-ow-bridge-dhcp.timer && rm -f /etc/systemd/system/symbios-ow-bridge-dhcp.service /etc/systemd/system/symbios-ow-bridge-dhcp.timer
 #     program_paths:
 #       - /symbios/services/openwrt-vm/
 #       - /symbios/runchecks.d/symbios-healthcheck-openwrt-vm.check
@@ -140,11 +143,17 @@
     # nftables tor-routing script).
     tor_ip: "172.18.2.1"
     tor_ip6: "fd00:18:2::1"
+    # mac: deterministic, locally-administered hardware address for the host
+    # bridge. An unset bridge inherits the MAC of its first port, i.e. of the
+    # libvirt tap (fe:54:00:...). dnsmasq then sends the DHCP OFFER to that
+    # very MAC, which the kernel matches as a permanent FDB entry on the tap
+    # port and re-sends to the port instead of the local stack - the host
+    # never receives the OFFER. hwaddress below breaks that collision.
     ow_networks:
-      - { name: openwrt-lan, bridge: openwrt-lan, device: eth1, uci: lan, ip: "172.18.0.1", ip6: "fd00:18:0::1/64" }
-      - { name: openwrt-iot, bridge: openwrt-iot, device: br-iot, bridge_ports: "eth2", uci: iot, ip: "172.18.1.1", ip6: "fd00:18:1::1/64" }
-      - { name: openwrt-tor, bridge: openwrt-tor, device: br-tor, bridge_ports: "eth3", uci: tor, ip: "{{ tor_ip }}", ip6: "{{ tor_ip6 }}/64" }
-      - { name: openwrt-misc, bridge: openwrt-misc, device: eth4, uci: misc, ip: "172.18.3.1", ip6: "fd00:18:3::1/64" }
+      - { name: openwrt-lan, bridge: openwrt-lan, device: eth1, uci: lan, mac: "02:ac:00:00:00:01", ip: "172.18.0.1", ip6: "fd00:18:0::1/64" }
+      - { name: openwrt-iot, bridge: openwrt-iot, device: br-iot, bridge_ports: "eth2", uci: iot, mac: "02:ac:00:00:00:02", ip: "172.18.1.1", ip6: "fd00:18:1::1/64" }
+      - { name: openwrt-tor, bridge: openwrt-tor, device: br-tor, bridge_ports: "eth3", uci: tor, mac: "02:ac:00:00:00:03", ip: "{{ tor_ip }}", ip6: "{{ tor_ip6 }}/64" }
+      - { name: openwrt-misc, bridge: openwrt-misc, device: eth4, uci: misc, mac: "02:ac:00:00:00:04", ip: "172.18.3.1", ip6: "fd00:18:3::1/64" }
     # ── OpenWrt preconfiguration variables (rendered into the first-boot
     #    scripts, see services/openwrt-vm.md + templates/). ────────────────
     openwrt_hostname: "openwrt"
@@ -332,6 +341,7 @@
           - e2fsprogs
           - ifupdown
           - bridge-utils
+          - isc-dhcp-client
           - "{{ 'qemu-efi-aarch64' if is_arm64 else 'ovmf' }}"
         state: present
         update_cache: yes
@@ -397,14 +407,23 @@
         - uplink_interface | default('') | length == 0
 
     # ── Detect IPv6 prefix from uplink ───────────────────────────────────
-    # Extract first 4 groups from the host's global IPv6 address on the uplink.
+    # Extract the first 4 groups of the host's global IPv6 address on the
+    # uplink in fully expanded form (every group with its leading zeros), so
+    # appending "::/64" always yields a valid prefix. The plain awk split
+    # breaks on compressed addresses (fd00::2ecf:67ff:... became
+    # "fd00::2ecf:67ff", producing the invalid "fd00::2ecf:67ff::/64").
     - name: Detect IPv6 prefix
       ansible.builtin.shell: |
         set -e
-        ip -6 -o addr show dev {{ uplink_interface }} scope global \
-          | awk '{print $4}' | cut -d/ -f1 \
-          | awk -F: '{OFS=":"; print $1,$2,$3,$4}' \
-          | head -1
+        A=$(ip -6 -o addr show dev {{ uplink_interface }} scope global 2>/dev/null \
+          | awk '{print $4}' | cut -d/ -f1 | head -1)
+        if [ -z "$A" ]
+        then
+          echo ""
+          exit 0
+        fi
+        printf '%s\n' "$A" \
+          | python3 -c 'import ipaddress,sys; ip=ipaddress.IPv6Interface(sys.stdin.read().strip()+"/64"); print(":".join(ip.network.network_address.exploded.split(":")[:4]))'
       register: ipv6_prefix_result
       changed_when: false
       failed_when: false
@@ -693,10 +712,13 @@
         mode: "0640"
       when: kvm_capable | bool
 
-    # ── Host bridges (ifupdown, pure L2) ─────────────────────────────────
+    # ── Host bridges (ifupdown, L2 + host DHCP) ───────────────────────────
     # The four internal segments are Linux bridges managed via ifupdown so
-    # they persist across reboots. They are pure L2: the VM owns the .1 / ::1
-    # gateway on every segment (controller-role split, mirrors linux-setups).
+    # they persist across reboots. They stay L2 switches: the VM owns the .1 /
+    # ::1 gateway on every segment (controller-role split, mirrors
+    # linux-setups). Each bridge additionally runs dhclient and takes an
+    # address from the segment's dnsmasq pool, so the host is directly
+    # reachable inside every segment.
     # libvirt networks would drop the <ipv6> element for isolated bridges, so
     # we configure the bridges directly here. VM NICs attach to them via
     # <interface type='bridge'>.
@@ -718,9 +740,13 @@
       changed_when: "'legacy-network-removed' in ow_net_cleanup.stdout"
       when: kvm_capable | bool
 
-    # Write ifupdown bridge config for each internal segment (no addresses -
-    # the VM is the gateway on the segment, the Linux bridge is just a switch).
-    - name: Write pure-L2 ifupdown bridge config for OpenWrt networks
+    # Write ifupdown bridge config for each internal segment. The bridge is
+    # pure L2 (the VM owns the gateway and the per-segment dnsmasq). v4 stays
+    # "manual": ifupdown's "inet dhcp" starts dhclient at boot (blocking ifup,
+    # stray daemons, and the segment's Router option would add a default
+    # route). The host's segment address is requested later by the retry
+    # timer's direct dhclient instead.
+    - name: Write ifupdown bridge config for OpenWrt networks (L2)
       ansible.builtin.copy:
         dest: "/etc/network/interfaces.d/{{ item.name }}"
         content: |
@@ -729,6 +755,9 @@
               bridge_ports none
               bridge_stp off
               bridge_fd 0
+              # Deterministic MAC: prevents inheriting the libvirt tap MAC,
+              # which would absorb the dnsmasq OFFER frame (see ow_networks).
+              hwaddress ether {{ item.mac }}
               post-up /usr/sbin/sysctl -w "net.ipv6.conf.{{ item.bridge }}.disable_ipv6=0" >/dev/null 2>&1 || true
           iface {{ item.bridge }} inet6 manual
               accept_ra 0
@@ -749,17 +778,148 @@
           source /etc/network/interfaces.d/*
       when: kvm_capable | bool
 
-    # Bring the bridges up. ifupdown (bridge-ports) creates each bridge; the
-    # VM connects at boot and the IPv6 link-local is enough for NDP routing.
-    - name: Bring up OpenWrt bridges (ifupdown)
+    # Bring the bridges up. ifupdown creates each bridge (hwaddress applied) at
+    # boot. Here dhclient is started directly in the background - running ifup
+    # on a bridge with "inet dhcp" starts dhclient synchronously and blocks
+    # the playbook until a lease arrives (or times out), and the segment
+    # dnsmasq's Router option would add a default route. The retry timer below
+    # keeps starting dhclient until every bridge holds an IPv4 address.
+    - name: Ensure OpenWrt bridges exist and DHCP is started
       ansible.builtin.shell: |
         set -e
         for b in openwrt-lan openwrt-iot openwrt-tor openwrt-misc; do
-          ifup "$b" 2>/dev/null || true
+          ip link show "$b" >/dev/null 2>&1 || ip link add name "$b" type bridge
+          if ! ip -4 addr show "$b" 2>/dev/null | grep -q "inet "
+          then
+            kill "$(cat "/run/dhclient.$b.pid" 2>/dev/null)" 2>/dev/null || true
+            nohup /sbin/dhclient -v "$b" >/dev/null 2>&1 &
+            disown
+          fi
         done
         echo "bridges-up"
       register: ow_bridges_up
       changed_when: false
+      when: kvm_capable | bool
+
+    # Ifupdown only applies the hwaddress when the interface is (re)brought
+    # up. On a live host where the bridge already inherited the tap MAC this
+    # task forces the deterministic address immediately (see the ow_networks
+    # comment). It deliberately does NOT re-run ifup or restart dhclient here:
+    # ifup on a bridge with "inet dhcp" blocks (dhclient waits on the segment
+    # gateway router) and wedges the host. The hwaddress in the ifupdown
+    # stanza is applied on the next boot/ifup; the retry timer below re-runs
+    # the lease request for bridges that still lack an IPv4 address.
+    - name: Apply deterministic MAC to OpenWrt bridges (live MAC only)
+      ansible.builtin.shell: |
+        set -e
+        OUT="mac-ok"
+        for item in {% for n in ow_networks %}{{ n.bridge }}={{ n.mac }} {% endfor %}; do
+          f_bmac="${item%%=*}"
+          f_want="${item##*=}"
+          f_cur="$(cat /sys/class/net/${f_bmac}/address 2>/dev/null || true)"
+          if [ "$f_cur" != "$f_want" ]; then
+            ip link set "${f_bmac}" address "${f_want}"
+            OUT="mac-fixed"
+          fi
+        done
+        echo "$OUT"
+      register: ow_bridge_mac_fix
+      changed_when: ow_bridge_mac_fix.stdout == "mac-fixed"
+      when: kvm_capable | bool
+
+    # The segment dnsmasq offers the Router option (the VM gateway
+    # 172.18.x.1) in every host-bridge lease. dhclient turns that into a
+    # default route over the segment bridge, which would hijack the host's
+    # uplink traffic (a second "default via 172.18.2.1" gateway). This hook
+    # drops those default routes after every dhclient event on the bridged
+    # interfaces.
+    - name: Deploy dhclient hook to drop OpenWrt segment default routes
+      ansible.builtin.copy:
+        dest: /etc/dhcp/dhclient-exit-hooks.d/symbios-openwrt-routes
+        content: |
+          #!/bin/sh
+          # SymbiOS: OpenWrt host bridges must never carry the host's default
+          # route. The segment dnsmasq offers the Router option (the VM
+          # gateway 172.18.x.1) in every host-bridge lease; this hook deletes
+          # any default route installed via these bridges after each lease
+          # event.
+          case "$interface" in
+            openwrt-lan|openwrt-iot|openwrt-tor|openwrt-misc)
+              case "$reason" in
+                BOUND|REBIND|REBOOT|RENEW|TIMEOUT)
+                  if [ -n "$(ip route show default dev "$interface" 2>/dev/null)" ]
+                  then
+                    ip route show default dev "$interface" 2>/dev/null | while read -r f_line
+                    do
+                      # shellcheck disable=SC2086
+                      ip route del $f_line 2>/dev/null || true
+                    done
+                  fi
+                  ;;
+              esac
+              ;;
+          esac
+        owner: root
+        group: root
+        mode: "0755"
+      when: kvm_capable | bool
+
+    # ── DHCP retry for the host bridges ───────────────────────────────────
+    # The VM starts after the LUKS boot-unlock (rc.local), i.e. after
+    # ifupdown already ran its one-shot dhclient at boot. A timer re-runs
+    # ifup for every bridge that still lacks an IPv4 address; once all four
+    # segments hold a lease the script is a no-op. The script is deployed to
+    # a fixed location outside the git repo so it survives repo re-syncs.
+    - name: Deploy OpenWrt bridge DHCP retry script
+      ansible.builtin.copy:
+        src: "{{ git_root }}/scripts/symbios-ow-bridge-dhcp.sh"
+        dest: /usr/local/sbin/symbios-ow-bridge-dhcp.sh
+        owner: root
+        group: root
+        mode: "0755"
+      when: kvm_capable | bool
+
+    - name: Deploy OpenWrt bridge DHCP retry service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-ow-bridge-dhcp.service
+        content: |
+          [Unit]
+          Description=Retry DHCP on OpenWrt host bridges without an IPv4 address
+
+          [Service]
+          Type=oneshot
+          KillMode=process
+          ExecStart=/usr/local/sbin/symbios-ow-bridge-dhcp.sh
+        owner: root
+        group: root
+        mode: "0644"
+      when: kvm_capable | bool
+
+    - name: Deploy OpenWrt bridge DHCP retry timer
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-ow-bridge-dhcp.timer
+        content: |
+          [Unit]
+          Description=Retry OpenWrt host bridge DHCP every five minutes
+
+          [Timer]
+          OnBootSec=2min
+          OnUnitActiveSec=5min
+          AccuracySec=1min
+
+          [Install]
+          WantedBy=timers.target
+        owner: root
+        group: root
+        mode: "0644"
+      when: kvm_capable | bool
+
+    - name: Enable and start OpenWrt bridge DHCP retry timer
+      ansible.builtin.systemd:
+        name: symbios-ow-bridge-dhcp.timer
+        enabled: true
+        state: started
+        daemon_reload: true
       when: kvm_capable | bool
 
     # ── UFW: NAT and route forwarding ────────────────────────────────────

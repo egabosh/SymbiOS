@@ -27,10 +27,14 @@ uci set network.wan.dns={{ vm_dns }}
 
 # Internal networks - the VM is the .1 gateway on each segment.
 {% for net in ow_networks %}
-{% if net.bridge_ports is defined and net.bridge_ports %}
-# internal bridge for {{ net.uci }} (member: {{ net.bridge_ports }})
+# Always declare a device section so netifd/cfg80211 brings the interface up
+# and assigns its static IPv4/6. Without it, eth1/eth4 (no bridge) can come up
+# IPv6-only and the lan/misc dnsmasq DHCP sockets cannot bind ("Address not
+# available") - the host bridge then never gets a lease.
 uci set network.{{ net.uci }}_dev=device
 uci set network.{{ net.uci }}_dev.name={{ net.device }}
+{% if net.bridge_ports is defined and net.bridge_ports %}
+# internal bridge for {{ net.uci }} (member: {{ net.bridge_ports }})
 uci set network.{{ net.uci }}_dev.type=bridge
 uci set network.{{ net.uci }}_dev.ports={{ net.bridge_ports }}
 uci set network.{{ net.uci }}_dev.stp=0

@@ -11,8 +11,10 @@ on first boot so it behaves like the linux-setups OpenWrt router at
 to OpenWrt 25.x (apk package manager).
 
 The VM owns the `.1` / `::1` gateway on every internal segment; the host
-bridges are pure L2 (no addresses). This mirrors the linux-setups controller
-role where the OpenWrt box is the router for dedicated LAN/VLAN segments.
+bridges are L2 switches that additionally take a DHCP address from the
+segment's dnsmasq, so the host is directly reachable inside every segment.
+This mirrors the linux-setups controller role where the OpenWrt box is the
+router for dedicated LAN/VLAN segments.
 
 ## Topology
 
@@ -20,17 +22,22 @@ role where the OpenWrt box is the router for dedicated LAN/VLAN segments.
 WAN   eth0  192.168.41.201/24   base-services bridge (same L2 as Docker/Traefik)
                                     gw 192.168.41.1 (host), NAT to uplink,
                                     IPv6 GUA ::201/64 (host NDP-proxies ::1)
-LAN   eth1  172.18.0.1/24       openwrt-lan bridge (L2)   ULA fd00:18:0::/64
-IOT   br-iot (port eth2) 172.18.1.1/24   openwrt-iot bridge (L2)  ULA fd00:18:1::/64
-TOR   br-tor (port eth3) 172.18.2.1/24   openwrt-tor bridge (L2)  ULA fd00:18:2::/64
-MISC  eth4  172.18.3.1/24       openwrt-misc bridge (L2)  ULA fd00:18:3::/64
+LAN   eth1  172.18.0.1/24       openwrt-lan bridge (L2 + host DHCP)   ULA fd00:18:0::/64
+IOT   br-iot (port eth2) 172.18.1.1/24   openwrt-iot bridge (L2 + host DHCP)  ULA fd00:18:1::/64
+TOR   br-tor (port eth3) 172.18.2.1/24   openwrt-tor bridge (L2 + host DHCP)  ULA fd00:18:2::/64
+MISC  eth4  172.18.3.1/24       openwrt-misc bridge (L2 + host DHCP)  ULA fd00:18:3::/64
 ```
 
 - iot/tor are **bridged inside the VM** (`br-iot`/`br-tor` with `eth2`/`eth3` as
   bridge ports) so the OpenVPN `tap1`/`tap2` devices can be attached - the same
   layout as linux-setups. lan/misc use `eth1`/`eth4` directly.
-- Host bridges (`openwrt-lan/-iot/-tor/-misc`) are managed by ifupdown in
-  `inet manual` / `inet6 manual` mode and persist across reboots.
+- Host bridges (`openwrt-lan/-iot/-tor/-misc`) use Deterministic MACs
+  (`02:ac:00:00:00:01`-`04`) and are managed by ifupdown in
+  `inet manual` / `inet6 manual` mode and persist across reboots. The v4 DHCP
+  lease comes from the segment's dnsmasq (host presence in every segment); a
+  systemd timer (`symbios-ow-bridge-dhcp.timer`) retries the lease while the
+  VM is still down after boot. The timer unit runs with `KillMode=process` so
+  the spawned `dhclient` daemons survive the oneshot unit's exit.
 - Clients on a segment use the VM as gateway + DHCP/DNS. All DNS is hijacked:
   lan + misc go through the router's dnscrypt-proxy (+Tor), iot + tor through
   dnscrypt-proxy-max (heavier blocklists).
