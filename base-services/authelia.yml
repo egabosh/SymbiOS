@@ -345,6 +345,7 @@
               image: authelia/authelia:latest
               container_name: symbios-base-authelia
               restart: unless-stopped
+              init: true
               depends_on:
                 - redis
               networks:
