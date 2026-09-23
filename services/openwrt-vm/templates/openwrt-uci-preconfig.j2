@@ -1143,7 +1143,11 @@ nft flush chain inet fw4 dstnat_tor
 # unquoted colons inside `nft log prefix` make `fw4 reload` choke with a
 # syntax error. The IPv4/IPv6 drop prefixes below are escaped for the same
 # reason (they survive the shell-quoting inside the nft expression).
-nft add rule inet fw4 dstnat_tor iifname "br-tor" log prefix "TOR_ROUTING_DROP" drop
+# IMPORTANT: this first rule is a log-ONLY audit rule (no "drop"!). With a
+# drop terminator it terminates the chain for EVERY packet on br-tor and the
+# allow/dnat rules below never match - the tor segment then loses DHCP, DNS
+# and NTP. The real catch-all drop sits at the END of the chain.
+nft add rule inet fw4 dstnat_tor iifname "br-tor" log prefix "TOR_ROUTING_DROP"
 
 # allow DHCP
 nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol udp udp sport 68 udp dport 67 accept
