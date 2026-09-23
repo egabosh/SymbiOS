@@ -1,6 +1,24 @@
 #!/bin/bash
 # SymbiOS - List available keyboard layouts from XKB symbols directory
-# Output: one layout name per line, sorted
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+List available keyboard layouts from the XKB symbols directory for the
+WebUI (Settings -> Localization). Output: one layout name per line, sorted,
+built-in modifier/utility files filtered out. No arguments.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
 
 source /etc/bash/gaboshlib.include
 

@@ -1,24 +1,43 @@
 #!/bin/bash
 # SymbiOS - Report the top processes by CPU, memory and disk I/O usage.
-# Called by symbios-dashboard-snapshot.sh once per minute (cron). The output
-# is written to <log>/dashboard-top.json for the WebUI Health page.
-#
-# Output: one JSON document on stdout:
-# {
-#   "timestamp": "...", "interval_sec": N, "measuring_io": true|false,
-#   "cpu": [{ "pid":..., "name":"...", "cmd":"...", "cpu":<float> }],
-#   "mem": [{ "pid":..., "name":"...", "cmd":"...", "rss_mb":<float> }],
-#   "io":  [{ "pid":..., "name":"...", "cmd":"...", "read_kbs":<float>,
-#             "write_kbs":<float>, "total_kbs":<float> }]
-# }
-# The `cmd` field carries the full command line (for tooltips in the WebUI);
-# it falls back to the truncated comm name when cmdline is unavailable
-# (kernel threads, zombies, unreadable proc entries).
-#
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") [top_n]
+
+Report the top processes by CPU, memory and disk I/O usage. Called by
+symbios-dashboard-snapshot.sh once per minute (cron); the output is written
+to <log>/dashboard-top.json for the WebUI Health page.
+
+Arguments:
+  top_n       how many processes to report per category (default: 6)
+
+Output: one JSON document on stdout:
+{
+  "timestamp": "...", "interval_sec": N, "measuring_io": true|false,
+  "cpu": [{ "pid":..., "name":"...", "cmd":"...", "cpu":<float> }],
+  "mem": [{ "pid":..., "name":"...", "cmd":"...", "rss_mb":<float> }],
+  "io":  [{ "pid":..., "name":"...", "cmd":"...", "read_kbs":<float>,
+            "write_kbs":<float>, "total_kbs":<float> }]
+}
+The 'cmd' field carries the full command line (for tooltips); it falls back
+to the truncated comm name when cmdline is unavailable.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # I/O is NOT available from /proc stat; it comes from /proc/<pid>/io
-# (read_bytes/write_bytes counters). The delta against the previous sample is
-# the per-interval rate. The first run after a state reset has no baseline,
-# so the io list stays empty until the next tick.
+# (read_bytes/write_bytes counters, see README of /proc behavior). The delta
+# against the previous sample is the per-interval rate. The first run after a
+# state reset has no baseline, so the io list stays empty until the next tick.
 
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"

@@ -102,11 +102,20 @@ trap f_handle_signal INT TERM HUP
 function f_usage {
   echo "Usage: $(basename "$0") [--service <name>] [--list-services]"
   echo ""
-  echo "Runs directly on the SymbiOS host (no SSH)."
+  echo "Comprehensive service test script. Dynamically reads # docs: metadata"
+  echo "from each services/*.yml playbook and runs all defined actions"
+  echo "(install, stop, start, restart, uninstall, etc.). Also performs"
+  echo "Authelia integration tests for services that declare access groups:"
+  echo "unauth redirect, admin login, and an ephemeral test user created with a"
+  echo "random pwgen password (added to the user group -> granted, removed ->"
+  echo "denied). The test user and its group memberships are cleaned up."
+  echo ""
+  echo "Runs DIRECTLY ON the SymbiOS host (no SSH involved)."
   echo ""
   echo "Arguments:"
   echo "  --service X       Only test service X (can be repeated)"
   echo "  --list-services   List discovered services and exit (no tests)"
+  echo "  -h, --help        Show this help and exit"
   echo ""
   echo "Discovers services dynamically from services/*.yml playbook # docs: blocks."
   echo "Admin password for Authelia tests: test1234"
@@ -422,6 +431,10 @@ do
       ;;
     --list-services)
       g_list_services=1
+      ;;
+    -h|--help)
+      f_usage
+      exit 0
       ;;
     -*)
       f_usage

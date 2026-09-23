@@ -1,6 +1,30 @@
 #!/bin/bash
 # SymbiOS - Report server identity: short hostname, primary LAN IPv4 and
 # global IPv6 (GUA) address. Prints one JSON line.
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Report server identity for the WebUI: short hostname, primary LAN IPv4 and
+global IPv6 (GUA) address as one JSON line. IPv4 must be RFC1918-private,
+IPv6 must be a global unicast address (link-local fe80::/10 and ULA fc00::/7
+are ignored). No arguments.
+
+Output: {"hostname":"...","ipv4":"...","ipv6":"...",
+"source":"host-ip-file|hostname"}
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # IPv4 must be RFC1918-private, IPv6 must be a global unicast address
 # (link-local fe80::/10 and ULA fc00::/7 are ignored).
 

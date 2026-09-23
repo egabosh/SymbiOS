@@ -40,6 +40,41 @@
 #   /var/log/symbios/jobs/<id>.done    exit code, written when the command ends
 #   /var/log/symbios/jobs/<id>.pid     PID of the detached command
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <start|poll> <args...>
+
+Run a command as a detached host process whose output the WebUI can poll
+incrementally. Jobs are decoupled from the WebUI's SSH session: they run via
+'setsid', so closing the SSH channel (browser close, WebUI restart, gunicorn
+worker recycle, container restart) can never SIGHUP the long-running
+command. Job files live in /var/log/symbios/jobs/ on the root filesystem -
+never on /symbios (the disk migration swaps /symbios).
+
+  start <job-id> '<command>'   Reads stdin (passphrase / keys) into a 0600
+                               input file, starts the command detached.
+                               Prints {"ok":true,"job":"<id>"} immediately.
+  poll <job-id> <byte-offset>  Prints {"ok":true,"status":"running|done",
+                               "rc":"N","size":<bytes>,
+                               "output":"<new text since byte-offset>"}.
+
+Job files (created/owned by root):
+  /var/log/symbios/jobs/<id>.input   stdin payload (chmod 600, deleted on exit)
+  /var/log/symbios/jobs/<id>.log     stdout/stderr of the command
+  /var/log/symbios/jobs/<id>.done    exit code, written when the command ends
+  /var/log/symbios/jobs/<id>.pid     PID of the detached command
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
 
@@ -149,6 +184,9 @@ case "$g_action" in
     ;;
   poll)
     f_poll "$@"
+    ;;
+  help|-h|--help)
+    f_usage
     ;;
   *)
     f_json_error "Usage: $0 {start|poll}"

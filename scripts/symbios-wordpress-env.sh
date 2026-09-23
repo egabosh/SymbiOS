@@ -25,8 +25,33 @@
 #
 # The .env file lives in the compose project directory and is picked up
 # automatically by docker compose for variable substitution.
-#
 # Usage: symbios-wordpress-env.sh <instance> [<instance> ...]
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <instance> [<instance> ...]
+
+Ensure the WordPress shared-db .env file exists and is complete. Generates
+the root password for the shared MariaDB once and, for every instance passed
+as an argument, the database name, user and a per-instance password.
+Existing values are kept, so the file is safe to re-run any time. To rotate
+a single password, delete its line and re-run. The .env file lives in the
+compose project directory and is picked up automatically by docker compose
+for variable substitution.
+
+Arguments:
+  instance    instance name(s) as defined in the WordPress compose stack
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
 
 source /etc/bash/gaboshlib.include 1>/dev/null 2>&1 || true
 g_script_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"

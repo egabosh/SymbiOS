@@ -9,6 +9,27 @@
 # runchecks.service. A dead daemon cannot report its own death, hence this
 # external check.
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Watchdog for the runchecks health daemon. Runs independently via the
+runchecks-watchdog.timer: if the runchecks results JSON is missing,
+unparsable or older than g_max_age seconds (3 x 5 min loop interval plus
+jitter), it starts/restarts runchecks.service. A dead daemon cannot report
+its own death, hence this external check. No arguments.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Source gaboshlib and set up environment
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"

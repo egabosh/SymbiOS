@@ -31,6 +31,37 @@
 # the snapshot (protected excludes keep docker internals and the local
 # backup store intact), restarts Docker and reapplies all playbooks.
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <plan|restore> <YYYY-MM-DD> [<service>|--full] [--yes]
+
+Restore snapshots created by symbios-backup.sh.
+
+  plan <YYYY-MM-DD> [<service>|--full]
+      Show (as JSON) what a restore would do - no changes are made.
+  restore <YYYY-MM-DD> [<service>|--full] [--yes]
+      Perform the restore. Without --yes nothing is executed (safety).
+
+Service restore: stops the affected docker compose stack(s), restores their
+directories (services/<name> and/or base-services/<name>) from the snapshot,
+re-imports matching database dumps found in the snapshot and starts the
+stack(s) again.
+
+Full restore: stops Docker, restores the whole /symbios data root from the
+snapshot (protected excludes keep docker internals and the local backup
+store intact), restarts Docker and reapplies all playbooks.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Load gaboshlib and the SymbIOS libs.
 # The plan action prints JSON on stdout: skip the gaboshlib stdout/stderr FIFO
 # redirection (g_all-to-syslog) so the output stays machine-parseable. The

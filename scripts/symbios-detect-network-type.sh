@@ -1,5 +1,31 @@
 #!/bin/bash
 # SymbiOS - Detect the server connection type: 'home' (behind a router/NAT),
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Detect the server connection type for the setup assistant: 'home' (behind a
+router/NAT), 'root' (own public IP) or 'airgapped' (enterprise intranet
+without direct internet access). Prints one JSON line with the detection
+result and a short reason. Only the interface of the default route is
+considered - Docker bridges and other secondary interfaces must not
+influence the result.
+
+Output: {"network_type":"...","reason":"...","ipv4":"...","gateway":"...",
+"online":"yes|"}
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # 'root' (own public IP) or 'airgapped' (enterprise intranet without direct
 # internet access). Prints one JSON line with the detection result and a short
 # reason so the setup assistant can pre-select the option.

@@ -1,6 +1,30 @@
 #!/bin/bash
 # SymbiOS - Run an Ansible playbook with standard flags
-# Usage: symbios-run-playbook.sh <playbook_path>
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <playbook_path>
+
+Run an Ansible playbook with the standard SymbiOS flags
+(--connection=local, --limit localhost, inventory from the WebUI config).
+On success the playbook output is streamed to stdout; on failure a JSON
+error is printed to stderr.
+
+Arguments:
+  <playbook_path>   path relative to the SymbiOS repo
+                    (e.g. base-services/smtp.yml) or absolute
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # The playbook_path is relative to the SymbiOS repo (e.g. base-services/smtp.yml)
 
 source /etc/bash/gaboshlib.include

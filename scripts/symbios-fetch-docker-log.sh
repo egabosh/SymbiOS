@@ -1,6 +1,29 @@
 #!/bin/bash
 # SymbiOS - Fetch Docker container logs with total count in one SSH roundtrip
-# Usage: symbios-fetch-docker-log.sh <container_id> [offset] [limit]
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <container_id> [offset] [limit]
+
+Fetch a Docker container's JSON log in one SSH roundtrip. Output: first line
+= total entry count, remaining lines = the extracted log messages.
+
+Arguments:
+  container_id  container ID (hex string, must be [a-f0-9]+)
+  offset        entry offset to start reading from (default: 0)
+  limit         maximum number of entries to return (default: 500)
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Output: first line = total count, remaining lines = extracted log messages
 
 source /etc/bash/gaboshlib.include

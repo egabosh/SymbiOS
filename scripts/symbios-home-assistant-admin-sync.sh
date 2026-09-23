@@ -8,6 +8,29 @@
 #
 # Runs from the LDAP group-change hook system (/symbios/ldap-groups.d/).
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Sync Home Assistant admin rights from the LDAP group home-assistant-admins.
+Home Assistant's hass-oidc-auth component only evaluates the role on user
+creation (async_user_meta_for_credentials is called only in
+async_create_user), so once a user is created with system-users, later LDAP
+group changes are never reflected. This script reconciles the HA auth
+storage with LDAP group membership directly. Runs from the LDAP group-change
+hook system (/symbios/ldap-groups.d/) and from services/home-assistant.yml.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 g_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f /etc/bash/gaboshlib.include ]]
 then

@@ -32,6 +32,37 @@
 # Load gaboshlib (g_echo*, g_backup, g_lockfile, ...) and the SymbiOS libs.
 # Passphrase subcommands print JSON on stdout: skip the gaboshlib stdout/stderr
 # FIFO redirection (g_all-to-syslog) so the output stays machine-parseable.
+
+function f_usage {
+  echo "Usage: $(basename "$0") [command]"
+  echo ""
+  echo "SymbiOS main backup engine. Backs up the whole data root (/symbios -"
+  echo "configuration, services, docker volumes and the pre-run database dumps"
+  echo "from backup.d/) as a daily, hardlink-based snapshot:"
+  echo "  - No backup server configured  : local snapshot below /symbios/backup"
+  echo "  - Server configured            : rsync snapshot over SSH/SFTP"
+  echo "  - Server + encryption          : openssl-encrypted daily archive pushed"
+  echo "                                   over SSH (at-rest encrypted on target)"
+  echo ""
+  echo "Called by scripts/backup.sh (cron /etc/cron.d/backup_local, nightly 00:05)."
+  echo "Status is written to <log>/backup-status.json for the WebUI."
+  echo ""
+  echo "Commands:"
+  echo "  gen-passphrase    Ensure the backup encryption passphrase file exists"
+  echo "                    and print it as JSON (never overwrites an existing)"
+  echo "  get-passphrase    Print the current backup passphrase as JSON"
+  echo "  help              Show this help"
+  echo ""
+  echo "Options:"
+  echo "  -h, --help        Show this help and exit"
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]
+then
+  f_usage
+  exit 0
+fi
+
 [[ "${1:-}" == "gen-passphrase" || "${1:-}" == "get-passphrase" ]] && g_alltosyslog=1
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"

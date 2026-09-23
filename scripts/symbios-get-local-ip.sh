@@ -1,6 +1,26 @@
 #!/bin/bash
 # SymbiOS - Get local IPv4 address (RFC1918 private range)
-# Checks .host-ip file first (written by host cron), falls back to hostname -I
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Get the local IPv4 address (RFC1918 private range). Checks the .host-ip file
+first (written by the host cron snapshot job), falls back to 'hostname -I'.
+Prints the plain address on stdout. No arguments.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
+# Checks the .host-ip file first (written by host cron), falls back to hostname -I
 
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"

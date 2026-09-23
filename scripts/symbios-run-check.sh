@@ -1,10 +1,32 @@
 #!/bin/bash
 # SymbiOS - Run a single health check and output JSON result.
 # Used by the WebUI to allow on-demand re-checking of individual checks.
-#
-# Usage: symbios-run-check.sh <check-name>
-#   <check-name>   The check name as shown in the health UI (e.g. "df", "ssl", "containers")
-#
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <check-name>
+
+Run a single health check and output the JSON result. Used by the WebUI to
+allow on-demand re-checking of individual checks.
+
+Arguments:
+  <check-name>   The check name as shown in the health UI
+                 (e.g. "df", "ssl", "containers")
+
+Output: JSON on stdout with fields: name, status, message, title, desc,
+detail, category, script.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Output: JSON on stdout with fields: name, status, message, title, desc, detail, category, script
 
 source /etc/bash/gaboshlib.include

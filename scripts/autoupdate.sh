@@ -1,12 +1,38 @@
 #!/bin/bash
 
 # SymbiOS autoupdate dispatcher - runs all .update scripts from autoupdate.d/
-#
-# Optional arguments limit the run to single modules (basename without the
-# .update suffix), e.g.:
-#   autoupdate.sh                  # run everything (cron default)
-#   autoupdate.sh debian           # only the operating system module
-#   autoupdate.sh docker symbios   # only Docker apps and SymbiOS itself
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") [module ...]
+
+SymbiOS autoupdate dispatcher. Runs all .update scripts from autoupdate.d/
+without arguments (the cron default) or only the named modules. Module names
+are the basenames without the .update suffix.
+
+Modules:
+  debian              operating system packages (unattended upgrades)
+  docker              Docker images and running containers
+  btrfs-scrub         Btrfs scrub health
+  smart-selftest      SMART disk self-tests
+  symbios             SymbiOS repo update + changed playbooks
+
+Options:
+  -h, --help          Show this help and exit
+
+Examples:
+  $(basename "$0")                 # run everything (cron default)
+  $(basename "$0") debian          # only the operating system module
+  $(basename "$0") docker symbios  # only Docker apps and SymbiOS itself
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"

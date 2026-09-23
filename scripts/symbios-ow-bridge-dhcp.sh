@@ -1,6 +1,32 @@
 #!/usr/bin/env bash
 # symbios-ow-bridge-dhcp.sh - maintain a DHCP lease on the OpenWrt host
-# bridges. The OpenWrt VM (the per-segment dnsmasq/DHCP server) only starts
+# bridges (see f_usage below).
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Maintain a DHCP lease on the OpenWrt host bridges. The OpenWrt VM (the
+per-segment dnsmasq/DHCP server) only starts after the LUKS boot-unlock via
+rc.local, i.e. after ifupdown already ran. This script is driven by the
+symbios-ow-bridge-dhcp.timer (every 5 minutes): it starts dhclient on every
+bridge without a lease and is a no-op once all segments hold one (and while
+a client is already running). No arguments.
+
+Operates on the bridges: openwrt-lan openwrt-iot openwrt-tor openwrt-misc.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
+# The OpenWrt VM (the per-segment dnsmasq/DHCP server) only starts
 # after the LUKS boot-unlock via rc.local, i.e. after ifupdown already ran.
 # This script is driven by the symbios-ow-bridge-dhcp.timer (every 5
 # minutes): it starts dhclient on every bridge without a lease and is a no-op

@@ -2,7 +2,34 @@
 # SymbiOS - Capture Docker container statistics into a machine-readable JSON
 # snapshot (dashboard-docker.json). Called once per minute by
 # symbios-dashboard-snapshot.sh (cron) so the WebUI never runs docker itself.
-#
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") [timeout]
+
+Capture Docker container statistics into a machine-readable JSON snapshot
+(dashboard-docker.json) for the WebUI Health page. Called once per minute by
+symbios-dashboard-snapshot.sh (cron).
+
+Arguments:
+  timeout     seconds before the 'docker stats' call is aborted (default: 30)
+
+Output: one JSON document on stdout with the timestamp and a 'containers'
+array (name, id, cpu_percent, mem_percent, mem_used_mb, mem_limit_mb,
+net_rx_mb, net_tx_mb, block_read_mb, block_write_mb, pids), sorted by memory
+percentage descending.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Output: one JSON document on stdout:
 # {
 #   "timestamp": "...",
