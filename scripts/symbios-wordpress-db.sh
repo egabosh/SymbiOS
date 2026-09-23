@@ -23,8 +23,32 @@
 # creates DATABASE + USER per instance. All statements are idempotent, so the
 # script is safe to re-run (e.g. to add a new instance). The database is
 # utf8mb4/utf8mb4_unicode_ci to support full UTF-8 content.
-#
 # Usage: symbios-wordpress-db.sh <instance> [<instance> ...]
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <instance> [<instance> ...]
+
+Provision databases and users for WordPress instances on the shared MariaDB.
+Reads the credentials from the wordpress .env file (see
+symbios-wordpress-env.sh), waits for MariaDB to accept connections and then
+creates DATABASE + USER per instance. All statements are idempotent, so the
+script is safe to re-run (e.g. to add a new instance). The database is
+utf8mb4/utf8mb4_unicode_ci to support full UTF-8 content.
+
+Arguments:
+  instance    instance name(s) as defined in the WordPress compose stack
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
 
 source /etc/bash/gaboshlib.include 1>/dev/null 2>&1 || true
 g_script_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"

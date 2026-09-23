@@ -60,6 +60,40 @@
 #
 # The playbook-path is relative to the git root, e.g. "services/jellyfin.yml".
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <playbook-path> <mode>
+
+Uninstall a SymbiOS service. Reads the # docs: block from the playbook via
+yq and performs the uninstall according to the selected mode.
+
+Modes:
+  full     Uninstall: stop containers (removing their images), run the
+           optional docs.uninstall.commands cleanup list, delete the whole
+           service dir plus program_paths and userdata_paths (recursive)
+           and clear the state entry.
+  program  Uninstall (keep data): stop containers (removing their images),
+           delete program_paths (Traefik provider, healthcheck, ...) while
+           keeping the service dir completely intact - compose file and all
+           data survive - and clear the state entry.
+  reset    Delete Userdata: stop containers (images are kept), wipe the
+           service dir plus userdata_paths and re-run the playbook so the
+           service comes back freshly provisioned. The state entry stays.
+
+Template variables {{ ansible_facts['hostname'] }}, {{ ansible_hostname }}
+and {{ base_domain }} are expanded in paths and commands.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 source /etc/bash/gaboshlib.include 2>/dev/null || true
 g_script_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_script_dir/symbios-lib.sh"

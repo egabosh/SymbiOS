@@ -1,8 +1,27 @@
 #!/bin/bash
 # SymbiOS - Router detection via UPnP (pure bash, no python)
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Probe the default gateway for UPnP IGD, extract the manufacturer/model from
+its device description and classify it as 'fritzbox' or 'generic_upnp'.
+Outputs JSON to stdout. No arguments.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Probes default gateway for UPnP IGD, extracts manufacturer/model,
-# and classifies as fritzbox or generic_upnp.
-# Outputs JSON to stdout.
+# and classifies as fritzbox or generic_upnp. Outputs JSON to stdout.
 
 SCRIPT_NAME="$(basename "$0")"
 BASE_PORT=49000

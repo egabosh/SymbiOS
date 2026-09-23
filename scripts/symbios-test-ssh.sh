@@ -1,6 +1,31 @@
 #!/bin/bash
 # SymbiOS - Test SSH connectivity to a remote server
-# Usage: symbios-test-ssh.sh <host> <port> <user> [path]
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <host> <port> <user> [path]
+
+Test SSH connectivity to a remote server (used by the WebUI backup and
+service pages with the symbios exec-gateway key). Output: JSON with
+ok/message or error.
+
+Arguments:
+  host      remote host (hostname or IP)
+  port      SSH port (default: 22 when empty)
+  user      SSH user (default: root)
+  path      optional remote path to test (SFTP read test)
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Output: JSON with ok, message/error
 
 source /etc/bash/gaboshlib.include

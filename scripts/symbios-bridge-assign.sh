@@ -1,9 +1,31 @@
 #!/bin/bash
 # SymbiOS - Apply interface-to-bridge assignments and persist them across
 # reboots in /etc/rc.local.
-#
-# Usage: echo '{"wlan0":"br-lan","eth1":"br-lan"}' | symbios-bridge-assign.sh
-#
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Apply interface-to-bridge assignments and persist them across reboots in
+/etc/rc.local. Reads a JSON dict (interface -> bridge) from stdin, applies
+it immediately with \`ip link set ... master ...\`, releases interfaces that
+were dropped, and regenerates the rc.local boot block. Without stdin (e.g.
+a playbook reapply) the assignments from inventory.yml are re-applied.
+
+Input example:
+  echo '{"wlan0":"br-lan","eth1":"br-lan"}' | $(basename "$0")
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Reads a JSON dict (interface -> bridge) from stdin, applies it immediately
 # with `ip link set ... master ...`, releases interfaces that were dropped,
 # and regenerates the rc.local boot block (markers below) so the assignments

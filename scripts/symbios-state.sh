@@ -42,13 +42,20 @@ fi
 
 function f_usage {
   cat << EOF
-Usage: symbios-state.sh <command> [argument]
+Usage: $(basename "$0") <command> [argument]
+
+Manage the installed-playbooks state file (<config>/installed-playbooks.yml).
+Each playbook registers itself via this script so the reapply script knows
+which playbooks to re-run.
 
 Commands:
   set <playbook>       Register playbook as installed
   unset <playbook>     Remove playbook from installed list
   list                 Print installed playbooks (one per line, just paths)
   is-installed <path>  Check if playbook is installed (exit 0/1)
+
+Options:
+  -h, --help          Show this help and exit
 EOF
 }
 
@@ -110,6 +117,9 @@ case "${1:-}" in
     ;;
   is-installed)
     f_is_installed "$2"
+    ;;
+  help|-h|--help)
+    f_usage
     ;;
   *)
     f_usage

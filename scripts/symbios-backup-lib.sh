@@ -33,6 +33,49 @@
 #   rsync mode (g_backup):  <dest>/<hostname>/backup-YYYY-MM-DD/symbios/...
 #   archive mode:           <dest>/<hostname>/symbios-YYYY-MM-DD.tar.gz.enc
 
+# ---------------------------------------------------------------------------
+# Direct invocation (not sourced): this is a library, so running it directly
+# only makes sense to read its documentation. The guard (BASH_SOURCE == $0)
+# prevents the usage block from triggering when a caller script is itself
+# invoked with --help.
+# ---------------------------------------------------------------------------
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]
+then
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+  then
+    cat << EOF
+$(basename "$0") - Shared helpers for the SymbiOS backup/restore scripts.
+
+This is a library and must be sourced after symbios-lib.sh:
+  source symbios-lib.sh
+  source symbios-backup-lib.sh
+
+Used by symbios-backup.sh, symbios-backup-list.sh and symbios-restore.sh.
+Reads all backup settings from inventory.yml into g_bk_* globals and
+provides the helper functions f_bk_read_vars, f_bk_is_remote,
+f_bk_ssh_opts, f_bk_rsh, f_bk_write_excludes, f_bk_excludes_for_tar,
+f_bk_list_local_dates, f_bk_dates_from_archive_names, f_bk_resolve_source,
+f_bk_remove_local_entry and f_bk_is_monthly_alias (among others).
+
+Configuration (inventory.yml, all.vars):
+  backup_server_host / backup_server_port / backup_server_user /
+  backup_server_path   remote target (empty host = local backups only)
+  backup_encryption    true = encrypt remote archives (openssl aes-256-cbc)
+  backup_exclude       list of extra rsync exclude patterns
+  backup_keep_daily / backup_keep_weekly / backup_keep_monthly
+                       local snapshot retention (grandfather-father-son)
+  backup_min_free_gb / backup_min_free_percent
+                       disk guard: abort before the disk fills up
+
+Options:
+  -h, --help  Show this help and exit
+EOF
+    exit 0
+  fi
+  echo "$(basename "$0") is a library and cannot be run directly - source it instead." >&2
+  exit 1
+fi
+
 # Retention policy for remote encrypted archives AND local snapshots
 # (grandfather-father-son): keep the last N dailies, N Monday-weeklies and
 # N month-starts, prune everything older.

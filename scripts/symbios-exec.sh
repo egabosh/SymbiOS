@@ -24,6 +24,30 @@
 # metadata, so no host-side parsing or verb dispatch remains.
 # Logging uses the gaboshlib helpers (g_logger -> syslog, g_echo_error).
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <command>
+
+SymbiOS Remote Execution gateway - pure executor + audit logger. The WebUI
+resolves every high-level verb into a concrete command and sends it
+(shell-quoted) over SSH; this script only audit-logs the invocation and runs
+it via 'exec bash -c'. Invoked without a command it prints "interactive"
+(an interactive shell was requested).
+
+Arguments:
+  <command>   the shell command to audit-log and execute
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Load shared bash helpers (g_echo_error, g_logger, ...).
 # Redirect to stderr so helper messages don't corrupt JSON output on stdout.
 source /etc/bash/gaboshlib.include 1>&2

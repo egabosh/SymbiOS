@@ -1,4 +1,26 @@
 #!/bin/bash
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Grade the current TLS certificate of every configured Traefik HTTPS service
+against the Qualys SSL Labs API (ssllabs-scan). Builds ssllabs-scan from
+source on first run, resolves the public services from the Traefik
+provider config and submits each host to the API queue. No arguments; kicks
+off long-running background scans.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"

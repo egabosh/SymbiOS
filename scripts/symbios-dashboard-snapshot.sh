@@ -18,6 +18,34 @@
 # The WebUI reads these files ("/log" volume mount) and no longer invokes the
 # underlying scripts on demand.
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Refresh the dashboard snapshot files so the WebUI can render the dashboard
+without ever blocking on a live command via SSH. Deployed as a minutely cron
+job (/etc/cron.d/symbios-dashboard-snapshot); the lockfile guards against
+overlap. No arguments.
+
+Writes:
+  <log>/dashboard-stats.json       host stats (symbios-system-stats.sh)
+  <log>/dashboard-network.json     LAN scan (symbios-network-scan.sh)
+  <log>/dashboard-top.json         top processes (symbios-top-procs.sh)
+  <log>/dashboard-docker.json      docker stats (symbios-docker-stats.sh)
+  <log>/dashboard-history-YYYYMMDD.jsonl   per-minute combined history
+                                 (files older than 7 days are pruned)
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"

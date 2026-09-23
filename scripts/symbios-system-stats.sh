@@ -1,5 +1,26 @@
 #!/bin/bash
 # SymbiOS - Report host system statistics for the dashboard WebUI.
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Report host system statistics for the dashboard WebUI. Output: one JSON line
+with CPU %, load average, memory, swap, uptime and disk I/O (read/write
+throughput and %util), sampled over 1 second. Pure /proc based - no sysstat
+or any other package is required. No arguments.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Output: one JSON line with CPU %, load average, memory, swap, uptime and
 # disk I/O (read/write throughput and %util) sampled over 1 second.
 # Pure /proc based - no sysstat or any other package is required.

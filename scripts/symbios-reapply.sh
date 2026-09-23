@@ -27,6 +27,33 @@
 #   symbios-reapply.sh --only <pb1> <pb2> ...             # re-run only specific playbooks (must be installed)
 #   symbios-reapply.sh --only --force <pb1> <pb2> ...     # same, but skip install check
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") [--only <pb1> <pb2> ...] [--force]
+
+Re-run installed playbooks. Reads the state file managed by symbios-state.sh
+and re-executes every registered playbook. Designed to run in the
+background (nohup) so the WebUI does not block. Logs to <log>/reapply.log.
+
+Options:
+  --only <pb1> <pb2> ...    re-run only the given playbooks (must be
+                            installed, unless --force is given)
+  --force                   with --only: skip the installed-state check
+  -h, --help                Show this help and exit
+
+Examples:
+  $(basename "$0")                              # full reapply
+  $(basename "$0") --only base-services/traefik.yml
+  $(basename "$0") --force --only services/myservice.yml
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"

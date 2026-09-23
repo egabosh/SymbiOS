@@ -18,6 +18,28 @@
 # WebUI (Settings -> Backup). Merges local snapshot dates and - if a backup
 # server is configured - remote dates / encrypted archive dates.
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+List available backup snapshots as JSON for the WebUI (Settings -> Backup).
+Merges local snapshot dates and, if a backup server is configured, remote
+dates / encrypted archive dates. No arguments.
+
+Output JSON: {"ok":true,"mode":"local|remote|remote-encrypted","host":...,
+"path":...,"snapshots":[...],"services":[...],"warning":...,"pubkey":...}
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Pure query script printing JSON: skip the gaboshlib stdout/stderr FIFO
 # redirection (g_all-to-syslog) so the output stays machine-parseable.
 g_alltosyslog=1

@@ -19,6 +19,11 @@ g_desec_base="https://desec.io/api/v1"
 
 function f_usage {
   echo "Usage:"
+  echo "  $(basename "$0") <command> [args...]"
+  echo ""
+  echo "deSEC account registration and API token / domain management."
+  echo ""
+  echo "Commands:"
   echo "  $0 captcha"
   echo "  $0 register <email> <password> [domain]"
   echo "  $0 register-with-captcha <email> <password> <captcha_id> <captcha_solution> [domain]"
@@ -27,7 +32,11 @@ function f_usage {
   echo "  $0 create-domain <token> <domain>"
   echo "  $0 setup <email> <password> [domain]"
   echo "  $0 activate <code> [captcha_id captcha_solution]"
-  echo "  $0 check-activation <email> <password>"
+echo "  $0 check-activation <email> <password>"
+  echo "  help                          Show this help"
+  echo ""
+  echo "Options:"
+  echo "  -h, --help        Show this help and exit"
 }
 
 function f_request {
@@ -373,6 +382,9 @@ case "${g_action}" in
     ;;
   setup)
     f_setup "$1" "$2" "$3"
+    ;;
+  help|-h|--help)
+    f_usage
     ;;
   *)
     f_usage

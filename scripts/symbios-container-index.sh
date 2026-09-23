@@ -1,5 +1,26 @@
 #!/bin/bash
 # Index file storing Docker container information
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Refresh the Docker container index file <log>/docker-containers.tsv with the
+current container list (id and name per line) and grant the WebUI container
+(uid 10000) ACL read access to the container logs. Called by the WebUI on
+demand; no arguments.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
 g_index_file="${g_log_dir}/docker-containers.tsv"

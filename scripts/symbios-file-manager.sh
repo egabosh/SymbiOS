@@ -196,6 +196,46 @@ function f_usage {
   f_json_error "Usage: $0 $1"
 }
 
+# f_usage_full: human-readable help for -h/--help (plain text, exit 0).
+function f_usage_full {
+  cat << EOF
+Usage: $(basename "$0") <action> [paths...]
+
+Secure file manager for the WebUI. All paths are restricted to the SymbiOS
+data root (allowed prefixes are /symbios and /etc/symbios). Provides
+read/write/edit/upload/management operations that a normal container
+cannot perform through volume mounts alone. Every action returns JSON.
+
+Actions:
+  list <dir>                  list directory entries
+  stat <path>                 stat a single file/dir
+  read <file>                 read a file's contents
+  download <dir>              return archive download metadata for a dir
+  write <file> <content>      write a file (creates parent dirs, 0644)
+  upload <dir>                start an upload (returns upload_id)
+  upload-start/-part/-finish/-abort <upload_id> ...
+                              chunked upload protocol
+  mkdir <dir>                 create a directory (0755)
+  delete <paths...>           delete files/dirs (recursively)
+  rename <src> <dst>          rename/move a file or dir
+  move <src> <dst>            move a file or dir
+  copy <src> <dst>            copy a file or dir
+  chmod <mode> <paths...>     change permissions
+  chown <user:group> <paths...>  change ownership
+  users                       list user/group names for chown dropdown
+  run-script <template> <paths...>  run user-provided bash per path
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]
+then
+  f_usage_full
+  exit 0
+fi
+
 
 # ------------------------------------------------------------------ actions
 
@@ -470,6 +510,9 @@ case "$g_action" in
   chown)   f_chown "$@" ;;
   users)   f_users ;;
   run-script) f_run_script "$@" ;;
+  help|-h|--help)
+    f_usage_full
+    ;;
   *)
     f_usage "list|stat|read|download|write|upload|upload-start|upload-part|upload-finish|upload-abort|mkdir|delete|rename|move|copy|chmod|chown|users|run-script"
     ;;

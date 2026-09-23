@@ -1,12 +1,33 @@
 #!/bin/bash
 # symbios-feature-detect.sh - Generic feature parameter detection for SymbiOS.
-#
-# Reads plugin.yml to find the detect script for a given feature parameter,
-# then runs it and outputs JSON (array of {value, label} objects).
-#
-# Usage: symbios-feature-detect.sh <service> <feature> <param>
-#
-# Exit codes: 0 = success, 1 = usage/config error.
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <service> <feature> <param>
+
+Generic feature parameter detection for SymbiOS. Reads plugin.yml to find
+the detect script for a given feature parameter, runs it, and outputs JSON
+(an array of {value, label} objects used to populate select/multi-select
+params in the WebUI).
+
+Arguments:
+  service     service name (directory under <git_root>/services/)
+  feature     feature id from plugin.yml
+  param       parameter name from plugin.yml
+
+Exit codes: 0 = success, 1 = usage/config error.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 . /etc/bash/gaboshlib.include
 source symbios-lib.sh
 
@@ -16,7 +37,7 @@ PARAM="$3"
 
 if [[ -z "$SERVICE" ]] || [[ -z "$FEATURE" ]] || [[ -z "$PARAM" ]]
 then
-  echo "Usage: $0 <service> <feature> <param>"
+  f_usage
   exit 1
 fi
 

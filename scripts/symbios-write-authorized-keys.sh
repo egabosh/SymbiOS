@@ -1,6 +1,29 @@
 #!/bin/bash
 # SymbiOS - Write SSH authorized_keys from stdin
-# Usage: echo "key1\nkey2" | symbios-write-authorized-keys.sh
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Write /root/.ssh/authorized_keys from stdin. Reads the list of SSH public
+keys from stdin and replaces the existing keys, always preserving the
+symbios-base-webui exec-gateway key. Called by the WebUI for SSH key
+management.
+
+Example:
+  printf '%s\n' "ssh-ed25519 AAAA... user@host" | $(basename "$0")
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Reads keys from stdin and writes to /root/.ssh/authorized_keys
 # Always preserves the symbios-base-webui exec-gateway key.
 

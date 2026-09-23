@@ -10,6 +10,29 @@
 # Runs from cron (/etc/cron.d/symbios-nextcloud-sync) and from
 # services/nextcloud.yml (nextcloud.init.sh).
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Sync Nextcloud admin rights from the LDAP group nextcloud-admins.
+ldapAdminGroup only promotes users logging in through the user_ldap backend;
+accounts provisioned via OIDC are never promoted. This script reconciles the
+internal Nextcloud "admin" group with LDAP group membership instead. Local
+users (e.g. ncadmin) are never touched, only accounts that exist as
+posixAccount in LDAP. Runs from cron (/etc/cron.d/symbios-nextcloud-sync)
+and from services/nextcloud.yml (nextcloud.init.sh). No arguments.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Source shared libraries (absolute paths so cron works without profile PATH)
 g_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f /etc/bash/gaboshlib.include ]]

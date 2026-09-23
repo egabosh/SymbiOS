@@ -32,6 +32,39 @@
 #
 # State file for rollback: /symbios/.symbios-data-migration.state
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <action> [args...]
+
+Manage the /symbios data partition (create, encrypt, mount, rollback). The
+/symbios data root holds all SymbiOS data (git repo, docker stacks,
+docker/containerd data dirs, homes, backups). Moving it to a separate
+(optionally LUKS-encrypted) disk keeps sensitive data off the root FS.
+
+Actions:
+  list                          List block devices (JSON)
+  status                        Show /symbios mount + LUKS status (JSON)
+  setup <device> [encrypt=yes] [password-file=path]
+                                Migrate /symbios to a new disk
+  rollback                      Undo the last migration, restore original
+                                /symbios (unmounts /symbios, closes LUKS)
+  change-password <current-pw-file> <new-pw-file>
+                                Change the LUKS passphrase
+  help                          Show this help
+
+State file for rollback: /symbios/.symbios-data-migration.state
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]
+then
+  f_usage
+  exit 0
+fi
+
 set -euo pipefail
 
 # Labels used when creating LUKS partition and ext4 data filesystem.
@@ -592,8 +625,12 @@ EOF
     f_json_ok '"message":"LUKS passphrase changed successfully."'
     ;;
 
+  help|-h|--help)
+    f_usage
+    ;;
+
   *)
-    f_json_error "Usage: $0 {list|status|setup|rollback||change-password}"
+    f_json_error "Usage: $0 {list|status|setup|rollback|change-password}"
     ;;
   esac
 }

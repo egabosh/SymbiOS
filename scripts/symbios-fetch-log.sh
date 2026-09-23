@@ -1,6 +1,29 @@
 #!/bin/bash
 # SymbiOS - Fetch system log with line count in one SSH roundtrip
-# Usage: symbios-fetch-log.sh <path> [offset] [limit]
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <path> [offset] [limit]
+
+Fetch a system log in one SSH roundtrip. Output: first line = total line
+count, remaining lines = log content slice.
+
+Arguments:
+  path        absolute path of the log file to read
+  offset      line offset to start reading from (default: 0)
+  limit       maximum number of lines to return (default: 500)
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Output: first line = total count, remaining lines = log content
 
 source /etc/bash/gaboshlib.include

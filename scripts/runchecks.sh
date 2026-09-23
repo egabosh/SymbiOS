@@ -1,5 +1,25 @@
 #!/bin/bash
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+SymbiOS health daemon (normally started via runchecks.service). Runs
+continuously: every 5 minutes it executes all runchecks.d/*.check scripts
+and writes the combined JSON result to <log>/runchecks-results.json, which
+the WebUI reads for the sidebar status and the Health page.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Source gaboshlib and set up environment
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"

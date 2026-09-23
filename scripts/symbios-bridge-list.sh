@@ -1,5 +1,30 @@
 #!/bin/bash
 # SymbiOS - List Linux bridges and physical interfaces for the WebUI
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+List Linux bridges and the physical interfaces they can be assigned to for
+the WebUI (Settings -> Network Bridges). Output: JSON with the bridges a
+physical interface can be assigned to, the currently visible physical
+interfaces, and the stored assignments. No arguments.
+
+Docker/bridge-utils (br-*, docker*) and SymbiOS service networks
+(symbios_base_services, symbios_services, base-services, services) are
+excluded so they cannot be dumbly overwritten.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Output: JSON with the bridges a physical interface can be assigned to and
 # the physical interfaces currently visible, plus the stored assignments.
 #

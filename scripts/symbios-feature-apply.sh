@@ -1,13 +1,32 @@
 #!/bin/bash
 # symbios-feature-apply.sh - Generic feature executor for SymbiOS services.
-#
-# Reads plugin.yml (manifest) and features-state.yml (current state) from the
-# service directory, maps WebUI parameters to Ansible extra-vars using the
-# param_mapping defined in plugin.yml, then runs the target playbook.
-#
-# Usage: symbios-feature-apply.sh <service> <feature>
-#
-# Exit codes: 0 = success, 1 = usage/config error, 2 = playbook failure.
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") <service> <feature>
+
+Generic feature executor for SymbiOS services. Reads plugin.yml (manifest)
+and features-state.yml (current state) from the service directory, maps
+WebUI parameters to Ansible extra-vars using the param_mapping defined in
+plugin.yml, then runs the target playbook.
+
+Arguments:
+  service     service name (directory under <git_root>/services/)
+  feature     feature id from plugin.yml
+
+Exit codes: 0 = success, 1 = usage/config error, 2 = playbook failure.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 . /etc/bash/gaboshlib.include
 source symbios-lib.sh
 
@@ -16,7 +35,7 @@ FEATURE="$2"
 
 if [[ -z "$SERVICE" ]] || [[ -z "$FEATURE" ]]
 then
-  echo "Usage: $0 <service> <feature>"
+  f_usage
   exit 1
 fi
 

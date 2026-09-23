@@ -15,8 +15,24 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# Restart all Docker Compose services cleanly after boot.
-# Runs as a systemd oneshot at the end of the boot process.
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Restart all Docker Compose services cleanly after boot. Runs as a systemd
+oneshot at the end of the boot process (symbios-restart-docker-services).
+No arguments.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
 
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"

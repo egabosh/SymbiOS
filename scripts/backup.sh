@@ -1,13 +1,31 @@
 #!/bin/bash
 
 # SymbiOS backup dispatcher - nightly entry point (cron /etc/cron.d/backup_local).
-#
-# 1. Runs all *.backup modules from backup.d/ (pre-run dumps: LDAP export,
-#    MySQL/MariaDB/PostgreSQL dumps). The dumps land in ${backup_root}
-#    (= /symbios/backups) and are therefore part of every snapshot.
-# 2. Runs symbios-backup.sh which creates the daily main snapshot of the
-#    whole data root (/symbios): locally below /symbios/backup or on a
-#    remote SSH/SFTP server (optionally encrypted).
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+SymbiOS backup dispatcher. No arguments - this is the nightly cron entry point.
+
+  1. Runs all *.backup modules from backup.d/ (pre-run dumps: LDAP export,
+     MySQL/MariaDB/PostgreSQL dumps). The dumps land in \${backup_root}
+     (= /symbios/backups) and are therefore part of every snapshot.
+  2. Runs symbios-backup.sh which creates the daily main snapshot of the
+     whole data root (/symbios): locally below /symbios/backup or on a
+     remote SSH/SFTP server (optionally encrypted).
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"

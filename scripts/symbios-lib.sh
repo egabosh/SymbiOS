@@ -59,6 +59,52 @@
 # data partition is mounted (symbios-boot-unlock/*, symbios-data-partition.sh).
 # Those scripts hardcode their paths by design.
 
+# ---------------------------------------------------------------------------
+# Direct invocation (not sourced): this is a library, so running it directly
+# only makes sense to read its documentation. All SymbiOS scripts source this
+# file; the guard (BASH_SOURCE == $0) prevents the usage block from triggering
+# when a caller script is itself invoked with --help.
+# ---------------------------------------------------------------------------
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]
+then
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+  then
+    cat << EOF
+$(basename "$0") - Central configuration loader for SymbiOS bash scripts.
+
+This is a library and must be sourced, not executed:
+  source /etc/bash/gaboshlib.include   # optional, for g_echo* helpers
+  source symbios-lib.sh                # via PATH (scripts/ is in PATH)
+
+Resolves the filesystem layout and key configuration values from
+inventory.yml (or /etc/symbios/symbios.conf if present) and exports them as
+g_* globals. Provides helper functions:
+
+  f_symbios_var <key> <default>    read a scalar from inventory.yml
+  f_symbios_var_set <key> <value>  set a scalar under all.vars (host only)
+  f_json_escape                    escape a string (stdin) for JSON
+  f_json_error <msg>               print {"ok":false,"error":"<msg>"}
+  f_json_get <json> <key>          extract a string value from JSON
+  f_check_cache <name>             skip a check that ran within 5 min
+  f_symbios_ldap_init              set f_ldap_uri/f_base_dn/f_admin_pw/f_bind_dn
+  f_ldap_exec / f_ldap_ldif        run LDAP in the webui container
+  f_symbios_traefik_hosts          write Traefik Host labels to \$g_tmp/hosts
+  f_ldap_groups_hooks              run LDAP group-change hooks
+
+Exported globals: g_data_root, g_git_root, g_base_services_root,
+g_services_root, g_docker_root, g_containerd_root, g_backup_root,
+g_config_dir, g_log_dir, g_inventory, g_state_file, g_base_domain,
+g_ldap_basedn.
+
+Options:
+  -h, --help  Show this help and exit
+EOF
+    exit 0
+  fi
+  echo "$(basename "$0") is a library and cannot be run directly - source it instead." >&2
+  exit 1
+fi
+
 # Base paths are deterministic; inventory.yml may override the root.
 g_data_root="/symbios"
 

@@ -14,6 +14,26 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+SymbiOS deSEC DynDNS updater. Reads ddns_apikey, ddns_host and ddns_ipv6
+from inventory.yml, ensures the domain exists on desec.io and updates the
+DNS record(s) to the current public IPv4 (and IPv6 if enabled) address.
+Runs from cron; no arguments. Logs to <log>/dedyn.log.
+
+Options:
+  -h, --help          Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Source gaboshlib for utility functions
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"

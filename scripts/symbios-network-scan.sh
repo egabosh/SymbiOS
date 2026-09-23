@@ -1,5 +1,36 @@
 #!/bin/bash
 # SymbiOS - Discover devices on the host's networks for the dashboard WebUI.
+
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0") [--fresh]
+
+Discover devices on the host's networks for the dashboard WebUI. Output:
+JSON with the scanned subnets (interface, CIDR) and the devices found in
+them (IP, MAC, vendor, hostname), plus the WiFi stations currently
+associated to the hostapd access point.
+
+Which networks are scanned: every interface with a private IPv4 address
+except the intentionally internal networks (Docker bridges br-*/docker0 and
+the SymbiOS service networks base-services/services). OpenWrt VM bridges and
+their subnets are shown. The default-route subnet is listed first so the
+physical LAN sorts on top in the WebUI.
+
+Results are cached for 60 seconds so a frequently reloaded dashboard does
+not hammer the network.
+
+Options:
+  --fresh     ignore the cache and force a new scan
+  -h, --help  Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
+then
+  f_usage
+  exit 0
+fi
+
 # Output: JSON with the scanned subnets (interface, CIDR) and the devices
 # found in them (IP, MAC, vendor, hostname), plus the WiFi stations that are
 # currently associated to the hostapd access point.
