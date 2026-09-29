@@ -175,11 +175,20 @@ function f_run_g_backup {
     chmod 700 "$f_wrapper/rsync"
   fi
 
+  # Sources: the data root, plus the host's root SSH directory. The remote
+  # target is reached with the key in there, so without it a restored host
+  # could never push its next snapshot. g_backup splits the list on ':' and
+  # gives each source its own subdirectory inside the same snapshot
+  # (backup-<date>/symbios/... and backup-<date>/root/.ssh/...), so retention
+  # and the hardlink chain are unaffected.
+  local f_srcs="$g_data_root"
+  [[ -d /root/.ssh ]] && f_srcs="$f_srcs:/root/.ssh"
+
   # shellcheck disable=SC2086
   # Pass --sparse as gaboshlib's $9 (appended to the rsync options):
   # sparse files (e.g. the truncated OpenWrt VM image) stay sparse in the
   # snapshot instead of being materialized into full-size copies.
-  PATH="$f_wrapper:$PATH" g_backup "$g_data_root" "$f_dest" "$f_excl" \
+  PATH="$f_wrapper:$PATH" g_backup "$f_srcs" "$f_dest" "$f_excl" \
     "$f_srv" "$f_port" "$f_user" "" "" "--sparse"
 }
 
@@ -199,10 +208,15 @@ function f_run_encrypted_archive {
 
   # Stream: tar -> gzip -> encrypt -> ssh. sha256 of the ciphertext is
   # written to a temp file while streaming and verified against the remote.
+  # Members mirror the snapshot sources (see f_run_g_backup): the data root
+  # and the host's root SSH dir, which hold the key for the next push.
+  local f_members="symbios"
+  [[ -d /root/.ssh ]] && f_members="$f_members root/.ssh"
   : > "${g_tmp}/archive.sha"
   g_echo "Creating encrypted archive $f_arch (this can take a while)"
+  # shellcheck disable=SC2086
   tar --numeric-owner --one-file-system \
-    --exclude-from="$f_tar_excl" -C / -czf - symbios 2>"${g_tmp}/tar.err" \
+    --exclude-from="$f_tar_excl" -C / -czf - $f_members 2>"${g_tmp}/tar.err" \
     | openssl enc "-$g_bk_cipher" -salt -pbkdf2 -iter "$g_bk_kdf_iter" \
         -pass file:"$g_bk_pw_file" \
     | tee >(sha256sum > "${g_tmp}/archive.sha") \
@@ -258,6 +272,15 @@ if ! f_bk_guard_free_space
 then
   g_bk_cur_target="$(f_bk_is_remote && echo "remote" || echo "local")"
   f_write_status "error" "$g_bk_cur_target" "" "Disk below ${g_bk_min_free_gb}GB/${g_bk_min_free_percent}% free - aborting before the disk fills up."
+  exit 1
+fi
+
+# Key pre-flight: an unusable backup key must abort loudly here, not surface
+# as a "Permission denied" on the remote server an hour into the snapshot.
+if ! f_bk_check_ssh_key
+then
+  g_bk_cur_target="$(f_bk_is_remote && echo "remote" || echo "local")"
+  f_write_status "error" "$g_bk_cur_target" "" "Backup key ${g_bk_ssh_key} is missing or unusable - see syslog."
   exit 1
 fi
 

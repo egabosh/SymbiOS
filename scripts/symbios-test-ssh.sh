@@ -5,9 +5,11 @@ function f_usage {
   cat << EOF
 Usage: $(basename "$0") <host> <port> <user> [path]
 
-Test SSH connectivity to a remote server (used by the WebUI backup and
-service pages with the symbios exec-gateway key). Output: JSON with
-ok/message or error.
+Test SSH connectivity to a remote server (used by the WebUI backup page).
+It uses the same identity as the backup run itself, the host root key
+(override with backup_ssh_key in inventory.yml), so a successful test
+means the backup will authenticate too. Output: JSON with ok/message
+or error.
 
 Arguments:
   host      remote host (hostname or IP)
@@ -36,11 +38,26 @@ g_host="${1:-}"
 g_port="${2:-22}"
 g_user="${3:-root}"
 g_path="${4:-}"
-g_key="$(f_symbios_ssh_key)"
+g_key="$(f_symbios_var backup_ssh_key "/root/.ssh/id_ed25519")"
 
 if [[ -z "$g_host" ]]
 then
   echo '{"ok":false,"error":"Host is required"}'
+  exit 1
+fi
+
+# Report an unusable key here rather than letting ssh fall back to the agent
+# or to the default key files, which would test a different identity than the
+# one the backup actually uses.
+if [[ ! -f "$g_key" ]]
+then
+  echo "{\"ok\":false,\"error\":\"Backup key ${g_key} does not exist. Set backup_ssh_key in inventory.yml or create the key.\"}"
+  exit 1
+fi
+
+if ! ssh-keygen -y -P '' -f "$g_key" >/dev/null 2>&1
+then
+  echo "{\"ok\":false,\"error\":\"Backup key ${g_key} is passphrase-protected and cannot be used unattended.\"}"
   exit 1
 fi
 

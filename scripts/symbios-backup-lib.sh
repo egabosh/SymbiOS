@@ -105,12 +105,13 @@ function f_bk_read_vars {
   g_bk_snap_base="${g_data_root}/backup/$(hostname)"
   # Passphrase file for encrypted archives (0600, root only).
   g_bk_pw_file="${g_config_dir}/.backup_passphrase"
-  # SSH client key: reuse the WebUI gateway identity so one key works for
-  # everything (Test Connection in the WebUI uses the same key). The helper
-  # hands out a root-only copy, because the config-dir original has to stay
-  # readable for the WebUI container (uid 10000) and OpenSSH rejects that.
-  g_bk_ssh_key="$(f_symbios_ssh_key)"
-  g_bk_ssh_pubkey="$(f_symbios_ssh_pubkey)"
+  # SSH client key: the host's own root key. The backup runs on the host as
+  # root, so /root/.ssh/id_ed25519 is directly readable and needs no copy.
+  # This is deliberately NOT the WebUI gateway key (id_symbios): that one has
+  # to stay group-readable for the container (uid 10000) and OpenSSH refuses
+  # such a key. Override with backup_ssh_key to use a different identity.
+  g_bk_ssh_key="$(f_symbios_var backup_ssh_key "/root/.ssh/id_ed25519")"
+  g_bk_ssh_pubkey="${g_bk_ssh_key}.pub"
   # Optional overrides from inventory.yml (retention + disk guard).
   g_bk_keep_daily="$(f_symbios_var backup_keep_daily "$g_bk_keep_daily")"
   g_bk_keep_weekly="$(f_symbios_var backup_keep_weekly "$g_bk_keep_weekly")"
@@ -122,6 +123,37 @@ function f_bk_read_vars {
 # True if a remote backup server is configured.
 function f_bk_is_remote {
   [[ -n "$g_bk_host" && -n "$g_bk_path" ]]
+}
+
+# Pre-flight for the SSH key. Without this the only symptom of a missing or
+# passphrase-protected key is a generic "Permission denied" on the remote, and
+# a key rotation on the host silently stops every backup. Both are checked up
+# front so the run fails with a message naming the inventory variable to set.
+function f_bk_check_ssh_key {
+  f_bk_is_remote || return 0
+
+  if [[ ! -f "$g_bk_ssh_key" ]]
+  then
+    g_echo_error "Backup key ${g_bk_ssh_key} does not exist - no backup possible."
+    g_echo_error "Create it, or point backup_ssh_key in inventory.yml at another key."
+    return 1
+  fi
+
+  if [[ ! -r "$g_bk_ssh_key" ]]
+  then
+    g_echo_error "Backup key ${g_bk_ssh_key} is not readable by $(id -un)."
+    return 1
+  fi
+
+  # A protected key would block every BatchMode call until the timeout hits.
+  if ! ssh-keygen -y -P '' -f "$g_bk_ssh_key" >/dev/null 2>&1
+  then
+    g_echo_error "Backup key ${g_bk_ssh_key} is passphrase-protected - unattended backups cannot use it."
+    g_echo_error "Point backup_ssh_key in inventory.yml at a passphrase-less key."
+    return 1
+  fi
+
+  return 0
 }
 
 # Build the ssh option string used for every remote call.
