@@ -838,6 +838,19 @@
           when: not yq_binary.stat.exists
       when: nocontainer.stat.exists == true
 
+    - name: Set system hostname from base_domain
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-set-hostname.sh"
+      register: hostname_result
+      changed_when: "'hostname-changed:' in hostname_result.stdout"
+      when: nocontainer.stat.exists == true
+
+    - name: Show hostname result
+      ansible.builtin.debug:
+        var: hostname_result.stdout_lines
+      when:
+        - nocontainer.stat.exists == true
+        - hostname_result.stdout | length > 0
+
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/basics.yml"
       changed_when: false
