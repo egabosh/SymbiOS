@@ -6,8 +6,11 @@ g_timestamp=$(date +"%Y%m%d%H%M")
 
 cd "${g_base_services_root}/ldap"
 
-# Export LDAP database using slapcat
-if docker compose exec -ti symbios-base-ldap slapcat -F /ldap-config/slapd.d >$g_backupdir/openldap.ldap.local-$g_timestamp.ldif 2>"${g_tmp}/ldaperr"
+# Export LDAP database using slapcat.
+# The compose *service* is "openldap"; "symbios-base-ldap" is the container
+# name and docker compose exec only accepts the service name. -T instead of
+# -ti: the output goes to a file, and a TTY would corrupt the LDIF dump.
+if docker compose exec -T openldap slapcat -F /ldap-config/slapd.d >$g_backupdir/openldap.ldap.local-$g_timestamp.ldif 2>"${g_tmp}/ldaperr"
 then
   # Compress the LDIF backup
   gzip $g_backupdir/openldap.ldap.local-$g_timestamp.ldif

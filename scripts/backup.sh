@@ -35,6 +35,20 @@ g_all-to-syslog
 g_echo_ok "Starting $0"
 set -o pipefail
 
+# Target directory for the pre-run database dumps of backup.d/*.backup.
+#
+# It has to live inside the data root, because symbios-backup.sh snapshots all
+# of it and the dumps are the reason these modules run before the snapshot.
+# It must not be below ${data_root}/backup: that path holds the snapshots
+# themselves and is excluded from the rsync (see f_bk_write_excludes), so
+# dumps stored there would never reach the backup server. backup_root
+# (<data_root>/backups) is included in the snapshot and not excluded.
+#
+# g_backupdir was a gaboshlib global that no longer exists; with it unset the
+# modules redirected their dumps to "/<name>" and silently backed up nothing.
+g_backupdir="${g_backup_root}/db"
+mkdir -p "$g_backupdir"
+
 # Pre-run dumps (database exports) - failures must not stop the snapshot.
 for g_backup in $(find /usr/local/sbin/backup.d ${g_data_root}/backup.d ${g_git_root}/scripts/backup.d -name "*.backup" -type f | sort)
 do
