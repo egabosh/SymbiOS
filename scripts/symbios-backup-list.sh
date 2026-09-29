@@ -145,7 +145,7 @@ fi
 
 # Public key the user needs to authorize on the backup server
 g_pubkey=""
-[[ -r "${g_bk_ssh_key}.pub" ]] && g_pubkey="$(cat "${g_bk_ssh_key}.pub")"
+[[ -r "${g_bk_ssh_pubkey}" ]] && g_pubkey="$(cat "${g_bk_ssh_pubkey}")"
 
 cat <<EOF
 {"ok":true,"mode":"$g_mode","host":"$g_bk_host","path":"$g_bk_path",

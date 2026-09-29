@@ -44,6 +44,8 @@
 # Functions:
 #   f_symbios_var <key> <default>   read a scalar from inventory.yml
 #   f_symbios_var_set <key> <value> set a scalar under all.vars (host only)
+#   f_symbios_ssh_key               private key for host-side OpenSSH calls
+#   f_symbios_ssh_pubkey            matching public key
 #   f_json_escape                   escape a string (stdin) for JSON
 #   f_json_error <msg>              print {"ok":false,"error":"<msg>"}
 #   f_json_get <json> <key>         extract a string value from JSON
@@ -82,6 +84,8 @@ g_* globals. Provides helper functions:
 
   f_symbios_var <key> <default>    read a scalar from inventory.yml
   f_symbios_var_set <key> <value>  set a scalar under all.vars (host only)
+  f_symbios_ssh_key                private key for host-side OpenSSH calls
+  f_symbios_ssh_pubkey             matching public key
   f_json_escape                    escape a string (stdin) for JSON
   f_json_error <msg>               print {"ok":false,"error":"<msg>"}
   f_json_get <json> <key>          extract a string value from JSON
@@ -182,6 +186,46 @@ with open(tmp, 'w') as f:
     os.fsync(f.fileno())
 os.replace(tmp, path)
 PYEOF
+}
+
+# Resolve the private key to use for host-side OpenSSH calls (backup server,
+# "Test connection" on the backup page). Prints the path to pass to ssh -i.
+#
+# The WebUI container authenticates to the host with this same key pair and
+# runs as uid 10000, so symbios-ui.yml keeps the original at 0640 root:10000
+# in the config dir. OpenSSH refuses to load a group-readable private key
+# ("UNPROTECTED PRIVATE KEY FILE" / "bad permissions"), so host-side calls
+# use a root-only copy instead. The copy is refreshed on demand, which also
+# repairs installs whose playbook has not created it yet.
+#
+# Use f_symbios_ssh_pubkey for the matching public key - the copy has none.
+function f_symbios_ssh_key {
+  local f_key="${g_config_dir}/.ssh/id_symbios"
+  local f_secure="/etc/symbios/ssh/id_symbios"
+
+  # No key at all: report the original path so the caller reports it missing.
+  [[ -r "${f_key}" ]] || { echo "${f_key}"; return 0; }
+
+  # Refresh the root-only copy when missing or older than the source, so a
+  # regenerated or rotated key is picked up without a playbook run.
+  if [[ ! -r "${f_secure}" || "${f_key}" -nt "${f_secure}" ]]
+  then
+    install -d -m 0700 -o root -g root "${f_secure%/*}" 2>/dev/null
+    install -m 0600 -o root -g root "${f_key}" "${f_secure}" 2>/dev/null
+  fi
+
+  # Not root (install failed): fall back, the caller will see OpenSSH's error.
+  if [[ -r "${f_secure}" ]]
+  then
+    echo "${f_secure}"
+  else
+    echo "${f_key}"
+  fi
+}
+
+# Path of the public key belonging to f_symbios_ssh_key (0644, no copy needed).
+function f_symbios_ssh_pubkey {
+  echo "${g_config_dir}/.ssh/id_symbios.pub"
 }
 
 # Load the full layout into g_* globals.
