@@ -251,12 +251,29 @@ Also intercepts all forms with data-exec="true" attribute:
       });
   });
 
+  /* Resolve the element alerts are inserted into.
+     Pages extending base.html have a '.col.py-3' content column. Standalone
+     pages (change password, service detail, file manager) load this script
+     without that column, so a dedicated host is injected at the top of the
+     body - without it, every error of a data-exec form was silently dropped. */
+  function alertHost() {
+    var host = document.querySelector('.col.py-3');
+    if (host) return host;
+    host = document.getElementById('execAlertHost');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'execAlertHost';
+      host.className = 'exec-alert-host';
+      document.body.insertBefore(host, document.body.firstChild);
+    }
+    return host;
+  }
+
   /* Show a dismissible Bootstrap alert at the top of the content area.
      opts.link + opts.link_text optionally append an anchor to the page
      where the reported problem can be fixed. */
   function showAlert(message, type, opts) {
-    var container = document.querySelector('.col.py-3');
-    if (!container) return;
+    var container = alertHost();
     var icons = { success: 'check-circle-fill', danger: 'exclamation-triangle-fill', warning: 'info-circle-fill', info: 'info-circle-fill' };
     var text = '<span>' + escapeHtml(message);
     if (opts && opts.link) {

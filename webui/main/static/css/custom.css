@@ -460,6 +460,23 @@
   min-height: 100vh;
 }
 
+/* Fallback alert host for pages without a '.col.py-3' content column
+   (standalone pages). Injected by exec-modal.js showAlert(). */
+.exec-alert-host {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1080;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0.75rem;
+  pointer-events: none;
+}
+.exec-alert-host > * {
+  pointer-events: auto;
+}
+
 /* DNS settings status areas */
 #host-status, #api-key-status {
   min-height: 1.5em;
