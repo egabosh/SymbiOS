@@ -106,8 +106,11 @@ function f_bk_read_vars {
   # Passphrase file for encrypted archives (0600, root only).
   g_bk_pw_file="${g_config_dir}/.backup_passphrase"
   # SSH client key: reuse the WebUI gateway identity so one key works for
-  # everything (Test Connection in the WebUI uses the same key).
-  g_bk_ssh_key="${g_config_dir}/.ssh/id_symbios"
+  # everything (Test Connection in the WebUI uses the same key). The helper
+  # hands out a root-only copy, because the config-dir original has to stay
+  # readable for the WebUI container (uid 10000) and OpenSSH rejects that.
+  g_bk_ssh_key="$(f_symbios_ssh_key)"
+  g_bk_ssh_pubkey="$(f_symbios_ssh_pubkey)"
   # Optional overrides from inventory.yml (retention + disk guard).
   g_bk_keep_daily="$(f_symbios_var backup_keep_daily "$g_bk_keep_daily")"
   g_bk_keep_weekly="$(f_symbios_var backup_keep_weekly "$g_bk_keep_weekly")"

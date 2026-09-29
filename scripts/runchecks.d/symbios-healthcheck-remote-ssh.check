@@ -6,7 +6,7 @@ CHECK_DETAIL="Verifies the SSH key exists at config/.ssh/id_symbios.|Tests TCP c
 # Check: Verify remote SSH key exists and host 192.168.41.1 is reachable on port 22
 f_check_cache "symbios-healthcheck-remote-ssh" || return 2>/dev/null || true
 
-g_ssh_key="${g_config_dir}/.ssh/id_symbios"
+g_ssh_key="$(f_symbios_ssh_key)"
 if [[ ! -f "$g_ssh_key" ]]
 then
   g_echo_error "Remote SSH exec key missing at $g_ssh_key"

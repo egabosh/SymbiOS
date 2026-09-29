@@ -36,7 +36,7 @@ g_host="${1:-}"
 g_port="${2:-22}"
 g_user="${3:-root}"
 g_path="${4:-}"
-g_key="${g_config_dir}/.ssh/id_symbios"
+g_key="$(f_symbios_ssh_key)"
 
 if [[ -z "$g_host" ]]
 then
