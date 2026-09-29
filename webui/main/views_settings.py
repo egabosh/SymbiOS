@@ -34,12 +34,14 @@ import re
 import shlex
 
 
-def _start_reapply(playbooks=None, force=False):
+def _start_reapply(playbooks=None, force=False, prefix=''):
     """Start symbios-reapply.sh as a tracked job and return the job id.
 
     The job streams live output to the browser via /exec/output/.
     With force=True, playbooks that are not yet marked as installed are
     run anyway (--force).
+    An optional prefix (a script name) is chained in front of the reapply with
+    '&&', so it runs first and its output shows up in the same exec modal.
     Returns a (job_id, title, cmd) tuple.
     """
     from .utils.jobs import create_job
@@ -54,6 +56,8 @@ def _start_reapply(playbooks=None, force=False):
         flag = ''
         title = 'Reapplying all playbooks...'
     cmd = f'symbios-reapply.sh {flag}'
+    if prefix:
+        cmd = f'{prefix} && {cmd}'
     job_id = create_job(cmd, timeout=3600)
     return job_id, title, cmd
 
@@ -67,6 +71,10 @@ _DNS_CHAIN = [
     'base-services/authelia.yml',
 ]
 _DNS_CHAIN_DESEC = ['base-services/dedyn.yml'] + _DNS_CHAIN
+
+# The system hostname follows base_domain. It is applied first so the reapply
+# runs under the new name, and its output appears in the same exec modal.
+_HOSTNAME_CMD = 'symbios-set-hostname.sh'
 
 
 @login_required
@@ -101,7 +109,7 @@ def settings_dns(request):
                 _save_inventory_config(config)
                 if is_ajax:
                     from .utils.jobs import create_job
-                    cmd = 'symbios-reapply.sh'
+                    cmd = f'{_HOSTNAME_CMD} && symbios-reapply.sh'
                     job_id = create_job(cmd, timeout=3600)
                     resp = {'ok': True, 'job': job_id,
                             'title': 'Removing DNS config and reapplying...',
@@ -112,7 +120,7 @@ def settings_dns(request):
                     return JsonResponse(resp)
                 messages.success(request, 'DNS configuration removed.')
                 messages.info(request, 'Reapplying all playbooks in the background...')
-                _start_reapply()
+                _start_reapply(prefix=_HOSTNAME_CMD)
             elif dns_mode == 'self-managed':
                 self_domain = request.POST.get('self_domain', '').strip().lower().rstrip('.')
                 if not self_domain:
@@ -129,7 +137,8 @@ def settings_dns(request):
                 _save_inventory_config(config)
                 if is_ajax:
                     job_id, title, cmd = _start_reapply(playbooks=_DNS_CHAIN,
-                                                        force=True)
+                                                        force=True,
+                                                        prefix=_HOSTNAME_CMD)
                     resp = {'ok': True, 'job': job_id, 'title': title,
                             'message': f'DNS settings saved for {self_domain}.',
                             'command': cmd}
@@ -140,7 +149,8 @@ def settings_dns(request):
                 # Apply the domain-dependent playbooks (Traefik, ACME, Authelia)
                 # in the background, with the new domain.
                 messages.info(request, 'Reapplying DNS playbooks in the background...')
-                _start_reapply(playbooks=_DNS_CHAIN, force=True)
+                _start_reapply(playbooks=_DNS_CHAIN, force=True,
+                               prefix=_HOSTNAME_CMD)
             else:
                 # deSEC mode (existing behavior)
                 ddns_host = request.POST.get('ddns_host', '')
@@ -160,7 +170,8 @@ def settings_dns(request):
                 _save_inventory_config(config)
                 if is_ajax:
                     job_id, title, cmd = _start_reapply(playbooks=_DNS_CHAIN_DESEC,
-                                                        force=True)
+                                                        force=True,
+                                                        prefix=_HOSTNAME_CMD)
                     resp = {'ok': True, 'job': job_id, 'title': title,
                             'message': 'DNS settings saved.',
                             'command': cmd}
@@ -171,7 +182,8 @@ def settings_dns(request):
                 # Apply the domain-dependent playbooks (DDNS, Traefik, ACME,
                 # Authelia) in the background, with the new domain.
                 messages.info(request, 'Reapplying DNS playbooks in the background...')
-                _start_reapply(playbooks=_DNS_CHAIN_DESEC, force=True)
+                _start_reapply(playbooks=_DNS_CHAIN_DESEC, force=True,
+                               prefix=_HOSTNAME_CMD)
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)
