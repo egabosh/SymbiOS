@@ -22,7 +22,9 @@ from django.contrib import messages
 from .utils.ssh_exec import run_command
 from .utils.http import is_ajax_request
 from .utils.secret_file import f_write_secret
-from .utils.password_policy import validate_password
+from .utils.password_policy import (POLICIES, POLICY_LABELS,
+                                    get_password_policy,
+                                    validate_password)
 
 
 @login_required
@@ -83,4 +85,13 @@ def change_password(request):
         else:
             messages.error(request, f"Error: {output}")
 
-    return render(request, "main/change_password.html")
+    # Tell the user up front which policy applies, so a rejected password is
+    # not a surprise: the form's minlength and the server-side check below
+    # must agree with the policy configured in inventory.yml.
+    f_policy = get_password_policy()
+    f_min_length = POLICIES.get(f_policy, POLICIES['medium'])[0]
+    return render(request, "main/change_password.html", {
+        'policy': f_policy,
+        'policy_label': POLICY_LABELS.get(f_policy, POLICY_LABELS['medium']),
+        'min_length': f_min_length,
+    })
