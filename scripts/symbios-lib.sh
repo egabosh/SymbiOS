@@ -188,8 +188,10 @@ os.replace(tmp, path)
 PYEOF
 }
 
-# Resolve the private key to use for host-side OpenSSH calls (backup server,
-# "Test connection" on the backup page). Prints the path to pass to ssh -i.
+# Resolve the private key of the WebUI exec gateway (config dir id_symbios).
+# Prints the path to pass to ssh -i. The backup does NOT use this key - it runs
+# on the host as root and uses /root/.ssh/id_ed25519 directly, see
+# symbios-backup-lib.sh.
 #
 # The WebUI container authenticates to the host with this same key pair and
 # runs as uid 10000, so symbios-ui.yml keeps the original at 0640 root:10000
