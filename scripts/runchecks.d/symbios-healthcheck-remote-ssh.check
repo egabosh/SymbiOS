@@ -6,7 +6,10 @@ CHECK_DETAIL="Verifies the SSH key exists at config/.ssh/id_symbios.|Tests TCP c
 # Check: Verify remote SSH key exists and host 192.168.41.1 is reachable on port 22
 f_check_cache "symbios-healthcheck-remote-ssh" || return 2>/dev/null || true
 
-g_ssh_key="$(f_symbios_ssh_key)"
+# The exec-gateway key is read by the WebUI container (uid 10000), so it is
+# checked where it lives. Nothing on the host loads it: the backup uses the
+# host root key, so no 0600 copy of this one is needed any more.
+g_ssh_key="${g_config_dir}/.ssh/id_symbios"
 if [[ ! -f "$g_ssh_key" ]]
 then
   g_echo_error "Remote SSH exec key missing at $g_ssh_key"

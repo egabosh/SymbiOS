@@ -127,31 +127,16 @@ function f_bk_is_remote {
 
 # Pre-flight for the SSH key. Without this the only symptom of a missing or
 # passphrase-protected key is a generic "Permission denied" on the remote, and
-# a key rotation on the host silently stops every backup. Both are checked up
-# front so the run fails with a message naming the inventory variable to set.
+# a key rotation on the host silently stops every backup.
 function f_bk_check_ssh_key {
   f_bk_is_remote || return 0
 
-  if [[ ! -f "$g_bk_ssh_key" ]]
-  then
-    g_echo_error "Backup key ${g_bk_ssh_key} does not exist - no backup possible."
-    g_echo_error "Create it, or point backup_ssh_key in inventory.yml at another key."
+  local f_why=""
+  f_why="$(f_symbios_ssh_key_usable "$g_bk_ssh_key")" || {
+    g_echo_error "Backup key ${g_bk_ssh_key} ${f_why} - no backup possible."
+    g_echo_error "Fix the key, or point backup_ssh_key in inventory.yml at another one."
     return 1
-  fi
-
-  if [[ ! -r "$g_bk_ssh_key" ]]
-  then
-    g_echo_error "Backup key ${g_bk_ssh_key} is not readable by $(id -un)."
-    return 1
-  fi
-
-  # A protected key would block every BatchMode call until the timeout hits.
-  if ! ssh-keygen -y -P '' -f "$g_bk_ssh_key" >/dev/null 2>&1
-  then
-    g_echo_error "Backup key ${g_bk_ssh_key} is passphrase-protected - unattended backups cannot use it."
-    g_echo_error "Point backup_ssh_key in inventory.yml at a passphrase-less key."
-    return 1
-  fi
+  }
 
   return 0
 }
