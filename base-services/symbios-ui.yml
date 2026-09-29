@@ -166,10 +166,9 @@
     - name: Fix permissions on SSH key
       # 0640 root:10000 is deliberate: the WebUI container runs as uid 10000
       # and reads this key itself (utils/ssh_exec.py, Paramiko - which ignores
-      # file modes). OpenSSH does not - it refuses a group-readable private
-      # key - so host-side ssh calls (backup server, "Test connection") use a
-      # root-only copy via f_symbios_ssh_key in symbios-lib.sh. Do not "fix"
-      # this to 0600 or the WebUI loses its exec gateway.
+      # file modes). Do not "fix" this to 0600 or the WebUI loses its exec
+      # gateway. Nothing else needs this key: /root/.ssh is not readable by
+      # the container, so the backup uses the host root key instead.
       ansible.builtin.file:
         path: "{{ base_services_root }}/symbios-ui/config/.ssh/{{ item.path }}"
         owner: root

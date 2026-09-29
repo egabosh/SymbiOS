@@ -49,17 +49,10 @@ fi
 # Report an unusable key here rather than letting ssh fall back to the agent
 # or to the default key files, which would test a different identity than the
 # one the backup actually uses.
-if [[ ! -f "$g_key" ]]
-then
-  echo "{\"ok\":false,\"error\":\"Backup key ${g_key} does not exist. Set backup_ssh_key in inventory.yml or create the key.\"}"
+f_why="$(f_symbios_ssh_key_usable "$g_key")" || {
+  echo "{\"ok\":false,\"error\":\"Backup key ${g_key} ${f_why}.\"}"
   exit 1
-fi
-
-if ! ssh-keygen -y -P '' -f "$g_key" >/dev/null 2>&1
-then
-  echo "{\"ok\":false,\"error\":\"Backup key ${g_key} is passphrase-protected and cannot be used unattended.\"}"
-  exit 1
-fi
+}
 
 # Validate port
 if ! [[ "$g_port" =~ ^[0-9]+$ ]] || (( g_port < 1 || g_port > 65535 ))
