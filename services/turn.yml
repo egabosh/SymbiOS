@@ -1,0 +1,435 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# TURN/STUN NAT traversal server (coturn).
+#
+# Auth model: TURN is a UDP/TCP protocol (STUN/TURN, RFC 5389 / RFC 5766) and
+# carries no HTTP request that Traefik or Authelia could inspect, so neither
+# OIDC nor LDAP forward-auth is possible here. Clients authenticate with a
+# time-limited credential derived from the shared static-auth-secret (TURN
+# REST API, "use-auth-secret"). There is no user database and no LDAP lookup.
+#
+# An nginx sidecar exists solely to give Traefik a hostname whose ACME
+# certificate can be obtained. Coturn itself terminates TLS on 5349 with that
+# certificate, fetched from the Traefik ACME store.
+#
+# docs:
+#   name: TURN
+#   short_description: Deploy the coturn TURN/STUN NAT traversal server
+#   description: Deploys coturn as a generic TURN/STUN server for VoIP and WebRTC media relay. Uses the static-auth-secret (TURN REST API) mechanism, because the TURN protocol cannot carry OIDC or LDAP forward-auth.
+#   url: "turn://{{ service_domain }}"
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   service_control:
+#     services:
+#     - name: turn
+#       type: docker
+#       compose_file: /symbios/services/turn/docker-compose.yml
+#       status: test -d /symbios/services/turn || exit 2; docker compose -f /symbios/services/turn/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: turn
+#       command: docker compose -f /symbios/services/turn/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/turn/docker-compose.yml down
+#     program_paths:
+#       - /symbios/services/turn/
+#       - /symbios/base-services/traefik/providers/turn.yml
+#       - /symbios/runchecks.d/symbios-healthcheck-turn.check
+#   actions:
+#     start: docker compose -f /symbios/services/turn/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/turn/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/turn/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/turn/docker-compose.yml up -d
+#
+---
+- name: turn
+  hosts: all
+  vars:
+    service_name: turn
+    service_domain: "{{ service_name }}.{{ base_domain }}"
+    # Relay port range that coturn uses to allocate media relays
+    turn_min_port: 49160
+    turn_max_port: 49200
+    # Public IP of this host, optional. Coturn needs it because the container
+    # only sees the private bridge address. Set it in inventory.yml (or with
+    # -e) to a value like "203.0.113.10" or "203.0.113.10/2001:db8::10".
+    # When empty, the coturn image detects the external IP itself.
+    turn_external_ip: ""
+  tasks:
+
+    - name: Create /symbios/services/turn dir
+      ansible.builtin.file:
+        path: "/symbios/services/{{ service_name }}"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: Create /symbios/services/turn/coturn dir
+      ansible.builtin.file:
+        path: "/symbios/services/{{ service_name }}/coturn"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0750'
+
+    - name: Create /symbios/services/turn/htdocs dir
+      ansible.builtin.file:
+        path: "/symbios/services/{{ service_name }}/htdocs"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0750'
+
+    - name: Create /symbios/services/turn/htdocs/index.html
+      ansible.builtin.copy:
+        dest: "/symbios/services/{{ service_name }}/htdocs/index.html"
+        owner: root
+        group: docker
+        mode: '0640'
+        force: false
+        content: |
+          <!DOCTYPE html>
+          <html lang="en">
+          <head><meta charset="utf-8"><title>TURN</title></head>
+          <body><p>This hostname exists only so that Traefik can obtain a TLS certificate for the TURN server.</p></body>
+          </html>
+
+    # Firewall rules: STUN/TURN control ports plus the relay range
+    - name: Allow port 3478/tcp (STUN/TURN)
+      community.general.ufw:
+        rule: allow
+        port: '3478'
+        proto: tcp
+
+    - name: Allow port 3478/udp (STUN/TURN)
+      community.general.ufw:
+        rule: allow
+        port: '3478'
+        proto: udp
+
+    - name: Allow port 5349/tcp (TURNS)
+      community.general.ufw:
+        rule: allow
+        port: '5349'
+        proto: tcp
+
+    - name: Allow port 5349/udp (TURNS)
+      community.general.ufw:
+        rule: allow
+        port: '5349'
+        proto: udp
+
+    - name: Allow relay port range {{ turn_min_port }}-{{ turn_max_port }}/udp
+      community.general.ufw:
+        rule: allow
+        port: "{{ turn_min_port }}:{{ turn_max_port }}"
+        proto: udp
+
+    # /symbios/services/turn/coturn/turnserver.conf.tmpl
+    - name: /symbios/services/turn/coturn/turnserver.conf.tmpl
+      blockinfile:
+        path: "/symbios/services/{{ service_name }}/coturn/turnserver.conf.tmpl"
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Coturn configuration template. genpw.sh renders this file into
+          # turnserver.conf and replaces the !PLACEHOLDER! markers.
+
+          # Shared secret mechanism (TURN REST API) instead of lt-cred-mech.
+          # Clients derive short-lived credentials from this secret.
+          use-auth-secret
+          static-auth-secret=!TURNSECRET!
+          cli-password=!CLIPASSWORD!
+
+          # Realm advertised to clients
+          realm=!REALM!
+
+          # Control ports (plain and TLS)
+          listening-port=3478
+          tls-listening-port=5349
+
+          # Relay port range used for media relays
+          min-port=!MINPORT!
+          max-port=!MAXPORT!
+
+          # Certificate for TURNS, fetched from the Traefik ACME store
+          cert=/etc/coturn/cert.pem
+          pkey=/etc/coturn/key.pem
+
+          # Do not relay between two clients on the same server, and do not
+          # answer STUN requests from other servers on the LAN
+          no-loopback-peers
+          no-multicast-peers
+
+          # Public address of this host. genpw.sh drops this line when no
+          # address is configured, so the coturn image detects it instead.
+          external-ip=!EXTERNALIP!
+
+          # Fingerprint so clients can detect a changed secret
+          fingerprint
+
+          # Log to the container output
+          log-file=stdout
+          simple-log
+          new-log-timestamp
+          verbose
+        backup: yes
+
+    # /symbios/services/turn/genpw.sh (render the config with a random secret)
+    - name: /symbios/services/turn/genpw.sh (render the config with a random secret)
+      blockinfile:
+        path: "/symbios/services/{{ service_name }}/genpw.sh"
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          #!/bin/bash
+          # Generate the TURN static-auth-secret and render turnserver.conf.
+
+          # Change to service directory
+          cd /symbios/services/turn || exit 1
+
+          # Nothing to do once the rendered config exists
+          if [ -s coturn/turnserver.conf ]
+          then
+            exit 0
+          fi
+
+          # Generate the shared secret and the CLI password
+          g_turnsecret=$(pwgen -s 48 1)
+          g_turnclipw=$(pwgen -s 32 1)
+
+          # Render the coturn configuration from the template
+          sed \
+            -e "s|!TURNSECRET!|${g_turnsecret}|g" \
+            -e "s|!CLIPASSWORD!|${g_turnclipw}|g" \
+            -e "s|!REALM!|{{ service_domain }}|g" \
+            -e "s|!MINPORT!|{{ turn_min_port }}|g" \
+            -e "s|!MAXPORT!|{{ turn_max_port }}|g" \
+            -e "s|!EXTERNALIP!|{{ turn_external_ip }}|g" \
+            coturn/turnserver.conf.tmpl >coturn/turnserver.conf
+
+          # Drop the external-ip line when no public address is configured
+          if [ -z "{{ turn_external_ip }}" ]
+          then
+            sed -i "/^external-ip=/d" coturn/turnserver.conf
+          fi
+
+          # The config holds the shared secret, keep it out of world access
+          chmod 400 coturn/turnserver.conf
+          chown root:docker coturn/turnserver.conf
+
+          # Store the generated credentials for the administrator to read
+          cat >credentials <<EOF
+          # Generated by genpw.sh on the first run. Delete after you have
+          # stored the secret in your password manager.
+          TURN_SECRET=${g_turnsecret}
+          TURN_CLI_SECRET=${g_turnclipw}
+          TURN_URL=turn:{{ service_domain }}:3478
+          TURN_URLS=turns:{{ service_domain }}:5349
+          TURN_REALM={{ service_domain }}
+          EOF
+          chmod 400 credentials
+          chown root:root credentials
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /symbios/services/turn/genpw.sh shebang
+      ansible.builtin.lineinfile:
+        path: "/symbios/services/{{ service_name }}/genpw.sh"
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    - name: Render turnserver.conf with the generated secret
+      ansible.builtin.shell: /symbios/services/turn/genpw.sh
+      args:
+        creates: "/symbios/services/{{ service_name }}/coturn/turnserver.conf"
+
+    # /symbios/services/turn/get-cert.sh (fetch the ACME cert from Traefik)
+    - name: /symbios/services/turn/get-cert.sh (fetch the ACME cert from Traefik)
+      blockinfile:
+        path: "/symbios/services/{{ service_name }}/get-cert.sh"
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          #!/bin/bash
+          # Copy the Traefik ACME certificate for the TURN hostname into the
+          # coturn config directory and restart coturn so it picks it up.
+
+          # Change to service directory
+          cd /symbios/services/turn || exit 1
+
+          # Read the certificate and key for the TURN hostname from Traefik
+          f_dl="[ -s coturn/cert.pem.new ] && [ -s coturn/key.pem.new ]"
+          until eval "$f_dl"
+          do
+            cat /symbios/base-services/traefik/letsencrypt/acme.json \
+              | jq -r ".letsencrypt.Certificates[] | select(.domain.main==\"{{ service_domain }}\") | .certificate" \
+              | base64 -d >coturn/cert.pem.new
+            cat /symbios/base-services/traefik/letsencrypt/acme.json \
+              | jq -r ".letsencrypt.Certificates[] | select(.domain.main==\"{{ service_domain }}\") | .key" \
+              | base64 -d >coturn/key.pem.new
+            # Do not spin when no certificate was issued yet
+            eval "$f_dl" || sleep 5
+          done
+
+          # Install the fetched certificate for the coturn container
+          mv coturn/cert.pem.new coturn/cert.pem
+          mv coturn/key.pem.new coturn/key.pem
+          chmod 640 coturn/cert.pem coturn/key.pem
+          chown root:docker coturn/cert.pem coturn/key.pem
+
+          # Restart coturn so the new certificate is loaded
+          docker compose restart turn
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /symbios/services/turn/get-cert.sh shebang
+      ansible.builtin.lineinfile:
+        path: "/symbios/services/{{ service_name }}/get-cert.sh"
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    # /symbios/services/turn/docker-compose.yml Container Configuration
+    - name: /symbios/services/turn/docker-compose.yml Container Configuration
+      blockinfile:
+        path: "/symbios/services/{{ service_name }}/docker-compose.yml"
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          name: ""
+
+          services:
+
+            # Main coturn server
+            {{ service_name }}:
+              image: coturn/coturn:latest
+              container_name: {{ service_name }}
+              restart: unless-stopped
+              # The image appends --external-ip from this variable, so it is
+              # only set when no address is configured in the config file.
+              environment:
+          {% if not turn_external_ip | trim %}
+                DETECT_EXTERNAL_IP: "yes"
+          {% endif %}
+              volumes:
+                - ./coturn:/etc/coturn
+                - /etc/localtime:/etc/localtime:ro
+              ports:
+                - "3478:3478"
+                - "3478:3478/udp"
+                - "5349:5349"
+                - "5349:5349/udp"
+                - "{{ turn_min_port }}-{{ turn_max_port }}:{{ turn_min_port }}-{{ turn_max_port }}/udp"
+              networks:
+                - symbios_services
+
+            # nginx sidecar: gives Traefik a hostname so the ACME certificate
+            # for the TURN hostname can be issued. Serves no real content.
+            {{ service_name }}--ssl:
+              image: nginx:latest
+              container_name: {{ service_name }}--ssl
+              restart: unless-stopped
+              volumes:
+                - ./htdocs:/usr/share/nginx/html:ro
+                - /etc/localtime:/etc/localtime:ro
+              networks:
+                - symbios_services
+
+          networks:
+            symbios_services:
+              external: true
+        backup: yes
+      notify: Restart turn
+
+    # /symbios/base-services/traefik/providers/turn.yml Traefik File Provider
+    - name: /symbios/base-services/traefik/providers/turn.yml Traefik File Provider
+      blockinfile:
+        path: "/symbios/base-services/traefik/providers/{{ service_name }}.yml"
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              {{ service_name }}:
+                rule: "Host(`{{ service_domain }}`)"
+                entryPoints:
+                  - "https"
+                service: {{ service_name }}--ssl
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  # No authelia@file: this router only exists so that Traefik
+                  # can issue the certificate that coturn needs for TURNS.
+                  - "secHeaders@file"
+            services:
+              {{ service_name }}--ssl:
+                loadBalancer:
+                  servers:
+                    - url: "http://{{ service_name }}--ssl:80"
+        backup: yes
+
+    - name: Ensure turn is running
+      include_tasks: tasks/docker-start.yml
+
+    # The certificate can only be fetched once the Traefik router above exists
+    # and Traefik has issued a certificate for the TURN hostname.
+    - name: Get letsencrypt cert from traefik
+      ansible.builtin.shell: /symbios/services/turn/get-cert.sh
+      args:
+        creates: "/symbios/services/{{ service_name }}/coturn/cert.pem"
+      async: 900
+      poll: 10
+      no_log: true
+
+    - name: Deploy healthcheck
+      include_tasks: tasks/runcheck-docker.yml
+      vars:
+        service_name: turn
+        check_desc: "Verifies that the turn (coturn) container is running. A missing container marks the check as failed."
+
+    - name: Register playbook as installed
+      include_tasks: tasks/state-register.yml
+
+  handlers:
+
+    - name: Restart turn
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: "/symbios/services/{{ service_name }}"

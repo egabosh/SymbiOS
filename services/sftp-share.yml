@@ -14,6 +14,30 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# SFTP file share with a chrooted, jailed view on one directory.
+#
+# User management: the LDAP group sftp-share-users is the single source of
+# truth for who may use the share. It is created like the OIDC service groups
+# (see tasks/oidc-groups.yml) and a group-change hook in ldap-groups.d/ runs
+# symbios-sftp-share-sync.sh on every membership change, so adding or removing
+# a user in the WebUI grants or revokes SFTP access immediately. There is no
+# second, independent user list. Run the sync manually with
+# symbios-sftp-share-sync.sh --adopt to import an existing local list.
+#
+# Why the accounts are local: this service speaks SSH, not HTTP, so neither an
+# Authelia forward-auth request nor a browser OIDC flow exists that Traefik
+# could inspect. The bundled sshd image also has no LDAP/SSSD client
+# (libnss-ldap, slapd, nslcd) and sshd would need PasswordAuthentication to
+# consult it. The sync therefore materializes the group membership as local
+# accounts in the SFTPUSERS list of the service env file, locked to the
+# chroot. Passwords are generated automatically; because the sshd config sets
+# PasswordAuthentication no, access is granted with an SSH public key placed
+# in the home directory inside the container.
+#
+# The share directory is configurable via sftp_share_datadir. It can point at a
+# local directory or at a mounted volume when the shared data shall live on a
+# separate disk.
+#
 # docs:
 #   name: SFTP Share
 #   short_description: Deploy the SFTP file-share service
@@ -42,6 +66,8 @@
 #     program_paths:
 #       - /symbios/services/sftp-share/
 #       - /symbios/runchecks.d/symbios-healthcheck-sftp-share.check
+#   ldap_groups:
+#     - sftp-share-users
 #   actions:
 #     start: docker compose -f /symbios/services/sftp-share/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/sftp-share/docker-compose.yml down
@@ -55,7 +81,40 @@
   vars:
     service_name: sftp-share
     service_domain: "{{ service_name }}.{{ base_domain }}"
+    # Directory that is exported read-write to every SFTP user. Inside the
+    # container it is always /sftp-share, because that is the chroot root.
+    sftp_share_datadir: "/symbios/services/{{ service_name }}/data"
+    # Group and gid that owns the share directory inside the container
+    sftp_share_group: sftp-share
+    sftp_share_gid: 28
+    # LDAP group that defines which users may access the share
+    sftp_share_ldap_group: sftp-share-users
   tasks:
+
+  - name: Create LDAP group {{ sftp_share_ldap_group }} for SFTP access control
+    include_tasks: tasks/ldap-single-group.yml
+    vars:
+      service_name: sftp-share
+      ldap_group_name: "{{ sftp_share_ldap_group }}"
+
+  - name: Deploy LDAP group-change hook (SFTP access follows the group membership)
+    ansible.builtin.copy:
+      dest: "{{ data_root }}/ldap-groups.d/sftp-share-users.hook"
+      content: |
+        #!/bin/bash
+        # SymbiOS hook - keep the SFTP user list in sync with the LDAP group
+        # sftp-share-users. Executed by the shared LDAP group-change dispatcher
+        # (see symbios-lib.sh, called by symbios-ldap-groups.sh for CLI and
+        # WebUI changes) whenever a group or a membership changes.
+        # Args: $1=event $2=group $3=uid
+        # Only react to changes of the SFTP group, the sync reconciles the
+        # whole membership so the single uid is not needed. The container is
+        # recreated on a real change so the accounts exist immediately.
+        [[ "${2:-}" == "sftp-share-users" ]] || exit 0
+        exec "{{ git_root }}/scripts/symbios-sftp-share-sync.sh"
+      mode: '0755'
+      owner: root
+      group: root
 
   - name: Allow all access to tcp port 28
     community.general.ufw:
@@ -71,11 +130,11 @@
       state: directory
       mode: '0550'
 
-  - name: Create Data-Directory /symbios/services/sftp-share/data
+  - name: Create Data-Directory {{ sftp_share_datadir }}
     ansible.builtin.file:
-      path: /symbios/services/sftp-share/data
+      path: "{{ sftp_share_datadir }}"
       owner: root
-      group: 28
+      group: "{{ sftp_share_gid }}"
       state: directory
       mode: '0755'
 
@@ -110,11 +169,12 @@
               - /etc/localtime:/etc/localtime:ro
               - ./ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key
               - ./ssh_host_ed25519_key.pub:/etc/ssh/ssh_host_ed25519_key.pub
-              - ./sftp-share.conf:/etc/sftp-share.conf:ro
-              - ./sftp-share-user.conf:/etc/sftp-share-user.conf
-              - ./data:/sftp-share:rw
+                - ./sftp-share.conf:/etc/sftp-share.conf:ro
+                - ./sftp-share-user.conf:/etc/sftp-share-user.conf
+                - {{ sftp_share_datadir }}:/sftp-share:rw
             networks:
               - sftp-share--network
+
         
         networks:
           sftp-share--network:
@@ -137,7 +197,7 @@
         FROM debian:latest
         RUN apt-get update \
             && apt-get install -y openssh-server strace \
-            && groupadd -g 28 sftp-share \
+            && groupadd -g {{ sftp_share_gid }} {{ sftp_share_group }} \
             && mkdir -p -m0755 /run/sshd
         ENV LANG en_US.utf8
         COPY ./docker-entrypoint.sh /
@@ -174,14 +234,15 @@
       marker: "# {mark} ANSIBLE MANAGED BLOCK"
       block: |
         # Create users from environment variable SFTPUSERS (format: user:pass)
-        # TODO: Replace with LDAP integration
+        # NOTE: SSH has no HTTP request, so LDAP cannot be consulted here. See
+        # the auth model note in the playbook header.
         for g_sftpuserpw in $SFTPUSERS
         do
           # Extract username from user:password pair
           g_sftpuser=$(echo "${g_sftpuserpw}" | cut -d ":" -f1)
 
           # Create system user with sftp-share group and supplementary groups (skip if already exists)
-          id "$g_sftpuser" &>/dev/null || useradd -g sftp-share -G 33,101 -m -s /usr/sbin/nologin "$g_sftpuser"
+          id "$g_sftpuser" &>/dev/null || useradd -g {{ sftp_share_group }} -G 33,101 -m -s /usr/sbin/nologin "$g_sftpuser"
 
           # Set password for the user
           echo "${g_sftpuserpw}" | chpasswd
@@ -225,7 +286,7 @@
         AcceptEnv LANG LC_*
         AllowTcpForwarding no
         AllowAgentForwarding no
-        AllowGroups sftp-share
+        AllowGroups {{ sftp_share_group }}
         IgnoreRhosts yes
         PermitRootLogin no
         PermitTunnel no
@@ -250,6 +311,11 @@
     notify:
     - Restart sftp-share
 
+  - name: Remove the obsolete manual user helper (LDAP group is the single source of truth)
+    ansible.builtin.file:
+      path: /symbios/services/sftp-share/sftp-share-user.sh
+      state: absent
+
   - name: Deploy healthcheck
     include_tasks: tasks/runcheck-docker.yml
     vars:
@@ -261,6 +327,11 @@
     args:
       chdir: /symbios/services/sftp-share
     changed_when: false
+
+  - name: Sync the SFTP user list from LDAP group {{ sftp_share_ldap_group }}
+    ansible.builtin.shell: "{{ git_root }}/scripts/symbios-sftp-share-sync.sh"
+    register: f_sftp_sync
+    changed_when: "'updated' in f_sftp_sync.stdout"
 
   - name: Register playbook as installed
     include_tasks: tasks/state-register.yml

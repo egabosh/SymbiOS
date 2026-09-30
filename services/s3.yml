@@ -1,0 +1,327 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Generic S3-compatible backup endpoint for restic.
+#
+# Auth model: this service is NOT protected by Authelia/OIDC. A restic client
+# is a non-interactive HTTP client and cannot complete a browser login, so
+# forward-auth would break every backup job. Access control is therefore done
+# with the native rest-server htpasswd user list. Users are managed with
+# /symbios/services/s3/s3-user.sh on the host.
+#
+# docs:
+#   name: S3
+#   short_description: Deploy a generic S3-compatible restic backup endpoint
+#   description: Deploys restic/rest-server as a generic S3-style REST backend for restic backups. Access is controlled by an htpasswd user list (not OIDC), because non-interactive restic clients cannot complete a browser login.
+#   url: "https://s3.{{ base_domain }}"
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   service_control:
+#     services:
+#     - name: s3
+#       type: docker
+#       compose_file: /symbios/services/s3/docker-compose.yml
+#       status: test -d /symbios/services/s3 || exit 2; docker compose -f /symbios/services/s3/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: s3
+#       command: docker compose -f /symbios/services/s3/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/s3/docker-compose.yml down
+#     program_paths:
+#       - /symbios/services/s3/
+#       - /symbios/base-services/traefik/providers/s3.yml
+#       - /symbios/runchecks.d/symbios-healthcheck-s3.check
+#   actions:
+#     start: docker compose -f /symbios/services/s3/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/s3/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/s3/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/s3/docker-compose.yml up -d
+#
+---
+- name: s3
+  hosts: all
+  vars:
+    service_name: s3
+    service_domain: "{{ service_name }}.{{ base_domain }}"
+    # Repository root inside the container (fixed by the upstream image)
+    s3_container_path: /data
+    # User created on the very first run when no htpasswd file exists yet
+    s3_initial_user: admin
+    # Extra flags handed to rest-server. Leave empty unless you need
+    # --private-repos, --group-accessible-repos, --prometheus or --tls.
+    # Do NOT use --append-only unless the endpoint must be un-deletable.
+    s3_options: ""
+  tasks:
+
+    - name: Create /symbios/services/s3 dir
+      ansible.builtin.file:
+        path: "/symbios/services/{{ service_name }}"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: Create /symbios/services/s3/data dir
+      ansible.builtin.file:
+        path: "/symbios/services/{{ service_name }}/data"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0750'
+
+    # /symbios/services/s3/docker-compose.yml Container Configuration
+    - name: /symbios/services/s3/docker-compose.yml Container Configuration
+      blockinfile:
+        path: "/symbios/services/{{ service_name }}/docker-compose.yml"
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          name: ""
+
+          services:
+
+            {{ service_name }}:
+              image: restic/rest-server:latest
+              container_name: {{ service_name }}
+              restart: unless-stopped
+              environment:
+                # .htpasswd is read from the repository root by default
+                PASSWORD_FILE: "{{ s3_container_path }}/.htpasswd"
+                OPTIONS: "{{ s3_options }}"
+              volumes:
+                - ./data:{{ s3_container_path }}:rw
+                - /etc/localtime:/etc/localtime:ro
+              networks:
+                - symbios_services
+
+          networks:
+            symbios_services:
+              external: true
+        backup: yes
+      notify: Restart s3
+
+    # /symbios/services/s3/genpw.sh (generate Random PW for the initial user)
+    - name: /symbios/services/s3/genpw.sh (generate Random PW for the initial user)
+      blockinfile:
+        path: "/symbios/services/{{ service_name }}/genpw.sh"
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          #!/bin/bash
+          # Create the initial rest-server user and record its credentials.
+
+          # Change to service directory
+          cd /symbios/services/s3 || exit 1
+
+          # Nothing to do once the htpasswd file exists
+          if [ -s data/.htpasswd ]
+          then
+            exit 0
+          fi
+
+          # Generate a random password for the initial user
+          g_s3password=$(pwgen -s 32 1)
+
+          # Write the htpasswd entry (bcrypt) into the repository root
+          htpasswd -B -b -c data/.htpasswd "{{ s3_initial_user }}" "$g_s3password"
+          chmod 640 data/.htpasswd
+          chown root:docker data/.htpasswd
+
+          # Store the generated credentials for the administrator to read
+          cat >credentials <<EOF
+          # Generated by genpw.sh on the first run. Delete after you have
+          # stored the password in your password manager.
+          S3_USER={{ s3_initial_user }}
+          S3_PASSWORD=$g_s3password
+          S3_URL=https://{{ service_domain }}
+          EOF
+          chmod 400 credentials
+          chown root:root credentials
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /symbios/services/s3/genpw.sh shebang
+      ansible.builtin.lineinfile:
+        path: "/symbios/services/{{ service_name }}/genpw.sh"
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    # /symbios/services/s3/s3-user.sh (add and delete restic users)
+    - name: /symbios/services/s3/s3-user.sh (add and delete restic users)
+      blockinfile:
+        path: "/symbios/services/{{ service_name }}/s3-user.sh"
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          #!/bin/bash
+          # Manage rest-server users in the htpasswd file.
+          #
+          # Usage: s3-user.sh add <user> [password]
+          #        s3-user.sh del <user>
+          #        s3-user.sh list
+          #        s3-user.sh passwd <user> [password]
+
+          # Change to service directory
+          cd /symbios/services/s3 || exit 1
+
+          f_action="${1:-}"
+          f_user="${2:-}"
+          f_pass="${3:-}"
+
+          f_htpasswd="data/.htpasswd"
+          f_credentials="credentials"
+
+          # Print usage when called without a valid action
+          if [ -z "$f_action" ] || [ -z "$f_user" ]
+          then
+            echo "Usage: s3-user.sh {add|del|list|passwd} <user> [password]" >&2
+            exit 1
+          fi
+
+          # list only needs the user list, not a real user name
+          if [ "$f_action" == "list" ]
+          then
+            cut -d ":" -f1 "$f_htpasswd" 2>/dev/null
+            exit 0
+          fi
+
+          # Generate a password when none was given
+          if [ -z "$f_pass" ]
+          then
+            f_pass=$(pwgen -s 32 1)
+          fi
+
+          case "$f_action" in
+            add)
+              # Refuse to overwrite an existing user silently
+              if grep -q "^${f_user}:" "$f_htpasswd" 2>/dev/null
+              then
+                echo "User ${f_user} already exists, use 'passwd' to change it." >&2
+                exit 1
+              fi
+              htpasswd -B -b "$f_htpasswd" "$f_user" "$f_pass"
+              echo "S3_USER=${f_user}"
+              echo "S3_PASSWORD=${f_pass}"
+              echo "S3_URL=https://{{ service_domain }}"
+              ;;
+            passwd)
+              # htpasswd needs an existing entry to update it
+              if ! grep -q "^${f_user}:" "$f_htpasswd" 2>/dev/null
+              then
+                echo "User ${f_user} does not exist." >&2
+                exit 1
+              fi
+              htpasswd -B -b "$f_htpasswd" "$f_user" "$f_pass"
+              echo "S3_USER=${f_user}"
+              echo "S3_PASSWORD=${f_pass}"
+              echo "S3_URL=https://{{ service_domain }}"
+              ;;
+            del)
+              # Rebuild the htpasswd file without the removed user
+              sed -i "/^${f_user}:/d" "$f_htpasswd"
+              echo "User ${f_user} removed."
+              ;;
+            *)
+              echo "Unknown action: ${f_action}" >&2
+              exit 1
+              ;;
+          esac
+
+          # The repository directory is written by root only
+          chmod 640 "$f_htpasswd"
+          chown root:docker "$f_htpasswd"
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /symbios/services/s3/s3-user.sh shebang
+      ansible.builtin.lineinfile:
+        path: "/symbios/services/{{ service_name }}/s3-user.sh"
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    # /symbios/base-services/traefik/providers/s3.yml Traefik File Provider
+    - name: /symbios/base-services/traefik/providers/s3.yml Traefik File Provider
+      blockinfile:
+        path: "/symbios/base-services/traefik/providers/{{ service_name }}.yml"
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+              {{ service_name }}:
+                rule: "Host(`{{ service_domain }}`)"
+                entryPoints:
+                  - "https"
+                service: {{ service_name }}
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  # No authelia@file here: restic clients cannot log in via a
+                  # browser. Authentication is the htpasswd list of the
+                  # rest-server itself.
+                  - "secHeaders@file"
+            services:
+              {{ service_name }}:
+                loadBalancer:
+                  servers:
+                    - url: "http://{{ service_name }}:8000"
+        backup: yes
+
+    # rest-server refuses to start without a readable .htpasswd file, so the
+    # initial user has to exist before the compose stack is started.
+    - name: Run genpw.sh to create the initial s3 user
+      ansible.builtin.shell: /symbios/services/s3/genpw.sh
+      args:
+        creates: "/symbios/services/s3/data/.htpasswd"
+
+    - name: Deploy healthcheck
+      include_tasks: tasks/runcheck-docker.yml
+      vars:
+        service_name: s3
+        check_desc: "Verifies that the s3 (restic rest-server) container is running. A missing container marks the check as failed."
+
+    - name: Ensure s3 is running
+      include_tasks: tasks/docker-start.yml
+
+    - name: Register playbook as installed
+      include_tasks: tasks/state-register.yml
+
+  handlers:
+
+    - name: Restart s3
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: "/symbios/services/{{ service_name }}"

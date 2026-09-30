@@ -8,3 +8,4 @@ __pycache__/
 /webui/main/static/js/bootstrap.bundle.min.js
 /symbpios-image/symbpios-*
 AGENTS.md
+migrations

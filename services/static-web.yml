@@ -1,0 +1,286 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Static web host serving any number of vhosts from plain directories.
+#
+# Sites are declared in the static_web_sites list, so the playbook stays
+# generic: add an entry with a name and a domain to serve another subdomain.
+# The default deployment provides three sites (web, doc, share).
+#
+# Auth model: sites listed in static_web_auth_sites are protected by Authelia
+# forward-auth restricted to the "static-web" LDAP group. OIDC is not used
+# because static content has no login form that could start an OIDC flow; the
+# LDAP group check happens in the Authelia forward-auth request instead. Sites
+# that are not listed stay public and only get the security headers.
+#
+# docs:
+#   name: Static Web
+#   short_description: Serve static web content from plain directories
+#   description: Deploys a single nginx container that serves any number of static subdomains from local directories. Selected sites are protected by Authelia forward-auth against the static-web LDAP group.
+#   url: "https://web.{{ base_domain }}"
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   access:
+#     user_group: static-web
+#   service_control:
+#     services:
+#     - name: static-web
+#       type: docker
+#       compose_file: /symbios/services/static-web/docker-compose.yml
+#       status: test -d /symbios/services/static-web || exit 2; docker compose -f /symbios/services/static-web/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: static-web
+#       command: docker compose -f /symbios/services/static-web/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/static-web/docker-compose.yml down
+#     program_paths:
+#       - /symbios/services/static-web/
+#       - /symbios/base-services/traefik/providers/static-web.yml
+#       - /symbios/runchecks.d/symbios-healthcheck-static-web.check
+#     ldap_groups:
+#       - static-web
+#     authelia_blocks:
+#       - "static-web ACCESS CONTROL"
+#   actions:
+#     start: docker compose -f /symbios/services/static-web/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/static-web/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/static-web/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/static-web/docker-compose.yml up -d
+#
+---
+- name: static-web
+  hosts: all
+  vars:
+    service_name: static-web
+    # Sites served by this stack. "name" is used for the document root
+    # directory and the Traefik router, "domain" for the hostname.
+    static_web_sites:
+      - name: web
+        domain: "web.{{ base_domain }}"
+      - name: doc
+        domain: "doc.{{ base_domain }}"
+      - name: share
+        domain: "share.{{ base_domain }}"
+    # Subset of static_web_sites that is protected by Authelia forward-auth
+    static_web_auth_sites:
+      - web
+    # Authelia policy applied to the protected sites
+    static_web_auth_policy: two_factor
+    # Site used for the healthcheck URL
+    static_web_probe_site: web
+    # tasks/runcheck.yml derives the check name and default URL from
+    # service_domain, so point it at the probed site
+    service_domain: "{{ (static_web_sites | selectattr('name', 'equalto', static_web_probe_site) | map(attribute='domain') | first) | default(static_web_sites[0].domain) }}"
+  tasks:
+
+    - name: Create /symbios/services/static-web dir
+      ansible.builtin.file:
+        path: "/symbios/services/{{ service_name }}"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: Create /symbios/services/static-web/htdocs dir
+      ansible.builtin.file:
+        path: "/symbios/services/{{ service_name }}/htdocs"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0750'
+
+    - name: Create /symbios/services/static-web/nginx/conf.d dir
+      ansible.builtin.file:
+        path: "/symbios/services/{{ service_name }}/nginx/conf.d"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0750'
+
+    # One document root per site, each with a placeholder index page
+    - name: Create document root per site
+      ansible.builtin.file:
+        path: "/symbios/services/{{ service_name }}/htdocs/{{ item.name }}"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0750'
+      loop: "{{ static_web_sites }}"
+
+    - name: Create placeholder index page per site
+      ansible.builtin.copy:
+        dest: "/symbios/services/{{ service_name }}/htdocs/{{ item.name }}/index.html"
+        owner: root
+        group: docker
+        mode: '0640'
+        force: false
+        content: |
+          <!DOCTYPE html>
+          <html lang="en">
+          <head><meta charset="utf-8"><title>{{ item.domain }}</title></head>
+          <body><p>No content deployed for {{ item.domain }} yet.</p></body>
+          </html>
+      loop: "{{ static_web_sites }}"
+
+    # One nginx server block per site, replacing the image default site
+    - name: Create nginx vhost per site
+      ansible.builtin.copy:
+        dest: "/symbios/services/{{ service_name }}/nginx/conf.d/{{ item.name }}.conf"
+        owner: root
+        group: docker
+        mode: '0640'
+        content: |
+          # nginx server block for the {{ item.domain }} site
+          server {
+            listen 80;
+            listen [::]:80;
+            server_name {{ item.domain }};
+
+            # Document root and index files
+            root /usr/share/nginx/html/{{ item.name }};
+            index index.html index.htm;
+
+            # Do not expose dotfiles
+            location ~ /\. {
+              deny all;
+            }
+
+            # Never render a directory listing
+            autoindex off;
+          }
+      loop: "{{ static_web_sites }}"
+
+    - name: Remove the nginx image default site
+      ansible.builtin.file:
+        path: "/symbios/services/{{ service_name }}/nginx/conf.d/default.conf"
+        state: absent
+
+    # /symbios/services/static-web/docker-compose.yml Container Configuration
+    - name: /symbios/services/static-web/docker-compose.yml Container Configuration
+      blockinfile:
+        path: "/symbios/services/{{ service_name }}/docker-compose.yml"
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          name: ""
+
+          services:
+
+            {{ service_name }}:
+              image: nginx:latest
+              container_name: {{ service_name }}
+              restart: unless-stopped
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - ./htdocs:/usr/share/nginx/html:ro
+                - ./nginx/conf.d:/etc/nginx/conf.d:ro
+              networks:
+                - symbios_services
+
+          networks:
+            symbios_services:
+              external: true
+        backup: yes
+      notify: Restart static-web
+
+    # /symbios/base-services/traefik/providers/static-web.yml Traefik File Provider
+    - name: /symbios/base-services/traefik/providers/static-web.yml Traefik File Provider
+      blockinfile:
+        path: "/symbios/base-services/traefik/providers/{{ service_name }}.yml"
+        create: yes
+        mode: 0444
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            routers:
+          {% for site in static_web_sites %}
+              {{ site.name }}:
+                rule: "Host(`{{ site.domain }}`)"
+                entryPoints:
+                  - "https"
+                service: {{ service_name }}
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+          {% if site.name in static_web_auth_sites %}
+                  - "authelia@file"
+          {% endif %}
+          {% endfor %}
+            services:
+              {{ service_name }}:
+                loadBalancer:
+                  servers:
+                    - url: "http://{{ service_name }}:80"
+        backup: yes
+
+    ##################
+    #### Authelia ####
+    ##################
+
+    # LDAP auth without OIDC: static content cannot start an OIDC flow, so the
+    # "static-web" LDAP group is the access list and Authelia checks it while
+    # handling the forward-auth request.
+    - name: Create LDAP group for static-web access control
+      include_tasks: tasks/ldap-single-group.yml
+
+    - name: Write Authelia access_control for static-web group restriction
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK {{ service_name }} ACCESS CONTROL"
+        # Explicit string form with newline escapes: the block scalar would
+        # strip the leading whitespace that access_control rules need.
+        block: "{% for site in static_web_sites | selectattr('name', 'in', static_web_auth_sites) %}    - domain: \"{{ site.domain }}\"\n      policy: {{ static_web_auth_policy }}\n      subject:\n        - [\"group:static-web\"]\n    - domain: \"{{ site.domain }}\"\n      policy: deny\n{% endfor %}"
+        insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+      notify: Restart authelia
+
+    - name: Deploy healthcheck
+      include_tasks: tasks/runcheck.yml
+      vars:
+        service_name: static-web
+        healthcheck_url: "https://{{ service_domain }}"
+
+    - name: Ensure static-web is running
+      include_tasks: tasks/docker-start.yml
+
+    - name: Register playbook as installed
+      include_tasks: tasks/state-register.yml
+
+  handlers:
+
+    - name: Restart static-web
+      ansible.builtin.shell: docker compose up -d --force-recreate
+      args:
+        chdir: "/symbios/services/{{ service_name }}"
+
+    - name: Restart authelia
+      ansible.builtin.shell: docker compose restart
+      args:
+        chdir: /symbios/base-services/authelia
