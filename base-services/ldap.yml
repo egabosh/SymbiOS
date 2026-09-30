@@ -243,6 +243,7 @@
               cn: module
               olcModulePath: /usr/lib/ldap
               olcModuleLoad: back_mdb
+              olcModuleLoad: argon2
 
               dn: olcDatabase={0}config,cn=config
               objectClass: olcDatabaseConfig

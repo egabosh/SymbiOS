@@ -3,15 +3,19 @@
 # the admin user to it.
 #
 # Required var:  service_name
-# Optional var:  git_root         (default from playbook vars)
-# Optional var:  ldap_admin_uid   (defaults to admin)
+# Optional vars: git_root         (default from playbook vars)
+#                ldap_admin_uid   (defaults to admin)
+#                ldap_group_name  (defaults to service_name; use this when the
+#                                  group needs a different name than the
+#                                  service, e.g. <service>-users for a
+#                                  non-OIDC service)
 
-- name: "Create LDAP group {{ service_name }}"
-  ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name {{ service_name }}"
+- name: "Create LDAP group {{ ldap_group_name | default(service_name) }}"
+  ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name {{ ldap_group_name | default(service_name) }}"
   changed_when: false
   failed_when: false
 
-- name: "Add user {{ ldap_admin_uid | default('admin') }} to LDAP group {{ service_name }}"
-  ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --add-user --name {{ service_name }} --uid {{ ldap_admin_uid | default('admin') }}"
+- name: "Add user {{ ldap_admin_uid | default('admin') }} to LDAP group {{ ldap_group_name | default(service_name) }}"
+  ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --add-user --name {{ ldap_group_name | default(service_name) }} --uid {{ ldap_admin_uid | default('admin') }}"
   changed_when: false
   failed_when: false

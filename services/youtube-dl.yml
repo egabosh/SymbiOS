@@ -1,0 +1,188 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# yt-dlp downloader.
+#
+# This is a one-shot job container, not a service with a web interface. It has
+# no Traefik router and no authentication at all: it never listens on a port
+# and is only reachable from the host through the youtube-dl wrapper script.
+# Start it with an arbitrary yt-dlp URL argument.
+#
+# docs:
+#   name: yt-dlp
+#   short_description: Deploy a yt-dlp downloader for ad-hoc video downloads
+#   description: Deploys a one-shot yt-dlp (youtube-dl) container that downloads a video into a configurable target directory. It exposes no port and needs no authentication; start it with the youtube-dl wrapper on the host.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   service_control:
+#     services:
+#     - name: youtube-dl
+#       type: docker
+#       compose_file: /symbios/services/youtube-dl/docker-compose.yml
+#       status: docker compose -f /symbios/services/youtube-dl/docker-compose.yml config -q
+#     logs:
+#     - name: youtube-dl
+#       command: docker compose -f /symbios/services/youtube-dl/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/youtube-dl/docker-compose.yml down
+#     program_paths:
+#       - /symbios/services/youtube-dl/
+#       - /usr/local/bin/youtube-dl
+#       - /symbios/runchecks.d/symbios-healthcheck-youtube-dl.check
+#   actions:
+#     start: docker compose -f /symbios/services/youtube-dl/docker-compose.yml build
+#     stop: docker compose -f /symbios/services/youtube-dl/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/youtube-dl/docker-compose.yml build
+#     reload: docker compose -f /symbios/services/youtube-dl/docker-compose.yml build
+#
+---
+- name: youtube-dl
+  hosts: all
+  vars:
+    service_name: youtube-dl
+    # Directory the downloaded files are written to. Point this at a share
+    # volume if the files should end up on a NAS or a shared data disk.
+    youtube_dl_downloaddir: "{{ data_root }}/services/youtube-dl/downloads"
+  tasks:
+
+    - name: Create /symbios/services/youtube-dl dir
+      ansible.builtin.file:
+        path: "/symbios/services/{{ service_name }}"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: Create the download target directory
+      ansible.builtin.file:
+        path: "{{ youtube_dl_downloaddir }}"
+        owner: 1000
+        group: 1000
+        state: directory
+        mode: '0775'
+
+    # /symbios/services/youtube-dl/Dockerfile
+    - name: /symbios/services/youtube-dl/Dockerfile
+      blockinfile:
+        path: "/symbios/services/{{ service_name }}/Dockerfile"
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # yt-dlp image with ffmpeg for merging and post-processing streams.
+          FROM debian:latest
+          RUN apt-get update \
+              && apt-get install -y ffmpeg python3-full wget ca-certificates \
+              && wget -q https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp \
+              && chmod +x /usr/local/bin/yt-dlp \
+              && rm -rf /var/lib/apt/lists/*
+          ENV LANG en_US.utf8
+          # Run yt-dlp directly, the compose file passes the URL
+          ENTRYPOINT ["/usr/local/bin/yt-dlp"]
+        backup: yes
+      notify: Rebuild youtube-dl
+
+    # /symbios/services/youtube-dl/docker-compose.yml Container Configuration
+    - name: /symbios/services/youtube-dl/docker-compose.yml Container Configuration
+      blockinfile:
+        path: "/symbios/services/{{ service_name }}/docker-compose.yml"
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          name: ""
+
+          services:
+
+            {{ service_name }}:
+              build:
+                context: .
+                dockerfile: Dockerfile
+              container_name: {{ service_name }}
+              # One-shot job: never restarted automatically
+              restart: "no"
+              # yt-dlp writes into the current working directory, so this is
+              # what decides where the result ends up
+              working_dir: /downloaddir
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - {{ youtube_dl_downloaddir }}:/downloaddir:rw
+        backup: yes
+      notify: Rebuild youtube-dl
+
+    # /usr/local/bin/youtube-dl wrapper so the tool is on the host PATH
+    - name: /usr/local/bin/youtube-dl
+      blockinfile:
+        path: "/usr/local/bin/youtube-dl"
+        create: yes
+        mode: 0550
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          #!/bin/bash
+          # Download a video with yt-dlp into the youtube-dl target directory.
+
+          # Change to the service directory so the compose project resolves
+          cd /symbios/services/youtube-dl || exit 1
+
+          # Pass every argument through to yt-dlp
+          exec docker compose run --rm {{ service_name }} --no-playlist "$@"
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /usr/local/bin/youtube-dl shebang
+      ansible.builtin.lineinfile:
+        path: /usr/local/bin/youtube-dl
+        insertbefore: BOF
+        line: "#!/bin/bash"
+
+    - name: Build the youtube-dl image
+      ansible.builtin.shell: docker compose build
+      args:
+        chdir: "/symbios/services/{{ service_name }}"
+      changed_when: false
+
+    - name: Deploy healthcheck
+      include_tasks: tasks/runcheck-docker.yml
+      vars:
+        service_name: youtube-dl
+        # The container is a one-shot job and is normally exited, so the
+        # check verifies that the image and the target directory exist.
+        check_command: "docker compose -f /symbios/services/youtube-dl/docker-compose.yml images -q | grep -q . && test -d {{ youtube_dl_downloaddir }}"
+        check_desc: "Verifies that the youtube-dl image is built and the download target directory exists. A missing image or directory marks the check as failed."
+
+    - name: Register playbook as installed
+      include_tasks: tasks/state-register.yml
+
+  handlers:
+
+    - name: Rebuild youtube-dl
+      ansible.builtin.shell: docker compose build --pull
+      args:
+        chdir: "/symbios/services/{{ service_name }}"
