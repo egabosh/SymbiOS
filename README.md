@@ -247,6 +247,29 @@ Access tiers below the media root:
 - **Group shares** (`shared/<name>`): exactly the members of one LDAP group
   (auto-created as `shared-<name>`). Manage them on the **Shares** page in
   the WebUI (membership via Groups); only empty shares can be deleted.
+
+### Member guide: using the shared storage
+
+For teams, friends, clubs or small businesses - same rules for everyone,
+no special cases. All access works unchanged over LAN and VPN (only
+reachability of the ports below matters, no extra configuration).
+
+- **SFTP** (port 28): server `sftp://<base_domain>:28` (or the LAN IP),
+  login with your LDAP username plus password or SSH key. SSH keys are
+  managed per user under **Users** (key button, one per line). Clients:
+  WinSCP or FileZilla on Windows, `sftp`/`sshfs` on Linux/macOS.
+- **Where things land**: you start in your private dir (`home/<uid>`,
+  nobody else can see it). Shared uploads go to `inbox/` (members of the
+  `media` group). Libraries (`audio`, `images`, `videos`, `books`,
+  `documents`) are read-only; group shares live below `shared/`.
+- **Nextcloud** (if installed): the same libraries appear as external
+  storage in Files, plus WebDAV at
+  `https://nextcloud.<base_domain>/remote.php/dav/files/<uid>/` for
+  "Map network drive" in Windows Explorer / Finder.
+- **Getting access**: ask an admin to add you to the `media` group
+  (libraries + inbox over SFTP) or to a `shared-<name>` group (one
+  collaboration folder). Deleting in shared folders is immediate and
+  final - there is no trash bin on SFTP.
 - **WordPress instances** (opt-in via `sftp: true`): live docroots are
   exposed per instance at `/sftp-share/wordpress/<name>`, gated by the
   instance LDAP group `wordpress-<name>` - members only ever see their own

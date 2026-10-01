@@ -100,6 +100,11 @@ PAGE_EXPLAIN = {
         'server URL is stored in the inventory, and an optional API key '
         'can be added if the endpoint requires authentication.'
     ),
+    'media': (
+        'Central locations for music, photos, videos, books, documents '
+        'and the shared inbox. Services mount these instead of inventing '
+        'their own paths; missing directories are created on apply.'
+    ),
 }
 
 # Map settings page -> runchecks check name (for the status badge).
@@ -155,6 +160,13 @@ def get_page_badge(page_key, inventory_vars):
                     'An OpenAI-compatible endpoint is configured.')
         return ('missing', 'Not configured',
                 'No AI endpoint is configured yet.')
+
+    if page_key == 'media':
+        if inventory_vars.get('media_root'):
+            return ('ok', 'Configured',
+                    'Shared media directories are configured.')
+        return ('missing', 'Not configured',
+                'No media root is configured yet.')
 
     if page_key == 'port-forwarding':
         if inventory_vars.get('port_forwarding_configured'):

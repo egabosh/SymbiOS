@@ -8,7 +8,7 @@
 #
 # Usage:
 #   symbios-media-share.sh --list
-#   symbios-media-share.sh --create --name <share> [--group <group>]
+#   symbios-media-share.sh --create --name <share> [--group <group>] [--quota <GiB>]
 #   symbios-media-share.sh --delete --name <share>
 
 g_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,8 +26,9 @@ Manage shared group directories below ${g_media_root}/shared.
 
 Options:
   --list                          List shares as JSON
-  --create --name <share> [--group <group>]
-                                  Create share dir + LDAP group (default group: shared-<share>)
+  --create --name <share> [--group <group>] [--quota <GiB>]
+                                  Create share dir + LDAP group (default group: shared-<share>,
+                                  default quota: media_quota_share from inventory, 0 = unlimited)
   --delete --name <share>         Delete an empty share dir and its auto-created group
   -h, --help                      Show this help and exit
 EOF
@@ -57,6 +58,7 @@ function f_ldap_members {
 function f_cmd_list {
   local f_dir f_name f_gid f_group f_mode f_members f_json f_first
   local f_shared="${g_media_root}/shared"
+  local f_qline f_qused f_qlimit
 
   f_json="["
   f_first=1
@@ -80,13 +82,23 @@ function f_cmd_list {
       then
         f_members="$(f_ldap_members "${f_group}")"
       fi
+      # Project quota usage (best-effort, empty when unsupported).
+      f_qused=""
+      f_qlimit=""
+      if command -v repquota >/dev/null 2>&1
+      then
+        f_qline="$(repquota -P "${g_media_root}" 2>/dev/null | awk -v id="#${f_gid}" '$1 == id {print $3, $5}')"
+        f_qused="${f_qline%% *}"
+        f_qlimit="${f_qline##* }"
+        [[ "${f_qused}" == "${f_qlimit}" ]] && f_qlimit=""
+      fi
       if [[ ${f_first} -eq 1 ]]
       then
         f_first=0
       else
         f_json="${f_json},"
       fi
-      f_json="${f_json}{\"name\":\"${f_name}\",\"path\":\"${f_dir%/}\",\"group\":\"${f_group}\",\"gid\":\"${f_gid}\",\"mode\":\"${f_mode}\",\"members\":\"${f_members}\"}"
+      f_json="${f_json}{\"name\":\"${f_name}\",\"path\":\"${f_dir%/}\",\"group\":\"${f_group}\",\"gid\":\"${f_gid}\",\"mode\":\"${f_mode}\",\"members\":\"${f_members}\",\"quota_used\":\"${f_qused}\",\"quota_limit\":\"${f_qlimit}\"}"
     done
   fi
   f_json="${f_json}]"
@@ -96,6 +108,7 @@ function f_cmd_list {
 f_action=""
 f_name=""
 f_group=""
+f_quota=""
 
 while [[ $# -gt 0 ]]
 do
@@ -118,6 +131,10 @@ do
       ;;
     --group)
       f_group="$2"
+      shift 2
+      ;;
+    --quota)
+      f_quota="$2"
       shift 2
       ;;
     -h|--help)
@@ -188,6 +205,18 @@ case "${f_action}" in
     mkdir -p "${f_dir}"
     chown "root:${f_gid}" "${f_dir}"
     chmod 2770 "${f_dir}"
+    # Project quota with the owning gid as stable project id: explicit
+    # --quota wins, otherwise the inventory default (0 = unlimited).
+    if [[ -z "${f_quota}" ]]
+    then
+      f_quota="$(f_symbios_var media_quota_share 0)"
+    fi
+    if ! [[ "${f_quota}" =~ ^[0-9]+$ ]]
+    then
+      g_echo_error "Invalid quota: must be GiB as a number"
+      exit 1
+    fi
+    f_media_quota "${f_gid}" "${f_dir}" "${f_quota}"
     g_echo_note "Share '${f_name}' ready (${f_dir}, group ${f_group})"
     ;;
 

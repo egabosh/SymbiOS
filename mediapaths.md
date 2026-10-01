@@ -105,8 +105,8 @@ coverage - rate-limit at the daemon (`MaxAuthTries 3`, `LoginGraceTime 60`,
   Nextcloud can never modify the libraries (read-only mounts).
 - **Paperless**: `media_documents` as document archive (paperless owns and
   writes it via `USERMAP_GID=media` plus a dedicated ACL, the media group
-  only reads). Ingest moved to `media_inbox/paperless` (also the Samba
-  `[paperless-in]` target). `./data` and `./export` stay service-local.
+  only reads). Ingest moved to `media_inbox/paperless` (uploads via SFTP
+  by media members). `./data` and `./export` stay service-local.
 - **Home Assistant**: libraries mounted `:ro` below HA's own
   `/media` and exposed in the Media Browser via `media_dirs`
   (`audio`/`videos`/`images`); `./media` stays app-owned (TTS, camera clips).
@@ -127,9 +127,6 @@ coverage - rate-limit at the daemon (`MaxAuthTries 3`, `LoginGraceTime 60`,
   (fail2ban on container logs or router-side rate limiting).
 - Least-privilege LDAP bind user for the SFTP container (today: shared
   `readuser`, which reads the whole directory).
-- Samba `[paperless-in]` user: the `paperless` system account does not
-  exist where uid 998 is taken (e.g. by `systemd-network`) - map or
-  create a working upload identity.
 
 ## Three semantics (do not conflate)
 

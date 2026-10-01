@@ -45,10 +45,7 @@
 #     program_paths:
 #       - /symbios/services/paperless/
 #       - /symbios/base-services/traefik/providers/paperless.yml
-#       - /symbios/runchecks.d/symbios-healthcheck-paperless.check
-#       - /etc/samba/smb-{{ ansible_facts['hostname'] }}.conf
-#     commands:
-#       - userdel paperless
+#     - /symbios/runchecks.d/symbios-healthcheck-paperless.check
 #     ldap_groups:
 #       - paperless-users
 #       - paperless-admins
@@ -69,7 +66,7 @@
     # Document archive (see mediapaths.md). Paperless owns and writes this
     # store; every other consumer only reads it via the media group.
     paperless_media_path: "{{ media_documents | default('/symbios/media/documents') }}"
-    # Ingest directory: new scans land here (SFTP, scanners, Samba share).
+    # Ingest directory: new scans land here via SFTP or member uploads.
     paperless_consume_path: "{{ media_inbox | default('/symbios/media/inbox') }}/paperless"
     # Previous service-local defaults kept for the one-time migration below.
     paperless_legacy_media: "/symbios/services/paperless/media"
@@ -207,15 +204,6 @@
         chdir: /symbios/services/paperless
       changed_when: false
 
-    - name: Create paperless User
-      ansible.builtin.user:
-        name: paperless
-        comment: Paperless User for samba
-        uid: 998
-        shell: /bin/false
-        group: docker
-      failed_when: false
-
     - name: Ensure the media archive and consume directories exist
       ansible.builtin.file:
         path: "{{ item.path }}"
@@ -258,26 +246,12 @@
       changed_when: false
       failed_when: false
 
-    - name: Samba Share for incoming documents
-      blockinfile:
+    - name: Remove the obsolete Samba share (uploads go via SFTP now)
+      ansible.builtin.blockinfile:
         path: /etc/samba/smb-{{ ansible_facts['hostname'] }}.conf
-        create: yes
-        mode: "0444"
-        owner: root
-        group: root
         marker: "# {mark} paperles ANSIBLE MANAGED BLOCK"
-        block: |
-          [paperless-in]
-            valid users = paperless
-            path = {{ paperless_consume_path }}
-            public = no
-            writable = yes
-            read only = no
-            printable = no
-            guest ok = no
-        backup: yes
-      notify:
-      - Restart samba
+        state: absent
+      failed_when: false
 
     - name: Give paperless permissions for consume dir
       ansible.builtin.file:
@@ -350,12 +324,6 @@
       ansible.builtin.shell: docker compose up -d --force-recreate
       args:
         chdir: /symbios/services/paperless
-
-    - name: Restart samba
-      ansible.builtin.service:
-        name: samba-{{ ansible_facts['hostname'] }}
-        state: restarted
-      failed_when: false
 
     - name: Restart authelia
       ansible.builtin.shell: docker compose restart

@@ -7,14 +7,14 @@
     </button>
 </div>
 
-<p class="text-muted">Group directories below the shared media root. Only members of the share's LDAP group can read and write it (mode 2770). Manage membership under <a href="/groups/">Groups</a>. Private per-user dirs (<code>home/&lt;uid&gt;</code>, only the user itself) are created automatically.</p>
+<p class="text-muted">Group directories below the shared media root. Only members of the share's LDAP group can read and write it (mode 2770). Manage membership under <a href="/groups/">Groups</a>. Private per-user dirs (<code>home/&lt;uid&gt;</code>, only the user itself) are created automatically. Connection help: SFTP port 28 with your LDAP login, or Nextcloud/WebDAV if installed.</p>
 
 <div class="card mb-4">
     <div class="card-body">
         {% if shares %}
         <table class="table table-hover table-sm">
             <thead>
-                <tr><th>Share</th><th>Path</th><th>Group</th><th>Members</th><th style="width:60px"></th></tr>
+                <tr><th>Share</th><th>Path</th><th>Group</th><th>Members</th><th>Quota</th><th style="width:60px"></th></tr>
             </thead>
             <tbody>
                 {% for share in shares %}
@@ -23,6 +23,7 @@
                     <td class="font-monospace small">{{ share.path }}</td>
                     <td><span class="badge bg-secondary">{{ share.group|default:'-' }}</span></td>
                     <td class="small">{{ share.members|default:'' }}</td>
+                    <td class="small font-monospace">{% if share.quota_limit %}{{ share.quota_used|default:'?' }} / {{ share.quota_limit }}{% else %}-{% endif %}</td>
                     <td class="text-end">
                         <form method="post" action="/shares/{{ share.name }}/delete/" class="d-inline" data-exec-confirm="Really delete share &quot;{{ share.name }}&quot;? Only empty shares can be deleted." data-exec="true">
                             {% csrf_token %}
@@ -59,6 +60,11 @@
                         <label class="form-label">LDAP Group (optional)</label>
                         <input type="text" class="form-control" name="group" pattern="[a-zA-Z0-9._-]+" placeholder="shared-verein (default)">
                         <div class="form-text">Empty creates and uses <code>shared-&lt;name&gt;</code>. Members are managed under Groups.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Quota in GiB (optional)</label>
+                        <input type="number" class="form-control" name="quota" min="0" step="1" placeholder="default from inventory">
+                        <div class="form-text">Empty uses the inventory default. Requires a filesystem with project quotas, otherwise ignored.</div>
                     </div>
                 </div>
                 <div class="modal-footer">

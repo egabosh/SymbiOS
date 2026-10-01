@@ -1,0 +1,54 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="Media Quotas"
+CHECK_DESC="Warns when a media directory approaches its project quota."
+CHECK_DETAIL="Reads repquota project usage (CSV) for the media libraries, inbox, homes and shares.|Warns at 90%, errors past the hard limit, so a full directory never wedges the disk.|Skipped silently when the filesystem has no project quotas."
+
+# Alert thresholds in percent
+f_warn_pct=90
+
+if command -v repquota >/dev/null 2>&1 && command -v findmnt >/dev/null 2>&1
+then
+  if findmnt -n -o OPTIONS --target "${g_media_root}" 2>/dev/null | tr ',' '\n' | grep -qx prjquota
+  then
+    # CSV first line is the header - locate the block used/hard columns
+    # dynamically so format variants do not misalign the math.
+    f_mq_header="$(repquota -P -O csv "${g_media_root}" 2>/dev/null | head -1)"
+    f_mq_used_col="$(echo "${f_mq_header}" | tr ',' '\n' | grep -nx 'used' | head -1 | cut -d: -f1)"
+    f_mq_hard_col="$(echo "${f_mq_header}" | tr ',' '\n' | grep -nx 'hard' | head -1 | cut -d: -f1)"
+    f_mq_id_col="$(echo "${f_mq_header}" | tr ',' '\n' | grep -nx 'id' | head -1 | cut -d: -f1)"
+    if [[ -n "${f_mq_used_col}" ]] && [[ -n "${f_mq_hard_col}" ]] && [[ -n "${f_mq_id_col}" ]]
+    then
+      f_mq_csv="$(repquota -P -O csv "${g_media_root}" 2>/dev/null | tail -n +2)"
+      f_media_quota_check() {
+        local f_id="$1" f_label="$2" f_row f_used f_hard f_pct
+        f_row="$(echo "${f_mq_csv}" | awk -F, -v col="${f_mq_id_col}" -v id="${f_id}" '$col == id {print $0}')"
+        [[ -n "${f_row}" ]] || return 0
+        f_used="$(echo "${f_row}" | cut -d, -f"${f_mq_used_col}")"
+        f_hard="$(echo "${f_row}" | cut -d, -f"${f_mq_hard_col}")"
+        [[ "${f_hard}" -gt 0 ]] 2>/dev/null || return 0
+        f_pct=$(( f_used * 100 / f_hard ))
+        if [[ "${f_pct}" -ge 100 ]]
+        then
+          g_echo_error "Media quota exceeded on ${f_label} (project ${f_id})"
+        elif [[ "${f_pct}" -ge "${f_warn_pct}" ]]
+        then
+          g_echo_warn "Media quota at ${f_pct}% on ${f_label} (project ${f_id})"
+        fi
+      }
+      for f_entry in "31010:inbox" "31011:videos" "31012:audio" "31013:images" "31014:books" "31015:documents"
+      do
+        f_media_quota_check "${f_entry%%:*}" "${f_entry##*:}"
+      done
+      for f_dir in "${g_media_root}/home/"*/ "${g_media_root}/shared/"*/
+      do
+        [[ -d "${f_dir}" ]] || continue
+        if [[ "${f_dir}" == */home/* ]]
+        then
+          f_media_quota_check "$(stat -c '%u' "${f_dir}")" "home/$(basename "${f_dir}")"
+        else
+          f_media_quota_check "$(stat -c '%g' "${f_dir}")" "shared/$(basename "${f_dir}")"
+        fi
+      done
+    fi
+  fi
+fi

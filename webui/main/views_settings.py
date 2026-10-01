@@ -1837,3 +1837,75 @@ def settings_updates(request):
         'page_status_text': badge[2],
     })
 
+
+
+# Editable standard media locations (see mediapaths.md). Missing
+# directories are created by base-services/media.yml on apply; the shared
+# media GID is fixed infrastructure and intentionally not editable here.
+MEDIA_VARS = [
+    ('media_root', 'Media root', 'Base directory for all media below.'),
+    ('media_audio', 'Audio', 'Read-only music/podcast library.'),
+    ('media_images', 'Images', 'Read-only photo library.'),
+    ('media_videos', 'Videos', 'Read-only movie/series library.'),
+    ('media_books', 'Books', 'Read-only e-book library.'),
+    ('media_documents', 'Documents', 'Document archive (e.g. Paperless).'),
+    ('media_inbox', 'Inbox', 'The only shared writable ingest.'),
+    ('media_shared', 'Shares', 'Base directory for group shares.'),
+]
+
+
+@login_required
+def settings_media(request):
+    config = _get_inventory_config()
+    if 'all' not in config:
+        config['all'] = {}
+    if 'vars' not in config['all']:
+        config['all']['vars'] = {}
+    vars_ = config['all']['vars']
+
+    if request.method == 'POST':
+        is_ajax = is_ajax_request(request)
+        try:
+            for key, _label, _hint in MEDIA_VARS:
+                value = request.POST.get(key, '').strip()
+                if not value:
+                    raise ValueError(f'Media path for {key} is required.')
+                if not value.startswith('/'):
+                    raise ValueError(f'Media path for {key} must be absolute.')
+                vars_[key] = value
+            _save_inventory_config(config)
+            job_id, title, cmd = _start_reapply(playbooks=['base-services/media.yml'])
+            resp = {'ok': True, 'job': job_id, 'title': title,
+                    'message': 'Media settings saved.',
+                    'command': cmd}
+            if is_ajax:
+                return JsonResponse(resp)
+            messages.success(request, 'Media settings saved.')
+            messages.info(request, 'Reapplying media playbook in the background...')
+            return redirect('settings_media')
+        except ValueError as e:
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': str(e)}, status=400)
+            messages.error(request, f'Error: {e}')
+            return redirect('settings_media')
+        except Exception as e:
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+            messages.error(request, f'Error: {e}')
+            return redirect('settings_media')
+
+    badge = get_page_badge('media', vars_)
+    media_fields = [{'key': key, 'label': label, 'hint': hint,
+                     'value': vars_.get(key, '')} for key, label, hint in MEDIA_VARS]
+    return render(request, 'main/settings_media.html', {
+        'vars': vars_,
+        'media_vars': MEDIA_VARS,
+        'media_fields': media_fields,
+        'page_key': 'media',
+        'page_icon': 'bi-collection-play',
+        'page_title': 'Media',
+        'page_explain': PAGE_EXPLAIN['media'],
+        'page_status': badge[0],
+        'page_status_label': badge[1],
+        'page_status_text': badge[2],
+    })
