@@ -1,8 +1,9 @@
 # SymbiOS Standard Media Paths
 
-Status: in implementation (sessions Oct 2026). Pilot precedent already merged:
-`services/navidrome.yml` (`navidrome_music_path` / `navidrome_music_gid`)
-proves the read-only mount + supplementary gid pattern works.
+Status: implemented and verified end-to-end on symbios-dev (sessions Oct
+2026); this document is the design record. User-facing summary in README.md
+("Shared media directories"), contributor rules in AGENTS.md
+("Standard media paths").
 
 ## Problem
 
@@ -48,6 +49,7 @@ storage, Paperless consume) would reinvent this again.
 | `media_books` | E-books, audiobooks | `/symbios/media/books` |
 | `media_documents` | Document library / archive (e.g. Paperless) | `/symbios/media/documents` |
 | `media_inbox` | Shared writable ingest | `/symbios/media/inbox` |
+| `media_shared` | Group shares base (`shared/<name>`, one LDAP group each) | `/symbios/media/shared` |
 | `media_gid` | Shared filesystem GID (fixed) | `31000` |
 
 Defaults live under `data_root`. Per-host overrides point anywhere
@@ -94,23 +96,34 @@ coverage - rate-limit at the daemon (`MaxAuthTries 3`, `LoginGraceTime 60`,
   `media_audio` / `media_images`, `:ro` mounts, non-root user with
   supplementary `media_gid`.
 - **sftp-share**: `sftp_share_datadir = media_root` (Chroot), read/write
-  enforced by LDAP group membership (`AllowGroups media*`) + on-disk perms.
-- **youtube-dl** (later): download dir into `media_videos` / `media_inbox`.
-- **Nextcloud** (later): external storage pointing at the media dirs (instead
-  of duplicating files into `nextcloud-data`).
-- **Paperless** (implemented): `media_documents` as document archive (paperless
-  owns and writes it via a dedicated ACL, the media group only reads).
-  Ingest moved to `media_inbox/paperless` (also the Samba `[paperless-in]`
-  target). `./data` and `./export` stay service-local.
-- **youtube-dl** (implemented): downloads land in
+  enforced by LDAP group membership (`AllowGroups media shared-*`) +
+  on-disk perms.
+- **youtube-dl**: downloads land in
   `media_videos/downloads` so Jellyfin picks them up directly.
-- **Nextcloud** (implemented): `media_audio` / `media_videos` /
+- **Nextcloud**: `media_audio` / `media_videos` /
   `media_images` / `media_documents` mounted `:ro` plus registered as
   global external storage (`occ files_external:create`, idempotent).
   Nextcloud can never modify the libraries (read-only mounts).
-- **Home Assistant** (implemented): libraries mounted `:ro` below HA's own
+- **Paperless**: `media_documents` as document archive (paperless owns and
+  writes it via `USERMAP_GID=media` plus a dedicated ACL, the media group
+  only reads). Ingest moved to `media_inbox/paperless` (also the Samba
+  `[paperless-in]` target). `./data` and `./export` stay service-local.
+- **Home Assistant**: libraries mounted `:ro` below HA's own
   `/media` and exposed in the Media Browser via `media_dirs`
   (`audio`/`videos`/`images`); `./media` stays app-owned (TTS, camera clips).
+
+## Open follow-ups (not started)
+
+- Backup strategy for `/symbios/media`: libraries likely belong into
+  `backup_exclude`, documents/inbox likely not - undecided.
+- Brute-force protection for SFTP port 28 beyond daemon limits
+  (fail2ban on container logs or router-side rate limiting).
+- Least-privilege LDAP bind user for the SFTP container (today: shared
+  `readuser`, which reads the whole directory).
+- Samba `[paperless-in]` user: the `paperless` system account does not
+  exist where uid 998 is taken (e.g. by `systemd-network`) - map or
+  create a working upload identity.
+- Defiant migration 7.8 switches host-specific paths to these globals.
 
 ## Three semantics (do not conflate)
 
