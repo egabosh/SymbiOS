@@ -119,6 +119,17 @@ all:
     media_documents: "/symbios/media/documents"
     media_inbox: "/symbios/media/inbox"
     media_shared: "/symbios/media/shared"
+    # Per-directory quotas in GiB (project quotas, see mediapaths.md).
+    # Enforced only when the filesystem is mounted with prjquota
+    # (new data partitions get it automatically); 0 = unlimited.
+    media_quota_inbox: 5
+    media_quota_videos: 20
+    media_quota_audio: 10
+    media_quota_images: 5
+    media_quota_books: 2
+    media_quota_documents: 5
+    media_quota_home: 2
+    media_quota_share: 5
     # Filesystem GID shared by all media consumers (fixed value, never
     # derived from the LDAP group hash). Owns the media dirs together
     # with setgid so every consumer can read group-accessible files.

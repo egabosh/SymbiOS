@@ -62,6 +62,9 @@
 #   f_ldap_exec / f_ldap_ldif       run LDAP in the webui container
 #   f_symbios_traefik_hosts         write Traefik Host labels to $g_tmp/hosts
 #
+#   f_media_quota <projid> <dir> <limit_gib>  apply an ext4 project
+#                                                  quota (best-effort)
+#
 # CONFIG_PATH may be set (e.g. /config/inventory.yml inside the WebUI
 # container) to point at the inventory file.
 #
@@ -385,6 +388,26 @@ function f_ldap_groups_hooks {
     bash "${f_hook_file}" "${f_hook_event}" "${f_hook_group}" "${f_hook_uid}" \
       || g_echo_error "Hook failed: ${f_hook_file}"
   done
+}
+
+# Apply an ext4 project quota to a media dir (best-effort).
+# Usage: f_media_quota <projid> <dir> <limit_gib>  (0 = unlimited, skip)
+# Silent no-op when quota tools are missing or the filesystem is not
+# mounted with prjquota (e.g. root filesystems created before quotas).
+function f_media_quota {
+  local f_projid="$1" f_dir="$2" f_limit="$3"
+  local f_kb
+
+  [[ "${f_limit}" -gt 0 ]] 2>/dev/null || return 0
+  command -v chattr >/dev/null 2>&1 || return 0
+  command -v setquota >/dev/null 2>&1 || return 0
+  command -v findmnt >/dev/null 2>&1 || return 0
+  findmnt -n -o OPTIONS --target "${f_dir}" 2>/dev/null | tr ',' '\n' | grep -qx prjquota || return 0
+
+  f_kb=$(( f_limit * 1048576 ))
+  chattr -p "${f_projid}" "${f_dir}" 2>/dev/null || return 0
+  chattr +P "${f_dir}" 2>/dev/null || true
+  setquota -P "${f_projid}" "${f_kb}" "${f_kb}" 0 0 "${g_media_root}" 2>/dev/null || true
 }
 
 # Load layout immediately so sourcing the library is sufficient.

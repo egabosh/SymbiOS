@@ -1,0 +1,17 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="SFTP Login Attempts"
+CHECK_DESC="Alerts on brute-force patterns against the SFTP share (port 28)."
+CHECK_DETAIL="Counts failed password logins in recent container logs.|Alerts above the threshold (host fail2ban only watches the host sshd, never port 28).|Skipped silently when the service is not installed."
+
+# Alert when more than this many failed passwords appear in the window below
+f_max_failed=10
+f_window="25m"
+
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx sftp-share
+then
+  f_failed="$(docker logs --since "${f_window}" sftp-share 2>&1 | grep -c 'Failed password')"
+  if [[ "${f_failed}" -gt "${f_max_failed}" ]]
+  then
+    g_echo_error "SFTP brute-force pattern: ${f_failed} failed passwords in ${f_window}"
+  fi
+fi

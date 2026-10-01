@@ -450,7 +450,9 @@ EOF
       f_log_ok "Temporary mount /symbios.new already present - keeping it"
     else
       f_log_step "Formatting $f_device as ext4"
-      mkfs.ext4 -F -L "$g_data_label" "$f_target" 2>&1 || {
+      # quota+project enable ext4 project quotas for the media directories
+      # (enforced per-directory limits, see base-services/media.yml).
+      mkfs.ext4 -F -O quota,project -L "$g_data_label" "$f_target" 2>&1 || {
         f_setup_error "mkfs.ext4 failed"
       }
       f_log_ok "ext4 filesystem created"
@@ -521,13 +523,13 @@ EOF
     sed -i '\#.*[[:space:]]/symbios[[:space:]]#d' /etc/fstab
     if [[ "$f_encrypt" == "yes" ]]
     then
-      echo "/dev/mapper/$f_luks_name ${g_mountpoint} ext4 defaults,noatime,noauto 0 2" >> /etc/fstab
+      echo "/dev/mapper/$f_luks_name ${g_mountpoint} ext4 defaults,noatime,noauto,prjquota 0 2" >> /etc/fstab
     else
       local f_uuid
       f_uuid=$(blkid -s UUID -o value "$f_device" 2>/dev/null) || {
         f_setup_error "blkid failed"
       }
-      echo "UUID=$f_uuid ${g_mountpoint} ext4 defaults,noatime,noauto 0 2" >> /etc/fstab
+      echo "UUID=$f_uuid ${g_mountpoint} ext4 defaults,noatime,noauto,prjquota 0 2" >> /etc/fstab
     fi
     f_log_ok "fstab updated"
 

@@ -66,6 +66,15 @@ def share_create(request):
         cmd = f'symbios-media-share.sh --create --name {shlex.quote(name)}'
         if group:
             cmd += f' --group {shlex.quote(group)}'
+        quota = request.POST.get('quota', '').strip()
+        if quota:
+            if not re.match(r'^[0-9]+$', quota):
+                msg = 'Invalid quota: must be GiB as a number (empty = default).'
+                if is_ajax_request(request):
+                    return JsonResponse({'ok': False, 'error': msg}, status=400)
+                messages.error(request, msg)
+                return redirect('shares')
+            cmd += f' --quota {shlex.quote(quota)}'
         return _exec_ldap_command(request, cmd, f'Creating share "{name}"...',
                                   f'Share "{name}" created.', redirect_to='shares')
     return redirect('shares')

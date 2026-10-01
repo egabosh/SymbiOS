@@ -166,12 +166,29 @@
         block: |
           #!/bin/bash
           # Download a video with yt-dlp into the youtube-dl target directory.
+          # Defaults merge to mp4 (Jellyfin direct play) and skip re-downloads
+          # via the archive file; extra arguments override them. After a
+          # successful download the Nextcloud file index is refreshed in the
+          # background (guarded, at most one scan at a time).
 
           # Change to the service directory so the compose project resolves
           cd /symbios/services/youtube-dl || exit 1
 
           # Pass every argument through to yt-dlp
-          exec docker compose run --rm {{ service_name }} --no-playlist "$@"
+          f_rc=0
+          docker compose run --rm {{ service_name }} --no-playlist \
+            --download-archive /downloaddir/.download-archive \
+            --merge-output-format mp4 "$@" || f_rc=$?
+
+          if [[ ${f_rc} -eq 0 ]] && [[ -d /symbios/services/nextcloud ]]
+          then
+            (
+              flock -n 9 || exit 0
+              docker compose -f /symbios/services/nextcloud/docker-compose.yml exec -T -u www-data nextcloud ./occ files:scan --all --unscanned --no-interaction -q >/dev/null 2>&1 || true
+            ) 9>/tmp/youtube-dl-scan.lock &
+            disown || true
+          fi
+          exit ${f_rc}
         backup: yes
         validate: /bin/bash -n %s
 

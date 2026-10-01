@@ -91,6 +91,7 @@ urlpatterns = [
     path('settings/localization/', views_settings.settings_localization, name='settings_localization'),
     path('settings/ai/', views_settings.settings_ai, name='settings_ai'),
     path('settings/ai/test/', views_settings.settings_ai_test, name='settings_ai_test'),
+    path('settings/media/', views_settings.settings_media, name='settings_media'),
     path('settings/local-ip/', views_settings.settings_local_ip, name='settings_local_ip'),
     path('settings/port-forwarding/', views_port_forwarding.settings_port_forwarding, name='settings_port_forwarding'),
     path('settings/port-forwarding/detect/', views_port_forwarding.settings_port_forwarding_detect, name='settings_port_forwarding_detect'),

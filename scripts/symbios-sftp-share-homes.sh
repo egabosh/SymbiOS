@@ -44,6 +44,7 @@ function f_ldap_uidnumber {
 
 f_only="${1:-}"
 f_ensured=0
+f_home_quota="$(f_symbios_var media_quota_home 0)"
 
 f_members="$(f_ldap_members)"
 if [[ -z "${f_members}" && -z "${f_only}" ]]
@@ -82,6 +83,8 @@ do
   # matches and would leave an inherited setgid bit behind.
   chmod 0700 "${f_home}"
   chmod g-s "${f_home}"
+  # Project quota with the uidNumber as stable project id (best-effort).
+  f_media_quota "${f_number}" "${f_home}" "${f_home_quota}"
   f_ensured=$((f_ensured + 1))
 done <<<"${f_members}"
 

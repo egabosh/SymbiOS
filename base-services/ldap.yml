@@ -273,7 +273,22 @@
                 by anonymous auth
                 by dn="cn=readuser,{{ldap_basedn}}" auth
                 by * none
-              olcAccess: {3}to *
+              olcAccess: {3}to attrs=entry,uid,cn,objectClass,uidNumber,gidNumber,homeDirectory,loginShell,sshPublicKey,memberUid
+                by self read
+                by dn="cn=sftp-reader,{{ldap_basedn}}" read
+                by dn="cn=readuser,{{ldap_basedn}}" read
+                by * none
+              olcAccess: {4}to dn.base="ou=users,{{ldap_basedn}}"
+                by self read
+                by dn="cn=sftp-reader,{{ldap_basedn}}" read
+                by dn="cn=readuser,{{ldap_basedn}}" read
+                by * none
+              olcAccess: {5}to dn.base="ou=groups,{{ldap_basedn}}"
+                by self read
+                by dn="cn=sftp-reader,{{ldap_basedn}}" read
+                by dn="cn=readuser,{{ldap_basedn}}" read
+                by * none
+              olcAccess: {6}to *
                 by self read
                 by dn="cn=readuser,{{ldap_basedn}}" read
                 by * none
@@ -579,6 +594,104 @@
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --gid 31000 --name media"
       changed_when: false
       failed_when: false
+
+    # Least-privilege bind account for the SFTP container (NSS/PAM lookups
+    # plus sshPublicKey, no directory-wide read like the shared readuser).
+    # The password is generated once into sftp-reader.pw (ansible password
+    # lookup); if that file is ever lost, delete the LDAP entry too and
+    # reapply so both are recreated together.
+    - name: Check if the sftp-reader bind account exists
+      ansible.builtin.shell: docker compose exec -T openldap ldapsearch -x -H ldap://localhost -D "cn=head-of-ldap,{{ ldap_basedn }}" -w "{{ ldap_admin_password.stdout }}" -b "cn=sftp-reader,{{ ldap_basedn }}" dn
+      args:
+        chdir: "{{ docker_path }}"
+      register: sftp_reader_check
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Add the sftp-reader ACL rule offline (cn=config has no live write access)
+      when: "'dn: cn=sftp-reader' not in sftp_reader_check.stdout"
+      block:
+        - name: Stop LDAP for the offline ACL import
+          ansible.builtin.shell: docker compose stop openldap
+          args:
+            chdir: "{{ docker_path }}"
+          changed_when: false
+
+        - name: Insert the sftp-reader rules offline (old catch-all becomes {6})
+          ansible.builtin.shell: |
+            python3 - <<'PYEOF'
+            import sys
+            path = "{{ docker_path }}/ldap-config/slapd.d/cn=config/olcDatabase={1}mdb.ldif"
+            base = "{{ ldap_basedn }}"
+            q = chr(34)
+            with open(path) as fh:
+                content = fh.read()
+            old = [l for l in content.split('\n') if l.startswith('olcAccess: {3}to *')]
+            if not old:
+                print('UNCHANGED')
+                sys.exit(0)
+            # Folded continuation lines (leading space) belong to the rule
+            lines = content.split('\n')
+            idx = lines.index(old[0])
+            end = idx + 1
+            while end < len(lines) and lines[end].startswith(' '):
+                end += 1
+            oldblock = '\n'.join(lines[idx:end])
+            attrs = 'entry,uid,cn,objectClass,uidNumber,gidNumber,homeDirectory,loginShell,sshPublicKey,memberUid'
+            new3 = ('olcAccess: {3}to attrs=' + attrs
+                    + ' by self read by dn=' + q + 'cn=sftp-reader,' + base + q
+                    + ' read by dn=' + q + 'cn=readuser,' + base + q + ' read by * none')
+            ou4 = ('olcAccess: {4}to dn.base=' + q + 'ou=users,' + base + q
+                   + ' by self read by dn=' + q + 'cn=sftp-reader,' + base + q
+                   + ' read by dn=' + q + 'cn=readuser,' + base + q + ' read by * none')
+            ou5 = ('olcAccess: {5}to dn.base=' + q + 'ou=groups,' + base + q
+                   + ' by self read by dn=' + q + 'cn=sftp-reader,' + base + q
+                   + ' read by dn=' + q + 'cn=readuser,' + base + q + ' read by * none')
+            content = content.replace(oldblock, new3 + '\n' + ou4 + '\n' + ou5, 1)
+            content = content.replace('olcAccess: {4}to *', 'olcAccess: {6}to *', 1)
+            with open(path, 'w') as fh:
+                fh.write(content)
+            print('CHANGED')
+            PYEOF
+          register: sftp_reader_acl
+          changed_when: "'CHANGED' in sftp_reader_acl.stdout"
+
+        - name: Start LDAP after the offline ACL import
+          ansible.builtin.shell: docker compose up -d openldap
+          args:
+            chdir: "{{ docker_path }}"
+          changed_when: false
+
+        - name: Wait for LDAP to be ready after the ACL import
+          ansible.builtin.shell:
+            cmd: |
+              echo '{{ ldap_admin_password.stdout }}' | docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn }} -W
+          args:
+            chdir: "{{ docker_path }}"
+          register: ldap_ready_acl
+          until: ldap_ready_acl.rc == 0
+          retries: 20
+          delay: 10
+          changed_when: false
+          no_log: true
+
+        - name: Create the sftp-reader bind account
+          ansible.builtin.shell: |
+            docker compose exec -T openldap ldapadd -x -H ldap://localhost -D "cn=head-of-ldap,{{ ldap_basedn }}" -w "{{ ldap_admin_password.stdout }}" <<EOF
+            dn: cn=sftp-reader,{{ ldap_basedn }}
+            objectClass: simpleSecurityObject
+            objectClass: organizationalRole
+            cn: sftp-reader
+            description: Least-privilege bind account for the SFTP container. Do not remove!
+            userPassword: {{ lookup('password', docker_path + '/sftp-reader.pw chars=ascii_letters,digits length=32') }}
+            EOF
+          args:
+            chdir: "{{ docker_path }}"
+          register: sftp_reader_add
+          changed_when: sftp_reader_add.rc == 0
+          failed_when: false
+          no_log: true
 
     - name: Ensure admin user password is admin in LDAP
       ansible.builtin.shell: |

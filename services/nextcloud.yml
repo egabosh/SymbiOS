@@ -558,6 +558,9 @@
           sleep 10
         done
         docker compose exec -T -u www-data nextcloud ./occ app:enable files_external >/dev/null 2>&1 || true
+        # Pregenerate thumbnails for the photo/video libraries in the
+        # background cronjob (the nextcloud-cron service runs it).
+        docker compose exec -T -u www-data nextcloud ./occ app:enable previewgenerator >/dev/null 2>&1 || true
         for f_spec in "Media Audio|/media/audio" "Media Videos|/media/videos" "Media Images|/media/images" "Media Documents|/media/documents"
         do
           f_name="${f_spec%%|*}"
@@ -830,6 +833,10 @@
           docker compose exec -T -u www-data nextcloud ./occ trashbin:cleanup --all-users
           docker compose exec -T -u www-data nextcloud ./occ files:cleanup
           docker compose exec -T -u www-data nextcloud ./occ files:scan --all --generate-metadata --home-only --no-interaction -q
+          # External storage (media libraries) is filled from outside
+          # (SFTP, yt-dlp, paperless), so index new files there too. The
+          # --unscanned pass is cheap: known files are skipped.
+          docker compose exec -T -u www-data nextcloud ./occ files:scan --all --unscanned --no-interaction -q
           # maps:scan-photos replaced by "occ files:scan --generate-metadata"
           #docker compose exec -T -u www-data nextcloud ./occ maps:scan-photos --now
           docker compose exec -T -u www-data nextcloud ./occ db:convert-filecache-bigint -n
