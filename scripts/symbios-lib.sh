@@ -40,6 +40,7 @@
 #   g_media_books        e-book library (inventory media_books)
 #   g_media_documents    document library (inventory media_documents)
 #   g_media_inbox        ingest dir (inventory media_inbox)
+#   g_media_shared       group shares base (inventory media_shared)
 #   g_media_gid          shared media filesystem gid (inventory media_gid)
 #   g_config_dir         dir of inventory.yml (host: .../symbios-ui/config,
 #                        container CONFIG_PATH=/config/inventory.yml: /config)
@@ -104,7 +105,7 @@ g_* globals. Provides helper functions:
 Exported globals: g_data_root, g_git_root, g_base_services_root,
 g_services_root, g_docker_root, g_containerd_root, g_backup_root,
 g_media_root, g_media_audio, g_media_images, g_media_videos,
-g_media_books, g_media_documents, g_media_inbox, g_media_gid,
+g_media_books, g_media_documents, g_media_inbox, g_media_shared, g_media_gid,
 g_config_dir, g_log_dir, g_inventory, g_state_file, g_base_domain,
 g_ldap_basedn.
 
@@ -244,6 +245,7 @@ function f_symbios_load_layout {
   g_media_books=$(f_symbios_var media_books "${g_media_root}/books")
   g_media_documents=$(f_symbios_var media_documents "${g_media_root}/documents")
   g_media_inbox=$(f_symbios_var media_inbox "${g_media_root}/inbox")
+  g_media_shared=$(f_symbios_var media_shared "${g_media_root}/shared")
   g_media_gid=$(f_symbios_var media_gid "31000")
   g_base_domain=$(f_symbios_var base_domain "")
   g_ldap_basedn=$(f_symbios_var ldap_basedn "dc=openldap,dc=local")

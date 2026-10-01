@@ -19,6 +19,7 @@ from . import views
 from . import views_settings
 from . import views_mailserver
 from . import views_users
+from . import views_shares
 from . import views_logs
 from . import views_change_password
 from . import views_services
@@ -113,6 +114,9 @@ urlpatterns = [
     path('groups/', views_users.groups, name='groups'),
     path('groups/create/', views_users.group_create, name='group_create'),
     path('groups/<str:name>/delete/', views_users.group_delete, name='group_delete'),
+    path('shares/', views_shares.shares, name='shares'),
+    path('shares/create/', views_shares.share_create, name='share_create'),
+    path('shares/<str:name>/delete/', views_shares.share_delete, name='share_delete'),
     path('change-password/', views_change_password.change_password, name='change_password'),
     path('login/', views.login_view, name='login'),
     path('logout/', views.logout_view, name='logout'),

@@ -157,7 +157,7 @@
               env_file: docker-compose.env
               environment:
                 - USERMAP_UID=998
-                - USERMAP_GID=1003
+                - USERMAP_GID={{ media_gid | default(31000) }}
                 - PAPERLESS_REDIS=redis://paperless-broker:6379
                 - PAPERLESS_FILENAME_FORMAT={correspondent}/{created}-{title}
                 - PAPERLESS_TASK_WORKERS=1
@@ -229,6 +229,11 @@
 
     - name: Grant the paperless user write access on the shared archive (group stays read-only)
       ansible.builtin.shell: setfacl -m u:{{ paperless_uid }}:rwx "{{ paperless_media_path }}" && setfacl -d -m u:{{ paperless_uid }}:rwx "{{ paperless_media_path }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Grant the paperless user read access on the consume dir (uploads land group-only)
+      ansible.builtin.shell: setfacl -m u:{{ paperless_uid }}:rx "{{ paperless_consume_path }}" && setfacl -d -m u:{{ paperless_uid }}:rx "{{ paperless_consume_path }}"
       changed_when: false
       failed_when: false
 

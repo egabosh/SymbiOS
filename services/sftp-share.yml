@@ -108,10 +108,11 @@
         # (see symbios-lib.sh, called by symbios-ldap-groups.sh for CLI and
         # WebUI changes) whenever a group or a membership changes.
         # Args: $1=event $2=group $3=uid
-        # Only new members of the media group need a landing dir; removals
-        # keep their data for the admin to clean up.
+        # SFTP access comes from the media group and every shared-* group.
+        # Only new members need a landing dir; removals keep their data for
+        # the admin to clean up.
         [[ "${1:-}" == "member-added" ]] || exit 0
-        [[ "${2:-}" == "media" ]] || exit 0
+        [[ "${2:-}" == "media" || "${2:-}" == shared-* ]] || exit 0
         exec "{{ git_root }}/scripts/symbios-sftp-share-homes.sh" "${3:-}"
       mode: '0755'
       owner: root
@@ -147,13 +148,10 @@
     changed_when: false
     failed_when: false
 
-  - name: Ensure the share directory exists (owned by media.yml, same mode)
+  - name: Ensure the share directory exists (owned by media.yml, never managed here)
     ansible.builtin.file:
       path: "{{ sftp_share_datadir }}"
-      owner: root
-      group: "{{ sftp_share_gid }}"
       state: directory
-      mode: '2750'
 
   - name: Gen sshd ed25519 host-keys
     ansible.builtin.shell: ssh-keygen -q -N "" -t ed25519 -f ssh_host_ed25519_key
@@ -352,14 +350,20 @@
           sleep 5
         done
 
-        for g_user in $(getent group media 2>/dev/null | cut -d: -f4 | tr ',' ' ')
+        # Landing dirs for every SFTP-eligible user (media + shared-* groups)
+        for g_user in $(getent passwd 2>/dev/null | cut -d: -f1)
         do
+          if ! id -nG "${g_user}" 2>/dev/null | tr ' ' '\n' | grep -qxE 'media|shared-.*'
+          then
+            continue
+          fi
           g_uid="$(id -u "${g_user}" 2>/dev/null || true)"
           if [[ -n "${g_uid}" ]]
           then
             mkdir -p "/sftp-share/home/${g_user}"
             chown "${g_uid}:{{ sftp_share_gid }}" "/sftp-share/home/${g_user}"
-            chmod 0750 "/sftp-share/home/${g_user}"
+            chmod 0700 "/sftp-share/home/${g_user}"
+            chmod g-s "/sftp-share/home/${g_user}"
           fi
         done
 
@@ -399,14 +403,17 @@
         AcceptEnv LANG LC_*
         AllowTcpForwarding no
         AllowAgentForwarding no
-        AllowGroups {{ sftp_share_group }}
+        AllowGroups {{ sftp_share_group }} shared-*
         IgnoreRhosts yes
         PermitRootLogin no
         PermitTunnel no
         X11Forwarding no
         Subsystem sftp internal-sftp -f AUTH -l INFO -u 0007
-        # Land in the shared inbox; homes exist for the post-chroot chdir
-        ForceCommand internal-sftp -d /inbox -f AUTH -l INFO -u 0007
+        # Default landing is the chroot root (traversable, not listable).
+        # %u is NOT expanded in internal-sftp args, so per-user start dirs
+        # are impossible here; media members get the shared inbox instead
+        # (Match must stay last: nothing but comments below).
+        ForceCommand internal-sftp -d / -f AUTH -l INFO -u 0007
         # No fail2ban coverage for port 28 (host fail2ban only watches the
         # host sshd), so rate-limit at the daemon level on top of the
         # built-in per-source penalties.
@@ -426,6 +433,12 @@
         ChrootDirectory /sftp-share
 
         Include /etc/sftp-share-user.conf
+
+        # Media members land in the shared inbox. Match blocks must stay
+        # last in sshd_config; never add global options below this line,
+        # and never put a Match block into sftp-share-user.conf above.
+        Match Group media
+          ForceCommand internal-sftp -d /inbox -f AUTH -l INFO -u 0007
       backup: yes
       validate: /usr/sbin/sshd -T -f %s
     notify:

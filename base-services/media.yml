@@ -49,6 +49,10 @@
       - "{{ media_documents | default('/symbios/media/documents') }}"
     media_dirs_rw:
       - "{{ media_inbox | default('/symbios/media/inbox') }}"
+    # Base dir for named group shares (see symbios-media-share.sh). Each
+    # share below it is owned by its own LDAP group (2770); the base stays
+    # traversable so members find their shares.
+    media_shared_base: "{{ media_shared | default('/symbios/media/shared') }}"
   tasks:
 
     - name: Ensure the media LDAP group with fixed GID exists
@@ -72,7 +76,9 @@
         path: "{{ media_root | default('/symbios/media') }}"
         owner: root
         group: "{{ media_gid_number }}"
-        mode: '2750'
+        # Group lists, everyone traverses (needed for share-only SFTP users
+        # reaching their home/share below; libraries stay hidden via 2750).
+        mode: '2751'
         state: directory
 
     - name: Create the read-only media library directories
@@ -92,6 +98,22 @@
         mode: '2770'
         state: directory
       loop: "{{ media_dirs_rw }}"
+
+    - name: Create the group shares base directory
+      ansible.builtin.file:
+        path: "{{ media_shared_base }}"
+        owner: root
+        group: root
+        mode: '0755'
+        state: directory
+
+    - name: Create the private homes base directory (traverse-only, no listing)
+      ansible.builtin.file:
+        path: "{{ media_root | default('/symbios/media') }}/home"
+        owner: root
+        group: root
+        mode: '0711'
+        state: directory
 
     - name: Set default ACLs on read-only libraries (group read, inherit group)
       ansible.builtin.shell: setfacl -d -m g::rx "{{ item }}"
