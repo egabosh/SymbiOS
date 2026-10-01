@@ -240,6 +240,14 @@ via `AllowGroups media`. App-owned data (caches, databases, thumbnails) stays
 under `/symbios/services/<name>/` and is never shared. New services must use
 these globals instead of inventing per-service media paths.
 
+Access tiers below the media root:
+
+- **Private** (`home/<uid>`, owner-only): only the user itself, created
+  automatically for everyone with SFTP access.
+- **Group shares** (`shared/<name>`): exactly the members of one LDAP group
+  (auto-created as `shared-<name>`). Manage them on the **Shares** page in
+  the WebUI (membership via Groups); only empty shares can be deleted.
+
 ---
 
 ## 5. Domains, TLS and certificates
