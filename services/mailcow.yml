@@ -160,7 +160,7 @@
     # Generate mailcow.conf directly (bypasses the interactive generate_config.sh).
     # Secrets are stored in per-service files so re-applies keep stable passwords.
     # HTTP/HTTPS are bound to the symbios_services gateway; Traefik terminates TLS
-    # and talks plain HTTP to port 9080 (same pattern as cockpit.yml).
+    # and talks plain HTTP to port 9080.
     # SKIP_LETS_ENCRYPT=y because Traefik (ACME) provides the certificates.
     - name: "{{ mailcow_root }}/mailcow.conf Mailcow Configuration"
       blockinfile:
