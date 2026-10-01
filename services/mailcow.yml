@@ -16,7 +16,7 @@
 # docs:
 #   name: Mailcow
 #   short_description: Deploy the Mailcow mail server (mailcow-dockerized)
-#   description: Deploys Mailcow with Traefik integration, LDAP groups, and Authelia access control. TLS certificates are provided by Traefik (ACME) and synced into the mailcow nginx.
+#   description: Deploys Mailcow with Traefik integration, LDAP groups, and Authelia access control. TLS certificates are provided by Traefik (ACME) and synced into the mailcow nginx. All persistent data (mailboxes, databases) lives in bind-backed named volumes under ./volumes/, i.e. as plain files inside the service directory.
 #   url: "https://mail.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
@@ -68,6 +68,24 @@
     service_name: mailcow
     service_domain: "mail.{{ base_domain }}"
     mailcow_root: "{{ services_root }}/mailcow"
+    # All persistent mailcow data lives in these upstream named volumes.
+    # They are bind-backed to {{ mailcow_root }}/volumes/<name> (see the
+    # docker-compose.override.yml task below), so the whole mail store is
+    # visible as plain files inside the service directory instead of
+    # hiding under /var/lib/docker/volumes.
+    mailcow_bind_volumes:
+      - vmail-vol-1
+      - vmail-index-vol-1
+      - mysql-vol-1
+      - mysql-socket-vol-1
+      - redis-vol-1
+      - rspamd-vol-1
+      - postfix-vol-1
+      - postfix-tlspol-vol-1
+      - crypt-vol-1
+      - sogo-web-vol-1
+      - sogo-userdata-backup-vol-1
+      - clamd-db-vol-1
 
   pre_tasks:
     # Fail early if no public domain is configured yet.
@@ -278,9 +296,33 @@
             control-cert-file: "/etc/unbound/unbound_control.pem"
       notify: Restart unbound
 
+    # Bind-mount backing directories for the upstream named volumes.
+    # Created as root (like the docker daemon would for named volumes);
+    # the mailcow containers run their entrypoints as root and fix up
+    # ownership inside, exactly as with upstream named volumes. Migrated
+    # data is copied in with numeric UID/GID preserved (see migration docs).
+    - name: Create mailcow volume backing dirs
+      ansible.builtin.file:
+        path: "{{ mailcow_root }}/volumes/{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: docker
+      loop: "{{ mailcow_bind_volumes }}"
+
     # docker-compose.override.yml adds the autoconfig/autodiscover nginx
     # container (for client autodiscovery, see config-v1.1.xml below).
     # The container joins symbios_services so Traefik can reach it by name.
+    # The same file re-defines the upstream named volumes as bind-backed
+    # (driver_opts type=none + o=bind) pointing at ./volumes/<name>.
+    # Volume NAMES stay unchanged, so upstream docker-compose.yml,
+    # update.sh and helper-scripts/backup_and_restore.sh keep working.
+    # NOTE for pre-existing installs: docker reuses already-created named
+    # volumes and ignores driver_opts afterwards. Moving an old install to
+    # binds is manual: stop the stack, copy
+    # /var/lib/docker/volumes/mailcowdockerized_<name>/_data/ to
+    # ./volumes/<name>/ (numeric IDs preserved), `docker volume rm` the old
+    # ones, then `docker compose up -d`.
     - name: "{{ mailcow_root }}/docker-compose.override.yml Autoconfig Container Configuration"
       blockinfile:
         path: "{{ mailcow_root }}/docker-compose.override.yml"
@@ -310,6 +352,68 @@
                 com.docker.network.bridge.name: br-mcow-acfg
             symbios_services:
               external: true
+
+          volumes:
+            vmail-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/vmail-vol-1"
+                o: bind
+            vmail-index-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/vmail-index-vol-1"
+                o: bind
+            mysql-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/mysql-vol-1"
+                o: bind
+            mysql-socket-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/mysql-socket-vol-1"
+                o: bind
+            redis-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/redis-vol-1"
+                o: bind
+            rspamd-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/rspamd-vol-1"
+                o: bind
+            postfix-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/postfix-vol-1"
+                o: bind
+            postfix-tlspol-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/postfix-tlspol-vol-1"
+                o: bind
+            crypt-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/crypt-vol-1"
+                o: bind
+            sogo-web-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/sogo-web-vol-1"
+                o: bind
+            sogo-userdata-backup-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/sogo-userdata-backup-vol-1"
+                o: bind
+            clamd-db-vol-1:
+              driver_opts:
+                type: none
+                device: "{{ mailcow_root }}/volumes/clamd-db-vol-1"
+                o: bind
         backup: yes
       notify: Restart mailcow
 
