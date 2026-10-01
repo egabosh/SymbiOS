@@ -107,6 +107,7 @@ urlpatterns = [
     path('users/<str:uid>/delete/', views_users.user_delete, name='user_delete'),
     path('users/<str:uid>/password/', views_users.user_set_password, name='user_set_password'),
     path('users/<str:uid>/email/', views_users.user_update_email, name='user_update_email'),
+    path('users/<str:uid>/ssh-keys/', views_users.user_ssh_keys, name='user_ssh_keys'),
     path('users/group/add-user/', views_users.group_add_user, name='group_add_user'),
     path('users/group/remove-user/', views_users.group_remove_user, name='group_remove_user'),
     path('groups/', views_users.groups, name='groups'),

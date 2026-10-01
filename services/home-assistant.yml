@@ -72,6 +72,13 @@
   vars:
     service_name: home-assistant
     service_domain: "{{ service_name }}.{{ base_domain }}"
+    # Shared media libraries for playback on media players (see mediapaths.md).
+    # Mounted read-only below HA's own /media (which stays app-owned for
+    # TTS prompts and camera clips); exposed in the Media Browser via
+    # media_dirs in configuration.yaml below.
+    ha_media_audio: "{{ media_audio | default('/symbios/media/audio') }}"
+    ha_media_videos: "{{ media_videos | default('/symbios/media/videos') }}"
+    ha_media_images: "{{ media_images | default('/symbios/media/images') }}"
   tasks:
 
     - name: Set home_assistant_ip from traefik_network_gateway inventory variable
@@ -145,6 +152,10 @@
           tts:
           stream:
           media_source:
+            media_dirs:
+              audio: /media/audio
+              videos: /media/videos
+              images: /media/images
                     
           # Load frontend themes from the themes folder
           frontend:
@@ -240,6 +251,9 @@
               volumes:
                 - ./config:/config
                 - ./media:/media
+                - {{ ha_media_audio }}:/media/audio:ro
+                - {{ ha_media_videos }}:/media/videos:ro
+                - {{ ha_media_images }}:/media/images:ro
                 - /etc/localtime:/etc/localtime:ro
                 - /run/dbus:/run/dbus:ro
               network_mode: host

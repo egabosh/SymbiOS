@@ -55,7 +55,31 @@
   vars:
     service_name: jellyfin
     service_domain: "jellyfin.{{ base_domain }}"
+    # Local service user for the container (non-root, see mediapaths.md).
+    jellyfin_uid: 992
+    # Supplementary group for read-only media access (fixed media GID).
+    jellyfin_gid: "{{ media_gid | default('') }}"
+    # Standard media libraries, mounted read-only (see mediapaths.md).
+    # The media_* vars are guaranteed by base-services/media.yml.
+    jellyfin_videos_path: "{{ media_videos | default('/symbios/media/videos') }}"
+    jellyfin_audio_path: "{{ media_audio | default('/symbios/media/audio') }}"
+    jellyfin_images_path: "{{ media_images | default('/symbios/media/images') }}"
   tasks:
+
+    - name: Ensure the media LDAP group exists (fixed GID for library access)
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --gid {{ jellyfin_gid }} --name media"
+      changed_when: false
+      failed_when: false
+      when: jellyfin_gid | default('') | string | length > 0
+
+    - name: Ensure the local jellyfin service user exists
+      ansible.builtin.user:
+        name: jellyfin
+        comment: Jellyfin media server
+        uid: "{{ jellyfin_uid }}"
+        group: docker
+        shell: /bin/false
+      failed_when: false
 
     - name: Create /symbios/services/jellyfin dir
       ansible.builtin.file:
@@ -64,6 +88,17 @@
         group: docker
         state: directory
         mode: '0550'
+
+    - name: Create jellyfin config and cache dirs (owned by the service user)
+      ansible.builtin.file:
+        path: "/symbios/services/jellyfin/data/{{ item }}"
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        state: directory
+        mode: '0750'
+      loop:
+        - config
+        - cache
 
 #    - name: /symbios/services/jellyfin/genpw.sh (generate Random PW for Semaphore and DB)
 #      blockinfile:
@@ -133,12 +168,15 @@
               container_name: jellyfin
               restart: unless-stopped
               #env_file: env
-              user: "0:0"
+              user: "{{ jellyfin_uid }}{% if jellyfin_gid %}:{{ jellyfin_gid }}{% endif %}"
               #environment:
               volumes:
                 - ./data/config:/config
                 - ./data/cache:/cache
                 - /etc/localtime:/etc/localtime
+                - {{ jellyfin_videos_path }}:/media/videos:ro
+                - {{ jellyfin_audio_path }}:/media/audio:ro
+                - {{ jellyfin_images_path }}:/media/images:ro
               networks:
                 - symbios_services
           # optional hardware acceleration

@@ -21,7 +21,7 @@
 # which has direct network access to the OpenLDAP service.
 #
 # Usage:
-#   symbios-ldap-groups.sh --create --name <group>
+#   symbios-ldap-groups.sh --create --name <group> [--gid <number>]
 #   symbios-ldap-groups.sh --delete --name <group>
 #   symbios-ldap-groups.sh --add-user --name <group> --uid <user>
 #   symbios-ldap-groups.sh --remove-user --name <group> --uid <user>
@@ -38,19 +38,28 @@ Usage: $(basename "$0") [options]
 Manage LDAP groups in SymbiOS.
 
 Actions (exactly one required):
-  --create --name <group>           Create a new group
+  --create --name <group> [--gid <number>]  Create a new group
   --delete --name <group>           Delete a group (removes all members first)
   --add-user --name <group> --uid <user>   Add user to group
   --remove-user --name <group> --uid <user>  Remove user from group
   --list-members --name <group>     List members of a group
   --help                            Show this help
+
+The media group is infrastructure (fixed GID, see mediapaths.md) and
+cannot be deleted through this script. Pass --gid to pin a fixed GID
+for infrastructure groups; without it a hash-based GID is generated.
 EOF
 }
+
+# Groups that carry fixed infrastructure GIDs and must survive. They are
+# created with --gid and can never be deleted through this script.
+g_protected_groups="media"
 
 # Parse arguments
 f_action=""
 f_name=""
 f_uid=""
+f_gid=""
 
 while [[ $# -gt 0 ]]
 do
@@ -81,6 +90,10 @@ do
       ;;
     --uid)
       f_uid="$2"
+      shift 2
+      ;;
+    --gid)
+      f_gid="$2"
       shift 2
       ;;
     --help|-h)
@@ -126,8 +139,17 @@ case "${f_action}" in
   create)
     g_echo_note "Creating group: ${f_name}"
 
-    # Generate a GID from the group name hash
-    f_gid="$(python3 -c "print(abs(hash('${f_name}')) % 10000 + 20000)" 2>/dev/null || echo 20001)"
+    # Fixed GID for infrastructure groups, hash-based GID otherwise
+    if [[ -n "${f_gid}" ]]
+    then
+      if ! [[ "${f_gid}" =~ ^[0-9]+$ ]]
+      then
+        g_echo_error "Invalid GID: must be a number"
+        exit 1
+      fi
+    else
+      f_gid="$(python3 -c "print(abs(hash('${f_name}')) % 10000 + 20000)" 2>/dev/null || echo 20001)"
+    fi
 
     f_ldif="dn: ${f_group_dn}
 objectClass: posixGroup
@@ -150,6 +172,13 @@ gidNumber: ${f_gid}
     ;;
 
   delete)
+    # Infrastructure groups carry fixed GIDs and must survive
+    if [[ " ${g_protected_groups} " == *" ${f_name} "* ]]
+    then
+      g_echo_error "Group '${f_name}' is protected infrastructure and cannot be deleted"
+      exit 1
+    fi
+
     g_echo_note "Deleting group: ${f_name}"
 
     # Remove all members first

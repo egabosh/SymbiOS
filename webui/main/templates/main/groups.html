@@ -59,10 +59,14 @@
                         {% endwith %}
                     </td>
                     <td class="text-end">
+                        {% if group in protected_groups %}
+                        <span class="btn btn-outline-secondary btn-sm disabled" title="Protected infrastructure group">&#128273;</span>
+                        {% else %}
                         <form method="post" action="/groups/{{ group }}/delete/" class="d-inline" data-exec-confirm="Really delete group &quot;{{ group }}&quot;? All members will be removed first." data-exec="true">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete group">&#128465;</button>
                         </form>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}

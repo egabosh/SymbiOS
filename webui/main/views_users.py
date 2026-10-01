@@ -23,6 +23,13 @@ from .views import _get_ldap_users, _get_ldap_groups
 from .utils.ssh_exec import run_command
 from .utils.jobs import create_job
 from .utils.secret_file import f_write_secret
+from .views_settings import _is_valid_ssh_pubkey
+
+
+# LDAP groups with fixed infrastructure GIDs (see mediapaths.md). They are
+# created with a pinned GID and must never be deleted via the WebUI (the
+# CLI script symbios-ldap-groups.sh enforces the same protection).
+PROTECTED_GROUPS = ['media']
 
 
 def _exec_ldap_command(request, cmd, title, success_msg, redirect_to='users'):
@@ -65,6 +72,7 @@ def groups(request):
         'groups': groups,
         'group_members': users,
         'group_available_users': group_available_users,
+        'protected_groups': PROTECTED_GROUPS,
     })
 
 
@@ -113,6 +121,21 @@ def user_delete(request, uid):
         cmd = f'symbios-ldap-user.sh --delete --uid {shlex.quote(uid)}'
         return _exec_ldap_command(request, cmd, f'Deleting user "{uid}"...', f'User "{uid}" deleted.')
     return redirect('users')
+
+
+@login_required
+def group_delete(request, name):
+    if name in PROTECTED_GROUPS:
+        msg = f'Group "{name}" is protected infrastructure and cannot be deleted.'
+        from .utils.http import is_ajax_request
+        if is_ajax_request(request):
+            return JsonResponse({'ok': False, 'error': msg}, status=400)
+        messages.error(request, msg)
+        return redirect('groups')
+    if request.method == 'POST':
+        cmd = f'symbios-ldap-groups.sh --delete --name {shlex.quote(name)}'
+        return _exec_ldap_command(request, cmd, f'Deleting group "{name}"...', f'Group "{name}" deleted.', redirect_to='groups')
+    return redirect('groups')
 
 
 @login_required
@@ -172,11 +195,28 @@ def group_create(request):
 
 
 @login_required
-def group_delete(request, name):
+def user_ssh_keys(request, uid):
+    """Save the SSH public keys of a user (one per line, empty clears all)."""
     if request.method == 'POST':
-        cmd = f'symbios-ldap-groups.sh --delete --name {shlex.quote(name)}'
-        return _exec_ldap_command(request, cmd, f'Deleting group "{name}"...', f'Group "{name}" deleted.', redirect_to='groups')
-    return redirect('groups')
+        from .utils.http import is_ajax_request
+        keys = [line.strip() for line in request.POST.get('ssh_keys', '').splitlines()
+                if line.strip()]
+        invalid = [k for k in keys if not _is_valid_ssh_pubkey(k)]
+        if invalid:
+            msg = f'{len(invalid)} invalid SSH public key(s).'
+            if is_ajax_request(request):
+                return JsonResponse({'ok': False, 'error': msg}, status=400)
+            messages.error(request, msg)
+            return redirect('users')
+        cmd = f'symbios-ldap-user.sh --modify --uid {shlex.quote(uid)}'
+        if keys:
+            for key in keys:
+                cmd += f' --ssh-key {shlex.quote(key)}'
+        else:
+            cmd += ' --clear-ssh-keys'
+        return _exec_ldap_command(request, cmd, f'Saving SSH keys for "{uid}"...',
+                                  f'SSH keys for "{uid}" saved.')
+    return redirect('users')
 
 
 @login_required

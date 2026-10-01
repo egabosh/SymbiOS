@@ -9,9 +9,11 @@
 #                                  group needs a different name than the
 #                                  service, e.g. <service>-users for a
 #                                  non-OIDC service)
+#                ldap_group_gid   (optional fixed GID for infrastructure
+#                                  groups, e.g. the shared media group)
 
 - name: "Create LDAP group {{ ldap_group_name | default(service_name) }}"
-  ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name {{ ldap_group_name | default(service_name) }}"
+  ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name {{ ldap_group_name | default(service_name) }}{{ ' --gid ' + ldap_group_gid | string if ldap_group_gid is defined else '' }}"
   changed_when: false
   failed_when: false
 
