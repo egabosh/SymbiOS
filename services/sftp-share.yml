@@ -25,6 +25,14 @@
 # container accounts and no second user list. LDAP users resolve to their
 # real uidNumber inside the container.
 #
+# WordPress instances with sftp:true in their instances.yml are exposed
+# automatically (read from that file, same pattern as wordpress.yml):
+# <data-dir> -> /sftp-share/wordpress/<name> (container-only mounts, no
+# host binds). Access inside is gated per instance LDAP group
+# (wordpress-<name>, ACLs set by wordpress.yml), so instance admins only
+# ever see their own instances. The wordpress/ view dir itself is
+# traversable-but-not-listable (2710).
+#
 # The share directory defaults to the global media_root (see mediapaths.md)
 # and is always the chroot root inside the container. It must stay
 # root-owned without group/other write access (sshd requirement); the
@@ -84,7 +92,27 @@
     sftp_share_gid: "{{ media_gid | default(31000) }}"
     # LDAP group that defines which users may access the share
     sftp_share_ldap_group: media
+    # Manual extra mounts (container-only, no host binds): list of
+    # {src, dest, mode}. Used for paths outside the media tree, e.g. web
+    # staging dirs. WordPress instance mounts are added automatically
+    # below (wordpress_sftp_mounts) and need no manual entry.
+    sftp_share_extra_mounts: []
+    # WordPress instance list (same file wordpress.yml manages). Instances
+    # with sftp:true are auto-exposed; run wordpress.yml first so the data
+    # dirs and the instance ACLs exist before this playbook mounts them.
+    wp_instances_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/wordpress/instances.yml"
   tasks:
+
+  - name: Read WordPress instance list for SFTP auto-exposure
+    ansible.builtin.slurp:
+      src: "{{ wp_instances_file }}"
+    register: sftp_wp_instances_slurp
+    failed_when: false
+
+  - name: Set WordPress SFTP mounts from instances with sftp:true
+    ansible.builtin.set_fact:
+      wordpress_sftp_mounts: "{{ (sftp_wp_instances_slurp.content | default('') | b64decode | from_yaml | default([])) | selectattr('sftp') | list }}"
+    when: sftp_wp_instances_slurp.content | default('') | length > 0
 
   - name: Create LDAP group {{ sftp_share_ldap_group }} for SFTP access control
     include_tasks: tasks/ldap-single-group.yml
@@ -189,6 +217,12 @@
               - ./nsswitch.conf:/etc/nsswitch.conf:ro
               - ./sftp-ldap-keys:/usr/local/bin/sftp-ldap-keys:ro
               - {{ sftp_share_datadir }}:/sftp-share:rw
+              {% for m in sftp_share_extra_mounts | default([]) %}
+              - {{ m.src }}:{{ m.dest }}:{{ m.mode | default('rw') }}
+              {% endfor %}
+              {% for wp in wordpress_sftp_mounts | default([]) %}
+              - /symbios/services/wordpress/{{ wp.name }}-data:/sftp-share/wordpress/{{ wp.name }}:rw
+              {% endfor %}
             networks:
               - sftp-share--network
               - symbios_base_services
@@ -367,6 +401,14 @@
           fi
         done
 
+        {% if wordpress_sftp_mounts | default([]) | length > 0 %}
+        # WordPress per-instance view: traversable but not listable - the
+        # instance mounts below gate access per LDAP group (wordpress-<name>,
+        # ACLs by wordpress.yml).
+        mkdir -p /sftp-share/wordpress
+        chgrp media /sftp-share/wordpress
+        chmod 2710 /sftp-share/wordpress
+        {% endif %}
         # Start SSH daemon in foreground with sftp-share configuration
         /usr/sbin/sshd -D -f /etc/sftp-share.conf -E /proc/1/fd/1
       backup: yes

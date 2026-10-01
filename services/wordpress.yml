@@ -58,6 +58,9 @@
 #       public:
 #         label: Public
 #         type: bool
+#       sftp:
+#         label: SFTP
+#         type: bool
 #       phpmyadmin:
 #         label: phpMyAdmin
 #         type: bool
@@ -91,9 +94,11 @@
     service_domain: "{{ service_name }}.{{ base_domain }}"
     # A WordPress instance needs a LDAP group + Authelia rule when it is NOT
     # public (forward-auth on the site) or when phpMyAdmin is enabled (the
-    # phpMyAdmin endpoint is always protected). The restriction is expressed
-    # inline per task via:
-    #   when: not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool)
+    # phpMyAdmin endpoint is always protected). The LDAP group is also the
+    # SFTP access gate when sftp is enabled (see the ACL tasks below and
+    # services/sftp-share.yml). The restriction is expressed inline per
+    # task via:
+    #   when: not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool) or (item.sftp | default(false) | bool)
     # Authelia policy follows the central twofa_enabled variable.
     wp_auth_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
     # Instance list is managed by the WebUI (Instances tab) and stored in the
@@ -172,12 +177,14 @@
         owner: root
         group: docker
 
-    # LDAP groups + Authelia access_control for restricted instances
+    # LDAP groups + Authelia access_control for restricted instances.
+    # The group doubles as SFTP access gate for sftp:true instances (the
+    # ACL tasks below grant it read/write on the instance data).
     - name: Create LDAP group wordpress-<name> for restricted instances
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name wordpress-{{ item.name }}"
       loop: "{{ wordpress_instances | default([]) }}"
       when:
-        - not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool)
+        - not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool) or (item.sftp | default(false) | bool)
       changed_when: false
       failed_when: false
 
@@ -185,9 +192,36 @@
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --add-user --name wordpress-{{ item.name }} --uid {{ ldap_admin_uid | default('admin') }}"
       loop: "{{ wordpress_instances | default([]) }}"
       when:
-        - not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool)
+        - not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool) or (item.sftp | default(false) | bool)
       changed_when: false
       failed_when: false
+
+    # SFTP exposure (opt-in per instance via sftp:true): grant the instance
+    # LDAP group read/write via access + default ACL and setgid inheritance.
+    # Ownership stays 33:33 (www-data) so WordPress itself is unaffected:
+    # WP reads/writes as owner or via its own group 33, SFTP writers use the
+    # ACL entry. Default ACLs inherit to new files from either side; setgid
+    # keeps the file group at 33 so WordPress never loses group access to
+    # SFTP-created files. The recursive pass runs once (marker file), the
+    # default ACL is refreshed on every apply. Repair path for drifted
+    # ownership: scripts/symbios-wordpress-fix-perms.sh
+    - name: Install ACL tools for SFTP ACLs
+      ansible.builtin.apt:
+        name: acl
+        update_cache: no
+        install_recommends: no
+      when: wordpress_instances | default([]) | selectattr('sftp') | list | length > 0
+
+    - name: Grant instance LDAP group access for SFTP instances
+      ansible.builtin.shell: |
+        chmod -R g+s "/symbios/services/wordpress/{{ item.name }}-data" && \
+        setfacl -R -m g:wordpress-{{ item.name }}:rwx "/symbios/services/wordpress/{{ item.name }}-data" && \
+        setfacl -R -d -m g:wordpress-{{ item.name }}:rwx "/symbios/services/wordpress/{{ item.name }}-data" && \
+        touch "/symbios/services/wordpress/.sftp-acl-{{ item.name }}"
+      args:
+        creates: "/symbios/services/wordpress/.sftp-acl-{{ item.name }}"
+      loop: "{{ wordpress_instances | default([]) }}"
+      when: item.sftp | default(false) | bool
 
     - name: Write Authelia access_control for restricted WordPress domains
       ansible.builtin.include_tasks: tasks/authelia-acl.yml
