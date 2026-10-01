@@ -61,9 +61,12 @@
   hosts: all
   vars:
     service_name: youtube-dl
-    # Directory the downloaded files are written to. Point this at a share
-    # volume if the files should end up on a NAS or a shared data disk.
-    youtube_dl_downloaddir: "{{ data_root }}/services/youtube-dl/downloads"
+    # Finished downloads land directly in the shared video library
+    # (see mediapaths.md) so Jellyfin picks them up. Points at a
+    # service-local directory only when explicitly overridden.
+    youtube_dl_downloaddir: "{{ media_videos | default('/symbios/media/videos') }}/downloads"
+    # Previous default kept for the one-time migration below.
+    youtube_dl_legacy_downloaddir: "{{ data_root }}/services/youtube-dl/downloads"
   tasks:
 
     - name: Create /symbios/services/youtube-dl dir
@@ -74,13 +77,29 @@
         state: directory
         mode: '0550'
 
+    - name: Check the legacy download directory for content to migrate
+      ansible.builtin.stat:
+        path: "{{ youtube_dl_legacy_downloaddir }}"
+      register: youtube_dl_legacy_dir
+
+    - name: Move legacy downloads into the media library (one-time migration)
+      ansible.builtin.shell: |
+        mkdir -p "{{ youtube_dl_downloaddir }}"
+        mv "{{ youtube_dl_legacy_downloaddir }}"/* "{{ youtube_dl_downloaddir }}/" 2>/dev/null || true
+        rmdir "{{ youtube_dl_legacy_downloaddir }}" 2>/dev/null || true
+      when:
+        - youtube_dl_legacy_dir.stat.exists | default(false)
+        - youtube_dl_legacy_downloaddir != youtube_dl_downloaddir
+      changed_when: false
+      failed_when: false
+
     - name: Create the download target directory
       ansible.builtin.file:
         path: "{{ youtube_dl_downloaddir }}"
-        owner: 1000
-        group: 1000
+        owner: root
+        group: "{{ media_gid | default(31000) }}"
         state: directory
-        mode: '0775'
+        mode: '2770'
 
     # /symbios/services/youtube-dl/Dockerfile
     - name: /symbios/services/youtube-dl/Dockerfile

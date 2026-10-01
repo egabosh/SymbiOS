@@ -55,6 +55,13 @@
   vars:
     service_name: navidrome
     service_domain: "{{ service_name }}.{{ base_domain }}"
+    # Standard media library (see mediapaths.md). Mounted at /music
+    # read-only; the container runs with media_gid as supplementary group
+    # so it can read group-restricted files. The legacy per-service vars
+    # below still override when set (inventory wins over these defaults).
+    # (Kept as music_* for backward compat: /music is Navidrome terminology.)
+    navidrome_music_path: "{{ media_audio | default('') }}"
+    navidrome_music_gid: "{{ media_gid | default('') }}"
   tasks:
 
     - name: Create /symbios/services/navidrome dir
@@ -103,10 +110,12 @@
                 ND_ENABLEUSEREDITING: "false"
               networks:
                 - symbios_services
-              user: "33"
+              user: "33{% if navidrome_music_gid %}:{{ navidrome_music_gid }}{% endif %}"
               volumes:
                 - ./navidrome-data:/data
                 - /etc/localtime:/etc/localtime:ro
+                {% if navidrome_music_path %}- {{ navidrome_music_path }}:/music:ro
+                {% endif %}
 
           networks:
             symbios_services:

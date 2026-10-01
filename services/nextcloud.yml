@@ -68,6 +68,12 @@
   vars:
     service_name: nextcloud
     service_domain: "{{ service_name }}.{{ base_domain }}"
+    # Shared media libraries as read-only external storage (see mediapaths.md).
+    # Mounted :ro into the container, so Nextcloud can never modify them.
+    nextcloud_media_audio: "{{ media_audio | default('/symbios/media/audio') }}"
+    nextcloud_media_videos: "{{ media_videos | default('/symbios/media/videos') }}"
+    nextcloud_media_images: "{{ media_images | default('/symbios/media/images') }}"
+    nextcloud_media_documents: "{{ media_documents | default('/symbios/media/documents') }}"
 
 
   tasks:
@@ -290,11 +296,19 @@
               security_opt:
                 - no-new-privileges:true
               restart: unless-stopped
+              # Supplementary media group so www-data (33) can read the
+              # group-restricted :ro library mounts below (see mediapaths.md).
+              group_add:
+                - "{{ media_gid | default(31000) }}"
               volumes:
                 - ./nextcloud-data:/var/www/html
                 - ./remoteip.conf:/etc/apache2/conf-enabled/remoteip.conf:ro
                 - /etc/localtime:/etc/localtime:ro
                 - /etc/hosts:/etc/hosts:ro
+                - {{ nextcloud_media_audio }}:/media/audio:ro
+                - {{ nextcloud_media_videos }}:/media/videos:ro
+                - {{ nextcloud_media_images }}:/media/images:ro
+                - {{ nextcloud_media_documents }}:/media/documents:ro
               depends_on:
                 - nextcloud-db
                 - nextcloud-redis
@@ -350,9 +364,16 @@
               image: nextcloud:stable-apache
               container_name: nextcloud-cron
               restart: unless-stopped
+              # Same supplementary media group as the app container (file scans).
+              group_add:
+                - "{{ media_gid | default(31000) }}"
               volumes:
                 - ./nextcloud-data:/var/www/html
                 - /etc/localtime:/etc/localtime:ro
+                - {{ nextcloud_media_audio }}:/media/audio:ro
+                - {{ nextcloud_media_videos }}:/media/videos:ro
+                - {{ nextcloud_media_images }}:/media/images:ro
+                - {{ nextcloud_media_documents }}:/media/documents:ro
               entrypoint: /cron.sh
               environment:
                 - PHP_MEMORY_LIMIT=1024M
@@ -523,6 +544,35 @@
     - name: Wait until nextcloud install is finished
       wait_for:
         path: /symbios/services/nextcloud/nextcloud-data/config/config.php
+
+    - name: Ensure the media libraries are registered as external storage (idempotent)
+      ansible.builtin.shell: |
+        cd /symbios/services/nextcloud
+        # config.php exists on the host even mid-restart, so wait for a live occ.
+        for i in $(seq 1 30)
+        do
+          if docker compose exec -T -u www-data nextcloud ./occ status 2>/dev/null | grep -q "installed: true"
+          then
+            break
+          fi
+          sleep 10
+        done
+        docker compose exec -T -u www-data nextcloud ./occ app:enable files_external >/dev/null 2>&1 || true
+        for f_spec in "Media Audio|/media/audio" "Media Videos|/media/videos" "Media Images|/media/images" "Media Documents|/media/documents"
+        do
+          f_name="${f_spec%%|*}"
+          f_path="${f_spec##*|}"
+          # Name-based idempotency: if the mount point exists it is kept
+          # as-is (delete it once via occ when the datadir ever changes).
+          if ! docker compose exec -T -u www-data nextcloud ./occ files_external:list 2>/dev/null | grep -q -e "${f_name}" -e "${f_path}"
+          then
+            docker compose exec -T -u www-data nextcloud ./occ files_external:create "${f_name}" local null::null -c datadir="${f_path}"
+            echo "created ${f_name}"
+          fi
+        done
+      register: nextcloud_media_ext
+      changed_when: "'created ' in nextcloud_media_ext.stdout"
+      failed_when: false
 
     - name: /symbios/services/nextcloud/nextcloud-data/config/local.config.php (local nextcloud config)
       blockinfile:

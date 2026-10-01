@@ -66,6 +66,16 @@
   vars:
     service_name: paperless
     service_domain: "{{ service_name }}.{{ base_domain }}"
+    # Document archive (see mediapaths.md). Paperless owns and writes this
+    # store; every other consumer only reads it via the media group.
+    paperless_media_path: "{{ media_documents | default('/symbios/media/documents') }}"
+    # Ingest directory: new scans land here (SFTP, scanners, Samba share).
+    paperless_consume_path: "{{ media_inbox | default('/symbios/media/inbox') }}/paperless"
+    # Previous service-local defaults kept for the one-time migration below.
+    paperless_legacy_media: "/symbios/services/paperless/media"
+    paperless_legacy_consume: "/symbios/services/paperless/consume"
+    # UIDs paperless writes with (must match USERMAP_UID below).
+    paperless_uid: 998
   tasks:
 
     - name: Create /symbios/services/paperless dir
@@ -133,11 +143,15 @@
               image: ghcr.io/paperless-ngx/paperless-ngx:latest
               container_name: paperless
               restart: unless-stopped
+              # Supplementary media group for archive reads (writes are
+              # granted via a dedicated ACL, see the setfacl task below).
+              group_add:
+                - "{{ media_gid | default(31000) }}"
               volumes:
                 - ./data:/usr/src/paperless/data
-                - ./media:/usr/src/paperless/media
+                - {{ paperless_media_path }}:/usr/src/paperless/media:rw
                 - ./export:/usr/src/paperless/export
-                - ./consume:/usr/src/paperless/consume
+                - {{ paperless_consume_path }}:/usr/src/paperless/consume:rw
               depends_on:
                 - paperless-broker
               env_file: docker-compose.env
@@ -202,6 +216,43 @@
         group: docker
       failed_when: false
 
+    - name: Ensure the media archive and consume directories exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: "{{ item.owner }}"
+        group: "{{ media_gid | default(31000) }}"
+        mode: "{{ item.mode }}"
+        state: directory
+      loop:
+        - { path: "{{ paperless_media_path }}", owner: root, mode: '2750' }
+        - { path: "{{ paperless_consume_path }}", owner: "{{ paperless_uid }}", mode: '2770' }
+
+    - name: Grant the paperless user write access on the shared archive (group stays read-only)
+      ansible.builtin.shell: setfacl -m u:{{ paperless_uid }}:rwx "{{ paperless_media_path }}" && setfacl -d -m u:{{ paperless_uid }}:rwx "{{ paperless_media_path }}"
+      changed_when: false
+      failed_when: false
+
+    - name: Check legacy service-local media and consume dirs for content to migrate
+      ansible.builtin.stat:
+        path: "{{ item.src }}"
+      register: paperless_legacy_dirs
+      loop:
+        - { src: "{{ paperless_legacy_media }}", dest: "{{ paperless_media_path }}" }
+        - { src: "{{ paperless_legacy_consume }}", dest: "{{ paperless_consume_path }}" }
+      when: item.src != item.dest
+
+    - name: Move legacy archive and consume content into the media dirs (one-time migration)
+      ansible.builtin.shell: |
+        mkdir -p "{{ item.item.dest }}"
+        mv "{{ item.item.src }}"/* "{{ item.item.dest }}/" 2>/dev/null || true
+        rmdir "{{ item.item.src }}" 2>/dev/null || true
+      loop: "{{ paperless_legacy_dirs.results }}"
+      when:
+        - item.stat is defined
+        - item.stat.exists | default(false)
+      changed_when: false
+      failed_when: false
+
     - name: Samba Share for incoming documents
       blockinfile:
         path: /etc/samba/smb-{{ ansible_facts['hostname'] }}.conf
@@ -209,11 +260,11 @@
         mode: "0444"
         owner: root
         group: root
-        marker: "# {mark} paperless ANSIBLE MANAGED BLOCK"
+        marker: "# {mark} paperles ANSIBLE MANAGED BLOCK"
         block: |
           [paperless-in]
             valid users = paperless
-            path = /symbios/services/paperless/consume
+            path = {{ paperless_consume_path }}
             public = no
             writable = yes
             read only = no
@@ -225,10 +276,10 @@
 
     - name: Give paperless permissions for consume dir
       ansible.builtin.file:
-        path: /symbios/services/paperless/consume
-        owner: 998
-        group: '1003'
-        mode: '0770'
+        path: "{{ paperless_consume_path }}"
+        owner: "{{ paperless_uid }}"
+        group: "{{ media_gid | default(31000) }}"
+        mode: '2770'
 
     - name: /symbios/base-services/traefik/providers/paperless.yml Routing Configuration
       blockinfile:

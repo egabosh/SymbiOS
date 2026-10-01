@@ -1,0 +1,113 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Standard media locations (see mediapaths.md): creates the shared media
+# directories with the fixed media GID (setgid + default ACLs) and ensures
+# the matching LDAP group exists. Must run after ldap.yml (group creation
+# needs the directory). Consumers (navidrome, jellyfin, sftp-share, ...)
+# only mount these paths, they never create them.
+#
+# docs:
+#   name: Media
+#   short_description: Create the shared standard media directories
+#   description: Creates the shared media directories with the fixed media group and ensures the matching LDAP group exists.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Directory / Storage
+#
+---
+- name: media
+  hosts: all
+  vars:
+    service_name: media
+    media_gid_number: "{{ media_gid | default(31000) }}"
+    media_dirs_ro:
+      - "{{ media_audio | default('/symbios/media/audio') }}"
+      - "{{ media_images | default('/symbios/media/images') }}"
+      - "{{ media_videos | default('/symbios/media/videos') }}"
+      - "{{ media_books | default('/symbios/media/books') }}"
+      - "{{ media_documents | default('/symbios/media/documents') }}"
+    media_dirs_rw:
+      - "{{ media_inbox | default('/symbios/media/inbox') }}"
+  tasks:
+
+    - name: Ensure the media LDAP group with fixed GID exists
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --gid {{ media_gid_number }} --name media"
+      changed_when: false
+      failed_when: false
+
+    - name: Ensure the local media group exists (host name resolution for the fixed GID)
+      ansible.builtin.group:
+        name: media
+        gid: "{{ media_gid_number }}"
+
+    - name: Install ACL tools for default ACLs
+      ansible.builtin.apt:
+        name: acl
+        update_cache: no
+        install_recommends: no
+
+    - name: Create the media root directory
+      ansible.builtin.file:
+        path: "{{ media_root | default('/symbios/media') }}"
+        owner: root
+        group: "{{ media_gid_number }}"
+        mode: '2750'
+        state: directory
+
+    - name: Create the read-only media library directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: root
+        group: "{{ media_gid_number }}"
+        mode: '2750'
+        state: directory
+      loop: "{{ media_dirs_ro }}"
+
+    - name: Create the writable media ingest directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: root
+        group: "{{ media_gid_number }}"
+        mode: '2770'
+        state: directory
+      loop: "{{ media_dirs_rw }}"
+
+    - name: Set default ACLs on read-only libraries (group read, inherit group)
+      ansible.builtin.shell: setfacl -d -m g::rx "{{ item }}"
+      loop: "{{ media_dirs_ro }}"
+      changed_when: false
+
+    - name: Set default ACLs on ingest directories (group read/write, inherit group)
+      ansible.builtin.shell: setfacl -d -m g::rwx "{{ item }}"
+      loop: "{{ media_dirs_rw }}"
+      changed_when: false
+
+    - name: Remove renamed legacy library dirs when empty (music/photos)
+      ansible.builtin.shell: rmdir "{{ media_root | default('/symbios/media') }}/music" "{{ media_root | default('/symbios/media') }}/photos" 2>/dev/null
+      changed_when: false
+      failed_when: false
+
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/media.yml"
+      changed_when: false

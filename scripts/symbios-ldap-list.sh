@@ -106,9 +106,10 @@ then
   f_groups_raw="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
     -b "ou=groups,${f_base_dn}" "(objectClass=posixGroup)" cn memberUid 2>/dev/null || true)"
 
-  # Get all users with basic attributes
+  # Get all users with basic attributes (sshPublicKey values are unfolded
+  # in the parser below because ldapsearch wraps long lines)
   f_users_raw="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
-    -b "ou=users,${f_base_dn}" "(objectClass=posixAccount)" uid cn mail 2>/dev/null || true)"
+    -b "ou=users,${f_base_dn}" "(objectClass=posixAccount)" uid cn mail sshPublicKey 2>/dev/null || true)"
 
   # Parse everything into JSON using Python
   python3 -c "
@@ -137,16 +138,28 @@ all_groups = sorted(group_members.keys())
 # Parse users
 users = []
 current = {}
+
+# Unfold wrapped LDIF lines (ldapsearch wraps lines longer than 78
+# chars with a leading space - SSH keys always wrap)
+unfolded = []
 for line in users_raw.split('\n'):
+    if line.startswith(' ') and unfolded:
+        unfolded[-1] += line[1:]
+    else:
+        unfolded.append(line)
+
+for line in unfolded:
     line = line.strip()
     if line.startswith('uid:'):
         if current and current.get('uid'):
             users.append(current)
-        current = {'uid': line.split(':', 1)[1].strip(), 'cn': '', 'email': '', 'groups': [], 'available_groups': []}
+        current = {'uid': line.split(':', 1)[1].strip(), 'cn': '', 'email': '', 'groups': [], 'available_groups': [], 'ssh_keys': []}
     elif line.startswith('cn:') and current:
         current['cn'] = line.split(':', 1)[1].strip()
     elif line.startswith('mail:') and current:
         current['email'] = line.split(':', 1)[1].strip()
+    elif line.startswith('sshPublicKey:') and current:
+        current['ssh_keys'].append(line.split(':', 1)[1].strip())
 
 if current and current.get('uid'):
     users.append(current)

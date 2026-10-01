@@ -24,7 +24,7 @@
 # Usage:
 #   symbios-ldap-user.sh --create --uid <name> --password-file <path> [options]
 #   symbios-ldap-user.sh --delete --uid <name>
-#   symbios-ldap-user.sh --modify --uid <name> [--password-file <path>] [--email <addr>]
+#   symbios-ldap-user.sh --modify --uid <name> [--password-file <path>] [--email <addr>] [--ssh-key <key>]... [--clear-ssh-keys]
 
 source /etc/bash/gaboshlib.include 1>/dev/null 2>&1 || true
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -48,7 +48,12 @@ Create options:
 
 Modify options:
   --password-file <path> New password file (optional)
-  --email <addr>        New email (optional, at least one required)
+  --email <addr>        New email (optional)
+  --ssh-key <key>       SSH public key, replaces the whole key set
+                        (repeatable)
+  --clear-ssh-keys      Remove all SSH public keys of the user
+
+At least one modify option is required for --modify.
 
 General options:
   --help                Show this help
@@ -64,6 +69,8 @@ f_email=""
 f_displayname=""
 f_group="users"
 f_cleanup_files=""
+f_ssh_keys=()
+f_clear_ssh_keys=0
 
 while [[ $# -gt 0 ]]
 do
@@ -99,6 +106,14 @@ do
     --group)
       f_group="$2"
       shift 2
+      ;;
+    --ssh-key)
+      f_ssh_keys+=("$2")
+      shift 2
+      ;;
+    --clear-ssh-keys)
+      f_clear_ssh_keys=1
+      shift
       ;;
     --help|-h)
       f_usage
@@ -167,12 +182,27 @@ then
   exit 1
 fi
 
-if [[ "${f_action}" == "modify" ]] && [[ -z "${f_password_file}" ]] && [[ -z "${f_email}" ]]
+if [[ "${f_action}" == "modify" ]] && [[ -z "${f_password_file}" ]] && [[ -z "${f_email}" ]] && [[ ${#f_ssh_keys[@]} -eq 0 ]] && [[ "${f_clear_ssh_keys}" -eq 0 ]]
 then
-  g_echo_error "Modify requires at least --password-file or --email"
+  g_echo_error "Modify requires at least --password-file, --email, --ssh-key or --clear-ssh-keys"
   f_usage >&2
   exit 1
 fi
+
+# Validate SSH public key format (same key types as the WebUI check)
+function f_validate_ssh_key {
+  local f_key="$1"
+  if ! [[ "${f_key}" =~ ^ssh-(rsa|ed25519|dss|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521)\ [A-Za-z0-9+/=]+(\ .*)?$ ]]
+  then
+    g_echo_error "Invalid SSH public key format"
+    return 1
+  fi
+}
+
+for f_key in "${f_ssh_keys[@]}"
+do
+  f_validate_ssh_key "${f_key}" || exit 1
+done
 
 # Set displayname default
 if [[ -z "${f_displayname}" ]]
@@ -279,7 +309,13 @@ case "${f_action}" in
 
     f_ldif="dn: ${f_user_dn}
 objectClass: inetOrgPerson
-objectClass: posixAccount
+objectClass: posixAccount"
+    if [[ ${#f_ssh_keys[@]} -gt 0 ]]
+    then
+      f_ldif="${f_ldif}
+objectClass: ldapPublicKey"
+    fi
+    f_ldif="${f_ldif}
 uid: ${f_uid}
 sn: ${f_uid}
 cn: ${f_displayname}
@@ -294,6 +330,12 @@ userPassword: ${f_password}"
       f_ldif="${f_ldif}
 mail: ${f_email}"
     fi
+
+    for f_key in "${f_ssh_keys[@]}"
+    do
+      f_ldif="${f_ldif}
+sshPublicKey: ${f_key}"
+    done
 
     f_ldif="${f_ldif}
 "
@@ -400,6 +442,49 @@ userPassword: ${f_password}"
     else
       g_echo_error "Failed to modify user '${f_uid}'"
       exit 1
+    fi
+
+    # SSH keys are handled in a second step: ensure the ldapPublicKey
+    # objectClass exists (tolerated when already present), then replace
+    # or delete the whole key set.
+    if [[ ${#f_ssh_keys[@]} -gt 0 ]] || [[ "${f_clear_ssh_keys}" -eq 1 ]]
+    then
+      f_key_ldif="dn: ${f_user_dn}
+changetype: modify
+add: objectClass
+objectClass: ldapPublicKey
+"
+      echo "${f_key_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" >/dev/null 2>&1 || true
+
+      if [[ "${f_clear_ssh_keys}" -eq 1 ]]
+      then
+        f_key_ldif="dn: ${f_user_dn}
+changetype: modify
+delete: sshPublicKey
+"
+      else
+        f_key_ldif="dn: ${f_user_dn}
+changetype: modify
+replace: sshPublicKey"
+        for f_key in "${f_ssh_keys[@]}"
+        do
+          f_key_ldif="${f_key_ldif}
+sshPublicKey: ${f_key}"
+        done
+        f_key_ldif="${f_key_ldif}
+"
+      fi
+
+      echo "${f_key_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}"
+      f_rc=$?
+
+      if [[ ${f_rc} -eq 0 ]]
+      then
+        g_echo_note "SSH keys of '${f_uid}' updated successfully"
+      else
+        g_echo_error "Failed to update SSH keys of '${f_uid}'"
+        exit 1
+      fi
     fi
     ;;
 

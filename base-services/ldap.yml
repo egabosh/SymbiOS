@@ -208,6 +208,13 @@
               gidNumber: 30001
               memberUid: admin
 
+              dn: cn=media,ou=groups,{{ldap_basedn}}
+              objectClass: top
+              objectClass: posixGroup
+              cn: media
+              gidNumber: 31000
+              description: Shared media access group with fixed GID (see mediapaths.md). Do not remove!
+
               dn: uid=admin,ou=users,{{ldap_basedn}}
               objectClass: top
               objectClass: inetOrgPerson
@@ -267,11 +274,31 @@
                 by dn="cn=readuser,{{ldap_basedn}}" auth
                 by * none
               olcAccess: {3}to *
+                by self read
                 by dn="cn=readuser,{{ldap_basedn}}" read
                 by * none
           no_log: true
 
-    - name: "{{ docker_path }}/Dockerfile"
+    - name: "{{ docker_path }}/ldap-config/openssh-lpk.ldif"
+      blockinfile:
+        path: "{{ docker_path }}/ldap-config/openssh-lpk.ldif"
+        mode: "0440"
+        owner: 10001
+        group: 10001
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # OpenSSH LDAP public key schema (ldapPublicKey / sshPublicKey).
+          # Loaded into cn=config on fresh installs (see docker-entrypoint.sh)
+          # and live-added for existing installs (see openssh-lpk task below).
+          dn: cn=openssh-lpk,cn=schema,cn=config
+          objectClass: olcSchemaConfig
+          cn: openssh-lpk
+          olcAttributeTypes: ( 1.3.6.1.4.1.24552.500.1.1.1.13 NAME 'sshPublicKey' DESC 'OpenSSH public key' EQUALITY octetStringMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.40 )
+          olcObjectClasses: ( 1.3.6.1.4.1.24552.500.1.1.2.0 NAME 'ldapPublicKey' DESC 'OpenSSH public key objectclass' SUP top AUXILIARY MUST ( uid ) MAY ( sshPublicKey ) )
+        backup: yes
+
+    - name: "{{ docker_path }}/docker-entrypoint.sh"
       blockinfile:
         path: "{{ docker_path }}/Dockerfile"
         mode: "0440"
@@ -329,6 +356,7 @@
             slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/cosine.ldif
             slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/inetorgperson.ldif
             slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/nis.ldif
+            slapadd -F /ldap-config/slapd.d -n 0 -l /ldap-config/openssh-lpk.ldif
 
             # Load base directory structure
             slapadd -F /ldap-config/slapd.d -l /ldap-config/base.ldif
@@ -502,6 +530,55 @@
       ansible.builtin.stat:
         path: "{{ base_services_root }}/symbios-ui/config/.admin_initialized"
       register: admin_init_flag
+
+    - name: Check if the openssh-lpk schema is loaded (functional probe)
+      ansible.builtin.shell: |
+        echo '{{ ldap_admin_password.stdout }}' | docker compose exec -T openldap ldapsearch -x -H ldap://localhost -D "cn=head-of-ldap,{{ ldap_basedn }}" -W -b "ou=users,{{ ldap_basedn }}" "(objectClass=ldapPublicKey)" dn
+      args:
+        chdir: "{{ docker_path }}"
+      register: lpk_schema_check
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Add openssh-lpk schema offline (cn=config has no EXTERNAL write access on existing installs)
+      when: lpk_schema_check.rc != 0
+      block:
+        - name: Stop LDAP for the offline schema import
+          ansible.builtin.shell: docker compose stop openldap
+          args:
+            chdir: "{{ docker_path }}"
+          changed_when: false
+
+        - name: Import openssh-lpk.ldif into cn=config
+          ansible.builtin.shell: docker compose run --rm --no-deps --user 10001:10001 --entrypoint slapadd openldap -F /ldap-config/slapd.d -n 0 -l /ldap-config/openssh-lpk.ldif
+          args:
+            chdir: "{{ docker_path }}"
+          changed_when: true
+
+        - name: Start LDAP after the offline schema import
+          ansible.builtin.shell: docker compose up -d openldap
+          args:
+            chdir: "{{ docker_path }}"
+          changed_when: false
+
+        - name: Wait for LDAP to be ready after the schema import
+          ansible.builtin.shell:
+            cmd: |
+              echo '{{ ldap_admin_password.stdout }}' | docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn }} -W
+          args:
+            chdir: "{{ docker_path }}"
+          register: ldap_ready_lpk
+          until: ldap_ready_lpk.rc == 0
+          retries: 20
+          delay: 10
+          changed_when: false
+          no_log: true
+
+    - name: Ensure media LDAP group with fixed GID 31000 (see mediapaths.md)
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --gid 31000 --name media"
+      changed_when: false
+      failed_when: false
 
     - name: Ensure admin user password is admin in LDAP
       ansible.builtin.shell: |

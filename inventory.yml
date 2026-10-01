@@ -108,6 +108,20 @@ all:
     # Free-space guard: abort before the disk fills up. Defaults 3GB/15%.
     #backup_min_free_gb: 3
     #backup_min_free_percent: 15
+    # Standard media paths (single source of truth, see mediapaths.md).
+    # Defaults live under data_root; per-host overrides may point anywhere
+    # (incl. external volumes). All paths are literal (no Jinja).
+    media_root: "/symbios/media"
+    media_audio: "/symbios/media/audio"
+    media_images: "/symbios/media/images"
+    media_videos: "/symbios/media/videos"
+    media_books: "/symbios/media/books"
+    media_documents: "/symbios/media/documents"
+    media_inbox: "/symbios/media/inbox"
+    # Filesystem GID shared by all media consumers (fixed value, never
+    # derived from the LDAP group hash). Owns the media dirs together
+    # with setgid so every consumer can read group-accessible files.
+    media_gid: 31000
   hosts:
     # SymbiOS server
     localhost:
