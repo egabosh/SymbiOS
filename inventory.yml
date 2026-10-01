@@ -118,6 +118,7 @@ all:
     media_books: "/symbios/media/books"
     media_documents: "/symbios/media/documents"
     media_inbox: "/symbios/media/inbox"
+    media_shared: "/symbios/media/shared"
     # Filesystem GID shared by all media consumers (fixed value, never
     # derived from the LDAP group hash). Owns the media dirs together
     # with setgid so every consumer can read group-accessible files.
