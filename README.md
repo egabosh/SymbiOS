@@ -247,6 +247,10 @@ Access tiers below the media root:
 - **Group shares** (`shared/<name>`): exactly the members of one LDAP group
   (auto-created as `shared-<name>`). Manage them on the **Shares** page in
   the WebUI (membership via Groups); only empty shares can be deleted.
+- **WordPress instances** (opt-in via `sftp: true`): live docroots are
+  exposed per instance at `/sftp-share/wordpress/<name>`, gated by the
+  instance LDAP group `wordpress-<name>` - members only ever see their own
+  instances. Ownership stays `www-data` (`33:33`), so updates keep working.
 
 ---
 

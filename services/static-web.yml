@@ -73,8 +73,11 @@
   hosts: all
   vars:
     service_name: static-web
-    # Sites served by this stack. "name" is used for the document root
-    # directory and the Traefik router, "domain" for the hostname.
+    # Sites served by this stack. "name" is used for the Traefik router
+    # and (by default) the document root directory, "domain" for the
+    # hostname. "docroot" optionally points a site at an external
+    # directory (e.g. a media share like /symbios/media/shared/<site>);
+    # external docroots are mounted as-is and never created or modified.
     static_web_sites:
       - name: web
         domain: "web.{{ base_domain }}"
@@ -118,7 +121,9 @@
         state: directory
         mode: '0750'
 
-    # One document root per site, each with a placeholder index page
+    # One document root per site, each with a placeholder index page.
+    # Sites with an external docroot are skipped (owned by whoever
+    # provides the directory, e.g. the shares machinery).
     - name: Create document root per site
       ansible.builtin.file:
         path: "/symbios/services/{{ service_name }}/htdocs/{{ item.name }}"
@@ -127,6 +132,7 @@
         state: directory
         mode: '0750'
       loop: "{{ static_web_sites }}"
+      when: item.docroot is not defined
 
     - name: Create placeholder index page per site
       ansible.builtin.copy:
@@ -142,6 +148,7 @@
           <body><p>No content deployed for {{ item.domain }} yet.</p></body>
           </html>
       loop: "{{ static_web_sites }}"
+      when: item.docroot is not defined
 
     # One nginx server block per site, replacing the image default site
     - name: Create nginx vhost per site
@@ -196,7 +203,9 @@
               restart: unless-stopped
               volumes:
                 - /etc/localtime:/etc/localtime:ro
-                - ./htdocs:/usr/share/nginx/html:ro
+                {% for site in static_web_sites %}
+                - {{ site.docroot | default('./htdocs/' + site.name) }}:/usr/share/nginx/html/{{ site.name }}:ro
+                {% endfor %}
                 - ./nginx/conf.d:/etc/nginx/conf.d:ro
               networks:
                 - symbios_services

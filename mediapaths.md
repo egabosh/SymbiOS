@@ -110,6 +110,14 @@ coverage - rate-limit at the daemon (`MaxAuthTries 3`, `LoginGraceTime 60`,
 - **Home Assistant**: libraries mounted `:ro` below HA's own
   `/media` and exposed in the Media Browser via `media_dirs`
   (`audio`/`videos`/`images`); `./media` stays app-owned (TTS, camera clips).
+- **WordPress** (opt-in per instance via `sftp: true`): `sftp-share.yml`
+  auto-mounts the live `<name>-data` at `/sftp-share/wordpress/<name>`
+  (container-only, no host bind). Gate is the instance LDAP group
+  `wordpress-<name>` via access + default ACL; ownership stays `33:33`
+  so `direct` updates keep working. Parent `wordpress/` is `2710`
+  (traverse, no listing). Repair: `symbios-wordpress-fix-perms.sh`.
+- **static-web**: per-site `docroot:` (e.g. a media share); external
+  docroots are mounted as-is and never created or modified.
 
 ## Open follow-ups (not started)
 
