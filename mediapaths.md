@@ -55,6 +55,35 @@ Defaults live under `data_root`. Per-host overrides point anywhere
 after the volume move - same gating problem as the navidrome pilot, see
 `migration-defiant.md` 7.8 Schritt 0).
 
+## Access model (implemented)
+
+Three tiers below `media_root`:
+
+1. **Private** (`home/<uid>`, `0700` owner-only): only the user itself
+   (root bypasses for backups). Created automatically for every SFTP-
+   eligible user by `symbios-sftp-share-homes.sh` (playbook + entrypoint +
+   ldap-groups hook on `member-added` for `media` and `shared-*`).
+   Pitfall: `mkdir` inherits parent setgid and a lone `chmod 0700` skips
+   the syscall when 0777 already matches (coreutils "retained") - always
+   clear explicitly (`chmod 0700` + `chmod g-s`). The `home/` base itself
+   is `0711` (traverse-only, no listing).
+2. **Group shares** (`shared/<name>`, `2770`): exactly the members of one
+   LDAP group (default auto-created `shared-<name>`). Managed by
+   `symbios-media-share.sh` (`--list/--create/--delete`; delete refuses
+   non-empty dirs and only removes auto-created groups) and the Shares
+   WebUI page (`shares.html`, membership via the Groups page).
+3. **Libraries** (audio/images/videos/books/documents): every `media`
+   member reads, nobody writes except the owner app (plus `:ro` mounts and
+   `2750` as second and third lock).
+
+SFTP side: chroot is `media_root` (`2751`: group lists, everyone
+traverses), `AllowGroups media shared-*`, default landing is the chroot
+root, `Match Group media` lands in `/inbox` instead. `%u` is NOT expanded
+in `internal-sftp -d` args, so per-user start dirs are impossible; Match
+blocks must stay last in `sftp-share.conf`. Port 28 has no fail2ban
+coverage - rate-limit at the daemon (`MaxAuthTries 3`, `LoginGraceTime 60`,
+`MaxStartups 3:50:10`).
+
 ## Consumers
 
 - **Navidrome** (pilot): read-only `/music` from `media_audio`.
