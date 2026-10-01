@@ -7,11 +7,11 @@ Status: implemented and verified end-to-end on symbios-dev (sessions Oct
 
 ## Problem
 
-Every service invents its own media locations. The defiant migration proved
-the pain: the music library lives at the host-specific path
-`/data-crypt/share/Musik/Uploaddatum` and had to be threaded through as
-per-service playbook vars. The next service (Jellyfin, Nextcloud external
-storage, Paperless consume) would reinvent this again.
+Every service invents its own media locations, so each new service
+(Jellyfin, Nextcloud external storage, Paperless consume) re-threads
+another host-specific path through per-service playbook vars. Central
+media locations end that repetition: one source of truth, edited in the
+WebUI, consumed by services instead of per-service vars.
 
 ## Decisions (locked)
 
@@ -52,10 +52,9 @@ storage, Paperless consume) would reinvent this again.
 | `media_shared` | Group shares base (`shared/<name>`, one LDAP group each) | `/symbios/media/shared` |
 | `media_gid` | Shared filesystem GID (fixed) | `31000` |
 
-Defaults live under `data_root`. Per-host overrides point anywhere
-(incl. external volumes such as `/data-crypt/share/...`, which only exist
-after the volume move - same gating problem as the navidrome pilot, see
-`migration-defiant.md` 7.8 Schritt 0).
+Defaults live under `data_root`. Per-host overrides may point anywhere,
+including external volumes - which only exist after the volume is mounted,
+so validate (or offer creation) before pointing a library at them.
 
 ## Access model (implemented)
 
@@ -123,7 +122,6 @@ coverage - rate-limit at the daemon (`MaxAuthTries 3`, `LoginGraceTime 60`,
 - Samba `[paperless-in]` user: the `paperless` system account does not
   exist where uid 998 is taken (e.g. by `systemd-network`) - map or
   create a working upload identity.
-- Defiant migration 7.8 switches host-specific paths to these globals.
 
 ## Three semantics (do not conflate)
 
@@ -153,5 +151,4 @@ GID allocation: infrastructure groups use the fixed range 31xxx
 ## Non-goals
 
 - No per-service media vars for new services - use the globals from day one.
-- The defiant host-specific paths stay in `migrations/defiant/` until the
-  feature lands; then 7.8 switches to the globals.
+- Host-specific migration paths live in `migrations/<host>/`, never here.
