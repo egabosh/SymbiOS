@@ -25,7 +25,7 @@
                     <td class="small">{{ share.members|default:'' }}</td>
                     <td class="small font-monospace">{% if share.quota_limit %}{{ share.quota_used|default:'?' }} / {{ share.quota_limit }}{% else %}-{% endif %}</td>
                     <td class="text-end">
-                        <form method="post" action="/shares/{{ share.name }}/delete/" class="d-inline" data-exec-confirm="Really delete share &quot;{{ share.name }}&quot;? Only empty shares can be deleted." data-exec="true">
+                        <form method="post" action="/settings/shares/{{ share.name }}/delete/" class="d-inline" data-exec-confirm="Really delete share &quot;{{ share.name }}&quot;? Only empty shares can be deleted." data-exec="true">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete share">&#128465;</button>
                         </form>
@@ -44,7 +44,7 @@
 <div class="modal fade" id="createShareModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
-            <form method="post" action="/shares/create/" data-exec="true">
+            <form method="post" action="/settings/shares/create/" data-exec="true">
                 {% csrf_token %}
                 <div class="modal-header">
                     <h5 class="modal-title">Create New Share</h5>
@@ -53,12 +53,12 @@
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label">Share Name</label>
-                        <input type="text" class="form-control" name="name" required pattern="[a-z0-9][a-z0-9-]*" placeholder="verein">
+                        <input type="text" class="form-control" name="name" required pattern="[a-z0-9][a-z0-9-]*" placeholder="myshare">
                         <div class="form-text">Lowercase letters, digits, hyphens. Created below the shared media root.</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">LDAP Group (optional)</label>
-                        <input type="text" class="form-control" name="group" pattern="[a-zA-Z0-9._-]+" placeholder="shared-verein (default)">
+                        <input type="text" class="form-control" name="group" pattern="[a-zA-Z0-9._-]+" placeholder="shared-myshare (default)">
                         <div class="form-text">Empty creates and uses <code>shared-&lt;name&gt;</code>. Members are managed under Groups.</div>
                     </div>
                     <div class="mb-3">
