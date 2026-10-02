@@ -202,26 +202,37 @@
     # WP reads/writes as owner or via its own group 33, SFTP writers use the
     # ACL entry. Default ACLs inherit to new files from either side; setgid
     # keeps the file group at 33 so WordPress never loses group access to
-    # SFTP-created files. The recursive pass runs once (marker file), the
-    # default ACL is refreshed on every apply. Repair path for drifted
-    # ownership: scripts/symbios-wordpress-fix-perms.sh
+    # SFTP-created files. The GID is resolved numerically from LDAP because
+    # host NSS does not reliably resolve LDAP group names (only the local
+    # media entry is guaranteed). The recursive pass runs once (marker
+    # file), the default ACL is refreshed on every apply. Repair path for
+    # drifted ownership: scripts/symbios-wordpress-fix-perms.sh
     - name: Install ACL tools for SFTP ACLs
       ansible.builtin.apt:
         name: acl
         update_cache: no
         install_recommends: no
-      when: wordpress_instances | default([]) | selectattr('sftp') | list | length > 0
+      when: wordpress_instances | default([]) | selectattr('sftp', 'defined') | selectattr('sftp') | list | length > 0
 
     - name: Grant instance LDAP group access for SFTP instances
       ansible.builtin.shell: |
-        chmod -R g+s "/symbios/services/wordpress/{{ item.name }}-data" && \
-        setfacl -R -m g:wordpress-{{ item.name }}:rwx "/symbios/services/wordpress/{{ item.name }}-data" && \
-        setfacl -R -d -m g:wordpress-{{ item.name }}:rwx "/symbios/services/wordpress/{{ item.name }}-data" && \
+        set -e
+        GID=$(docker exec symbios-base-ldap ldapsearch -x -H ldap://localhost \
+          -D "cn=head-of-ldap,{{ ldap_basedn }}" -w "$LDAP_ADMIN_PW" \
+          -b "cn=wordpress-{{ item.name }},ou=groups,{{ ldap_basedn }}" gidNumber 2>/dev/null \
+          | sed -n 's/^gidNumber: //p' | head -1)
+        [ -n "$GID" ] || { echo "no GID for wordpress-{{ item.name }}"; exit 1; }
+        chmod -R g+s "/symbios/services/wordpress/{{ item.name }}-data"
+        setfacl -R -m "g:${GID}:rwx" -m m::rwx "/symbios/services/wordpress/{{ item.name }}-data"
+        setfacl -R -d -m "g:${GID}:rwx" -m m::rwx "/symbios/services/wordpress/{{ item.name }}-data"
         touch "/symbios/services/wordpress/.sftp-acl-{{ item.name }}"
+      environment:
+        LDAP_ADMIN_PW: "{{ lookup('file', (config_dir | default('/symbios/base-services/symbios-ui/config')) + '/.ldap_admin_pw') }}"
       args:
         creates: "/symbios/services/wordpress/.sftp-acl-{{ item.name }}"
       loop: "{{ wordpress_instances | default([]) }}"
       when: item.sftp | default(false) | bool
+      no_log: true
 
     - name: Write Authelia access_control for restricted WordPress domains
       ansible.builtin.include_tasks: tasks/authelia-acl.yml
