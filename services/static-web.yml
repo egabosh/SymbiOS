@@ -150,6 +150,35 @@
       loop: "{{ static_web_sites }}"
       when: item.docroot is not defined
 
+    # Resolve external docroots (existence check for the fail-fast
+    # assert below; the Grant task consumes the same register).
+    - name: Resolve owning GIDs of external docroots
+      ansible.builtin.stat:
+        path: "{{ item.docroot }}"
+      loop: "{{ static_web_sites | selectattr('docroot', 'defined') | list }}"
+      register: static_web_docroot_stats
+
+    # External docroots (e.g. media shares) keep their own permissions
+    # (typically 2770/660 from SFTP uploads): nginx workers drop
+    # supplementary groups on startup, so group membership cannot grant
+    # them access. A numeric-uid ACL for the nginx worker (uid 101 in the
+    # official image) grants read/traverse directly; the default ACL
+    # inherits it to new uploads, so no normalization workflow is needed.
+    # SFTP isolation is unaffected (no other identity carries uid 101),
+    # hence even non-public sites may be share-backed.
+    - name: Grant nginx worker read access on external docroots
+      ansible.builtin.shell: |
+        setfacl -R -m u:101:rX "{{ item.item.docroot }}" && \
+        setfacl -R -d -m u:101:rX "{{ item.item.docroot }}"
+      loop: "{{ static_web_docroot_stats.results | selectattr('stat.exists') | list }}"
+
+    - name: Fail on missing external docroots
+      ansible.builtin.assert:
+        that: item.stat.exists
+        fail_msg: "External docroot {{ item.item.docroot }} does not exist (site {{ item.item.name }}). Create it first (e.g. the media share)."
+      loop: "{{ static_web_docroot_stats.results }}"
+      when: static_web_docroot_stats.results | default([]) | length > 0
+
     # One nginx server block per site, replacing the image default site
     - name: Create nginx vhost per site
       ansible.builtin.copy:
