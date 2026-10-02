@@ -17,7 +17,7 @@
 # docs:
 #   name: Hardening
 #   short_description: Apply basic Debian Linux hardening
-#   description: 'Hardens the OS: tightens SSH configuration, applies kernel/sysctl and permission hardening, and reduces the attack surface of the host.'
+#   description: 'Hardens the OS: tightens SSH configuration, encrypts swap with a random key per boot, applies kernel/sysctl and permission hardening, and reduces the attack surface of the host.'
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -131,6 +131,99 @@
         enabled: true
       when: nocontainer.stat.exists == true
 
+    # Encrypted swap (random key per boot): unencrypted swap may leak
+    # decrypted content (mails, database pages, key material) to disk.
+    # Same recipe the Debian installer generates (plain dm-crypt swap with
+    # a /dev/urandom key): nothing to enter, fresh key every boot, old
+    # swap pages unreadable. Only block devices are handled (swap files
+    # are reported, not converted); no swap at all (typical for cloud
+    # images) is a valid end state.
+    - name: Detect swap entries in fstab
+      ansible.builtin.shell: awk '$3 == "swap" {print $1}' /etc/fstab 2>/dev/null || true
+      register: hardening_swap_fstab
+      changed_when: false
+      when: nocontainer.stat.exists == true
+
+    - name: Set swap source fact (first non-mapper fstab swap entry)
+      ansible.builtin.set_fact:
+        hardening_swap_src: "{{ (hardening_swap_fstab.stdout_lines | default([]) | reject('match', '^/dev/mapper/') | list | first) | default('') }}"
+      when:
+        - nocontainer.stat.exists == true
+        - hardening_swap_fstab.stdout | default('') | length > 0
+
+    - name: Resolve swap device UUID
+      ansible.builtin.shell: test -b {{ hardening_swap_src }} && blkid -s UUID -o value {{ hardening_swap_src }} 2>/dev/null || true
+      register: hardening_swap_uuid
+      changed_when: false
+      when:
+        - nocontainer.stat.exists == true
+        - hardening_swap_src | default('') | length > 0
+
+    - name: Report unhandled swap (file or already encrypted)
+      ansible.builtin.debug:
+        msg: >-
+          Swap {{ hardening_swap_src }} is not a plain block device or is
+          already encrypted, leaving it untouched. Swap files cannot be
+          encrypted this way; remove the file if swap is not wanted.
+      when:
+        - nocontainer.stat.exists == true
+        - hardening_swap_src | default('') | length > 0
+        - hardening_swap_uuid.stdout | default('') | length == 0
+
+    - name: Install cryptsetup for encrypted swap
+      ansible.builtin.apt:
+        name: cryptsetup
+        update_cache: no
+        install_recommends: no
+      when:
+        - nocontainer.stat.exists == true
+        - hardening_swap_uuid.stdout | default('') | length > 0
+
+    - name: Encrypted swap via crypttab (random key, plain dm-crypt)
+      ansible.builtin.blockinfile:
+        path: /etc/crypttab
+        create: yes
+        mode: '0600'
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK CRYPTSWAP"
+        block: |
+          cryptswap UUID={{ hardening_swap_uuid.stdout }} /dev/urandom swap,offset=8,cipher=aes-xts-plain64
+        backup: yes
+      when:
+        - nocontainer.stat.exists == true
+        - hardening_swap_uuid.stdout | default('') | length > 0
+      notify:
+      - Reactivate swap
+
+    - name: Point fstab swap at the encrypted mapper
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^{{ hardening_swap_src | ansible.builtin.regex_escape }}\s+\S+\s+swap\s.*$'
+        replace: '/dev/mapper/cryptswap none swap sw 0 0'
+        backup: yes
+      when:
+        - nocontainer.stat.exists == true
+        - hardening_swap_uuid.stdout | default('') | length > 0
+      notify:
+      - Reactivate swap
+
+    - name: Verify swap runs on the encrypted mapper
+      ansible.builtin.shell: swapon --show=NAME --noheadings 2>/dev/null | grep -q /dev/mapper/cryptswap && echo ENCRYPTED || echo PLAIN
+      register: hardening_swap_verify
+      changed_when: false
+      failed_when: false
+      when: nocontainer.stat.exists == true
+
+    - name: Report swap state
+      ansible.builtin.debug:
+        msg: >-
+          Swap state: {{ hardening_swap_verify.stdout | default('none present') }}.
+          PLAIN means a reboot is still needed to activate the encrypted mapper.
+      when:
+        - nocontainer.stat.exists == true
+        - hardening_swap_verify.stdout | default('') | length > 0
+
 
 
     - name: Register playbook as installed
@@ -147,5 +240,30 @@
       service:
         name: fail2ban
         state: restarted
+
+    # Reactivate swap on the encrypted mapper without reboot. Skipped when
+    # too much swap is in use (swapoff could OOM the box) - then the next
+    # reboot activates it via crypttab/fstab.
+    - name: Reactivate swap
+      ansible.builtin.shell: |
+        set -u
+        f_used=$(free -m | awk '/^Swap:/ {print $3}')
+        f_free=$(free -m | awk '/^Mem:/ {print $7}')
+        if [ "${f_used}" -ge "${f_free}" ]
+        then
+          echo "too much swap in use (${f_used}M used, ${f_free}M free), reboot to activate encrypted swap"
+          exit 0
+        fi
+        swapoff -a
+        if systemctl restart systemd-cryptsetup@cryptswap 2>/dev/null
+        then
+          true
+        else
+          /lib/cryptsetup/cryptdisks_start cryptswap
+        fi
+        swapon -a
+        swapon --show=NAME --noheadings
+      changed_when: true
+      failed_when: false
 
 
