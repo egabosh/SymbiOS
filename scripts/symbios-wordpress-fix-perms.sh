@@ -62,8 +62,8 @@ do
     g_echo_warn "LDAP group ${f_group} not found, ownership fixed but no SFTP ACL applied"
     continue
   fi
-  setfacl -R -m "g:${f_gid}:rwx" "${f_dir}"
-  setfacl -R -d -m "g:${f_gid}:rwx" "${f_dir}"
+  setfacl -R -m "g:${f_gid}:rwx" -m m::rwx "${f_dir}"
+  setfacl -R -d -m "g:${f_gid}:rwx" -m m::rwx "${f_dir}"
   touch "${g_services_root}/wordpress/.sftp-acl-${f_name}"
   g_echo_note "Permissions fixed for ${f_name} (group ${f_group})"
 done

@@ -111,7 +111,7 @@
 
   - name: Set WordPress SFTP mounts from instances with sftp:true
     ansible.builtin.set_fact:
-      wordpress_sftp_mounts: "{{ (sftp_wp_instances_slurp.content | default('') | b64decode | from_yaml | default([])) | selectattr('sftp') | list }}"
+        wordpress_sftp_mounts: "{{ (sftp_wp_instances_slurp.content | default('') | b64decode | from_yaml | default([])) | selectattr('sftp', 'defined') | selectattr('sftp') | list }}"
     when: sftp_wp_instances_slurp.content | default('') | length > 0
 
   - name: Create LDAP group {{ sftp_share_ldap_group }} for SFTP access control
@@ -188,52 +188,12 @@
       creates: /symbios/services/sftp-share/ssh_host_ed25519_key
 
   - name: /symbios/services/sftp-share/docker-compose.yml
-    blockinfile:
-      path: /symbios/services/sftp-share/docker-compose.yml
+    ansible.builtin.template:
+      src: sftp-share/templates/docker-compose.yml.j2
+      dest: /symbios/services/sftp-share/docker-compose.yml
       mode: "0440"
       owner: root
       group: root
-      create: yes
-      marker: "# {mark} ANSIBLE MANAGED BLOCK"
-      block: |
-        name: ""
-
-        services:
-          sftp-share:
-            build:
-              context: .
-              dockerfile: Dockerfile
-            container_name: sftp-share
-            restart: unless-stopped
-            ports:
-              - "28:28"
-            volumes:
-              - /etc/localtime:/etc/localtime:ro
-              - ./ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key
-              - ./ssh_host_ed25519_key.pub:/etc/ssh/ssh_host_ed25519_key.pub
-              - ./sftp-share.conf:/etc/sftp-share.conf:ro
-              - ./sftp-share-user.conf:/etc/sftp-share-user.conf
-              - ./nslcd.conf:/etc/nslcd.conf:ro
-              - ./nsswitch.conf:/etc/nsswitch.conf:ro
-              - ./sftp-ldap-keys:/usr/local/bin/sftp-ldap-keys:ro
-              - {{ sftp_share_datadir }}:/sftp-share:rw
-              {% for m in sftp_share_extra_mounts | default([]) %}
-              - {{ m.src }}:{{ m.dest }}:{{ m.mode | default('rw') }}
-              {% endfor %}
-              {% for wp in wordpress_sftp_mounts | default([]) %}
-              - /symbios/services/wordpress/{{ wp.name }}-data:/sftp-share/wordpress/{{ wp.name }}:rw
-              {% endfor %}
-            networks:
-              - sftp-share--network
-              - symbios_base_services
-
-        networks:
-          sftp-share--network:
-            driver: bridge
-            driver_opts:
-              com.docker.network.bridge.name: br-sftp-share
-          symbios_base_services:
-            external: true
       backup: yes
     notify:
     - Restart sftp-share
@@ -401,14 +361,13 @@
           fi
         done
 
-        {% if wordpress_sftp_mounts | default([]) | length > 0 %}
         # WordPress per-instance view: traversable but not listable - the
-        # instance mounts below gate access per LDAP group (wordpress-<name>,
-        # ACLs by wordpress.yml).
+        # instance mounts gate access per LDAP group (wordpress-<name>,
+        # ACLs by wordpress.yml). Always ensured (harmless when empty:
+        # nothing to list, nothing to enter).
         mkdir -p /sftp-share/wordpress
         chgrp media /sftp-share/wordpress
         chmod 2710 /sftp-share/wordpress
-        {% endif %}
         # Start SSH daemon in foreground with sftp-share configuration
         /usr/sbin/sshd -D -f /etc/sftp-share.conf -E /proc/1/fd/1
       backup: yes

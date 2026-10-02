@@ -296,6 +296,13 @@ Service playbooks can reuse shared task files from `services/tasks/` via
 `include_tasks`. This avoids duplicating common patterns (LDAP groups,
 Authelia config, healthchecks) across 13+ playbooks.
 
+> **No Jinja control flow inside `blockinfile`.** `{% for %}` / `{% if %}`
+> lines inside a `block:` scalar render with drifted indentation (verified
+> Oct 2026: loop body gained extra indent, compose refused to parse).
+> Single-line `{% if x %}...{% endif %}` is safe; multi-line loops belong
+> in real `.j2` template files rendered with the `template` module
+> (precedent: `wordpress/templates/`, `sftp-share/templates/`).
+
 ### `tasks/oidc-groups.yml` - dual-group LDAP setup
 
 Creates `<service>-users` and `<service>-admins` LDAP groups and adds
