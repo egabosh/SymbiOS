@@ -338,6 +338,55 @@
              | list }}
         _wp_hc_stale: "{{ wp_hc_existing.files | map(attribute='path') | difference(_wp_hc_current) | list }}"
 
+    # WordPress database backup module. The generic docker.backup module
+    # cannot cover the shared MariaDB (multiple instance databases, only
+    # root credentials in the container env), so dump --all-databases with
+    # the root password from the compose .env. Runs from backup.sh like
+    # all *.backup modules; skips silently without a deployed service.
+    - name: "{{ data_root }}/backup.d/wordpress-db.backup"
+      ansible.builtin.blockinfile:
+        path: "{{ data_root }}/backup.d/wordpress-db.backup"
+        create: yes
+        mode: '0550'
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          if [[ -d ${g_services_root}/wordpress && -f ${g_services_root}/wordpress/.env ]]
+          then
+            g_echo_ok "Start WordPress database backup (shared MariaDB)"
+            g_days=7
+            mkdir -p $g_backupdir
+            set -a
+            . ${g_services_root}/wordpress/.env
+            set +a
+            if [[ -z "${WORDPRESS_DB_ROOT_PASSWORD:-}" ]]
+            then
+              g_echo_error "WordPress backup skipped: no root password in .env"
+            elif ! docker ps -qf "name=^symbios-wordpress-db$" | grep -q .
+            then
+              g_echo_error "WordPress backup skipped: symbios-wordpress-db not running"
+            else
+              g_pw_file=$(mktemp /tmp/symbios-db-pw.XXXXXX)
+              chmod 600 "$g_pw_file"
+              echo "$WORDPRESS_DB_ROOT_PASSWORD" > "$g_pw_file"
+              unset WORDPRESS_DB_ROOT_PASSWORD
+              g_timestamp=$(date +"%Y%m%d%H%M")
+              if ! docker exec symbios-wordpress-db /usr/bin/mariadb-dump --no-tablespaces -uroot --password="$(cat $g_pw_file)" --single-transaction --quick --routines --triggers --events --all-databases 2>${g_tmp}/dberr | gzip > $g_backupdir/symbios-wordpress-db-all-$g_timestamp.sql.gz
+              then
+                g_echo_error "WordPress DB backup failed: $(cat ${g_tmp}/dberr)"
+              fi
+              rm -f "$g_pw_file"
+              g_old_backups=$(ls -1 $g_backupdir/symbios-wordpress-db-*.gz 2>/dev/null | wc -l)
+              if [[ $g_old_backups -gt $g_days ]]
+              then
+                find $g_backupdir -name "symbios-wordpress-db-*.gz" -daystart -mtime +$g_days -delete
+              fi
+            fi
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
     # Register playbook as installed in the state file
     - name: Register playbook as installed
       include_tasks: tasks/state-register.yml
