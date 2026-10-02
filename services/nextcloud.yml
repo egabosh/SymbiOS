@@ -74,6 +74,11 @@
     nextcloud_media_videos: "{{ media_videos | default('/symbios/media/videos') }}"
     nextcloud_media_images: "{{ media_images | default('/symbios/media/images') }}"
     nextcloud_media_documents: "{{ media_documents | default('/symbios/media/documents') }}"
+    # Thumbnail pre-generation for the photo/video libraries. The
+    # nextcloud-cron service runs it in the background; disable on TB
+    # archives where the preview tables would explode (on-demand
+    # thumbnails while browsing keep working either way).
+    nextcloud_previews: true
 
 
   tasks:
@@ -560,7 +565,12 @@
         docker compose exec -T -u www-data nextcloud ./occ app:enable files_external >/dev/null 2>&1 || true
         # Pregenerate thumbnails for the photo/video libraries in the
         # background cronjob (the nextcloud-cron service runs it).
-        docker compose exec -T -u www-data nextcloud ./occ app:enable previewgenerator >/dev/null 2>&1 || true
+        if [[ "{{ nextcloud_previews | default(true) }}" == "True" ]]
+        then
+          docker compose exec -T -u www-data nextcloud ./occ app:enable previewgenerator >/dev/null 2>&1 || true
+        else
+          docker compose exec -T -u www-data nextcloud ./occ app:disable previewgenerator >/dev/null 2>&1 || true
+        fi
         for f_spec in "Media Audio|/media/audio" "Media Videos|/media/videos" "Media Images|/media/images" "Media Documents|/media/documents"
         do
           f_name="${f_spec%%|*}"
@@ -833,10 +843,11 @@
           docker compose exec -T -u www-data nextcloud ./occ trashbin:cleanup --all-users
           docker compose exec -T -u www-data nextcloud ./occ files:cleanup
           docker compose exec -T -u www-data nextcloud ./occ files:scan --all --generate-metadata --home-only --no-interaction -q
-          # External storage (media libraries) is filled from outside
-          # (SFTP, yt-dlp, paperless), so index new files there too. The
-          # --unscanned pass is cheap: known files are skipped.
-          docker compose exec -T -u www-data nextcloud ./occ files:scan --all --unscanned --no-interaction -q
+          # External storage filled from outside (paperless inflow, uploads)
+          # is indexed per configured mount (see nextcloud_media_scan_mounts:
+          # full-library scans on TB archives bloat the database, browsing a
+          # folder indexes it live anyway, so only listed mounts are scanned).
+          symbios-nextcloud-media-scan.sh
           # maps:scan-photos replaced by "occ files:scan --generate-metadata"
           #docker compose exec -T -u www-data nextcloud ./occ maps:scan-photos --now
           docker compose exec -T -u www-data nextcloud ./occ db:convert-filecache-bigint -n

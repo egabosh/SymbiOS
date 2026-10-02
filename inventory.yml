@@ -118,6 +118,12 @@ all:
     media_books: "/symbios/media/books"
     media_documents: "/symbios/media/documents"
     media_inbox: "/symbios/media/inbox"
+    # Nextcloud external-storage scan scope (mount display names, one per
+    # line). Only listed mounts get a daily --unscanned index pass: full
+    # scans on TB archives bloat the database (browsing a folder indexes
+    # it live anyway). Small high-churn mounts belong here.
+    nextcloud_media_scan_mounts:
+      - Media Documents
     media_shared: "/symbios/media/shared"
     # Per-directory quotas in GiB (project quotas, see mediapaths.md).
     # Enforced only when the filesystem is mounted with prjquota

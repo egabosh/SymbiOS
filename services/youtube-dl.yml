@@ -182,9 +182,11 @@
 
           if [[ ${f_rc} -eq 0 ]] && [[ -d /symbios/services/nextcloud ]]
           then
+            # Index just the fresh download target (cheap even on TB
+            # libraries: --path limits the walk to this subtree).
             (
               flock -n 9 || exit 0
-              docker compose -f /symbios/services/nextcloud/docker-compose.yml exec -T -u www-data nextcloud ./occ files:scan --all --unscanned --no-interaction -q >/dev/null 2>&1 || true
+              symbios-nextcloud-media-scan.sh "Media Videos" >/dev/null 2>&1 || true
             ) 9>/tmp/youtube-dl-scan.lock &
             disown || true
           fi

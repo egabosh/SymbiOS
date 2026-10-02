@@ -123,10 +123,11 @@ coverage - rate-limit at the daemon (`MaxAuthTries 3`, `LoginGraceTime 60`,
 
 - Backup strategy for `/symbios/media`: libraries likely belong into
   `backup_exclude`, documents/inbox likely not - undecided.
-- Brute-force protection for SFTP port 28 beyond daemon limits
-  (fail2ban on container logs or router-side rate limiting).
-- Least-privilege LDAP bind user for the SFTP container (today: shared
-  `readuser`, which reads the whole directory).
+- SFTP bind account is now dedicated (`cn=sftp-reader`, scoped ACLs);
+  the same treatment was not applied to other consumers (shared
+  `readuser`).
+- Quota enforcement needs a `prjquota` filesystem (new data partitions
+  get it); existing root filesystems only get warnings.
 
 ## Three semantics (do not conflate)
 

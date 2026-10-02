@@ -92,6 +92,45 @@
       - Restart sshd
       when: nocontainer.stat.exists == true
 
+    - name: Install fail2ban for SSH brute-force protection (host sshd, ports 22/33)
+      ansible.builtin.apt:
+        name: fail2ban
+        update_cache: no
+        install_recommends: no
+      when: nocontainer.stat.exists == true
+
+    - name: Configure fail2ban sshd jail (5 failures in 10 minutes -> 30 minutes ban)
+      ansible.builtin.blockinfile:
+        path: /etc/fail2ban/jail.local
+        mode: "0444"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          [DEFAULT]
+          bantime = 30m
+          findtime = 10m
+          maxretry = 5
+          backend = systemd
+          [sshd]
+          enabled = true
+          port = 22,33
+          # Match the whole ssh unit: OpenSSH >= 9.8 logs as sshd-session,
+          # a _COMM=sshd constraint would blind the jail.
+          journalmatch = _SYSTEMD_UNIT=ssh.service
+        backup: yes
+      notify:
+      - Restart fail2ban
+      when: nocontainer.stat.exists == true
+
+    - name: Enable and start fail2ban
+      ansible.builtin.service:
+        name: fail2ban
+        state: started
+        enabled: true
+      when: nocontainer.stat.exists == true
+
 
 
     - name: Register playbook as installed
@@ -102,6 +141,11 @@
     - name: Restart sshd
       service:
         name: ssh
+        state: restarted
+
+    - name: Restart fail2ban
+      service:
+        name: fail2ban
         state: restarted
 
 
