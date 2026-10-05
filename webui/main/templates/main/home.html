@@ -102,7 +102,25 @@
 </div>
 
 {# --- System --- #}
-<h2 class="mb-2">System</h2>
+<div class="d-flex align-items-center justify-content-between mb-2">
+  <h2 class="mb-0">System</h2>
+  <div class="d-flex gap-2">
+    <form method="post" action="/system/power/" class="d-inline" data-exec="true" data-exec-confirm="Really reboot the whole SymbiOS host now?">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="reboot">
+      <button type="submit" class="btn btn-warning btn-sm">
+        <i class="bi bi-arrow-clockwise"></i> Reboot
+      </button>
+    </form>
+    <form method="post" action="/system/power/" class="d-inline" data-exec="true" data-exec-confirm="Really shut down the whole SymbiOS host now? It stays off until powered on again.">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="shutdown">
+      <button type="submit" class="btn btn-danger btn-sm">
+        <i class="bi bi-power"></i> Shut down
+      </button>
+    </form>
+  </div>
+</div>
 
 {# --- Host system stats: 3 separate tiles --- #}
 <div class="d-flex align-items-center gap-2 mb-2">
@@ -178,31 +196,43 @@
   {% endif %}
 </div>
 
-{# --- Network overview (full width) --- #}
-<div class="card svc-base-card mb-3" style="height:auto">
-  <div class="card-header d-flex align-items-center gap-2 py-1">
-    <i class="bi bi-hdd-network"></i>
-    <span class="fw-semibold">Network Devices</span>
-    <span class="ms-auto small text-muted" id="net-meta"></span>
-  </div>
-  <div class="card-body p-0">
+{# --- Network overview: one separate card per network --- #}
+<div class="d-flex align-items-center gap-2 mb-2">
+  <i class="bi bi-hdd-network text-muted"></i>
+  <span class="fw-semibold">Network Devices</span>
+  <span class="ms-auto small text-muted" id="net-meta"></span>
+</div>
+<div id="net-groups" class="mb-3">
+  {% for g in network.groups %}
+  <div class="card svc-base-card mb-3" style="height:auto">
+    <div class="card-body p-0">
     <div class="table-responsive">
       <table class="table table-sm align-middle mb-0">
-        <thead class="table-light">
+        <thead>
+          <tr class="table-light">
+            <th colspan="4">
+              <span class="text-muted">Interface</span> <code>{{ g.interface }}</code>
+              <span class="text-muted ms-2">Subnet</span> {{ g.cidr }}
+              {% if g.self %}
+              <span class="text-muted ms-2">SymbiOS</span> <code>{{ g.self.ip }}</code>
+              {% if g.self.hostname %}<span>{{ g.self.hostname }}</span>{% endif %}
+              {% if g.self.mac %}<code class="text-uppercase">{{ g.self.mac }}</code>{% endif %}
+              {% else %}
+              <span class="text-muted ms-2">SymbiOS has no address in this network.</span>
+              {% endif %}
+            </th>
+          </tr>
           <tr>
             <th>IP</th>
             <th>Hostname</th>
             <th>MAC</th>
             <th>Vendor</th>
-            <th>Interface</th>
-            <th>Subnet</th>
           </tr>
         </thead>
-        <tbody id="net-devices">
-          {% for d in network.devices %}
+        <tbody>
+          {% for d in g.devices %}
           <tr>
             <td class="text-nowrap">
-              {% if d.self %}<span class="badge text-bg-primary me-1">self</span>{% endif %}
               {% if d.gateway %}<span class="badge text-bg-warning me-1">router</span>{% endif %}
               {% if d.wifi %}<i class="bi bi-wifi text-success me-1" title="{{ d.ap }} AP"></i>{% endif %}
               <code>{{ d.ip }}</code>
@@ -210,24 +240,28 @@
             <td>{{ d.hostname }}</td>
             <td>{% if d.mac %}<code class="text-uppercase">{{ d.mac }}</code>{% else %}<span class="text-muted">&ndash;</span>{% endif %}</td>
             <td class="text-muted">{{ d.vendor }}{% if d.wifi %} <span class="text-nowrap">({{ d.signal }} dBm)</span>{% endif %}</td>
-            <td>{% if d.interface %}<code>{{ d.interface }}</code>{% else %}<span class="text-muted">&ndash;</span>{% endif %}</td>
-            <td class="text-muted">{{ d.subnet }}</td>
           </tr>
           {% empty %}
           <tr>
-            <td colspan="6" class="text-center text-muted py-3">
-              {% if network.subnets %}
-              No devices found.
-              {% else %}
-              Network overview unavailable.
-              {% endif %}
-            </td>
+            <td colspan="4" class="text-center text-muted py-2">No other devices found in this network.</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
+      </div>
+      </div>
     </div>
-  </div>
+    {% empty %}
+    <div class="card svc-base-card mb-3" style="height:auto">
+      <div class="card-body py-3 text-center text-muted">
+        {% if network.subnets %}
+        No devices found.
+        {% else %}
+        Network overview unavailable.
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
 </div>
 
 {% endblock %}
@@ -305,37 +339,72 @@
     el.innerHTML = html;
   }
 
-  function renderNetwork(n) {
-    const tb = document.getElementById('net-devices');
-    const meta = document.getElementById('net-meta');
+  // One table per network: the title row (merged columns) carries the
+  // interface, subnet and the host's own IP/hostname/MAC in that network,
+  // so the device rows only need IP/hostname/MAC/vendor.
+  function netGroups(n) {
+    if (n && n.groups && n.groups.length) return n.groups;
+    // Fallback for payloads without groups: build them from subnets+devices.
+    const subnets = (n && n.subnets) || [];
     const devices = (n && n.devices) || [];
+    return subnets.map(function (s) {
+      const members = devices.filter(function (d) { return d.subnet === s.cidr; });
+      const self = members.find(function (d) { return d.self; }) || null;
+      return { cidr: s.cidr, interface: s.interface, self: self,
+               devices: members.filter(function (d) { return !d.self; }) };
+    });
+  }
+
+  function netTitleRow(g) {
+    let title = '<span class="text-muted">Interface</span> <code>' + escapeHtml(g.interface || '') + '</code>'
+      + ' <span class="text-muted ms-2">Subnet</span> ' + escapeHtml(g.cidr || '');
+    if (g.self) {
+      title += ' <span class="text-muted ms-2">SymbiOS</span> <code>' + escapeHtml(g.self.ip || '') + '</code>';
+      if (g.self.hostname) title += ' <span>' + escapeHtml(g.self.hostname) + '</span>';
+      if (g.self.mac) title += ' <code class="text-uppercase">' + escapeHtml(g.self.mac) + '</code>';
+    } else {
+      title += ' <span class="text-muted ms-2">SymbiOS has no address in this network.</span>';
+    }
+    return '<tr class="table-light"><th colspan="4">' + title + '</th></tr>'
+      + '<tr><th>IP</th><th>Hostname</th><th>MAC</th><th>Vendor</th></tr>';
+  }
+
+  function netDeviceRow(d) {
+    let badges = '';
+    if (d.gateway) badges += '<span class="badge text-bg-warning me-1">router</span>';
+    if (d.wifi) badges += '<i class="bi bi-wifi text-success me-1" title="' + escapeHtml((d.ap || '') + ' AP') + '"></i>';
+    const mac = d.mac ? '<code class="text-uppercase">' + escapeHtml(d.mac) + '</code>' : '<span class="text-muted">&ndash;</span>';
+    const sig = d.wifi ? ' <span class="text-nowrap">(' + escapeHtml(d.signal + ' dBm') + ')</span>' : '';
+    return '<tr><td class="text-nowrap">' + badges + '<code>' + escapeHtml(d.ip) + '</code></td>'
+      + '<td>' + escapeHtml(d.hostname || '') + '</td>'
+      + '<td>' + mac + '</td>'
+      + '<td class="text-muted">' + escapeHtml(d.vendor || '') + sig + '</td></tr>';
+  }
+
+  function renderNetwork(n) {
+    const box = document.getElementById('net-groups');
+    const meta = document.getElementById('net-meta');
+    const groups = netGroups(n);
     const subnets = (n && n.subnets) || [];
     if (meta) {
       const sub = subnets.length ? escapeHtml(String(subnets.length) + ' subnets') : '';
       const at = (n && n.scanned_at) ? dashLinked(n.scanned_at) : '';
       meta.innerHTML = sub ? '<span class="small text-muted">' + sub + ' &middot; updated ' + escapeHtml(at) + '</span>' : '';
     }
-    if (!devices.length) {
-      tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">' + (subnets.length ? 'No devices found.' : 'Network overview unavailable.') + '</td></tr>';
+    if (!groups.length) {
+      box.innerHTML = '<div class="card svc-base-card mb-3" style="height:auto"><div class="card-body py-3 text-center text-muted">'
+        + (subnets.length ? 'No devices found.' : 'Network overview unavailable.') + '</div></div>';
       return;
     }
-    let rows = '';
-    devices.forEach(function (d) {
-      let badges = '';
-      if (d.self) badges += '<span class="badge text-bg-primary me-1">self</span>';
-      if (d.gateway) badges += '<span class="badge text-bg-warning me-1">router</span>';
-      if (d.wifi) badges += '<i class="bi bi-wifi text-success me-1" title="' + escapeHtml((d.ap || '') + ' AP') + '"></i>';
-      const mac = d.mac ? '<code class="text-uppercase">' + escapeHtml(d.mac) + '</code>' : '<span class="text-muted">&ndash;</span>';
-      const sig = d.wifi ? ' <span class="text-nowrap">(' + escapeHtml(d.signal + ' dBm') + ')</span>' : '';
-      const iface = d.interface ? '<code>' + escapeHtml(d.interface) + '</code>' : '<span class="text-muted">&ndash;</span>';
-      rows += '<tr><td class="text-nowrap">' + badges + '<code>' + escapeHtml(d.ip) + '</code></td>'
-        + '<td>' + escapeHtml(d.hostname || '') + '</td>'
-        + '<td>' + mac + '</td>'
-        + '<td class="text-muted">' + escapeHtml(d.vendor || '') + sig + '</td>'
-        + '<td>' + iface + '</td>'
-        + '<td class="text-muted">' + escapeHtml(d.subnet || '') + '</td></tr>';
-    });
-    tb.innerHTML = rows;
+    box.innerHTML = groups.map(function (g) {
+      const rows = g.devices.length
+        ? g.devices.map(netDeviceRow).join('')
+        : '<tr><td colspan="4" class="text-center text-muted py-2">No other devices found in this network.</td></tr>';
+      return '<div class="card svc-base-card mb-3" style="height:auto"><div class="card-body p-0">'
+        + '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead>'
+        + netTitleRow(g) + '</thead><tbody>' + rows + '</tbody></table></div>'
+        + '</div></div>';
+    }).join('');
   }
 
   async function fetchStats() {
@@ -360,10 +429,10 @@
   }
 
   function handleNetworkError() {
-    const tb = document.getElementById('net-devices');
+    const box = document.getElementById('net-groups');
     const meta = document.getElementById('net-meta');
-    if (tb && !tb.querySelector('tr td')) {
-      tb.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Network overview unavailable.</td></tr>';
+    if (box && !box.querySelector('table')) {
+      box.innerHTML = '<div class="card svc-base-card mb-3" style="height:auto"><div class="card-body py-3 text-center text-muted">Network overview unavailable.</div></div>';
     }
     if (meta) meta.innerHTML = '';
   }
