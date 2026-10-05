@@ -325,7 +325,9 @@ EOF
     then
       if [[ -f "$f_password_file" ]]
       then
-        IFS= read -rs f_password < "$f_password_file"
+        # read exits nonzero when the file has no trailing newline -
+        # tolerate that, the empty-check below reports a proper error.
+        IFS= read -rs f_password < "$f_password_file" || true
         rm -f "$f_password_file" 2>/dev/null
       fi
     fi
@@ -399,7 +401,7 @@ EOF
     # idempotent rsync instead of wiping the disk and copying from scratch.
     # This makes the migration robust against SSH drops / WebUI restarts.
     local f_resume=false f_new_source=""
-    if f_load_state && [[ "$f_old_home_device" == "$old_device" ]]
+    if f_load_state && [[ "$f_old_home_device" == "$f_old_device" ]]
     then
       f_new_source=$(findmnt -n -o SOURCE /symbios.new 2>/dev/null || true)
       if [[ "$f_encrypt" == "yes" ]] && [[ "$f_new_source" == "/dev/mapper/${g_mapper_name}" ]]
@@ -523,13 +525,15 @@ EOF
     sed -i '\#.*[[:space:]]/symbios[[:space:]]#d' /etc/fstab
     if [[ "$f_encrypt" == "yes" ]]
     then
-      echo "/dev/mapper/$f_luks_name ${g_mountpoint} ext4 defaults,noatime,noauto,prjquota 0 2" >> /etc/fstab
+      # nofail: never wait at boot for a locked/missing volume (boot-unlock
+      # via console prompt or web page happens after boot, see symbios-boot-unlock).
+      echo "/dev/mapper/$f_luks_name ${g_mountpoint} ext4 defaults,noatime,nofail,noauto,prjquota 0 2" >> /etc/fstab
     else
       local f_uuid
       f_uuid=$(blkid -s UUID -o value "$f_device" 2>/dev/null) || {
         f_setup_error "blkid failed"
       }
-      echo "UUID=$f_uuid ${g_mountpoint} ext4 defaults,noatime,noauto,prjquota 0 2" >> /etc/fstab
+      echo "UUID=$f_uuid ${g_mountpoint} ext4 defaults,noatime,nofail,noauto,prjquota 0 2" >> /etc/fstab
     fi
     f_log_ok "fstab updated"
 
@@ -585,12 +589,12 @@ EOF
     # Read passwords from secret files
     if [[ -f "$f_current_pw_file" ]]
     then
-      IFS= read -rs f_current_password < "$f_current_pw_file"
+      IFS= read -rs f_current_password < "$f_current_pw_file" || true
       rm -f "$f_current_pw_file" 2>/dev/null
     fi
     if [[ -f "$f_new_pw_file" ]]
     then
-      IFS= read -rs f_new_password < "$f_new_pw_file"
+      IFS= read -rs f_new_password < "$f_new_pw_file" || true
       rm -f "$f_new_pw_file" 2>/dev/null
     fi
 
