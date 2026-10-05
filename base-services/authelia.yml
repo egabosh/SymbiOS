@@ -283,9 +283,7 @@
                smtp:
                  username: "{{ smtp_from if smtp_user == '%EMAILADDRESS%' else smtp_user }}"
                  password: {{ smtp_password }}
-                 # Bare host:port (always STARTTLS). Do NOT use with implicit-TLS
-                 # ports (465): it hangs forever there, use submissions:// then.
-                 address: {{ smtp_server }}:{{ smtp_port }}
+                 address: {{ 'submissions' if (smtp_port|string) == '465' else 'submission' }}://{{ smtp_server }}:{{ smtp_port }}
                  sender: {{ smtp_from }}
                  subject: "[{{ authelia_domain }}] Notification"
                  startup_check_address: {{ smtp_from }}
