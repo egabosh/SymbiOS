@@ -4,6 +4,8 @@
 # Required var:  service_name
 # Optional var:  check_command   (shell expression; default: docker ps | grep -q "service_name")
 # Optional var:  check_desc      (human-readable description of what is checked)
+# Optional var:  check_error     (message reported on failure; default mentions
+#                "container not running", which is wrong for one-shot jobs)
 
 - name: "{{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check"
   ansible.builtin.blockinfile:
@@ -24,9 +26,12 @@
         return 2>/dev/null || true
       fi
       date > "$g_check_file"
-      if ! {{ check_command | default('docker ps | grep -q "' ~ service_name ~ '"') }}
+      # Parentheses group the command so the negation applies to the whole
+      # expression: without them "if ! A && B" only negates A and a failing B
+      # alone would never report an error.
+      if ! ({{ check_command | default('docker ps | grep -q "' ~ service_name ~ '"') }})
       then
-        g_echo_error "Healthcheck failed for {{ service_name }}: container not running"
+        g_echo_error "{{ check_error | default('Healthcheck failed for ' ~ service_name ~ ': container not running') }}"
       fi
     backup: yes
     validate: /bin/bash -n %s

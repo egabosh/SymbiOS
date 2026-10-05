@@ -383,7 +383,9 @@ relays, SSH tunnels, etc.).
 
 ```yaml
     # Required vars: service_name
-    # Optional vars: check_command, check_desc
+    # Optional vars: check_command, check_desc, check_error
+    # (check_error overrides the default "container not running" message -
+    # needed for one-shot jobs that are never running idle)
     - name: Deploy healthcheck
       include_tasks: tasks/runcheck-docker.yml
 ```
@@ -550,7 +552,7 @@ section under **Custom Playbooks**.
 ```yaml
 # docs:
 #   short_description: My custom backup job
-#   description: Runs a backup to an external NFS mount.
+#   description: Runs a backup to an external mount.
 #   url: "https://mybackup.{{ base_domain }}"
 #   actions:
 #     run:

@@ -800,6 +800,14 @@
         chdir: /symbios/services/nextcloud
         creates: /symbios/services/nextcloud/nextcloud.init.log
 
+    - name: Set files_lock timeout to auto-expire stale Text locks (1 day)
+      ansible.builtin.shell: docker compose exec -T -u www-data nextcloud ./occ config:app:set files_lock lock_timeout --value='1440'
+      args:
+        chdir: /symbios/services/nextcloud
+      register: nextcloud_files_lock_timeout
+      changed_when: "'1440' in nextcloud_files_lock_timeout.stdout"
+      failed_when: false
+
     - name: Deploy LDAP group-change hook (immediate admin sync on membership changes)
       ansible.builtin.copy:
         dest: "{{ data_root }}/ldap-groups.d/nextcloud-admin-sync.hook"
