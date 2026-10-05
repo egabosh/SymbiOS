@@ -31,6 +31,12 @@ Also intercepts all forms with data-exec="true" attribute:
   let _needsReload = false;
   let _redirectUrl = null;
   let _pollRetries = 0;
+  /* Set to 'reboot'/'shutdown' when the job output mentions a host power
+     action (e.g. disk migration finishing with "reboot in 1 minute", or the
+     power buttons announcing "Shutting down ..."): later connection losses
+     are then most likely the expected power action, not a network blip. */
+  let _powerAction = null;
+  let _longOutageNoted = false;
   /* The job keeps running on the host even when it is unreachable from the
      browser (Traefik/Authelia restarts mid-job, flaky links). Retry for a
      few minutes before declaring failure instead of giving up too early. */
@@ -72,7 +78,16 @@ Also intercepts all forms with data-exec="true" attribute:
              job is still running on the host. */
           _pollRetries++;
           if (_pollRetries === 3) appendNote('Connection interrupted - retrying...');
-          if (_pollRetries >= MAX_POLL_RETRIES) {
+          if (_pollRetries === 15 && !_longOutageNoted) {
+            _longOutageNoted = true;
+            if (_powerAction === 'reboot') {
+              appendNote('Host unreachable for a while - reboot is probably in progress (e.g. disk migration finishing). Wait for the boot, unlock LUKS at the console prompt or boot page if asked, then close this window and check status. Do NOT resubmit the job.');
+            } else if (_powerAction === 'shutdown') {
+              appendNote('Host unreachable for a while - shutdown is probably in progress. The host stays off until it is powered on again. Do NOT resubmit the job.');
+            } else {
+              appendNote('Host unreachable for a while - check whether it rebooted or lost network before resubmitting anything.');
+            }
+          }          if (_pollRetries >= MAX_POLL_RETRIES) {
             finish(false);
             return;
           }
@@ -81,7 +96,12 @@ Also intercepts all forms with data-exec="true" attribute:
         }
         _pollRetries = 0;
         if (d.command) showCommand(d.command);
-        appendDelta(d.output || '');
+        var newText = d.output || '';
+        if (!_powerAction) {
+          var m = /reboot|shut ?down|power ?off/i.exec(newText);
+          if (m) _powerAction = /reboot/i.test(m[0]) ? 'reboot' : 'shutdown';
+        }
+        appendDelta(newText);
         if (d.done) {
           finish(d.success);
           return;
@@ -91,6 +111,16 @@ Also intercepts all forms with data-exec="true" attribute:
       .catch(function () {
         _pollRetries++;
         if (_pollRetries === 3) appendNote('Connection interrupted - retrying...');
+        if (_pollRetries === 15 && !_longOutageNoted) {
+          _longOutageNoted = true;
+          if (_powerAction === 'reboot') {
+            appendNote('Host unreachable for a while - reboot is probably in progress (e.g. disk migration finishing). Wait for the boot, unlock LUKS at the console prompt or boot page if asked, then close this window and check status. Do NOT resubmit the job.');
+          } else if (_powerAction === 'shutdown') {
+            appendNote('Host unreachable for a while - shutdown is probably in progress. The host stays off until it is powered on again. Do NOT resubmit the job.');
+          } else {
+            appendNote('Host unreachable for a while - check whether it rebooted or lost network before resubmitting anything.');
+          }
+        }
         if (_pollRetries >= MAX_POLL_RETRIES) {
           finish(false);
           return;
@@ -125,6 +155,8 @@ Also intercepts all forms with data-exec="true" attribute:
     outputEl.dataset.rawLen = '0';
     rawLen = 0;
     _pollRetries = 0;
+    _powerAction = null;
+    _longOutageNoted = false;
     _redirectUrl = null;
     titleEl.innerHTML = '<i class="bi bi-terminal me-2"></i>' + escapeHtml(title || 'Running command...');
     if (command) {
@@ -177,14 +209,24 @@ Also intercepts all forms with data-exec="true" attribute:
   /* ------------------------------------------------------------------ */
   document.addEventListener('submit', function (e) {
     var form = e.target;
-    if (!form.dataset.exec) return;
+    if (!form || !form.dataset || !form.dataset.exec) return;
+    try {
     /* Confirmations must live here, not in an inline onsubmit: returning
        false from onsubmit cancels the default form submission but the
        submit event still bubbles to this listener, which would run the
        action anyway (even when the user pressed "Cancel"). */
-    if (form.dataset.execConfirm && !window.confirm(form.dataset.execConfirm)) return;
-    if (running) return;  /* prevent double-execution */
+    if (form.dataset.execConfirm && !window.confirm(form.dataset.execConfirm)) {
+      e.preventDefault();
+      return;
+    }
+    /* preventDefault FIRST: a busy flag must never fall through to a
+       synchronous full-page POST (that would run the command without any
+       progress window). */
     e.preventDefault();
+    if (running) {
+      showAlert('A command is already running - please wait for it to finish.', 'warning');
+      return;
+    }
 
     /* Show the modal immediately so the click gives feedback while the
        request is in flight: views with slow host introspection (e.g. router
@@ -249,6 +291,12 @@ Also intercepts all forms with data-exec="true" attribute:
         close();
         showAlert('Network error: ' + err, 'danger');
       });
+    } catch (err) {
+      /* Never fail silently: without this, any exception above (e.g. in
+         open() or FormData) leaves the user staring at a dead page. */
+      try { close(); } catch (e2) {}
+      showAlert('Form submission failed: ' + err, 'danger');
+    }
   });
 
   /* Resolve the element alerts are inserted into.

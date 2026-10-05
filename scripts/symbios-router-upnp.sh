@@ -289,7 +289,7 @@ case "$ACTION" in
         echo '{"ok":false,"error":"Password file not found."}'
         exit 1
       fi
-      IFS= read -rs f_config_password < "$f_pw_file"
+      IFS= read -rs f_config_password < "$f_pw_file" || true
       rm -f "$f_pw_file" 2>/dev/null
     fi
 
