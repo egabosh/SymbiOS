@@ -18,6 +18,7 @@ from django.urls import path, re_path
 from . import views
 from . import views_settings
 from . import views_mailserver
+from . import views_notifications
 from . import views_users
 from . import views_shares
 from . import views_logs
@@ -69,6 +70,11 @@ urlpatterns = [
     path('settings/mailserver/discover/', views_mailserver.settings_mailserver_discover, name='settings_mailserver_discover'),
     path('settings/mailserver/test-email/', views_mailserver.settings_mailserver_test_email, name='settings_mailserver_test_email'),
     path('settings/mailserver/autoconfig.xml', views_mailserver.autoconfig_xml, name='autoconfig_xml'),
+    path('settings/notifications/', views_notifications.settings_notifications, name='settings_notifications'),
+    path('settings/notifications/test-mail/', views_notifications.settings_notifications_test_mail, name='settings_notifications_test_mail'),
+    path('settings/notifications/test-matrix/', views_notifications.settings_notifications_test_matrix, name='settings_notifications_test_matrix'),
+    path('settings/matrix/', views_notifications.settings_matrix, name='settings_matrix'),
+    path('settings/matrix/probe/', views_notifications.settings_matrix_probe, name='settings_matrix_probe'),
     path('settings/auth/', views_settings.settings_auth, name='settings_auth'),
     path('settings/security/', views_settings.settings_security, name='settings_security'),
     path('settings/acme/', views_settings.settings_acme, name='settings_acme'),

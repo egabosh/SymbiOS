@@ -1,0 +1,135 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   name: Notifications
+#   short_description: Route system mails and health alerts to mail and matrix
+#   description: Deploys the notification dispatcher (symbios-notify.sh as /usr/local/bin/notify.sh, so gaboshlib g_echo_error/g_echo_warn deliver automatically) and routes system mails addressed to root to both the mail recipient and the matrix notify room.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Notifications
+#
+
+- name: notifications
+  hosts: all
+
+  tasks:
+    # --- /usr/local/bin/notify.sh (gaboshlib hook) ---
+    # Deployed as a real file (not a symlink into git_root): the postfix
+    # root alias executes it as an unprivileged user that cannot traverse
+    # the 0750 /symbios data root, so a symlink would break root-mail
+    # delivery. The script is self-sufficient via /etc/symbios-notify.conf.
+    - name: Check /usr/local/bin/notify.sh type
+      ansible.builtin.stat:
+        path: /usr/local/bin/notify.sh
+        follow: false
+      register: notify_sh_stat
+
+    - name: Remove symlinked /usr/local/bin/notify.sh
+      ansible.builtin.file:
+        path: /usr/local/bin/notify.sh
+        state: absent
+      when: notify_sh_stat.stat.exists and notify_sh_stat.stat.islnk | default(false)
+
+    - name: Deploy /usr/local/bin/notify.sh from symbios-notify.sh
+      ansible.builtin.copy:
+        src: "{{ git_root }}/scripts/symbios-notify.sh"
+        dest: /usr/local/bin/notify.sh
+        remote_src: true
+        mode: '0755'
+        owner: root
+        group: root
+        validate: /bin/bash -n %s
+
+    # --- Resolve effective targets (tolerant no-op when unconfigured) ---
+    - name: Resolve notification targets
+      ansible.builtin.set_fact:
+        notify_mail_active: "{{ notify_mail_enabled | default(false) | bool }}"
+        notify_matrix_active: "{{ notify_matrix_enabled | default(false) | bool }}"
+        notify_smtp_ready: "{{ smtp_server is defined and smtp_server | length > 0 }}"
+
+    - name: Warn when mail notifications lack an SMTP relay
+      ansible.builtin.debug:
+        msg: "notify_mail_enabled is true but no SMTP server is configured - mail target falls back to local root mailbox."
+      when: notify_mail_active | bool and not notify_smtp_ready | bool
+
+    - name: Set root alias targets
+      ansible.builtin.set_fact:
+        # No spaces in the -s subject: postfix pipe commands are split
+        # without a shell, so quoted multi-word subjects would break.
+        notify_pipe: "|/usr/local/bin/notify.sh -s System-mail-{{ inventory_hostname }}"
+        notify_root_mail: "{{ notify_mail_to | default('') or smtp_from | default('') }}"
+
+    # World-readable delivery config: the postfix root alias executes
+    # notify.sh as an unprivileged user that cannot read the 0600
+    # inventory.yml. Contains no secrets (matrix credentials stay in the
+    # matrix-client daemon store; delivery there goes via the FIFO).
+    - name: Write /etc/symbios-notify.conf delivery config
+      ansible.builtin.copy:
+        dest: /etc/symbios-notify.conf
+        mode: '0644'
+        owner: root
+        group: root
+        content: |
+          notify_mail_enabled={{ 'true' if notify_mail_active | bool else 'false' }}
+          notify_mail_to={{ notify_root_mail }}
+          notify_level={{ notify_level | default('warn') }}
+          notify_matrix_enabled={{ 'true' if notify_matrix_active | bool else 'false' }}
+          notify_fifo=/usr/local/share/matrix-room-notify.fifo
+
+    # --- /etc/aliases routes root mails to mail and/or matrix ---
+    - name: Route root to mail recipient and matrix pipe
+      ansible.builtin.lineinfile:
+        path: /etc/aliases
+        regexp: '^root:'
+        line: "root: {{ notify_root_mail }}, \"{{ notify_pipe }}\""
+        create: yes
+      when: (notify_mail_active | bool or notify_matrix_active | bool) and notify_smtp_ready | bool and notify_root_mail | length > 0
+      notify: Rebuild aliases
+
+    - name: Route root to local mailbox and matrix pipe (no SMTP relay)
+      ansible.builtin.lineinfile:
+        path: /etc/aliases
+        regexp: '^root:'
+        line: "root: root, \"{{ notify_pipe }}\""
+        create: yes
+      when: (notify_mail_active | bool or notify_matrix_active | bool) and (not notify_smtp_ready | bool or notify_root_mail | length == 0)
+      notify: Rebuild aliases
+
+    - name: Reset root alias to local delivery (notifications disabled)
+      ansible.builtin.lineinfile:
+        path: /etc/aliases
+        regexp: '^root:'
+        line: "root: root"
+        create: yes
+      when: not notify_mail_active | bool and not notify_matrix_active | bool
+      notify: Rebuild aliases
+
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/notifications.yml"
+      changed_when: false
+
+  handlers:
+    - name: Rebuild aliases
+      ansible.builtin.command: newaliases
+      changed_when: false

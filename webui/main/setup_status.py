@@ -41,6 +41,15 @@ PAGE_EXPLAIN = {
         'needs the ability to send emails. For that, an SMTP account is '
         'configured.'
     ),
+    'notifications': (
+        'Health-check alerts and system mails to <code>root</code> are '
+        'delivered by email and/or into an encrypted matrix room. '
+        'At least one of the two channels must be configured.'
+    ),
+    'matrix': (
+        'Sender account for matrix notifications. Messages are sent '
+        'E2EE-encrypted into a single room by the matrix-client daemon.'
+    ),
     'auth': (
         'Authelia protects all web services with a login. With 2FA, a code '
         'or TOTP token is additionally required when logging in \u2014 this '
@@ -132,6 +141,15 @@ def _load_runchecks():
     return result
 
 
+def _matrix_account_complete(inventory_vars):
+    """True when the matrix sender account is fully configured."""
+    return bool(inventory_vars.get('matrix_homeserver')
+                and inventory_vars.get('matrix_user')
+                and inventory_vars.get('matrix_room')
+                and (inventory_vars.get('matrix_password')
+                     or inventory_vars.get('matrix_token')))
+
+
 def get_page_badge(page_key, inventory_vars):
     """Compute the status badge for a settings page.
 
@@ -178,6 +196,34 @@ def get_page_badge(page_key, inventory_vars):
                     '(Port Forwarding page).')
         return ('missing', 'DNS required',
                 'First set up a name under DNS.')
+
+    if page_key == 'matrix':
+        if _matrix_account_complete(inventory_vars):
+            return ('ok', 'Configured',
+                    'The matrix sender account is set up.')
+        if (inventory_vars.get('matrix_homeserver')
+                or inventory_vars.get('matrix_user')
+                or inventory_vars.get('matrix_room')):
+            return ('warn', 'Incomplete',
+                    'The matrix account is only partially configured.')
+        return ('missing', 'Not configured',
+                'No matrix sender account is configured yet.')
+
+    if page_key == 'notifications':
+        mail_on = bool(inventory_vars.get('notify_mail_enabled'))
+        matrix_on = bool(inventory_vars.get('notify_matrix_enabled'))
+        smtp_ok = bool(inventory_vars.get('smtp_server')
+                       and inventory_vars.get('smtp_from'))
+        matrix_ok = _matrix_account_complete(inventory_vars)
+        if (mail_on and smtp_ok) or (matrix_on and matrix_ok):
+            return ('ok', 'Active',
+                    'Notifications are delivered via the enabled channels.')
+        if (mail_on and not smtp_ok) or (matrix_on and not matrix_ok):
+            return ('error', 'Channel broken',
+                    'A notification channel is enabled but its backend '
+                    '(SMTP / matrix account) is not configured.')
+        return ('none', 'Not set up yet',
+                'Neither mail nor matrix notifications are enabled.')
 
     check_name = PAGE_CHECK.get(page_key)
     status = checks.get(check_name) if check_name else None

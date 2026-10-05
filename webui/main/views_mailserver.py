@@ -49,6 +49,11 @@ def settings_mailserver(request):
                     if is_ajax:
                         return JsonResponse({'ok': False, 'error': msg}, status=400)
                     messages.error(request, msg)
+                elif vars_.get('notify_mail_enabled'):
+                    msg = 'Cannot delete SMTP configuration while mail notifications are enabled. Disable them under Settings \u2192 Notifications first.'
+                    if is_ajax:
+                        return JsonResponse({'ok': False, 'error': msg}, status=400)
+                    messages.error(request, msg)
                 else:
                     for key in list(vars_):
                         if key.startswith('smtp_'):
