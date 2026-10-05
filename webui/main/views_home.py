@@ -18,11 +18,14 @@ import json
 import os
 from datetime import datetime
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import render, redirect
+from django.contrib import messages
 from zoneinfo import ZoneInfo
 from .decorators import login_required
 from .playbook_catalog import get_catalog
 from .views_services import _get_installed_playbooks, _get_healthcheck_status, _order_catalog
+from .utils.http import is_ajax_request
+from .utils.ssh_exec import run_command
 
 # Snapshot files in the /log volume, written minutely by the
 # symbios-dashboard-snapshot.sh cron job so the WebUI never blocks on live
@@ -103,6 +106,12 @@ def _get_network_devices():
     the hostapd access point are included as well. The scan itself runs
     minutely via cron (symbios-dashboard-snapshot.sh); this loader never
     triggers it.
+
+    Besides the flat ``devices`` list (kept for compatibility) this also
+    builds ``groups``: one entry per subnet with the host's own row as
+    ``self`` (its IP/hostname/MAC in that network) and the remaining
+    devices in ``devices``, so the dashboard can render one table per
+    network without repeating interface/subnet columns.
     """
     data = _read_snapshot(_NETWORK_SNAPSHOT)
     if not data:
@@ -111,8 +120,8 @@ def _get_network_devices():
         data['scanned_at'] = _localize_time(data.get('scanned_at'))
 
         # Sort by subnet (the physical default-route LAN first), then IP.
-        subnet_order = {s.get('cidr', ''): i
-                        for i, s in enumerate(data.get('subnets') or [])}
+        subnets = data.get('subnets') or []
+        subnet_order = {s.get('cidr', ''): i for i, s in enumerate(subnets)}
         devices = data.get('devices') or []
 
         def _sort_key(device):
@@ -121,6 +130,33 @@ def _get_network_devices():
             return [order] + _ip_key(device)
 
         data['devices'] = sorted(devices, key=_sort_key)
+
+        by_cidr = {}
+        for device in data['devices']:
+            by_cidr.setdefault(str(device.get('subnet', '')), []).append(device)
+        groups = []
+        for subnet in subnets:
+            cidr = str(subnet.get('cidr', ''))
+            members = by_cidr.pop(cidr, [])
+            self_row = next((d for d in members if d.get('self')), None)
+            groups.append({
+                'cidr': cidr,
+                'interface': subnet.get('interface', ''),
+                'self': self_row,
+                'devices': [d for d in members if not d.get('self')],
+            })
+        # Devices whose subnet is not in the subnets list (should not
+        # happen, but keep them visible instead of dropping them).
+        for cidr, members in by_cidr.items():
+            self_row = next((d for d in members if d.get('self')), None)
+            groups.append({
+                'cidr': cidr,
+                'interface': (members[0].get('interface', '')
+                              if members else ''),
+                'self': self_row,
+                'devices': [d for d in members if not d.get('self')],
+            })
+        data['groups'] = groups
         return data
     except Exception:
         return {}
@@ -211,3 +247,59 @@ def dashboard_network(request):
     this endpoint only reads the pre-computed snapshot file.
     """
     return JsonResponse(_get_network_devices())
+
+
+# Host power script (in scripts/, on PATH) and the only actions it accepts.
+_POWER_SCRIPT = 'symbios-power.sh'
+_POWER_ACTIONS = ('reboot', 'shutdown')
+
+
+@login_required
+def system_power(request):
+    """Reboot or shut down the whole SymbiOS host.
+
+    Change operation behind the exec modal overlay: AJAX submits a
+    background job and polls its live output (the host script announces the
+    action first, so the modal treats the following connection loss as the
+    expected reboot/shutdown). The plain POST fallback runs the command
+    synchronously. Only POST with a valid action is accepted.
+    """
+    if request.method != 'POST':
+        return redirect('home')
+    is_ajax = is_ajax_request(request)
+    action = request.POST.get('action', '').strip()
+    if action not in _POWER_ACTIONS:
+        if is_ajax:
+            return JsonResponse({'ok': False, 'error': 'Unknown power action.'},
+                                status=400)
+        messages.error(request, 'Unknown power action.')
+        return redirect('home')
+
+    cmd = '{} {}'.format(_POWER_SCRIPT, action)
+    if action == 'reboot':
+        title = 'Rebooting the host...'
+        message = ('The host is rebooting. Wait for the boot, unlock LUKS at '
+                   'the boot page if asked.')
+    else:
+        title = 'Shutting down the host...'
+        message = ('The host is shutting down and stays off until powered '
+                   'on again.')
+
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=120)
+        return JsonResponse({
+            'ok': True,
+            'job': job_id,
+            'title': title,
+            'message': message,
+            'command': cmd,
+        })
+
+    try:
+        run_command(cmd, timeout=30)
+    except Exception as e:
+        messages.error(request, 'Error: {}'.format(e))
+        return redirect('home')
+    messages.success(request, message)
+    return redirect('home')
