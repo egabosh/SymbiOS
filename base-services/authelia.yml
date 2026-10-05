@@ -283,11 +283,9 @@
                smtp:
                  username: "{{ smtp_from if smtp_user == '%EMAILADDRESS%' else smtp_user }}"
                  password: {{ smtp_password }}
-                 # Scheme selects the TLS mode (Authelia docs): submissions://
-                 # = implicit TLS (port 465), submission:// = STARTTLS
-                 # (port 587). A bare host:port would always try STARTTLS
-                 # and hang forever against implicit-TLS ports.
-                 address: {{ 'submissions' if (smtp_port|string) == '465' else 'submission' }}://{{ smtp_server }}:{{ smtp_port }}
+                 # Bare host:port (always STARTTLS). Do NOT use with implicit-TLS
+                 # ports (465): it hangs forever there, use submissions:// then.
+                 address: {{ smtp_server }}:{{ smtp_port }}
                  sender: {{ smtp_from }}
                  subject: "[{{ authelia_domain }}] Notification"
                  startup_check_address: {{ smtp_from }}
