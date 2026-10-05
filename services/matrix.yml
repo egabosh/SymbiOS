@@ -323,8 +323,15 @@
             listen         80 default_server;
             server_name    matrix.{{ base_domain }};
 
+            # Docker DNS with a short TTL plus a variable upstream: plain
+            # "proxy_pass http://matrix-synapse:8008" resolves the name only
+            # once at nginx startup and keeps the stale IP forever, so every
+            # synapse recreate (new container IP) 502s until nginx restarts.
+            resolver 127.0.0.11 valid=10s ipv6=off;
+            set $synapse_upstream matrix-synapse;
+
             location / {
-              proxy_pass http://matrix-synapse:8008;
+              proxy_pass http://$synapse_upstream:8008;
               proxy_set_header X-Forwarded-For $remote_addr;
               client_max_body_size 2048m;
             }

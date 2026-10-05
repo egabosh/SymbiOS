@@ -174,9 +174,12 @@
           # Change to the service directory so the compose project resolves
           cd /symbios/services/youtube-dl || exit 1
 
-          # Pass every argument through to yt-dlp
+          # Pass every argument through to yt-dlp. --build makes the wrapper
+          # self-healing: the nightly "docker system prune -af" deletes the
+          # image (no container ever references it between runs), so rebuild
+          # on demand instead of failing with "image not found".
           f_rc=0
-          docker compose run --rm {{ service_name }} --no-playlist \
+          docker compose run --build --rm {{ service_name }} --no-playlist \
             --download-archive /downloaddir/.download-archive \
             --merge-output-format mp4 "$@" || f_rc=$?
 
@@ -210,10 +213,15 @@
       include_tasks: tasks/runcheck-docker.yml
       vars:
         service_name: youtube-dl
-        # The container is a one-shot job and is normally exited, so the
-        # check verifies that the image and the target directory exist.
-        check_command: "docker compose -f /symbios/services/youtube-dl/docker-compose.yml images -q | grep -q . && test -d {{ youtube_dl_downloaddir }}"
-        check_desc: "Verifies that the youtube-dl image is built and the download target directory exists. A missing image or directory marks the check as failed."
+        # The container is a one-shot job that is never running idle, and its
+        # image is deleted by every "docker system prune -af" (nothing
+        # references it between runs; the wrapper rebuilds on demand via
+        # --build). Requiring the image here would warn permanently, so the
+        # check only verifies readiness: compose config present and the
+        # download target directory exists.
+        check_command: "test -f /symbios/services/youtube-dl/docker-compose.yml && test -f /symbios/services/youtube-dl/Dockerfile && test -d {{ youtube_dl_downloaddir }}"
+        check_desc: "Verifies that the youtube-dl job is ready: compose config and download target directory exist. The image is rebuilt on demand by the wrapper and is not required."
+        check_error: "Healthcheck failed for youtube-dl: compose config or download target directory missing"
 
     - name: Register playbook as installed
       include_tasks: tasks/state-register.yml

@@ -55,6 +55,36 @@
       changed_when: _bridge_apply.rc == 0
       failed_when: _bridge_apply.rc != 0
 
+    # The rc.local block written by symbios-bridge-assign.sh runs once at boot
+    # and fails silently (|| true) when the target bridge does not exist yet -
+    # e.g. the openwrt-* bridges are created later by the openwrt-vm network
+    # setup, or a USB interface appears late. This oneshot unit retries the
+    # same script (no stdin: it re-reads inventory.yml) until it succeeds so
+    # the assignments survive reboots regardless of boot ordering.
+    - name: Deploy bridge-assignment retry service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/symbios-bridge-assign.service
+        content: |
+          [Unit]
+          Description=Apply SymbiOS network bridge assignments (retry until bridges exist)
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/bin/bash -c 'for i in $(seq 1 24); do {{ git_root }}/scripts/symbios-bridge-assign.sh </dev/null && exit 0; sleep 5; done; exit 1'
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Enable and start bridge-assignment retry service
+      ansible.builtin.systemd:
+        name: symbios-bridge-assign.service
+        enabled: true
+        state: started
+        daemon_reload: true
+
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/network-bridges.yml"
       changed_when: false
