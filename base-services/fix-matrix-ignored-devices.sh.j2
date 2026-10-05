@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# Fix ignored matrix-commander devices automatically.
+# Scans the notify sender store. Devices of users that are still joined to
+# the notify room are removed from the nio ignored_devices lists. Ignoring a
+# device of an active member blocks m.room_key sharing and makes that user
+# unable to decrypt messages. Stale devices (users no longer in the room)
+# are left untouched.
+# Works against any homeserver: room membership is read via the sender
+# access token (no local synapse database needed).
+# After a change the matrix-notify daemon is restarted so it reloads the store.
+# Run via cron (see base-services/matrix-client.yml) or manually.
+# Deployed via Ansible (matrix-client.yml) as a template.
+
+. /etc/bash/gaboshlib.include
+
+g_lockfile
+
+MATRIX_CLIENT_DIR="{{ base_services_root }}/matrix-client"
+HOMESERVER="{{ matrix_homeserver }}"
+SENDER="{{ matrix_user }}"
+ROOM="{{ matrix_room }}"
+TOKEN_FILE="${MATRIX_CLIENT_DIR}/.sender_token"
+
+cd "${MATRIX_CLIENT_DIR}" || exit 1
+
+# Read the sender access token (0600, written by matrix-client.yml).
+function f_get_token {
+  if [[ -s "${TOKEN_FILE}" ]]
+  then
+    cat "${TOKEN_FILE}"
+    return 0
+  fi
+  g_echo_error "No sender token in ${TOKEN_FILE} - run base-services/matrix-client.yml first"
+  return 1
+}
+
+# Print user ids currently joined to the notify room, one per line.
+function f_joined_users {
+  local f_token="$1"
+  python3 - "${HOMESERVER}" "${ROOM}" "${f_token}" <<'PYEOF' 2>/dev/null
+import json, sys, urllib.request
+home, room, token = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    if room.startswith('#'):
+        req = urllib.request.Request(
+            home + '/_matrix/client/v3/directory/room/' + room,
+            headers={'Authorization': 'Bearer ' + token})
+        room = json.load(urllib.request.urlopen(req, timeout=30))['room_id']
+    req = urllib.request.Request(
+        home + '/_matrix/client/v3/rooms/' + room + '/joined_members',
+        headers={'Authorization': 'Bearer ' + token})
+    for user_id in json.load(urllib.request.urlopen(req, timeout=30))['joined']:
+        print(user_id)
+except Exception:
+    sys.exit(1)
+PYEOF
+}
+
+f_token="$(f_get_token)" || exit 1
+
+JOINED_USERS="${g_tmp}/matrix-joined-users-$(date +%s)"
+CHANGED_COUNT=0
+
+g_echo_note "Scanning ignored_devices in ${MATRIX_CLIENT_DIR}"
+
+if ! f_joined_users "${f_token}" | grep -v "^$" | sort -u > "${JOINED_USERS}"
+then
+  g_echo_error "Membership query failed - aborting without changes"
+  rm -f "${JOINED_USERS}"
+  exit 1
+fi
+
+if [ ! -s "${JOINED_USERS}" ]
+then
+  g_echo_error "Membership query returned no users - aborting without changes"
+  rm -f "${JOINED_USERS}"
+  exit 1
+fi
+
+for STORE_FILE in ${MATRIX_CLIENT_DIR}/matrix-commander-data-notify/store/@*.ignored_devices
+do
+  [ -f "${STORE_FILE}" ] || continue
+
+  # Keep only entries whose user is no member of the room, drop the rest.
+  while IFS= read -r g_line
+  do
+    [ -n "${g_line}" ] || continue
+    g_user=${g_line%% *}
+    if ! grep -Fqx "${g_user}" "${JOINED_USERS}"
+    then
+      printf '%s\n' "${g_line}"
+    fi
+  done < "${STORE_FILE}" > "${STORE_FILE}.new"
+
+  if cmp -s "${STORE_FILE}" "${STORE_FILE}.new"
+  then
+    rm -f "${STORE_FILE}.new"
+    continue
+  fi
+
+  cp -a "${STORE_FILE}" "${STORE_FILE}.bak.$(date +%Y%m%d)"
+  mv "${STORE_FILE}.new" "${STORE_FILE}"
+
+  CHANGED_COUNT=$((CHANGED_COUNT + 1))
+  g_echo_warn "Removed ignored entries of active members from ${STORE_FILE} -> daemon restart required"
+done
+
+rm -f "${JOINED_USERS}"
+
+if [ "${CHANGED_COUNT}" -gt 0 ]
+then
+  g_echo "Restarting matrix-notify daemon to apply ignored-device changes"
+  docker compose -p matrix-notify -f ./docker-compose.yml restart matrix-notify >/dev/null 2>&1
+  echo "Fixed ignored devices in ${CHANGED_COUNT} store(s), restarted matrix-notify" | notify.sh -s "Matrix: ignored-device fix"
+else
+  g_echo_ok "No ignored-device fixes required"
+fi

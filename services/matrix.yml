@@ -534,12 +534,6 @@
                 matrix: {}
                 symbios_services: null
 
-            matrix-commander:
-              image: matrixcommander/matrix-commander:7.5
-              volumes:
-                - /etc/localtime:/etc/localtime:ro
-                - ./matrix-commander-data:/data:rw
-              restart: no
 
           networks:
             matrix:
@@ -685,119 +679,58 @@
           # Create System User for Server-Notifications
           docker compose exec -T matrix-synapse register_new_matrix_user -c /data/homeserver.yaml --no-admin -u $MATRIX_SRV_USER -p $MATRIX_SRV_USER_PASSWORD http://localhost:8008 >>matrix.init.log 2>&1
 
-          ## Matrix Commander
-          #
-          # Configure CLI Client (matrix-commander) Access
-          docker compose -f /symbios/services/matrix/docker-compose.yml run -T matrix-commander --login password --homeserver matrix.{{ base_domain }} --user-login $MATRIX_SRV_USER --password $MATRIX_SRV_USER_PASSWORD --device {{ base_domain }} --room-default {{ base_domain }}
-
-          # Create Room
-          docker compose -f /symbios/services/matrix/docker-compose.yml run -T matrix-commander --room-create {{ base_domain }}
-
-          # Invite other users example
-          # docker compose -f /symbios/services/matrix/docker-compose.yml run -ti matrix-commander --room-invite {{ base_domain }} --user @user:matrix.{{ base_domain }}
         backup: yes
         validate: /bin/bash -n %s
 #      notify: run matrix.init
 
-    - name: Script to create pipes and the single pipes-runner container for existing rooms
-      blockinfile:
-        path: /symbios/services/matrix/pipe-rooms.sh
-        mode: "0500"
-        owner: root
-        group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          cd /symbios/services/matrix
+    # --- Migration: pipe stack moved to base-services/matrix-client.yml ---
+    # The per-room pipes-runner (compose project pipelistener) is replaced by
+    # the single-room matrix-notify daemon. Remove the old artifacts; the
+    # matrix-client playbook redeploys whatever is still needed.
+    - name: Stop legacy pipelistener pipes-runner
+      ansible.builtin.shell: docker compose -p pipelistener -f /symbios/services/matrix/docker-compose.pipes-runner.yml down
+      args:
+        chdir: /symbios/services/matrix
+      failed_when: false
+      changed_when: false
 
-          # No per-room pipe containers anymore - the single pipes-runner
-          # (compose project pipelistener) handles all rooms.
-          echo "services: {}" >docker-compose.override.yml.new
+    - name: Remove legacy pipe artifacts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /symbios/services/matrix/pipe-rooms.sh
+        - /symbios/services/matrix/pipes.json
+        - /symbios/services/matrix/pipes.json.rooms.new
+        - /symbios/services/matrix/compose.volumes.new
+        - /symbios/services/matrix/docker-compose.pipes-runner.yml
+        - /symbios/services/matrix/docker-compose.override.yml
 
-          : >pipes.json.rooms.new
-          : >compose.volumes.new
+    - name: Remove legacy commander stores (device identities move to matrix-client)
+      ansible.builtin.shell: rm -rf /symbios/services/matrix/matrix-commander-data /symbios/services/matrix/matrix-commander-data-*
+      failed_when: false
+      changed_when: false
 
-          # go through existing rooms (ids) of matrix-commander user
-          for roomid in $(docker run -t -v ./matrix-commander-data:/data:rw -v /etc/hosts:/etc/hosts:ro  matrixcommander/matrix-commander  --joined-rooms --output text | grep ":matrix.{{ base_domain }}")
-          do
+    - name: Remove stale notify FIFOs (keep the matrix-client one)
+      ansible.builtin.shell: find /usr/local/share -maxdepth 1 -name 'matrix-room-*.fifo' ! -name 'matrix-room-notify.fifo' -delete
+      failed_when: false
+      changed_when: false
 
-            echo "== Room ID $roomid"
+    - name: Remove legacy watchdog crons (owned by matrix-client now)
+      ansible.builtin.cron:
+        name: "{{ item }}"
+        state: absent
+      loop:
+        - "Fix ignored matrix-commander devices"
+        - "Matrix device health"
 
-            # get room name
-            room=$(docker run -t -v ./matrix-commander-data:/data:rw -v /etc/hosts:/etc/hosts:ro matrixcommander/matrix-commander:7.5 --get-room-info "\\$roomid" --log-level ERROR ERROR | cut -d\# -f2 | cut -d: -f1)
-
-            if [ -z "$room" ]
-            then
-              echo "ERROR: Got no roomname for \"$roomid\""
-              continue
-            fi
-
-            echo "== Room: $room"
-
-            # define/create pipe
-            roomnospace=${room// /_}
-            pipe="/usr/local/share/matrix-room-${roomnospace}.fifo"
-            [ -e "$pipe" ] || mkfifo "$pipe"
-            chown root:matrix "$pipe"
-            chmod 660 "$pipe"
-
-            # pipes.json entry for this room
-            printf '{"name":"%s","alias":"#%s:matrix.{{ base_domain }}","data":"/data/%s","fifo":"/fifos/matrix-room-%s.fifo","forward_history":true}\n' \
-              "${roomnospace}" "${room}" "${roomnospace}" "${roomnospace}" >>pipes.json.rooms.new
-
-            # compose volume lines for this room (store dir + fifo)
-            printf '        - ./matrix-commander-data-%s:/data/%s:rw\n' "${roomnospace}" "${roomnospace}" >>compose.volumes.new
-            printf '        - %s:/fifos/matrix-room-%s.fifo\n' "$pipe" "${roomnospace}" >>compose.volumes.new
-
-            # Auth commander instance if not exists
-            declare -a newrooms
-            [ -s "matrix-commander-data-${roomnospace}/credentials.json" ] || newrooms+=("$roomnospace")
-
-          done
-
-          mv docker-compose.override.yml.new docker-compose.override.yml
-
-          # assemble pipes.json (list of rooms, comma separated entries)
-          {
-            echo '{"rooms":['
-            paste -sd, pipes.json.rooms.new
-            echo ']}'
-          } >pipes.json
-          rm -f pipes.json.rooms.new
-
-          # compose file for the single pipes-runner container
-          {
-            echo "name: pipelistener"
-            echo ""
-            echo "services:"
-            echo "  matrix.pipes-runner:"
-            echo "    image: matrixcommander/matrix-commander"
-            echo "    volumes:"
-            echo "      - /etc/localtime:/etc/localtime:ro"
-            echo "      - /etc/hosts:/etc/hosts:ro"
-            echo "      - ./pipes_runner.py:/app/pipes_runner.py:ro"
-            echo "      - ./pipes.json:/app/pipes.json:ro"
-            cat compose.volumes.new
-            echo "    entrypoint: python3 -u /app/pipes_runner.py /app/pipes.json"
-            echo "    restart: unless-stopped"
-          } >docker-compose.pipes-runner.yml
-          rm -f compose.volumes.new
-
-          for newroom in "${newrooms[@]}"
-          do
-            echo "== Auth new root/matrix-commander instance ${newroom}"
-            . ./env.user
-            docker run -t -v ./matrix-commander-data-${newroom}:/data:rw -v /etc/hosts:/etc/hosts:ro matrixcommander/matrix-commander --login password --homeserver matrix.{{ base_domain }} --user-login $MATRIX_SRV_USER --password $MATRIX_SRV_USER_PASSWORD --device {{ base_domain }} --room-default {{ base_domain }}
-          done
-
-          # start the single pipes-runner container for all rooms
-          docker compose -p pipelistener -f ./docker-compose.pipes-runner.yml up -d
-
-          docker compose up -d --remove-orphans
-        backup: yes
-        validate: /bin/bash -n %s
-#      notify: run matrix.init
-
+    - name: Remove legacy watchdog scripts (owned by matrix-client now)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/sbin/fix-matrix-ignored-devices.sh
+        - /usr/local/sbin/matrix-device-health.sh
 
     - name: Run matrix.init after install
       ansible.builtin.shell: bash /symbios/services/matrix/matrix.init.sh
@@ -847,14 +780,6 @@
 #        backup: yes
 #        validate: /bin/bash -n %s
 
-    - name: Deploy pipes_runner.py (single-process replacement for per-room pipe containers)
-      ansible.builtin.copy:
-        src: matrix/files/pipes_runner.py
-        dest: /symbios/services/matrix/pipes_runner.py
-        mode: "0644"
-        owner: root
-        group: root
-
     - name: Deploy matrix-recreate-room.sh (room state corruption repair)
       ansible.builtin.template:
         src: matrix/files/matrix-recreate-room.sh.j2
@@ -874,40 +799,6 @@
         group: root
         validate: /bin/bash -n %s
         backup: yes
-
-    - name: /usr/local/sbin/fix-matrix-ignored-devices.sh (ignored-device watchdog)
-      ansible.builtin.template:
-        src: matrix/files/fix-matrix-ignored-devices.sh.j2
-        dest: /usr/local/sbin/fix-matrix-ignored-devices.sh
-        mode: "0755"
-        owner: root
-        group: root
-        validate: /bin/bash -n %s
-        backup: yes
-
-    - name: /usr/local/sbin/matrix-device-health.sh (E2EE deleted-device watchdog)
-      ansible.builtin.template:
-        src: matrix/files/matrix-device-health.sh.j2
-        dest: /usr/local/sbin/matrix-device-health.sh
-        mode: "0755"
-        owner: root
-        group: root
-        validate: /bin/bash -n %s
-        backup: yes
-
-    - name: Cron fix ignored matrix-commander devices daily
-      ansible.builtin.cron:
-        name: "Fix ignored matrix-commander devices"
-        minute: "30"
-        hour: "4"
-        job: /usr/local/sbin/fix-matrix-ignored-devices.sh >>/symbios/services/matrix/fix-ignored-devices.log 2>&1
-
-    - name: Cron matrix-device-health daily (unmark stale deleted E2EE devices)
-      ansible.builtin.cron:
-        name: "Matrix device health"
-        minute: "15"
-        hour: "4"
-        job: /usr/local/sbin/matrix-device-health.sh >>/symbios/services/matrix/device-health.log 2>&1
 
     - name: Cron synapse-purge daily (safe vacuum/analyze)
       ansible.builtin.cron:

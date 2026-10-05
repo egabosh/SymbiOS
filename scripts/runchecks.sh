@@ -35,6 +35,10 @@ g_json_file="${g_log_dir}/runchecks-results.json"
 # Override g_echo_error to capture failures for JSON output. All errors of a
 # single check are accumulated (separated by " | ") instead of overwriting,
 # so e.g. multiple failing disks are all reported.
+# The gaboshlib original would pipe every error into /usr/local/bin/notify.sh
+# immediately (one notification per 5min cycle per persistent failure).
+# Instead the notify call happens once per loop below with flap protection
+# (only on state change), see the notify block after each check.
 function g_echo_error {
   logger -t runchecks "ERROR: $*"
   g_current_check_failed=1
@@ -43,6 +47,19 @@ function g_echo_error {
     g_current_check_error="${g_current_check_error} | $*"
   else
     g_current_check_error="$*"
+  fi
+}
+
+# Override g_echo_warn to capture warnings without failing the check.
+# Warnings never change the check status; they only feed the same
+# flap-protected notify path as errors (honoring notify_level).
+function g_echo_warn {
+  logger -t runchecks "WARN: $*"
+  if [[ -n "$g_current_check_warn" ]]
+  then
+    g_current_check_warn="${g_current_check_warn} | $*"
+  else
+    g_current_check_warn="$*"
   fi
 }
 
@@ -81,6 +98,30 @@ do
   # Ensure g_tmp directory exists (may be cleaned between cycles)
   mkdir -p "$g_tmp"
 
+  # Notification flap state: one file per check holding the last notified
+  # severity (error|warn). Notifications go out only on state change, so a
+  # persistent failure does not spam every 5 minutes. Same source as the
+  # dispatcher itself: /etc/symbios-notify.conf when present (written by
+  # base-services/notifications.yml, also covers ansible -e overrides),
+  # inventory.yml as fallback. When no channel is enabled the whole block
+  # below is skipped.
+  g_notify_state_dir="${g_log_dir}/notify-state"
+  mkdir -p "$g_notify_state_dir"
+  if [[ -r /etc/symbios-notify.conf ]]
+  then
+    # shellcheck disable=SC1091
+    source /etc/symbios-notify.conf
+    g_notify_level="${notify_level:-warn}"
+    g_notify_active=0
+    [[ "${notify_mail_enabled:-false}" == "true" ]] && g_notify_active=1
+    [[ "${notify_matrix_enabled:-false}" == "true" ]] && g_notify_active=1
+  else
+    g_notify_level="$(f_symbios_var notify_level "warn")"
+    g_notify_active=0
+    [[ "$(f_symbios_var notify_mail_enabled "false")" == "true" ]] && g_notify_active=1
+    [[ "$(f_symbios_var notify_matrix_enabled "false")" == "true" ]] && g_notify_active=1
+  fi
+
   g_json_results=""
   g_json_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
@@ -89,6 +130,7 @@ do
   do
     g_current_check_failed=0
     g_current_check_error=""
+    g_current_check_warn=""
 
     # Extract metadata from the check file (before sourcing, so it works
     # even if the script returns early or fails). CHECK_TITLE/DESC are
@@ -127,6 +169,39 @@ do
     fi
 
     [[ -n "$g_json_results" ]] && g_json_results="${g_json_results},${g_entry}" || g_json_results="${g_entry}"
+
+    # Flap-protected notification for this check (Mail and/or Matrix via
+    # /usr/local/bin/notify.sh, deployed by base-services/notifications.yml):
+    # error on failed checks, warning on warnings (only when
+    # notify_level=warn), recovery note on ok after a notified failure.
+    if [[ "$g_notify_active" -eq 1 && -x /usr/local/bin/notify.sh ]]
+    then
+      g_notify_state_file="${g_notify_state_dir}/${g_check_name}"
+      g_notify_last=""
+      [[ -f "$g_notify_state_file" ]] && g_notify_last="$(cat "$g_notify_state_file" 2>/dev/null)"
+      if [[ "$g_current_check_failed" -eq 1 ]]
+      then
+        if [[ "$g_notify_last" != "error" ]]
+        then
+          printf '%s' "Healthcheck ${g_check_name} FAILED: ${g_current_check_error}" \
+            | /usr/local/bin/notify.sh -s "Healthcheck ${g_check_name} FAILED" 2>/dev/null || true
+          echo "error" > "$g_notify_state_file"
+        fi
+      elif [[ -n "$g_current_check_warn" && "$g_notify_level" == "warn" ]]
+      then
+        if [[ "$g_notify_last" != "warn" ]]
+        then
+          printf '%s' "Healthcheck ${g_check_name} WARNING: ${g_current_check_warn}" \
+            | /usr/local/bin/notify.sh -s "Healthcheck ${g_check_name} WARNING" 2>/dev/null || true
+          echo "warn" > "$g_notify_state_file"
+        fi
+      elif [[ -n "$g_notify_last" ]]
+      then
+        printf '%s' "Healthcheck ${g_check_name} recovered." \
+          | /usr/local/bin/notify.sh -s "Healthcheck ${g_check_name} recovered" 2>/dev/null || true
+        rm -f "$g_notify_state_file"
+      fi
+    fi
   done
 
   # Build categories JSON from the CATEGORIES associative array

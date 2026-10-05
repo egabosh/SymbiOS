@@ -47,6 +47,20 @@ all:
     smtp_from: ''
     smtp_tls: ''
     smtp_port: ''
+    # notifications (base-services/notifications.yml, WebUI Settings -> Notifications)
+    # notify_level: 'warn' delivers warnings + errors, 'error' only errors
+    notify_mail_enabled: false
+    notify_mail_to: ''
+    notify_level: 'warn'
+    notify_matrix_enabled: false
+    # matrix sender account (base-services/matrix-client.yml,
+    # WebUI Settings -> Matrix). Either password or a long-lived access
+    # token must be set; the token is preferred when both are present.
+    matrix_homeserver: ''
+    matrix_user: ''
+    matrix_password: ''
+    matrix_token: ''
+    matrix_room: ''
     # port forwarding - extra inbound UFW rules for IPv6 forwards,
     # kept in sync by the WebUI (settings → port forwarding)
     ufw_extra_inbound: []

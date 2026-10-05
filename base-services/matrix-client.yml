@@ -1,0 +1,339 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   name: Matrix Client
+#   short_description: E2EE matrix sender for notifications
+#   description: Runs the persistent pipes-runner daemon (matrix-nio, E2EE via megolm) that delivers SymbiOS notifications into a single encrypted matrix room. symbios-notify.sh hands messages over via a FIFO, so sending costs no container start. Extracted from services/matrix.yml (single-room variant, works against any homeserver).
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Notifications
+#   service_control:
+#     services:
+#     - name: matrix-notify
+#       type: docker
+#       compose_file: /symbios/base-services/matrix-client/docker-compose.yml
+#       status: docker inspect -f '{{.State.Running}}' matrix-notify-runner 2>/dev/null | grep -q true
+#     logs:
+#     - name: matrix-notify
+#       command: docker logs matrix-notify-runner --tail=100
+#
+
+- name: matrix-client
+  hosts: all
+  vars:
+    matrix_client_dir: "{{ base_services_root }}/matrix-client"
+    matrix_client_fifo: /usr/local/share/matrix-room-notify.fifo
+    matrix_client_device: "symbios-notify-{{ inventory_hostname | regex_replace('[^A-Za-z0-9._=-]', '-') }}"
+    matrix_client_image: matrixcommander/matrix-commander:7.5
+
+  tasks:
+    - name: Resolve matrix client state
+      ansible.builtin.set_fact:
+        matrix_client_active: "{{ notify_matrix_enabled | default(false) | bool and matrix_homeserver | default('') | length > 0 and matrix_user | default('') | length > 0 and matrix_room | default('') | length > 0 and (matrix_password | default('') | length > 0 or matrix_token | default('') | length > 0) }}"
+
+    - name: Fail on incomplete matrix notify config
+      ansible.builtin.fail:
+        msg: >-
+          Matrix notifications are enabled but incomplete. Required in
+          inventory: matrix_homeserver, matrix_user, matrix_room and either
+          matrix_password or matrix_token. Configure them under
+          Settings -> Matrix Account first.
+      when: notify_matrix_enabled | default(false) | bool and not matrix_client_active | bool
+
+    # --- Stack layout ---
+    - name: Create matrix-client dir
+      ansible.builtin.file:
+        path: "{{ matrix_client_dir }}"
+        owner: root
+        group: root
+        state: directory
+        mode: '0750'
+      when: matrix_client_active | bool
+
+    - name: Create commander store dir
+      ansible.builtin.file:
+        path: "{{ matrix_client_dir }}/matrix-commander-data-notify"
+        owner: root
+        group: root
+        state: directory
+        mode: '0700'
+      when: matrix_client_active | bool
+
+    - name: Deploy pipes_runner.py (E2EE FIFO sender daemon)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/pipes_runner.py"
+        dest: "{{ matrix_client_dir }}/pipes_runner.py"
+        owner: root
+        group: root
+        mode: '0644'
+      when: matrix_client_active | bool
+
+    - name: Write pipes.json (single notify room)
+      ansible.builtin.copy:
+        dest: "{{ matrix_client_dir }}/pipes.json"
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          {"rooms": [{"name": "notify", "alias": "{{ matrix_room }}", "data": "/data/notify", "fifo": "/fifos/matrix-room-notify.fifo", "forward_history": true}]}
+      when: matrix_client_active | bool
+
+    - name: Write docker-compose.yml (persistent pipes-runner daemon)
+      ansible.builtin.copy:
+        dest: "{{ matrix_client_dir }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          name: matrix-notify
+          services:
+            matrix-notify:
+              image: {{ matrix_client_image }}
+              container_name: matrix-notify-runner
+              volumes:
+                - /etc/localtime:/etc/localtime:ro
+                - ./matrix-commander-data-notify:/data/notify:rw
+                - ./pipes_runner.py:/app/pipes_runner.py:ro
+                - ./pipes.json:/app/pipes.json:ro
+                - {{ matrix_client_fifo }}:/fifos/matrix-room-notify.fifo
+              entrypoint: python3 -u /app/pipes_runner.py /app/pipes.json
+              restart: unless-stopped
+      when: matrix_client_active | bool
+
+    # The FIFO carries notifications from symbios-notify.sh (which may run
+    # as an unprivileged user via the postfix root alias) to the daemon
+    # running as root: owner read/write, others write-only, no read access.
+    - name: Create notify FIFO
+      ansible.builtin.shell: "mkfifo {{ matrix_client_fifo }}"
+      args:
+        creates: "{{ matrix_client_fifo }}"
+      when: matrix_client_active | bool
+
+    - name: Set notify FIFO permissions
+      ansible.builtin.file:
+        path: "{{ matrix_client_fifo }}"
+        owner: root
+        group: root
+        mode: '0622'
+      when: matrix_client_active | bool
+
+    # --- Sender identity (device + access token for API calls) ---
+    - name: Login commander device (creates credentials.json + olm store)
+      ansible.builtin.shell: "docker run --rm -v {{ matrix_client_dir }}/matrix-commander-data-notify:/data:rw {{ matrix_client_image }} --login password --homeserver {{ matrix_homeserver }} --user-login {{ matrix_user }} --password {{ matrix_password }} --device {{ matrix_client_device }} --room-default {{ matrix_room }}"
+      args:
+        creates: "{{ matrix_client_dir }}/matrix-commander-data-notify/credentials.json"
+      when: matrix_client_active | bool and matrix_password | default('') | length > 0
+      no_log: true
+
+    - name: Store configured access token for API calls
+      ansible.builtin.copy:
+        dest: "{{ matrix_client_dir }}/.sender_token"
+        owner: root
+        group: root
+        mode: '0600'
+        content: "{{ matrix_token }}"
+      when: matrix_client_active | bool and matrix_token | default('') | length > 0
+      no_log: true
+
+    - name: Login via API to obtain access token (password mode)
+      ansible.builtin.shell: |
+        set -o pipefail
+        if [ -s "{{ matrix_client_dir }}/.sender_token" ] && curl -s --max-time 15 "{{ matrix_homeserver }}/_matrix/client/v3/account/whoami" --header "Authorization: Bearer $(cat {{ matrix_client_dir }}/.sender_token)" | grep -q '"user_id"'; then
+          echo "token still valid"
+        else
+          curl -s --max-time 30 -X POST "{{ matrix_homeserver }}/_matrix/client/v3/login" --header 'Content-Type: application/json' --data '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"{{ matrix_user }}"},"password":"{{ matrix_password }}","device_id":"{{ matrix_client_device }}"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' > "{{ matrix_client_dir }}/.sender_token"
+          chmod 0600 "{{ matrix_client_dir }}/.sender_token"
+          echo "token refreshed"
+        fi
+      args:
+        executable: /bin/bash
+      when: matrix_client_active | bool and matrix_token | default('') | length == 0
+      no_log: true
+      changed_when: false
+
+    # Best effort: join the room and enable encryption so notifications can
+    # actually be delivered. Hard failures stay visible in the .check and in
+    # the daemon log; the reliable path is the manual setup documented on
+    # the WebUI matrix page (create encrypted room, invite sender).
+    - name: Join notify room (best effort)
+      ansible.builtin.shell: "docker run --rm -v {{ matrix_client_dir }}/matrix-commander-data-notify:/data:rw {{ matrix_client_image }} --room-join {{ matrix_room }} --log-level ERROR ERROR"
+      register: matrix_client_join
+      failed_when: false
+      changed_when: false
+      when: matrix_client_active | bool
+
+    - name: Note when room join failed
+      ansible.builtin.debug:
+        msg: "Could not join {{ matrix_room }} automatically ({{ matrix_client_join.stderr | default('see daemon log') }}). Create an encrypted room, invite {{ matrix_user }} and verify its device, then re-run this playbook."
+      when: matrix_client_active | bool and matrix_client_join.rc | default(0) != 0
+
+    - name: Enable room encryption (best effort, no-op when already set)
+      ansible.builtin.shell: |
+        ROOM="{{ matrix_room }}"
+        TOKEN="$(cat {{ matrix_client_dir }}/.sender_token)"
+        case "${ROOM}" in
+          '#'*) ROOMID="$(curl -s --max-time 15 "{{ matrix_homeserver }}/_matrix/client/v3/directory/room/${ROOM}" --header "Authorization: Bearer ${TOKEN}" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("room_id",""))' 2>/dev/null)" ;;
+          '!'*) ROOMID="${ROOM}" ;;
+          *) ROOMID="" ;;
+        esac
+        if [ -n "${ROOMID}" ]; then
+          curl -s --max-time 15 -X PUT "{{ matrix_homeserver }}/_matrix/client/v3/rooms/${ROOMID}/state/m.room.encryption" --header "Authorization: Bearer ${TOKEN}" --header 'Content-Type: application/json' --data '{"algorithm":"m.megolm.v1.aes-sha2"}'
+        fi
+      args:
+        executable: /bin/bash
+      failed_when: false
+      changed_when: false
+      no_log: true
+      when: matrix_client_active | bool
+
+    - name: Start matrix-notify daemon
+      ansible.builtin.shell: docker compose -p matrix-notify -f {{ matrix_client_dir }}/docker-compose.yml up -d
+      args:
+        chdir: "{{ matrix_client_dir }}"
+      when: matrix_client_active | bool
+
+    # --- E2EE watchdogs (moved from services/matrix.yml, retargeted) ---
+    - name: /usr/local/sbin/fix-matrix-ignored-devices.sh (ignored-device watchdog)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/fix-matrix-ignored-devices.sh.j2"
+        dest: /usr/local/sbin/fix-matrix-ignored-devices.sh
+        mode: '0755'
+        owner: root
+        group: root
+        validate: /bin/bash -n %s
+        backup: yes
+      when: matrix_client_active | bool
+
+    - name: /usr/local/sbin/matrix-device-health.sh (E2EE deleted-device watchdog)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/matrix-device-health.sh.j2"
+        dest: /usr/local/sbin/matrix-device-health.sh
+        mode: '0755'
+        owner: root
+        group: root
+        validate: /bin/bash -n %s
+        backup: yes
+      when: matrix_client_active | bool
+
+    - name: Cron fix ignored matrix-commander devices daily
+      ansible.builtin.cron:
+        name: "Fix ignored matrix-commander devices"
+        minute: "30"
+        hour: "4"
+        job: /usr/local/sbin/fix-matrix-ignored-devices.sh >>{{ matrix_client_dir }}/fix-ignored-devices.log 2>&1
+      when: matrix_client_active | bool
+
+    - name: Cron matrix-device-health daily (unmark stale deleted E2EE devices)
+      ansible.builtin.cron:
+        name: "Matrix device health"
+        minute: "15"
+        hour: "4"
+        job: /usr/local/sbin/matrix-device-health.sh >>{{ matrix_client_dir }}/device-health.log 2>&1
+      when: matrix_client_active | bool
+
+    # --- Healthcheck: daemon running, FIFO present, sender joined ---
+    - name: "{{ data_root }}/runchecks.d/symbios-healthcheck-matrix-client.check"
+      ansible.builtin.blockinfile:
+        path: "{{ data_root }}/runchecks.d/symbios-healthcheck-matrix-client.check"
+        create: yes
+        mode: '0644'
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK matrix-client"
+        block: |
+          CHECK_CATEGORY="services"
+          CHECK_DESC="Checks the matrix notify daemon (E2EE sender for notifications)."
+          CHECK_DETAIL="Verifies the matrix-notify container is running and the notify FIFO exists.|Also verifies the sender is joined to the notify room.|If down, matrix notifications are lost (mail still works)."
+          CHECK_TITLE="Matrix Notify Client"
+          f_matrix_client_dir="{{ matrix_client_dir }}"
+          f_matrix_fifo="{{ matrix_client_fifo }}"
+          f_matrix_homeserver="{{ matrix_homeserver }}"
+          f_matrix_user="{{ matrix_user }}"
+          f_matrix_room="{{ matrix_room }}"
+          f_matrix_token_file="${f_matrix_client_dir}/.sender_token"
+          f_check_cache "symbios-healthcheck-matrix-client" || return 2>/dev/null || true
+          if ! docker ps --no-trunc 2>/dev/null | grep -q "matrix-notify-runner"
+          then
+            g_echo_error "Healthcheck failed for matrix-client: container matrix-notify-runner not running"
+          elif [[ ! -p "${f_matrix_fifo}" ]]
+          then
+            g_echo_error "Healthcheck failed for matrix-client: FIFO ${f_matrix_fifo} missing"
+          elif [[ -s "${f_matrix_token_file}" ]]
+          then
+            f_matrix_membership="$(python3 - "${f_matrix_homeserver}" "${f_matrix_user}" "${f_matrix_room}" "${f_matrix_token_file}" <<'PYEOF' 2>/dev/null
+          import json, sys, urllib.request
+          home, user, room, token_file = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+          try:
+              token = open(token_file).read().strip()
+              if room.startswith('#'):
+                  url = home + '/_matrix/client/v3/directory/room/' + room
+                  req = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + token})
+                  room = json.load(urllib.request.urlopen(req, timeout=15))['room_id']
+              url = home + '/_matrix/client/v3/rooms/' + room + '/joined_members'
+              req = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + token})
+              members = json.load(urllib.request.urlopen(req, timeout=15))['joined']
+              print('joined' if user in members else 'not-joined')
+          except Exception:
+              print('unknown')
+          PYEOF
+          )"
+            if [[ "${f_matrix_membership}" == "not-joined" ]]
+            then
+              g_echo_error "Healthcheck failed for matrix-client: sender ${f_matrix_user} is not joined to ${f_matrix_room}"
+            elif [[ "${f_matrix_membership}" == "unknown" ]]
+            then
+              g_echo_error "Healthcheck failed for matrix-client: cannot verify room membership (token invalid or homeserver unreachable)"
+            fi
+          fi
+      when: matrix_client_active | bool
+
+    # --- Teardown when matrix notifications are disabled ---
+    - name: Stop matrix-notify daemon (notifications disabled)
+      ansible.builtin.shell: docker compose -p matrix-notify -f {{ matrix_client_dir }}/docker-compose.yml down
+      args:
+        chdir: "{{ matrix_client_dir }}"
+      failed_when: false
+      when: not matrix_client_active | bool
+
+    - name: Remove notify FIFO (notifications disabled)
+      ansible.builtin.file:
+        path: "{{ matrix_client_fifo }}"
+        state: absent
+      when: not matrix_client_active | bool
+
+    - name: Remove matrix-client healthcheck (notifications disabled)
+      ansible.builtin.file:
+        path: "{{ data_root }}/runchecks.d/symbios-healthcheck-matrix-client.check"
+        state: absent
+      when: not matrix_client_active | bool
+
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/matrix-client.yml"
+      changed_when: false
+
+  handlers:
+    - name: Restart matrix-notify
+      ansible.builtin.shell: docker compose -p matrix-notify -f {{ matrix_client_dir }}/docker-compose.yml up -d
+      args:
+        chdir: "{{ matrix_client_dir }}"

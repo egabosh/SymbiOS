@@ -1,40 +1,38 @@
 #!/bin/bash
 
-# matrix-device-health.sh - E2EE device health watchdog for all room stores.
+# matrix-device-health.sh - E2EE device health watchdog for the notify store.
 #
 # nio marks a member device as "deleted" when it is missing from the
-# homeserver's device-key response during sync (e.g. after the federation
-# key cache was lost). Deleted devices are excluded from megolm key
-# sharing, so that user can no longer decrypt new messages.
+# homeserver's device-key response during sync. Deleted devices are excluded
+# from megolm key sharing, so that user can no longer decrypt new messages.
 #
-# This script checks every deleted device in every runner store against
-# the homeserver (POST /keys/query, which also re-primes an empty
-# federation key cache) and unmarks devices that still exist on the
-# server. After changes the single pipes-runner container is restarted
-# so the stores are reloaded.
+# This script checks every deleted device in the sender store against the
+# homeserver (POST /keys/query, any authenticated user may query) and unmarks
+# devices that still exist on the server. Works against any homeserver via
+# the sender access token (no local synapse database needed). After changes
+# the matrix-notify daemon is restarted so the store is reloaded.
 #
-# Run via cron (see matrix.yml) or manually:
+# Run via cron (see base-services/matrix-client.yml) or manually:
 #   /usr/local/sbin/matrix-device-health.sh
 
 . /etc/bash/gaboshlib.include
 
 g_lockfile
 
-MATRIX_DIR="{{ data_root }}/services/matrix"
-DOMAIN="matrix.{{ base_domain }}"
-SYNAPSE_URL="https://${DOMAIN}"
-POSTGRES_DB="synapse"
+MATRIX_CLIENT_DIR="{{ base_services_root }}/matrix-client"
+HOMESERVER="{{ matrix_homeserver }}"
 
-cd "${MATRIX_DIR}" || exit 1
-source ./env
+cd "${MATRIX_CLIENT_DIR}" || exit 1
 
-# admin token for API calls (same lookup as matrix-recreate-room.sh)
-get_admin_token() {
-  TOKEN=$(docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -t -A --dbname=$POSTGRES_DB --user=$POSTGRES_USER --command="select token from access_tokens where user_id='@mx-admin:${DOMAIN}' order by id desc limit 1;" 2>/dev/null)
-  if [ -z "${TOKEN}" ]; then
-    g_echo_error "Failed to retrieve admin token"
-    exit 1
+# Read the sender access token (0600, written by matrix-client.yml).
+function f_get_token {
+  if [[ -s "${MATRIX_CLIENT_DIR}/.sender_token" ]]
+  then
+    cat "${MATRIX_CLIENT_DIR}/.sender_token"
+    return 0
   fi
+  g_echo_error "No sender token - run base-services/matrix-client.yml first"
+  return 1
 }
 
 # list deleted devices of a store: one "user_id device_id" per line
@@ -51,7 +49,7 @@ for user_id, device_id in con.execute(
 
 # current (live) device ids of a user according to the homeserver
 server_live_devices() {
-  curl -s --max-time 30 "${SYNAPSE_URL}/_matrix/client/v3/keys/query" -X POST \
+  curl -s --max-time 30 "${HOMESERVER}/_matrix/client/v3/keys/query" -X POST \
     --header "Authorization: Bearer ${TOKEN}" \
     --header 'Content-Type: application/json' \
     --data "{\"device_keys\":{\"$1\":[]}}" | python3 -c '
@@ -78,18 +76,15 @@ con.commit()
 ' "$1" "$2" "$3" 2>/dev/null
 }
 
-get_admin_token
+TOKEN="$(f_get_token)" || exit 1
 
 CHANGED_COUNT=0
 
-g_echo_note "Checking deleted devices in ${MATRIX_DIR}"
+g_echo_note "Checking deleted devices in ${MATRIX_CLIENT_DIR}"
 
-for STORE_DB in ${MATRIX_DIR}/matrix-commander-data-*/store/@*.db
+for STORE_DB in ${MATRIX_CLIENT_DIR}/matrix-commander-data-notify/store/@*.db
 do
   [ -f "${STORE_DB}" ] || continue
-
-  ROOM=${STORE_DB%%/store/*}
-  ROOM=${ROOM##*/}
 
   DELETED_DEVICES=$(store_deleted_devices "${STORE_DB}")
   if [ -z "${DELETED_DEVICES}" ]; then
@@ -116,17 +111,17 @@ do
     if printf '%s' "${LIVE_DEVICES}" | grep -Fqx "${USER} ${DEVICE}"; then
       unmark_device "${STORE_DB}" "${USER}" "${DEVICE}"
       CHANGED_COUNT=$((CHANGED_COUNT + 1))
-      g_echo_warn "Unmarked deleted device ${DEVICE} of ${USER} in room store ${ROOM}"
+      g_echo_warn "Unmarked deleted device ${DEVICE} of ${USER} in notify store"
     else
-      g_echo_debug "Device ${DEVICE} of ${USER} is gone on the server - keeping it marked as deleted (${ROOM})"
+      g_echo_debug "Device ${DEVICE} of ${USER} is gone on the server - keeping it marked as deleted"
     fi
   done <<< "${DELETED_DEVICES}"
 done
 
 if [ "${CHANGED_COUNT}" -gt 0 ]; then
-  g_echo "Fixed ${CHANGED_COUNT} device(s), restarting pipes-runner container"
-  docker compose -p pipelistener -f ./docker-compose.pipes-runner.yml restart matrix.pipes-runner >/dev/null 2>&1
-  echo "Matrix: unmarked ${CHANGED_COUNT} stale deleted device(s) in E2EE stores" | notify.sh -s "Matrix: device-health fix"
+  g_echo "Fixed ${CHANGED_COUNT} device(s), restarting matrix-notify daemon"
+  docker compose -p matrix-notify -f ./docker-compose.yml restart matrix-notify >/dev/null 2>&1
+  echo "Matrix: unmarked ${CHANGED_COUNT} stale deleted device(s) in notify store" | notify.sh -s "Matrix: device-health fix"
 else
   g_echo_ok "No stale deleted devices found"
 fi
