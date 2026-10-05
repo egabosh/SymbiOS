@@ -165,14 +165,18 @@
                 - PAPERLESS_TIME_ZONE=Europe/Berlin
                 - PAPERLESS_URL=https://{{ service_domain }}
                 - PAPERLESS_DEBUG=false
-                - PAPERLESS_OIDC_ENABLED=true
-                - PAPERLESS_OIDC_CLIENT_ID=paperless
-                - PAPERLESS_OIDC_CLIENT_SECRET={{ lookup('file', '/symbios/services/paperless/oidc_password') }}
-                - PAPERLESS_OIDC_PROVIDER_URL=https://auth.{{ base_domain }}
-                - PAPERLESS_OIDC_REDIRECT_URI=https://{{ service_domain }}/oidc/callback/
-                - PAPERLESS_OIDC_USERNAME_CLAIM=preferred_username
-                - PAPERLESS_OIDC_DISPLAY_NAME=Authelia
-                - PAPERLESS_OIDC_AUTO_logout=true
+                # OIDC via Authelia (django-allauth, see the Authelia
+                # paperless integration doc). NOTE: paperless-ngx has no
+                # PAPERLESS_OIDC_* settings - the previous vars with that
+                # prefix were silently ignored, so SSO never worked.
+                - PAPERLESS_APPS=allauth.socialaccount.providers.openid_connect
+                - 'PAPERLESS_SOCIALACCOUNT_PROVIDERS={"openid_connect": {"SCOPE": ["openid", "profile", "email", "groups"], "OAUTH_PKCE_ENABLED": true, "APPS": [{"provider_id": "authelia", "name": "Authelia", "client_id": "paperless", "secret": "{{ lookup('file', '/symbios/services/paperless/oidc_password') | trim }}", "settings": {"server_url": "https://auth.{{ base_domain }}", "token_auth_method": "client_secret_basic"}}]}}'
+                - PAPERLESS_SOCIAL_AUTO_SIGNUP=true
+                - PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS=true
+                # Skip the local login form: /accounts/login/ forwards
+                # straight to Authelia (regular login stays available as
+                # fallback via /admin/ and the API).
+                - PAPERLESS_REDIRECT_LOGIN_TO_SSO=true
               networks:
                 paperless: {}
                 symbios_services: null
@@ -291,12 +295,17 @@
     - name: Ensure LDAP groups for OIDC login (paperless-users / paperless-admins)
       include_tasks: tasks/oidc-groups.yml
 
+    # Redirect URI must match the django-allauth callback path; the old
+    # /oidc/callback/ value was never used by paperless and would fail
+    # with a redirect_uri mismatch. token_endpoint_auth_method must match
+    # settings.token_auth_method above (see the Authelia paperless doc).
     - name: Write OIDC config in authelias configuration.yml for paperless
       include_tasks: tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Paperless"
         oidc_redirect_uris:
-          - "https://paperless.{{ base_domain }}/oidc/callback/"
+          - "https://paperless.{{ base_domain }}/accounts/oidc/authelia/login/callback/"
+        oidc_token_endpoint_auth_method: "client_secret_basic"
 
     - name: Write Authelia access_control for paperless group restriction
       include_tasks: tasks/authelia-acl.yml
