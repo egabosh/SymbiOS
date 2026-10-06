@@ -122,6 +122,14 @@
           REDIS_PASSWORD=!REDISPASSWORD!" >env
           fi
 
+          # Migration case: env copied from the old system lacks REDIS_PASSWORD
+          # (old env has no such key) - without it redis crashes on empty
+          # --requirepass. Append once, never overwrite.
+          if ! grep -q ^REDIS_PASSWORD= env 2>/dev/null
+          then
+            echo "REDIS_PASSWORD=$(pwgen -s 32 1)" >>env
+          fi
+
           # Create env file for MariaDB if not exists
           if [ ! -f env.db ]
           then

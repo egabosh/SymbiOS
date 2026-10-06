@@ -769,7 +769,6 @@
     - name: Write Authelia access_control for mailcow
       include_tasks: tasks/authelia-acl.yml
       vars:
-        authelia_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
         authelia_subjects:
           - - "group:mailcow-users"
           - - "group:mailcow-admins"
