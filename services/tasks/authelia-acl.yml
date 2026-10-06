@@ -7,7 +7,9 @@
 #     authelia_subjects = [["group:<service_name>-users"], ["group:<service_name>-admins"]]
 #
 # Required vars:  service_name, service_domain, authelia_subjects (list)
-# Optional vars:  authelia_policy (default "two_factor")
+# Optional vars:  authelia_policy (default follows the central twofa_enabled
+#                  flag from inventory.yml; set explicitly only to exempt a
+#                  service, e.g. native app clients that cannot do 2FA)
 
 - name: "write Authelia access_control for {{ service_name }} group restriction"
   ansible.builtin.blockinfile:
@@ -15,7 +17,7 @@
     marker: "# {mark} ANSIBLE MANAGED BLOCK {{ service_name }} ACCESS CONTROL"
     block: |2
           - domain: "{{ service_domain }}"
-            policy: {{ authelia_policy | default('two_factor') }}
+            policy: {{ authelia_policy | default("two_factor" if (twofa_enabled | default(false) | bool) else "one_factor") }}
             subject: {{ authelia_subjects | to_json }}
           - domain: "{{ service_domain }}"
             policy: deny

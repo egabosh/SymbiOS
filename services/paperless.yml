@@ -310,10 +310,25 @@
     - name: Write Authelia access_control for paperless group restriction
       include_tasks: tasks/authelia-acl.yml
       vars:
-        authelia_policy: "one_factor"
         authelia_subjects:
           - "group:paperless-users"
           - "group:paperless-admins"
+
+    - name: Deploy LDAP group-change hook (immediate admin sync on membership changes)
+      ansible.builtin.copy:
+        dest: "{{ data_root }}/ldap-groups.d/paperless-admin-sync.hook"
+        content: |
+          #!/bin/bash
+          # SymbIOS hook - keep Paperless admins in sync with LDAP group paperless-admins.
+          # Executed by the shared LDAP group-change dispatcher (see symbios-lib.sh,
+          # called by symbios-ldap-groups.sh for CLI and WebUI changes) whenever a
+          # group or a membership changes. Args: $1=event $2=group $3=uid
+          # Only react to changes of the Paperless admin group (incl. group deletion).
+          [[ "${2:-}" == "paperless-admins" ]] || exit 0
+          exec "{{ git_root }}/scripts/symbios-paperless-admin-sync.sh"
+        mode: '0755'
+        owner: root
+        group: root
 
     # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck

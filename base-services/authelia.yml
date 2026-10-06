@@ -261,7 +261,9 @@
        - name: create check file for default authorization_policy
          ansible.builtin.copy:
            dest: "{{ service_path }}/authorization_policy"
-           content: "one_factor"
+           # Central 2FA switch for all OIDC clients: the client blocks
+           # rendered by the service playbooks read this file.
+           content: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
            mode: "0644"
 
 
@@ -300,7 +302,9 @@
        - name: create check file for default authorization_policy
          ansible.builtin.copy:
            dest: "{{ service_path }}/authorization_policy"
-           content: "one_factor"
+           # Central 2FA switch for all OIDC clients: the client blocks
+           # rendered by the service playbooks read this file.
+           content: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
            mode: "0644"
 
 
