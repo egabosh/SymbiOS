@@ -30,7 +30,7 @@ services:
       - OAUTH_CLIENT_ID=openwebui
       - OAUTH_CLIENT_SECRET={{ lookup('file', '/symbios/services/openwebui/oidc_password') }}
       - OAUTH_PROVIDER_URL=https://auth.{{ base_domain }}
-      - OAUTH_REDIRECT_URI=https://openwebui.{{ base_domain }}/oauth/oidc
+      - OAUTH_REDIRECT_URI=https://ai.{{ base_domain }}/oauth/oidc/callback
       - OAUTH_PROVIDER_NAME=Authelia
       - OPENID_PROVIDER_URL=https://auth.{{ base_domain }}/.well-known/openid-configuration
       - OAUTH_ALLOWED_ROLES=openwebui-users,openwebui-admins

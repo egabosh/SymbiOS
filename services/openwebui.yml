@@ -146,8 +146,11 @@
       include_tasks: tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Open WebUI"
+        # Must match exactly what OpenWebUI sends: it derives the URI from
+        # the request host (ai.<domain>, the only Traefik route) and appends
+        # /callback. The OAUTH_REDIRECT_URI env below mirrors this.
         oidc_redirect_uris:
-          - "https://openwebui.{{ base_domain }}/oauth/oidc"
+          - "https://ai.{{ base_domain }}/oauth/oidc/callback"
 
 ###########################
 #### OpenWebUI Automation #
