@@ -169,7 +169,7 @@
           SUSPEND_IF="{{ item.suspend.iface | default('') }}"
           IDLE_TIMEOUT={{ (item.suspend.idle_timeout_min | default(15) | int) * 60 }}
           GRACE_AFTER_WOL={{ item.suspend.grace_after_wol_sec | default(300) }}
-          TCP_PORTS="{{ item.suspend.tcp_ports | default([]) | join('|') }}"
+          TCP_PORTS="{{ item.suspend.tcp_ports | default('') }}"
           LAN_SUBNET="{{ item.suspend.lan_subnet | default('') }}"
           EXTRA_LOCAL_CMD_B64="{{ (item.suspend.extra_local_cmd | default('')) | b64encode }}"
           EXTRA_REMOTE_CMD_B64="{{ (item.suspend.extra_remote_cmd | default('')) | b64encode }}"
