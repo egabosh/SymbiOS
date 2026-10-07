@@ -156,6 +156,10 @@
       include_tasks: tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Open WebUI"
+        # OpenWebUI authenticates at the token endpoint with HTTP Basic
+        # (client_secret_basic); client_secret_post is rejected. Same pattern
+        # as the paperless client, see tasks/authelia-oidc.yml.
+        oidc_token_endpoint_auth_method: 'client_secret_basic'
         # PKCE stays enforced (shared-task default): OpenWebUI sends an S256
         # code_challenge via OAUTH_CODE_CHALLENGE_METHOD, see compose env.
         # Must match exactly what OpenWebUI sends: it derives the URI from
