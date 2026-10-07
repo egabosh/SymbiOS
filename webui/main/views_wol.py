@@ -14,7 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Wake-on-LAN page: configure wake targets and wake them on demand."""
+"""Wake-on-LAN page: configure wake targets and wake them on demand.
+
+All list and mutation logic lives in symbios-wol-suspend-apply.sh (single
+source of truth, shared with shell users); this view only forwards form
+data to it and renders the result.
+"""
 
 import json
 import shlex
@@ -24,12 +29,6 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 
 from .decorators import login_required
-from .power_targets import (
-    entry_from_post,
-    load_targets,
-    save_targets,
-    validate_target,
-)
 from .utils.http import is_ajax_request
 from .utils.ssh_exec import run_command
 from .views_users import _exec_ldap_command
@@ -45,19 +44,49 @@ def _error(request, msg):
     return redirect('settings_wol')
 
 
+def _save_command(request, original):
+    """Build the CLI add/set-wake command from POST fields."""
+    name = request.POST.get('name', '').strip().lower()
+    if not name:
+        return None
+    action = '--set-wake' if original else '--add-wake'
+    parts = [APPLY_CMD, action, '--name', shlex.quote(name)]
+    for form_field in ('mac', 'wake_host'):
+        cli_flag = 'host' if form_field == 'wake_host' else form_field
+        value = request.POST.get(form_field, '').strip()
+        if value:
+            parts += ['--' + cli_flag, shlex.quote(value)]
+    patterns = [p.strip() for p in request.POST.get('patterns', '').splitlines()]
+    patterns = [p for p in patterns if p]
+    if patterns:
+        parts += ['--patterns', shlex.quote(','.join(patterns))]
+    if request.POST.get('log_path', '').strip():
+        parts += ['--log-path', shlex.quote(request.POST.get('log_path').strip())]
+    parts += ['--enabled' if 'wake_enabled' in request.POST else '--disabled']
+    return ' '.join(parts)
+
+
 @login_required
 def settings_wol(request):
-    targets = [t for t in load_targets() if (t.get('wake') or {}).get('enabled') or 'wake' in t]
+    ok, stdout, _ = run_command(f'{APPLY_CMD} --dump', timeout=30)
+    targets = []
+    if ok and stdout.strip():
+        try:
+            data = json.loads(stdout.strip())
+            targets = [t for t in data if isinstance(t, dict) and 'wake' in t]
+        except ValueError:
+            pass
     ok, stdout, _ = run_command(f'{APPLY_CMD} --status', timeout=30)
     status = {}
     if ok and stdout.strip():
         try:
             for row in json.loads(stdout.strip()):
                 status[row.get('name')] = row
-        except (ValueError, AttributeError):
+        except ValueError:
             pass
     for target in targets:
-        target['live'] = status.get(target.get('name'), {})
+        live = status.get(target.get('name'), {})
+        target['live_awake'] = live.get('awake', False)
     return render(request, 'main/settings_wol.html', {
         'targets': targets,
     })
@@ -67,61 +96,34 @@ def settings_wol(request):
 def settings_wol_save(request):
     if request.method != 'POST':
         return redirect('settings_wol')
-    targets = load_targets()
     original = request.POST.get('original_name', '').strip() or None
-    entry = entry_from_post(request, original)
-    if 'wake' not in entry:
-        return _error(request, 'The wake block must not be empty.')
-    entry['wake']['enabled'] = 'wake_enabled' in request.POST
-    err = validate_target(entry, targets, original_name=original)
-    if err:
-        return _error(request, err)
-    if original:
-        targets = [e for e in targets if e.get('name') != original]
-    targets.append(entry)
-    targets.sort(key=lambda e: e.get('name', ''))
-    save_targets(targets)
-    msg = f'Wake target "{entry["name"]}" saved (apply to activate).'
-    if is_ajax_request(request):
-        return JsonResponse({'ok': True, 'message': msg})
-    messages.success(request, msg)
-    return redirect('settings_wol')
+    cmd = _save_command(request, original)
+    if cmd is None:
+        return _error(request, 'Name must not be empty.')
+    name = request.POST.get('name', '').strip().lower()
+    return _exec_ldap_command(request, cmd, f'Saving wake target "{name}"...',
+                              f'Wake target "{name}" saved and applied.',
+                              redirect_to='settings_wol')
 
 
 @login_required
 def settings_wol_delete(request, name):
     if request.method != 'POST':
         return redirect('settings_wol')
-    targets = load_targets()
-    remaining = [e for e in targets if e.get('name') != name]
-    if len(remaining) == len(targets):
-        return _error(request, f'No target named "{name}".')
-    save_targets(remaining)
-    msg = f'Target "{name}" deleted (apply to remove the watchers).'
-    if is_ajax_request(request):
-        return JsonResponse({'ok': True, 'message': msg})
-    messages.success(request, msg)
-    return redirect('settings_wol')
+    cmd = f'{APPLY_CMD} --delete --name {shlex.quote(name)}'
+    return _exec_ldap_command(request, cmd, f'Deleting target "{name}"...',
+                              f'Target "{name}" deleted and applied.',
+                              redirect_to='settings_wol')
 
 
 @login_required
 def settings_wol_toggle(request, name):
     if request.method != 'POST':
         return redirect('settings_wol')
-    targets = load_targets()
-    found = False
-    for entry in targets:
-        if entry.get('name') == name and isinstance(entry.get('wake'), dict):
-            entry['wake']['enabled'] = not entry['wake'].get('enabled', True)
-            found = True
-    if not found:
-        return _error(request, f'No wake target named "{name}".')
-    save_targets(targets)
-    msg = f'Wake target "{name}" toggled (apply to activate).'
-    if is_ajax_request(request):
-        return JsonResponse({'ok': True, 'message': msg})
-    messages.success(request, msg)
-    return redirect('settings_wol')
+    cmd = f'{APPLY_CMD} --toggle-wake --name {shlex.quote(name)}'
+    return _exec_ldap_command(request, cmd, f'Toggling wake target "{name}"...',
+                              f'Wake target "{name}" toggled and applied.',
+                              redirect_to='settings_wol')
 
 
 @login_required
@@ -135,14 +137,6 @@ def settings_wol_apply(request):
 
 
 @login_required
-def settings_wol_entry(request, name):
-    entry = next((e for e in load_targets() if e.get('name') == name), None)
-    if entry is None:
-        return JsonResponse({'ok': False, 'error': f'No target named "{name}".'}, status=404)
-    return JsonResponse({'ok': True, 'entry': entry})
-
-
-@login_required
 def settings_wol_wake(request, name):
     if request.method != 'POST':
         return redirect('settings_wol')
@@ -151,3 +145,17 @@ def settings_wol_wake(request, name):
                               f'Waking "{name}"...',
                               f'Wake packet sent to "{name}".',
                               redirect_to='settings_wol')
+
+
+@login_required
+def settings_wol_entry(request, name):
+    ok, stdout, _ = run_command(f'{APPLY_CMD} --dump', timeout=30)
+    if ok and stdout.strip():
+        try:
+            data = json.loads(stdout.strip())
+            entry = next((e for e in data if isinstance(e, dict) and e.get('name') == name), None)
+            if entry is not None:
+                return JsonResponse({'ok': True, 'entry': entry})
+        except ValueError:
+            pass
+    return JsonResponse({'ok': False, 'error': f'No target named "{name}".'}, status=404)

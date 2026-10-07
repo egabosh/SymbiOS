@@ -134,7 +134,8 @@ Authelia) and always gets a Let's Encrypt certificate. Applied without
 restarting Traefik (file provider watching); per-route test button included.
 - Playbook: `base-services/traefik-proxy.yml` (renders `proxy-<name>.yml`
   into the Traefik providers dir, removes orphaned snippets)
-- Script: `scripts/symbios-traefik-proxy-apply.sh` (validate + apply,
+- Script: `scripts/symbios-traefik-proxy-apply.sh` (single source of truth,
+  also used by the WebUI: `list|dump|add|set|delete|toggle|apply`,
   `--import <dir>` converts hand-written provider snippets)
 - Data: `<config>/traefik/forwards.yml`
 
@@ -149,8 +150,10 @@ A host never suspends itself; `/tmp/no-suspend` (non-empty) blocks a
 suspend on both sides. Per-target dry-run shows which check would prevent
 a suspend, without suspending.
 - Playbook: `base-services/wol-suspend.yml` (shared with Wake-on-LAN)
-- Scripts: `scripts/symbios-wol-suspend-apply.sh` (validate + apply,
-  `--check <target>` dry-run, `--wake <target>`, `--status`),
+- Scripts: `scripts/symbios-wol-suspend-apply.sh` (single source of truth,
+  also used by the WebUI: `list|dump|add-wake|set-wake|add-suspend|
+  set-suspend|delete|toggle-wake|toggle-suspend|apply`, `--check <target>`
+  dry-run, `--wake <target>`, `--status`),
   `scripts/symbios-wol-watch-idle.sh` (5-minute loop, systemd instance
   `wol-idle@<name>`), `scripts/symbios-wol-common.sh` (shared checks)
 - Data: `<config>/power/targets.yml` (shared)

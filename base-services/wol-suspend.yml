@@ -227,7 +227,7 @@
 
     - name: Enable and start instances for active targets
       ansible.builtin.systemd:
-        name: "{{ item.0 }}@{{ item.1.name }}"
+        name: "{{ item.0.unit }}@{{ item.1.name }}"
         state: started
         enabled: true
         daemon_reload: false
@@ -240,7 +240,7 @@
 
     - name: Stop and disable instances for inactive targets
       ansible.builtin.systemd:
-        name: "{{ item.0 }}@{{ item.1.name }}"
+        name: "{{ item.0.unit }}@{{ item.1.name }}"
         state: stopped
         enabled: false
         daemon_reload: false

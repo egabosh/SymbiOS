@@ -21,15 +21,28 @@ source "${g_script_dir}/symbios-lib.sh"
 
 function f_usage {
   cat << EOF
-Usage: $(basename "$0") [--import <dir>]
+Usage: $(basename "$0") [action] [options]
 
-Apply the Reverse-Proxy forwards from ${g_config_dir}/traefik/forwards.yml
-via base-services/traefik-proxy.yml.
+Manage Reverse-Proxy forwards (same entries as the WebUI at
+/settings/reverse-proxy/) and apply them via
+base-services/traefik-proxy.yml.
 
-Options:
-  --import <dir>   Convert hand-written Traefik provider snippets (*.yml)
-                   into forwards.yml entries and exit
-  -h, --help       Show this help and exit
+Actions (default: --apply):
+  --list                       List all forwards as a table
+  --dump                       Print all forwards as JSON (for the WebUI)
+  --add --name <n> --host <h> --target <t> --port <p>
+      [--scheme http|https] [--access open|local|authelia]
+      [--insecure true|false] [--disabled]
+                               Add a forward (fails when the name exists)
+  --set --name <n> [same fields as --add]
+                               Change fields of an existing forward
+  --delete --name <n>          Delete a forward
+  --toggle --name <n>          Flip enabled/disabled
+  --apply                      Validate and render all forwards
+  --import <dir>               Convert hand-written Traefik provider snippets
+                               (*.yml) into forwards.yml entries and exit
+
+Mutating actions validate the list and auto-apply afterwards.
 EOF
 }
 
@@ -151,20 +164,179 @@ for f_line in f_added:
 PYEOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]
-then
-  f_usage
-  exit 0
-fi
+function f_manage {
+  python3 - "$@" << 'PYEOF'
+import re
+import sys
+import yaml
 
-if [[ "${1:-}" == "--import" ]]
+f_args = sys.argv[1:]
+f_action = f_args[0]
+f_file = f_args[1]
+f_opts = {}
+f_key = None
+for f_tok in f_args[2:]:
+    if f_tok.startswith('--'):
+        f_key = f_tok[2:]
+        f_opts[f_key] = True
+    elif f_key:
+        f_opts[f_key] = f_tok
+        f_key = None
+
+try:
+    with open(f_file) as f_handle:
+        f_data = yaml.safe_load(f_handle) or []
+except OSError:
+    f_data = []
+if not isinstance(f_data, list):
+    sys.exit('forwards.yml must contain a YAML list')
+
+def f_check(entry):
+    f_name = entry.get('name', '?')
+    if not re.match(r'^[a-z0-9][a-z0-9-]*$', f_name or ''):
+        sys.exit('invalid name: ' + str(f_name))
+    if f_name in ('default', 'symbios-services', 'traefik', 'authelia'):
+        sys.exit('name is reserved: ' + f_name)
+    if not re.match(r'^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$',
+                    (entry.get('host') or '').lower()):
+        sys.exit('invalid host in ' + f_name)
+    if entry.get('scheme', 'http') not in ('http', 'https'):
+        sys.exit('invalid scheme in ' + f_name)
+    if not re.match(r'^[A-Za-z0-9.-]+$', entry.get('target') or ''):
+        sys.exit('invalid target in ' + f_name)
+    try:
+        f_port = int(entry.get('port', 0))
+    except (TypeError, ValueError):
+        sys.exit('invalid port in ' + f_name)
+    if f_port < 1 or f_port > 65535:
+        sys.exit('invalid port in ' + f_name)
+    if entry.get('access', 'open') not in ('open', 'local', 'authelia'):
+        sys.exit('invalid access in ' + f_name)
+
+if f_action == 'list':
+    print('%-16s %-5s %-32s %-28s %s' % ('NAME', 'ON', 'HOST', 'TARGET', 'ACCESS'))
+    for f_e in sorted(f_data, key=lambda e: e.get('name', '')):
+        print('%-16s %-5s %-32s %-28s %s' % (
+            f_e.get('name'), 'yes' if f_e.get('enabled', True) else 'no',
+            f_e.get('host'),
+            '%s://%s:%s' % (f_e.get('scheme', 'http'), f_e.get('target'), f_e.get('port')),
+            f_e.get('access', 'open')))
+    sys.exit(0)
+
+f_name = str(f_opts.get('name', '')).lower()
+if not f_name:
+    sys.exit('--name is required')
+f_idx = next((i for i, e in enumerate(f_data) if e.get('name') == f_name), None)
+
+if f_action == 'delete':
+    if f_idx is None:
+        sys.exit('no forward named ' + f_name)
+    del f_data[f_idx]
+    print('deleted ' + f_name)
+elif f_action == 'toggle':
+    if f_idx is None:
+        sys.exit('no forward named ' + f_name)
+    f_data[f_idx]['enabled'] = not f_data[f_idx].get('enabled', True)
+    print(f_name + ' is now ' + ('enabled' if f_data[f_idx]['enabled'] else 'disabled'))
+elif f_action in ('add', 'set'):
+    if f_action == 'add':
+        if f_idx is not None:
+            sys.exit('forward ' + f_name + ' already exists')
+        f_entry = {'name': f_name, 'enabled': True}
+        f_data.append(f_entry)
+    else:
+        if f_idx is None:
+            sys.exit('no forward named ' + f_name)
+        f_entry = f_data[f_idx]
+    if 'host' in f_opts:
+        f_entry['host'] = str(f_opts['host']).lower()
+    if 'scheme' in f_opts:
+        f_entry['scheme'] = f_opts['scheme']
+    if 'target' in f_opts:
+        f_entry['target'] = f_opts['target']
+    if 'port' in f_opts:
+        f_entry['port'] = int(f_opts['port'])
+    if 'access' in f_opts:
+        f_entry['access'] = f_opts['access']
+    if 'insecure' in f_opts:
+        f_entry['insecure_skip_verify'] = str(f_opts['insecure']).lower() in ('1', 'true', 'yes', 'on')
+    if 'disabled' in f_opts:
+        f_entry['enabled'] = False
+    if 'enabled' in f_opts:
+        f_entry['enabled'] = True
+    for f_e in f_data:
+        f_check(f_e)
+    if len({str(e.get('host', '')).lower() for e in f_data}) != len(f_data):
+        sys.exit('duplicate host')
+    f_data.sort(key=lambda e: e.get('name', ''))
+    print(('added ' if f_action == 'add' else 'updated ') + f_name)
+else:
+    sys.exit('unknown action: ' + f_action)
+
+with open(f_file, 'w') as f_handle:
+    yaml.safe_dump(f_data, f_handle, default_flow_style=False, sort_keys=False)
+PYEOF
+}
+
+function f_apply {
+  local f_file="$1"
+  if f_validate "${f_file}"
+  then
+    symbios-run-playbook.sh base-services/traefik-proxy.yml
+  fi
+}
+
+function f_dump {
+  python3 - "$1" << 'PYEOF'
+import json
+import sys
+import yaml
+
+try:
+    with open(sys.argv[1]) as f_handle:
+        f_data = yaml.safe_load(f_handle) or []
+except (OSError, yaml.YAMLError):
+    f_data = []
+if not isinstance(f_data, list):
+    f_data = []
+print(json.dumps([e for e in f_data if isinstance(e, dict)]))
+PYEOF
+}
+
+f_action="apply"
+f_import_dir=""
+f_rest=()
+while [[ $# -gt 0 ]]
+do
+  case "$1" in
+    -h|--help)
+      f_usage
+      exit 0
+      ;;
+    --list|--add|--set|--delete|--toggle|--apply|--dump)
+      f_action="${1#--}"
+      shift
+      ;;
+    --import)
+      f_action="import"
+      f_import_dir="${2:-}"
+      shift 2
+      ;;
+    *)
+      f_rest+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ "${f_action}" == "import" ]]
 then
-  if [[ -z "${2:-}" || ! -d "$2" ]]
+  if [[ -z "${f_import_dir}" || ! -d "${f_import_dir}" ]]
   then
     g_echo_error "--import needs an existing directory"
     exit 1
   fi
-  f_import "$2"
+  f_import "${f_import_dir}"
   exit 0
 fi
 
@@ -175,7 +347,26 @@ then
   echo "[]" > "${g_file}"
 fi
 
-if f_validate "${g_file}"
+if [[ "${f_action}" == "list" ]]
 then
-  symbios-run-playbook.sh base-services/traefik-proxy.yml
+  f_manage list "${g_file}"
+  exit 0
+fi
+
+if [[ "${f_action}" == "dump" ]]
+then
+  f_dump "${g_file}"
+  exit 0
+fi
+
+if [[ "${f_action}" == "apply" ]]
+then
+  f_apply "${g_file}"
+  exit 0
+fi
+
+# Mutating actions validate first (inside f_manage), then auto-apply.
+if f_manage "${f_action}" "${g_file}" "${f_rest[@]}"
+then
+  f_apply "${g_file}"
 fi
