@@ -2,7 +2,9 @@
 # SymbiOS - Write an OpenVPN client config from stdin
 # Called by the WebUI when a tunnel config is uploaded (Settings -> OpenVPN
 # Client). The config may contain private keys, so it arrives via stdin (never
-# on the command line or in the exec audit log) and is stored 0600.
+# on the command line or in the exec audit log) and is stored encrypted on
+# the data volume (<base-services>/openvpn/<name>.conf, 0600) - never on the
+# unencrypted SD card. The playbook bind-mounts it into /etc/openvpn.
 
 function f_usage {
   cat << EOF
@@ -27,6 +29,8 @@ then
 fi
 
 source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
 
 # Tunnel name doubles as a path and unit fragment - restrict the charset.
 g_name="${1:-}"
@@ -36,14 +40,19 @@ then
   exit 1
 fi
 
-g_conf_file="/etc/openvpn/${g_name}.conf"
+# Encrypted target directory (0700, on the LUKS volume). Missing means the
+# data volume is not mounted - refuse instead of writing to the SD card.
+g_target_dir="${g_base_services_root}/openvpn"
+if [[ ! -d "${g_target_dir}" ]]
+then
+  echo '{"ok":false,"error":"Encrypted config dir missing (data volume mounted? run the openvpn playbook first)"}' >&2
+  exit 1
+fi
+
+g_conf_file="${g_target_dir}/${g_name}.conf"
 g_tmp="${g_conf_file}.tmp.$$"
 
-# Ensure the target directory exists (openvpn package creates it on install).
-mkdir -p /etc/openvpn
-chmod 755 /etc/openvpn
-
-# Read the config from stdin, write atomically.
+# Read the config from stdin, write atomically on the same filesystem.
 cat > "$g_tmp"
 if [[ $? -ne 0 ]]
 then

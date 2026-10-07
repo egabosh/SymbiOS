@@ -1,9 +1,11 @@
 #!/bin/bash
 # SymbiOS - Manage OpenVPN client tunnels on the host
 # Lists tunnel status for the WebUI (Settings -> OpenVPN Client) and controls
-# the openvpn@<name> systemd units. Config files live in /etc/openvpn/<name>.conf
-# (0600, may contain private keys). Fetch-mode tunnels additionally own
-# /etc/openvpn/fetch-<name>.sh (deployed by the playbook from inventory).
+# the openvpn@<name> systemd units. Tunnel configs hold private keys and live
+# encrypted on the data volume (<base-services>/openvpn/<name>.conf, 0700);
+# /etc/openvpn/<name>.conf is a bind mount onto them (created by the playbook
+# or rc.local after mount), so no plaintext ever lands on the SD card.
+# Fetch-mode tunnels additionally own <base-services>/openvpn/fetch-<name>.sh.
 
 function f_usage {
   cat << EOF
@@ -42,6 +44,9 @@ source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
 
+# Encrypted tunnel config directory (0700, on the LUKS volume).
+g_ovpn_dir="${g_base_services_root}/openvpn"
+
 # Check that a tunnel name is safe for use in paths and unit names.
 function f_valid_name {
   local f_name="$1"
@@ -59,6 +64,23 @@ function f_dev_iface {
   else
     echo "${f_dev}"
   fi
+}
+
+# Bind-mount the encrypted config into /etc/openvpn (no-op when done).
+# Returns 1 when no config exists (e.g. data volume not mounted).
+function f_ensure_bind {
+  local f_name="$1"
+  local f_src="${g_ovpn_dir}/${f_name}.conf"
+  local f_dst="/etc/openvpn/${f_name}.conf"
+  [[ -f "${f_src}" ]] || return 1
+  if mountpoint -q "${f_dst}" 2>/dev/null
+  then
+    return 0
+  fi
+  mkdir -p /etc/openvpn 2>/dev/null || return 1
+  touch "${f_dst}" 2>/dev/null || return 1
+  chmod 600 "${f_dst}" 2>/dev/null || true
+  mount --bind "${f_src}" "${f_dst}" 2>/dev/null
 }
 
 # Emit the JSON object for one tunnel (no surrounding array).
@@ -89,17 +111,17 @@ function f_tunnel_json {
   fi
 
   # Fetch mode when a fetch helper exists for this tunnel.
-  if [[ -x "/etc/openvpn/fetch-${f_name}.sh" ]]
+  if [[ -x "${g_ovpn_dir}/fetch-${f_name}.sh" ]]
   then
     f_fetch="true"
   fi
 
   printf '{"name":%s,"active":%s,"enabled":%s,"interface":%s,"ip":%s,"fetch_mode":%s}' \
-    "$(echo "${f_name}" | f_json_escape)" \
+    "$(printf '%s' "${f_name}" | f_json_escape)" \
     "${f_active}" \
     "${f_enabled}" \
-    "$(echo "${f_iface}" | f_json_escape)" \
-    "$(echo "${f_ip}" | f_json_escape)" \
+    "$(printf '%s' "${f_iface}" | f_json_escape)" \
+    "$(printf '%s' "${f_ip}" | f_json_escape)" \
     "${f_fetch}"
 }
 
@@ -113,6 +135,8 @@ then
   for g_conf in /etc/openvpn/*.conf
   do
     [[ -e "${g_conf}" ]] || continue
+    # Skip empty bind placeholders (no encrypted config mounted yet).
+    [[ -s "${g_conf}" ]] || continue
     g_tunnel="$(basename "${g_conf}" .conf)"
     if [[ "${g_first}" -eq 1 ]]
     then
@@ -141,7 +165,7 @@ then
   then
     f_json_error "Invalid tunnel name"
   fi
-  if [[ ! -f "/etc/openvpn/${g_name}.conf" ]]
+  if [[ ! -s "/etc/openvpn/${g_name}.conf" && ! -s "${g_ovpn_dir}/${g_name}.conf" ]]
   then
     f_json_error "Tunnel not found: ${g_name}"
   fi
@@ -159,7 +183,14 @@ then
   then
     f_json_error "Invalid tunnel name"
   fi
-  if [[ ! -f "/etc/openvpn/${g_name}.conf" ]]
+  # Starting needs the bound config - bind it now when the volume is there.
+  if [[ "${g_cmd}" == "up" ]]
+  then
+    if ! f_ensure_bind "${g_name}"
+    then
+      f_json_error "No config for tunnel ${g_name} (data volume mounted?)"
+    fi
+  elif [[ ! -s "/etc/openvpn/${g_name}.conf" && ! -s "${g_ovpn_dir}/${g_name}.conf" ]]
   then
     f_json_error "Tunnel not found: ${g_name}"
   fi
@@ -194,11 +225,15 @@ then
   then
     f_json_error "Invalid tunnel name"
   fi
-  if [[ ! -x "/etc/openvpn/fetch-${g_name}.sh" ]]
+  if [[ ! -x "${g_ovpn_dir}/fetch-${g_name}.sh" ]]
   then
     f_json_error "No fetch helper for tunnel: ${g_name}"
   fi
-  if "/etc/openvpn/fetch-${g_name}.sh" 2>/dev/null
+  if ! f_ensure_bind "${g_name}"
+  then
+    f_json_error "No config for tunnel ${g_name} (data volume mounted?)"
+  fi
+  if "${g_ovpn_dir}/fetch-${g_name}.sh" 2>/dev/null
   then
     if systemctl is-enabled "openvpn@${g_name}" >/dev/null 2>&1
     then
@@ -222,8 +257,10 @@ then
   # Stop and disable first - failures are fine (unit may not exist).
   systemctl stop "openvpn@${g_name}" 2>/dev/null || true
   systemctl disable "openvpn@${g_name}" 2>/dev/null || true
-  # Remove the config, the fetch helper and the refresh cron entry.
-  rm -f "/etc/openvpn/${g_name}.conf" "/etc/openvpn/fetch-${g_name}.sh"
+  # Unmount the bind, then remove placeholder, encrypted config, fetch
+  # helper and the refresh cron entry.
+  umount "/etc/openvpn/${g_name}.conf" 2>/dev/null || true
+  rm -f "/etc/openvpn/${g_name}.conf" "${g_ovpn_dir}/${g_name}.conf" "${g_ovpn_dir}/fetch-${g_name}.sh"
   if crontab -l 2>/dev/null | grep -q "SymbiOS openvpn fetch ${g_name}"
   then
     (crontab -l 2>/dev/null | grep -v "SymbiOS openvpn fetch ${g_name}") | crontab - 2>/dev/null || true

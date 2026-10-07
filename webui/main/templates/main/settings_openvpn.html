@@ -180,7 +180,7 @@
             <label class="form-label fw-semibold">Config content (.ovpn / .conf)</label>
             <textarea class="form-control font-monospace" name="config" rows="10" required
                       placeholder="Paste the full client config here (must contain remote and dev directives)"></textarea>
-            <div class="form-text">Stored as <code>/etc/openvpn/&lt;name&gt;.conf</code> (0600). Private keys never appear in logs.</div>
+            <div class="form-text">Stored encrypted on the data volume (0600) and bind-mounted into <code>/etc/openvpn</code> after mount. Private keys never appear in logs.</div>
           </div>
 
           <div class="form-check mb-3">
