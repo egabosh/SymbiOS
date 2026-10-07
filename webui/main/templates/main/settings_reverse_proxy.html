@@ -1,0 +1,219 @@
+{% extends "main/base.html" %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<h2><i class="bi bi-arrow-left-right"></i> Reverse Proxy</h2>
+<p class="text-muted">
+    Publish external targets (other hosts, appliances, containers) under public hostnames
+    through Traefik. Each entry maps one hostname to one backend
+    (<code>http(s)://target:port</code>). Changes apply without restarting Traefik.
+    The hostname must resolve to this server (DNS), otherwise no certificate is issued.
+</p>
+
+<div class="card mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-list"></i> Forwards ({{ forwards|length }})</span>
+        <span>
+            <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#forwardModal" onclick="openAddModal()">
+                <i class="bi bi-plus"></i> Add forward
+            </button>
+        </span>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Public host</th>
+                    <th>Target</th>
+                    <th>Access</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in forwards %}
+                <tr>
+                    <td><code>proxy-{{ f.name }}</code></td>
+                    <td><a href="https://{{ f.host }}/" target="_blank" rel="noopener">{{ f.host }}</a></td>
+                    <td><code>{{ f.scheme|default:'http' }}://{{ f.target }}:{{ f.port }}</code></td>
+                    <td>
+                        {% if f.access == 'local' %}
+                        <span class="badge bg-warning text-dark">local only</span>
+                        {% elif f.access == 'authelia' %}
+                        <span class="badge bg-info text-dark">authelia</span>
+                        {% else %}
+                        <span class="badge bg-secondary">open</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if f.enabled|default:True %}
+                        <span class="badge bg-success">enabled</span>
+                        {% else %}
+                        <span class="badge bg-secondary">disabled</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-end text-nowrap">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="testForward('{{ f.name }}', this)" title="Test route">
+                            <i class="bi bi-activity"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-sm"
+                            data-name="{{ f.name }}"
+                            data-enabled="{{ f.enabled|default:True|yesno:'on,off' }}"
+                            data-host="{{ f.host }}"
+                            data-scheme="{{ f.scheme|default:'http' }}"
+                            data-target="{{ f.target }}"
+                            data-port="{{ f.port }}"
+                            data-insecure="{{ f.insecure_skip_verify|default:True|yesno:'on,off' }}"
+                            data-access="{{ f.access|default:'open' }}"
+                            onclick="openEditModal(this)" title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <form method="post" action="{% url 'settings_reverse_proxy_toggle' f.name %}" data-exec="true" class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-secondary btn-sm" title="Enable/disable">
+                                <i class="bi bi-toggle2-{% if f.enabled|default:True %}on{% else %}off{% endif %}"></i>
+                            </button>
+                        </form>
+                        <form method="post" action="{% url 'settings_reverse_proxy_delete' f.name %}" data-exec="true" data-exec-confirm="Delete forward '{{ f.name }}'? The route is removed on apply." class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                        <span id="test-{{ f.name }}" class="ms-1 small"></span>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="text-muted text-center py-3">No forwards yet. Add one, or import hand-written provider snippets below.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-header"><i class="bi bi-check2-square"></i> Apply</div>
+    <div class="card-body">
+        <p class="small text-muted">Renders the Traefik snippets from the list above (added, changed, disabled and deleted entries).</p>
+        <form method="post" action="{% url 'settings_reverse_proxy_apply' %}" data-exec="true" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-success"><i class="bi bi-check2-square"></i> Apply forwards</button>
+        </form>
+    </div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-header"><i class="bi bi-upload"></i> Import provider snippets</div>
+    <div class="card-body">
+        <p class="small text-muted">One-time import: converts hand-written Traefik <code>*.yml</code> files (e.g. migration leftovers) into list entries. Skips <code>_default.yml</code>, <code>novnc.yml</code> and hosts that already exist.</p>
+        <form method="post" action="{% url 'settings_reverse_proxy_import' %}" data-exec="true" class="d-flex gap-2">
+            {% csrf_token %}
+            <input type="text" class="form-control" name="import_dir" value="/root/traefik-import" placeholder="/path/to/snippets">
+            <button type="submit" class="btn btn-outline-primary text-nowrap"><i class="bi bi-upload"></i> Import</button>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="forwardModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'settings_reverse_proxy_save' %}" data-exec="true" id="forward-form">
+                {% csrf_token %}
+                <input type="hidden" name="original_name" id="f_original" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="forwardModalTitle">Add forward</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Name</label>
+                        <input type="text" class="form-control" name="name" id="f_name" required pattern="[a-z0-9][a-z0-9-]*" placeholder="llm">
+                        <div class="form-text">Lowercase letters, digits, hyphens. Becomes <code>proxy-&lt;name&gt;</code>.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Public host</label>
+                        <input type="text" class="form-control" name="host" id="f_host" required placeholder="llm.{{ base_domain|default:'example.com' }}">
+                    </div>
+                    <div class="row">
+                        <div class="col-4 mb-3">
+                            <label class="form-label">Scheme</label>
+                            <select class="form-select" name="scheme" id="f_scheme">
+                                <option value="http">http</option>
+                                <option value="https">https</option>
+                            </select>
+                        </div>
+                        <div class="col-5 mb-3">
+                            <label class="form-label">Target</label>
+                            <input type="text" class="form-control" name="target" id="f_target" required placeholder="172.23.0.225">
+                        </div>
+                        <div class="col-3 mb-3">
+                            <label class="form-label">Port</label>
+                            <input type="number" class="form-control" name="port" id="f_port" required min="1" max="65535" placeholder="8080">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Access</label>
+                        <select class="form-select" name="access" id="f_access">
+                            <option value="open">Open (backend handles auth)</option>
+                            <option value="local">Local networks only</option>
+                            <option value="authelia">Authelia login required</option>
+                        </select>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input type="checkbox" class="form-check-input" name="insecure_skip_verify" id="f_insecure" checked>
+                        <label class="form-check-label" for="f_insecure">Skip backend TLS verification (self-signed certs)</label>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input type="checkbox" class="form-check-input" name="enabled" id="f_enabled" checked>
+                        <label class="form-check-label" for="f_enabled">Enabled</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function openAddModal() {
+    document.getElementById('forwardModalTitle').textContent = 'Add forward';
+    document.getElementById('forward-form').reset();
+    document.getElementById('f_original').value = '';
+    document.getElementById('f_name').readOnly = false;
+    document.getElementById('f_insecure').checked = true;
+    document.getElementById('f_enabled').checked = true;
+}
+function openEditModal(btn) {
+    document.getElementById('forwardModalTitle').textContent = 'Edit forward';
+    document.getElementById('f_original').value = btn.dataset.name;
+    document.getElementById('f_name').value = btn.dataset.name;
+    document.getElementById('f_name').readOnly = true;
+    document.getElementById('f_enabled').checked = (btn.dataset.enabled === 'on');
+    document.getElementById('f_host').value = btn.dataset.host;
+    document.getElementById('f_scheme').value = btn.dataset.scheme;
+    document.getElementById('f_target').value = btn.dataset.target;
+    document.getElementById('f_port').value = btn.dataset.port;
+    document.getElementById('f_insecure').checked = (btn.dataset.insecure === 'on');
+    document.getElementById('f_access').value = btn.dataset.access;
+    new bootstrap.Modal(document.getElementById('forwardModal')).show();
+}
+function testForward(name, btn) {
+    var out = document.getElementById('test-' + name);
+    out.textContent = '...';
+    fetch(('{% url "settings_reverse_proxy_test" name="__NAME__" %}').replace('__NAME__', encodeURIComponent(name)))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (d.ok) {
+                out.innerHTML = '<span class="badge bg-success">HTTP ' + d.code + '</span>';
+            } else {
+                out.innerHTML = '<span class="badge bg-danger" title="' + (d.error || '').replace(/"/g, '') + '">fail</span>';
+            }
+        })
+        .catch(function () { out.textContent = 'error'; });
+}
+</script>
+{% endblock %}

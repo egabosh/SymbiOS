@@ -27,6 +27,9 @@ from . import views_services
 from . import views_home
 from . import views_exec
 from . import views_port_forwarding
+from . import views_reverse_proxy
+from . import views_suspend
+from . import views_wol
 from . import views_external
 from . import views_plugins
 from . import views_wlan_ap
@@ -114,6 +117,27 @@ urlpatterns = [
     path('settings/port-forwarding/detect/', views_port_forwarding.settings_port_forwarding_detect, name='settings_port_forwarding_detect'),
     path('settings/port-forwarding/list/', views_port_forwarding.settings_port_forwarding_list, name='settings_port_forwarding_list'),
     path('settings/port-forwarding/config/', views_port_forwarding.settings_port_forwarding_config, name='settings_port_forwarding_config'),
+    path('settings/reverse-proxy/', views_reverse_proxy.settings_reverse_proxy, name='settings_reverse_proxy'),
+    path('settings/reverse-proxy/save/', views_reverse_proxy.settings_reverse_proxy_save, name='settings_reverse_proxy_save'),
+    path('settings/reverse-proxy/delete/<str:name>/', views_reverse_proxy.settings_reverse_proxy_delete, name='settings_reverse_proxy_delete'),
+    path('settings/reverse-proxy/toggle/<str:name>/', views_reverse_proxy.settings_reverse_proxy_toggle, name='settings_reverse_proxy_toggle'),
+    path('settings/reverse-proxy/apply/', views_reverse_proxy.settings_reverse_proxy_apply, name='settings_reverse_proxy_apply'),
+    path('settings/reverse-proxy/import/', views_reverse_proxy.settings_reverse_proxy_import, name='settings_reverse_proxy_import'),
+    path('settings/reverse-proxy/test/<str:name>/', views_reverse_proxy.settings_reverse_proxy_test, name='settings_reverse_proxy_test'),
+    path('settings/suspend/', views_suspend.settings_suspend, name='settings_suspend'),
+    path('settings/suspend/save/', views_suspend.settings_suspend_save, name='settings_suspend_save'),
+    path('settings/suspend/delete/<str:name>/', views_suspend.settings_suspend_delete, name='settings_suspend_delete'),
+    path('settings/suspend/toggle/<str:name>/', views_suspend.settings_suspend_toggle, name='settings_suspend_toggle'),
+    path('settings/suspend/apply/', views_suspend.settings_suspend_apply, name='settings_suspend_apply'),
+    path('settings/suspend/check/<str:name>/', views_suspend.settings_suspend_check, name='settings_suspend_check'),
+    path('settings/suspend/entry/<str:name>/', views_suspend.settings_suspend_entry, name='settings_suspend_entry'),
+    path('settings/wake-on-lan/', views_wol.settings_wol, name='settings_wol'),
+    path('settings/wake-on-lan/save/', views_wol.settings_wol_save, name='settings_wol_save'),
+    path('settings/wake-on-lan/delete/<str:name>/', views_wol.settings_wol_delete, name='settings_wol_delete'),
+    path('settings/wake-on-lan/toggle/<str:name>/', views_wol.settings_wol_toggle, name='settings_wol_toggle'),
+    path('settings/wake-on-lan/apply/', views_wol.settings_wol_apply, name='settings_wol_apply'),
+    path('settings/wake-on-lan/wake/<str:name>/', views_wol.settings_wol_wake, name='settings_wol_wake'),
+    path('settings/wake-on-lan/entry/<str:name>/', views_wol.settings_wol_entry, name='settings_wol_entry'),
     path('settings/playbooks/', views_settings.settings_playbooks, name='settings_playbooks'),
     path('services/playbooks/', views_settings.settings_playbooks, name='services_playbooks'),
     path('settings/playbooks/upload/', views_settings.settings_playbooks_upload, name='settings_playbooks_upload'),

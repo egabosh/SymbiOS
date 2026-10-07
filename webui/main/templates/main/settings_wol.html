@@ -1,0 +1,171 @@
+{% extends "main/base.html" %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<h2><i class="bi bi-lightning-charge"></i> Wake-on-LAN</h2>
+<p class="text-muted">
+    Sleeping hosts wake automatically when one of their hostnames is requested
+    (matched against the Traefik access log), or manually with the Wake button.
+    Waking needs no login on the target - only its MAC address and a WoL-capable
+    network card (enable Wake-on in the BIOS once).
+</p>
+
+<div class="card mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-list"></i> Wake targets ({{ targets|length }})</span>
+        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#targetModal" onclick="openAddModal()">
+            <i class="bi bi-plus"></i> Add target
+        </button>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>MAC</th>
+                    <th>Host</th>
+                    <th>Patterns</th>
+                    <th>State</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in targets %}
+                <tr>
+                    <td><code>{{ t.name }}</code></td>
+                    <td><code>{{ t.wake.mac }}</code></td>
+                    <td><code>{{ t.wake.host }}</code></td>
+                    <td class="small">{{ t.wake.patterns|length }} hostname(s)</td>
+                    <td>
+                        {% if t.wake.enabled|default:True %}
+                        <span class="badge bg-success">enabled</span>
+                        {% else %}
+                        <span class="badge bg-secondary">disabled</span>
+                        {% endif %}
+                        {% if t.live.awake %} <span class="badge bg-info text-dark">awake</span>
+                        {% else %} <span class="badge bg-secondary">asleep?</span>{% endif %}
+                    </td>
+                    <td class="text-end text-nowrap">
+                        <form method="post" action="{% url 'settings_wol_wake' t.name %}" data-exec="true" class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-warning btn-sm" title="Send magic packet now">
+                                <i class="bi bi-lightning-charge"></i>
+                            </button>
+                        </form>
+                        <button type="button" class="btn btn-outline-primary btn-sm"
+                            data-name="{{ t.name }}"
+                            data-enabled="{{ t.wake.enabled|default:True|yesno:'on,off' }}"
+                            data-mac="{{ t.wake.mac }}"
+                            data-host="{{ t.wake.host }}"
+                            onclick="openEditModal(this)" title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <form method="post" action="{% url 'settings_wol_toggle' t.name %}" data-exec="true" class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-secondary btn-sm" title="Enable/disable">
+                                <i class="bi bi-toggle2-{% if t.wake.enabled|default:True %}on{% else %}off{% endif %}"></i>
+                            </button>
+                        </form>
+                        <form method="post" action="{% url 'settings_wol_delete' t.name %}" data-exec="true" data-exec-confirm="Delete wake target '{{ t.name }}'? The watcher is removed on apply." class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="text-muted text-center py-3">No wake targets yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-header"><i class="bi bi-check2-square"></i> Apply</div>
+    <div class="card-body">
+        <p class="small text-muted">Renders the watcher configs and systemd instances from the list above.</p>
+        <form method="post" action="{% url 'settings_wol_apply' %}" data-exec="true" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-success"><i class="bi bi-check2-square"></i> Apply targets</button>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="targetModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="{% url 'settings_wol_save' %}" data-exec="true" id="target-form">
+                {% csrf_token %}
+                <input type="hidden" name="original_name" id="f_original" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="targetModalTitle">Add wake target</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Name</label>
+                        <input type="text" class="form-control" name="name" id="f_name" required pattern="[a-z0-9][a-z0-9-]*" placeholder="compute">
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label class="form-label">MAC address</label>
+                            <input type="text" class="form-control font-monospace" name="mac" id="f_mac" required pattern="([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}" placeholder="b0:82:e2:aa:c5:16">
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label">Host</label>
+                            <input type="text" class="form-control" name="wake_host" id="f_host" required placeholder="compute.lan">
+                            <div class="form-text">Pinged to detect awake/asleep.</div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Wake patterns (one hostname per line)</label>
+                        <textarea class="form-control font-monospace" name="patterns" id="f_patterns" rows="4" required placeholder="llm.example.com"></textarea>
+                        <div class="form-text">A request for any of these hostnames in the access log wakes the target.</div>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input type="checkbox" class="form-check-input" name="wake_enabled" id="f_enabled" checked>
+                        <label class="form-check-label" for="f_enabled">Enabled</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function openAddModal() {
+    document.getElementById('targetModalTitle').textContent = 'Add wake target';
+    document.getElementById('target-form').reset();
+    document.getElementById('f_original').value = '';
+    document.getElementById('f_name').readOnly = false;
+    document.getElementById('f_enabled').checked = true;
+}
+function openEditModal(btn) {
+    var name = btn.dataset.name;
+    document.getElementById('targetModalTitle').textContent = 'Edit wake target';
+    document.getElementById('f_original').value = name;
+    document.getElementById('f_name').value = name;
+    document.getElementById('f_name').readOnly = true;
+    document.getElementById('f_enabled').checked = (btn.dataset.enabled === 'on');
+    document.getElementById('f_mac').value = btn.dataset.mac;
+    document.getElementById('f_host').value = btn.dataset.host;
+    fetch(('{% url "settings_wol_entry" name="__NAME__" %}').replace('__NAME__', encodeURIComponent(name)))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.ok) { return; }
+            var w = d.entry.wake || {};
+            document.getElementById('f_enabled').checked = (w.enabled !== false);
+            document.getElementById('f_mac').value = w.mac || '';
+            document.getElementById('f_host').value = w.host || '';
+            document.getElementById('f_patterns').value = (w.patterns || []).join('\n');
+        });
+    new bootstrap.Modal(document.getElementById('targetModal')).show();
+}
+</script>
+{% endblock %}
