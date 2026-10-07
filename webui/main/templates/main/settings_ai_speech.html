@@ -1,0 +1,149 @@
+{% extends "main/base.html" %}
+{% load static %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<div class="row">
+  <!-- Main form -->
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-body">
+        <form method="post" data-exec="true">
+          {% csrf_token %}
+
+          <h6 class="fw-semibold mt-1 mb-3">Speech-to-Text (Whisper)</h6>
+
+          <!-- STT URL -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">STT server URL</label>
+            <input type="url" class="form-control" name="ai_stt_url" id="ai_stt_url"
+                   placeholder="e.g. https://stt.example.com/v1"
+                   value="{% if vars.ai_stt_url %}{{ vars.ai_stt_url }}{% endif %}">
+            <div class="form-text">OpenAI-compatible transcription endpoint (Whisper proxy). Empty keeps the built-in default.</div>
+          </div>
+
+          <!-- STT key -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">STT API key (optional)</label>
+            <div class="input-group">
+              <input type="password" class="form-control" name="ai_stt_key" id="ai_stt_key"
+                     placeholder="Leave empty to reuse the LLM API key"
+                     value="{% if vars.ai_stt_key %}{{ vars.ai_stt_key }}{% endif %}"
+                     autocomplete="off" spellcheck="false">
+              <button type="button" class="btn btn-outline-secondary" tabindex="-1"
+                      onclick="toggleAiFieldVisibility('ai_stt_key', this)" title="Show/hide API key">
+                <i class="bi bi-eye"></i>
+              </button>
+            </div>
+            <div class="form-text">Falls back to the LLM API key when empty. To remove the stored key, clear this field and save.</div>
+          </div>
+
+          <!-- STT model -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold">STT model</label>
+            <input type="text" class="form-control" name="ai_stt_model" id="ai_stt_model"
+                   placeholder="e.g. ggml-large-v3-turbo.bin"
+                   value="{% if vars.ai_stt_model %}{{ vars.ai_stt_model }}{% endif %}">
+          </div>
+
+          <h6 class="fw-semibold mt-1 mb-3">Text-to-Speech</h6>
+
+          <!-- TTS URL -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">TTS server URL</label>
+            <input type="url" class="form-control" name="ai_tts_url" id="ai_tts_url"
+                   placeholder="e.g. https://tts-fast.example.com/v1"
+                   value="{% if vars.ai_tts_url %}{{ vars.ai_tts_url }}{% endif %}">
+            <div class="form-text">OpenAI-compatible speech endpoint (Piper/XTTS proxy). Empty keeps the built-in default.</div>
+          </div>
+
+          <!-- TTS key -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">TTS API key (optional)</label>
+            <div class="input-group">
+              <input type="password" class="form-control" name="ai_tts_key" id="ai_tts_key"
+                     placeholder="Leave empty to reuse the LLM API key"
+                     value="{% if vars.ai_tts_key %}{{ vars.ai_tts_key }}{% endif %}"
+                     autocomplete="off" spellcheck="false">
+              <button type="button" class="btn btn-outline-secondary" tabindex="-1"
+                      onclick="toggleAiFieldVisibility('ai_tts_key', this)" title="Show/hide API key">
+                <i class="bi bi-eye"></i>
+              </button>
+            </div>
+            <div class="form-text">Falls back to the LLM API key when empty. To remove the stored key, clear this field and save.</div>
+          </div>
+
+          <!-- TTS model -->
+          <div class="mb-4">
+            <label class="form-label fw-semibold">TTS model</label>
+            <input type="text" class="form-control" name="ai_tts_model" id="ai_tts_model"
+                   placeholder="e.g. tts-1"
+                   value="{% if vars.ai_tts_model %}{{ vars.ai_tts_model }}{% endif %}">
+          </div>
+
+          <div class="d-flex align-items-center gap-2">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
+            <button type="button" class="btn btn-outline-secondary" id="btn_ai_speech_test"
+                    onclick="testAiSpeechConnection()">
+              <i class="bi bi-plug"></i> Test connection
+            </button>
+          </div>
+
+          <!-- Test result -->
+          <div id="ai_test_result" class="mt-3"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Toggle password field visibility.
+  function toggleAiFieldVisibility(fieldId, btn) {
+    const field = document.getElementById(fieldId);
+    const icon = btn.querySelector('i');
+    if (field.type === 'password') {
+      field.type = 'text';
+      icon.className = 'bi bi-eye-slash';
+    } else {
+      field.type = 'password';
+      icon.className = 'bi bi-eye';
+    }
+  }
+
+  // Optional connection check against the (possibly unsaved) STT/TTS URLs.
+  function testAiSpeechConnection() {
+    const resultEl = document.getElementById('ai_test_result');
+    const btn = document.getElementById('btn_ai_speech_test');
+
+    resultEl.innerHTML = '<div class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Testing connection...</div>';
+    btn.disabled = true;
+
+    const data = new URLSearchParams();
+    for (const id of ['ai_stt_url', 'ai_stt_key', 'ai_tts_url', 'ai_tts_key']) {
+      data.set(id, document.getElementById(id).value.trim());
+    }
+
+    fetch('{% url "settings_ai_speech_test" %}', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-CSRFToken': getCsrfToken() },
+      body: data
+    })
+    .then(r => r.json())
+    .then(resp => {
+      if (resp.valid) {
+        resultEl.innerHTML = '<div class="alert alert-success py-2 mb-0"><i class="bi bi-check-circle-fill me-1"></i>' + resp.message + '</div>';
+      } else {
+        resultEl.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>' + resp.error + '</div>';
+      }
+    })
+    .catch(() => {
+      resultEl.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Request failed.</div>';
+    })
+    .finally(() => {
+      btn.disabled = false;
+    });
+  }
+</script>
+{% endblock %}

@@ -351,7 +351,97 @@
       changed_when: "'changed' in openai_db_result.stdout"
       notify: Restart openwebui
       no_log: true
-      when: ai_server | default('', true) | bool
+      when: ai_server | default('', true) | length > 0
+
+    # Keep speech/image/retrieval backends in sync with the inventory
+    # (Settings -> AI Speech / AI Image / AI Search & RAG). The compose
+    # template writes the same values as ENV defaults, but rows already
+    # stored in webui.db take precedence at runtime - so stale rows (e.g.
+    # ai.lan leftovers from the first install) are updated here as well.
+    # JSON string encoding matches what OpenWebUI stores (quoted strings).
+    - name: Store speech backends in OpenWebUI DB (STT/TTS sync)
+      ansible.builtin.shell: |
+        DB=/symbios/services/openwebui/openwebui-data/webui.db
+        NOW=$(date +%s%3N)
+        sync_kv() {
+          CUR=$(sqlite3 "$DB" "SELECT value FROM config WHERE key='$1'")
+          if [ "$CUR" != "$2" ]; then
+            sqlite3 "$DB" "INSERT INTO config (key, value, updated_at) VALUES ('$1', '$2', $NOW)
+              ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;"
+            echo changed
+          fi
+        }
+        CHANGED=""
+        STT_URL='{{ ai_stt_url | default('', true) }}'
+        STT_KEY='{{ ai_stt_key | default('', true) or ai_apikey | default('', true) }}'
+        STT_MODEL='{{ ai_stt_model | default('', true) }}'
+        TTS_URL='{{ ai_tts_url | default('', true) }}'
+        TTS_KEY='{{ ai_tts_key | default('', true) or ai_apikey | default('', true) }}'
+        TTS_MODEL='{{ ai_tts_model | default('', true) }}'
+        [ -n "$STT_URL" ] && CHANGED="$CHANGED$(sync_kv audio.stt.openai.api_base_url "\"$STT_URL\"")"
+        [ -n "$STT_KEY" ] && CHANGED="$CHANGED$(sync_kv audio.stt.openai.api_key "\"$STT_KEY\"")"
+        [ -n "$STT_MODEL" ] && CHANGED="$CHANGED$(sync_kv audio.stt.model "\"$STT_MODEL\"")"
+        [ -n "$TTS_URL" ] && CHANGED="$CHANGED$(sync_kv audio.tts.openai.api_base_url "\"$TTS_URL\"")"
+        [ -n "$TTS_KEY" ] && CHANGED="$CHANGED$(sync_kv audio.tts.openai.api_key "\"$TTS_KEY\"")"
+        [ -n "$TTS_MODEL" ] && CHANGED="$CHANGED$(sync_kv audio.tts.model "\"$TTS_MODEL\"")"
+        echo "$CHANGED"
+      register: stt_tts_db_result
+      changed_when: "'changed' in stt_tts_db_result.stdout"
+      notify: Restart openwebui
+      no_log: true
+      when: (ai_stt_url | default('', true) | length > 0) or (ai_tts_url | default('', true) | length > 0)
+
+    - name: Store image backend in OpenWebUI DB (ComfyUI sync)
+      ansible.builtin.shell: |
+        DB=/symbios/services/openwebui/openwebui-data/webui.db
+        NOW=$(date +%s%3N)
+        sync_kv() {
+          CUR=$(sqlite3 "$DB" "SELECT value FROM config WHERE key='$1'")
+          if [ "$CUR" != "$2" ]; then
+            sqlite3 "$DB" "INSERT INTO config (key, value, updated_at) VALUES ('$1', '$2', $NOW)
+              ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;"
+            echo changed
+          fi
+        }
+        CHANGED=""
+        IMG_URL='{{ ai_image_url | default('', true) }}'
+        IMG_MODEL='{{ ai_image_model | default('', true) }}'
+        IMG_EDIT_URL='{{ ai_image_edit_url | default('', true) or ai_image_url | default('', true) }}'
+        IMG_EDIT_MODEL='{{ ai_image_edit_model | default('', true) or ai_image_model | default('', true) }}'
+        [ -n "$IMG_URL" ] && CHANGED="$CHANGED$(sync_kv image_generation.comfyui.base_url "\"$IMG_URL\"")"
+        [ -n "$IMG_MODEL" ] && CHANGED="$CHANGED$(sync_kv image_generation.model "\"$IMG_MODEL\"")"
+        [ -n "$IMG_EDIT_URL" ] && CHANGED="$CHANGED$(sync_kv images.edit.comfyui.base_url "\"$IMG_EDIT_URL\"")"
+        [ -n "$IMG_EDIT_MODEL" ] && CHANGED="$CHANGED$(sync_kv images.edit.model "\"$IMG_EDIT_MODEL\"")"
+        echo "$CHANGED"
+      register: image_db_result
+      changed_when: "'changed' in image_db_result.stdout"
+      notify: Restart openwebui
+      no_log: true
+      when: ai_image_url | default('', true) | length > 0
+
+    - name: Store retrieval backends in OpenWebUI DB (Tika/SearXNG sync)
+      ansible.builtin.shell: |
+        DB=/symbios/services/openwebui/openwebui-data/webui.db
+        NOW=$(date +%s%3N)
+        sync_kv() {
+          CUR=$(sqlite3 "$DB" "SELECT value FROM config WHERE key='$1'")
+          if [ "$CUR" != "$2" ]; then
+            sqlite3 "$DB" "INSERT INTO config (key, value, updated_at) VALUES ('$1', '$2', $NOW)
+              ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;"
+            echo changed
+          fi
+        }
+        CHANGED=""
+        TIKA_URL='{{ ai_tika_url | default('', true) }}'
+        SEARXNG_URL='{{ ai_searxng_url | default('', true) }}'
+        [ -n "$TIKA_URL" ] && CHANGED="$CHANGED$(sync_kv rag.tika_server_url "\"$TIKA_URL\"")"
+        [ -n "$SEARXNG_URL" ] && CHANGED="$CHANGED$(sync_kv web.search.searxng_query_url "\"$SEARXNG_URL\"")"
+        echo "$CHANGED"
+      register: retrieval_db_result
+      changed_when: "'changed' in retrieval_db_result.stdout"
+      notify: Restart openwebui
+      no_log: true
+      when: (ai_tika_url | default('', true) | length > 0) or (ai_searxng_url | default('', true) | length > 0)
 
     - name: Flush handlers - restart OpenWebUI to pick up DB config
       ansible.builtin.meta: flush_handlers
