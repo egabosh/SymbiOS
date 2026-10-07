@@ -145,6 +145,20 @@
                 middlewares:
                   - "secHeaders@file"
                   - "authelia@file"
+              # Subsonic API (Supersonic, DSub, Feishin, ...) cannot do the
+              # browser SSO flow, so /rest/* bypasses Authelia forward-auth
+              # (longer rule = higher Traefik priority, wins automatically).
+              # Auth there is Navidrome's own local password (migrated from
+              # the old system, still valid as fallback per 7.8).
+              navidrome-api:
+                rule: "Host(`{{ service_domain }}`) && PathPrefix(`/rest`)"
+                service: navidrome
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
 
             services:
               navidrome:
