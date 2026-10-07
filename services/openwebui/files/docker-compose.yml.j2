@@ -26,6 +26,9 @@ services:
       - ENABLE_OAUTH_ROLE_MAPPING=true
       - ENABLE_API_KEYS=true
       - OAUTH_MERGE_ACCOUNTS_BY_EMAIL=false
+      # Authelia enforces PKCE (S256): without this OpenWebUI drops the
+      # code_challenge (its discovery check) and the token flow fails.
+      - OAUTH_CODE_CHALLENGE_METHOD=S256
       # Skip the "Continue with ..." button: with a single OIDC provider the
       # login page redirects straight to Authelia (Nextcloud-style auto-login).
       - OAUTH_AUTO_REDIRECT=true
