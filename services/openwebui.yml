@@ -86,15 +86,6 @@
         - oidc_digest
       changed_when: false
 
-    - name: /symbios/services/openwebui/docker-compose.yml Container Configuration
-      ansible.builtin.template:
-        src: openwebui/files/docker-compose.yml.j2
-        dest: /symbios/services/openwebui/docker-compose.yml
-        mode: 0440
-        owner: root
-        group: docker
-      notify: Restart openwebui
-
     - name: /symbios/base-services/traefik/providers/openwebui.yml OpenWebUI<->Traefik provider
       blockinfile:
         path: /symbios/base-services/traefik/providers/openwebui.yml
@@ -126,11 +117,30 @@
 #### OIDC Authelia ####
 #######################
 
+    - name: Drop placeholder OIDC secrets so real ones get generated
+      ansible.builtin.shell: |
+        for f in /symbios/services/openwebui/oidc_password /symbios/services/openwebui/oidc_digest; do
+          [ "$(cat "$f" 2>/dev/null)" = "placeholder" ] && rm -f "$f"
+        done
+        echo cleaned
+      changed_when: false
+
     - name: Create oidc client secret
       ansible.builtin.shell: |
         /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/openwebui
       changed_when: false
       failed_when: false
+
+    # Rendered AFTER the secret exists, so OAUTH_CLIENT_SECRET always holds
+    # the real password (rendering before generation baked "placeholder" in).
+    - name: /symbios/services/openwebui/docker-compose.yml Container Configuration
+      ansible.builtin.template:
+        src: openwebui/files/docker-compose.yml.j2
+        dest: /symbios/services/openwebui/docker-compose.yml
+        mode: 0440
+        owner: root
+        group: docker
+      notify: Restart openwebui
 
     - name: Ensure LDAP groups for OIDC login (openwebui-users / openwebui-admins)
       include_tasks: tasks/oidc-groups.yml
