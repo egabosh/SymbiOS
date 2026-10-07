@@ -1,0 +1,158 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   name: Reverse Proxy
+#   short_description: Publish external targets through Traefik
+#   description: Renders one Traefik file-provider snippet per configured forward (proxy-<name>.yml) from the data file <config>/traefik/forwards.yml (managed in the WebUI at /settings/reverse-proxy/). Each forward maps one public hostname to one backend (http/https + host/IP + port) with optional access control (open, local-only, Authelia). Traefik watches the providers directory, so no restart is needed.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Reverse proxy
+
+---
+- name: traefik-proxy
+  hosts: all
+
+  vars:
+    traefik_providers_dir: "{{ base_services_root }}/traefik/providers"
+    traefik_proxy_data: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/traefik/forwards.yml"
+    traefik_proxy_reserved:
+      - default
+      - symbios-services
+      - traefik
+      - authelia
+
+  pre_tasks:
+    - name: Fail if base_domain is not configured
+      ansible.builtin.fail:
+        msg: >-
+          base_domain is not set. Configure a domain first via
+          the WebUI at /settings/ddns/ or edit inventory.yml directly.
+      when: base_domain is not defined or base_domain == '' or base_domain == 'none'
+
+  tasks:
+
+    - name: Read forwards data file
+      ansible.builtin.slurp:
+        src: "{{ traefik_proxy_data }}"
+      register: traefik_proxy_slurp
+      failed_when: false
+
+    - name: Set forwards list from data file
+      ansible.builtin.set_fact:
+        traefik_proxy_forwards: "{{ (traefik_proxy_slurp.content | default('') | b64decode) | from_yaml | default([]) }}"
+      when: traefik_proxy_slurp.content | default('') | length > 0
+
+    - name: Default to empty forwards list
+      ansible.builtin.set_fact:
+        traefik_proxy_forwards: []
+      when: traefik_proxy_forwards is not defined
+
+    - name: Validate forward names
+      ansible.builtin.fail:
+        msg: "Invalid forward name '{{ item.name | default('?') }}': must start with a letter or digit, then letters, digits or hyphens."
+      when: item.name is not defined or item.name is not regex('^[a-z0-9][a-z0-9-]*$')
+      loop: "{{ traefik_proxy_forwards }}"
+
+    - name: Validate forward names are not reserved
+      ansible.builtin.fail:
+        msg: "Forward name '{{ item.name }}' is reserved for SymbiOS internals."
+      when: item.name in traefik_proxy_reserved
+      loop: "{{ traefik_proxy_forwards }}"
+
+    - name: Validate forward hosts
+      ansible.builtin.fail:
+        msg: "Invalid host '{{ item.host | default('?') }}' in forward '{{ item.name }}': must be a lowercase FQDN."
+      when: item.host is not defined or item.host is not regex('^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$')
+      loop: "{{ traefik_proxy_forwards }}"
+
+    - name: Validate forward targets
+      ansible.builtin.fail:
+        msg: "Invalid target in forward '{{ item.name }}': scheme must be http/https, target a hostname or IP, port 1-65535."
+      when: item.scheme | default('http') not in ['http', 'https'] or item.target is not defined or item.target is not regex('^[A-Za-z0-9.-]+$') or item.port | default(0) | int < 1 or item.port | default(0) | int > 65535
+      loop: "{{ traefik_proxy_forwards }}"
+
+    - name: Validate forward access mode
+      ansible.builtin.fail:
+        msg: "Invalid access '{{ item.access | default('?') }}' in forward '{{ item.name }}': must be open, local or authelia."
+      when: item.access | default('open') not in ['open', 'local', 'authelia']
+      loop: "{{ traefik_proxy_forwards }}"
+
+    - name: Validate no duplicate hosts
+      ansible.builtin.fail:
+        msg: "Duplicate host: each hostname may only be forwarded once."
+      vars:
+        traefik_proxy_hosts: "{{ traefik_proxy_forwards | map(attribute='host') | list }}"
+      when: traefik_proxy_hosts | unique | length != traefik_proxy_hosts | length
+
+    - name: Collect names of active forwards
+      ansible.builtin.set_fact:
+        traefik_proxy_active: "{{ traefik_proxy_forwards | selectattr('enabled', 'defined') | selectattr('enabled') | map(attribute='name') | list + traefik_proxy_forwards | rejectattr('enabled', 'defined') | map(attribute='name') | list }}"
+
+    - name: Render provider snippet per active forward
+      ansible.builtin.copy:
+        dest: "{{ traefik_providers_dir }}/proxy-{{ item.name }}.yml"
+        mode: '0644'
+        content: |
+          # ANSIBLE MANAGED BLOCK traefik-proxy {{ item.name }} (WebUI: /settings/reverse-proxy/)
+          http:
+            routers:
+              proxy-{{ item.name }}:
+                rule: "Host(`{{ item.host }}`)"
+                service: proxy-{{ item.name }}
+                entryPoints:
+                  - "https"
+                tls:
+                  certresolver: letsencrypt
+                middlewares:
+                  - "secHeaders@file"
+                  {{ '- "allowlocalipsonly@file"' if item.access | default('open') == 'local' else '' }}
+                  {{ '- "authelia@file"' if item.access | default('open') == 'authelia' else '' }}
+            services:
+              proxy-{{ item.name }}:
+                loadBalancer:
+                  serversTransport: "proxy-{{ item.name }}"
+                  servers:
+                    - url: "{{ item.scheme | default('http') }}://{{ item.target }}:{{ item.port }}"
+            serversTransports:
+              proxy-{{ item.name }}:
+                insecureSkipVerify: {{ item.insecure_skip_verify | default(true) | bool | lower }}
+      loop: "{{ traefik_proxy_forwards }}"
+      when: item.name in traefik_proxy_active
+
+    - name: List rendered proxy snippets
+      ansible.builtin.find:
+        paths: "{{ traefik_providers_dir }}"
+        patterns: "proxy-*.yml"
+      register: traefik_proxy_files
+
+    - name: Remove snippets of inactive or deleted forwards
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      when: item.path | basename | regex_replace('^proxy-(.*)\.yml$', '\\1') not in traefik_proxy_active
+      loop: "{{ traefik_proxy_files.files }}"
+
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/traefik-proxy.yml"
+      changed_when: false

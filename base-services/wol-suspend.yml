@@ -1,0 +1,291 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   name: WoL Suspend
+#   short_description: Wake-on-LAN and idle suspend for other hosts
+#   description: Watches the Traefik access log and sends Wake-on-LAN magic packets when a sleeping target is requested (wol-tail@ instances), and suspends idle targets over SSH (wol-idle@ instances). Targets are configured in the WebUI (/settings/wake-on-lan/ and /settings/suspend/), stored in <config>/power/targets.yml. The watchers depend on /symbios (SSH key, scripts, access log); the scripts wait for those paths instead of failing when the data disk unlocks late.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Power management
+
+---
+- name: power
+  hosts: all
+
+  vars:
+    power_config_dir: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/power"
+    power_targets_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/power/targets.yml"
+    power_ssh_key: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/.ssh/id_symbios"
+
+  tasks:
+
+    - name: Install WoL tooling on the waker
+      ansible.builtin.apt:
+        name:
+          - wakeonlan
+          - ethtool
+        state: present
+
+    - name: Read power targets file
+      ansible.builtin.slurp:
+        src: "{{ power_targets_file }}"
+      register: power_slurp
+      failed_when: false
+
+    - name: Set targets list from data file
+      ansible.builtin.set_fact:
+        power_targets: "{{ (power_slurp.content | default('') | b64decode) | from_yaml | default([]) }}"
+      when: power_slurp.content | default('') | length > 0
+
+    - name: Default to empty targets list
+      ansible.builtin.set_fact:
+        power_targets: []
+      when: power_targets is not defined
+
+    - name: Validate target names
+      ansible.builtin.fail:
+        msg: "Invalid target name '{{ item.name | default('?') }}': must start with a letter or digit, then letters, digits or hyphens."
+      when: item.name is not defined or item.name is not regex('^[a-z0-9][a-z0-9-]*$')
+      loop: "{{ power_targets }}"
+
+    - name: Validate each target has a wake or suspend block
+      ansible.builtin.fail:
+        msg: "Target '{{ item.name }}' defines neither wake nor suspend - one is required."
+      when: item.wake is not defined and item.suspend is not defined
+      loop: "{{ power_targets }}"
+
+    - name: Validate wake blocks
+      ansible.builtin.fail:
+        msg: "Invalid wake block in target '{{ item.name }}': need mac (AA:BB:...), host and non-empty patterns."
+      when: item.wake is defined and item.wake.get('enabled', false) | bool and (item.wake.mac is not defined or item.wake.mac is not regex('^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$') or item.wake.host is not defined or item.wake.host | length == 0 or item.wake.patterns | default([]) | length == 0)
+      loop: "{{ power_targets }}"
+
+    - name: Validate suspend blocks
+      ansible.builtin.fail:
+        msg: "Invalid suspend block in target '{{ item.name }}': need host, iface, timeout 5-600 min."
+      when: item.suspend is defined and item.suspend.get('enabled', false) | bool and (item.suspend.host is not defined or item.suspend.host | length == 0 or item.suspend.iface is not defined or item.suspend.iface | length == 0 or item.suspend.idle_timeout_min | default(0) | int < 5 or item.suspend.idle_timeout_min | default(0) | int > 600)
+      loop: "{{ power_targets }}"
+
+    - name: Collect all instance names
+      ansible.builtin.set_fact:
+        power_active_instances: "{{ ['wol-tail', 'wol-idle'] | product(power_targets | map(attribute='name') | list) | map('join', '@') | list }}"
+        power_enabled_instances: "{{ (power_targets | selectattr('wake', 'defined') | selectattr('wake.enabled', 'defined') | selectattr('wake.enabled') | map(attribute='name') | map('regex_replace', '^(.*)$', 'wol-tail@\\1') | list) + (power_targets | selectattr('suspend', 'defined') | selectattr('suspend.enabled', 'defined') | selectattr('suspend.enabled') | map(attribute='name') | map('regex_replace', '^(.*)$', 'wol-idle@\\1') | list) }}"
+
+    - name: Refuse targets that resolve to this host
+      ansible.builtin.shell: |
+        set -o pipefail
+        hostname -I | tr ' ' '\n' | grep -qx "{{ item.suspend.host }}" && echo LOCAL && exit 0
+        getent hosts "{{ item.suspend.host }}" | awk '{print $1}' | grep -qxF "$(hostname -I | awk '{print $1}')" && echo LOCAL && exit 0
+        echo REMOTE
+      register: power_local_check
+      changed_when: false
+      failed_when: false
+      loop: "{{ power_targets | selectattr('suspend', 'defined') | selectattr('suspend.enabled', 'defined') | selectattr('suspend.enabled') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Fail on self-suspend targets
+      ansible.builtin.fail:
+        msg: "Target '{{ item.item.name }}' resolves to this host - refusing (a host must never suspend itself)."
+      when: item.stdout is search('LOCAL')
+      loop: "{{ power_local_check.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Check SSH key access to suspend targets
+      ansible.builtin.shell: |
+        ssh -i {{ power_ssh_key }} -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=5 root@{{ item.suspend.host }} "id" 2>/dev/null && echo OK || echo NEED_SSH_KEY
+      register: power_ssh_check
+      changed_when: false
+      failed_when: false
+      loop: "{{ power_targets | selectattr('suspend', 'defined') | selectattr('suspend.enabled', 'defined') | selectattr('suspend.enabled') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Print SSH key setup instructions when needed
+      ansible.builtin.debug:
+        msg:
+          - "No key access to {{ item.item.suspend.host }} (target {{ item.item.name }})."
+          - "One-time setup as root on this host:"
+          - "  ssh-copy-id -i {{ power_ssh_key }} root@{{ item.item.suspend.host }}"
+          - "Then re-run this playbook. Until then the idle watcher for this target stays inactive."
+      when: "'NEED_SSH_KEY' in item.stdout"
+      loop: "{{ power_ssh_check.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Ensure ethtool on suspend targets with key access
+      ansible.builtin.shell: |
+        ssh -i {{ power_ssh_key }} -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=5 root@{{ item.item.suspend.host }} "command -v ethtool >/dev/null || apt-get install -y ethtool" 2>&1
+      changed_when: false
+      failed_when: false
+      when: "'OK' in item.stdout"
+      loop: "{{ power_ssh_check.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Create live config directory
+      ansible.builtin.file:
+        path: "{{ power_config_dir }}/live"
+        state: directory
+        mode: '0755'
+
+    - name: Render live config per target
+      ansible.builtin.copy:
+        dest: "{{ power_config_dir }}/live/{{ item.name }}.conf"
+        mode: '0644'
+        content: |
+          # ANSIBLE MANAGED BLOCK power {{ item.name }} (WebUI: /settings/suspend/, /settings/wake-on-lan/)
+          TARGET_NAME="{{ item.name }}"
+          SSH_KEY="{{ power_ssh_key }}"
+          WAKE_ENABLED={{ (item.wake is defined and item.wake.get('enabled', false) | bool) | bool | lower }}
+          WAKE_MAC="{{ item.wake.mac | default('') }}"
+          WAKE_HOST="{{ item.wake.host | default(item.suspend.host | default('')) }}"
+          WAKE_PATTERNS="{{ item.wake.patterns | default([]) | join('|') }}"
+          LOG_PATH="{{ item.wake.get('log_path', '') if item.wake is defined else '' }}"
+          SUSPEND_ENABLED={{ (item.suspend is defined and item.suspend.get('enabled', false) | bool) | bool | lower }}
+          SUSPEND_HOST="{{ item.suspend.host | default('') }}"
+          SUSPEND_IF="{{ item.suspend.iface | default('') }}"
+          IDLE_TIMEOUT={{ (item.suspend.idle_timeout_min | default(15) | int) * 60 }}
+          GRACE_AFTER_WOL={{ item.suspend.grace_after_wol_sec | default(300) }}
+          TCP_PORTS="{{ item.suspend.tcp_ports | default([]) | join('|') }}"
+          LAN_SUBNET="{{ item.suspend.lan_subnet | default('') }}"
+          EXTRA_LOCAL_CMD_B64="{{ (item.suspend.extra_local_cmd | default('')) | b64encode }}"
+          EXTRA_REMOTE_CMD_B64="{{ (item.suspend.extra_remote_cmd | default('')) | b64encode }}"
+      loop: "{{ power_targets }}"
+      notify: Restart wol instances
+
+    - name: Deploy wol-tail template unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/wol-tail@.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=WoL trigger %i - tail access log, send magic packet
+          After=network.target
+          StartLimitIntervalSec=0
+
+          [Service]
+          Type=simple
+          # Scripts, SSH key and log live under /symbios; the script waits for
+          # those paths (late LUKS unlock) instead of failing at boot.
+          ExecStart={{ git_root }}/scripts/symbios-wol-watch-tail.sh %i
+          Restart=always
+          RestartSec=60
+          TimeoutStopSec=10
+          KillMode=mixed
+          KillSignal=SIGTERM
+          SendSIGHUP=no
+      notify: Reload systemd
+
+    - name: Deploy wol-idle template unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/wol-idle@.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Idle suspend %i - suspend target when idle
+          After=network.target
+          StartLimitIntervalSec=0
+
+          [Service]
+          Type=simple
+          # Scripts, SSH key and log live under /symbios; the script waits for
+          # those paths (late LUKS unlock) instead of failing at boot.
+          ExecStart={{ git_root }}/scripts/symbios-wol-watch-idle.sh %i
+          Restart=always
+          RestartSec=60
+          TimeoutStopSec=10
+          KillMode=mixed
+          KillSignal=SIGTERM
+          SendSIGHUP=no
+      notify: Reload systemd
+
+    - name: Flush handlers for unit files
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable and start instances for active targets
+      ansible.builtin.systemd:
+        name: "{{ item.0 }}@{{ item.1.name }}"
+        state: started
+        enabled: true
+        daemon_reload: false
+      loop: "{{ [{'unit': 'wol-tail', 'flag': 'wake'}, {'unit': 'wol-idle', 'flag': 'suspend'}] | product(power_targets) | list }}"
+      vars:
+        block_enabled: "{{ (item.1.get(item.0.flag, {}) | default({})).get('enabled', false) | bool }}"
+      when: block_enabled | bool
+      loop_control:
+        label: "{{ item.0.unit }}@{{ item.1.name }}"
+
+    - name: Stop and disable instances for inactive targets
+      ansible.builtin.systemd:
+        name: "{{ item.0 }}@{{ item.1.name }}"
+        state: stopped
+        enabled: false
+        daemon_reload: false
+      loop: "{{ [{'unit': 'wol-tail', 'flag': 'wake'}, {'unit': 'wol-idle', 'flag': 'suspend'}] | product(power_targets) | list }}"
+      vars:
+        block_enabled: "{{ (item.1.get(item.0.flag, {}) | default({})).get('enabled', false) | bool }}"
+      when: not (block_enabled | bool)
+      loop_control:
+        label: "{{ item.0.unit }}@{{ item.1.name }}"
+
+    - name: Read previous instance state
+      ansible.builtin.slurp:
+        src: "{{ power_config_dir }}/instances"
+      register: power_instances_slurp
+      failed_when: false
+
+    - name: Stop and disable stale instances
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+        daemon_reload: false
+      when: item not in power_active_instances
+      loop: "{{ (power_instances_slurp.content | default('') | b64decode).split() }}"
+
+    - name: Write current instance state
+      ansible.builtin.copy:
+        dest: "{{ power_config_dir }}/instances"
+        mode: '0644'
+        content: "{{ power_active_instances | join('\n') }}\n"
+
+    - name: Register playbook as installed
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/wol-suspend.yml"
+      changed_when: false
+
+  handlers:
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart wol instances
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: restarted
+        enabled: true
+        daemon_reload: true
+      loop: "{{ power_enabled_instances | default([]) }}"

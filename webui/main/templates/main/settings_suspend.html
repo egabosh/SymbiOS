@@ -1,0 +1,207 @@
+{% extends "main/base.html" %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<h2><i class="bi bi-moon"></i> Suspend</h2>
+<p class="text-muted">
+    Hosts on this list are suspended over SSH once they have been idle longer than
+    their timeout (no requests, no active connections, no blocking checks).
+    The watchers wait for <code>/symbios</code> after a reboot, so a late disk
+    unlock never breaks them. A host never suspends itself; <code>/tmp/no-suspend</code>
+    (non-empty) blocks a suspend on both sides. SSH key access to each target is
+    required once (<code>ssh-copy-id root@&lt;host&gt;</code> as root on this host).
+</p>
+
+<div class="card mt-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-list"></i> Suspend targets ({{ targets|length }})</span>
+        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#targetModal" onclick="openAddModal()">
+            <i class="bi bi-plus"></i> Add target
+        </button>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-striped mb-0">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Host</th>
+                    <th>Idle timeout</th>
+                    <th>State</th>
+                    <th>Watcher</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in targets %}
+                <tr>
+                    <td><code>{{ t.name }}</code></td>
+                    <td><code>{{ t.suspend.host }}</code></td>
+                    <td>{{ t.suspend.idle_timeout_min|default:15 }} min</td>
+                    <td>
+                        {% if t.suspend.enabled|default:True %}
+                        <span class="badge bg-success">enabled</span>
+                        {% else %}
+                        <span class="badge bg-secondary">disabled</span>
+                        {% endif %}
+                    </td>
+                    <td class="small">
+                        {{ t.live_idle|default:'?' }}
+                        {% if t.live_awake %} <span class="badge bg-success">awake</span>{% endif %}
+                    </td>
+                    <td class="text-end text-nowrap">
+                        <form method="post" action="{% url 'settings_suspend_check' t.name %}" data-exec="true" class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-secondary btn-sm" title="Dry-run idle evaluation (never suspends)">
+                                <i class="bi bi-activity"></i>
+                            </button>
+                        </form>
+                        <button type="button" class="btn btn-outline-primary btn-sm"
+                            data-name="{{ t.name }}"
+                            data-enabled="{{ t.suspend.enabled|default:True|yesno:'on,off' }}"
+                            data-host="{{ t.suspend.host }}"
+                            data-iface="{{ t.suspend.iface }}"
+                            data-timeout="{{ t.suspend.idle_timeout_min|default:15 }}"
+                            data-grace="{{ t.suspend.grace_after_wol_sec|default:300 }}"
+                            data-ports="{{ t.suspend.tcp_ports|default:'' }}"
+                            data-subnet="{{ t.suspend.lan_subnet|default:'' }}"
+                            onclick="openEditModal(this)" title="Edit">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <form method="post" action="{% url 'settings_suspend_toggle' t.name %}" data-exec="true" class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-secondary btn-sm" title="Enable/disable">
+                                <i class="bi bi-toggle2-{% if t.suspend.enabled|default:True %}on{% else %}off{% endif %}"></i>
+                            </button>
+                        </form>
+                        <form method="post" action="{% url 'settings_suspend_delete' t.name %}" data-exec="true" data-exec-confirm="Delete suspend target '{{ t.name }}'? The watchers are removed on apply." class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="text-muted text-center py-3">No suspend targets yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card mt-3">
+    <div class="card-header"><i class="bi bi-check2-square"></i> Apply</div>
+    <div class="card-body">
+        <p class="small text-muted">Renders the watcher configs and systemd instances from the list above.</p>
+        <form method="post" action="{% url 'settings_suspend_apply' %}" data-exec="true" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-success"><i class="bi bi-check2-square"></i> Apply targets</button>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="targetModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="post" action="{% url 'settings_suspend_save' %}" data-exec="true" id="target-form">
+                {% csrf_token %}
+                <input type="hidden" name="original_name" id="f_original" value="">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="targetModalTitle">Add suspend target</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label class="form-label">Name</label>
+                            <input type="text" class="form-control" name="name" id="f_name" required pattern="[a-z0-9][a-z0-9-]*" placeholder="compute">
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label">Host</label>
+                            <input type="text" class="form-control" name="suspend_host" id="f_host" required placeholder="compute.lan">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-4 mb-3">
+                            <label class="form-label">NIC for WoL flag</label>
+                            <input type="text" class="form-control" name="iface" id="f_iface" required placeholder="eno1">
+                            <div class="form-text">Armed with <code>ethtool -s IF wol g</code> before suspend.</div>
+                        </div>
+                        <div class="col-4 mb-3">
+                            <label class="form-label">Idle timeout (min)</label>
+                            <input type="number" class="form-control" name="idle_timeout_min" id="f_timeout" min="5" max="600" value="15">
+                        </div>
+                        <div class="col-4 mb-3">
+                            <label class="form-label">Grace after wake (s)</label>
+                            <input type="number" class="form-control" name="grace_after_wol_sec" id="f_grace" min="0" value="300">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <label class="form-label">Busy TCP ports (regex, optional)</label>
+                            <input type="text" class="form-control" name="tcp_ports" id="f_ports" placeholder="8[0-9]{3}">
+                        </div>
+                        <div class="col-6 mb-3">
+                            <label class="form-label">LAN subnet for SSH sessions (optional)</label>
+                            <input type="text" class="form-control" name="lan_subnet" id="f_subnet" placeholder="172.23.">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Extra local check (optional)</label>
+                        <input type="text" class="form-control font-monospace" name="extra_local_cmd" id="f_extra_local" placeholder="exit 1">
+                        <div class="form-text">Shell command on this host; exit 0 counts as busy.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Extra remote check (optional)</label>
+                        <input type="text" class="form-control font-monospace" name="extra_remote_cmd" id="f_extra_remote" placeholder="exit 1">
+                        <div class="form-text">Shell command on the target over SSH; exit 0 counts as busy.</div>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input type="checkbox" class="form-check-input" name="suspend_enabled" id="f_enabled" checked>
+                        <label class="form-check-label" for="f_enabled">Enabled</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function openAddModal() {
+    document.getElementById('targetModalTitle').textContent = 'Add suspend target';
+    document.getElementById('target-form').reset();
+    document.getElementById('f_original').value = '';
+    document.getElementById('f_name').readOnly = false;
+    document.getElementById('f_timeout').value = 15;
+    document.getElementById('f_grace').value = 300;
+    document.getElementById('f_enabled').checked = true;
+}
+function openEditModal(btn) {
+    var name = btn.dataset.name;
+    document.getElementById('targetModalTitle').textContent = 'Edit suspend target';
+    document.getElementById('f_original').value = name;
+    document.getElementById('f_name').value = name;
+    document.getElementById('f_name').readOnly = true;
+    fetch(('{% url "settings_suspend_entry" name="__NAME__" %}').replace('__NAME__', encodeURIComponent(name)))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+            if (!d.ok) { return; }
+            var s = d.entry.suspend || {};
+            document.getElementById('f_enabled').checked = (s.enabled !== false);
+            document.getElementById('f_host').value = s.host || '';
+            document.getElementById('f_iface').value = s.iface || '';
+            document.getElementById('f_timeout').value = s.idle_timeout_min || 15;
+            document.getElementById('f_grace').value = (s.grace_after_wol_sec !== undefined) ? s.grace_after_wol_sec : 300;
+            document.getElementById('f_ports').value = s.tcp_ports || '';
+            document.getElementById('f_subnet').value = s.lan_subnet || '';
+            document.getElementById('f_extra_local').value = s.extra_local_cmd || '';
+            document.getElementById('f_extra_remote').value = s.extra_remote_cmd || '';
+        });
+    new bootstrap.Modal(document.getElementById('targetModal')).show();
+}
+</script>
+{% endblock %}

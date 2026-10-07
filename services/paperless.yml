@@ -174,9 +174,11 @@
                 - PAPERLESS_SOCIAL_AUTO_SIGNUP=true
                 - PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS=true
                 # Skip the local login form: /accounts/login/ forwards
-                # straight to Authelia (regular login stays available as
-                # fallback via /admin/ and the API).
+                # straight to Authelia. Hiding the frontend password form
+                # as well (Django /admin/ and API local login keep working
+                # as fallback, per upstream docs).
                 - PAPERLESS_REDIRECT_LOGIN_TO_SSO=true
+                - PAPERLESS_DISABLE_REGULAR_LOGIN=true
               networks:
                 paperless: {}
                 symbios_services: null

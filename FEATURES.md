@@ -126,6 +126,48 @@ enable/disable, re-fetch, delete and a journal viewer per tunnel.
   `rc.local` binds and starts the enabled tunnels after the LUKS unlock,
   so dependents (e.g. Home Assistant) always find the interface ready.
 
+### Reverse Proxy (`/settings/reverse-proxy/`)
+Publishes external targets (other hosts, appliances, AI boxes) under public
+hostnames through Traefik. One entry maps one hostname to one backend
+(`http(s)://target:port`) with access control (open, local-networks-only,
+Authelia) and always gets a Let's Encrypt certificate. Applied without
+restarting Traefik (file provider watching); per-route test button included.
+- Playbook: `base-services/traefik-proxy.yml` (renders `proxy-<name>.yml`
+  into the Traefik providers dir, removes orphaned snippets)
+- Script: `scripts/symbios-traefik-proxy-apply.sh` (validate + apply,
+  `--import <dir>` converts hand-written provider snippets)
+- Data: `<config>/traefik/forwards.yml`
+
+---
+
+## Power
+
+### Suspend (`/settings/suspend/`)
+Suspends configured hosts over SSH once they have been idle longer than
+their timeout (no requests, no active connections, no blocking checks).
+A host never suspends itself; `/tmp/no-suspend` (non-empty) blocks a
+suspend on both sides. Per-target dry-run shows which check would prevent
+a suspend, without suspending.
+- Playbook: `base-services/wol-suspend.yml` (shared with Wake-on-LAN)
+- Scripts: `scripts/symbios-wol-suspend-apply.sh` (validate + apply,
+  `--check <target>` dry-run, `--wake <target>`, `--status`),
+  `scripts/symbios-wol-watch-idle.sh` (5-minute loop, systemd instance
+  `wol-idle@<name>`), `scripts/symbios-wol-common.sh` (shared checks)
+- Data: `<config>/power/targets.yml` (shared)
+- Boot model: the watchers are systemd-enabled; scripts, SSH key and access
+  log all live under `/symbios`, so the scripts wait for those paths (late
+  LUKS unlock) instead of failing at boot.
+
+### Wake-on-LAN (`/settings/wake-on-lan/`)
+Wakes sleeping hosts with a magic packet - automatically when one of their
+hostnames is requested (matched against the Traefik access log) or manually
+with the Wake button per target. The target needs no agent, only its MAC
+address and Wake-on enabled in the BIOS.
+- Playbook: `base-services/wol-suspend.yml` (shared)
+- Scripts: `scripts/symbios-wol-watch-tail.sh` (log tail, systemd instance
+  `wol-tail@<name>`), same apply script as Suspend
+- Data: `<config>/power/targets.yml` (shared)
+
 ---
 
 ## Data & Storage
