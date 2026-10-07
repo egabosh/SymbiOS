@@ -263,7 +263,7 @@
            dest: "{{ service_path }}/authorization_policy"
            # Central 2FA switch for all OIDC clients: the client blocks
            # rendered by the service playbooks read this file.
-           content: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
+           content: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
            mode: "0644"
 
 
@@ -304,7 +304,7 @@
            dest: "{{ service_path }}/authorization_policy"
            # Central 2FA switch for all OIDC clients: the client blocks
            # rendered by the service playbooks read this file.
-           content: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
+           content: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
            mode: "0644"
 
 
