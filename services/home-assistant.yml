@@ -331,9 +331,8 @@
                   - "https"
                 tls:
                   certResolver: {{ acme_resolver }}
-                middlewares:
-                  - "secHeadersHA@file"
-                  - "authelia@file"
+      middlewares:
+        - "secHeadersHA@file"
 
               matter:
                 rule: "Host(`matter.{{ base_domain }}`)"
