@@ -14,7 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Suspend page: configure which hosts are suspended when idle."""
+"""Suspend page: configure which hosts are suspended when idle.
+
+All list and mutation logic lives in symbios-wol-suspend-apply.sh (single
+source of truth, shared with shell users); this view only forwards form
+data to it and renders the result.
+"""
 
 import json
 import shlex
@@ -24,17 +29,24 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 
 from .decorators import login_required
-from .power_targets import (
-    entry_from_post,
-    load_targets,
-    save_targets,
-    validate_target,
-)
 from .utils.http import is_ajax_request
 from .utils.ssh_exec import run_command
 from .views_users import _exec_ldap_command
 
 APPLY_CMD = 'symbios-wol-suspend-apply.sh'
+
+
+def _load_status():
+    """Load the live target status via the CLI script (empty on any error)."""
+    ok, stdout, _ = run_command(f'{APPLY_CMD} --status', timeout=30)
+    if ok and stdout.strip():
+        try:
+            data = json.loads(stdout.strip())
+            if isinstance(data, list):
+                return [e for e in data if isinstance(e, dict)]
+        except ValueError:
+            pass
+    return []
 
 
 def _error(request, msg):
@@ -45,17 +57,38 @@ def _error(request, msg):
     return redirect('settings_suspend')
 
 
+def _save_command(request, original):
+    """Build the CLI add/set-suspend command from POST fields."""
+    name = request.POST.get('name', '').strip().lower()
+    if not name:
+        return None
+    action = '--set-suspend' if original else '--add-suspend'
+    parts = [APPLY_CMD, action, '--name', shlex.quote(name)]
+    mapping = (
+        ('suspend_host', 'host'), ('iface', 'iface'),
+        ('idle_timeout_min', 'timeout'), ('grace_after_wol_sec', 'grace'),
+        ('tcp_ports', 'tcp-ports'), ('lan_subnet', 'lan-subnet'),
+        ('extra_local_cmd', 'extra-local'), ('extra_remote_cmd', 'extra-remote'),
+    )
+    for form_field, cli_flag in mapping:
+        value = request.POST.get(form_field, '').strip()
+        if value:
+            parts += ['--' + cli_flag, shlex.quote(value)]
+    parts += ['--enabled' if 'suspend_enabled' in request.POST else '--disabled']
+    return ' '.join(parts)
+
+
 @login_required
 def settings_suspend(request):
-    targets = [t for t in load_targets() if (t.get('suspend') or {}).get('enabled') or 'suspend' in t]
-    ok, stdout, _ = run_command(f'{APPLY_CMD} --status', timeout=30)
-    status = {}
+    ok, stdout, _ = run_command(f'{APPLY_CMD} --dump', timeout=30)
+    targets = []
     if ok and stdout.strip():
         try:
-            for row in json.loads(stdout.strip()):
-                status[row.get('name')] = row
-        except (ValueError, AttributeError):
+            data = json.loads(stdout.strip())
+            targets = [t for t in data if isinstance(t, dict) and 'suspend' in t]
+        except ValueError:
             pass
+    status = {row.get('name'): row for row in _load_status()}
     for target in targets:
         live = status.get(target.get('name'), {})
         target['live_idle'] = (live.get('units') or {}).get('wol-idle', '?')
@@ -69,61 +102,34 @@ def settings_suspend(request):
 def settings_suspend_save(request):
     if request.method != 'POST':
         return redirect('settings_suspend')
-    targets = load_targets()
     original = request.POST.get('original_name', '').strip() or None
-    entry = entry_from_post(request, original)
-    if 'suspend' not in entry:
-        return _error(request, 'The suspend block must not be empty.')
-    entry['suspend']['enabled'] = 'suspend_enabled' in request.POST
-    err = validate_target(entry, targets, original_name=original)
-    if err:
-        return _error(request, err)
-    if original:
-        targets = [e for e in targets if e.get('name') != original]
-    targets.append(entry)
-    targets.sort(key=lambda e: e.get('name', ''))
-    save_targets(targets)
-    msg = f'Suspend target "{entry["name"]}" saved (apply to activate).'
-    if is_ajax_request(request):
-        return JsonResponse({'ok': True, 'message': msg})
-    messages.success(request, msg)
-    return redirect('settings_suspend')
+    cmd = _save_command(request, original)
+    if cmd is None:
+        return _error(request, 'Name must not be empty.')
+    name = request.POST.get('name', '').strip().lower()
+    return _exec_ldap_command(request, cmd, f'Saving suspend target "{name}"...',
+                              f'Suspend target "{name}" saved and applied.',
+                              redirect_to='settings_suspend')
 
 
 @login_required
 def settings_suspend_delete(request, name):
     if request.method != 'POST':
         return redirect('settings_suspend')
-    targets = load_targets()
-    remaining = [e for e in targets if e.get('name') != name]
-    if len(remaining) == len(targets):
-        return _error(request, f'No target named "{name}".')
-    save_targets(remaining)
-    msg = f'Target "{name}" deleted (apply to remove the watchers).'
-    if is_ajax_request(request):
-        return JsonResponse({'ok': True, 'message': msg})
-    messages.success(request, msg)
-    return redirect('settings_suspend')
+    cmd = f'{APPLY_CMD} --delete --name {shlex.quote(name)}'
+    return _exec_ldap_command(request, cmd, f'Deleting target "{name}"...',
+                              f'Target "{name}" deleted and applied.',
+                              redirect_to='settings_suspend')
 
 
 @login_required
 def settings_suspend_toggle(request, name):
     if request.method != 'POST':
         return redirect('settings_suspend')
-    targets = load_targets()
-    found = False
-    for entry in targets:
-        if entry.get('name') == name and isinstance(entry.get('suspend'), dict):
-            entry['suspend']['enabled'] = not entry['suspend'].get('enabled', True)
-            found = True
-    if not found:
-        return _error(request, f'No suspend target named "{name}".')
-    save_targets(targets)
-    msg = f'Suspend target "{name}" toggled (apply to activate).'
-    if is_ajax_request(request):
-        return JsonResponse({'ok': True, 'message': msg})
-    messages.success(request, msg)
-    return redirect('settings_suspend')
+    cmd = f'{APPLY_CMD} --toggle-suspend --name {shlex.quote(name)}'
+    return _exec_ldap_command(request, cmd, f'Toggling suspend target "{name}"...',
+                              f'Suspend target "{name}" toggled and applied.',
+                              redirect_to='settings_suspend')
 
 
 @login_required
@@ -137,14 +143,6 @@ def settings_suspend_apply(request):
 
 
 @login_required
-def settings_suspend_entry(request, name):
-    entry = next((e for e in load_targets() if e.get('name') == name), None)
-    if entry is None:
-        return JsonResponse({'ok': False, 'error': f'No target named "{name}".'}, status=404)
-    return JsonResponse({'ok': True, 'entry': entry})
-
-
-@login_required
 def settings_suspend_check(request, name):
     if request.method != 'POST':
         return redirect('settings_suspend')
@@ -153,3 +151,17 @@ def settings_suspend_check(request, name):
                               f'Dry-run idle evaluation for "{name}"...',
                               f'Dry-run for "{name}" finished (no suspend).',
                               redirect_to='settings_suspend')
+
+
+@login_required
+def settings_suspend_entry(request, name):
+    ok, stdout, _ = run_command(f'{APPLY_CMD} --dump', timeout=30)
+    if ok and stdout.strip():
+        try:
+            data = json.loads(stdout.strip())
+            entry = next((e for e in data if isinstance(e, dict) and e.get('name') == name), None)
+            if entry is not None:
+                return JsonResponse({'ok': True, 'entry': entry})
+        except ValueError:
+            pass
+    return JsonResponse({'ok': False, 'error': f'No target named "{name}".'}, status=404)
