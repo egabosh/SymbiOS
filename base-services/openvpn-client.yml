@@ -208,16 +208,13 @@
       failed_when: false
 
     - name: Allow tunnel ports on the tunnel interface
-      community.general.ufw:
-        rule: allow
-        port: "{{ tunnel_rule.1.port | string }}"
-        proto: "{{ tunnel_rule.1.proto | default('tcp') }}"
-        interface: "{{ tunnel_rule.0.1.interface | default('tun0') }}"
-        direction: in
-      loop: "{{ _openvpn_tunnels | subelements('1.ufw_allow', skip_missing=True) }}"
+      ansible.builtin.include_tasks: tasks/openvpn-ufw.yml
+      loop: "{{ _openvpn_tunnels }}"
       loop_control:
-        loop_var: tunnel_rule
-      changed_when: true
+        loop_var: tunnel_item
+      vars:
+        tunnel_vars: "{{ tunnel_item.1 }}"
+      when: tunnel_item.1.ufw_allow is defined
 
     # Tunnels must never autostart via systemd: at boot the data volume is
     # still locked (fstab noauto, mount happens in rc.local after unlock)
