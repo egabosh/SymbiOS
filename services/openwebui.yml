@@ -168,6 +168,22 @@
         oidc_redirect_uris:
           - "https://ai.{{ base_domain }}/oauth/oidc/callback"
 
+    - name: Deploy LDAP group-change hook (immediate admin sync on membership changes)
+      ansible.builtin.copy:
+        dest: "{{ data_root }}/ldap-groups.d/openwebui-admin-sync.hook"
+        content: |
+          #!/bin/bash
+          # SymbIOS hook - keep OpenWebUI admins in sync with LDAP group openwebui-admins.
+          # Executed by the shared LDAP group-change dispatcher (see symbios-lib.sh,
+          # called by symbios-ldap-groups.sh for CLI and WebUI changes) whenever a
+          # group or a membership changes. Args: $1=event $2=group $3=uid
+          # Only react to changes of the OpenWebUI admin group (incl. group deletion).
+          [[ "${2:-}" == "openwebui-admins" ]] || exit 0
+          exec "{{ git_root }}/scripts/symbios-openwebui-admin-sync.sh"
+        mode: '0755'
+        owner: root
+        group: root
+
 ###########################
 #### OpenWebUI Automation #
 ###########################
