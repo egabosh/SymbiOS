@@ -151,6 +151,16 @@
         state: directory
         mode: '0755'
 
+    - name: Stage SSH key with client-safe permissions
+      ansible.builtin.copy:
+        src: "{{ power_ssh_key }}"
+        dest: /root/.ssh/id_symbios_wol
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+      notify: Restart wol instances
+
     - name: Render live config per target
       ansible.builtin.copy:
         dest: "{{ power_config_dir }}/live/{{ item.name }}.conf"
@@ -158,7 +168,9 @@
         content: |
           # ANSIBLE MANAGED BLOCK power {{ item.name }} (WebUI: /settings/suspend/, /settings/wake-on-lan/)
           TARGET_NAME="{{ item.name }}"
-          SSH_KEY="{{ power_ssh_key }}"
+          # Root-only copy (0600) of the deploy key - the SSH client refuses
+          # the group-readable original. Synced from config on every apply.
+          SSH_KEY="/root/.ssh/id_symbios_wol"
           WAKE_ENABLED={{ (item.wake is defined and item.wake.get('enabled', false) | bool) | bool | lower }}
           WAKE_MAC="{{ item.wake.mac | default('') }}"
           WAKE_HOST="{{ item.wake.host | default(item.suspend.host | default('')) }}"
