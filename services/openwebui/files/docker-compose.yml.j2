@@ -40,9 +40,9 @@ services:
       - OAUTH_MAP_EMAIL_TO_USERNAME=true
       - AUTO_APPROVE_OAUTH_ACCOUNTS=true
       - DEFAULT_USER_ROLE=user
-      # RAG / Document Processing (Tika runs as Docker container on ai.lan)
+      # RAG / Document Processing (Tika server from Settings -> AI Search & RAG)
       - CONTENT_EXTRACTION_ENGINE=tika
-      - TIKA_SERVER_URL=http://{{ ai_host }}:9998
+      - TIKA_SERVER_URL={{ ai_tika_url | default('', true) or 'http://' + ai_host + ':9998' }}
       - TIKA_SERVER_VERSION=4
       - PDF_EXTRACT_IMAGES=true
       - ENABLE_IMAGE_INTERPRETATION=true
@@ -54,11 +54,11 @@ services:
       - USE_EMBEDDING_MODEL_DOCKER=
       - USE_AUXILIARY_EMBEDDING_MODEL_DOCKER=
       - RAG_RERANKING_MODEL=
-      # Web Search (SearXNG runs as Docker container on ai.lan)
+      # Web Search (SearXNG query URL from Settings -> AI Search & RAG)
       - ENABLE_WEB_SEARCH=true
       - WEB_SEARCH_ENGINE=searxng
       - WEB_SEARCH_RESULT_COUNT=3
-      - SEARXNG_QUERY_URL=http://{{ ai_host }}:8081/search?format=json&q=<query>
+      - SEARXNG_QUERY_URL={{ ai_searxng_url | default('', true) or 'http://' + ai_host + ':8081/search?format=json&q=<query>' }}
       - ENABLE_RAG_LOCAL_WEB_FETCH=false
       - BYPASS_WEB_SEARCH_WEB_LOADER=true
       # Model Defaults (OpenAI-compatible API, endpoint from Settings -> AI)
@@ -83,24 +83,24 @@ services:
       - OPENAI_API_REQUEST_TIMEOUT=180
       - ENABLE_CONTEXT_COMPACTION=true
       - CONTEXT_COMPACTION_TOKEN_THRESHOLD=200000
-      # Image Generation (ComfyUI)
+      # Image Generation (ComfyUI server from Settings -> AI Image)
       - ENABLE_IMAGE_GENERATION=true
       - IMAGE_GENERATION_ENGINE=comfyui
-      - IMAGE_GENERATION_MODEL=sd15.safetensors
-      - COMFYUI_BASE_URL=http://{{ ai_host }}:8188
+      - IMAGE_GENERATION_MODEL={{ ai_image_model | default('', true) or 'sd15.safetensors' }}
+      - COMFYUI_BASE_URL={{ ai_image_url | default('', true) or 'http://' + ai_host + ':8188' }}
       - ENABLE_IMAGE_EDIT=true
       - IMAGE_EDIT_ENGINE=comfyui
-      - IMAGE_EDIT_MODEL=sd15.safetensors
-      - IMAGES_EDIT_COMFYUI_BASE_URL=http://{{ ai_host }}:8188
-      # Speech-to-Text (Whisper)
-      - STT_WHISPER_API_BASE_URL=http://{{ ai_host }}:8082/v1
-      - STT_WHISPER_API_KEY=
-      - STT_WHISPER_MODEL=ggml-large-v3-turbo.bin
-      # Text-to-Speech (Piper)
+      - IMAGE_EDIT_MODEL={{ ai_image_edit_model | default('', true) or ai_image_model | default('', true) or 'sd15.safetensors' }}
+      - IMAGES_EDIT_COMFYUI_BASE_URL={{ ai_image_edit_url | default('', true) or ai_image_url | default('', true) or 'http://' + ai_host + ':8188' }}
+      # Speech-to-Text (Whisper server from Settings -> AI Speech)
+      - STT_WHISPER_API_BASE_URL={{ ai_stt_url | default('', true) or 'http://' + ai_host + ':8082/v1' }}
+      - STT_WHISPER_API_KEY={{ ai_stt_key | default('', true) or ai_apikey | default('', true) }}
+      - STT_WHISPER_MODEL={{ ai_stt_model | default('', true) or 'ggml-large-v3-turbo.bin' }}
+      # Text-to-Speech (server from Settings -> AI Speech)
       - AUDIO_TTS_ENGINE=openai
-      - AUDIO_TTS_OPENAI_API_BASE_URL=http://{{ ai_host }}:8083/v1
-      - AUDIO_TTS_MODEL=tts-1
-      - AUDIO_TTS_OPENAI_API_KEY=sk-placeholder
+      - AUDIO_TTS_OPENAI_API_BASE_URL={{ ai_tts_url | default('', true) or 'http://' + ai_host + ':8083/v1' }}
+      - AUDIO_TTS_MODEL={{ ai_tts_model | default('', true) or 'tts-1' }}
+      - AUDIO_TTS_OPENAI_API_KEY={{ ai_tts_key | default('', true) or ai_apikey | default('', true) or 'sk-placeholder' }}
       # Other
       - ENABLE_OLLAMA_API=false
     volumes:

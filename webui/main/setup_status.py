@@ -109,6 +109,20 @@ PAGE_EXPLAIN = {
         'server URL is stored in the inventory, and an optional API key '
         'can be added if the endpoint requires authentication.'
     ),
+    'ai-speech': (
+        'Speech-to-text (Whisper) and text-to-speech endpoints used by '
+        'OpenWebUI voice features. Keys fall back to the LLM API key '
+        'when left empty.'
+    ),
+    'ai-image': (
+        'ComfyUI server for image generation and image editing in '
+        'OpenWebUI, plus the checkpoints to use. The edit fields fall '
+        'back to the generation values when left empty.'
+    ),
+    'ai-search': (
+        'Retrieval backends for OpenWebUI: the Tika server extracts text '
+        'from uploaded documents, SearXNG answers web-search queries.'
+    ),
     'media': (
         'Central locations for music, photos, videos, books, documents '
         'and the shared inbox. Services mount these instead of inventing '
@@ -184,6 +198,27 @@ def get_page_badge(page_key, inventory_vars):
                     'An OpenAI-compatible endpoint is configured.')
         return ('missing', 'Not configured',
                 'No AI endpoint is configured yet.')
+
+    if page_key == 'ai-speech':
+        if inventory_vars.get('ai_stt_url') or inventory_vars.get('ai_tts_url'):
+            return ('ok', 'Configured',
+                    'Speech endpoints are configured.')
+        return ('missing', 'Not configured',
+                'No speech endpoint is configured yet.')
+
+    if page_key == 'ai-image':
+        if inventory_vars.get('ai_image_url'):
+            return ('ok', 'Configured',
+                    'A ComfyUI image server is configured.')
+        return ('missing', 'Not configured',
+                'No image server is configured yet.')
+
+    if page_key == 'ai-search':
+        if inventory_vars.get('ai_tika_url') or inventory_vars.get('ai_searxng_url'):
+            return ('ok', 'Configured',
+                    'Retrieval backends are configured.')
+        return ('missing', 'Not configured',
+                'No retrieval backend is configured yet.')
 
     if page_key == 'openvpn':
         if inventory_vars.get('openvpn_clients'):

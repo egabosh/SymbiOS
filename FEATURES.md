@@ -188,6 +188,24 @@ Optional OpenAI-compatible endpoint (server URL + API key) consumed by the
 check that saves nothing.
 - Vars: `ai_server`, `ai_apikey` (removed again when cleared)
 
+### AI Speech (`/settings/ai-speech/`)
+Speech-to-text (Whisper proxy) and text-to-speech endpoints for OpenWebUI
+voice features, plus their models. Empty keys fall back to `ai_apikey`.
+- Vars: `ai_stt_url`, `ai_stt_key`, `ai_stt_model`,
+  `ai_tts_url`, `ai_tts_key`, `ai_tts_model` (removed again when cleared)
+
+### AI Image (`/settings/ai-image/`)
+ComfyUI server for OpenWebUI image generation and image editing, plus the
+checkpoints to use. Empty edit fields fall back to the generation values.
+- Vars: `ai_image_url`, `ai_image_model`,
+  `ai_image_edit_url`, `ai_image_edit_model` (removed again when cleared)
+
+### AI Search & RAG (`/settings/ai-search/`)
+Retrieval backends for OpenWebUI: the Tika server URL used for document
+text extraction and the SearXNG query URL (with `<query>` placeholder)
+for web search.
+- Vars: `ai_tika_url`, `ai_searxng_url` (removed again when cleared)
+
 ### Config Editor (`/settings/config/`)
 Raw `inventory.yml` editor with YAML validation, automatic `.bak` backup
 and full reapply. Escape hatch for everything the forms do not cover.

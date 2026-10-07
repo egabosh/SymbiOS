@@ -73,11 +73,34 @@ all:
     # SymbiOS) or 'manual' (forwards entered in the router by hand)
     port_forwarding_method: ''
     # OpenAI-compatible AI endpoint (optional, managed by the WebUI under
-    # Settings → AI). When ai_server is set, the openwebui/opencode playbooks
+    # Settings -> AI). When ai_server is set, the openwebui/opencode playbooks
     # configure their OpenAI provider with it; an optional ai_apikey is only
     # written when set. Both vars are removed again when cleared in the WebUI.
     ai_server: ''
     ai_apikey: ''
+    # OpenWebUI speech backends (managed by the WebUI under Settings ->
+    # AI Speech). STT points at the Whisper proxy, TTS at the fast Piper
+    # proxy; both expect the shared compute.lan Bearer key (falls back to
+    # ai_apikey when empty). Empty URL disables the override and the
+    # playbook keeps the ai_host default.
+    ai_stt_url: ''
+    ai_stt_key: ''
+    ai_stt_model: ''
+    ai_tts_url: ''
+    ai_tts_key: ''
+    ai_tts_model: ''
+    # OpenWebUI image backend (managed by the WebUI under Settings ->
+    # AI Image). ComfyUI base URL plus checkpoint for generation and edit.
+    # Empty URL disables the override (ai_host default is kept).
+    ai_image_url: ''
+    ai_image_model: ''
+    ai_image_edit_url: ''
+    ai_image_edit_model: ''
+    # OpenWebUI retrieval backends (managed by the WebUI under Settings ->
+    # AI Search & RAG). Tika extracts document text, SearXNG answers web
+    # search. Empty values keep the ai_host defaults.
+    ai_tika_url: ''
+    ai_searxng_url: ''
     # OpenVPN client tunnels (base-services/openvpn-client.yml, managed by
     # the WebUI under Settings -> OpenVPN Client). Dict of name -> {enabled,
     # mode (upload|fetch), interface, fetch_cmd, cron, ufw_allow: [{port, proto}]}.
