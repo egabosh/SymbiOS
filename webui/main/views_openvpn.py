@@ -78,6 +78,27 @@ def _live_status():
     return [], None
 
 
+def _merged_tunnels(clients, live):
+    """Merge inventory tunnels with live host states.
+
+    Tunnels known from inventory but not bound on the host (e.g. data
+    volume not mounted yet) show up as down instead of vanishing.
+    """
+    by_name = {t.get('name'): t for t in live if t.get('name')}
+    merged = list(live)
+    for name, entry in clients.items():
+        if name not in by_name:
+            merged.append({
+                'name': name,
+                'active': False,
+                'enabled': bool(entry.get('enabled', False)),
+                'interface': entry.get('interface', ''),
+                'ip': '',
+                'fetch_mode': entry.get('mode', 'upload') == 'fetch',
+            })
+    return sorted(merged, key=lambda t: t.get('name', ''))
+
+
 def _page_context(vars_, tunnels, installed):
     badge = get_page_badge('openvpn', vars_)
     return {
@@ -315,6 +336,7 @@ def settings_openvpn(request):
 
     # GET: render with live host status merged into the inventory tunnels.
     tunnels, installed = _live_status()
+    tunnels = _merged_tunnels(_get_clients(vars_), tunnels)
     return render(request, 'main/settings_openvpn.html',
                   _page_context(vars_, tunnels, installed))
 
@@ -323,6 +345,11 @@ def settings_openvpn(request):
 def settings_openvpn_status(request):
     """AJAX GET - live tunnel states for refresh without page reload."""
     tunnels, installed = _live_status()
+    try:
+        vars_ = _get_inventory_config().get('all', {}).get('vars', {})
+        tunnels = _merged_tunnels(_get_clients(vars_), tunnels)
+    except Exception:
+        pass
     return JsonResponse({'tunnels': tunnels, 'openvpn_installed': installed})
 
 

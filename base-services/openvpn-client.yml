@@ -17,7 +17,7 @@
 # docs:
 #   name: OpenVPN Client
 #   short_description: Manage OpenVPN client tunnels to remote networks
-#   description: Installs openvpn and manages client tunnels from inventory (openvpn_clients). Each tunnel is either uploaded once (mode upload) or refreshed from a fetch helper on a schedule (mode fetch, e.g. pulled from the router). Managed through the WebUI under Settings -> OpenVPN Client.
+#   description: Installs openvpn and manages client tunnels from inventory (openvpn_clients). Each tunnel is either uploaded once (mode upload) or refreshed from a fetch helper on a schedule (mode fetch, e.g. pulled from the router). Tunnel configs contain private keys and live encrypted on the data volume (base-services/openvpn/); they are bind-mounted into /etc/openvpn after the mount and the tunnels are started from rc.local (never via systemd autostart, which would run before the LUKS unlock). Managed through the WebUI under Settings -> OpenVPN Client.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -44,6 +44,13 @@
 - name: Configure OpenVPN client tunnels
   hosts: localhost
   become: true
+  vars:
+    # Tunnel configs hold private keys - they live encrypted on the data
+    # volume (0700) and are bind-mounted into /etc/openvpn at runtime, so
+    # no plaintext ever lands on the unencrypted SD card. The distro
+    # template unit openvpn@<name> is used untouched; only the enablement
+    # differs (rc.local after mount, never systemd autostart before unlock).
+    openvpn_conf_dir: "{{ base_services_root }}/openvpn"
   tasks:
     - name: Install openvpn
       ansible.builtin.apt:
@@ -65,28 +72,51 @@
       ansible.builtin.set_fact:
         _openvpn_tunnels: "{{ (openvpn_clients | default({})).items() | list }}"
 
-    - name: Deploy fetch helpers for fetch-mode tunnels
+    - name: Create encrypted tunnel config directory (0700, on LUKS volume)
+      ansible.builtin.file:
+        path: "{{ openvpn_conf_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Remove legacy fetch helpers from /etc/openvpn (unreleased layout)
+      ansible.builtin.shell: |
+        rm -f /etc/openvpn/fetch-*.sh && echo "cleaned"
+      changed_when: false
+      failed_when: false
+
+    - name: Deploy fetch helpers for fetch-mode tunnels (encrypted volume)
       ansible.builtin.copy:
         content: |
           #!/bin/bash
           # SymbiOS OpenVPN fetch helper for tunnel {{ item.0 }} - managed by Ansible.
-          # Refreshes /etc/openvpn/{{ item.0 }}.conf from the configured source.
+          # Refreshes {{ openvpn_conf_dir }}/{{ item.0 }}.conf from the configured source.
           {{ item.1.fetch_cmd | default('# No fetch_cmd configured - upload the config instead.') }}
-        dest: "/etc/openvpn/fetch-{{ item.0 }}.sh"
+        dest: "{{ openvpn_conf_dir }}/fetch-{{ item.0 }}.sh"
         owner: root
         group: root
-        mode: '0755'
+        mode: '0700'
       loop: "{{ _openvpn_tunnels }}"
       when: (item.1.mode | default('upload')) == 'fetch'
       changed_when: true
 
     - name: Remove fetch helpers of upload-mode tunnels
       ansible.builtin.file:
-        path: "/etc/openvpn/fetch-{{ item.0 }}.sh"
+        path: "{{ openvpn_conf_dir }}/fetch-{{ item.0 }}.sh"
         state: absent
       loop: "{{ _openvpn_tunnels }}"
       when: (item.1.mode | default('upload')) != 'fetch'
       changed_when: false
+
+    - name: Run first fetch for fetch-mode tunnels without a config yet
+      ansible.builtin.shell: "{{ openvpn_conf_dir }}/fetch-{{ item.0 }}.sh"
+      args:
+        creates: "{{ openvpn_conf_dir }}/{{ item.0 }}.conf"
+      loop: "{{ _openvpn_tunnels }}"
+      when: (item.1.mode | default('upload')) == 'fetch'
+      changed_when: true
+      failed_when: false
 
     - name: Schedule config refresh for fetch-mode tunnels
       ansible.builtin.cron:
@@ -96,7 +126,7 @@
         day: "{{ (item.1.cron | default('*/5 * * * *')).split(' ')[2] }}"
         month: "{{ (item.1.cron | default('*/5 * * * *')).split(' ')[3] }}"
         weekday: "{{ (item.1.cron | default('*/5 * * * *')).split(' ')[4] }}"
-        job: "/etc/openvpn/fetch-{{ item.0 }}.sh && systemctl restart openvpn@{{ item.0 }}"
+        job: '[ -x "{{ openvpn_conf_dir }}/fetch-{{ item.0 }}.sh" ] && "{{ openvpn_conf_dir }}/fetch-{{ item.0 }}.sh" && systemctl restart openvpn@{{ item.0 }}'
         user: root
         state: present
       loop: "{{ _openvpn_tunnels }}"
@@ -129,6 +159,54 @@
         loop_var: orphan
       changed_when: false
 
+    - name: Touch bind placeholders for known tunnels (empty, 0600)
+      ansible.builtin.file:
+        path: "/etc/openvpn/{{ item.0 }}.conf"
+        state: touch
+        owner: root
+        group: root
+        mode: '0600'
+        modification_time: preserve
+        access_time: preserve
+      loop: "{{ _openvpn_tunnels }}"
+      changed_when: false
+
+    - name: Remove stale placeholders (empty, unmounted, unknown tunnel)
+      ansible.builtin.shell: |
+        g_known=" {{ (openvpn_clients | default({})).keys() | list | join(' ') }} "
+        for f_conf in /etc/openvpn/*.conf
+        do
+          [[ -e "${f_conf}" ]] || continue
+          [[ -s "${f_conf}" ]] && continue
+          mountpoint -q "${f_conf}" 2>/dev/null && continue
+          f_base="$(basename "${f_conf}" .conf)"
+          [[ "${g_known}" == *" ${f_base} "* ]] && continue
+          rm -f "${f_conf}" && echo "removed ${f_base}"
+        done
+      args:
+        executable: /bin/bash
+      register: _openvpn_stale
+      changed_when: '"removed " in _openvpn_stale.stdout'
+      failed_when: false
+
+    - name: Bind tunnel configs from the encrypted volume (no fstab entry)
+      ansible.builtin.shell: |
+        if mountpoint -q "/etc/openvpn/{{ item.0 }}.conf" 2>/dev/null
+        then
+          echo "already bound"
+        elif [[ -f "{{ openvpn_conf_dir }}/{{ item.0 }}.conf" ]]
+        then
+          mount --bind "{{ openvpn_conf_dir }}/{{ item.0 }}.conf" "/etc/openvpn/{{ item.0 }}.conf" && echo "bound"
+        else
+          echo "no config yet"
+        fi
+      args:
+        executable: /bin/bash
+      loop: "{{ _openvpn_tunnels }}"
+      register: _openvpn_binds
+      changed_when: '"bound" in _openvpn_binds.stdout'
+      failed_when: false
+
     - name: Allow tunnel ports on the tunnel interface
       community.general.ufw:
         rule: allow
@@ -141,25 +219,65 @@
         loop_var: tunnel_rule
       changed_when: true
 
-    - name: Enable and start active tunnels
+    # Tunnels must never autostart via systemd: at boot the data volume is
+    # still locked (fstab noauto, mount happens in rc.local after unlock)
+    # and an enabled unit would fail against the empty placeholder. Start
+    # happens here (apply time) and from rc.local (every boot after mount).
+    - name: Disable boot autostart for all tunnels (started via rc.local)
       ansible.builtin.systemd:
         name: "openvpn@{{ item.0 }}"
-        state: started
-        enabled: true
-        daemon_reload: true
-      loop: "{{ _openvpn_tunnels }}"
-      when: (item.1.enabled | default(false) | bool)
-      failed_when: false
-
-    - name: Stop and disable inactive tunnels
-      ansible.builtin.systemd:
-        name: "openvpn@{{ item.0 }}"
-        state: stopped
         enabled: false
         daemon_reload: true
       loop: "{{ _openvpn_tunnels }}"
-      when: not (item.1.enabled | default(false) | bool)
+      changed_when: false
       failed_when: false
+
+    - name: Start enabled tunnels now
+      ansible.builtin.systemd:
+        name: "openvpn@{{ item.0 }}"
+        state: started
+      loop: "{{ _openvpn_tunnels }}"
+      when: (item.1.enabled | default(false) | bool)
+      changed_when: true
+      failed_when: false
+
+    - name: Stop disabled tunnels now
+      ansible.builtin.systemd:
+        name: "openvpn@{{ item.0 }}"
+        state: stopped
+      loop: "{{ _openvpn_tunnels }}"
+      when: not (item.1.enabled | default(false) | bool)
+      changed_when: false
+      failed_when: false
+
+    - name: Build boot-start lines for enabled tunnels
+      ansible.builtin.set_fact:
+        _openvpn_boot_starts: "{{ (_openvpn_boot_starts | default('')) + '  systemctl start \"openvpn@' + item.0 + '\" 2>/dev/null || true\n' }}"
+      loop: "{{ _openvpn_tunnels }}"
+      when: (item.1.enabled | default(false) | bool)
+      changed_when: false
+
+    - name: Start tunnels from rc.local after the data volume is mounted
+      ansible.builtin.blockinfile:
+        path: /etc/rc.local
+        create: true
+        mode: '0755'
+        insertbefore: 'exit 0'
+        marker: "# {mark} SymbiOS OpenVPN Client start"
+        block: |
+          # Bind tunnel configs from the encrypted volume and start enabled
+          # tunnels. Regenerated by base-services/openvpn-client.yml.
+          if [[ -d "{{ openvpn_conf_dir }}" ]]
+          then
+            for f_ovpn_src in {{ openvpn_conf_dir }}/*.conf
+            do
+              [[ -e "${f_ovpn_src}" ]] || continue
+              f_ovpn_name="$(basename "${f_ovpn_src}" .conf)"
+              touch "/etc/openvpn/${f_ovpn_name}.conf" 2>/dev/null || true
+              chmod 600 "/etc/openvpn/${f_ovpn_name}.conf" 2>/dev/null || true
+              mountpoint -q "/etc/openvpn/${f_ovpn_name}.conf" 2>/dev/null || mount --bind "${f_ovpn_src}" "/etc/openvpn/${f_ovpn_name}.conf" 2>/dev/null || true
+            done
+          {{ _openvpn_boot_starts | default('') }}fi
 
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/openvpn-client.yml"
