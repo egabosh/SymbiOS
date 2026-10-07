@@ -146,9 +146,8 @@
       include_tasks: tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Open WebUI"
-        # OpenWebUI sends no code_challenge (plain authorize-code flow,
-        # like the old ai client), so PKCE must stay off here.
-        oidc_require_pkce: false
+        # PKCE stays enforced (shared-task default): OpenWebUI sends an S256
+        # code_challenge via OAUTH_CODE_CHALLENGE_METHOD, see compose env.
         # Must match exactly what OpenWebUI sends: it derives the URI from
         # the request host (ai.<domain>, the only Traefik route) and appends
         # /callback. The OAUTH_REDIRECT_URI env below mirrors this.
