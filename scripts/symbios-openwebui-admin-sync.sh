@@ -11,10 +11,11 @@
 # Runs from the ldap-groups.d hook (member-added/member-removed on
 # openwebui-admins) deployed by services/openwebui.yml. No arguments.
 #
-# SQLite note: OpenWebUI holds webui.db open in WAL mode, so the app
-# container is stopped for the write and started afterwards. Group changes
-# are rare events; seconds of downtime are acceptable and safer than a
-# busy-locked write.
+# No container restart: OpenWebUI loads the user incl. role from the
+# database on every request (get_current_user -> Users.get_user_by_id),
+# so a role change takes effect on the very next request. The single-row
+# UPDATE runs with a busy timeout, which is safe against the app's
+# short-lived SQLite sessions even in WAL mode.
 
 function f_usage {
   cat << EOF
@@ -82,15 +83,13 @@ function f_openwebui_admin_sync {
     return 1
   fi
 
-  # Stop the app for a consistent SQLite write (WAL mode)
-  local f_was_running=""
-  if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx openwebui
-  then
-    f_was_running=1
-    (cd "$f_openwebui_dir" && docker compose stop openwebui >/dev/null 2>&1)
-  fi
-
   local f_rc=0
+
+  # Single-row writes with a busy timeout: safe against the app's
+  # short-lived SQLite sessions, no container restart needed.
+  f_sqlite() {
+    sqlite3 -cmd ".timeout 15000" "$f_db" "$1" 2>/dev/null
+  }
 
   # Promote missing members of openwebui-admins (only existing OpenWebUI rows)
   for f_uid in $f_desired
@@ -106,7 +105,7 @@ function f_openwebui_admin_sync {
       continue
     fi
     g_echo_note "Promoting $f_uid to OpenWebUI admin"
-    sqlite3 "$f_db" "UPDATE \"user\" SET role='admin' WHERE name='$f_uid';" 2>/dev/null || f_rc=1
+    f_sqlite "UPDATE \"user\" SET role='admin' WHERE name='$f_uid';" || f_rc=1
   done
 
   # Demote ex-members (never touch rows without LDAP counterpart)
@@ -124,17 +123,11 @@ function f_openwebui_admin_sync {
     if [[ "${f_in_ldap:-0}" -gt 0 ]]
     then
       g_echo_note "Demoting $f_uid from OpenWebUI admin"
-      sqlite3 "$f_db" "UPDATE \"user\" SET role='user' WHERE name='$f_uid';" 2>/dev/null || f_rc=1
+      f_sqlite "UPDATE \"user\" SET role='user' WHERE name='$f_uid';" || f_rc=1
     else
       g_echo_note "Keeping $f_uid: no LDAP account (system row)"
     fi
   done
-
-  # Restart the app if it was running
-  if [[ -n "$f_was_running" ]]
-  then
-    (cd "$f_openwebui_dir" && docker compose up -d openwebui >/dev/null 2>&1)
-  fi
 
   return $f_rc
 }
