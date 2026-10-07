@@ -78,6 +78,13 @@ all:
     # written when set. Both vars are removed again when cleared in the WebUI.
     ai_server: ''
     ai_apikey: ''
+    # OpenVPN client tunnels (base-services/openvpn-client.yml, managed by
+    # the WebUI under Settings -> OpenVPN Client). Dict of name -> {enabled,
+    # mode (upload|fetch), interface, fetch_cmd, cron, ufw_allow: [{port, proto}]}.
+    # The tunnel configs themselves live in /etc/openvpn/<name>.conf (0600)
+    # on the host and are uploaded via the WebUI, never stored here.
+    openvpn_clients: {}
+    openvpn_configured: false
     # router UPnP/TR-064 credentials (FRITZ!Box WebUI user/password).
     # Stored only in the deployed inventory.yml (see symbios-router-upnp.sh);
     # these placeholders keep the template clean for new installs.

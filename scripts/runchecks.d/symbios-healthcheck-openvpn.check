@@ -1,0 +1,55 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="OpenVPN Client"
+CHECK_DESC="Checks that all enabled OpenVPN client tunnels are up."
+CHECK_DETAIL="Verifies openvpn@<name>.service is active and the tunnel interface carries an IP.|Feeds e.g. Home Assistant IoT devices (Shelly) through the tunnel.|If down, all devices behind the tunnel are silent."
+
+# Healthcheck for OpenVPN client tunnels (enabled flag in inventory).
+f_check_cache "symbios-healthcheck-openvpn" || return 2>/dev/null || true
+
+# Read openvpn_clients from the inventory and verify each enabled tunnel is
+# active and its interface carries an IP. Done in python3 (robust for
+# flow/block YAML); an empty dict means the feature is unused.
+f_bad="$(python3 - "${g_inventory}" <<'PYEOF' 2>/dev/null
+import subprocess
+import sys
+import yaml
+
+path = sys.argv[1]
+try:
+    with open(path) as f:
+        cfg = yaml.safe_load(f) or {}
+except Exception:
+    sys.exit(0)
+clients = (cfg.get('all', {}).get('vars', {})
+           .get('openvpn_clients') or {})
+if not clients:
+    sys.exit(0)  # feature unused
+bad = []
+for name, entry in clients.items():
+    if not isinstance(entry, dict) or not entry.get('enabled'):
+        continue
+    try:
+        subprocess.check_output(
+            ['systemctl', 'is-active', 'openvpn@{}'.format(name)],
+            stderr=subprocess.DEVNULL)
+    except Exception:
+        bad.append('{} (service down)'.format(name))
+        continue
+    iface = entry.get('interface') or ''
+    if iface and iface not in ('tun', 'tap', 'null'):
+        try:
+            out = subprocess.check_output(
+                ['ip', '-o', '-4', 'addr', 'show', 'dev', str(iface)],
+                stderr=subprocess.DEVNULL).decode()
+        except Exception:
+            out = ''
+        if 'inet ' not in out:
+            bad.append('{} (no IP on {})'.format(name, iface))
+if bad:
+    print('\n'.join(bad))
+PYEOF
+)"
+if [[ -n "${f_bad}" ]]
+then
+  g_echo_error "OpenVPN tunnels down: ${f_bad}"
+fi
