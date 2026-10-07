@@ -114,6 +114,12 @@ PAGE_EXPLAIN = {
         'and the shared inbox. Services mount these instead of inventing '
         'their own paths; missing directories are created on apply.'
     ),
+    'openvpn': (
+        'OpenVPN client tunnels connect the server to remote networks '
+        '(e.g. an IoT network behind another router). Each tunnel is '
+        'either uploaded once or refreshed from a fetch command on a '
+        'schedule.'
+    ),
 }
 
 # Map settings page -> runchecks check name (for the status badge).
@@ -178,6 +184,13 @@ def get_page_badge(page_key, inventory_vars):
                     'An OpenAI-compatible endpoint is configured.')
         return ('missing', 'Not configured',
                 'No AI endpoint is configured yet.')
+
+    if page_key == 'openvpn':
+        if inventory_vars.get('openvpn_clients'):
+            return ('ok', 'Configured',
+                    'At least one OpenVPN client tunnel is configured.')
+        return ('missing', 'Not configured',
+                'No OpenVPN client tunnel is configured yet.')
 
     if page_key == 'media':
         if inventory_vars.get('media_root'):

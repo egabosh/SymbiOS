@@ -1,0 +1,247 @@
+{% extends "main/base.html" %}
+{% load static %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<!-- Live tunnel states -->
+<div class="card mt-3">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <span><i class="bi bi-hdd-network"></i> Tunnels</span>
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshOpenvpnStatus()">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+  </div>
+  <div class="card-body p-0">
+    {% if not openvpn_installed %}
+    <div class="alert alert-warning m-3 mb-0">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      The <code>openvpn</code> package is not installed on the host yet.
+      Save a tunnel below to install it and apply the configuration.
+    </div>
+    {% endif %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Mode</th>
+            <th>Interface</th>
+            <th>IP</th>
+            <th>State</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="openvpn_rows">
+          {% for t in tunnels %}
+          <tr>
+            <td><code>{{ t.name }}</code></td>
+            <td>{% if t.fetch_mode %}fetch{% else %}upload{% endif %}</td>
+            <td>{% if t.interface %}<code>{{ t.interface }}</code>{% else %}<span class="text-muted">-</span>{% endif %}</td>
+            <td>{% if t.ip %}<code>{{ t.ip }}</code>{% else %}<span class="text-muted">-</span>{% endif %}</td>
+            <td>
+              {% if t.active %}
+              <span class="badge bg-success">active</span>
+              {% else %}
+              <span class="badge bg-secondary">down</span>
+              {% endif %}
+              {% if t.enabled %}
+              <span class="badge bg-info">enabled</span>
+              {% endif %}
+            </td>
+            <td class="text-end text-nowrap">
+              <form method="post" class="d-inline" data-exec="true">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="tunnel">
+                <input type="hidden" name="op" value="up">
+                <input type="hidden" name="name" value="{{ t.name }}">
+                <button type="submit" class="btn btn-sm btn-outline-success" title="Start"><i class="bi bi-play-fill"></i></button>
+              </form>
+              <form method="post" class="d-inline" data-exec="true">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="tunnel">
+                <input type="hidden" name="op" value="down">
+                <input type="hidden" name="name" value="{{ t.name }}">
+                <button type="submit" class="btn btn-sm btn-outline-warning" title="Stop"><i class="bi bi-stop-fill"></i></button>
+              </form>
+              {% if t.fetch_mode %}
+              <form method="post" class="d-inline" data-exec="true">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="tunnel">
+                <input type="hidden" name="op" value="fetch">
+                <input type="hidden" name="name" value="{{ t.name }}">
+                <button type="submit" class="btn btn-sm btn-outline-primary" title="Refresh config from source"><i class="bi bi-cloud-download"></i></button>
+              </form>
+              {% endif %}
+              <button type="button" class="btn btn-sm btn-outline-secondary" title="Show log"
+                      onclick="showOpenvpnLog('{{ t.name }}')"><i class="bi bi-journal-text"></i></button>
+              <form method="post" class="d-inline" data-exec="true"
+                    data-exec-confirm="Really delete tunnel &quot;{{ t.name }}&quot;? Its config on the host will be removed.">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="name" value="{{ t.name }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"><i class="bi bi-trash"></i></button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="6" class="text-muted small px-3 py-3">
+              No tunnels on the host yet. Add one below - either by uploading a
+              <code>.ovpn</code>/<code>.conf</code> file or by configuring a fetch source.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <pre id="openvpn_log" class="small bg-dark text-light p-3 mb-0 d-none" style="max-height:300px;overflow:auto"></pre>
+  </div>
+</div>
+
+<div class="row mt-3">
+  <!-- Tunnel settings -->
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-gear"></i> Tunnel settings</div>
+      <div class="card-body">
+        <form method="post" data-exec="true">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="save">
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Tunnel name</label>
+            <input type="text" class="form-control" name="name" id="ovpn_name"
+                   placeholder="e.g. homeassistant-iot" pattern="[a-zA-Z0-9_-]+" required>
+            <div class="form-text">Used for <code>/etc/openvpn/&lt;name&gt;.conf</code> and <code>openvpn@&lt;name&gt;</code>.</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Config source</label>
+            <select class="form-select" name="mode" id="ovpn_mode" onchange="toggleOpenvpnFetch()">
+              <option value="upload">Upload (config stored on the server)</option>
+              <option value="fetch">Fetch (refresh config from a command, e.g. from the router)</option>
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Tunnel interface</label>
+            <input type="text" class="form-control" name="interface" value="tun0"
+                   pattern="[a-zA-Z0-9_-]+" required>
+            <div class="form-text">The <code>dev</code> name from the config (e.g. <code>iot0</code> for a fixed interface).</div>
+          </div>
+
+          <div id="ovpn_fetch_fields" class="d-none">
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Fetch command</label>
+              <textarea class="form-control font-monospace" name="fetch_cmd" rows="3"
+                        placeholder="e.g. scp root@router:/etc/openvpn/homeassistant-iot.conf /etc/openvpn/homeassistant-iot.conf"></textarea>
+              <div class="form-text">Runs on the host and must refresh <code>/etc/openvpn/&lt;name&gt;.conf</code>. Needed keys (e.g. <code>root@router</code>) must already work.</div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Refresh schedule (cron)</label>
+              <input type="text" class="form-control font-monospace" name="cron" value="*/5 * * * *">
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Allowed ports on the tunnel interface (optional)</label>
+            <input type="text" class="form-control font-monospace" name="ufw_ports"
+                   placeholder="e.g. 8123/tcp, 8889/tcp">
+            <div class="form-text">Opened in the host firewall (UFW) on the tunnel interface above.</div>
+          </div>
+
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="enabled" id="ovpn_enabled" checked>
+            <label class="form-check-label" for="ovpn_enabled">Enable tunnel (start now and at boot)</label>
+          </div>
+
+          <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save &amp; apply</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config upload -->
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-upload"></i> Upload tunnel config</div>
+      <div class="card-body">
+        <form method="post" data-exec="true">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="upload">
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Tunnel name</label>
+            <input type="text" class="form-control" name="name"
+                   placeholder="e.g. homeassistant-iot" pattern="[a-zA-Z0-9_-]+" required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Config content (.ovpn / .conf)</label>
+            <textarea class="form-control font-monospace" name="config" rows="10" required
+                      placeholder="Paste the full client config here (must contain remote and dev directives)"></textarea>
+            <div class="form-text">Stored as <code>/etc/openvpn/&lt;name&gt;.conf</code> (0600). Private keys never appear in logs.</div>
+          </div>
+
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="enabled" id="ovpn_upload_enabled" checked>
+            <label class="form-check-label" for="ovpn_upload_enabled">Enable tunnel (start now and at boot)</label>
+          </div>
+
+          <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> Upload &amp; apply</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Show/hide the fetch source fields depending on the selected mode.
+  function toggleOpenvpnFetch() {
+    const mode = document.getElementById('ovpn_mode').value;
+    document.getElementById('ovpn_fetch_fields').classList.toggle('d-none', mode !== 'fetch');
+  }
+
+  // Live status refresh without a full page reload.
+  function refreshOpenvpnStatus() {
+    fetch('{% url "settings_openvpn_status" %}', {credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(resp => {
+        if (!resp.tunnels || !resp.tunnels.length) {
+          return;
+        }
+        const rows = document.getElementById('openvpn_rows');
+        rows.innerHTML = '';
+        resp.tunnels.forEach(t => {
+          const tr = document.createElement('tr');
+          const state = t.active
+            ? '<span class="badge bg-success">active</span>'
+            : '<span class="badge bg-secondary">down</span>';
+          const enabled = t.enabled ? ' <span class="badge bg-info">enabled</span>' : '';
+          tr.innerHTML = '<td><code></code></td><td></td><td></td><td></td><td>' + state + enabled + '</td><td class="text-end text-muted small">reload page for actions</td>';
+          tr.children[0].firstChild.textContent = t.name;
+          tr.children[1].textContent = t.fetch_mode ? 'fetch' : 'upload';
+          tr.children[2].textContent = t.interface || '-';
+          tr.children[3].textContent = t.ip || '-';
+          rows.appendChild(tr);
+        });
+      })
+      .catch(() => {});
+  }
+
+  // Fetch the last journal lines of one tunnel into the log box.
+  function showOpenvpnLog(name) {
+    const box = document.getElementById('openvpn_log');
+    box.classList.remove('d-none');
+    box.textContent = 'Loading log for ' + name + ' ...';
+    fetch('{% url "settings_openvpn_log" %}?name=' + encodeURIComponent(name), {credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(resp => {
+        box.textContent = resp.ok ? resp.log : ('Error: ' + resp.error);
+      })
+      .catch(() => {
+        box.textContent = 'Request failed.';
+      });
+  }
+</script>
+{% endblock %}
