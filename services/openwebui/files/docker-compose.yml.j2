@@ -25,7 +25,11 @@ services:
       - ENABLE_OAUTH_SIGNUP=true
       - ENABLE_OAUTH_ROLE_MAPPING=true
       - ENABLE_API_KEYS=true
-      - OAUTH_MERGE_ACCOUNTS_BY_EMAIL=false
+      # Merge by email: after an LDAP/IdP migration the OIDC sub changes,
+      # so returning users would hit "email already registered". Merging
+      # links the new sub to the existing same-email account on next login.
+      # Safe here: the IdP is our own Authelia+LDAP.
+      - OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true
       # Authelia enforces PKCE (S256): without this OpenWebUI drops the
       # code_challenge (its discovery check) and the token flow fails.
       - OAUTH_CODE_CHALLENGE_METHOD=S256
