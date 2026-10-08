@@ -115,6 +115,7 @@
         mode: '0644'
         content: |
           # ANSIBLE MANAGED BLOCK traefik-proxy {{ item.name }} (WebUI: /settings/reverse-proxy/)
+          # api-backend: {{ item.api | default(false) | bool | lower }}
           http:
             routers:
               proxy-{{ item.name }}:

@@ -74,6 +74,10 @@ def _save_command(request, original):
         parts += ['--insecure', 'true']
     else:
         parts += ['--insecure', 'false']
+    if 'api' in request.POST:
+        parts += ['--api']
+    else:
+        parts += ['--no-api']
     if 'enabled' in request.POST:
         parts += ['--enabled']
     else:

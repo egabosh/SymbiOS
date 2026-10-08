@@ -65,6 +65,7 @@
                             data-target="{{ f.target }}"
                             data-port="{{ f.port }}"
                             data-insecure="{{ f.insecure_skip_verify|default:True|yesno:'on,off' }}"
+                            data-api="{{ f.api|default:False|yesno:'on,off' }}"
                             data-access="{{ f.access|default:'open' }}"
                             onclick="openEditModal(this)" title="Edit">
                             <i class="bi bi-pencil"></i>
@@ -165,6 +166,10 @@
                         <label class="form-check-label" for="f_insecure">Skip backend TLS verification (self-signed certs)</label>
                     </div>
                     <div class="form-check mb-3">
+                        <input type="checkbox" class="form-check-input" name="api" id="f_api">
+                        <label class="form-check-label" for="f_api">API backend (no web UI - monitoring accepts 501/404)</label>
+                    </div>
+                    <div class="form-check mb-3">
                         <input type="checkbox" class="form-check-input" name="enabled" id="f_enabled" checked>
                         <label class="form-check-label" for="f_enabled">Enabled</label>
                     </div>
@@ -198,6 +203,7 @@ function openEditModal(btn) {
     document.getElementById('f_target').value = btn.dataset.target;
     document.getElementById('f_port').value = btn.dataset.port;
     document.getElementById('f_insecure').checked = (btn.dataset.insecure === 'on');
+    document.getElementById('f_api').checked = (btn.dataset.api === 'on');
     document.getElementById('f_access').value = btn.dataset.access;
     new bootstrap.Modal(document.getElementById('forwardModal')).show();
 }
