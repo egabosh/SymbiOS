@@ -390,6 +390,36 @@ function f_ldap_groups_hooks {
   done
 }
 
+# Run all LDAP password hooks from ${g_data_root}/ldap-groups.d/.
+# Called after every successful password set by symbios-ldap-user.sh
+# (create and modify - covers all WebUI password flows and CLI use) so
+# services with their own credential store (e.g. S3 htpasswd) can follow.
+# Hooks receive:
+#   $1 = event (always password-set)
+#   $2 = uid
+#   $3 = path to a 0600 file holding the plaintext password. The caller
+#        shreds it after all hooks ran - never log its content.
+# Existing group-change hooks ignore this event via their $1/$2 guards.
+function f_ldap_password_hooks {
+  local f_hook_uid="$1"
+  local f_hook_pwfile="$2"
+  local f_hook_dir="${g_data_root}/ldap-groups.d"
+  local f_hook_file
+
+  # No hook directory -> nothing to do
+  [[ -d "${f_hook_dir}" ]] || return 0
+
+  for f_hook_file in "${f_hook_dir}"/*.hook
+  do
+    # Skip when the glob did not match anything
+    [[ -e "${f_hook_file}" ]] || continue
+    g_echo_note "Password hook: $(basename "${f_hook_file}") (password-set ${f_hook_uid})"
+    # Errors are logged but never abort the loop or the caller
+    bash "${f_hook_file}" "password-set" "${f_hook_uid}" "${f_hook_pwfile}" \
+      || g_echo_error "Hook failed: ${f_hook_file}"
+  done
+}
+
 # Apply an ext4 project quota to a media dir (best-effort).
 # Usage: f_media_quota <projid> <dir> <limit_gib>  (0 = unlimited, skip)
 # Silent no-op when quota tools are missing or the filesystem is not
