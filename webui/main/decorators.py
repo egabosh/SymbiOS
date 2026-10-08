@@ -21,7 +21,17 @@ management views. Regular ldap-users are rejected - they should use
 service-level access (Nextcloud, Matrix, etc.) instead.
 """
 from django.conf import settings
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
+
+
+def access_denied(request):
+    # Authenticated via Authelia, but not authorized for the WebUI (admin
+    # only). Render a plain 403 page instead of redirecting to the login
+    # page: the login view sends authenticated users back to '/', which
+    # caused an infinite redirect loop (ERR_TOO_MANY_REDIRECTS).
+    username = getattr(getattr(request, 'user', None), 'username', '') or ''
+    return render(request, 'main/access_denied.html', {'username': username},
+                  status=403)
 
 
 def login_required(view_func):
@@ -29,9 +39,7 @@ def login_required(view_func):
         if not getattr(request.user, 'is_authenticated', False):
             return redirect(settings.LOGIN_URL)
         if not getattr(request.user, 'is_staff', False):
-            from django.contrib import messages
-            messages.error(request, 'Access denied. Admin privileges required.')
-            return redirect(settings.LOGIN_URL)
+            return access_denied(request)
         return view_func(request, *args, **kwargs)
     wrapper.__name__ = getattr(view_func, '__name__', 'wrapper')
     return wrapper
