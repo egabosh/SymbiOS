@@ -69,6 +69,70 @@
       notify: localectl
       when: nocontainer.stat.exists == true
 
+    # /etc/default/keyboard above only feeds the console (setupcon) and future
+    # display managers. It never reaches a running X server or desktop
+    # sessions: with no input source configured, Cinnamon falls back to US
+    # (seen live: system reported de, effective X map was US). The two tasks
+    # below close that gap - X server default at every start plus a desktop
+    # default for all users (explicit user settings still win).
+
+    - name: X11 keyboard defaults
+      ansible.builtin.file:
+        path: /etc/X11/xorg.conf.d
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+      when: nocontainer.stat.exists == true
+
+    - name: X11 keyboard defaults file
+      ansible.builtin.copy:
+        dest: /etc/X11/xorg.conf.d/00-keyboard.conf
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          # Managed by SymbiOS (base-services/localization.yml). System-wide X11
+          # keyboard defaults, applied at every X server start.
+          Section "InputClass"
+                  Identifier "symbios keyboard defaults"
+                  MatchIsKeyboard "on"
+                  Option "XkbLayout" "{{ keyboard }}"
+                  Option "XkbVariant" "nodeadkeys"
+          EndSection
+      when: nocontainer.stat.exists == true
+
+    - name: Check for dconf
+      ansible.builtin.shell: command -v dconf
+      register: dconf_bin
+      failed_when: false
+      changed_when: false
+
+    - name: dconf system db dir
+      ansible.builtin.file:
+        path: /etc/dconf/db/local.d
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+      when: nocontainer.stat.exists == true and dconf_bin.rc == 0
+
+    - name: Desktop keyboard default for all users
+      ansible.builtin.copy:
+        dest: /etc/dconf/db/local.d/01-symbios-keyboard
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          # Managed by SymbiOS (base-services/localization.yml). Default input
+          # source for all desktop users; explicit user settings still win.
+          [org/cinnamon/desktop/input-sources]
+          sources=[('xkb', '{{ keyboard }}+nodeadkeys')]
+          [org/gnome/desktop/input-sources]
+          sources=[('xkb', '{{ keyboard }}+nodeadkeys')]
+      notify: dconf update
+      when: nocontainer.stat.exists == true and dconf_bin.rc == 0
+
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/localization.yml"
       changed_when: false
@@ -80,3 +144,6 @@
 
     - name: localectl
       ansible.builtin.shell: localectl set-locale LANG="{{ locale }}"
+
+    - name: dconf update
+      ansible.builtin.command: dconf update
