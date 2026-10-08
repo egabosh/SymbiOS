@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import re
+import json
 import smtplib
 import ssl
 import urllib.request
@@ -24,8 +24,8 @@ from django.shortcuts import render, redirect
 from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
-from .views import _get_inventory_config, _save_inventory_config
-from .utils.ssh_exec import run_playbook
+from .views import _get_inventory_config
+from .utils.ssh_exec import run_playbook, run_command
 from .utils.http import is_ajax_request
 from .setup_status import get_page_badge, PAGE_EXPLAIN
 
@@ -44,96 +44,88 @@ def settings_mailserver(request):
         is_ajax = is_ajax_request(request)
         try:
             if request.POST.get('action') == 'delete':
-                if vars_.get('twofa_enabled'):
-                    msg = 'Cannot delete SMTP configuration while 2-Factor Authentication (2FA) is enabled. Disable 2FA under Settings \u2192 Auth first.'
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': msg}, status=400)
-                    messages.error(request, msg)
-                elif vars_.get('notify_mail_enabled'):
-                    msg = 'Cannot delete SMTP configuration while mail notifications are enabled. Disable them under Settings \u2192 Notifications first.'
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': msg}, status=400)
-                    messages.error(request, msg)
+                # Guards (2FA / notifications need a sender) and the key
+                # deletion live in the settings CLI.
+                set_cmd = 'symbios-settings-mailserver.sh remove'
+                if is_ajax:
+                    from .utils.jobs import create_job
+                    cmd = f'{set_cmd} && symbios-run-playbook.sh base-services/smtp.yml'
+                    job_id = create_job(cmd, timeout=3600)
+                    return JsonResponse({'ok': True, 'job': job_id,
+                                         'title': 'Deleting SMTP config...',
+                                         'message': 'SMTP configuration deleted.',
+                                         'command': cmd})
+                ok, stdout, stderr = run_command(set_cmd, timeout=30)
+                if not ok:
+                    messages.error(request, f'Error: {stderr or stdout}')
+                    return redirect('settings_mailserver')
+                ok, out = run_playbook('base-services/smtp.yml', timeout=180)
+                if ok:
+                    messages.success(request, 'SMTP configuration deleted.')
                 else:
-                    for key in list(vars_):
-                        if key.startswith('smtp_'):
-                            del vars_[key]
-                    _save_inventory_config(config)
-                    if is_ajax:
-                        from .utils.jobs import create_job
-                        cmd = 'symbios-run-playbook.sh base-services/smtp.yml'
-                        job_id = create_job(cmd, timeout=3600)
-                        return JsonResponse({'ok': True, 'job': job_id,
-                                             'title': 'Deleting SMTP config...',
-                                             'message': 'SMTP configuration deleted.',
-                                             'command': cmd})
-                    ok, out = run_playbook('base-services/smtp.yml', timeout=180)
-                    if ok:
-                        messages.success(request, 'SMTP configuration deleted.')
-                    else:
-                        messages.error(request, f'Applied with errors: {out[:500]}')
+                    messages.error(request, f'Applied with errors: {out[:500]}')
                 return redirect('settings_mailserver')
 
-            smtp_server = request.POST.get('smtp_server', '').strip()
-            smtp_port = request.POST.get('smtp_port', '').strip()
-            smtp_user = request.POST.get('smtp_user', '').strip()
-            smtp_password = request.POST.get('smtp_password', '').strip()
+            # Secrets travel via stdin JSON, never as argv (visible in ps).
+            payload = json.dumps({
+                'smtp_server': request.POST.get('smtp_server', '').strip(),
+                'smtp_port': request.POST.get('smtp_port', '').strip(),
+                'smtp_user': request.POST.get('smtp_user', '').strip(),
+                'smtp_password': request.POST.get('smtp_password', '').strip(),
+                'smtp_from': request.POST.get('smtp_from', '').strip(),
+                'smtp_tls': request.POST.get('smtp_tls', '').strip(),
+            })
+            set_cmd = 'symbios-settings-mailserver.sh set --json-stdin'
+
+            # Authoritative validation first (no write): the live SMTP
+            # probe below needs complete, well-formed values for a
+            # meaningful error, and the script owns the rules.
+            ok, stdout, stderr = run_command(
+                f'{set_cmd} --check', timeout=30, stdin_data=payload)
+            if not ok:
+                err = (stderr or stdout or 'Invalid SMTP settings.')
+                if is_ajax:
+                    return JsonResponse({'ok': False, 'error': err}, status=400)
+                messages.error(request, f'{err}')
+                return redirect('settings_mailserver')
+
+            # Live connection probe (stays Python: smtplib, no host access).
+            # % placeholders are expanded here for the probe; the script
+            # expands them again identically for the stored values.
             smtp_from = request.POST.get('smtp_from', '').strip()
-            smtp_tls = request.POST.get('smtp_tls', '').strip()
-
-            missing = []
-            if not smtp_server: missing.append('SMTP Server')
-            if not smtp_port: missing.append('SMTP Port')
-            if not smtp_password: missing.append('Password')
-            if not smtp_from: missing.append('Email Address')
-            if missing:
-                msg = f'Required fields missing: {", ".join(missing)}.'
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg}, status=400)
-                messages.error(request, msg)
-                return redirect('settings_mailserver')
-
-            if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', smtp_from):
-                msg = 'Invalid email address format. Must be like <strong>user@domain.tld</strong>.'
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg}, status=400)
-                messages.error(request, msg)
-                return redirect('settings_mailserver')
-
+            smtp_user = request.POST.get('smtp_user', '').strip()
             smtp_user = smtp_user.replace('%EMAILADDRESS%', smtp_from).replace('%EMAILLOCALPART%', smtp_from.split('@')[0])
-
-            ok, err = _test_smtp(smtp_server, smtp_port, smtp_user, smtp_password, smtp_from, smtp_tls)
+            ok, err = _test_smtp(request.POST.get('smtp_server', '').strip(),
+                                 request.POST.get('smtp_port', '').strip(),
+                                 smtp_user,
+                                 request.POST.get('smtp_password', '').strip(),
+                                 smtp_from,
+                                 request.POST.get('smtp_tls', '').strip())
             if not ok:
                 if is_ajax:
                     return JsonResponse({'ok': False, 'error': err}, status=400)
                 messages.error(request, f'{err}')
                 return redirect('settings_mailserver')
 
-            vars_['smtp_server'] = smtp_server
-            vars_['smtp_port'] = smtp_port
-            vars_['smtp_user'] = smtp_user
-            vars_['smtp_password'] = smtp_password
-            vars_['smtp_from'] = smtp_from
-            vars_['smtp_tls'] = smtp_tls
-            _save_inventory_config(config)
-
             # Build a single chained command for the exec modal:
-            # always run smtp.yml, optionally followed by authelia.yml if 2FA is on
-            smtp_cmd = 'symbios-run-playbook.sh base-services/smtp.yml'
+            # validated set, then smtp.yml, optionally authelia.yml if 2FA.
+            cmd = f'{set_cmd} && symbios-run-playbook.sh base-services/smtp.yml'
             if vars_.get('twofa_enabled'):
-                authelia_cmd = 'symbios-run-playbook.sh base-services/authelia.yml'
-                cmd = smtp_cmd + ' && ' + authelia_cmd
-            else:
-                cmd = smtp_cmd
+                cmd += ' && symbios-run-playbook.sh base-services/authelia.yml'
 
             if is_ajax:
                 from .utils.jobs import create_job
-                job_id = create_job(cmd, timeout=3600)
+                job_id = create_job(cmd, timeout=3600, stdin_data=payload)
                 return JsonResponse({'ok': True, 'job': job_id,
                                      'title': 'Applying mailserver settings...',
                                      'message': 'Mailserver settings saved.',
                                      'command': cmd})
 
+            ok, stdout, stderr = run_command(cmd, timeout=30,
+                                            stdin_data=payload)
+            if not ok:
+                messages.error(request, f'Error: {stderr or stdout}')
+                return redirect('settings_mailserver')
             ok, out = run_playbook('base-services/smtp.yml', timeout=180)
             if ok and vars_.get('twofa_enabled'):
                 ok, out = run_playbook('base-services/authelia.yml', timeout=180)

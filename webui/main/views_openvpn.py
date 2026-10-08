@@ -18,7 +18,7 @@ from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.contrib import messages
 from .decorators import login_required
-from .views import _get_inventory_config, _save_inventory_config
+from .views import _get_inventory_config
 from .utils.http import is_ajax_request
 from .utils.ssh_exec import run_command
 from .setup_status import get_page_badge, PAGE_EXPLAIN
@@ -42,27 +42,6 @@ def _get_clients(vars_):
 
 def _validate_name(name):
     return bool(name) and bool(_NAME_RE.match(name))
-
-
-def _parse_ufw_ports(text):
-    """Parse '8123/tcp, 8889/tcp' into [{port, proto}]."""
-    rules = []
-    for part in (text or '').split(','):
-        part = part.strip()
-        if not part:
-            continue
-        if '/' in part:
-            port, proto = part.split('/', 1)
-        else:
-            port, proto = part, 'tcp'
-        port = port.strip()
-        proto = proto.strip().lower()
-        if not port.isdigit() or int(port) < 1 or int(port) > 65535:
-            raise ValueError(f'Invalid port: {port}')
-        if proto not in ('tcp', 'udp'):
-            raise ValueError(f'Invalid protocol: {proto}')
-        rules.append({'port': int(port), 'proto': proto})
-    return rules
 
 
 def _live_status():
@@ -133,60 +112,25 @@ def settings_openvpn(request):
         try:
             if action == 'save':
                 # Save tunnel metadata (mode, interface, fetch source, ports).
+                # Validation and the inventory write live in the settings CLI.
                 name = request.POST.get('name', '').strip()
-                if not _validate_name(name):
-                    msg = 'Invalid tunnel name (a-z, 0-9, _ and - only).'
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': msg}, status=400)
-                    messages.error(request, msg)
-                    return redirect('settings_openvpn')
                 mode = request.POST.get('mode', 'upload').strip()
-                if mode not in ('upload', 'fetch'):
-                    mode = 'upload'
-                interface = request.POST.get('interface', '').strip() or 'tun0'
-                if not _validate_name(interface):
-                    msg = 'Invalid interface name.'
+                enabled = 'true' if request.POST.get('enabled') is not None else 'false'
+                set_cmd = ('symbios-settings-openvpn.sh save'
+                           f' --name {shlex.quote(name)}'
+                           f' --mode {shlex.quote(mode)}'
+                           f' --interface {shlex.quote(request.POST.get("interface", "").strip())}'
+                           f' --fetch-cmd {shlex.quote(request.POST.get("fetch_cmd", "").strip())}'
+                           f' --cron {shlex.quote(request.POST.get("cron", "").strip())}'
+                           f' --ufw-ports {shlex.quote(request.POST.get("ufw_ports", ""))}'
+                           f' --enabled {enabled}')
+                ok, stdout, stderr = run_command(set_cmd, timeout=30)
+                if not ok:
+                    err = (stderr or stdout or 'Failed to save tunnel.')
                     if is_ajax:
-                        return JsonResponse({'ok': False, 'error': msg}, status=400)
-                    messages.error(request, msg)
+                        return JsonResponse({'ok': False, 'error': err}, status=400)
+                    messages.error(request, f'Error: {err}')
                     return redirect('settings_openvpn')
-                fetch_cmd = request.POST.get('fetch_cmd', '').strip()
-                cron = request.POST.get('cron', '').strip() or '*/5 * * * *'
-                if len(cron.split()) != 5:
-                    msg = 'Refresh schedule must have 5 fields (e.g. */5 * * * *).'
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': msg}, status=400)
-                    messages.error(request, msg)
-                    return redirect('settings_openvpn')
-                if mode == 'fetch' and not fetch_cmd:
-                    msg = 'Fetch mode needs a fetch command.'
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': msg}, status=400)
-                    messages.error(request, msg)
-                    return redirect('settings_openvpn')
-                try:
-                    ufw_allow = _parse_ufw_ports(request.POST.get('ufw_ports', ''))
-                except ValueError as e:
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': str(e)}, status=400)
-                    messages.error(request, str(e))
-                    return redirect('settings_openvpn')
-                enabled = request.POST.get('enabled') is not None
-
-                clients = _get_clients(vars_)
-                entry = clients.get(name, {})
-                entry.update({
-                    'enabled': enabled,
-                    'mode': mode,
-                    'interface': interface,
-                    'fetch_cmd': fetch_cmd,
-                    'cron': cron,
-                    'ufw_allow': ufw_allow,
-                })
-                clients[name] = entry
-                vars_['openvpn_clients'] = clients
-                vars_['openvpn_configured'] = True
-                _save_inventory_config(config)
 
                 cmd = f'symbios-run-playbook.sh {PLAYBOOK}'
                 if is_ajax:
@@ -206,12 +150,6 @@ def settings_openvpn(request):
                 # Upload a tunnel config (arrives via stdin, never on cmdline).
                 name = request.POST.get('name', '').strip()
                 cfg_text = request.POST.get('config', '')
-                if not _validate_name(name):
-                    msg = 'Invalid tunnel name (a-z, 0-9, _ and - only).'
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': msg}, status=400)
-                    messages.error(request, msg)
-                    return redirect('settings_openvpn')
                 if not cfg_text or 'remote' not in cfg_text or 'dev' not in cfg_text:
                     msg = 'Invalid config: remote and dev directives required.'
                     if is_ajax:
@@ -229,20 +167,24 @@ def settings_openvpn(request):
                             interface = candidate
                         break
 
-                clients = _get_clients(vars_)
-                entry = clients.get(name, {})
-                entry.update({
-                    'enabled': enabled,
-                    'mode': 'upload',
-                    'interface': entry.get('interface', interface),
-                })
-                entry.setdefault('cron', '*/5 * * * *')
-                entry.setdefault('fetch_cmd', '')
-                entry.setdefault('ufw_allow', [])
-                clients[name] = entry
-                vars_['openvpn_clients'] = clients
-                vars_['openvpn_configured'] = True
-                _save_inventory_config(config)
+                # Metadata via the settings CLI (name validation included);
+                # the config text itself goes to the writer via stdin.
+                # An already stored interface wins over the derived one
+                # (same as before: only new tunnels take the derived value).
+                stored_iface = _get_clients(vars_).get(name, {}).get('interface', '')
+                meta_cmd = ('symbios-settings-openvpn.sh save'
+                            f' --name {shlex.quote(name)}'
+                            ' --mode upload'
+                            f' --enabled {"true" if enabled else "false"}')
+                if not stored_iface:
+                    meta_cmd += f' --interface {shlex.quote(interface)}'
+                ok, stdout, stderr = run_command(meta_cmd, timeout=30)
+                if not ok:
+                    err = (stderr or stdout or 'Failed to save tunnel.')
+                    if is_ajax:
+                        return JsonResponse({'ok': False, 'error': err}, status=400)
+                    messages.error(request, f'Error: {err}')
+                    return redirect('settings_openvpn')
 
                 cmd = f'{WRITE_SCRIPT} {shlex.quote(name)} && symbios-run-playbook.sh {PLAYBOOK}'
                 if is_ajax:
@@ -277,11 +219,20 @@ def settings_openvpn(request):
                     messages.error(request, msg)
                     return redirect('settings_openvpn')
                 if op in ('enable', 'disable'):
-                    clients = _get_clients(vars_)
-                    if name in clients:
-                        clients[name]['enabled'] = (op == 'enable')
-                        vars_['openvpn_clients'] = clients
-                        _save_inventory_config(config)
+                    # Inventory flag via the settings CLI - only for known
+                    # tunnels (same as before); the daemon control below
+                    # runs regardless.
+                    if name in _get_clients(vars_):
+                        flag_cmd = ('symbios-settings-openvpn.sh save'
+                                    f' --name {shlex.quote(name)}'
+                                    ' --enabled {}'.format('true' if op == 'enable' else 'false'))
+                        ok, stdout, stderr = run_command(flag_cmd, timeout=30)
+                        if not ok:
+                            err = (stderr or stdout or 'Failed to update tunnel.')
+                            if is_ajax:
+                                return JsonResponse({'ok': False, 'error': err}, status=400)
+                            messages.error(request, f'Error: {err}')
+                            return redirect('settings_openvpn')
                 cmd = f'{SCRIPT} {op} {shlex.quote(name)}'
                 if is_ajax:
                     from .utils.jobs import create_job
@@ -299,16 +250,17 @@ def settings_openvpn(request):
 
             elif action == 'delete':
                 name = request.POST.get('name', '').strip()
-                if not _validate_name(name):
-                    msg = 'Invalid tunnel name.'
+                # Inventory entry via the settings CLI (name validation
+                # included); the host-side tunnel is removed right after.
+                meta_cmd = ('symbios-settings-openvpn.sh remove'
+                            f' --name {shlex.quote(name)}')
+                ok, stdout, stderr = run_command(meta_cmd, timeout=30)
+                if not ok:
+                    err = (stderr or stdout or 'Failed to delete tunnel.')
                     if is_ajax:
-                        return JsonResponse({'ok': False, 'error': msg}, status=400)
-                    messages.error(request, msg)
+                        return JsonResponse({'ok': False, 'error': err}, status=400)
+                    messages.error(request, f'Error: {err}')
                     return redirect('settings_openvpn')
-                clients = _get_clients(vars_)
-                clients.pop(name, None)
-                vars_['openvpn_clients'] = clients
-                _save_inventory_config(config)
                 cmd = f'{SCRIPT} delete {shlex.quote(name)}'
                 if is_ajax:
                     from .utils.jobs import create_job

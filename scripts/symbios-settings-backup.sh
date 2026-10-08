@@ -266,7 +266,7 @@ then
   f_fail_validation "Invalid --host: must be a single line without whitespace"
 fi
 if ! [[ "${f_new_port}" =~ ^[0-9]+$ ]] \
-  || [[ "${f_new_port}" -lt 1 || "${f_new_port}" -gt 65535 ]]
+  || [[ "10#${f_new_port}" -lt 1 || "10#${f_new_port}" -gt 65535 ]]
 then
   f_fail_validation "Invalid --port: ${f_new_port} (expected 1-65535)"
 fi

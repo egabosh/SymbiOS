@@ -98,10 +98,18 @@ symbios-inventory.py --inventory /path/to/inventory.yml get timezone
 
 | Subcommand | Purpose |
 |------------|---------|
-| `get <key>` | Print one `all.vars` value (`true`/`false` for bools); exit 1 when unset |
+| `get <key>` | Print one `all.vars` value (`true`/`false` for bools, one item per line for lists; `--json` for any type as JSON); exit 1 when unset |
 | `set <key> <value>` | Store one **string** value (non-string types: use `merge`) |
-| `merge` | Merge a JSON object from stdin in one transaction; `null` deletes the key; preserves JSON types (bool/number/string) |
+| `merge` | Merge a JSON object from stdin in one transaction; `null` deletes the key; preserves JSON types (bool/number/string, lists and string-keyed dicts of those) |
 | `del <key>` | Delete one key (idempotent, missing keys report `unchanged`) |
+| `dict-get <dict> <key>` | Print one dict entry as JSON; exit 1 when missing |
+| `dict-set <dict> <key>` | Set one dict entry from a JSON value on stdin (creates the dict) |
+| `dict-merge <dict> <key>` | Merge a JSON object from stdin into one dict entry (partial update, creates it) |
+| `dict-del <dict> <key>` | Delete one dict entry (idempotent) |
+| `dict-keys <dict>` | Print dict keys, one per line |
+| `dict-show <dict>` | Print a string-valued dict as `k=v` lines |
+| `list-add <key>` | Append a stdin JSON value to a list unless already present |
+| `list-del <key>` | Remove stdin-JSON-equal entries from a list (idempotent) |
 
 `set`/`merge`/`del` accept `--check` (dry run). Key names must match
 `^[A-Za-z_][A-Za-z0-9_]*$` (exit 2 otherwise). Exit codes: 0 ok/unchanged,
@@ -230,6 +238,88 @@ gen-passphrase|get-passphrase` - the passphrase is NOT an inventory var),
 restore and manual runs stay with their dedicated scripts and thin
 endpoints.
 
+### 3.12 `symbios-settings-dns.sh`
+
+deSEC DynDNS or self-managed domain (the host becomes `base_domain`).
+Live deSEC API probes (availability, API-key test, registration, captcha,
+host status) stay Python in the container.
+
+```bash
+symbios-settings-dns.sh get [--json]
+echo '{"ddns_host":"myhost","ddns_apikey":"token..","ddns_ipv6":""}' | symbios-settings-dns.sh set --mode desec --json-stdin [--check]
+symbios-settings-dns.sh set --mode self-managed --domain example.com [--check]
+symbios-settings-dns.sh remove [--check]
+```
+
+Host normalization (lowercase, `.dedyn.io` suffix) and FQDN validation
+live here; `ddns_apikey` only via `--json-stdin`.
+
+### 3.13 `symbios-settings-security.sh`
+
+Password policy (`none|low|medium|high|paranoid`) and WebUI public-access
+flag (real boolean). Each field optional (two forms share the page);
+whether traefik is reapplied after a public-access flip is decided by the
+caller from old vs new values.
+
+```bash
+symbios-settings-security.sh set --policy high --public-access true [--check]
+```
+
+### 3.14 `symbios-settings-media.sh`
+
+The 8 standard media paths (all required, all absolute). Flags mirror the
+keys (`--media-root`, `--audio`, `--images`, `--videos`, `--books`,
+`--documents`, `--inbox`, `--shared`); omitted options keep their values.
+Values are stored with `printf -v`/indirect expansion, never `eval`
+(form values may hold quotes or `$()`).
+
+### 3.15 `symbios-settings-mailserver.sh`
+
+SMTP relay (server/port/user/password/sender/TLS). Password only via
+`--json-stdin`; `%EMAILADDRESS%`/`%EMAILLOCALPART%` expansion lives here.
+The view runs `set --check` first, then its live smtplib probe, then the
+real set. `remove` refuses while 2FA or mail notifications are enabled.
+
+### 3.16 `symbios-settings-matrix.sh` / `symbios-settings-notifications.sh`
+
+Matrix sender account (homeserver defaults to `https://`, full-ID and
+room validation, secrets via stdin, empty secret deletes its key) and the
+notification toggles (mail needs SMTP, matrix needs a complete account -
+preconditions live in the scripts). Homeserver reachability and test
+delivery stay Python probes.
+
+### 3.17 `symbios-settings-openvpn.sh`
+
+Tunnel metadata dict (`openvpn_clients`) via `dict-merge` (only given
+fields update, stored fields are kept - so enable/disable is
+`save --name N --enabled ...`), plus the `openvpn_configured` flag.
+Cron (5 fields), ufw port list and fetch-mode rules are validated here.
+Config upload, tunnel control and applying stay with
+`symbios-write-openvpn-config.sh` / `symbios-openvpn-client.sh` /
+`base-services/openvpn-client.yml`.
+
+### 3.18 `symbios-settings-network-bridges.sh` / `symbios-settings-wlan-ap.sh`
+
+Bridge assignments (whole-dict replace from stdin JSON; names must match
+the assign script's `[A-Za-z0-9_.@-]` charset since they reach
+`ip link set`) and WLAN AP settings (passphrase via stdin, 8+ chars,
+country uppercased to 2 letters). Discovery scans and playbooks stay
+where they are.
+
+### 3.19 `symbios-settings-port-forwarding.sh`
+
+Port-forwarding inventory state (router control stays with
+`symbios-router-upnp.sh`): `set --method auto|manual|""` (manual marks
+both configured flags done), `set --configured/--static-ip-configured`,
+and `ufw-add/ufw-remove --port --proto` (canonicalized entries via
+`list-add`/`list-del`; leading-zero ports compare decimally with `10#`).
+
+### 3.20 `symbios-settings-filemanager.sh` / `symbios-settings-setup.sh`
+
+Companion CLIs for non-`/settings/` endpoints that still own inventory
+state: file manager custom scripts (validated name/command list) and the
+setup wizard connection type (`home|root|airgapped`).
+
 ---
 
 ## 4. Script catalog
@@ -238,6 +328,30 @@ One line per script: purpose + arguments. Details always via
 `<script> --help` on the host (new settings scripts and recent helpers
 comply with the `--help` rule; older scripts predate it and gain usage
 texts opportunistically).
+
+### 4.0 Settings CLI scripts (full reference in section 3)
+
+| Script | WebUI page |
+|--------|------------|
+| `symbios-inventory.py` | (shared writer, no page) |
+| `symbios-settings-localization.sh` | `/settings/localization/` |
+| `symbios-settings-ai.sh`, `-ai-speech.sh`, `-ai-image.sh`, `-ai-search.sh` | `/settings/ai*/` |
+| `symbios-settings-auth.sh` | `/settings/auth/` |
+| `symbios-settings-acme.sh` | `/settings/acme/` |
+| `symbios-settings-ssh-keys.sh` | `/settings/ssh-keys/` |
+| `symbios-settings-backup.sh` | `/settings/backup/` |
+| `symbios-settings-dns.sh` | `/settings/dns/` |
+| `symbios-settings-security.sh` | `/settings/security/` |
+| `symbios-settings-media.sh` | `/settings/media/` |
+| `symbios-settings-mailserver.sh` | `/settings/mailserver/` |
+| `symbios-settings-matrix.sh` | `/settings/matrix/` |
+| `symbios-settings-notifications.sh` | `/settings/notifications/` |
+| `symbios-settings-openvpn.sh` | `/settings/openvpn/` |
+| `symbios-settings-network-bridges.sh` | `/settings/network-bridges/` |
+| `symbios-settings-wlan-ap.sh` | `/settings/wlan-accesspoint/` |
+| `symbios-settings-port-forwarding.sh` | `/settings/port-forwarding/` |
+| `symbios-settings-filemanager.sh` | `/filemanager/api/` (save-scripts) |
+| `symbios-settings-setup.sh` | `/setup/` (network type) |
 
 ### 4.1 Execution, jobs, playbooks, state
 

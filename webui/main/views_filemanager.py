@@ -34,7 +34,7 @@ from django.shortcuts import render
 from .decorators import login_required
 from .utils.jobs import create_job
 from .utils.ssh_exec import run_command, run_command_bytes_stream
-from .views import _get_inventory_config, _save_inventory_config
+from .views import _get_inventory_config
 
 # Host-side operation script (in scripts/ which is on the host PATH).
 _FM = 'symbios-file-manager.sh'
@@ -377,32 +377,23 @@ def filemanager_api(request):
             if not isinstance(raw, list):
                 return JsonResponse({'ok': False, 'error': 'Scripts must be a list.'},
                                     status=400)
-            cleaned = []
-            for item in raw:
-                if not isinstance(item, dict):
-                    continue
-                name = str(item.get('name') or '').strip()
-                command = str(item.get('command') or '').strip()
-                if not name or not command or '\n' in name:
-                    continue
-                if not name.replace('-', '').replace('_', '').replace(' ', '').replace('.', '').isalnum():
-                    return JsonResponse({'ok': False, 'error': 'Invalid script name: ' + name},
-                                        status=400)
-                if len(command) > 4000:
-                    return JsonResponse({'ok': False, 'error': 'Command too long (max 4000 chars).'},
-                                        status=413)
-                cleaned.append({'name': name, 'command': command})
+            # Validation and the inventory write live in the settings CLI
+            # (single source of truth); the payload is already JSON.
+            # The stored list is read back so dropped items never echo
+            # back as saved.
+            ok, stdout, stderr = run_command(
+                'symbios-settings-filemanager.sh set --json-stdin',
+                timeout=30, stdin_data=json.dumps(raw))
+            if not ok:
+                return JsonResponse({'ok': False,
+                                     'error': (stderr or stdout or 'Failed to save scripts.')},
+                                    status=400)
+            ok, stored, _ = run_command(
+                'symbios-settings-filemanager.sh get --json', timeout=30)
             try:
-                config = _get_inventory_config()
-                config.setdefault('all', {}).setdefault('vars', {})
-                if cleaned:
-                    config['all']['vars']['file_manager_scripts'] = cleaned
-                else:
-                    config['all']['vars'].pop('file_manager_scripts', None)
-                _save_inventory_config(config)
-            except Exception as e:
-                return JsonResponse({'ok': False, 'error': 'Failed to save scripts: {}'.format(e)},
-                                    status=500)
+                cleaned = json.loads(stored) if ok and stored else []
+            except Exception:
+                cleaned = []
             return JsonResponse({'ok': True, 'scripts': cleaned})
 
         return JsonResponse({'ok': False, 'error': 'Unknown action: ' + action}, status=400)

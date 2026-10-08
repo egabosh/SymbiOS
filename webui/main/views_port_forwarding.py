@@ -61,36 +61,30 @@ def _run_upnp(args, timeout=15):
 
 
 def _add_ufw_extra_inbound(ext_port, protocol):
-    """Record an IPv6 port forward in inventory so a reapply re-opens UFW."""
+    """Record an IPv6 port forward in inventory so a reapply re-opens UFW.
+
+    Best-effort (same as before): failures never propagate to the caller.
+    """
     try:
-        port = int(ext_port)
-    except (TypeError, ValueError):
-        return
-    proto = protocol.lower()
-    if proto not in ('tcp', 'udp'):
-        return
-    from .views import _get_inventory_config, _save_inventory_config
-    config = _get_inventory_config()
-    vars_ = config.setdefault('all', {}).setdefault('vars', {})
-    entries = vars_.setdefault('ufw_extra_inbound', [])
-    entry = {'port': port, 'proto': proto}
-    if entry not in entries:
-        entries.append(entry)
-        _save_inventory_config(config)
+        run_command(
+            'symbios-settings-port-forwarding.sh ufw-add'
+            f' --port {shlex.quote(str(ext_port))}'
+            f' --proto {shlex.quote(str(protocol))}',
+            timeout=30)
+    except Exception:
+        pass
 
 
 def _remove_ufw_extra_inbound(ext_port, protocol):
-    """Remove a recorded IPv6 port forward from inventory."""
-    from .views import _get_inventory_config, _save_inventory_config
-    config = _get_inventory_config()
-    vars_ = config.setdefault('all', {}).setdefault('vars', {})
-    entries = vars_.get('ufw_extra_inbound', [])
-    kept = [e for e in entries
-            if str(e.get('port', '')) != str(ext_port)
-            or str(e.get('proto', '')).lower() != protocol.lower()]
-    if len(kept) != len(entries):
-        vars_['ufw_extra_inbound'] = kept
-        _save_inventory_config(config)
+    """Remove a recorded IPv6 port forward from inventory (best-effort)."""
+    try:
+        run_command(
+            'symbios-settings-port-forwarding.sh ufw-remove'
+            f' --port {shlex.quote(str(ext_port))}'
+            f' --proto {shlex.quote(str(protocol))}',
+            timeout=30)
+    except Exception:
+        pass
 
 
 def _get_local_ip():
@@ -175,7 +169,7 @@ def _get_static_ip_status(local_ip, router_info=None):
 @login_required
 def settings_port_forwarding(request):
     """Main port forwarding settings page with router detection."""
-    from .views import _get_inventory_config, _save_inventory_config
+    from .views import _get_inventory_config
     config = _get_inventory_config()
     vars_ = (config.get('all', {}).get('vars', {}) if isinstance(config, dict) else {})
 
@@ -195,23 +189,22 @@ def settings_port_forwarding(request):
             if action == 'choose-method':
                 # Remember whether the user wants automatic or manual forwards
                 # so the page skips the (slow) router introspection in manual
-                # mode and restores the chosen view on every visit.
+                # mode and restores the chosen view on every visit. The
+                # configured-flag mapping (manual: done, else: rediscover)
+                # lives in the settings CLI.
                 method = request.POST.get('method', '').strip()
                 if method in ('auto', 'manual', ''):
-                    vars_['port_forwarding_method'] = method
-                    if method == 'manual':
-                        # The user takes care of the forwarding rules and the
-                        # fixed IP in the router themselves. Trust that without
-                        # probing the router, and consider the ports + static
-                        # IPv4 step done so the setup assistant completes.
-                        vars_['port_forwarding_configured'] = True
-                        vars_['port_forwarding_static_ip_configured'] = True
-                    else:
-                        # Back to automatic mode: the real router state decides
-                        # again (ports discovered on the next page render).
-                        vars_['port_forwarding_configured'] = False
-                        vars_['port_forwarding_static_ip_configured'] = False
-                    _save_inventory_config(config)
+                    ok, stdout, stderr = run_command(
+                        'symbios-settings-port-forwarding.sh set'
+                        f' --method {shlex.quote(method)}',
+                        timeout=30)
+                    if not ok:
+                        err = (stderr or stdout or 'Failed to save method.')
+                        if is_ajax:
+                            return JsonResponse({'ok': False, 'error': err},
+                                                status=400)
+                        messages.error(request, f'Error: {err}')
+                        return redirect('settings_port_forwarding')
                 if is_ajax:
                     resp = {'ok': True}
                     if 'setup' in request.GET and method == 'manual':
@@ -316,8 +309,10 @@ def settings_port_forwarding(request):
                     if result.get('ok'):
                         # Persist that the static IPv4 step is settled so the
                         # setup assistant and the page badge reflect it.
-                        vars_['port_forwarding_static_ip_configured'] = True
-                        _save_inventory_config(config)
+                        run_command(
+                            'symbios-settings-port-forwarding.sh set'
+                            ' --static-ip-configured true',
+                            timeout=30)
                         messages.success(request, result.get('message', 'Static IP secured.'))
                     else:
                         messages.error(request, result.get('error', 'Failed to secure static IP.'))
@@ -515,9 +510,10 @@ def settings_port_forwarding(request):
             status_by_port = {p['port']: p['open'] for p in port_status}
             configured = bool(status_by_port.get(80) and status_by_port.get(443))
             if bool(vars_.get('port_forwarding_configured')) != configured:
-                from .views import _save_inventory_config
-                vars_['port_forwarding_configured'] = configured
-                _save_inventory_config(config)
+                run_command(
+                    'symbios-settings-port-forwarding.sh set --configured {}'.format(
+                        'true' if configured else 'false'),
+                    timeout=30)
 
     # Whether the WebUI can actually change rules on the router: it must be
     # reachable, and either a login is stored (FRITZ!Box) or the router needs
