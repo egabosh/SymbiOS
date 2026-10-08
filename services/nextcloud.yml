@@ -837,6 +837,12 @@
         dest: /etc/cron.d/symbios-nextcloud-sync
         state: absent
 
+    - name: Reconcile Nextcloud admins on every apply (heals drift the hook never saw)
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-nextcloud-admin-sync.sh 2>&1"
+      register: nextcloud_admin_sync
+      changed_when: "'Promoting' in nextcloud_admin_sync.stdout or 'Demoting' in nextcloud_admin_sync.stdout"
+      failed_when: false
+
     # Deploy the shared autoupdate script (services/tasks/autoupdate.yml)
     - name: Deploy autoupdate script
       include_tasks: tasks/autoupdate.yml
