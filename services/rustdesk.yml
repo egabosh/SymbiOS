@@ -16,7 +16,34 @@
 # docs:
 #   name: RustDesk
 #   short_description: Deploy the RustDesk remote desktop server
-#   description: Deploys RustDesk server (hbbs/hbbr) for self-hosted remote desktop connections. Uses raw TCP/UDP ports, no Traefik.
+#   description: |
+#     Deploys RustDesk server (hbbs/hbbr) for self-hosted remote desktop connections. Uses raw TCP/UDP ports, no Traefik.
+#     Key verification is enforced: only clients configured with the server public key can use it (no open access).
+#
+#     Router port forwarding (required, to the SymbiOS host):
+#       - TCP 21115-21119 (hbbs: 21115 NAT test, 21116 ID registration, 21118 web client; hbbr: 21117 relay, 21119 web client)
+#       - UDP 21116 (hbbs ID registration and heartbeat)
+#     The playbook opens these ports in UFW on the host automatically. On the internet router the forwards are
+#     created automatically when port_forwarding_method is set to auto (UPnP/FRITZ!Box, see Settings -> Port Forwarding);
+#     otherwise create them manually.
+#
+#     Client setup (desktop client: click the three dots next to the ID, then Network; mobile client: Settings -> ID/Relay server).
+#     Enter the values below on BOTH sides (controller and remote machine), then confirm with OK - the client status should change to Ready.
+#     The WebUI renders the values below with your configured domain:
+#       - ID server: rustdesk.{{ base_domain }} (hostname only, no port - port 21116 is the default).
+#         This is "rustdesk." plus the base_domain from the SymbiOS settings (inventory.yml). It must resolve publicly
+#         (check with "nslookup rustdesk.{{ base_domain }}"); DynDNS/deSEC keeps it updated.
+#       - Relay server: same hostname as the ID server (port 21117 is the default). You may leave it empty - the client then falls back
+#         to the ID server - but filling it explicitly is recommended. The container announces exactly this host
+#         via "hbbs -r rustdesk.{{ base_domain }}:21117".
+#       - API server: leave empty. This field belongs to RustDesk Server Pro (address book/device management); this playbook installs
+#         only the open-source hbbs/hbbr, which has no API server.
+#       - Key: required. Paste the server public key here (same value on every client).
+#         Where to get it: click "Show key" in the Output / Actions section below and copy the single-line output
+#         (or run "cat /symbios/services/rustdesk/data/id_ed25519.pub" via SSH on the host).
+#         Clients without the correct key are rejected (key mismatch):
+#         only key holders can use this server, and their connections are encrypted. Both server
+#         containers share the same key file, so hbbs and hbbr always match.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -46,6 +73,7 @@
 #     stop: docker compose -f /symbios/services/rustdesk/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/rustdesk/docker-compose.yml restart
 #     reload: docker compose -f /symbios/services/rustdesk/docker-compose.yml up -d
+#     show_key: cat /symbios/services/rustdesk/data/id_ed25519.pub
 #
 ---
 - name: rustdesk setup
@@ -55,6 +83,11 @@
     service_name: rustdesk
     service_domain: "{{ service_name }}.{{ base_domain }}"
     this_arch: "{{ '-arm64v8' if ansible_architecture == 'aarch64' }}"
+    router_forwards:
+      - ports: [21115, 21116, 21117, 21118, 21119]
+        proto: TCP
+      - ports: [21116]
+        proto: UDP
 
   tasks:
 
@@ -69,6 +102,9 @@
         rule: allow
         port: '21116'
         proto: udp
+
+    - name: Router port forwarding (UPnP/FRITZ!Box)
+      include_tasks: tasks/router-forward.yml
 
     - name: /symbios/services/{{ service_name }}/docker-compose.yml Container Configuration
       blockinfile:
@@ -91,7 +127,7 @@
                 - 21116:21116/udp
                 - 21118:21118
               image: rustdesk/rustdesk-server:latest{{this_arch}}
-              command: hbbs -r {{ service_domain }}:21117 -k _
+              command: hbbs -r {{ service_domain }}:21117
               volumes:
                 - ./data:/root
               networks:
@@ -106,7 +142,7 @@
                 - 21117:21117
                 - 21119:21119
               image: rustdesk/rustdesk-server:latest{{this_arch}}
-              command: hbbr -k _
+              command: hbbr
               volumes:
                 - ./data:/root
               networks:
