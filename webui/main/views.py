@@ -101,7 +101,13 @@ def login_view(request):
     Only the admin user can log in here, so the form only asks for the password.
     """
     if getattr(request.user, 'is_authenticated', False):
-        return redirect('/')
+        # Staff (admin) sessions continue to the dashboard. Non-staff users
+        # authenticated via Authelia would loop between '/' and '/login/'
+        # forever, so they get the 403 page instead.
+        if getattr(request.user, 'is_staff', False):
+            return redirect('/')
+        from .decorators import access_denied
+        return access_denied(request)
     if request.method == 'POST':
         password = request.POST.get('password', '')
         result = _ldap_admin_bind(password)
