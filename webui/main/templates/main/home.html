@@ -159,7 +159,13 @@
             <div class="progress-bar bg-success" role="progressbar" style="width:{{ host_stats.mem_percent }}%"></div>
           </div>
           {% if host_stats.swap_total_mb > 0 %}
-          <div class="small text-muted">swap {{ host_stats.swap_used_mb }} / {{ host_stats.swap_total_mb }} MB</div>
+          <div class="d-flex justify-content-between align-items-center mb-1 mt-2">
+            <span class="small text-muted">Swap</span>
+            <span class="fw-semibold small">{{ host_stats.swap_percent }}% ({{ host_stats.swap_used_mb }} / {{ host_stats.swap_total_mb }} MB)</span>
+          </div>
+          <div class="progress mb-1" style="height:5px">
+            <div class="progress-bar {% if host_stats.swap_percent >= 80 %}bg-danger{% elif host_stats.swap_percent >= 60 %}bg-warning{% else %}bg-success{% endif %}" role="progressbar" style="width:{{ host_stats.swap_percent }}%"></div>
+          </div>
           {% endif %}
         </div>
       </div>
@@ -323,7 +329,10 @@
       + '<span class="fw-semibold">' + dashInt(s.mem_percent) + '% (' + dashInt(s.mem_used_mb) + ' / ' + dashInt(s.mem_total_mb) + ' MB)</span></div>';
     memInner += dashBar(s.mem_percent);
     if (Number(s.swap_total_mb) > 0) {
-      memInner += '<div class="small text-muted">swap ' + dashInt(s.swap_used_mb) + ' / ' + dashInt(s.swap_total_mb) + ' MB</div>';
+      memInner += '<div class="d-flex justify-content-between align-items-center mb-1 mt-2">'
+        + '<span class="small text-muted">Swap</span>'
+        + '<span class="fw-semibold small">' + dashInt(s.swap_percent) + '% (' + dashInt(s.swap_used_mb) + ' / ' + dashInt(s.swap_total_mb) + ' MB)</span></div>';
+      memInner += dashBar(s.swap_percent);
     }
     let ioInner = '<div class="d-flex justify-content-between align-items-center mb-1">'
       + '<span class="small text-muted">Disk I/O</span>'
