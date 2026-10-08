@@ -18,7 +18,7 @@ from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.contrib import messages
 from .decorators import login_required
-from .views import _get_inventory_config, _save_inventory_config
+from .views import _get_inventory_config
 from .utils.http import is_ajax_request
 from .utils.ssh_exec import run_command
 from .setup_status import PAGE_EXPLAIN
@@ -77,16 +77,27 @@ def settings_network_bridges(request):
         try:
             # The form sends one select per visible interface named
             # bridge_<iface>; an empty value means "no assignment".
+            # Validation and the inventory write live in the settings CLI.
+            # Empty values are dropped here (same as before): the assign
+            # script rejects them, and the settings script drops them too.
             assignments = {}
             for iface in data['interfaces']:
                 bridge = request.POST.get('bridge_' + iface, '').strip()
                 if bridge:
                     assignments[iface] = bridge
+            payload = json.dumps(assignments)
+            set_cmd = 'symbios-settings-network-bridges.sh set --json-stdin'
+            ok, stdout, stderr = run_command(set_cmd, timeout=30,
+                                            stdin_data=payload)
+            if not ok:
+                err = (stderr or stdout or 'Failed to save assignments.')
+                if is_ajax:
+                    return JsonResponse({'ok': False, 'error': err},
+                                        status=400)
+                messages.error(request, f'Error: {err}')
+                return redirect('settings_network_bridges')
 
-            vars_['bridge_assignments'] = assignments
-            _save_inventory_config(config)
-
-            bridge_json = json.dumps(assignments)
+            bridge_json = payload
             cmd = 'symbios-run-playbook.sh {} && {}'.format(
                 _PLAYBOOK, _ASSIGN_SCRIPT)
 

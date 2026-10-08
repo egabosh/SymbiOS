@@ -15,7 +15,6 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import yaml
-import os
 import json
 import shlex
 from django.shortcuts import render, redirect
@@ -32,27 +31,13 @@ def _get_inventory_config():
         return {}
 
 
-def _safe_write(path, data):
-    tmp = path + '.tmp'
-    with open(tmp, 'w') as f:
-        f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
-
-
-def _save_inventory_config(config):
-    # Keep a backup of the last good version
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH) as f:
-                bak = CONFIG_PATH + '.bak'
-                with open(bak, 'w') as b:
-                    b.write(f.read())
-        except Exception:
-            pass
-    dumped = yaml.dump(config, default_flow_style=False, allow_unicode=True)
-    _safe_write(CONFIG_PATH, dumped)
+# NOTE: inventory.yml is never written from the WebUI anymore. All writes
+# go through scripts/symbios-inventory.py on the host (called via
+# run_command), which provides the same guarantees the removed
+# _save_inventory_config/_safe_write pair used to provide here (atomic tmp
+# file + fsync + os.replace, .bak of the last good version). /config stays
+# a read-only source for views (plus SSH keys and state, see symbios-exec
+# rules in AGENTS.md).
 
 
 def _get_ldap_groups():
@@ -151,17 +136,27 @@ def setup(request):
     if request.method == 'POST':
         from .utils.http import is_ajax_request
         from django.http import JsonResponse
+        from .utils.ssh_exec import run_command
+        import shlex
         is_ajax = is_ajax_request(request)
         network_type = request.POST.get('network_type', '').strip()
-        if network_type in ('home', 'root', 'airgapped'):
-            vars_['network_type'] = network_type
-            _save_inventory_config(config)
+        # Validation and the write live in the settings CLI.
+        ok, stdout, stderr = run_command(
+            'symbios-settings-setup.sh set'
+            f' --network-type {shlex.quote(network_type)}',
+            timeout=30)
+        if ok:
+            # Refresh the local copy: the steps below render from it.
+            config = _get_inventory_config()
+            vars_ = config.get('all', {}).get('vars', {})
             if is_ajax:
                 return JsonResponse({'ok': True})
             messages.success(request, 'Server connection type saved.')
             return redirect('setup')
         if is_ajax:
-            return JsonResponse({'ok': False, 'error': 'Invalid network type'}, status=400)
+            return JsonResponse(
+                {'ok': False, 'error': (stderr or stdout or 'Invalid network type')},
+                status=400)
 
     ldap_users = _get_ldap_users()
     steps = setup_steps(vars_, ldap_users=ldap_users)

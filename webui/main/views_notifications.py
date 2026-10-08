@@ -15,14 +15,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import json
-import re
 import shlex
 import urllib.request
 from django.shortcuts import render, redirect
 from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
-from .views import _get_inventory_config, _save_inventory_config
+from .views import _get_inventory_config
 from .utils.ssh_exec import run_command
 from .utils.http import is_ajax_request
 from .setup_status import get_page_badge, PAGE_EXPLAIN
@@ -55,57 +54,47 @@ def settings_matrix(request):
         is_ajax = is_ajax_request(request)
         try:
             if request.POST.get('action') == 'delete':
-                for key in ('matrix_homeserver', 'matrix_user', 'matrix_password',
-                            'matrix_token', 'matrix_room', 'notify_matrix_enabled'):
-                    vars_.pop(key, None)
-                _save_inventory_config(config)
+                # The key deletion lives in the settings CLI.
+                set_cmd = 'symbios-settings-matrix.sh remove'
                 if is_ajax:
                     from .utils.jobs import create_job
-                    cmd = 'symbios-run-playbook.sh base-services/matrix-client.yml'
+                    cmd = f'{set_cmd} && symbios-run-playbook.sh base-services/matrix-client.yml'
                     job_id = create_job(cmd, timeout=3600)
                     return JsonResponse({'ok': True, 'job': job_id,
                                          'title': 'Deleting matrix account...',
                                          'message': 'Matrix account deleted.',
                                          'command': cmd})
+                ok, stdout, stderr = run_command(set_cmd, timeout=30)
+                if not ok:
+                    messages.error(request, f'Error: {stderr or stdout}')
+                return redirect('settings_matrix')
+
+            # Secrets travel via stdin JSON, never as argv (visible in ps).
+            # Homeserver normalization and ID/room validation live in the
+            # script; the live reachability probe below stays Python.
+            payload = json.dumps({
+                'matrix_homeserver': request.POST.get('matrix_homeserver', '').strip(),
+                'matrix_user': request.POST.get('matrix_user', '').strip(),
+                'matrix_password': request.POST.get('matrix_password', '').strip(),
+                'matrix_token': request.POST.get('matrix_token', '').strip(),
+                'matrix_room': request.POST.get('matrix_room', '').strip(),
+            })
+            set_cmd = 'symbios-settings-matrix.sh set --json-stdin'
+
+            # Authoritative validation first (no write): the probe needs a
+            # well-formed URL for a meaningful error.
+            ok, stdout, stderr = run_command(
+                f'{set_cmd} --check', timeout=30, stdin_data=payload)
+            if not ok:
+                err = (stderr or stdout or 'Invalid matrix account.')
+                if is_ajax:
+                    return JsonResponse({'ok': False, 'error': err}, status=400)
+                messages.error(request, err)
                 return redirect('settings_matrix')
 
             homeserver = request.POST.get('matrix_homeserver', '').strip().rstrip('/')
-            user = request.POST.get('matrix_user', '').strip()
-            password = request.POST.get('matrix_password', '').strip()
-            token = request.POST.get('matrix_token', '').strip()
-            room = request.POST.get('matrix_room', '').strip()
-
-            missing = []
-            if not homeserver:
-                missing.append('Homeserver URL')
-            if not user:
-                missing.append('User ID')
-            if not room:
-                missing.append('Room')
-            if not password and not token:
-                missing.append('Password or access token')
-            if missing:
-                msg = f'Required fields missing: {", ".join(missing)}.'
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg}, status=400)
-                messages.error(request, msg)
-                return redirect('settings_matrix')
-
             if not homeserver.startswith(('http://', 'https://')):
                 homeserver = 'https://' + homeserver
-            if not re.match(r'^@[^:@\s]+:[^:\s]+$', user):
-                msg = 'User ID must be a full matrix ID like <strong>@sender:example.org</strong>.'
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg}, status=400)
-                messages.error(request, msg)
-                return redirect('settings_matrix')
-            if not (room.startswith('#') or room.startswith('!')):
-                msg = 'Room must be a room alias (starting with <strong>#</strong>) or a room ID (starting with <strong>!</strong>).'
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg}, status=400)
-                messages.error(request, msg)
-                return redirect('settings_matrix')
-
             ok, err = _probe_homeserver(homeserver)
             if not ok:
                 if is_ajax:
@@ -113,27 +102,21 @@ def settings_matrix(request):
                 messages.error(request, err)
                 return redirect('settings_matrix')
 
-            vars_['matrix_homeserver'] = homeserver
-            vars_['matrix_user'] = user
-            vars_['matrix_room'] = room
-            if password:
-                vars_['matrix_password'] = password
-            else:
-                vars_.pop('matrix_password', None)
-            if token:
-                vars_['matrix_token'] = token
-            else:
-                vars_.pop('matrix_token', None)
-            _save_inventory_config(config)
-
-            cmd = 'symbios-run-playbook.sh base-services/matrix-client.yml'
+            cmd = f'{set_cmd} && symbios-run-playbook.sh base-services/matrix-client.yml'
             if is_ajax:
                 from .utils.jobs import create_job
-                job_id = create_job(cmd, timeout=3600)
+                job_id = create_job(cmd, timeout=3600, stdin_data=payload)
                 return JsonResponse({'ok': True, 'job': job_id,
                                      'title': 'Applying matrix account...',
                                      'message': 'Matrix account saved. Verify the new device, then check the room.',
                                      'command': cmd})
+            # Fallback saves without applying (same as before).
+            ok, stdout, stderr = run_command(set_cmd, timeout=30,
+                                            stdin_data=payload)
+            if not ok:
+                messages.error(request, f'Error: {stderr or stdout}')
+            else:
+                messages.success(request, 'Matrix account saved.')
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)
@@ -184,44 +167,22 @@ def settings_notifications(request):
 
     if request.method == 'POST':
         is_ajax = is_ajax_request(request)
+        # Preconditions (sender configured) and the inventory write live
+        # in the settings CLI (single source of truth).
+        set_cmd = ('symbios-settings-notifications.sh set'
+                   f' --mail {shlex.quote(request.POST.get("notify_mail_enabled", "false"))}'
+                   f' --matrix {shlex.quote(request.POST.get("notify_matrix_enabled", "false"))}'
+                   f' --to {shlex.quote(request.POST.get("notify_mail_to", "").strip())}'
+                   f' --level {shlex.quote(request.POST.get("notify_level", "warn").strip())}')
         try:
-            mail_enabled = request.POST.get('notify_mail_enabled') == 'true'
+            ok, stdout, stderr = run_command(set_cmd, timeout=30)
+            if not ok:
+                err = (stderr or stdout or 'Failed to save notification settings.')
+                if is_ajax:
+                    return JsonResponse({'ok': False, 'error': err}, status=400)
+                messages.error(request, f'Error: {err}')
+                return redirect('settings_notifications')
             matrix_enabled = request.POST.get('notify_matrix_enabled') == 'true'
-            mail_to = request.POST.get('notify_mail_to', '').strip()
-            level = request.POST.get('notify_level', 'warn').strip()
-            if level not in ('warn', 'error'):
-                level = 'warn'
-
-            if mail_enabled and not _smtp_ready(vars_):
-                msg = ('Cannot enable mail notifications: no SMTP server configured. '
-                       'Configure one under Settings &rarr; Email Sending (SMTP) first.')
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg}, status=400)
-                messages.error(request, msg)
-                return redirect('settings_notifications')
-            if matrix_enabled and not _matrix_account_complete(vars_):
-                msg = ('Cannot enable matrix notifications: no matrix account configured. '
-                       'Configure one under Settings &rarr; Matrix Account first.')
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg}, status=400)
-                messages.error(request, msg)
-                return redirect('settings_notifications')
-            if mail_to and not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', mail_to):
-                msg = 'Invalid recipient email address format.'
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg}, status=400)
-                messages.error(request, msg)
-                return redirect('settings_notifications')
-
-            vars_['notify_mail_enabled'] = mail_enabled
-            vars_['notify_matrix_enabled'] = matrix_enabled
-            if mail_to:
-                vars_['notify_mail_to'] = mail_to
-            else:
-                vars_.pop('notify_mail_to', None)
-            vars_['notify_level'] = level
-            _save_inventory_config(config)
-
             # Chain matrix-client first when matrix is enabled so the
             # daemon is up before the alias points at its FIFO.
             cmds = []

@@ -18,7 +18,7 @@ from django.shortcuts import render, redirect
 from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
-from .views import _get_inventory_config, _save_inventory_config, _safe_write
+from .views import _get_inventory_config
 from .constants import CONFIG_PATH
 from .utils.ssh_exec import run_playbook, run_command
 from .utils.http import is_ajax_request
@@ -34,7 +34,7 @@ import re
 import shlex
 
 
-def _start_reapply(playbooks=None, force=False, prefix=''):
+def _start_reapply(playbooks=None, force=False, prefix='', stdin_data=None):
     """Start symbios-reapply.sh as a tracked job and return the job id.
 
     The job streams live output to the browser via /exec/output/.
@@ -42,6 +42,9 @@ def _start_reapply(playbooks=None, force=False, prefix=''):
     run anyway (--force).
     An optional prefix (a script name) is chained in front of the reapply with
     '&&', so it runs first and its output shows up in the same exec modal.
+    An optional stdin_data payload is attached to the job (consumed by the
+    prefix command, e.g. settings scripts reading --json-stdin; commands
+    chained behind it see EOF, which Ansible ignores).
     Returns a (job_id, title, cmd) tuple.
     """
     from .utils.jobs import create_job
@@ -58,7 +61,7 @@ def _start_reapply(playbooks=None, force=False, prefix=''):
     cmd = f'symbios-reapply.sh {flag}'
     if prefix:
         cmd = f'{prefix} && {cmd}'
-    job_id = create_job(cmd, timeout=3600)
+    job_id = create_job(cmd, timeout=3600, stdin_data=stdin_data)
     return job_id, title, cmd
 
 
@@ -96,94 +99,72 @@ def settings_dns(request):
         is_ajax = is_ajax_request(request)
         action = request.POST.get('action', 'save')
         dns_mode = request.POST.get('dns_mode', 'desec')
+        # Validation and the inventory write live in the settings CLI
+        # (single source of truth). Secrets travel via stdin JSON, never
+        # as argv. Playbook chains abort on validation failure (&&).
         try:
             if action == 'remove':
-                config['all']['vars']['ddns_apikey'] = ''
-                config['all']['vars']['ddns_host'] = ''
-                config['all']['vars']['ddns_ipv6'] = ''
-                config['all']['vars']['dns_mode'] = ''
-                config['all']['vars']['dns_configured'] = False
-                # Reset domains to the local fallback (shared base_domain so the
-                # Authelia session cookie can span all service subdomains)
-                config['all']['vars']['base_domain'] = 'symbios.local'
-                _save_inventory_config(config)
-                if is_ajax:
-                    from .utils.jobs import create_job
-                    cmd = f'{_HOSTNAME_CMD} && symbios-reapply.sh'
-                    job_id = create_job(cmd, timeout=3600)
-                    resp = {'ok': True, 'job': job_id,
-                            'title': 'Removing DNS config and reapplying...',
-                            'message': 'DNS configuration removed.',
-                            'command': cmd}
-                    if 'setup' in request.GET:
-                        resp['redirect'] = '/setup/'
-                    return JsonResponse(resp)
-                messages.success(request, 'DNS configuration removed.')
-                messages.info(request, 'Reapplying all playbooks in the background...')
-                _start_reapply(prefix=_HOSTNAME_CMD)
+                set_cmd = 'symbios-settings-dns.sh remove'
+                stdin_data = None
+                playbooks = None
+                message = 'DNS configuration removed.'
+                title = 'Removing DNS config and reapplying...'
             elif dns_mode == 'self-managed':
-                self_domain = request.POST.get('self_domain', '').strip().lower().rstrip('.')
-                if not self_domain:
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': 'Please enter a domain.'}, status=400)
-                    messages.error(request, 'Please enter a domain.')
-                    return redirect('settings_dns')
-                config['all']['vars']['dns_mode'] = 'self-managed'
-                config['all']['vars']['ddns_apikey'] = ''
-                config['all']['vars']['ddns_host'] = ''
-                config['all']['vars']['ddns_ipv6'] = ''
-                config['all']['vars']['base_domain'] = self_domain
-                config['all']['vars']['dns_configured'] = True
-                _save_inventory_config(config)
-                if is_ajax:
-                    job_id, title, cmd = _start_reapply(playbooks=_DNS_CHAIN,
-                                                        force=True,
-                                                        prefix=_HOSTNAME_CMD)
-                    resp = {'ok': True, 'job': job_id, 'title': title,
-                            'message': f'DNS settings saved for {self_domain}.',
-                            'command': cmd}
-                    if 'setup' in request.GET:
-                        resp['redirect'] = '/setup/'
-                    return JsonResponse(resp)
-                messages.success(request, f'DNS settings saved for {self_domain}.')
-                # Apply the domain-dependent playbooks (Traefik, ACME, Authelia)
-                # in the background, with the new domain.
+                self_domain = request.POST.get('self_domain', '').strip()
+                set_cmd = ('symbios-settings-dns.sh set --mode self-managed'
+                           f' --domain {shlex.quote(self_domain)}')
+                stdin_data = None
+                playbooks = _DNS_CHAIN
+                message = f'DNS settings saved for {self_domain}.'
+                title = None
+            else:
+                # deSEC mode: host/key/ipv6 as stdin JSON (secret-safe).
+                # Host normalization (.dedyn.io suffix, lowercase) lives
+                # in the script.
+                payload = json.dumps({
+                    'ddns_host': request.POST.get('ddns_host', ''),
+                    'ddns_apikey': request.POST.get('ddns_apikey', ''),
+                    'ddns_ipv6': request.POST.get('ddns_ipv6', ''),
+                })
+                set_cmd = 'symbios-settings-dns.sh set --mode desec --json-stdin'
+                stdin_data = payload
+                playbooks = _DNS_CHAIN_DESEC
+                message = 'DNS settings saved.'
+                title = None
+            if is_ajax:
+                if playbooks:
+                    job_id, job_title, cmd = _start_reapply(
+                        playbooks=playbooks, force=True,
+                        prefix=f'{set_cmd} && {_HOSTNAME_CMD}',
+                        stdin_data=stdin_data)
+                else:
+                    from .utils.jobs import create_job
+                    cmd = f'{set_cmd} && {_HOSTNAME_CMD} && symbios-reapply.sh'
+                    job_id = create_job(cmd, timeout=3600,
+                                        stdin_data=stdin_data)
+                    job_title = title
+                resp = {'ok': True, 'job': job_id,
+                        'title': job_title,
+                        'message': message,
+                        'command': cmd}
+                if 'setup' in request.GET:
+                    resp['redirect'] = '/setup/'
+                return JsonResponse(resp)
+            ok, stdout, stderr = run_command(set_cmd, timeout=30,
+                                            stdin_data=stdin_data)
+            if not ok:
+                messages.error(request, f'Error: {stderr or stdout}')
+                return redirect('settings_dns')
+            messages.success(request, message)
+            if playbooks:
+                # Apply the domain-dependent playbooks (DDNS, Traefik,
+                # ACME, Authelia) in the background, with the new domain.
                 messages.info(request, 'Reapplying DNS playbooks in the background...')
-                _start_reapply(playbooks=_DNS_CHAIN, force=True,
+                _start_reapply(playbooks=playbooks, force=True,
                                prefix=_HOSTNAME_CMD)
             else:
-                # deSEC mode (existing behavior)
-                ddns_host = request.POST.get('ddns_host', '')
-                ddns_host = ddns_host.lower().strip()
-                if ddns_host.endswith('.dedyn.io'):
-                    ddns_host = ddns_host[:-len('.dedyn.io')]
-                ddns_host = ddns_host + '.dedyn.io'
-
-                config['all']['vars']['dns_mode'] = 'desec'
-                config['all']['vars']['ddns_apikey'] = request.POST.get('ddns_apikey', '')
-                config['all']['vars']['ddns_host'] = ddns_host
-                config['all']['vars']['ddns_ipv6'] = request.POST.get('ddns_ipv6', '')
-                # The DDNS host becomes the shared parent domain (base_domain) so
-                # the Authelia session cookie can span all service subdomains.
-                config['all']['vars']['base_domain'] = ddns_host
-                config['all']['vars']['dns_configured'] = True
-                _save_inventory_config(config)
-                if is_ajax:
-                    job_id, title, cmd = _start_reapply(playbooks=_DNS_CHAIN_DESEC,
-                                                        force=True,
-                                                        prefix=_HOSTNAME_CMD)
-                    resp = {'ok': True, 'job': job_id, 'title': title,
-                            'message': 'DNS settings saved.',
-                            'command': cmd}
-                    if 'setup' in request.GET:
-                        resp['redirect'] = '/setup/'
-                    return JsonResponse(resp)
-                messages.success(request, 'DNS settings saved.')
-                # Apply the domain-dependent playbooks (DDNS, Traefik, ACME,
-                # Authelia) in the background, with the new domain.
-                messages.info(request, 'Reapplying DNS playbooks in the background...')
-                _start_reapply(playbooks=_DNS_CHAIN_DESEC, force=True,
-                               prefix=_HOSTNAME_CMD)
+                messages.info(request, 'Reapplying all playbooks in the background...')
+                _start_reapply(prefix=_HOSTNAME_CMD)
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)
@@ -565,21 +546,26 @@ def settings_dns_finalize(request):
             domain_created = True
         # If domain creation fails for other reasons, continue anyway (user can create manually)
 
-    # Step 4: Save to inventory
-    config = _get_inventory_config()
-    if 'all' not in config:
-        config['all'] = {}
-    if 'vars' not in config['all']:
-        config['all']['vars'] = {}
-    vars_ = config['all']['vars']
-    vars_['dns_mode'] = 'desec'
-    vars_['ddns_apikey'] = api_token
-    if domain:
-        vars_['ddns_host'] = domain
-        vars_['base_domain'] = domain
-    vars_['ddns_ipv6'] = request.POST.get('ipv6_mode', '')
-    vars_['dns_configured'] = True
-    _save_inventory_config(config)
+    # Step 4: Save to inventory via the settings CLI (secret via stdin,
+    # domain normalization in the script). The API login/token flow above
+    # stays Python (external HTTPS, no host access needed). Without a
+    # domain in this request the previously stored host is kept (same as
+    # before: only a given domain overwrote ddns_host/base_domain).
+    if not domain:
+        current = _get_inventory_config()
+        domain = current.get('all', {}).get('vars', {}).get('ddns_host', '')
+    payload = json.dumps({
+        'ddns_host': domain,
+        'ddns_apikey': api_token,
+        'ddns_ipv6': request.POST.get('ipv6_mode', ''),
+    })
+    ok, stdout, stderr = run_command(
+        'symbios-settings-dns.sh set --mode desec --json-stdin',
+        timeout=30, stdin_data=payload)
+    if not ok:
+        return JsonResponse({'ok': False,
+                             'error': f'Account created but saving failed: {stderr or stdout}'},
+                            status=500)
 
     return JsonResponse({
         'ok': True,
@@ -1860,26 +1846,45 @@ def settings_security(request):
         is_ajax = is_ajax_request(request)
 
         # Only process fields that are actually present in the POST data
-        # (two separate forms share this view)
+        # (two separate forms share this view). Validation and the
+        # inventory write live in the settings CLI.
+        set_parts = []
         if 'password_policy' in request.POST:
-            password_policy = request.POST['password_policy']
-            if password_policy not in ('none', 'low', 'medium', 'high', 'paranoid'):
-                msg = 'Invalid password policy.'
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg}, status=400)
-                messages.error(request, msg)
-                return redirect('settings_security')
-            vars_['password_policy'] = password_policy
-
+            set_parts.append('--policy {}'.format(
+                shlex.quote(request.POST['password_policy'])))
+        webui_public_access = None
+        old_public_access = vars_.get('webui_public_access', False)
         if 'webui_public_access' in request.POST:
             webui_public_access = request.POST['webui_public_access'] == 'true'
-            old_public_access = vars_.get('webui_public_access', False)
-            vars_['webui_public_access'] = webui_public_access
-
-        _save_inventory_config(config)
+            set_parts.append('--public-access {}'.format(
+                'true' if webui_public_access else 'false'))
+        if not set_parts:
+            if is_ajax:
+                return JsonResponse({'ok': True,
+                                     'message': 'Security settings saved.',
+                                     'redirect': '/settings/security/'})
+            messages.success(request, 'Security settings saved.')
+            return redirect('settings_security')
+        set_cmd = 'symbios-settings-security.sh set ' + ' '.join(set_parts)
+        # The write runs synchronously (fast, no playbook): validation
+        # failures abort here with an error, before any reapply job.
+        try:
+            ok, stdout, stderr = run_command(set_cmd, timeout=30)
+            if not ok:
+                err = (stderr or stdout or 'Failed to save security settings.')
+                if is_ajax:
+                    return JsonResponse({'ok': False, 'error': err}, status=400)
+                messages.error(request, f'Error: {err}')
+                return redirect('settings_security')
+        except Exception as e:
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+            messages.error(request, f'Error: {e}')
+            return redirect('settings_security')
 
         # Re-apply traefik playbook only if public access actually changed
-        if 'webui_public_access' in request.POST and old_public_access != webui_public_access:
+        if (webui_public_access is not None
+                and old_public_access != webui_public_access):
             from .utils.jobs import create_job
             cmd = 'symbios-run-playbook.sh base-services/traefik.yml'
             job_id = create_job(cmd, timeout=300)
@@ -2049,6 +2054,20 @@ MEDIA_VARS = [
     ('media_shared', 'Shares', 'Base directory for group shares.'),
 ]
 
+# CLI flags per media key for symbios-settings-media.sh (mirrors the
+# script's field list; the view only forwards values, validation lives
+# in the script).
+_MEDIA_FLAGS = {
+    'media_root': '--media-root',
+    'media_audio': '--audio',
+    'media_images': '--images',
+    'media_videos': '--videos',
+    'media_books': '--books',
+    'media_documents': '--documents',
+    'media_inbox': '--inbox',
+    'media_shared': '--shared',
+}
+
 
 @login_required
 def settings_media(request):
@@ -2061,28 +2080,27 @@ def settings_media(request):
 
     if request.method == 'POST':
         is_ajax = is_ajax_request(request)
+        # Validation (required + absolute paths) and the inventory write
+        # live in the settings CLI; values are forwarded with their flags.
+        set_cmd = 'symbios-settings-media.sh set'
+        for key, _label, _hint in MEDIA_VARS:
+            value = request.POST.get(key, '').strip()
+            set_cmd += f' {_MEDIA_FLAGS[key]} {shlex.quote(value)}'
         try:
-            for key, _label, _hint in MEDIA_VARS:
-                value = request.POST.get(key, '').strip()
-                if not value:
-                    raise ValueError(f'Media path for {key} is required.')
-                if not value.startswith('/'):
-                    raise ValueError(f'Media path for {key} must be absolute.')
-                vars_[key] = value
-            _save_inventory_config(config)
-            job_id, title, cmd = _start_reapply(playbooks=['base-services/media.yml'])
-            resp = {'ok': True, 'job': job_id, 'title': title,
-                    'message': 'Media settings saved.',
-                    'command': cmd}
             if is_ajax:
+                job_id, title, cmd = _start_reapply(
+                    playbooks=['base-services/media.yml'], prefix=set_cmd)
+                resp = {'ok': True, 'job': job_id, 'title': title,
+                        'message': 'Media settings saved.',
+                        'command': cmd}
                 return JsonResponse(resp)
+            ok, stdout, stderr = run_command(set_cmd, timeout=30)
+            if not ok:
+                messages.error(request, f'Error: {stderr or stdout}')
+                return redirect('settings_media')
             messages.success(request, 'Media settings saved.')
             messages.info(request, 'Reapplying media playbook in the background...')
-            return redirect('settings_media')
-        except ValueError as e:
-            if is_ajax:
-                return JsonResponse({'ok': False, 'error': str(e)}, status=400)
-            messages.error(request, f'Error: {e}')
+            _start_reapply(playbooks=['base-services/media.yml'])
             return redirect('settings_media')
         except Exception as e:
             if is_ajax:

@@ -109,11 +109,14 @@ def fmt_value(value):
 
 
 def is_storable(value):
-    """Check a merge value holds only generic YAML types (no dicts)."""
+    """Check a merge value holds only generic YAML types."""
     if value is None or isinstance(value, (str, bool, int, float)):
         return True
     if isinstance(value, list):
         return all(is_storable(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(k, str) and is_storable(v)
+                   for k, v in value.items())
     return False
 
 
@@ -150,7 +153,7 @@ def apply_changes(vars_, changes):
         else:
             if key not in vars_ or vars_[key] != value:
                 vars_[key] = value
-                if isinstance(value, list):
+                if isinstance(value, (list, dict)):
                     lines.append("set {}={}".format(key, json.dumps(value)))
                 else:
                     lines.append("set {}={}".format(key, fmt_value(value)))
@@ -186,7 +189,8 @@ def cmd_merge(args):
         check_key(key)
         if not is_storable(data[key]):
             e_usage("unsupported type for key {!r}: only strings, booleans, "
-                    "numbers and lists of those can be stored".format(key))
+                    "numbers, lists and string-keyed dicts of those can be "
+                    "stored".format(key))
     cfg = load_inventory(args.inventory)
     vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
     lines = apply_changes(vars_, list(data.items()))
@@ -212,6 +216,183 @@ def cmd_del(args):
     write_inventory(args.inventory, cfg, args.check)
     for line in lines:
         print(line)
+    if args.check:
+        print("(check mode - nothing was written)")
+
+
+def get_dict(vars_, name):
+    """Return the named dict from vars_ (missing -> {}, wrong type -> exit 2)."""
+    value = vars_.get(name)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        e_usage("key {!r} is not a dict".format(name))
+    return value
+
+
+def cmd_dict_get(args):
+    """Print one dict entry as JSON (exit 1 when missing)."""
+    check_key(args.dict_key)
+    check_key(args.key)
+    cfg = load_inventory(args.inventory)
+    vars_ = cfg.get("all", {}).get("vars", {}) or {}
+    entry = get_dict(vars_, args.dict_key).get(args.key)
+    if entry is None:
+        e_technical("entry not set: {}.{}".format(args.dict_key, args.key))
+    print(json.dumps(entry))
+
+
+def cmd_dict_set(args):
+    """Set one dict entry from a JSON value on stdin (creates the dict)."""
+    check_key(args.dict_key)
+    check_key(args.key)
+    try:
+        raw = sys.stdin.read()
+        value = json.loads(raw) if raw.strip() else None
+    except json.JSONDecodeError as e:
+        e_usage("invalid JSON on stdin: {}".format(e))
+    if value is None:
+        e_usage("stdin must hold a JSON value, got empty input")
+    if not is_storable(value):
+        e_usage("unsupported type: only strings, booleans, numbers, lists "
+                "and string-keyed dicts of those can be stored")
+    cfg = load_inventory(args.inventory)
+    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+    changed = get_dict(vars_, args.dict_key).get(args.key) != value
+    vars_.setdefault(args.dict_key, {})[args.key] = value
+    if not changed:
+        print("unchanged")
+        return
+    write_inventory(args.inventory, cfg, args.check)
+    print("set {}.{}={}".format(args.dict_key, args.key,
+                                json.dumps(value)))
+    if args.check:
+        print("(check mode - nothing was written)")
+
+
+def cmd_dict_merge(args):
+    """Merge a JSON object from stdin into one dict entry (creates it)."""
+    check_key(args.dict_key)
+    check_key(args.key)
+    try:
+        raw = sys.stdin.read()
+        data = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError as e:
+        e_usage("invalid JSON on stdin: {}".format(e))
+    if not isinstance(data, dict):
+        e_usage("stdin must hold a JSON object, got {}".format(type(data).__name__))
+    for key in data:
+        if not isinstance(key, str) or not is_storable(data[key]):
+            e_usage("unsupported entry for key {!r}".format(key))
+    cfg = load_inventory(args.inventory)
+    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+    entry = get_dict(vars_, args.dict_key).get(args.key, {})
+    if not isinstance(entry, dict):
+        e_usage("entry {}.{} is not a dict".format(args.dict_key, args.key))
+    merged = dict(entry)
+    merged.update(data)
+    if merged == entry and args.key in get_dict(vars_, args.dict_key):
+        print("unchanged")
+        return
+    vars_.setdefault(args.dict_key, {})[args.key] = merged
+    write_inventory(args.inventory, cfg, args.check)
+    print("set {}.{}={}".format(args.dict_key, args.key,
+                                json.dumps(merged)))
+    if args.check:
+        print("(check mode - nothing was written)")
+
+
+def cmd_dict_keys(args):
+    """Print the keys of a dict, one per line (missing dict: no output)."""
+    check_key(args.dict_key)
+    cfg = load_inventory(args.inventory)
+    vars_ = cfg.get("all", {}).get("vars", {}) or {}
+    for key in get_dict(vars_, args.dict_key):
+        print(key)
+
+
+def cmd_dict_show(args):
+    """Print a string-valued dict as k=v lines (missing dict: no output)."""
+    check_key(args.dict_key)
+    cfg = load_inventory(args.inventory)
+    vars_ = cfg.get("all", {}).get("vars", {}) or {}
+    for key, value in get_dict(vars_, args.dict_key).items():
+        print("{}={}".format(key, fmt_value(value) if value is not None else ""))
+
+
+def get_list(vars_, name):
+    """Return the named list from vars_ (missing -> [], wrong type -> exit 2)."""
+    value = vars_.get(name)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        e_usage("key {!r} is not a list".format(name))
+    return value
+
+
+def read_stdin_value():
+    """Read one JSON value from stdin (empty input or null -> exit 2)."""
+    try:
+        raw = sys.stdin.read()
+        value = json.loads(raw) if raw.strip() else None
+    except json.JSONDecodeError as e:
+        e_usage("invalid JSON on stdin: {}".format(e))
+    if value is None:
+        e_usage("stdin must hold a JSON value, got empty input")
+    if not is_storable(value):
+        e_usage("unsupported type: only strings, booleans, numbers, lists "
+                "and string-keyed dicts of those can be stored")
+    return value
+
+
+def cmd_list_add(args):
+    """Append a stdin JSON value to a list unless already present."""
+    check_key(args.key)
+    value = read_stdin_value()
+    cfg = load_inventory(args.inventory)
+    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+    items = get_list(vars_, args.key)
+    if value in items:
+        print("unchanged")
+        return
+    vars_.setdefault(args.key, []).append(value)
+    write_inventory(args.inventory, cfg, args.check)
+    print("added {}={}".format(args.key, json.dumps(value)))
+    if args.check:
+        print("(check mode - nothing was written)")
+
+
+def cmd_list_del(args):
+    """Remove all stdin-JSON-equal entries from a list (idempotent)."""
+    check_key(args.key)
+    value = read_stdin_value()
+    cfg = load_inventory(args.inventory)
+    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+    items = get_list(vars_, args.key)
+    kept = [item for item in items if item != value]
+    if len(kept) == len(items):
+        print("unchanged")
+        return
+    vars_[args.key] = kept
+    write_inventory(args.inventory, cfg, args.check)
+    print("deleted {}={}".format(args.key, json.dumps(value)))
+    if args.check:
+        print("(check mode - nothing was written)")
+
+
+def cmd_dict_del(args):
+    """Delete one dict entry (idempotent: missing entries report unchanged)."""
+    check_key(args.dict_key)
+    check_key(args.key)
+    cfg = load_inventory(args.inventory)
+    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+    d = get_dict(vars_, args.dict_key)
+    if args.key not in d:
+        print("unchanged")
+        return
+    del d[args.key]
+    write_inventory(args.inventory, cfg, args.check)
+    print("deleted {}.{}".format(args.dict_key, args.key))
     if args.check:
         print("(check mode - nothing was written)")
 
@@ -260,6 +441,52 @@ def main(argv=None):
     p_del.add_argument("--check", action="store_true",
                        help="report what would change, change nothing")
     p_del.set_defaults(func=cmd_del)
+
+    p_dget = sub.add_parser("dict-get", help="print one dict entry as JSON")
+    p_dget.add_argument("dict_key", help="dict variable name under all.vars")
+    p_dget.add_argument("key", help="entry key inside the dict")
+    p_dget.set_defaults(func=cmd_dict_get)
+
+    p_dset = sub.add_parser("dict-set", help="set one dict entry from a JSON value on stdin")
+    p_dset.add_argument("dict_key", help="dict variable name under all.vars")
+    p_dset.add_argument("key", help="entry key inside the dict")
+    p_dset.add_argument("--check", action="store_true",
+                        help="report what would change, change nothing")
+    p_dset.set_defaults(func=cmd_dict_set)
+
+    p_ddel = sub.add_parser("dict-del", help="delete one dict entry (idempotent)")
+    p_ddel.add_argument("dict_key", help="dict variable name under all.vars")
+    p_ddel.add_argument("key", help="entry key inside the dict")
+    p_ddel.add_argument("--check", action="store_true",
+                        help="report what would change, change nothing")
+    p_ddel.set_defaults(func=cmd_dict_del)
+
+    p_dmerge = sub.add_parser("dict-merge", help="merge a JSON object from stdin into one dict entry")
+    p_dmerge.add_argument("dict_key", help="dict variable name under all.vars")
+    p_dmerge.add_argument("key", help="entry key inside the dict")
+    p_dmerge.add_argument("--check", action="store_true",
+                          help="report what would change, change nothing")
+    p_dmerge.set_defaults(func=cmd_dict_merge)
+
+    p_dkeys = sub.add_parser("dict-keys", help="print the keys of a dict, one per line")
+    p_dkeys.add_argument("dict_key", help="dict variable name under all.vars")
+    p_dkeys.set_defaults(func=cmd_dict_keys)
+
+    p_dshow = sub.add_parser("dict-show", help="print a string-valued dict as k=v lines")
+    p_dshow.add_argument("dict_key", help="dict variable name under all.vars")
+    p_dshow.set_defaults(func=cmd_dict_show)
+
+    p_ladd = sub.add_parser("list-add", help="append a stdin JSON value to a list unless present")
+    p_ladd.add_argument("key", help="list variable name under all.vars")
+    p_ladd.add_argument("--check", action="store_true",
+                        help="report what would change, change nothing")
+    p_ladd.set_defaults(func=cmd_list_add)
+
+    p_ldel = sub.add_parser("list-del", help="remove stdin-JSON-equal entries from a list")
+    p_ldel.add_argument("key", help="list variable name under all.vars")
+    p_ldel.add_argument("--check", action="store_true",
+                        help="report what would change, change nothing")
+    p_ldel.set_defaults(func=cmd_list_del)
 
     args = parser.parse_args(argv)
     args.func(args)

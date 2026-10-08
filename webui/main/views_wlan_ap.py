@@ -14,11 +14,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import json
+
 from django.shortcuts import render, redirect
 from django.http import JsonResponse
 from django.contrib import messages
 from .decorators import login_required
-from .views import _get_inventory_config, _save_inventory_config
+from .views import _get_inventory_config
 from .utils.http import is_ajax_request
 from .utils.ssh_exec import run_command
 from .playbook_catalog import get_catalog
@@ -70,62 +72,34 @@ def settings_wlan_ap(request):
 
     if request.method == 'POST':
         is_ajax = is_ajax_request(request)
+        # Validation and the inventory write live in the settings CLI
+        # (single source of truth). Secrets travel via stdin JSON, never
+        # as argv. The checkbox quirk stays here: present means enabled.
+        payload = json.dumps({
+            'ap_interface': request.POST.get('ap_interface', '').strip(),
+            'ap_name': request.POST.get('ap_name', '').strip(),
+            'ap_passphrase': request.POST.get('ap_passphrase', '').strip(),
+            'ap_country': request.POST.get('ap_country', '').strip(),
+            'ap_enabled': request.POST.get('ap_enabled') is not None,
+        })
+        set_cmd = 'symbios-settings-wlan-ap.sh set --json-stdin'
         try:
-            ap_interface = request.POST.get('ap_interface', '').strip()
-            ap_name = request.POST.get('ap_name', '').strip()
-            ap_passphrase = request.POST.get('ap_passphrase', '').strip()
-            ap_country = request.POST.get('ap_country', '').strip().upper()
-            # Checkbox: present in the form data when checked, absent otherwise.
-            ap_enabled = request.POST.get('ap_enabled') is not None
-
-            # Validate required fields
-            if not ap_interface:
-                msg = 'Please select a wireless interface.'
+            ok, stdout, stderr = run_command(set_cmd, timeout=30,
+                                            stdin_data=payload)
+            if not ok:
+                err = (stderr or stdout or 'Failed to save WLAN settings.')
                 if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg},
+                    return JsonResponse({'ok': False, 'error': err},
                                         status=400)
-                messages.error(request, msg)
+                messages.error(request, f'Error: {err}')
                 return redirect('settings_wlan_ap')
-
-            if not ap_name:
-                msg = 'Please enter a WLAN name (SSID).'
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg},
-                                        status=400)
-                messages.error(request, msg)
-                return redirect('settings_wlan_ap')
-
-            if ap_passphrase and len(ap_passphrase) < 8:
-                msg = 'WPA passphrase must be at least 8 characters.'
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg},
-                                        status=400)
-                messages.error(request, msg)
-                return redirect('settings_wlan_ap')
-
-            if ap_country and (len(ap_country) != 2 or not ap_country.isalpha()):
-                msg = 'Country code must be two letters (e.g. DE, US).'
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': msg},
-                                        status=400)
-                messages.error(request, msg)
-                return redirect('settings_wlan_ap')
-
-            # Save to inventory.yml
-            vars_['ap_interface'] = ap_interface
-            vars_['ap_name'] = ap_name
-            vars_['ap_passphrase'] = ap_passphrase
-            vars_['ap_country'] = ap_country
-            vars_['ap_enabled'] = ap_enabled
-            vars_['ap_configured'] = True
-            _save_inventory_config(config)
 
             # Run the hostapd playbook via the exec overlay
-            cmd = 'symbios-run-playbook.sh base-services/wlan-accesspoint.yml'
+            cmd = f'{set_cmd} && symbios-run-playbook.sh base-services/wlan-accesspoint.yml'
 
             if is_ajax:
                 from .utils.jobs import create_job
-                job_id = create_job(cmd, timeout=300)
+                job_id = create_job(cmd, timeout=300, stdin_data=payload)
                 return JsonResponse({
                     'ok': True,
                     'job': job_id,
@@ -135,7 +109,8 @@ def settings_wlan_ap(request):
                 })
 
             messages.success(request, 'WLAN AP settings saved.')
-            ok, stdout, stderr = run_command(cmd, timeout=120)
+            ok, stdout, stderr = run_command(cmd, timeout=120,
+                                            stdin_data=payload)
             if ok:
                 messages.success(request, 'Hostapd configured successfully.')
             else:
