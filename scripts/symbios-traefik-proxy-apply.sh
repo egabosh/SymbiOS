@@ -32,7 +32,7 @@ Actions (default: --apply):
   --dump                       Print all forwards as JSON (for the WebUI)
   --add --name <n> --host <h> --target <t> --port <p>
       [--scheme http|https] [--access open|local|authelia]
-      [--insecure true|false] [--disabled]
+      [--insecure true|false] [--api] [--disabled]
                                Add a forward (fails when the name exists)
   --set --name <n> [same fields as --add]
                                Change fields of an existing forward
@@ -260,6 +260,10 @@ elif f_action in ('add', 'set'):
         f_entry['access'] = f_opts['access']
     if 'insecure' in f_opts:
         f_entry['insecure_skip_verify'] = str(f_opts['insecure']).lower() in ('1', 'true', 'yes', 'on')
+    if 'api' in f_opts:
+        f_entry['api'] = True
+    if 'no-api' in f_opts:
+        f_entry['api'] = False
     if 'disabled' in f_opts:
         f_entry['enabled'] = False
     if 'enabled' in f_opts:
