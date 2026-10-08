@@ -1,7 +1,7 @@
 CHECK_CATEGORY="network"
 CHECK_TITLE="Reverse Proxy"
 CHECK_DESC="Checks if all websites behind Traefik are reachable."
-CHECK_DETAIL="Collects all hostnames from Docker Compose Traefik labels.|Adds missing hosts to /etc/hosts (指向 Traefik).|Verifies each host via HTTP wget with retries.|Tracks persistent 502 errors (warns after 15 minutes).|401/403 responses are expected (Authelia protection)."
+CHECK_DETAIL="Collects all hostnames from Docker Compose Traefik labels.|Adds missing hosts to /etc/hosts (指向 Traefik).|Verifies each host via HTTP wget with retries.|Tracks persistent 502 errors (warns after 15 minutes).|401/403 responses are expected (Authelia protection).|API-only backends (stt/tts/tts-fast) answer 501/404 on / without a web UI - any HTTP response counts as alive.|Routes of sleeping WoL targets are skipped via the asleep list."
 
 # Healthcheck for traefik host reachability
 # Collect all hostnames from docker-compose files
@@ -46,9 +46,20 @@ do
     # Report error only if it is not a known-auth response
     if ! grep -E -q "401 Unauthorized|403 Forbidden|415 Unsupported Media Type" "${g_tmp}/traefik-wget-check"
     then
-      g_echo_error "Error while connecting ${f_host} with wget:
+      # API-only backends (no web UI) answer 501/404 on /. The host list
+      # comes from the provider files themselves, so any completed HTTP
+      # response proves the route and the backend are alive.
+      if echo "$f_host" | grep -qE "^(stt|tts|tts-fast)\." && grep -E -q "501 Not Implemented|404 Not Found" "${g_tmp}/traefik-wget-check"
+      then
+        if [[ -f "${g_tmp}/$f_host-502" ]]
+        then
+          rm "${g_tmp}/$f_host-502"
+        fi
+      else
+        g_echo_error "Error while connecting ${f_host} with wget:
 
 $(cat ${g_tmp}/traefik-wget-check)"
+      fi
     else
       if [[ -f "${g_tmp}/$f_host-502" ]]
       then
