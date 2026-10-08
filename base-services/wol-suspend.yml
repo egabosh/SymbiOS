@@ -284,6 +284,14 @@
         mode: '0644'
         content: "{{ power_active_instances | join('\n') }}\n"
 
+    - name: Restart enabled instances (pick up new script code)
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: restarted
+        enabled: true
+        daemon_reload: false
+      loop: "{{ power_enabled_instances }}"
+
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/wol-suspend.yml"
       changed_when: false

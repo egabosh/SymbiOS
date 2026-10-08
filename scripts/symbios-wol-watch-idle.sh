@@ -77,6 +77,11 @@ do
   then
     continue
   fi
+  # Target reachable again (e.g. woken by a request): resume monitoring.
+  if ping -c1 -W2 "${WOL_SUSPEND_HOST}" &>/dev/null
+  then
+    f_asleep_remove
+  fi
   if f_evaluate > /dev/null
   then
     g_echo_warn "${WOL_SUSPEND_HOST} idle - suspending via SSH"
@@ -85,5 +90,8 @@ do
     ssh ${WOL_SSHOPTS} "root@${WOL_SUSPEND_HOST}" "ethtool -s ${WOL_SUSPEND_IF} wol g" &>/dev/null
     ssh ${WOL_SSHOPTS} "root@${WOL_SUSPEND_HOST}" "systemctl suspend" &>/dev/null
     echo "${EPOCHSECONDS}" > "${WOL_LAST_WOL_FILE}"
+    # Tell the Traefik healthcheck to skip this target's routes until it
+    # is back (expected 502s while sleeping must not alert).
+    f_asleep_add
   fi
 done

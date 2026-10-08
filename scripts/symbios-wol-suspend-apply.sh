@@ -140,6 +140,12 @@ import yaml
 
 g_config = os.environ.get('SYMBIOS_CONFIG_DIR', '')
 f_file = os.path.join(g_config, 'power', 'targets.yml')
+f_asleep_file = os.path.join(g_config, 'power', 'asleep')
+try:
+    with open(f_asleep_file) as f_handle:
+        f_asleep = {l.strip() for l in f_handle if l.strip()}
+except OSError:
+    f_asleep = set()
 try:
     with open(f_file) as f_handle:
         f_data = yaml.safe_load(f_handle) or []
@@ -167,6 +173,7 @@ for f_entry in f_data if isinstance(f_data, list) else []:
         f_units[f_unit] = f_state
     f_out.append({'name': f_entry.get('name'), 'host': f_host,
                   'awake': f_awake, 'units': f_units,
+                  'asleep': bool(set((f_entry.get('wake') or {}).get('patterns') or []) & f_asleep),
                   'wake': bool((f_entry.get('wake') or {}).get('enabled')),
                   'suspend': bool((f_entry.get('suspend') or {}).get('enabled'))})
 print(json.dumps(f_out))

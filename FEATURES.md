@@ -160,6 +160,10 @@ a suspend, without suspending.
 - Boot model: the watchers are systemd-enabled; scripts, SSH key and access
   log all live under `/symbios`, so the scripts wait for those paths (late
   LUKS unlock) instead of failing at boot.
+- Sleeping targets pause their Traefik monitoring: on suspend the target's
+  hostnames land in `<config>/power/asleep` (skipped by the `traefik`
+  healthcheck instead of erroring on expected 502s); the idle watcher
+  removes them once the target answers ping again.
 
 ### Wake-on-LAN (`/settings/wake-on-lan/`)
 Wakes sleeping hosts with a magic packet - automatically when one of their
