@@ -16,7 +16,7 @@
   </div>
 </div>
 
-<pre class="services-desc mt-3 bg-light bg-opacity-10 border rounded p-3 small" style="white-space:pre-wrap;word-break:break-word;">{{ item.docs.description }}</pre>
+<pre class="services-desc mt-3 bg-light bg-opacity-10 border rounded p-3 small" style="white-space:pre-wrap;word-break:break-word;">{{ service_description|default:item.docs.description }}</pre>
 
 <h4 class="h6 mb-2">Playbook Information</h4>
 <div class="border rounded p-2 small mb-3 bg-light bg-opacity-10">
