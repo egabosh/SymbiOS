@@ -29,7 +29,6 @@ from .decorators import login_required
 from .plugin_catalog import (
     get_plugin,
     load_plugin_state,
-    save_plugin_state,
     has_plugin,
 )
 from .utils.ssh_exec import run_command
@@ -48,8 +47,15 @@ def plugin_feature_toggle(request, service, feature_id):
     feat["enabled"] = not current
     if not feat.get("status"):
         feat["status"] = "draft" if feat["enabled"] else None
-    state[feature_id] = feat
-    save_plugin_state(service, state)
+    # The state write is atomic on the host (single writer); the merge
+    # only touches this feature, concurrent toggles of others are kept.
+    ok, _out, err = run_command(
+        'symbios-config.py --file services/{}/features-state.yml merge'.format(service),
+        timeout=30, stdin_data=json.dumps({feature_id: feat}))
+    if not ok:
+        return JsonResponse({"ok": False,
+                             "error": err or "Could not save state."},
+                            status=500)
 
     return JsonResponse({
         "ok": True,
@@ -80,8 +86,14 @@ def plugin_feature_save(request, service, feature_id):
     feat["error"] = None
     feat.setdefault("params", {})
     feat["params"].update(data)
-    state[feature_id] = feat
-    save_plugin_state(service, state)
+    # Atomic host-side write (deep merge keeps the other features).
+    ok, _out, err = run_command(
+        'symbios-config.py --file services/{}/features-state.yml merge'.format(service),
+        timeout=30, stdin_data=json.dumps({feature_id: feat}))
+    if not ok:
+        return JsonResponse({"ok": False,
+                             "error": err or "Could not save state."},
+                            status=500)
 
     return JsonResponse({"ok": True, "status": "draft"})
 
@@ -95,13 +107,14 @@ def plugin_feature_apply(request, service, feature_id):
     cmd = "symbios-feature-apply.sh %s %s" % (shlex_quote(service), shlex_quote(feature_id))
     job_id = create_job(cmd, timeout=600)
 
-    # Optimistically update state.
+    # Optimistically update state (atomic host-side write).
     state = load_plugin_state(service)
     feat = state.get(feature_id, {})
     feat["status"] = "applying"
     feat["error"] = None
-    state[feature_id] = feat
-    save_plugin_state(service, state)
+    run_command(
+        'symbios-config.py --file services/{}/features-state.yml merge'.format(service),
+        timeout=30, stdin_data=json.dumps({feature_id: feat}))
 
     # Background thread: wait for job to finish and update state.
     threading.Thread(
@@ -144,8 +157,10 @@ def _finish_feature_apply(service, feature_id, job_id):
         feat["status"] = "error"
         output = (result[0] if result else "")[-500:] if result else ""
         feat["error"] = output.strip() or "Playbook failed"
-    state[feature_id] = feat
-    save_plugin_state(service, state)
+    # Atomic host-side write (background thread, same single writer).
+    run_command(
+        'symbios-config.py --file services/{}/features-state.yml merge'.format(service),
+        timeout=30, stdin_data=json.dumps({feature_id: feat}))
 
 
 @login_required

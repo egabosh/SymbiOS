@@ -108,32 +108,18 @@ def get_plugin_state_path(service_name):
 
 
 def load_plugin_state(service_name):
-    """Load the current feature state for a service."""
+    """Load the current feature state for a service.
+
+    Reads stay container-local (read-only /config mount, repo fallback);
+    writes go through symbios-config.py on the host (merge into
+    services/<name>/features-state.yml, single writer).
+    """
     path = get_plugin_state_path(service_name)
     try:
         with open(path) as fh:
             return yaml.safe_load(fh) or {}
     except (FileNotFoundError, yaml.YAMLError):
         return {}
-
-
-def save_plugin_state(service_name, state):
-    """Save feature state to /config/services/<name>/features-state.yml."""
-    config_dir = os.path.join(CONFIG_BASE, "services", service_name)
-    os.makedirs(config_dir, exist_ok=True)
-    path = os.path.join(config_dir, "features-state.yml")
-    tmp_path = path + ".tmp"
-    try:
-        with open(tmp_path, "w") as fh:
-            yaml.dump(state, fh, default_flow_style=False, sort_keys=False)
-        os.replace(tmp_path, path)
-        return True
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        return False
 
 
 def has_plugin(service_name):

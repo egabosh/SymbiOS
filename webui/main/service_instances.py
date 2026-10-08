@@ -19,7 +19,11 @@
 Any service playbook can declare a ``docs.config`` block describing a list of
 instances (e.g. several WordPress/Nextcloud sites) together with a field
 schema. The WebUI then renders a generic "Instances" tab on the service detail
-page and persists the rows to a YAML file inside the writable config dir:
+page; saving (schema coercion + atomic write) goes through
+scripts/symbios-instances.py on the host, which parses the same docs.config
+source. Reads stay container-local via load_instances() below.
+
+Persisted rows land in a YAML file inside the writable config dir:
 
     <config_root>/<docs.config.file>  (default services/<svc>/instances.yml)
 
@@ -47,12 +51,6 @@ import os
 import yaml
 
 CONFIG_BASE = "/config"
-
-# Supported input types and their YAML round-tripping behavior.
-_BOOL_TYPES = {"bool", "boolean", "checkbox"}
-_NUMBER_TYPES = {"number", "int", "float"}
-_LIST_TYPES = {"list"}
-_TEXT_TYPES = {"text", "password", "select", "string"}
 
 
 def get_service_name(playbook):
@@ -116,7 +114,9 @@ def load_instances(meta):
     """Load the instance list from the config file (empty list when absent).
 
     The file stores a plain YAML list of mappings. Non-list content degrades
-    to an empty list instead of raising.
+    to an empty list instead of raising. Reads stay container-local
+    (read-only /config mount); writes go through symbios-instances.py on
+    the host (schema coercion + atomic write, single writer).
     """
     path = _config_path(meta)
     try:
@@ -125,96 +125,3 @@ def load_instances(meta):
     except (OSError, yaml.YAMLError):
         return []
     return data if isinstance(data, list) else []
-
-
-def save_instances(meta, rows):
-    """Persist the instance list and return (ok, error). Atomic write, and the
-    saved format is compatible with Ansible include_vars (plain list of maps).
-    """
-    path = _config_path(meta)
-    try:
-        directory = os.path.dirname(path)
-        if not os.path.isdir(directory):
-            os.makedirs(directory, exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w") as fh:
-            yaml.dump(rows if isinstance(rows, list) else [], fh,
-                      default_flow_style=False, sort_keys=False, allow_unicode=True)
-        os.replace(tmp, path)
-        return True, None
-    except Exception as exc:
-        try:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-        except OSError:
-            pass
-        return False, str(exc or "write failed")
-
-
-def coerce_row(meta, raw_row):
-    """Validate and coerce one submitted row against the field schema.
-
-    Returns (row, error). ``row`` contains only defined fields with YAML-safe
-    values (booleans as bool, numbers as int/float, lists as lists). Bool
-    fields are always present (default False). Unknown/blank optional text
-    fields are dropped.
-    """
-    row = {}
-    for fname, spec in meta.get("fields", {}).items():
-        raw = raw_row.get(fname, "")
-        ftype = spec["type"]
-
-        if ftype in _BOOL_TYPES:
-            row[fname] = raw in (True, "true", "1", "on", "yes") or raw == ""
-            continue
-
-        if ftype in _NUMBER_TYPES:
-            if raw in ("", None):
-                row[fname] = None
-                continue
-            try:
-                row[fname] = float(raw) if ftype in ("float",) else (int(raw) if ftype != "float" else float(raw))
-            except (ValueError, TypeError):
-                return None, "%s: '%s' is not a number" % (spec["label"], raw)
-            continue
-
-        if ftype in _LIST_TYPES:
-            values = []
-            if isinstance(raw, list):
-                values = [str(v).strip() for v in raw if str(v).strip()]
-            else:
-                sep = spec.get("separator") or ","
-                for part in str(raw or "").split(sep):
-                    part = part.strip()
-                    if part:
-                        values.append(part)
-            row[fname] = values
-            continue
-
-        # text / password / select
-        value = str(raw or "").strip()
-        if spec["required"] and not value:
-            return None, "%s is required" % spec["label"]
-        pattern = spec.get("pattern")
-        if value and pattern:
-            import re
-            try:
-                if not re.match(pattern + "$", value) and not re.match("^(" + pattern + ")$", value):
-                    if not re.match("^" + pattern + "$", value):
-                        return None, "%s does not match %s" % (spec["label"], pattern)
-            except re.error:
-                pass
-        if value or spec["required"]:
-            row[fname] = value
-    return row, None
-
-
-def coerce_rows(meta, raw_rows):
-    """Coerce a list of raw rows. Returns (rows, error_or_None)."""
-    rows = []
-    for raw in raw_rows:
-        row, err = coerce_row(meta, raw)
-        if err:
-            return None, err
-        rows.append(row)
-    return rows, None

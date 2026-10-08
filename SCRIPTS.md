@@ -321,6 +321,42 @@ Companion CLIs for non-`/settings/` endpoints that still own inventory
 state: file manager custom scripts (validated name/command list) and the
 setup wizard connection type (`home|root|airgapped`).
 
+## 3b. Config-file engine (Phase 4: beyond settings)
+
+`scripts/symbios-config.py` is the sibling of `symbios-inventory.py` for
+every OTHER writable YAML file below the config dir (path-jailed:
+`--file` must stay relative and below `--config-dir`):
+
+```bash
+symbios-config.py --file services/wp/instances.yml get --json
+symbios-config.py --file services/wp/instances.yml write < rows.yml
+echo '{"feat": {"enabled": true}}' | symbios-config.py --file services/openwrt-vm/features-state.yml merge
+```
+
+| Subcommand | Purpose |
+|------------|---------|
+| `get [--json]` | Print the document (raw YAML or JSON); missing file is an error (exit 1) |
+| `write [--check]` | Replace the document with YAML from stdin (must parse); atomic + `.bak` |
+| `merge [--check]` | Deep-merge a stdin JSON object into a mapping (missing file starts `{}`) |
+
+`scripts/symbios-instances.py` is schema-aware on top of it: it parses
+the service playbook's `# docs:` config block (same source the WebUI
+catalog reads), coerces stdin JSON rows (bool/number/list/text + patterns,
+same rules as the retired WebUI helper), and delegates the write:
+
+```bash
+symbios-instances.py --playbook services/wordpress.yml get
+symbios-instances.py --playbook services/wordpress.yml schema
+echo '[{"name": "blog"}]' | symbios-instances.py --playbook services/wordpress.yml save [--check]
+```
+
+Migrated: service instance lists, feature `features-state.yml`
+(toggle/save/apply-status via `merge`), external systems (`write`).
+Reads stay container-local; pure functions without host state (password
+policy, key format checks) stay Python by design. Note the inherited
+checkbox quirk: an absent/empty bool coerces to True, so round-trips can
+add a missing bool key (playbooks default missing bools to false).
+
 ---
 
 ## 4. Script catalog

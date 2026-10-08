@@ -52,14 +52,21 @@ def _load_systems():
 
 
 def _save_systems(systems):
-    """Save external systems to config file."""
-    data = {'external_systems': systems}
-    tmp = EXTERNAL_SYSTEMS_CONFIG + '.tmp'
-    with open(tmp, 'w') as fh:
-        yaml.dump(data, fh, default_flow_style=False, allow_unicode=True)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, EXTERNAL_SYSTEMS_CONFIG)
+    """Save external systems via the config engine on the host.
+
+    Single atomic writer (tmp + fsync + replace, .bak). Raises
+    RuntimeError on failure (same contract as the direct write before).
+    Validation (required fields, duplicate IDs) stays in the calling view:
+    it re-renders the form with the entered data on errors, so the checks
+    are load-bearing there and intentionally not duplicated host-side.
+    """
+    from .utils.ssh_exec import run_command
+    import json as _json
+    ok, _out, err = run_command(
+        'symbios-config.py --file external-systems.yml write',
+        timeout=30, stdin_data=_json.dumps({'external_systems': systems}))
+    if not ok:
+        raise RuntimeError(err or 'write failed')
 
 
 def _get_system(system_id):
