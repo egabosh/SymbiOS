@@ -31,8 +31,6 @@ from .service_instances import (
     get_config_meta,
     get_service_name,
     load_instances,
-    coerce_rows,
-    save_instances,
 )
 from .utils.ssh_exec import (
     stream_log,
@@ -764,13 +762,14 @@ def services_instances_save(request, playbook):
             payload = _json.loads(request.POST.get('rows', '[]') or '[]')
     except (ValueError, TypeError):
         return JsonResponse({'error': 'Invalid payload'}, status=400)
-    raw_rows = payload.get('rows') if isinstance(payload, dict) else payload
-    rows, err = coerce_rows(meta, raw_rows or [])
-    if err:
-        return JsonResponse({'error': err}, status=400)
-    ok, werr = save_instances(meta, rows)
+    # Coercion (schema rules from docs.config) and the atomic write live
+    # in symbios-instances.py; the rows travel as stdin JSON.
+    ok, stdout, stderr = run_command(
+        'symbios-instances.py --playbook {} save'.format(shlex.quote(playbook)),
+        timeout=60, stdin_data=_json.dumps(payload))
     if not ok:
-        return JsonResponse({'error': 'Could not write config: %s' % werr}, status=500)
+        return JsonResponse({'error': (stderr or stdout or 'Could not save config.')},
+                            status=400)
     from .utils.http import is_ajax_request
     if is_ajax_request(request):
         apply_now = bool(payload.get('apply')) if isinstance(payload, dict) else False
