@@ -110,6 +110,7 @@ symbios-inventory.py --inventory /path/to/inventory.yml get timezone
 | `dict-show <dict>` | Print a string-valued dict as `k=v` lines |
 | `list-add <key>` | Append a stdin JSON value to a list unless already present |
 | `list-del <key>` | Remove stdin-JSON-equal entries from a list (idempotent) |
+| `write` | Replace inventory.yml with a full YAML document from stdin (raw config editor only; must parse as a mapping) |
 
 `set`/`merge`/`del` accept `--check` (dry run). Key names must match
 `^[A-Za-z_][A-Za-z0-9_]*$` (exit 2 otherwise). Exit codes: 0 ok/unchanged,

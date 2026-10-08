@@ -380,6 +380,30 @@ def cmd_list_del(args):
         print("(check mode - nothing was written)")
 
 
+def cmd_write(args):
+    """Replace inventory.yml with a full YAML document from stdin.
+
+    Used only by the raw config editor (/settings/config/): the document
+    must parse as a YAML mapping, otherwise exit 2 and nothing is written.
+    Same atomic write + .bak guarantees as every other write here.
+    """
+    try:
+        raw = sys.stdin.read()
+        cfg = yaml.safe_load(raw) if raw.strip() else None
+    except yaml.YAMLError as e:
+        e_usage("invalid YAML on stdin: {}".format(e))
+    if not isinstance(cfg, dict):
+        e_usage("document must be a YAML mapping (dictionary)")
+    old = load_inventory(args.inventory)
+    if cfg == old:
+        print("unchanged")
+        return
+    write_inventory(args.inventory, cfg, args.check)
+    print("inventory replaced ({} top-level keys)".format(len(cfg)))
+    if args.check:
+        print("(check mode - nothing was written)")
+
+
 def cmd_dict_del(args):
     """Delete one dict entry (idempotent: missing entries report unchanged)."""
     check_key(args.dict_key)
@@ -487,6 +511,11 @@ def main(argv=None):
     p_ldel.add_argument("--check", action="store_true",
                         help="report what would change, change nothing")
     p_ldel.set_defaults(func=cmd_list_del)
+
+    p_write = sub.add_parser("write", help="replace inventory.yml with a full YAML document from stdin")
+    p_write.add_argument("--check", action="store_true",
+                         help="report what would change, change nothing")
+    p_write.set_defaults(func=cmd_write)
 
     args = parser.parse_args(argv)
     args.func(args)

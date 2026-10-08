@@ -1241,7 +1241,8 @@ def settings_config(request):
     if request.method == 'POST':
         is_ajax = is_ajax_request(request)
         content = request.POST.get('config_content', '')
-        # Validate YAML before saving
+        # Validate YAML before sending (fast local feedback; the CLI
+        # re-validates authoritatively before writing).
         try:
             parsed = yaml.safe_load(content)
             if not isinstance(parsed, dict):
@@ -1256,14 +1257,17 @@ def settings_config(request):
                                      'error': f'YAML syntax error: {e}'}, status=400)
             messages.error(request, f'YAML syntax error: {e}')
             return redirect('settings_config')
+        # The write itself lives in the inventory CLI (single writer).
         try:
-            # Backup + atomic write
-            if os.path.exists(CONFIG_PATH):
-                with open(CONFIG_PATH) as f:
-                    bak = CONFIG_PATH + '.bak'
-                    with open(bak, 'w') as b:
-                        b.write(f.read())
-            _safe_write(CONFIG_PATH, content)
+            ok, stdout, stderr = run_command(
+                'symbios-inventory.py write', timeout=30,
+                stdin_data=content)
+            if not ok:
+                err = (stderr or stdout or 'Failed to save config.')
+                if is_ajax:
+                    return JsonResponse({'ok': False, 'error': err}, status=400)
+                messages.error(request, f'Error: {err}')
+                return redirect('settings_config')
             if is_ajax:
                 job_id, title, cmd = _start_reapply()
                 return JsonResponse({'ok': True, 'job': job_id, 'title': title,
