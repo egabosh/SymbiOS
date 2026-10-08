@@ -16,7 +16,7 @@
 # docs:
 #   name: Navidrome
 #   short_description: Deploy the Navidrome music streaming server
-#   description: Deploys Navidrome, a self-hosted music server and streamer compatible with Subsonic/Airsonic, exposed via Traefik.
+#   description: Deploys Navidrome, a self-hosted music server and streamer compatible with Subsonic/Airsonic, exposed via Traefik. Browser login runs via Authelia SSO (Remote-User header, auto-mapped to the same-named row); Subsonic clients (Supersonic, DSub, Feishin, ...) use /rest/* which bypasses Authelia, so they authenticate with Navidrome's local password. That password follows the LDAP password automatically via the ldap-groups.d password hook. Troubleshooting tip: if a client login fails, set the user's password again via Users and Groups - this re-runs the password hook and repairs the API password. Users who only ever logged in via SSO have no local password yet - the admin sets it once with /symbios/services/navidrome/navidrome-passwd.sh on the host.
 #   url: "https://navidrome.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
@@ -123,6 +123,95 @@
 
         backup: yes
       notify: Restart navidrome
+
+    # /symbios/services/navidrome/navidrome-passwd.sh (local/API password).
+    # Browser SSO via Authelia is unaffected (Remote-User header wins), but
+    # Subsonic clients (Supersonic, DSub, Feishin, ...) need Navidrome's own
+    # password on /rest/*. Users coming only via SSO have none until the
+    # admin sets one with this script (mirrors s3-user.sh).
+    - name: /symbios/services/navidrome/navidrome-passwd.sh (local/API password)
+      blockinfile:
+        path: "/symbios/services/{{ service_name }}/navidrome-passwd.sh"
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Set a Navidrome user's local (Subsonic API) password.
+          # Usage: navidrome-passwd.sh <username> [password]
+          # Without password: generates a random one, prints it for handover.
+          set -u
+          g_prog=$(basename "$0")
+          g_user=${1:-}
+          g_pw=${2:-}
+
+          # A username is required, everything else has defaults
+          if [[ -z "$g_user" ]]
+          then
+            echo "Usage: $g_prog <username> [password]" >&2
+            exit 2
+          fi
+
+          # The user must exist (SSO users appear after first browser login)
+          if ! docker exec navidrome /app/navidrome user list \
+              --datafolder /data --nobanner 2>/dev/null \
+              | awk -F, 'NR>1 {print $2}' | grep -qx "$g_user"
+          then
+            echo "$g_prog: user '$g_user' not found in Navidrome (first browser login creates it)" >&2
+            exit 1
+          fi
+
+          # Generate a handover password when none was given
+          if [[ -z "$g_pw" ]]
+          then
+            g_pw=$(pwgen -s 24 1)
+          fi
+
+          # --set-password needs a TTY (term.ReadPassword): fake one with
+          # script(1). Live write is safe (SQLite WAL, server keeps running)
+          printf '%s\n%s\n' "$g_pw" "$g_pw" | script -qec \
+            "docker exec -i -t navidrome /app/navidrome user edit -u '$g_user' --set-password --datafolder /data --nobanner" \
+            /dev/null >/dev/null 2>&1
+
+          # Verify through the real path (Traefik + /rest bypass)
+          if curl -sk --resolve {{ service_domain }}:443:127.0.0.1 \
+              "https://{{ service_domain }}/rest/ping.view?v=1.16.1&c=navidrome-passwd&u=$g_user&p=$g_pw" \
+              | grep -q 'status="ok"'
+          then
+            echo "$g_user: $g_pw"
+          else
+            echo "$g_prog: password set but API verification failed" >&2
+            exit 1
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: /symbios/services/navidrome/navidrome-passwd.sh shebang
+      ansible.builtin.lineinfile:
+        path: "/symbios/services/{{ service_name }}/navidrome-passwd.sh"
+        insertbefore: BOF
+        regexp: "^#!/bin/bash"
+        line: "#!/bin/bash"
+
+    # The local API password follows the LDAP password (one password for
+    # browser SSO and Subsonic clients). Fired by symbios-ldap-user.sh
+    # after every successful password set (covers WebUI and CLI).
+    - name: Deploy LDAP password hook (navidrome API password sync)
+      ansible.builtin.copy:
+        dest: "{{ data_root }}/ldap-groups.d/navidrome-password-sync.hook"
+        content: |
+          #!/bin/bash
+          # SymbiOS hook - sync LDAP password changes into Navidrome's local
+          # password (Subsonic API on /rest/*). Fired by symbios-ldap-user.sh
+          # after every successful password set. Args: $1=event $2=uid
+          # $3=pwfile (0600 plaintext file, shredded by the caller - never
+          # log it).
+          [[ "${1:-}" == "password-set" ]] || exit 0
+          exec "{{ git_root }}/scripts/symbios-navidrome-password-sync.sh" "${1:-}" "${2:-}" "${3:-}"
+        mode: '0755'
+        owner: root
+        group: root
 
     - name: /symbios/base-services/traefik/providers/navidrome.yml Navidrome<->Traefik provider
       blockinfile:
