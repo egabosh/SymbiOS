@@ -55,14 +55,46 @@ def _get_base_domain():
         return ''
 
 
+def _get_inventory_vars():
+    """Read scalar vars from inventory.yml (all.vars).
+
+    Only plain scalars (str/int/float/bool) are returned, so structured
+    values can never leak into rendered docs texts.
+    """
+    config_path = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
+    try:
+        with open(config_path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+        vars_ = cfg.get('all', {}).get('vars', {}) or {}
+        return {k: v for k, v in vars_.items()
+                if isinstance(v, (str, int, float, bool))}
+    except Exception:
+        return {}
+
+
+def _render_placeholders(raw_text):
+    """Resolve inventory placeholders in a docs text.
+
+    Replaces Jinja-like ``{{ var }}`` (with or without inner spaces) as
+    well as the legacy ``<var>`` and ``<your var>`` spellings with the
+    matching scalar value from inventory.yml. Unknown placeholders are
+    left untouched.
+    """
+    if not raw_text:
+        return ''
+    text = str(raw_text)
+    for key, value in _get_inventory_vars().items():
+        rendered = str(value)
+        text = text.replace('{{ %s }}' % key, rendered)
+        text = text.replace('{{%s}}' % key, rendered)
+        text = text.replace('<%s>' % key, rendered)
+        text = text.replace('<your %s>' % key, rendered)
+    return text
+
+
 def _render_service_url(raw_url):
     """Resolve Jinja-like variables in a service URL (e.g. {{ base_domain }})."""
-    if not raw_url:
-        return ''
-    base_domain = _get_base_domain()
-    if base_domain:
-        raw_url = raw_url.replace('{{ base_domain }}', base_domain)
-    return raw_url
+    return _render_placeholders(raw_url)
 
 
 # Built-in base-services can be managed but never uninstalled from the WebUI.
@@ -302,6 +334,10 @@ def services_detail(request, playbook):
     logs = (item.get('docs') or {}).get('service_control', {}).get('logs', []) or []
     log_units = [{'name': l.get('name'), 'type': l.get('type', 'log')} for l in logs]
     service_url = _render_service_url((item.get('docs') or {}).get('url'))
+    # Render inventory placeholders (e.g. {{ base_domain }}) in the docs
+    # description. Computed here (not mutated into the cached catalog item).
+    service_description = _render_placeholders(
+        (item.get('docs') or {}).get('description'))
     all_catalog = get_catalog()
     # Build access groups context from the playbook's docs.access config.
     access_ctx = _build_access_context(item)
@@ -367,6 +403,7 @@ def services_detail(request, playbook):
         'uninstall_buttons': uninstall_buttons,
         'log_units': log_units,
         'service_url': service_url,
+        'service_description': service_description,
         'access_groups': access_ctx['groups'],
         'all_ldap_users': access_ctx['users'],
         'compatible_systems': compatible_systems,
