@@ -61,9 +61,51 @@ function f_wol_load_conf {
   WOL_SSHOPTS="-i ${WOL_SSH_KEY} -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=3 -o ServerAliveCountMax=2"
   WOL_PINGFILE="/tmp/wol-${WOL_NAME}-last-ping"
   WOL_LAST_WOL_FILE="/tmp/wol-${WOL_NAME}-last-wol"
+  WOL_ASLEEP_FILE="${g_config_dir}/power/asleep"
   # Dots in FQDN patterns are literals, not regex wildcards.
   WOL_WAKE_RE="$(echo "${WOL_WAKE_PATTERNS}" | sed 's/\./\\./g')"
   return 0
+}
+
+# Record this target's wake patterns as sleeping, so the Traefik
+# healthcheck skips them instead of erroring on expected 502s.
+function f_asleep_add {
+  local f_pattern
+  local IFS='|'
+  read -ra f_patterns <<< "${WOL_WAKE_PATTERNS}" || true
+  unset IFS
+  touch "${WOL_ASLEEP_FILE}"
+  for f_pattern in "${f_patterns[@]}"
+  do
+    if [[ -n "${f_pattern}" ]] && ! grep -qxF "${f_pattern}" "${WOL_ASLEEP_FILE}" 2>/dev/null
+    then
+      echo "${f_pattern}" >> "${WOL_ASLEEP_FILE}"
+    fi
+  done
+}
+
+# Drop this target's patterns from the sleeping list (called when the
+# target is reachable again, so monitoring resumes).
+function f_asleep_remove {
+  if ! [[ -f "${WOL_ASLEEP_FILE}" ]]
+  then
+    return 0
+  fi
+  local f_pattern
+  local IFS='|'
+  read -ra f_patterns <<< "${WOL_WAKE_PATTERNS}" || true
+  unset IFS
+  local f_tmp="${WOL_ASLEEP_FILE}.tmp"
+  cp "${WOL_ASLEEP_FILE}" "${f_tmp}"
+  for f_pattern in "${f_patterns[@]}"
+  do
+    if [[ -n "${f_pattern}" ]]
+    then
+      grep -vxF "${f_pattern}" "${f_tmp}" > "${f_tmp}.new" || true
+      mv "${f_tmp}.new" "${f_tmp}"
+    fi
+  done
+  mv "${f_tmp}" "${WOL_ASLEEP_FILE}"
 }
 
 # Block until the target config, the SSH key and (for tail mode) the access
