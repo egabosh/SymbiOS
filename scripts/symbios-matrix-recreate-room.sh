@@ -1,9 +1,9 @@
 #!/bin/bash
-
-# Recreate a broken Matrix room under the same alias (E2EE by default).
-# Usage: matrix-recreate-room.sh <ALIAS> [userid1 userid2 ...]
-#   ALIAS     short alias without server part, e.g. base_domain
-#   userids   full Matrix user IDs to join, e.g. @user:matrix.{{ base_domain }}
+# SymbiOS - Recreate a broken Matrix room under the same alias (E2EE by default).
+#
+# Usage: symbios-matrix-recreate-room.sh <ALIAS> [userid1 userid2 ...]
+#   ALIAS     short alias without server part, e.g. my-room
+#   userids   full Matrix user IDs to join, e.g. @user:matrix.example.com
 # Steps:
 #   1. resolve old room id via directory alias
 #   2. create new private room (trusted_private_chat preset)
@@ -13,28 +13,36 @@
 #   6. join all given members via admin API
 #   7. purge the old room
 
-. /etc/bash/gaboshlib.include
+g_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f /etc/bash/gaboshlib.include ]]
+then
+  . /etc/bash/gaboshlib.include
+fi
+source "${g_script_dir}/symbios-lib.sh"
 
 g_lockfile
 
-DOMAIN="matrix.{{ base_domain }}"
+DOMAIN="matrix.${g_base_domain}"
 SYNAPSE_URL="https://${DOMAIN}"
 ADMIN="@mx-admin:${DOMAIN}"
 POSTGRES_DB="synapse"
 ALIAS="${1:-}"
 shift || true
 
-if [ -z "${ALIAS}" ]; then
+if [[ -z "${ALIAS}" ]]
+then
   echo "Usage: $0 <ALIAS> [userid1 userid2 ...]"
   exit 1
 fi
 
-cd "{{ data_root }}/services/matrix" || exit 1
+cd "${g_services_root}/matrix" || exit 1
+# shellcheck disable=SC1091
 source ./env
 
 get_admin_token() {
   TOKEN=$(docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -t -A --dbname=$POSTGRES_DB --user=$POSTGRES_USER --command="select token from access_tokens where user_id='$ADMIN' order by id desc limit 1;" 2>/dev/null)
-  if [ -z "$TOKEN" ]; then
+  if [[ -z "$TOKEN" ]]
+  then
     g_echo_error "Failed to retrieve admin token"
     exit 1
   fi
@@ -45,7 +53,8 @@ api() {
   local method="$1"
   local path="$2"
   local body="${3:-}"
-  if [ -n "$body" ]; then
+  if [[ -n "$body" ]]
+  then
     curl -s --max-time 60 -X "$method" "${SYNAPSE_URL}${path}" \
       --header "Authorization: Bearer ${TOKEN}" \
       --header 'Content-Type: application/json' \
@@ -63,7 +72,8 @@ get_admin_token
 
 # Resolve old room id via directory alias (may not exist - continue either way)
 OLD_ID=$(api GET "/_matrix/client/v3/directory/room/${ENC_ALIAS}" | jq -r '.room_id // empty')
-if [ -n "$OLD_ID" ]; then
+if [[ -n "$OLD_ID" ]]
+then
   g_echo_note "Old room: ${OLD_ID}"
 else
   g_echo_warn "No old room found for alias ${FULL_ALIAS}"
@@ -73,7 +83,8 @@ fi
 #    Client API createRoom (admin token) - reliable across synapse versions.
 CREATE=$(api POST "/_matrix/client/v3/createRoom" '{"name":"'"${ALIAS}"'","visibility":"private","preset":"trusted_private_chat"}')
 NEW_ID=$(echo "$CREATE" | jq -r '.room_id // empty')
-if [ -z "$NEW_ID" ]; then
+if [[ -z "$NEW_ID" ]]
+then
   g_echo_error "Room creation failed: ${CREATE}"
   exit 1
 fi
@@ -81,11 +92,12 @@ g_echo_ok "Created new room: ${NEW_ID}"
 
 # 2. Enable E2EE encryption
 ENC=$(api PUT "/_matrix/client/v3/rooms/${NEW_ID}/state/m.room.encryption" '{"algorithm":"m.megolm.v1.aes-sha2"}')
-[ -n "$ENC" ] && g_echo_ok "Encryption enabled"
+[[ -n "$ENC" ]] && g_echo_ok "Encryption enabled"
 
 # 3. Set power levels: every given member becomes admin (level 100)
 PL_CURRENT=$(api GET "/_matrix/client/v3/rooms/${NEW_ID}/state/m.room.power_levels")
-if [ -n "$PL_CURRENT" ] && [ "$PL_CURRENT" != "null" ]; then
+if [[ -n "$PL_CURRENT" ]] && [[ "$PL_CURRENT" != "null" ]]
+then
   # Upgrading users individually keeps the rest of the power_levels event intact
   for USER in "$@"
   do
@@ -96,7 +108,8 @@ if [ -n "$PL_CURRENT" ] && [ "$PL_CURRENT" != "null" ]; then
 fi
 
 # 4. Move alias (old room -> new room), set canonical alias
-if [ -n "$OLD_ID" ]; then
+if [[ -n "$OLD_ID" ]]
+then
   # Remove canonical alias from old room so it does not shadow the new one
   api PUT "/_matrix/client/v3/rooms/${OLD_ID}/state/m.room.canonical_alias" '{}' >/dev/null
   # Remove the alias from the old room via the directory API
@@ -111,7 +124,8 @@ g_echo_ok "Alias ${FULL_ALIAS} moved to new room"
 for USER in "$@"
 do
   JOIN=$(api POST "/_synapse/admin/v1/join/${NEW_ID}" "{\"user_id\":\"${USER}\"}")
-  if echo "$JOIN" | grep -q 'room_id'; then
+  if echo "$JOIN" | grep -q 'room_id'
+  then
     g_echo_ok "Joined ${USER}"
   else
     g_echo_warn "Join ${USER} failed: ${JOIN}"
@@ -119,14 +133,16 @@ do
 done
 
 # 6. Purge old room (if found)
-if [ -n "$OLD_ID" ]; then
+if [[ -n "$OLD_ID" ]]
+then
   REMOVE=$(api DELETE "/_synapse/admin/v1/rooms/${OLD_ID}" '{"purge":true,"force":true}')
   g_echo_ok "Old room purge result: ${REMOVE}"
 fi
 
 # Verification
 RESOLVED=$(api GET "/_matrix/client/v3/directory/room/${ENC_ALIAS}" | jq -r '.room_id')
-if [ "$RESOLVED" = "$NEW_ID" ]; then
+if [[ "$RESOLVED" = "$NEW_ID" ]]
+then
   g_echo_ok "Verification passed: alias resolves to ${NEW_ID}"
 else
   g_echo_error "Verification failed: alias resolves to ${RESOLVED}"
