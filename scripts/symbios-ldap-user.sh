@@ -368,6 +368,15 @@ memberUid: ${f_uid}
         g_echo_warn "User created but failed to add to group '${f_group}'"
       fi
     fi
+
+    # Fire password-set hooks (e.g. S3 htpasswd sync). The plaintext
+    # travels via a 0600 file, never via argv. Hook errors are logged
+    # by the dispatcher and never abort the caller.
+    f_pw_hook_file="$(mktemp /tmp/.pwhook.XXXXXX)"
+    chmod 600 "${f_pw_hook_file}"
+    printf '%s' "${f_password}" > "${f_pw_hook_file}"
+    f_ldap_password_hooks "${f_uid}" "${f_pw_hook_file}"
+    shred -u "${f_pw_hook_file}"
     ;;
 
   delete)
@@ -387,6 +396,8 @@ memberUid: ${f_uid}
 "
       echo "${f_group_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" 2>/dev/null
       g_echo_note "Removed from group '${f_group}'"
+      # Fire member-removed so service hooks deprovision (e.g. S3 entry)
+      f_ldap_groups_hooks "member-removed" "${f_group}" "${f_uid}"
     done
 
     # Delete the user entry
@@ -439,6 +450,16 @@ userPassword: ${f_password}"
     if [[ ${f_rc} -eq 0 ]]
     then
       g_echo_note "User '${f_uid}' modified successfully"
+      # Fire password-set hooks only when a password was actually set
+      # (same 0600-file handover as on create, see above).
+      if [[ -n "${f_password}" ]]
+      then
+        f_pw_hook_file="$(mktemp /tmp/.pwhook.XXXXXX)"
+        chmod 600 "${f_pw_hook_file}"
+        printf '%s' "${f_password}" > "${f_pw_hook_file}"
+        f_ldap_password_hooks "${f_uid}" "${f_pw_hook_file}"
+        shred -u "${f_pw_hook_file}"
+      fi
     else
       g_echo_error "Failed to modify user '${f_uid}'"
       exit 1

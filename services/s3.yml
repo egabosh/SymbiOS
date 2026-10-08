@@ -19,13 +19,15 @@
 # Auth model: this service is NOT protected by Authelia/OIDC. A restic client
 # is a non-interactive HTTP client and cannot complete a browser login, so
 # forward-auth would break every backup job. Access control is therefore done
-# with the native rest-server htpasswd user list. Users are managed with
+# with the native rest-server htpasswd user list. Membership is managed in
+# LDAP (group s3-users) and LDAP password changes are synced into htpasswd
+# via ldap-groups.d hooks (see tasks below). Users are managed with
 # /symbios/services/s3/s3-user.sh on the host.
 #
 # docs:
 #   name: S3
 #   short_description: Deploy a generic S3-compatible restic backup endpoint
-#   description: Deploys restic/rest-server as a generic S3-style REST backend for restic backups. Access is controlled by an htpasswd user list (not OIDC), because non-interactive restic clients cannot complete a browser login.
+#   description: Deploys restic/rest-server as a generic S3-style REST backend for restic backups. Access is controlled by an htpasswd user list (not OIDC), because non-interactive restic clients cannot complete a browser login. Membership comes from the LDAP group s3-users and LDAP password changes are synced into htpasswd automatically. Troubleshooting tip: if a user cannot log in, set their password again via Users and Groups - this re-runs the password hook and repairs the htpasswd entry.
 #   url: "https://s3.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
@@ -68,10 +70,12 @@
     s3_container_path: /data
     # User created on the very first run when no htpasswd file exists yet
     s3_initial_user: admin
-    # Extra flags handed to rest-server. Leave empty unless you need
-    # --private-repos, --group-accessible-repos, --prometheus or --tls.
+    # Extra flags handed to rest-server. Private per-user repositories are
+    # the default: every htpasswd user only sees data/<user>/ and needs
+    # the username in the client URL (rest:https://user:pass@host/user).
+    # Override via inventory (s3_options) for single-repo mode ("").
     # Do NOT use --append-only unless the endpoint must be un-deletable.
-    s3_options: ""
+    s3_options: "--private-repos"
   tasks:
 
     - name: Create /symbios/services/s3 dir
@@ -306,6 +310,46 @@
       ansible.builtin.shell: /symbios/services/s3/genpw.sh
       args:
         creates: "/symbios/services/s3/data/.htpasswd"
+
+    # The htpasswd list is the only credential store rest-server
+    # understands, but membership is managed in LDAP: the group s3-users
+    # decides who gets an entry (lifecycle hook below) and password
+    # changes in LDAP are synced into htpasswd (password-set hook, fired
+    # by symbios-ldap-user.sh after every successful password change).
+    - name: Create LDAP group s3-users
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name s3-users"
+      changed_when: false
+      failed_when: false
+
+    - name: Deploy LDAP group-change hook (s3 htpasswd lifecycle)
+      ansible.builtin.copy:
+        dest: "{{ data_root }}/ldap-groups.d/s3-user-sync.hook"
+        content: |
+          #!/bin/bash
+          # SymbiOS hook - keep rest-server htpasswd entries in sync with
+          # the LDAP group s3-users. Args: $1=event $2=group $3=uid
+          # Only react to membership changes of s3-users.
+          [[ "${1:-}" == "member-added" || "${1:-}" == "member-removed" ]] || exit 0
+          [[ "${2:-}" == "s3-users" ]] || exit 0
+          exec "{{ git_root }}/scripts/symbios-s3-user-sync.sh" "${1:-}" "${3:-}"
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Deploy LDAP password hook (s3 htpasswd password sync)
+      ansible.builtin.copy:
+        dest: "{{ data_root }}/ldap-groups.d/s3-password-sync.hook"
+        content: |
+          #!/bin/bash
+          # SymbiOS hook - sync LDAP password changes into the rest-server
+          # htpasswd list. Fired by symbios-ldap-user.sh after every
+          # successful password set. Args: $1=event $2=uid $3=pwfile
+          # (0600 plaintext file, shredded by the caller - never log it).
+          [[ "${1:-}" == "password-set" ]] || exit 0
+          exec "{{ git_root }}/scripts/symbios-s3-user-sync.sh" "${1:-}" "${2:-}" "${3:-}"
+        mode: '0755'
+        owner: root
+        group: root
 
     - name: Deploy healthcheck
       include_tasks: tasks/runcheck-docker.yml
