@@ -667,21 +667,32 @@ def settings_localization(request):
 
     if request.method == 'POST':
         is_ajax = is_ajax_request(request)
+        timezone = request.POST.get('timezone', '').strip()
+        keyboard = request.POST.get('keyboard', '').strip()
+        locale = request.POST.get('locale', '').strip()
+        # All validation and the inventory write live in the settings CLI
+        # (single source of truth); the view only triggers it and reapplies.
+        # Validation failures abort the chained reapply (&&) and show up
+        # in the exec modal output.
+        set_cmd = ('symbios-settings-localization.sh set'
+                   f' --timezone {shlex.quote(timezone)}'
+                   f' --keyboard {shlex.quote(keyboard)}'
+                   f' --locale {shlex.quote(locale)}')
         try:
-            vars_['timezone'] = request.POST.get('timezone', '').strip()
-            vars_['keyboard'] = request.POST.get('keyboard', '').strip()
-            vars_['locale'] = request.POST.get('locale', '').strip()
-            vars_['localization_configured'] = True
-            _save_inventory_config(config)
             if is_ajax:
                 job_id, title, cmd = _start_reapply(
-                    playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'])
+                    playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'],
+                    prefix=set_cmd)
                 resp = {'ok': True, 'job': job_id, 'title': title,
                         'message': 'Localization settings saved.',
                         'command': cmd}
                 if 'setup' in request.GET:
                     resp['redirect'] = '/setup/'
                 return JsonResponse(resp)
+            ok, stdout, stderr = run_command(set_cmd, timeout=30)
+            if not ok:
+                messages.error(request, f'Error: {stderr or stdout}')
+                return redirect('settings_localization')
             messages.success(request, 'Localization settings saved.')
             messages.info(request, 'Reapplying localization playbooks in the background...')
             _start_reapply(playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'])
@@ -718,18 +729,22 @@ def settings_ai(request):
 
     if request.method == 'POST':
         is_ajax = is_ajax_request(request)
+        # Secrets travel via stdin JSON, never as argv (visible in ps).
+        # Validation and the inventory write live in the settings CLI.
+        payload = json.dumps({
+            'ai_server': request.POST.get('ai_server', '').strip(),
+            'ai_apikey': request.POST.get('ai_apikey', '').strip(),
+        })
         try:
-            server = request.POST.get('ai_server', '').strip()
-            apikey = request.POST.get('ai_apikey', '').strip()
-            if server:
-                vars_['ai_server'] = server
-            else:
-                vars_.pop('ai_server', None)
-            if apikey:
-                vars_['ai_apikey'] = apikey
-            else:
-                vars_.pop('ai_apikey', None)
-            _save_inventory_config(config)
+            ok, stdout, stderr = run_command(
+                'symbios-settings-ai.sh set --json-stdin',
+                timeout=30, stdin_data=payload)
+            if not ok:
+                err = (stderr or stdout or 'Failed to save AI settings.')
+                if is_ajax:
+                    return JsonResponse({'ok': False, 'error': err}, status=400)
+                messages.error(request, f'Error: {err}')
+                return redirect('settings_ai')
             if is_ajax:
                 return JsonResponse({'ok': True,
                                      'message': 'AI settings saved.',
@@ -818,28 +833,28 @@ def _probe_openai_models(url, apikey):
         return False, f'Could not reach {url}: {e}'
 
 
-def _save_ai_vars(request, fields, redirect_url):
+def _save_ai_vars(request, script, fields, redirect_url, redirect_name):
     """Shared POST handler for the AI sub-pages (speech/image/search).
 
-    Stores each listed field in inventory.yml (empty values are removed).
-    Answers AJAX with a redirect like settings_ai (save only, no reapply -
-    the openwebui playbook picks the vars up on its next run).
+    Builds a JSON payload from the listed fields and lets the settings CLI
+    validate and write it (stdin, so secrets never appear in ps). Empty
+    values delete the key, same as before. Answers AJAX with a redirect
+    like settings_ai (save only, no reapply - the openwebui playbook
+    picks the vars up on its next run).
     """
-    config = _get_inventory_config()
-    if 'all' not in config:
-        config['all'] = {}
-    if 'vars' not in config['all']:
-        config['all']['vars'] = {}
-    vars_ = config['all']['vars']
     is_ajax = is_ajax_request(request)
     try:
-        for field in fields:
-            value = request.POST.get(field, '').strip()
-            if value:
-                vars_[field] = value
-            else:
-                vars_.pop(field, None)
-        _save_inventory_config(config)
+        payload = json.dumps({
+            field: request.POST.get(field, '').strip() for field in fields
+        })
+        ok, stdout, stderr = run_command(
+            f'{script} set --json-stdin', timeout=30, stdin_data=payload)
+        if not ok:
+            err = (stderr or stdout or 'Failed to save AI settings.')
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': err}, status=400)
+            messages.error(request, f'Error: {err}')
+            return redirect(redirect_name)
         if is_ajax:
             return JsonResponse({'ok': True,
                                  'message': 'AI settings saved.',
@@ -877,7 +892,9 @@ def _render_ai_page(request, template, page_key, page_title, page_icon):
 @login_required
 def settings_ai_speech(request):
     if request.method == 'POST':
-        resp = _save_ai_vars(request, _AI_SPEECH_FIELDS, '/settings/ai-speech/')
+        resp = _save_ai_vars(request, 'symbios-settings-ai-speech.sh',
+                             _AI_SPEECH_FIELDS, '/settings/ai-speech/',
+                             'settings_ai_speech')
         if resp is not None:
             return resp
         return redirect('settings_ai_speech')
@@ -888,7 +905,9 @@ def settings_ai_speech(request):
 @login_required
 def settings_ai_image(request):
     if request.method == 'POST':
-        resp = _save_ai_vars(request, _AI_IMAGE_FIELDS, '/settings/ai-image/')
+        resp = _save_ai_vars(request, 'symbios-settings-ai-image.sh',
+                             _AI_IMAGE_FIELDS, '/settings/ai-image/',
+                             'settings_ai_image')
         if resp is not None:
             return resp
         return redirect('settings_ai_image')
@@ -899,7 +918,9 @@ def settings_ai_image(request):
 @login_required
 def settings_ai_search(request):
     if request.method == 'POST':
-        resp = _save_ai_vars(request, _AI_SEARCH_FIELDS, '/settings/ai-search/')
+        resp = _save_ai_vars(request, 'symbios-settings-ai-search.sh',
+                             _AI_SEARCH_FIELDS, '/settings/ai-search/',
+                             'settings_ai_search')
         if resp is not None:
             return resp
         return redirect('settings_ai_search')
@@ -995,27 +1016,25 @@ def settings_auth(request):
 
     if request.method == 'POST':
         is_ajax = is_ajax_request(request)
+        twofa_wanted = request.POST.get('twofa_enabled', 'false') == 'true'
+        # Validation (SMTP precondition) and the inventory write live in
+        # the settings CLI; the playbook apply is chained behind it so a
+        # validation failure aborts before anything is applied.
+        set_cmd = 'symbios-settings-auth.sh set --twofa {}'.format(
+            'true' if twofa_wanted else 'false')
         try:
-            twofa_wanted = request.POST.get('twofa_enabled', 'false') == 'true'
-            if twofa_wanted:
-                smtp_server = vars_.get('smtp_server', '')
-                smtp_from = vars_.get('smtp_from', '')
-                if not smtp_server or not smtp_from:
-                    if is_ajax:
-                        return JsonResponse({'ok': False,
-                                             'error': 'Cannot enable 2FA: No SMTP server configured.'}, status=400)
-                    messages.error(request, 'Cannot enable 2FA: No SMTP server configured. Configure a mailserver first under Settings \u2192 Mailserver (SMTP).')
-                    return redirect('settings_auth')
-            config['all']['vars']['twofa_enabled'] = twofa_wanted
-            _save_inventory_config(config)
             if is_ajax:
                 from .utils.jobs import create_job
-                cmd = 'symbios-run-playbook.sh base-services/authelia.yml'
+                cmd = f'{set_cmd} && symbios-run-playbook.sh base-services/authelia.yml'
                 job_id = create_job(cmd, timeout=3600)
                 return JsonResponse({'ok': True, 'job': job_id,
                                      'title': 'Applying auth settings...',
                                      'message': 'Auth settings saved.',
                                      'command': cmd})
+            ok, stdout, stderr = run_command(set_cmd, timeout=30)
+            if not ok:
+                messages.error(request, f'Error: {stderr or stdout}')
+                return redirect('settings_auth')
             messages.success(request, 'Auth settings saved.')
             try:
                 ok, out = run_playbook('base-services/authelia.yml', timeout=180)
@@ -1052,22 +1071,27 @@ def settings_acme(request):
     if request.method == 'POST':
         is_ajax = is_ajax_request(request)
         action = request.POST.get('action', 'save')
+        # Validation and the inventory write live in the settings CLI;
+        # the playbook apply is chained behind it so a validation
+        # failure aborts before anything is applied.
+        if action == 'remove':
+            set_cmd = 'symbios-settings-acme.sh remove'
+        else:
+            acme_server = request.POST.get('acme_server', '').strip()
+            set_cmd = f'symbios-settings-acme.sh set --server {shlex.quote(acme_server)}'
         try:
-            if action == 'remove':
-                config['all']['vars']['acme_server'] = ''
-                _save_inventory_config(config)
-            else:
-                acme_server = request.POST.get('acme_server', '').strip()
-                config['all']['vars']['acme_server'] = acme_server
-                _save_inventory_config(config)
             if is_ajax:
                 from .utils.jobs import create_job
-                cmd = 'symbios-run-playbook.sh base-services/traefik.yml'
+                cmd = f'{set_cmd} && symbios-run-playbook.sh base-services/traefik.yml'
                 job_id = create_job(cmd, timeout=3600)
                 return JsonResponse({'ok': True, 'job': job_id,
                                      'title': 'Applying ACME settings...',
                                      'message': 'ACME settings saved.',
                                      'command': cmd})
+            ok, stdout, stderr = run_command(set_cmd, timeout=30)
+            if not ok:
+                messages.error(request, f'Error: {stderr or stdout}')
+                return redirect('settings_acme')
             messages.success(request, 'ACME settings saved.')
             try:
                 ok, out = run_playbook('base-services/traefik.yml', timeout=180)
