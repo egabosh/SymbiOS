@@ -1147,29 +1147,24 @@ def _is_valid_ssh_pubkey(key):
 
 
 def _read_host_authorized_keys():
-    # Fetch live host authorized_keys via symbios-exec.sh (not a volume mount).
+    # Fetch live host keys via the settings CLI (JSON), not a volume mount
+    # and not a raw cat: the script splits user keys from the preserved
+    # symbios-base-webui system key. Returns (user_keys, system_keys).
     try:
-        ok, stdout, _ = run_command('cat /root/.ssh/authorized_keys', timeout=10)
+        ok, stdout, _ = run_command('symbios-settings-ssh-keys.sh list --json',
+                                    timeout=10)
         if ok and stdout:
-            return [line.strip() for line in stdout.splitlines()
-                    if line.strip()]
+            data = json.loads(stdout.strip())
+            return data.get('user_keys', []), data.get('system_keys', [])
     except Exception:
         pass
-    return []
-
-
-def _is_system_ssh_key(line):
-    # The WebUI's own exec-gateway key (comment "symbios-base-webui") is deployed
-    # automatically and must never be edited or deleted via the UI.
-    return "symbios-base-webui" in line
+    return [], []
 
 
 @login_required
 def settings_ssh_keys(request):
-    # Fetch host authorized_keys via symbios-exec.sh.
-    host_keys = _read_host_authorized_keys()
-    system_keys = [k for k in host_keys if _is_system_ssh_key(k)]
-    user_keys = [k for k in host_keys if not _is_system_ssh_key(k)]
+    # Fetch host authorized_keys via the settings CLI.
+    user_keys, system_keys = _read_host_authorized_keys()
 
     if request.method == "POST":
         action = request.POST.get("action", "save")
@@ -1177,48 +1172,46 @@ def settings_ssh_keys(request):
         try:
             if action == "add":
                 new_key = request.POST.get("new_key", "").strip()
-                if new_key:
-                    if not _is_valid_ssh_pubkey(new_key):
-                        raise ValueError("Invalid SSH public key format")
-                    user_keys.append(new_key)
+                if not new_key:
+                    raise ValueError("No key provided")
+                cmd = ('symbios-settings-ssh-keys.sh add'
+                       f' --key {shlex.quote(new_key)}')
+                stdin_data = None
             elif action == "remove":
                 remove_idx = request.POST.get("index", "")
-                if remove_idx.isdigit():
-                    idx = int(remove_idx)
-                    if 0 <= idx < len(user_keys):
-                        user_keys.pop(idx)
+                if not remove_idx.isdigit():
+                    raise ValueError("Invalid key index")
+                cmd = ('symbios-settings-ssh-keys.sh remove'
+                       f' --index {shlex.quote(remove_idx)}')
+                stdin_data = None
             elif action == "save":
-                keys_text = request.POST.get("keys", "").strip()
-                new_keys = [k.strip() for k in keys_text.split("\n") if k.strip()]
-                invalid = [k for k in new_keys
-                           if not k.startswith("#")
-                           and not _is_valid_ssh_pubkey(k)]
-                if invalid:
-                    raise ValueError(f"{len(invalid)} invalid SSH key(s) found")
-                user_keys = new_keys
+                # Raw textarea lines go via stdin; the script validates
+                # (comments/empty lines allowed) and preserves system keys.
+                keys_text = request.POST.get("keys", "")
+                cmd = 'symbios-settings-ssh-keys.sh set --stdin'
+                stdin_data = keys_text
+            else:
+                raise ValueError(f"Unknown action: {action}")
 
-            # Build the complete authorized_keys content: system keys first,
-            # then user keys.  Write via symbios-write-authorized-keys.sh
-            # (reads from stdin, no shell-quoting issues).
-            all_keys = system_keys + user_keys
-            keys_content = "\n".join(all_keys) + "\n"
-            cmd = 'symbios-write-authorized-keys.sh'
-
+            # Validation lives in the script; failures show up in the
+            # exec modal (AJAX) or as an error message (fallback).
             if is_ajax:
                 from .utils.jobs import create_job
-                job_id = create_job(cmd, timeout=60, stdin_data=keys_content)
+                job_id = create_job(cmd, timeout=60, stdin_data=stdin_data)
                 return JsonResponse({'ok': True, 'job': job_id,
                                      'title': 'Saving SSH keys...',
                                      'message': 'SSH keys saved.',
                                      'command': cmd})
 
             ok, stdout, stderr = run_command(
-                cmd, timeout=15, stdin_data=keys_content)
+                cmd, timeout=15, stdin_data=stdin_data)
             if not ok:
-                raise RuntimeError(f"Failed to write authorized_keys: {stderr}")
+                raise RuntimeError(f"Failed to write authorized_keys: {stderr or stdout}")
 
             messages.success(request, "SSH keys saved.")
         except Exception as e:
+            if is_ajax:
+                return JsonResponse({'ok': False, 'error': str(e)}, status=400)
             messages.error(request, f"Error: {e}")
         return redirect("settings_ssh_keys")
 
@@ -1325,25 +1318,34 @@ def settings_backup(request):
 
     if request.method == 'POST':
         is_ajax = is_ajax_request(request)
+        # Validation and the inventory write live in the settings CLI
+        # (single source of truth). The exclude textarea goes via stdin;
+        # no secrets are involved in this domain.
+        encryption = ('true' if request.POST.get('backup_encryption') == 'on'
+                      else 'false')
+        set_cmd = ('symbios-settings-backup.sh set'
+                   f' --host {shlex.quote(request.POST.get("backup_server_host", "").strip())}'
+                   f' --port {shlex.quote(request.POST.get("backup_server_port", "").strip())}'
+                   f' --user {shlex.quote(request.POST.get("backup_server_user", "").strip())}'
+                   f' --path {shlex.quote(request.POST.get("backup_server_path", "").strip())}'
+                   f' --encryption {encryption}'
+                   ' --exclude-stdin')
+        stdin_data = request.POST.get('backup_exclude', '')
         try:
-            vars_['backup_server_host'] = request.POST.get('backup_server_host', '').strip()
-            vars_['backup_server_port'] = request.POST.get('backup_server_port', '').strip() or '22'
-            vars_['backup_server_user'] = request.POST.get('backup_server_user', '').strip() or 'root'
-            vars_['backup_server_path'] = request.POST.get('backup_server_path', '').strip()
-            vars_['backup_encryption'] = request.POST.get('backup_encryption') == 'on'
-            # Exclude list: one rsync pattern per line; comments allowed
-            excludes = []
-            for line in request.POST.get('backup_exclude', '').splitlines():
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    excludes.append(line)
-            vars_['backup_exclude'] = excludes
-            _save_inventory_config(config)
             if is_ajax:
-                job_id, title, cmd = _start_reapply(playbooks=['base-services/backup.yml'])
-                return JsonResponse({'ok': True, 'job': job_id, 'title': title,
+                from .utils.jobs import create_job
+                cmd = (f'{set_cmd} && symbios-reapply.sh'
+                       ' --only base-services/backup.yml')
+                job_id = create_job(cmd, timeout=3600, stdin_data=stdin_data)
+                return JsonResponse({'ok': True, 'job': job_id,
+                                     'title': 'Reapplying: base-services/backup.yml',
                                      'message': 'Backup settings saved.',
                                      'command': cmd})
+            ok, stdout, stderr = run_command(set_cmd, timeout=30,
+                                            stdin_data=stdin_data)
+            if not ok:
+                messages.error(request, f'Error: {stderr or stdout}')
+                return redirect('settings_backup')
             messages.success(request, 'Backup settings saved.')
             messages.info(request, 'Reapplying backup playbook in the background...')
             _start_reapply(playbooks=['base-services/backup.yml'])

@@ -196,6 +196,40 @@ Emits a JSON array of field descriptors (`name`, `type`
 relevant) for future generic WebUI form rendering. Validate with
 `... schema | python3 -c "import json,sys; json.load(sys.stdin)"`.
 
+### 3.10 `symbios-settings-ssh-keys.sh`
+
+Root `authorized_keys` user keys. Exception domain: manages a host FILE,
+not `inventory.yml` (the documented SSH-key exception). The file write is
+delegated to `symbios-write-authorized-keys.sh` (atomic, always preserves
+the `symbios-base-webui` gateway key); this script adds strict validation
+(key type + base64), index-based removal over user keys only, and JSON
+list output. The gateway key can never be edited or removed here.
+
+```bash
+symbios-settings-ssh-keys.sh list [--json]
+printf '%s\n' "ssh-ed25519 AAAA... user@host" | symbios-settings-ssh-keys.sh validate --stdin
+symbios-settings-ssh-keys.sh add --key "ssh-ed25519 AAAA... user@host" [--check]
+symbios-settings-ssh-keys.sh remove --index 0 [--check]
+printf '%s\n' "ssh-ed25519 AAAA... user@host" | symbios-settings-ssh-keys.sh set --stdin [--check]
+```
+
+### 3.11 `symbios-settings-backup.sh`
+
+Backup target: server host/port/user/path, encryption flag (real YAML
+boolean), rsync exclude patterns (YAML list; needs `merge` list support
+in `symbios-inventory.py` plus `get --json` for reading the list back).
+
+```bash
+symbios-settings-backup.sh get [--json]
+symbios-settings-backup.sh set --host backup.example.com --port 22 --user root --path /backups/symbios --encryption true [--check]
+printf '%s\n' '*.tmp' 'cache/' | symbios-settings-backup.sh set --exclude-stdin [--check]
+```
+
+Snapshot listing, passphrase handling (`symbios-backup.sh
+gen-passphrase|get-passphrase` - the passphrase is NOT an inventory var),
+restore and manual runs stay with their dedicated scripts and thin
+endpoints.
+
 ---
 
 ## 4. Script catalog
