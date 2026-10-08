@@ -1,0 +1,195 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# docs:
+#   name: RustDesk Client
+#   short_description: Install the RustDesk client with preconfigured server
+#   description: |
+#     Installs the RustDesk remote desktop client on the SymbiOS host and preconfigures it for the
+#     self-hosted server (services/rustdesk.yml): ID/relay server rustdesk.{{ base_domain }} plus the server public key.
+#
+#     Upstream provides no official APT repository (see rustdesk/rustdesk discussion #3985), so the playbook
+#     downloads the .deb from GitHub releases (https://github.com/rustdesk/rustdesk/releases) and installs it
+#     via apt. x86_64 and aarch64 are supported.
+#
+#     Variables (override via inventory or -e):
+#       - rustdesk_client_version: client version, "latest" (default, resolved via the GitHub API) or pinned, e.g. "1.4.9"
+#
+#     Preconfiguration (central, per machine): the playbook writes the server settings (ID/relay server
+#     rustdesk.{{ base_domain }} plus the server public key) into the service account config
+#     /root/.config/rustdesk/RustDesk2.toml - the .deb installs RustDesk as a systemd service running as root
+#     ("rustdesk.service", /usr/bin/rustdesk --service), and this is the config that instance (unattended
+#     access, login screen) actually uses. No per-user files are needed; the playbook is the source of truth
+#     and rewrites the file on every run, then restarts the service when its unit exists.
+#     Requires services/rustdesk.yml installed first (source of the server public key).
+#
+#     There are no uninstall buttons (the uninstall schema is container-based); remove via "apt-get remove -y rustdesk".
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   actions:
+#     show_version: dpkg-query -W -f '${Version}' rustdesk
+#
+---
+- name: rustdesk-client setup
+  hosts: all
+
+  vars:
+    service_name: rustdesk-client
+    service_domain: "rustdesk.{{ base_domain }}"
+    rustdesk_client_version: "latest"
+    rustdesk_client_deb_arch: "{{ 'aarch64' if ansible_architecture == 'aarch64' else ('x86_64' if ansible_architecture == 'x86_64' else 'unsupported') }}"
+
+  tasks:
+
+    - name: Fail on unsupported architecture
+      ansible.builtin.fail:
+        msg: "rustdesk-client supports x86_64 and aarch64 only, got {{ ansible_architecture }}"
+      when: rustdesk_client_deb_arch == 'unsupported'
+
+    - name: Resolve latest client version via GitHub API
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/rustdesk/rustdesk/releases/latest
+        return_content: true
+      register: rustdesk_client_latest
+      when: rustdesk_client_version == 'latest'
+
+    - name: Set target client version
+      ansible.builtin.set_fact:
+        rustdesk_client_target: "{{ (rustdesk_client_latest.json.tag_name | regex_replace('^v', '')) if rustdesk_client_version == 'latest' else rustdesk_client_version }}"
+
+    - name: Check installed client version
+      ansible.builtin.command: dpkg-query -W -f=${Version} rustdesk
+      register: rustdesk_client_installed
+      failed_when: false
+      changed_when: false
+
+    - name: Check server public key exists
+      ansible.builtin.stat:
+        path: /symbios/services/rustdesk/data/id_ed25519.pub
+      register: rustdesk_client_keyfile
+
+    - name: Fail when the server is not installed
+      ansible.builtin.fail:
+        msg: "Server public key not found - install services/rustdesk.yml first."
+      when: not rustdesk_client_keyfile.stat.exists
+
+    - name: Read server public key
+      ansible.builtin.slurp:
+        src: /symbios/services/rustdesk/data/id_ed25519.pub
+      register: rustdesk_client_key_b64
+
+    - name: Set server public key fact
+      ansible.builtin.set_fact:
+        rustdesk_client_pubkey: "{{ rustdesk_client_key_b64.content | b64decode | trim }}"
+
+    - name: Ensure service dir exists
+      ansible.builtin.file:
+        path: /symbios/services/{{ service_name }}
+        state: directory
+        mode: "0750"
+        owner: root
+        group: root
+
+    - name: Download client .deb
+      ansible.builtin.get_url:
+        url: "https://github.com/rustdesk/rustdesk/releases/download/{{ rustdesk_client_target }}/rustdesk-{{ rustdesk_client_target }}-{{ rustdesk_client_deb_arch }}.deb"
+        dest: "/symbios/services/{{ service_name }}/rustdesk-{{ rustdesk_client_target }}-{{ rustdesk_client_deb_arch }}.deb"
+        mode: "0644"
+      when: rustdesk_client_installed.rc != 0 or rustdesk_client_installed.stdout != rustdesk_client_target
+
+    - name: Install client .deb
+      ansible.builtin.apt:
+        deb: "/symbios/services/{{ service_name }}/rustdesk-{{ rustdesk_client_target }}-{{ rustdesk_client_deb_arch }}.deb"
+      when: rustdesk_client_installed.rc != 0 or rustdesk_client_installed.stdout != rustdesk_client_target
+
+    - name: Ensure service account config dir
+      ansible.builtin.file:
+        path: /root/.config/rustdesk
+        state: directory
+        mode: "0700"
+        owner: root
+        group: root
+
+    - name: Preconfigure rustdesk client (central service config)
+      ansible.builtin.copy:
+        dest: /root/.config/rustdesk/RustDesk2.toml
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          # Preconfigured by SymbiOS (services/rustdesk-client.yml). Central per-machine config of the
+          # rustdesk systemd service - re-runs of this playbook restore these values.
+          rendezvous_server = '{{ service_domain }}:21116'
+          [options]
+          key = '{{ rustdesk_client_pubkey }}'
+          relay-server = '{{ service_domain }}'
+          custom-rendezvous-server = '{{ service_domain }}'
+          custom-relay-server = '{{ service_domain }}'
+      notify: Restart rustdesk service
+
+    - name: Check rustdesk service unit
+      ansible.builtin.command: systemctl cat rustdesk.service
+      register: rustdesk_client_unit
+      failed_when: false
+      changed_when: false
+
+    - name: Enable rustdesk service
+      ansible.builtin.systemd:
+        name: rustdesk.service
+        enabled: true
+      when: rustdesk_client_unit.rc == 0
+
+    - name: Deploy healthcheck
+      ansible.builtin.blockinfile:
+        path: "{{ data_root }}/runchecks.d/symbios-healthcheck-{{ service_name }}.check"
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          CHECK_CATEGORY="services"
+          CHECK_TITLE="{{ service_name }}"
+          CHECK_DESC="Healthcheck for the {{ service_name }} playbook."
+          CHECK_DETAIL="Verifies the rustdesk client package is installed (dpkg -s) and the central service config exists.|Missing package or config marks the check as failed."
+          if ! dpkg -s rustdesk >/dev/null 2>&1
+          then
+            g_echo_error "rustdesk client package is not installed"
+          fi
+          if [ ! -s /root/.config/rustdesk/RustDesk2.toml ]
+          then
+            g_echo_error "rustdesk central service config /root/.config/rustdesk/RustDesk2.toml is missing"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
+
+    - name: Register playbook as installed
+      include_tasks: tasks/state-register.yml
+
+  handlers:
+
+    - name: Restart rustdesk service
+      ansible.builtin.systemd:
+        name: rustdesk.service
+        state: restarted
+      when: rustdesk_client_unit.rc == 0
