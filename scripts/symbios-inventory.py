@@ -108,14 +108,31 @@ def fmt_value(value):
     return str(value)
 
 
+def is_storable(value):
+    """Check a merge value holds only generic YAML types (no dicts)."""
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return True
+    if isinstance(value, list):
+        return all(is_storable(item) for item in value)
+    return False
+
+
 def cmd_get(args):
-    """Print a single all.vars value."""
+    """Print a single all.vars value (lists: one item per line, or JSON)."""
     check_key(args.key)
     cfg = load_inventory(args.inventory)
     vars_ = cfg.get("all", {}).get("vars", {}) or {}
     if args.key not in vars_ or vars_[args.key] is None:
         e_technical("key not set: {}".format(args.key))
-    print(fmt_value(vars_[args.key]))
+    value = vars_[args.key]
+    if args.json:
+        print(json.dumps(value))
+        return
+    if isinstance(value, list):
+        for item in value:
+            print(fmt_value(item))
+        return
+    print(fmt_value(value))
 
 
 def apply_changes(vars_, changes):
@@ -133,7 +150,10 @@ def apply_changes(vars_, changes):
         else:
             if key not in vars_ or vars_[key] != value:
                 vars_[key] = value
-                lines.append("set {}={}".format(key, fmt_value(value)))
+                if isinstance(value, list):
+                    lines.append("set {}={}".format(key, json.dumps(value)))
+                else:
+                    lines.append("set {}={}".format(key, fmt_value(value)))
     return lines
 
 
@@ -164,9 +184,9 @@ def cmd_merge(args):
         e_usage("stdin must hold a JSON object, got {}".format(type(data).__name__))
     for key in data:
         check_key(key)
-        value = data[key]
-        if value is not None and not isinstance(value, (str, bool, int, float)):
-            e_usage("unsupported type for key {!r}: {}".format(key, type(value).__name__))
+        if not is_storable(data[key]):
+            e_usage("unsupported type for key {!r}: only strings, booleans, "
+                    "numbers and lists of those can be stored".format(key))
     cfg = load_inventory(args.inventory)
     vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
     lines = apply_changes(vars_, list(data.items()))
@@ -219,6 +239,8 @@ def main(argv=None):
 
     p_get = sub.add_parser("get", help="print one all.vars value")
     p_get.add_argument("key", help="variable name under all.vars")
+    p_get.add_argument("--json", action="store_true",
+                       help="print the value as JSON (needed for lists)")
     p_get.set_defaults(func=cmd_get)
 
     p_set = sub.add_parser("set", help="store one string value")
