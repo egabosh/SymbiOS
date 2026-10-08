@@ -851,6 +851,93 @@
         - nocontainer.stat.exists == true
         - hostname_result.stdout | length > 0
 
+    - name: Encrypted fast swap on the data disk
+      block:
+        - name: Remove dphys-swapfile (unencrypted SD-card default)
+          ansible.builtin.apt:
+            name: dphys-swapfile
+            state: absent
+            purge: true
+          when: nocontainer.stat.exists == true
+
+        - name: Create 8G swapfile on the encrypted data disk
+          ansible.builtin.shell: |
+            if [[ "$(stat -c%s {{ data_root }}/swapfile 2>/dev/null)" != "8589934592" ]] \
+               || ! blkid -s TYPE -o value {{ data_root }}/swapfile 2>/dev/null | grep -qx swap
+            then
+              swapoff {{ data_root }}/swapfile 2>/dev/null || true
+              fallocate -l 8G {{ data_root }}/swapfile
+              chmod 600 {{ data_root }}/swapfile
+              mkswap {{ data_root }}/swapfile
+              echo "swapfile-created"
+            fi
+          args:
+            executable: /bin/bash
+          register: swapfile_create
+          changed_when: "'swapfile-created' in swapfile_create.stdout"
+          failed_when: swapfile_create.rc != 0
+          when: nocontainer.stat.exists == true
+
+        - name: Activate the data-disk swapfile now
+          ansible.builtin.shell: |
+            if swapon --show=NAME --noheadings 2>/dev/null | grep -qx {{ data_root }}/swapfile
+            then
+              echo "already-active"
+            else
+              swapon {{ data_root }}/swapfile && echo "swapon-ran"
+            fi
+          args:
+            executable: /bin/bash
+          register: swapfile_on
+          changed_when: "'swapon-ran' in swapfile_on.stdout"
+          failed_when: swapfile_on.rc != 0
+          when: nocontainer.stat.exists == true
+
+        - name: Remove the old unencrypted swapfile (only after the new one is active)
+          ansible.builtin.shell: |
+            if swapon --show=NAME --noheadings 2>/dev/null | grep -qx {{ data_root }}/swapfile
+            then
+              swapoff /var/swap 2>/dev/null || true
+              rm -f /var/swap
+              echo "old-swap-removed"
+            else
+              echo "new swap not active, keeping /var/swap" >&2
+              exit 1
+            fi
+          args:
+            executable: /bin/bash
+          register: swapfile_cleanup
+          changed_when: "'old-swap-removed' in swapfile_cleanup.stdout"
+          failed_when: swapfile_cleanup.rc != 0
+          when: nocontainer.stat.exists == true
+
+        - name: Activate swap after late data-disk unlocks
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/symbios-swap.service
+            mode: '0644'
+            content: |
+              [Unit]
+              Description=Activate SymbiOS swapfile on the data disk
+              After=network.target
+              [Service]
+              Type=oneshot
+              RemainAfterExit=yes
+              # The data disk unlocks late (manual boot-unlock), so a plain
+              # fstab entry or rc.local line would miss it. This backgrounded
+              # wait retries until the file is swappable and never blocks boot.
+              ExecStart=/bin/bash -c 'nohup bash -c '\''while ! /sbin/swapon {{ data_root }}/swapfile 2>/dev/null; do sleep 30; done'\'' >/dev/null 2>&1 &'
+              [Install]
+              WantedBy=multi-user.target
+          when: nocontainer.stat.exists == true
+
+        - name: Enable the swap activation service
+          ansible.builtin.systemd:
+            name: symbios-swap
+            enabled: true
+            daemon_reload: true
+          when: nocontainer.stat.exists == true
+      when: nocontainer.stat.exists == true
+
     - name: Register playbook as installed
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/basics.yml"
       changed_when: false
