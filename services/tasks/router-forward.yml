@@ -1,0 +1,86 @@
+---
+# Shared task: router port forwarding via symbios-router-upnp.sh.
+#
+# Creates port forwards on the internet router (UPnP or FRITZ!Box TR-064)
+# for services that need raw ports. Honors inventory port_forwarding_method:
+# runs only when it is neither '' nor 'manual'. With 'manual' (or unset) the
+# task is a no-op and the service docs describe the manual setup.
+#
+# Required vars:
+#   service_name    (used for the default rule description)
+#   router_forwards (list of {ports: [...], proto: TCP|UDP, desc?, accesstype?};
+#                    undefined or empty means no-op)
+#   Example:
+#     router_forwards:
+#       - ports: [21115, 21116, 21117, 21118, 21119]
+#         proto: TCP
+#       - ports: [21116]
+#         proto: UDP
+#
+# Best-effort by design: a flaky router API must never break the service
+# deployment. Failed adds are reported as warnings; the WebUI page
+# Settings -> Port Forwarding stays the control plane (shows actual rules).
+
+- name: Router port forwarding
+  when: (port_forwarding_method | default('')) not in ['', 'manual'] and (router_forwards | default([]) | length > 0)
+  # symbios-router-upnp.sh calls sibling scripts (symbios-router-detect.sh)
+  # via bare names. symbios-exec.sh puts them on PATH, ansible SSH does not -
+  # so export the scripts dir here (inherited by all child processes).
+  environment:
+    PATH: "{{ git_root }}/scripts:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  block:
+
+    - name: Get local LAN IP for forwarding target
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-get-local-ip.sh"
+      register: _router_forward_local_ip
+      failed_when: false
+      changed_when: false
+
+    - name: Detect router type
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-router-upnp.sh detect"
+      register: _router_forward_detect
+      failed_when: false
+      changed_when: false
+
+    - name: Parse router detection
+      ansible.builtin.set_fact:
+        _router_forward_type: "{{ (_router_forward_detect.stdout | from_json).router_type | default('') }}"
+      when: _router_forward_detect.rc == 0
+
+    - name: Ensure static IPv4 on FRITZ!Box
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-router-upnp.sh staticip {{ _router_forward_local_ip.stdout | trim }}"
+      register: _router_forward_staticip
+      failed_when: false
+      changed_when: false
+      when:
+        - _router_forward_local_ip.rc == 0
+        - (_router_forward_local_ip.stdout | trim) | length > 0
+        - _router_forward_type | default('') == 'fritzbox'
+
+    - name: List existing router forwards
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-router-upnp.sh list"
+      register: _router_forward_list
+      failed_when: false
+      changed_when: false
+
+    - name: Parse existing router forwards
+      ansible.builtin.set_fact:
+        _router_forward_have: "{{ ((_router_forward_list.stdout | from_json).mappings | default([]) | map(attribute='external_port') | map('string') | list) | zip(((_router_forward_list.stdout | from_json).mappings | default([]) | map(attribute='protocol') | map('upper') | list)) | map('join', '/') | list }}"
+      when: _router_forward_list.rc == 0
+
+    - name: Add missing router forwards
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-router-upnp.sh add {{ item.1 }} {{ item.0.proto | upper }} {{ item.1 }} {{ _router_forward_local_ip.stdout | trim }} \"{{ item.0.desc | default('SymbiOS ' + service_name) }}\" {{ item.0.accesstype | default('ipv4') }}"
+      loop: "{{ router_forwards | subelements('ports') }}"
+      register: _router_forward_add
+      failed_when: false
+      changed_when: true
+      when:
+        - _router_forward_local_ip.rc == 0
+        - (_router_forward_local_ip.stdout | trim) | length > 0
+        - (item.1 | string + '/' + (item.0.proto | upper)) not in (_router_forward_have | default([]))
+
+    - name: Warn about failed router forwards
+      ansible.builtin.debug:
+        msg: "Router forwarding failed for {{ item.item.1 }}/{{ item.item.0.proto }}: {{ item.stdout | default(item.stderr | default('unknown error')) }} - create it manually on the router (see service docs)."
+      loop: "{{ _router_forward_add.results | default([]) }}"
+      when: item.skipped is not defined and item.rc is defined and item.rc != 0
