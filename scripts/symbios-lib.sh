@@ -177,27 +177,14 @@ function f_symbios_var {
 # Set a scalar under all.vars in inventory.yml (host side).
 # Usage: f_symbios_var_set <key> <value>
 # The write is atomic (tmp file + rename) so concurrent readers always see
-# a valid file. Requires python3 + PyYAML on the host. The WebUI writes its
-# own copy via _save_inventory_config (same effect, no locking either).
+# a valid file. Delegates to symbios-inventory.py, the single host-side
+# writer - no inline YAML parsing here. The WebUI writes its own copy via
+# _save_inventory_config (same effect, no locking either).
 function f_symbios_var_set {
   local f_key="$1" f_value="$2"
-  python3 - "$f_key" "$f_value" "${g_inventory}" <<'PYEOF'
-import os
-import sys
-import yaml
-
-key, value, path = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(path) as f:
-    cfg = yaml.safe_load(f) or {}
-vars_ = cfg.setdefault('all', {}).setdefault('vars', {})
-vars_[key] = value
-tmp = path + '.tmp'
-with open(tmp, 'w') as f:
-    yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
-    f.flush()
-    os.fsync(f.fileno())
-os.replace(tmp, path)
-PYEOF
+  local f_dir
+  f_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+  "${f_dir}/symbios-inventory.py" --inventory "${g_inventory}" set "${f_key}" "${f_value}"
 }
 
 # Check that a private key can be used unattended by OpenSSH: it must exist, be
