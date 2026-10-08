@@ -780,32 +780,16 @@
 #        backup: yes
 #        validate: /bin/bash -n %s
 
-    - name: Deploy matrix-recreate-room.sh (room state corruption repair)
-      ansible.builtin.template:
-        src: matrix/files/matrix-recreate-room.sh.j2
-        dest: /usr/local/sbin/matrix-recreate-room.sh
-        mode: "0755"
-        owner: root
-        group: root
-        validate: /bin/bash -n %s
-        backup: yes
-
-    - name: /symbios/services/matrix/synapse-purge.sh (safe Synapse cleanup)
-      ansible.builtin.template:
-        src: matrix/files/synapse-purge.sh.j2
-        dest: /usr/local/sbin/synapse-purge.sh
-        mode: "0755"
-        owner: root
-        group: root
-        validate: /bin/bash -n %s
-        backup: yes
-
+    # The room repair and synapse purge helpers ship with SymbiOS in
+    # scripts/ (symbios-matrix-recreate-room.sh, symbios-synapse-purge.sh)
+    # and need no deployment - they resolve paths/domain at runtime via
+    # symbios-lib.sh. Legacy copies under /usr/local/sbin are moved manually.
     - name: Cron synapse-purge daily (safe vacuum/analyze)
       ansible.builtin.cron:
         name: "synapse-purge daily"
         minute: "30"
         hour: "3"
-        job: /usr/local/sbin/synapse-purge.sh daily >/symbios/services/matrix/purge.log 2>&1
+        job: "{{ git_root }}/scripts/symbios-synapse-purge.sh daily >/symbios/services/matrix/purge.log 2>&1"
 
     - name: Cron synapse-purge weekly (vacuum_full_tables, stops synapse briefly)
       ansible.builtin.cron:
@@ -813,7 +797,7 @@
         weekday: "0"
         minute: "0"
         hour: "5"
-        job: /usr/local/sbin/synapse-purge.sh weekly >/symbios/services/matrix/purge.log 2>&1
+        job: "{{ git_root }}/scripts/symbios-synapse-purge.sh weekly >/symbios/services/matrix/purge.log 2>&1"
 
     - name: Cron synapse-purge monthly (vacuum_full_state, longest downtime)
       ansible.builtin.cron:
@@ -821,7 +805,7 @@
         day: "1"
         minute: "0"
         hour: "6"
-        job: /usr/local/sbin/synapse-purge.sh monthly >/symbios/services/matrix/purge.log 2>&1
+        job: "{{ git_root }}/scripts/symbios-synapse-purge.sh monthly >/symbios/services/matrix/purge.log 2>&1"
 
     # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
     - name: Deploy healthcheck

@@ -1,16 +1,24 @@
 #!/bin/bash
-
-# Safe Synapse cleanup: vacuum/analyze in safe modes; destructive DB
+# SymbiOS - Safe Synapse cleanup: vacuum/analyze in safe modes; destructive DB
 # operations only via explicit manual modes (they ask for confirmation).
-# Deployed via Ansible (matrix.yml) as a template under files/.
-# Host-agnostic: paths/domain are injected by the playbook.
+#
+# Ships with SymbiOS in scripts/ and runs on the host as root.
+# Host-agnostic: paths/domain are resolved at runtime via symbios-lib.sh.
+#
+# Usage: symbios-synapse-purge.sh {daily|weekly|monthly|purge|non-whitelisted|device-inbox|device-lists|orphaned-state|vacuum|vacuum-full|vacuum-state}
 
-. /etc/bash/gaboshlib.include
+g_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f /etc/bash/gaboshlib.include ]]
+then
+  . /etc/bash/gaboshlib.include
+fi
+source "${g_script_dir}/symbios-lib.sh"
 
-cd "{{ data_root }}/services/matrix"
+cd "${g_services_root}/matrix" || exit 1
+# shellcheck disable=SC1091
 source ./env
 
-DOMAIN="matrix.{{ base_domain }}"
+DOMAIN="matrix.${g_base_domain}"
 SYNAPSE_URL="https://${DOMAIN}"
 ADMIN="@mx-admin:${DOMAIN}"
 POSTGRES_DB="synapse"
@@ -31,12 +39,13 @@ ROOMLIST_PURGE="${g_tmp}/roompurgelist"
 confirm_destructive() {
   g_echo_warn "This operation is DESTRUCTIVE and can break E2EE decryption and federation."
   read -r -p "Type YES to continue: " g_confirm
-  [ "$g_confirm" = "YES" ]
+  [[ "$g_confirm" = "YES" ]]
 }
 
 get_admin_token() {
   TOKEN=$(docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -t -A --dbname=$POSTGRES_DB --user=$POSTGRES_USER --command="select token from access_tokens where user_id='$ADMIN' order by id desc limit 1;" 2>/dev/null)
-  if [ -z "$TOKEN" ]; then
+  if [[ -z "$TOKEN" ]]
+  then
     g_echo_error "Failed to retrieve admin token"
     exit 1
   fi
@@ -61,7 +70,8 @@ purge_empty_rooms() {
   local empty_count
   empty_count=$(wc -l < "$ROOMLIST_PURGE" | tr -d ' ')
 
-  if [ "$empty_count" = "0" ]; then
+  if [[ "$empty_count" = "0" ]]
+  then
     g_echo_ok "No empty rooms found"
     return
   fi
@@ -69,8 +79,9 @@ purge_empty_rooms() {
   g_echo "Found $empty_count empty rooms"
   local purged=0
 
-  while IFS= read -r ROOM_ID; do
-    [ -z "$ROOM_ID" ] && continue
+  while IFS= read -r ROOM_ID
+  do
+    [[ -z "$ROOM_ID" ]] && continue
 
     local encoded_room
     encoded_room=$(echo "$ROOM_ID" | sed 's/:/%3A/g')
@@ -82,7 +93,8 @@ purge_empty_rooms() {
       --data '{ "purge": true, "force": true }' \
       "${SYNAPSE_URL}/_synapse/admin/v1/rooms/${encoded_room}")
 
-    if [ "$http_code" = "200" ] || [ "$http_code" = "202" ]; then
+    if [[ "$http_code" = "200" ]] || [[ "$http_code" = "202" ]]
+    then
       purged=$((purged + 1))
       g_echo_ok "  Purged: $ROOM_ID"
     else
@@ -96,9 +108,9 @@ purge_empty_rooms() {
 cleanup_non_whitelisted() {
   g_echo_note "Cleaning up non-whitelisted federation..."
 
-  # Allowlist dynamisch aus homeserver.yaml lesen
+  # Read the allowlist dynamically from homeserver.yaml
   local allowed_domains
-  allowed_domains=$(grep -A 20 'federation_domain_whitelist' {{ data_root }}/services/matrix/data/homeserver.yaml | grep '^\s*-' | sed 's/.*- "//;s/"$//' | tr '\n' ' ')
+  allowed_domains=$(grep -A 20 'federation_domain_whitelist' "${g_services_root}/matrix/data/homeserver.yaml" | grep '^\s*-' | sed 's/.*- "//;s/"$//' | tr '\n' ' ')
   allowed_domains=("$DOMAIN" ${allowed_domains[*]})
 
   local domain_list
@@ -115,24 +127,28 @@ cleanup_non_whitelisted() {
   local rooms_purged=0
   local members_left=0
 
-  while IFS= read -r ROOM_ID; do
-    [ -z "$ROOM_ID" ] && continue
+  while IFS= read -r ROOM_ID
+  do
+    [[ -z "$ROOM_ID" ]] && continue
 
-    # Room-Domain extrahieren (Teil nach letztem ':')
+    # Extract the room domain (part after the last ':')
     local room_domain
     room_domain=$(echo "$ROOM_ID" | sed 's/.*://')
 
-    # Prüfen: Ist Room-Domain in Allowlist oder Local?
+    # Check: is the room domain allowlisted or local?
     local domain_allowed=0
-    for d in "${allowed_domains[@]}"; do
-      if [ "$room_domain" = "$d" ]; then
+    for d in "${allowed_domains[@]}"
+    do
+      if [[ "$room_domain" = "$d" ]]
+      then
         domain_allowed=1
         break
       fi
     done
 
-    if [ "$domain_allowed" = "0" ]; then
-      # Room ist auf einem nicht-gelisteten Server → purgen
+    if [[ "$domain_allowed" = "0" ]]
+    then
+      # Room lives on a non-listed server -> purge it
       local total_members
       total_members=$(db_query "SELECT COUNT(DISTINCT user_id) FROM room_memberships WHERE room_id = '$ROOM_ID';")
 
@@ -145,20 +161,22 @@ cleanup_non_whitelisted() {
         --data '{ "purge": true, "force": true }' \
         "${SYNAPSE_URL}/_synapse/admin/v1/rooms/${encoded_room}")
 
-      if [ "$http_code" = "200" ] || [ "$http_code" = "202" ]; then
+      if [[ "$http_code" = "200" ]] || [[ "$http_code" = "202" ]]
+      then
         rooms_purged=$((rooms_purged + 1))
         g_echo_ok "  Purged (foreign): $room_domain $ROOM_ID ($total_members members)"
       else
         g_echo_warn "  Failed: $ROOM_ID (HTTP $http_code)"
       fi
     else
-      # Room ist lokal/allowlisted → nicht-gelistete Mitglieder entfernen
+      # Room is local/allowlisted -> remove non-listed members
       local non_whitelisted
       non_whitelisted=$(db_query "SELECT DISTINCT user_id FROM room_memberships WHERE room_id = '$ROOM_ID' AND membership = 'join' AND NOT (split_part(user_id, ':', 2) IN ($domain_list));")
 
       local members_removed=0
-      while IFS= read -r user_id; do
-        [ -z "$user_id" ] && continue
+      while IFS= read -r user_id
+      do
+        [[ -z "$user_id" ]] && continue
         local encoded_user
         encoded_user=$(echo "$user_id" | sed 's/:/%3A/g')
         local http_code
@@ -168,11 +186,13 @@ cleanup_non_whitelisted() {
           --data "{ \"reason\": \"Non-whitelisted federation server\" }" \
           "${SYNAPSE_URL}/_synapse/admin/v1/rooms/${encoded_room}/kick/${encoded_user}")
 
-        if [ "$http_code" = "200" ]; then
+        if [[ "$http_code" = "200" ]]
+        then
           members_removed=$((members_removed + 1))
         fi
       done <<< "$non_whitelisted"
-      if [ "$members_removed" -gt 0 ]; then
+      if [[ "$members_removed" -gt 0 ]]
+      then
         members_left=$((members_left + members_removed))
         g_echo_ok "  Removed $members_removed non-whitelisted members from $ROOM_ID"
       fi
@@ -188,7 +208,8 @@ cleanup_device_inbox() {
   local count
   count=$(db_query "SELECT COUNT(*) FROM device_inbox;")
 
-  if [ -z "$count" ] || [ "$count" = "0" ] 2>/dev/null; then
+  if [[ -z "$count" ]] || [[ "$count" = "0" ]] 2>/dev/null
+  then
     g_echo_ok "device_inbox is empty"
     return
   fi
@@ -207,10 +228,10 @@ cleanup_orphaned_state() {
     SELECT sg.id FROM state_groups sg
     WHERE NOT EXISTS (SELECT 1 FROM event_to_state_groups etsg WHERE etsg.state_group = sg.id);
 
-    DELETE FROM state_groups_state 
+    DELETE FROM state_groups_state
     WHERE state_group IN (SELECT id FROM orphaned_state_groups);
 
-    DELETE FROM state_groups 
+    DELETE FROM state_groups
     WHERE id IN (SELECT id FROM orphaned_state_groups);
 
     SELECT (SELECT COUNT(*) FROM state_groups) as remaining;
@@ -225,7 +246,8 @@ cleanup_old_device_lists() {
   local max_stream
   max_stream=$(db_query "SELECT MAX(stream_id) FROM device_lists_remote_pending;")
 
-  if [ -z "$max_stream" ] || [ "$max_stream" = "0" ] 2>/dev/null; then
+  if [[ -z "$max_stream" ]] || [[ "$max_stream" = "0" ]] 2>/dev/null
+  then
     g_echo_ok "No device_lists_remote_pending data to clean"
     return
   fi
@@ -259,7 +281,8 @@ vacuum_tables() {
   total=$(printf '%s\n' "${tables[@]}" | wc -l | tr -d ' ')
   local i=0
 
-  for table in "${tables[@]}"; do
+  for table in "${tables[@]}"
+  do
     i=$((i + 1))
     g_echo "  [$i/$total] $table"
     db_exec "VACUUM $table;"
@@ -298,7 +321,8 @@ analyze_tables() {
   total=$(printf '%s\n' "${tables[@]}" | wc -l | tr -d ' ')
   local i=0
 
-  for table in "${tables[@]}"; do
+  for table in "${tables[@]}"
+  do
     i=$((i + 1))
     g_echo "  [$i/$total] $table"
     db_exec "ANALYZE $table;"
@@ -328,7 +352,8 @@ vacuum_full_tables() {
   total=$(printf '%s\n' "${tables[@]}" | wc -l | tr -d ' ')
   local i=0
 
-  for table in "${tables[@]}"; do
+  for table in "${tables[@]}"
+  do
     i=$((i + 1))
     g_echo "  [$i/$total] $table"
     db_exec "VACUUM FULL $table;"
