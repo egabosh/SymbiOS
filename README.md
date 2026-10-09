@@ -41,6 +41,11 @@ the WebUI - each one stronger together than alone. SymbiOS stands for
 15. [License](#15-license)
 16. [Disclaimer](#16-disclaimer)
 
+More documentation: [DOCS.md](DOCS.md) (index), [INSTALL.md](INSTALL.md)
+(install steps), [FEATURES.md](FEATURES.md) (settings reference),
+[SCRIPTS.md](SCRIPTS.md) (CLI reference), [playbooks.md](playbooks.md)
+(playbook authoring), [SECURITY.md](SECURITY.md) (threat model).
+
 ---
 
 ## 1. What SymbiOS does
@@ -120,14 +125,18 @@ SymbiOS/
 │   ├── *.yml             # One playbook per concern (see section 4)
 │   ├── traefik-services.j2   # Template -> /symbios/base-services/traefik/providers/symbios-services.yml
 │   ├── authelia-access-control.j2  # Template -> Authelia access_control block
-│   └── traefik-static.yml# Traefik static config (entrypoints, etc.)
-├── scripts/              # Helper scripts deployed to /usr/local/sbin/ and the WebUI
+│   └── files/traefik-static.yml.sample # Traefik static config sample (entrypoints, etc.)
+├── scripts/              # Host CLI layer (every WebUI action runs one of these)
+│   ├── symbios-settings-*.sh # One CLI per settings page (/settings/<slug>/)
+│   ├── symbios-inventory.py  # Single writer of inventory.yml (host side)
+│   ├── symbios-config.py     # Generic writer for other config-dir files
 │   ├── symbios-router-upnp.sh  # Router port-forwarding dispatcher (generic UPnP)
 │   ├── symbios-router-fritz.py # FRITZ!Box port-forwarding backend (data.lua API)
 │   ├── runchecks.d/      # Health-check scripts (run by runchecks.sh)
 │   ├── autoupdate.d/     # Update dispatchers (debian / docker / symbios)
 │   └── backup.d/         # Backup modules (docker, ldap-docker, …)
-│   │   └── ldap-groups.d/    # Hooks fired on LDAP group/membership changes
+│   └── ldap-groups.d/    # Hooks fired on LDAP group/membership changes
+│   (full reference: SCRIPTS.md; per-script help: `<name>.sh --help`)
 ├── services/             # OPTIONAL user services (each = one playbook)
 │   ├── home-assistant.yml# Example service (canonical Traefik file-provider pattern)
 │   ├── nextcloud.yml     # Example service
@@ -178,7 +187,7 @@ concern and is idempotent, so it is safe to re-run any of them.
 | `docker.yml`         | Installs Docker, creates the `docker` user/group.                       |
 | `dedyn.yml`          | deSEC (dedyn.io) dynamic-DNS client; forces EUI-64 IPv6 addressing (stable interface ID). |
 | `traefik.yml`        | Deploys the Traefik reverse proxy (file provider, no Docker socket).   |
-| `traefik-static.yml` | Traefik static config template (entrypoints, ACME resolver).            |
+| `files/traefik-static.yml.sample` | Traefik static config sample (entrypoints, ACME resolver). |
 | `ldap.yml`           | Deploys OpenLDAP; creates `/symbios/ldap-groups.d/` for group-change hooks. Also seeds the `media` access group (fixed GID 31000, see below) and loads the `openssh-lpk` schema for SSH public keys. |
 | `media.yml`          | Creates the shared standard media directories (`/symbios/media/*`) with the fixed media group, setgid and default ACLs. Runs after `ldap.yml`. |
 | `authelia.yml`       | Deploys Authelia (SSO/2FA/OIDC) and its access-control rules.          |
@@ -516,7 +525,7 @@ Only LDAP users who are members of the service's designated group(s) may log in.
 
 **How to enforce:**
 
-- **OIDC services**: Include `services/tasks/oidc-groups.yml` in your playbook,
+- **OIDC services**: Include `shared-tasks/oidc-groups.yml` in your playbook,
   then configure the app to restrict login to the group(s). Examples:
   - `openwebui`: `OAUTH_ALLOWED_ROLES=openwebui-users,openwebui-admins`
   - `home-assistant`: HA `auth_oidc` role mapping

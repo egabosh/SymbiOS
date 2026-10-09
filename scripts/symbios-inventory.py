@@ -31,6 +31,8 @@
 # JSON object on stdin instead of `set` for secret values.
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import re
@@ -77,8 +79,39 @@ def load_inventory(path):
         e_technical("cannot read {}: {}".format(path, e))
 
 
+@contextlib.contextmanager
+def locked(path):
+    """Hold an exclusive lock file across load/modify/write.
+
+    All mutating commands run inside this scope so concurrent writers
+    serialize the WHOLE read-modify-write cycle (locking only the final
+    write still loses updates - 20 parallel merges kept only 8 keys in
+    testing). flock releases with the descriptor: crashed holders never
+    block others. Reads need no lock (writes are atomic via os.replace).
+    """
+    try:
+        lock = open(path + ".lock", "w")
+    except OSError as e:
+        e_technical("cannot lock {}: {}".format(path, e))
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+    except OSError as e:
+        e_technical("cannot lock {}: {}".format(path, e))
+    try:
+        yield
+    finally:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        lock.close()
+
+
 def write_inventory(path, cfg, check_only):
-    """Write back atomically with .bak backup (or report only with check)."""
+    """Write back atomically with .bak backup (or report only with check).
+
+    Caller MUST hold locked(path): the load happened under the same lock.
+    """
     if check_only:
         return
     try:
@@ -163,17 +196,18 @@ def apply_changes(vars_, changes):
 def cmd_set(args):
     """Store one string value (non-string types go through merge)."""
     check_key(args.key)
-    cfg = load_inventory(args.inventory)
-    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
-    lines = apply_changes(vars_, [(args.key, args.value)])
-    if not lines:
-        print("unchanged")
-        return
-    write_inventory(args.inventory, cfg, args.check)
-    for line in lines:
-        print(line)
-    if args.check:
-        print("(check mode - nothing was written)")
+    with locked(args.inventory):
+        cfg = load_inventory(args.inventory)
+        vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+        lines = apply_changes(vars_, [(args.key, args.value)])
+        if not lines:
+            print("unchanged")
+            return
+        write_inventory(args.inventory, cfg, args.check)
+        for line in lines:
+            print(line)
+        if args.check:
+            print("(check mode - nothing was written)")
 
 
 def cmd_merge(args):
@@ -191,33 +225,35 @@ def cmd_merge(args):
             e_usage("unsupported type for key {!r}: only strings, booleans, "
                     "numbers, lists and string-keyed dicts of those can be "
                     "stored".format(key))
-    cfg = load_inventory(args.inventory)
-    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
-    lines = apply_changes(vars_, list(data.items()))
-    if not lines:
-        print("unchanged")
-        return
-    write_inventory(args.inventory, cfg, args.check)
-    for line in lines:
-        print(line)
-    if args.check:
-        print("(check mode - nothing was written)")
+    with locked(args.inventory):
+        cfg = load_inventory(args.inventory)
+        vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+        lines = apply_changes(vars_, list(data.items()))
+        if not lines:
+            print("unchanged")
+            return
+        write_inventory(args.inventory, cfg, args.check)
+        for line in lines:
+            print(line)
+        if args.check:
+            print("(check mode - nothing was written)")
 
 
 def cmd_del(args):
     """Delete one key (idempotent: missing keys report unchanged)."""
     check_key(args.key)
-    cfg = load_inventory(args.inventory)
-    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
-    lines = apply_changes(vars_, [(args.key, None)])
-    if not lines:
-        print("unchanged")
-        return
-    write_inventory(args.inventory, cfg, args.check)
-    for line in lines:
-        print(line)
-    if args.check:
-        print("(check mode - nothing was written)")
+    with locked(args.inventory):
+        cfg = load_inventory(args.inventory)
+        vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+        lines = apply_changes(vars_, [(args.key, None)])
+        if not lines:
+            print("unchanged")
+            return
+        write_inventory(args.inventory, cfg, args.check)
+        for line in lines:
+            print(line)
+        if args.check:
+            print("(check mode - nothing was written)")
 
 
 def get_dict(vars_, name):
@@ -256,18 +292,19 @@ def cmd_dict_set(args):
     if not is_storable(value):
         e_usage("unsupported type: only strings, booleans, numbers, lists "
                 "and string-keyed dicts of those can be stored")
-    cfg = load_inventory(args.inventory)
-    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
-    changed = get_dict(vars_, args.dict_key).get(args.key) != value
-    vars_.setdefault(args.dict_key, {})[args.key] = value
-    if not changed:
-        print("unchanged")
-        return
-    write_inventory(args.inventory, cfg, args.check)
-    print("set {}.{}={}".format(args.dict_key, args.key,
-                                json.dumps(value)))
-    if args.check:
-        print("(check mode - nothing was written)")
+    with locked(args.inventory):
+        cfg = load_inventory(args.inventory)
+        vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+        changed = get_dict(vars_, args.dict_key).get(args.key) != value
+        vars_.setdefault(args.dict_key, {})[args.key] = value
+        if not changed:
+            print("unchanged")
+            return
+        write_inventory(args.inventory, cfg, args.check)
+        print("set {}.{}={}".format(args.dict_key, args.key,
+                                    json.dumps(value)))
+        if args.check:
+            print("(check mode - nothing was written)")
 
 
 def cmd_dict_merge(args):
@@ -284,22 +321,23 @@ def cmd_dict_merge(args):
     for key in data:
         if not isinstance(key, str) or not is_storable(data[key]):
             e_usage("unsupported entry for key {!r}".format(key))
-    cfg = load_inventory(args.inventory)
-    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
-    entry = get_dict(vars_, args.dict_key).get(args.key, {})
-    if not isinstance(entry, dict):
-        e_usage("entry {}.{} is not a dict".format(args.dict_key, args.key))
-    merged = dict(entry)
-    merged.update(data)
-    if merged == entry and args.key in get_dict(vars_, args.dict_key):
-        print("unchanged")
-        return
-    vars_.setdefault(args.dict_key, {})[args.key] = merged
-    write_inventory(args.inventory, cfg, args.check)
-    print("set {}.{}={}".format(args.dict_key, args.key,
-                                json.dumps(merged)))
-    if args.check:
-        print("(check mode - nothing was written)")
+    with locked(args.inventory):
+        cfg = load_inventory(args.inventory)
+        vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+        entry = get_dict(vars_, args.dict_key).get(args.key, {})
+        if not isinstance(entry, dict):
+            e_usage("entry {}.{} is not a dict".format(args.dict_key, args.key))
+        merged = dict(entry)
+        merged.update(data)
+        if merged == entry and args.key in get_dict(vars_, args.dict_key):
+            print("unchanged")
+            return
+        vars_.setdefault(args.dict_key, {})[args.key] = merged
+        write_inventory(args.inventory, cfg, args.check)
+        print("set {}.{}={}".format(args.dict_key, args.key,
+                                    json.dumps(merged)))
+        if args.check:
+            print("(check mode - nothing was written)")
 
 
 def cmd_dict_keys(args):
@@ -349,35 +387,37 @@ def cmd_list_add(args):
     """Append a stdin JSON value to a list unless already present."""
     check_key(args.key)
     value = read_stdin_value()
-    cfg = load_inventory(args.inventory)
-    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
-    items = get_list(vars_, args.key)
-    if value in items:
-        print("unchanged")
-        return
-    vars_.setdefault(args.key, []).append(value)
-    write_inventory(args.inventory, cfg, args.check)
-    print("added {}={}".format(args.key, json.dumps(value)))
-    if args.check:
-        print("(check mode - nothing was written)")
+    with locked(args.inventory):
+        cfg = load_inventory(args.inventory)
+        vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+        items = get_list(vars_, args.key)
+        if value in items:
+            print("unchanged")
+            return
+        vars_.setdefault(args.key, []).append(value)
+        write_inventory(args.inventory, cfg, args.check)
+        print("added {}={}".format(args.key, json.dumps(value)))
+        if args.check:
+            print("(check mode - nothing was written)")
 
 
 def cmd_list_del(args):
     """Remove all stdin-JSON-equal entries from a list (idempotent)."""
     check_key(args.key)
     value = read_stdin_value()
-    cfg = load_inventory(args.inventory)
-    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
-    items = get_list(vars_, args.key)
-    kept = [item for item in items if item != value]
-    if len(kept) == len(items):
-        print("unchanged")
-        return
-    vars_[args.key] = kept
-    write_inventory(args.inventory, cfg, args.check)
-    print("deleted {}={}".format(args.key, json.dumps(value)))
-    if args.check:
-        print("(check mode - nothing was written)")
+    with locked(args.inventory):
+        cfg = load_inventory(args.inventory)
+        vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+        items = get_list(vars_, args.key)
+        kept = [item for item in items if item != value]
+        if len(kept) == len(items):
+            print("unchanged")
+            return
+        vars_[args.key] = kept
+        write_inventory(args.inventory, cfg, args.check)
+        print("deleted {}={}".format(args.key, json.dumps(value)))
+        if args.check:
+            print("(check mode - nothing was written)")
 
 
 def cmd_write(args):
@@ -394,31 +434,33 @@ def cmd_write(args):
         e_usage("invalid YAML on stdin: {}".format(e))
     if not isinstance(cfg, dict):
         e_usage("document must be a YAML mapping (dictionary)")
-    old = load_inventory(args.inventory)
-    if cfg == old:
-        print("unchanged")
-        return
-    write_inventory(args.inventory, cfg, args.check)
-    print("inventory replaced ({} top-level keys)".format(len(cfg)))
-    if args.check:
-        print("(check mode - nothing was written)")
+    with locked(args.inventory):
+        old = load_inventory(args.inventory)
+        if cfg == old:
+            print("unchanged")
+            return
+        write_inventory(args.inventory, cfg, args.check)
+        print("inventory replaced ({} top-level keys)".format(len(cfg)))
+        if args.check:
+            print("(check mode - nothing was written)")
 
 
 def cmd_dict_del(args):
     """Delete one dict entry (idempotent: missing entries report unchanged)."""
     check_key(args.dict_key)
     check_key(args.key)
-    cfg = load_inventory(args.inventory)
-    vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
-    d = get_dict(vars_, args.dict_key)
-    if args.key not in d:
-        print("unchanged")
-        return
-    del d[args.key]
-    write_inventory(args.inventory, cfg, args.check)
-    print("deleted {}.{}".format(args.dict_key, args.key))
-    if args.check:
-        print("(check mode - nothing was written)")
+    with locked(args.inventory):
+        cfg = load_inventory(args.inventory)
+        vars_ = cfg.setdefault("all", {}).setdefault("vars", {})
+        d = get_dict(vars_, args.dict_key)
+        if args.key not in d:
+            print("unchanged")
+            return
+        del d[args.key]
+        write_inventory(args.inventory, cfg, args.check)
+        print("deleted {}.{}".format(args.dict_key, args.key))
+        if args.check:
+            print("(check mode - nothing was written)")
 
 
 def main(argv=None):

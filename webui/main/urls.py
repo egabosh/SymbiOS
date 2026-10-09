@@ -17,6 +17,8 @@
 from django.urls import path, re_path
 from . import views
 from . import views_settings
+from . import views_settings_dns
+from . import views_settings_ai
 from . import views_settings_generic
 from . import views_mailserver
 from . import views_notifications
@@ -66,14 +68,14 @@ urlpatterns = [
     path('', views_home.home, name='home'),
     path('setup/', views.setup, name='setup'),
     path('settings/', views.settings, name='settings'),
-    path('settings/dns/', views_settings.settings_dns, name='settings_dns'),
-    path('settings/dns/test-api/', views_settings.settings_dns_test_api, name='settings_dns_test_api'),
-    path('settings/dns/check-ip/', views_settings.settings_dns_check_ip, name='settings_dns_check_ip'),
-    path('settings/dns/host-status/', views_settings.settings_dns_host_status, name='settings_dns_host_status'),
-    path('settings/dns/register/', views_settings.settings_dns_register, name='settings_dns_register'),
-    path('settings/dns/check-domain/', views_settings.settings_dns_check_domain, name='settings_dns_check_domain'),
-    path('settings/dns/finalize/', views_settings.settings_dns_finalize, name='settings_dns_finalize'),
-    path('settings/dns/captcha/', views_settings.settings_dns_captcha, name='settings_dns_captcha'),
+    path('settings/dns/', views_settings_dns.settings_dns, name='settings_dns'),
+    path('settings/dns/test-api/', views_settings_dns.settings_dns_test_api, name='settings_dns_test_api'),
+    path('settings/dns/check-ip/', views_settings_dns.settings_dns_check_ip, name='settings_dns_check_ip'),
+    path('settings/dns/host-status/', views_settings_dns.settings_dns_host_status, name='settings_dns_host_status'),
+    path('settings/dns/register/', views_settings_dns.settings_dns_register, name='settings_dns_register'),
+    path('settings/dns/check-domain/', views_settings_dns.settings_dns_check_domain, name='settings_dns_check_domain'),
+    path('settings/dns/finalize/', views_settings_dns.settings_dns_finalize, name='settings_dns_finalize'),
+    path('settings/dns/captcha/', views_settings_dns.settings_dns_captcha, name='settings_dns_captcha'),
     path('settings/mailserver/', views_mailserver.settings_mailserver, name='settings_mailserver'),
     path('settings/mailserver/discover/', views_mailserver.settings_mailserver_discover, name='settings_mailserver_discover'),
     path('settings/mailserver/test-email/', views_mailserver.settings_mailserver_test_email, name='settings_mailserver_test_email'),
@@ -114,16 +116,16 @@ urlpatterns = [
          name='settings_generic'),
     path('settings/ai/', views_settings_generic.settings_generic,
          {'slug': 'ai'}, name='settings_ai'),
-    path('settings/ai/test/', views_settings.settings_ai_test, name='settings_ai_test'),
+    path('settings/ai/test/', views_settings_ai.settings_ai_test, name='settings_ai_test'),
     path('settings/ai-speech/', views_settings_generic.settings_generic,
          {'slug': 'ai-speech'}, name='settings_ai_speech'),
-    path('settings/ai-speech/test/', views_settings.settings_ai_speech_test, name='settings_ai_speech_test'),
+    path('settings/ai-speech/test/', views_settings_ai.settings_ai_speech_test, name='settings_ai_speech_test'),
     path('settings/ai-image/', views_settings_generic.settings_generic,
          {'slug': 'ai-image'}, name='settings_ai_image'),
-    path('settings/ai-image/test/', views_settings.settings_ai_image_test, name='settings_ai_image_test'),
+    path('settings/ai-image/test/', views_settings_ai.settings_ai_image_test, name='settings_ai_image_test'),
     path('settings/ai-search/', views_settings_generic.settings_generic,
          {'slug': 'ai-search'}, name='settings_ai_search'),
-    path('settings/ai-search/test/', views_settings.settings_ai_search_test, name='settings_ai_search_test'),
+    path('settings/ai-search/test/', views_settings_ai.settings_ai_search_test, name='settings_ai_search_test'),
     path('settings/media/', views_settings_generic.settings_generic,
          {'slug': 'media'}, name='settings_media'),
     path('settings/local-ip/', views_settings.settings_local_ip, name='settings_local_ip'),

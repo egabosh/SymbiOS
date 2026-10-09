@@ -4,7 +4,9 @@ User and admin reference for everything in `scripts/`. These scripts are the
 executable layer of SymbiOS: the WebUI calls them on the host via
 `run_command()` -> `symbios-exec.sh`, and admins call them directly over SSH.
 If a task can be done in the WebUI, the same script behind the button does it
-on the CLI - same validation, same result.
+on the CLI - same validation, same result. Companion: FEATURES.md describes
+the same domains from the user side (settings pages); this file describes
+the CLI side. Documentation index: DOCS.md.
 
 > **Spelling**: the project name is always written `SymbiOS`.
 > File contents, names and docs follow the English-only rule from AGENTS.md.
