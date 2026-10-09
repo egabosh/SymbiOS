@@ -53,8 +53,8 @@ SETTINGS = {
         'playbooks': [],
         'force': False,
         'message': 'AI settings saved.',
-        'test': {'endpoint': '/settings/ai/test/',
-                 'label': 'Test connection'},
+        'tests': [{'endpoint': '/settings/ai/test/',
+                 'label': 'Test connection'}],
     },
     'ai-speech': {
         'script': 'symbios-settings-ai-speech.sh',
@@ -64,8 +64,8 @@ SETTINGS = {
         'playbooks': [],
         'force': False,
         'message': 'AI settings saved.',
-        'test': {'endpoint': '/settings/ai-speech/test/',
-                 'label': 'Test connection'},
+        'tests': [{'endpoint': '/settings/ai-speech/test/',
+                 'label': 'Test connection'}],
     },
     'ai-image': {
         'script': 'symbios-settings-ai-image.sh',
@@ -75,8 +75,8 @@ SETTINGS = {
         'playbooks': [],
         'force': False,
         'message': 'AI settings saved.',
-        'test': {'endpoint': '/settings/ai-image/test/',
-                 'label': 'Test connection'},
+        'tests': [{'endpoint': '/settings/ai-image/test/',
+                 'label': 'Test connection'}],
     },
     'ai-search': {
         'script': 'symbios-settings-ai-search.sh',
@@ -86,8 +86,8 @@ SETTINGS = {
         'playbooks': [],
         'force': False,
         'message': 'AI settings saved.',
-        'test': {'endpoint': '/settings/ai-search/test/',
-                 'label': 'Test connection'},
+        'tests': [{'endpoint': '/settings/ai-search/test/',
+                 'label': 'Test connection'}],
     },
     'auth': {
         'script': 'symbios-settings-auth.sh',
@@ -127,5 +127,39 @@ SETTINGS = {
         'playbooks': ['base-services/media.yml'],
         'force': False,
         'message': 'Media settings saved.',
+    },
+    'notifications': {
+        'script': 'symbios-settings-notifications.sh',
+        'title': 'Notifications',
+        'icon': 'bi-bell',
+        'explain': 'notifications',
+        'playbooks': ['base-services/notifications.yml'],
+        'force': False,
+        'message': 'Notification settings saved.',
+        # matrix-client first, but only when matrix was enabled - then
+        # the daemon is up before the alias points at its FIFO.
+        'conditional_playbooks': [
+            {'playbooks': ['base-services/matrix-client.yml'],
+             'when': {'field': 'notify_matrix_enabled', 'equals': True}},
+        ],
+        'tests': [
+            {'endpoint': '/settings/notifications/test-mail/',
+             'label': 'Send test mail'},
+            {'endpoint': '/settings/notifications/test-matrix/',
+             'label': 'Send test message'},
+        ],
+    },
+    'matrix': {
+        'script': 'symbios-settings-matrix.sh',
+        'title': 'Matrix Account',
+        'icon': 'bi-chat-dots',
+        'explain': 'matrix',
+        'playbooks': ['base-services/matrix-client.yml'],
+        'force': False,
+        'message': 'Matrix account saved. Verify the new device, then check the room.',
+        'tests': [
+            {'endpoint': '/settings/matrix/probe/',
+             'label': 'Probe homeserver'},
+        ],
     },
 }

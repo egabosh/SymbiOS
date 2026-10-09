@@ -78,10 +78,12 @@ then
 fi
 
 # Redact sensitive data from the audit log. Secrets are passed to scripts via
-# chmod-600 files (never CLI args), so only a generic password= catch-all
-# remains as a safety net.
+# chmod-600 files or stdin JSON (never CLI args), so these patterns are only
+# a safety net - but the secret inventory in AGENTS.md lists every key, and
+# each one must stay masked here. Matches key=value, key:value, key"value
+# and --flag value forms, case-insensitively.
 g_cmd_safe="${g_cmd}"
-g_cmd_safe="$(echo "$g_cmd_safe" | sed -E 's/(password[=: \"])[^ \"]+/\1***REDACTED***/gi')"
+g_cmd_safe="$(echo "${g_cmd_safe}" | sed -E 's/(password|passwd|passphrase|apikey|api[-_]key|secret|token)([=: \"]+)[^ \"]+/\1\2***REDACTED***/gi')"
 
 g_logger "client=${g_client_ip} cmd=${g_cmd_safe}"
 echo "$(date -Iseconds) client=${g_client_ip} cmd=${g_cmd_safe}" >> /var/log/symbios-exec.log 2>/dev/null || true

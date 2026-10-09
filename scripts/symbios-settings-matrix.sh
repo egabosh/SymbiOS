@@ -168,6 +168,7 @@ f_given_pw="no"
 f_new_token=""
 f_given_token="no"
 f_json_stdin="no"
+f_input="no"
 f_check="no"
 
 while [[ $# -gt 0 ]]
@@ -176,16 +177,19 @@ do
     --homeserver)
       [[ $# -ge 2 ]] || f_ss_fail_usage
       f_server="$2"
+      f_input="yes"
       shift 2
       ;;
     --user)
       [[ $# -ge 2 ]] || f_ss_fail_usage
       f_user="$2"
+      f_input="yes"
       shift 2
       ;;
     --room)
       [[ $# -ge 2 ]] || f_ss_fail_usage
       f_room="$2"
+      f_input="yes"
       shift 2
       ;;
     --password|--password=*|--token|--token=*)
@@ -234,6 +238,16 @@ then
 fi
 
 # --- validation (same rules the WebUI enforced before) ---------------------------
+
+# All fields explicitly empty means "delete the account" (same as
+# remove). A bare call without input still reports "nothing to set".
+if [[ "${f_input}" == "yes" || "${f_json_stdin}" == "yes" ]] \
+  && [[ -z "${f_server}" && -z "${f_user}" && -z "${f_room}" \
+   && "${f_given_pw}" == "no" && "${f_given_token}" == "no" ]]
+then
+  f_ss_merge '{"matrix_homeserver": null, "matrix_user": null, "matrix_password": null, "matrix_token": null, "matrix_room": null, "notify_matrix_enabled": null}' "matrix" "${f_check}"
+  exit 0
+fi
 
 f_missing=()
 [[ -z "${f_server}" ]] && f_missing+=("Homeserver URL")
