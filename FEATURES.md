@@ -14,7 +14,9 @@ Conventions used below: all host operations run through `symbios-exec.sh`
 re-applies the owning playbook (live output in the exec modal); secrets are
 passed via stdin, never on the command line. Companion: SCRIPTS.md
 describes the same domains from the CLI side
-(`symbios-settings-<slug>.sh`); documentation index: DOCS.md.
+(`symbios-settings-<slug>.sh`); documentation index: DOCS.md. The
+machine-readable field reference is generated
+(`symbios-settings-docs.sh`, committed as settings-fields.md).
 
 ---
 

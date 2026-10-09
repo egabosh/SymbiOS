@@ -26,6 +26,7 @@ do not duplicate content across files - link instead.
 | playbooks.md | Playbook authors | Service playbook authoring, `# docs:` reference | Service concept (services.md) |
 | mediapaths.md | Service authors | Media locations and mount semantics (single source of truth) | Per-service media vars (use the globals) |
 | SCRIPTS.md | Admins/developers | Every `scripts/` entry: purpose, arguments, conventions | Feature behavior (FEATURES.md), per-script `--help` detail |
+| settings-fields.md | Admins/developers | GENERATED field tables per settings script (do not edit; run `symbios-settings-docs.sh --write`, gate with `--check`) | Hand-written prose (FEATURES.md) |
 | AGENTS.md | Developers/AI | Architecture, coding standards, CLI-first contract, roadmap | Untracked by design (local working doc, never committed) |
 
 ## Rules
