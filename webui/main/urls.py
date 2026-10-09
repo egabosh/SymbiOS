@@ -17,6 +17,7 @@
 from django.urls import path, re_path
 from . import views
 from . import views_settings
+from . import views_settings_generic
 from . import views_mailserver
 from . import views_notifications
 from . import views_users
@@ -102,7 +103,10 @@ urlpatterns = [
     path('settings/disk/rollback/', views_settings.settings_disk_rollback, name='settings_disk_rollback'),
     path('settings/disk/umount/', views_settings.settings_disk_umount, name='settings_disk_umount'),
     path('settings/disk/change-password/', views_settings.settings_disk_change_password, name='settings_disk_change_password'),
-    path('settings/localization/', views_settings.settings_localization, name='settings_localization'),
+    path('settings/localization/', views_settings_generic.settings_generic,
+         {'slug': 'localization'}, name='settings_localization'),
+    path('settings/generic/<slug:slug>/', views_settings_generic.settings_generic,
+         name='settings_generic'),
     path('settings/ai/', views_settings.settings_ai, name='settings_ai'),
     path('settings/ai/test/', views_settings.settings_ai_test, name='settings_ai_test'),
     path('settings/ai-speech/', views_settings.settings_ai_speech, name='settings_ai_speech'),

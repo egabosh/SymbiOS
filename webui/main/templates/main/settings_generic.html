@@ -1,0 +1,77 @@
+{% extends "main/base.html" %}
+{% load static %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+{% if load_error %}
+<div class="alert alert-danger" role="alert">
+  <i class="bi bi-exclamation-triangle-fill me-2"></i>Could not load settings: {{ load_error }}
+</div>
+{% endif %}
+
+<div class="row">
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-body">
+        <form method="post" data-exec="true">
+          {% csrf_token %}
+
+          {% for field in fields %}
+          <div class="mb-4">
+            <label class="form-label fw-semibold" for="f_{{ field.name }}">{{ field.label }}</label>
+
+            {% if field.type == "select" %}
+            <select class="form-select" name="{{ field.name }}" id="f_{{ field.name }}"
+                    {% if field.required %}required{% endif %}>
+              <option value="" disabled {% if not field.value %}selected{% endif %} hidden>Choose...</option>
+              {% for opt in field.options %}
+              <option value="{{ opt.value }}" {% if field.value == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+              {% endfor %}
+            </select>
+
+            {% elif field.type == "bool" %}
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" role="switch"
+                     name="{{ field.name }}" id="f_{{ field.name }}" value="true"
+                     {% if field.value %}checked{% endif %}>
+              <label class="form-check-label" for="f_{{ field.name }}">Enabled</label>
+            </div>
+
+            {% elif field.type == "password" %}
+            <input type="password" class="form-control" name="{{ field.name }}" id="f_{{ field.name }}"
+                   value="" autocomplete="new-password"
+                   placeholder="{% if field.secret_set %}Configured - leave empty to keep{% else %}Not configured{% endif %}">
+            {% if field.secret_set %}
+            <div class="form-text"><i class="bi bi-check-circle me-1"></i>A value is stored. Leave empty to keep it.</div>
+            {% endif %}
+
+            {% elif field.type == "multiline" %}
+            <textarea class="form-control font-monospace" name="{{ field.name }}" id="f_{{ field.name }}" rows="4"
+                      placeholder="{{ field.placeholder }}">{{ field.value }}</textarea>
+
+            {% elif field.type == "number" %}
+            <input type="number" class="form-control" name="{{ field.name }}" id="f_{{ field.name }}"
+                   value="{{ field.value }}" placeholder="{{ field.placeholder }}"
+                   {% if field.required %}required{% endif %}>
+
+            {% else %}
+            <input type="{% if field.type == 'url' %}url{% else %}text{% endif %}" class="form-control"
+                   name="{{ field.name }}" id="f_{{ field.name }}"
+                   value="{{ field.value }}" placeholder="{{ field.placeholder }}"
+                   {% if field.pattern %}pattern="{{ field.pattern }}"{% endif %}
+                   {% if field.required %}required{% endif %}>
+            {% endif %}
+
+            {% if field.note %}
+            <div class="form-text">{{ field.note }}</div>
+            {% endif %}
+          </div>
+          {% endfor %}
+
+          <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
