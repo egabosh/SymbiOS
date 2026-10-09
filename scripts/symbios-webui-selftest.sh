@@ -89,6 +89,9 @@ function f_fail {
 
 # Registry slugs with their scripts (mirrors settings_registry.py; the
 # self-test stays independent of Django so it also runs pre-deploy).
+# Only generically rendered pages: dedicated rich pages (backup, dns,
+# mailserver, ...) have custom field handling the uniform POST cannot
+# reproduce.
 f_slugs="localization ai ai-speech ai-image ai-search auth acme security media matrix notifications"
 f_scripts="symbios-settings-localization.sh symbios-settings-ai.sh symbios-settings-ai-speech.sh symbios-settings-ai-image.sh symbios-settings-ai-search.sh symbios-settings-auth.sh symbios-settings-acme.sh symbios-settings-security.sh symbios-settings-media.sh symbios-settings-matrix.sh symbios-settings-notifications.sh"
 
@@ -193,13 +196,24 @@ else
   f_fail "localization POST invalid: ${f_locale_resp:0:200}"
 fi
 
-# 4. Inventory must be byte-identical (all writes were no-ops).
+# 4. Inventory must be byte-identical (all writes were no-ops). If a
+# POST added missing default keys or removed an empty default, restore
+# the snapshot so testing never leaves drift behind - but still fail,
+# because a truly idempotent round-trip writes nothing at all.
 if cmp -s "${f_snapshot}" "${g_inventory}"
 then
   f_pass "inventory byte-identical"
 else
-  f_fail "inventory changed during self-test:"
+  f_fail "inventory changed during self-test (restoring snapshot):"
   diff "${f_snapshot}" "${g_inventory}" | head -10 >&2
+  if cp "${f_snapshot}" "${g_inventory}" \
+    && cmp -s "${f_snapshot}" "${g_inventory}"
+  then
+    g_echo_note "snapshot restored" 2>/dev/null || echo "snapshot restored"
+  else
+    g_echo_error "FAILED TO RESTORE inventory snapshot!" 2>/dev/null \
+      || echo "FAILED TO RESTORE inventory snapshot!" >&2
+  fi
 fi
 
 if [[ "${f_failures}" -gt 0 ]]

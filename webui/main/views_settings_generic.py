@@ -196,6 +196,26 @@ def _render_generic(request, slug, entry, script):
     })
 
 
+def _is_unchanged(field, posted, old_values):
+    """True when a posted value already matches the stored state.
+
+    Missing keys count as their schema default, so first saves of
+    default-valued fields are no-ops instead of key-adding writes.
+    Anything doubtful returns False (write + reapply, the safe side).
+    """
+    name = field['name']
+    if name in old_values:
+        old = old_values[name]
+        if old is None:
+            # A stored null reads as the empty value of the posted type.
+            old = '' if isinstance(posted, str) else False
+        return posted == old
+    default = field.get('default')
+    if isinstance(default, bool):
+        return bool(posted) is bool(default)
+    return posted == default
+
+
 def _save_generic(request, slug, entry, script):
     is_ajax = is_ajax_request(request)
     fields, err = _load_schema(entry)
@@ -216,22 +236,34 @@ def _save_generic(request, slug, entry, script):
             payload[name] = request.POST.get(name, '')
         if field['secret'] and not payload[name]:
             del payload[name]
+    # Skip values identical to the stored ones (missing keys count as
+    # their schema default), so an idempotent save writes nothing and
+    # triggers no reapply. Fail-safe direction: anything doubtful stays
+    # in the payload and is written + reapplied.
+    old_values = _load_values(entry)
+    by_name = {f['name']: f for f in fields}
+    changed = {}
+    for name, posted in payload.items():
+        if _is_unchanged(by_name[name], posted, old_values):
+            continue
+        changed[name] = posted
+    if not changed:
+        if is_ajax:
+            return JsonResponse({'ok': True, 'message': 'Already up to date.',
+                                 'redirect': request.path})
+        messages.info(request, 'Already up to date - nothing changed.')
+        return redirect(request.path)
     result = run_settings_script(
         '{} set --json-stdin'.format(script), timeout=30,
-        stdin_data=json.dumps(payload))
+        stdin_data=json.dumps(changed))
     if not result:
         return settings_failed(request, result, request.path)
     playbooks = entry.get('playbooks') or []
     gated = entry.get('reapply_if_changed') or []
-    if gated:
-        # Reapply only when a gated field actually flipped (compare the
-        # posted payload against the pre-save values; missing old values
-        # count as changed so the reapply is never skipped wrongly).
-        old_values = _load_values(entry)
-        changed = any(payload.get(name) != old_values.get(name)
-                      for name in gated)
-        if not changed:
-            playbooks = []
+    if gated and not any(name in changed for name in gated):
+        # None of the gated fields is in the changed set: the values
+        # reaching the script are identical, so no reapply is needed.
+        playbooks = []
     for extra in entry.get('conditional_playbooks') or []:
         # Declarative extras: run these playbooks first when a posted
         # field equals the expected value (e.g. matrix-client before

@@ -18,8 +18,9 @@ Commands:
                                   or a JSON object with --json)
   set --server URL [--check]      Validate and write to inventory.yml.
                                   --json-stdin reads {"acme_server": ..}.
-                                  An empty server deletes the key (back to
-                                  the default CA), same as remove.
+                                  An empty server is stored as-is (the
+                                  default CA stays in effect); remove
+                                  deletes the key.
                                   --check changes nothing.
   remove [--check]                Delete the custom server (fall back to
                                   the default CA server).
@@ -153,18 +154,19 @@ fi
 
 # Single-line URL without whitespace. An explicit https:// scheme is not
 # required here - Traefik passes caServer through as configured. An empty
-# server falls back to the default CA (same as remove).
+# server is stored as-is (same as the WebUI before); only remove deletes
+# the key.
 if [[ "${f_remove}" == "no" && -n "${f_new_server}" ]]
 then
   f_ss_require_url "--server" "${f_new_server}"
 fi
 
-# --- transactional write (remove - or an empty server - deletes the key;
-# the playbook default "" and the {% if acme_server %} guard in traefik.yml
-# treat a missing key exactly like the empty string the WebUI used to
-# write) ------------------------------------------------------------------------
+# --- transactional write (remove deletes the key; an empty server is
+# stored as an empty string, exactly like the WebUI wrote it before;
+# the playbook default "" and the {% if acme_server %} guard treat both
+# the same) ---------------------------------------------------------------------
 
-if [[ "${f_remove}" == "yes" || -z "${f_new_server}" ]]
+if [[ "${f_remove}" == "yes" ]]
 then
   f_merge='{"acme_server": null}'
 else

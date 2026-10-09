@@ -90,9 +90,9 @@ then
   for f_script in "${f_root}"/scripts/symbios-settings-*.sh
   do
     [[ -f "${f_script}" ]] || continue
-    # skip the libs themselves
+    # skip libs, tooling and the docs generator (no get/set/schema contract)
     case "${f_script}" in
-      *-lib.sh|*-new.sh|*-check.sh) continue ;;
+      *-lib.sh|*-new.sh|*-check.sh|*-docs.sh) continue ;;
     esac
     f_base="$(basename "${f_script}")"
     grep -q 'source "\$g_symbios_dir/symbios-settings-lib.sh"' "${f_script}" \
