@@ -21,11 +21,14 @@ Manage SymbiOS security settings (password policy, WebUI access scope).
 Commands:
   get [--json]                    Print current values (key=value lines,
                                   or a JSON object with --json)
-  set [--policy POLICY --public-access true|false] [--check]
+  set [--policy POLICY --public-access true|false | --json-stdin]
+       [--check]
                                   Validate and write to inventory.yml.
-                                  POLICY is one of none|low|medium|high|
-                                  paranoid. Options left out keep their
-                                  current value. --check changes nothing.
+                                  --json-stdin reads {"password_policy":..,
+                                  "webui_public_access":..}. POLICY is one of
+                                  none|low|medium|high|paranoid. Options left
+                                  out keep their current value. --check
+                                  changes nothing.
   schema                          Print the field description as JSON
                                   (for generic WebUI form rendering)
   -h, --help                      Show this help and exit
@@ -132,6 +135,26 @@ do
     --public-access=*)
       f_new_public="${1#--public-access=}"
       f_given_public="yes"
+      shift
+      ;;
+    --json-stdin)
+      f_json="$(cat)"
+      if [[ "${f_json}" == *'"password_policy"'* ]]
+      then
+        f_new_policy="$(f_json_get "${f_json}" "password_policy")" || f_new_policy=""
+        f_given_policy="yes"
+      fi
+      if [[ "${f_json}" == *'"webui_public_access"'* ]]
+      then
+        f_onoff="$(grep -o '"webui_public_access"[[:space:]]*:[[:space:]]*[^,}]*' <<< "${f_json}" | head -1)"
+        f_onoff="${f_onoff##*:}"
+        f_onoff="${f_onoff#"${f_onoff%%[![:space:]]*}"}"
+        f_onoff="${f_onoff%"${f_onoff##*[![:space:]]}"}"
+        f_onoff="${f_onoff%\"}"
+        f_onoff="${f_onoff#\"}"
+        f_new_public="${f_onoff}"
+        f_given_public="yes"
+      fi
       shift
       ;;
     --check)

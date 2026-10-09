@@ -19,8 +19,9 @@ Commands:
   get [--json]                    Print current values (key=value lines,
                                   or a JSON object with --json)
   set [--media-root P --audio P --images P --videos P --books P
-       --documents P --inbox P --shared P] [--check]
+       --documents P --inbox P --shared P | --json-stdin] [--check]
                                   Validate and write to inventory.yml.
+                                  --json-stdin reads inventory key names.
                                   Every given path must be absolute.
                                   Options left out keep their current
                                   value. --check changes nothing.
@@ -151,6 +152,20 @@ do
   if [[ "${f_matched}" == "no" ]]
   then
     case "$1" in
+      --json-stdin)
+        # Full field object for generic callers (keys are inventory names).
+        f_json="$(cat)"
+        for f_pair in ${f_fields}
+        do
+          f_key="${f_pair%%|*}"
+          [[ "${f_json}" == *'"'"${f_key}"'"'* ]] || continue
+          f_val="$(f_json_get "${f_json}" "${f_key}")" || f_val=""
+          printf -v "f_val_${f_key}" '%s' "${f_val}"
+          printf -v "f_given_${f_key}" '%s' "yes"
+          f_given_any="yes"
+        done
+        shift
+        ;;
       --check)
         f_check="yes"
         shift

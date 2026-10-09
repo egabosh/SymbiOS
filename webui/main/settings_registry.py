@@ -30,6 +30,8 @@ here - no new view, no new template. Conventions (see views_settings_generic):
   option per line, e.g. "timezones").
 - Secret current values never come back (`get --json` reports
   <name>_set); the form renders them empty with a "configured" hint.
+- `reapply_if_changed` (optional field list) limits the reapply to real
+  flips of those fields (e.g. traefik only when public access changed).
 """
 
 SETTINGS = {
@@ -51,6 +53,8 @@ SETTINGS = {
         'playbooks': [],
         'force': False,
         'message': 'AI settings saved.',
+        'test': {'endpoint': '/settings/ai/test/',
+                 'label': 'Test connection'},
     },
     'ai-speech': {
         'script': 'symbios-settings-ai-speech.sh',
@@ -60,5 +64,68 @@ SETTINGS = {
         'playbooks': [],
         'force': False,
         'message': 'AI settings saved.',
+        'test': {'endpoint': '/settings/ai-speech/test/',
+                 'label': 'Test connection'},
+    },
+    'ai-image': {
+        'script': 'symbios-settings-ai-image.sh',
+        'title': 'AI Image',
+        'icon': 'bi-image',
+        'explain': 'ai-image',
+        'playbooks': [],
+        'force': False,
+        'message': 'AI settings saved.',
+        'test': {'endpoint': '/settings/ai-image/test/',
+                 'label': 'Test connection'},
+    },
+    'ai-search': {
+        'script': 'symbios-settings-ai-search.sh',
+        'title': 'AI Search & RAG',
+        'icon': 'bi-search',
+        'explain': 'ai-search',
+        'playbooks': [],
+        'force': False,
+        'message': 'AI settings saved.',
+        'test': {'endpoint': '/settings/ai-search/test/',
+                 'label': 'Test connection'},
+    },
+    'auth': {
+        'script': 'symbios-settings-auth.sh',
+        'title': 'Login & 2FA',
+        'icon': 'bi-shield-lock',
+        'explain': 'auth',
+        'playbooks': ['base-services/authelia.yml'],
+        'force': False,
+        'message': 'Auth settings saved.',
+    },
+    'acme': {
+        'script': 'symbios-settings-acme.sh',
+        'title': 'Security Certificates (TLS)',
+        'icon': 'bi-patch-check',
+        'explain': 'acme',
+        'playbooks': ['base-services/traefik.yml'],
+        'force': False,
+        'message': 'ACME settings saved.',
+    },
+    'security': {
+        'script': 'symbios-settings-security.sh',
+        'title': 'Security',
+        'icon': 'bi-shield-check',
+        'explain': 'security',
+        'playbooks': ['base-services/traefik.yml'],
+        'force': False,
+        'message': 'Security settings saved.',
+        # Reapply only when one of these fields actually flipped (a
+        # policy-only save needs no traefik run).
+        'reapply_if_changed': ['webui_public_access'],
+    },
+    'media': {
+        'script': 'symbios-settings-media.sh',
+        'title': 'Media',
+        'icon': 'bi-collection-play',
+        'explain': 'media',
+        'playbooks': ['base-services/media.yml'],
+        'force': False,
+        'message': 'Media settings saved.',
     },
 }

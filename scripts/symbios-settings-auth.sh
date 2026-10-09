@@ -21,6 +21,7 @@ Commands:
                                   or a JSON object with --json)
   set --twofa true|false [--check]
                                   Validate and write to inventory.yml.
+                                  --json-stdin reads {"twofa_enabled": ..}.
                                   Enabling requires smtp_server and
                                   smtp_from to be configured.
                                   --check changes nothing.
@@ -96,6 +97,7 @@ fi
 # --- subcommand: set -----------------------------------------------------------
 
 f_new_twofa=""
+f_given_twofa="no"
 f_check="no"
 
 while [[ $# -gt 0 ]]
@@ -104,10 +106,26 @@ do
     --twofa)
       [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_twofa="$2"
+      f_given_twofa="yes"
       shift 2
       ;;
     --twofa=*)
       f_new_twofa="${1#--twofa=}"
+      f_given_twofa="yes"
+      shift
+      ;;
+    --json-stdin)
+      f_json="$(cat)"
+      # Booleans arrive unquoted - match generously, fall back to a
+      # quoted string value.
+      f_onoff="$(grep -o '"twofa_enabled"[[:space:]]*:[[:space:]]*[^,}]*' <<< "${f_json}" | head -1)"
+      f_onoff="${f_onoff##*:}"
+      f_onoff="${f_onoff#"${f_onoff%%[![:space:]]*}"}"
+      f_onoff="${f_onoff%"${f_onoff##*[![:space:]]}"}"
+      f_onoff="${f_onoff%\"}"
+      f_onoff="${f_onoff#\"}"
+      f_new_twofa="${f_onoff}"
+      f_given_twofa="yes"
       shift
       ;;
     --check)
@@ -125,7 +143,7 @@ do
   esac
 done
 
-if [[ -z "${f_new_twofa}" ]]
+if [[ "${f_given_twofa}" == "no" ]]
 then
   f_ss_fail_validation "Nothing to set - pass --twofa true|false"
 fi

@@ -191,6 +191,75 @@ do
       f_given_enc="yes"
       shift 2
       ;;
+    --json-stdin)
+      # Full field object for generic callers (e.g. the schema renderer).
+      # backup_exclude arrives as a newline string, split like the
+      # --exclude-stdin textarea lines.
+      f_json="$(cat)"
+      for f_field in backup_server_host backup_server_port backup_server_user backup_server_path backup_encryption backup_exclude
+      do
+        [[ "${f_json}" == *'"'"${f_field}"'"'* ]] || continue
+        if [[ "${f_field}" == "backup_exclude" ]]
+        then
+          f_excl_text="$(f_json_get "${f_json}" "${f_field}")" || f_excl_text=""
+          # JSON escapes newlines as \n - restore real line breaks.
+          # (printf %s, never %b: patterns may hold literal backslashes.)
+          f_excl_text="${f_excl_text//\\n/$'\n'}"
+          f_stdin_patterns=()
+          while IFS= read -r f_line || [[ -n "${f_line}" ]]
+          do
+            f_trimmed="${f_line#"${f_line%%[![:space:]]*}"}"
+            f_trimmed="${f_trimmed%"${f_trimmed##*[![:space:]]}"}"
+            [[ -z "${f_trimmed}" || "${f_trimmed}" == \#* ]] && continue
+            f_stdin_patterns+=("${f_trimmed}")
+          done <<< "${f_excl_text}"
+          f_excludes_json="["
+          f_first="yes"
+          for f_pat in ${f_stdin_patterns[@]+"${f_stdin_patterns[@]}"}
+          do
+            [[ "${f_first}" == "yes" ]] || f_excludes_json="${f_excludes_json}, "
+            f_first="no"
+            f_excludes_json="${f_excludes_json}$(printf '%s' "${f_pat}" | f_json_escape)"
+          done
+          f_excludes_json="${f_excludes_json}]"
+          f_given_excludes="yes"
+          continue
+        fi
+        f_val="$(f_json_get "${f_json}" "${f_field}")" || f_val=""
+        # Booleans arrive unquoted - match generously.
+        if [[ "${f_field}" == "backup_encryption" ]]
+        then
+          f_onoff="$(grep -o "\"${f_field}\"[[:space:]]*:[[:space:]]*[^,}]*" <<< "${f_json}" | head -1)"
+          f_onoff="${f_onoff##*:}"
+          f_onoff="${f_onoff#"${f_onoff%%[![:space:]]*}"}"
+          f_onoff="${f_onoff%"${f_onoff##*[![:space:]]}"}"
+          f_onoff="${f_onoff%\"}"
+          f_onoff="${f_onoff#\"}"
+          f_new_enc="${f_onoff}"
+          f_given_enc="yes"
+          continue
+        fi
+        case "${f_field}" in
+          backup_server_host)
+            f_new_host="${f_val}"
+            f_given_host="yes"
+            ;;
+          backup_server_port)
+            f_new_port="${f_val}"
+            f_given_port="yes"
+            ;;
+          backup_server_user)
+            f_new_user="${f_val}"
+            f_given_user="yes"
+            ;;
+          backup_server_path)
+            f_new_path="${f_val}"
+            f_given_path="yes"
+            ;;
+        esac
+      done
+      shift
+      ;;
     --exclude-stdin)
       f_given_excludes="yes"
       f_stdin_patterns=()

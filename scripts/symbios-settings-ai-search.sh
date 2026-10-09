@@ -5,8 +5,8 @@
 # a thin wrapper around this script, which owns validation and the
 # inventory.yml write. The inventory write goes through
 # symbios-inventory.py (merge, one transaction). Empty values delete the
-# key (same as the WebUI before). This domain carries no secrets, so plain
-# flags are sufficient (no --json-stdin needed).
+# key (same as the WebUI before). This domain carries no secrets; plain
+# flags work, and --json-stdin takes the full field object.
 
 function f_usage {
   cat << EOF
@@ -17,7 +17,7 @@ Manage SymbiOS AI search settings (Tika text extraction, SearXNG search).
 Commands:
   get [--json]                    Print current values (key=value lines,
                                   or a JSON object with --json)
-  set [--tika-url URL --searxng-url URL] [--check]
+  set [--tika-url URL --searxng-url URL | --json-stdin] [--check]
                                   Validate and write to inventory.yml.
                                   Empty values delete the key.
                                   --check changes nothing.
@@ -104,6 +104,7 @@ f_tika_url=""
 f_searxng_url=""
 f_given_tika_url="no"
 f_given_searxng_url="no"
+f_json_stdin="no"
 f_check="no"
 
 while [[ $# -gt 0 ]]
@@ -121,6 +122,10 @@ do
       f_given_searxng_url="yes"
       shift 2
       ;;
+    --json-stdin)
+      f_json_stdin="yes"
+      shift
+      ;;
     --check)
       f_check="yes"
       shift
@@ -136,9 +141,30 @@ do
   esac
 done
 
-if [[ "${f_given_tika_url}" == "no" && "${f_given_searxng_url}" == "no" ]]
+if [[ "${f_given_tika_url}" == "no" && "${f_given_searxng_url}" == "no" \
+   && "${f_json_stdin}" == "no" ]]
 then
   f_ss_fail_validation "Nothing to set - pass --tika-url and/or --searxng-url"
+fi
+
+if [[ "${f_json_stdin}" == "yes" ]]
+then
+  f_json="$(cat)"
+  for f_field in ai_tika_url ai_searxng_url
+  do
+    [[ "${f_json}" == *'"'"${f_field}"'"'* ]] || continue
+    f_val="$(f_json_get "${f_json}" "${f_field}")" || f_val=""
+    case "${f_field}" in
+      ai_tika_url)
+        f_tika_url="${f_val}"
+        f_given_tika_url="yes"
+        ;;
+      ai_searxng_url)
+        f_searxng_url="${f_val}"
+        f_given_searxng_url="yes"
+        ;;
+    esac
+  done
 fi
 
 # URLs must be single-line. The SearXNG URL may carry a <query> placeholder

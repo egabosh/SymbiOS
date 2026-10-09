@@ -20,7 +20,7 @@ from django.contrib import messages
 from django.http import JsonResponse
 from .views import _get_inventory_config
 from .constants import CONFIG_PATH
-from .utils.ssh_exec import run_playbook, run_command
+from .utils.ssh_exec import run_command
 from .utils.settings_cli import run_settings_script, settings_failed
 from .utils.http import is_ajax_request
 from .utils.secret_file import f_write_secret
@@ -596,56 +596,6 @@ def settings_dns_captcha(request):
 
 
 @login_required
-def settings_ai(request):
-    config = _get_inventory_config()
-    if 'all' not in config:
-        config['all'] = {}
-    if 'vars' not in config['all']:
-        config['all']['vars'] = {}
-    vars_ = config['all']['vars']
-
-    if request.method == 'POST':
-        is_ajax = is_ajax_request(request)
-        # Secrets travel via stdin JSON, never as argv (visible in ps).
-        # Validation and the inventory write live in the settings CLI.
-        payload = json.dumps({
-            'ai_server': request.POST.get('ai_server', '').strip(),
-            'ai_apikey': request.POST.get('ai_apikey', '').strip(),
-        })
-        try:
-            ok, stdout, stderr = run_command(
-                'symbios-settings-ai.sh set --json-stdin',
-                timeout=30, stdin_data=payload)
-            if not ok:
-                err = (stderr or stdout or 'Failed to save AI settings.')
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': err}, status=400)
-                messages.error(request, f'Error: {err}')
-                return redirect('settings_ai')
-            if is_ajax:
-                return JsonResponse({'ok': True,
-                                     'message': 'AI settings saved.',
-                                     'redirect': '/settings/ai/'})
-            messages.success(request, 'AI settings saved.')
-        except Exception as e:
-            if is_ajax:
-                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
-            messages.error(request, f'Error: {e}')
-        return redirect('settings_ai')
-
-    return render(request, 'main/settings_ai.html', {
-        'vars': vars_,
-        'page_key': 'ai',
-        'page_icon': 'bi-cpu',
-        'page_title': 'AI',
-        'page_explain': PAGE_EXPLAIN['ai'],
-        'page_status': get_page_badge('ai', vars_)[0],
-        'page_status_label': get_page_badge('ai', vars_)[1],
-        'page_status_text': get_page_badge('ai', vars_)[2],
-    })
-
-
-@login_required
 def settings_ai_test(request):
     """AJAX POST - optional connection check against an OpenAI-compatible server.
 
@@ -708,101 +658,6 @@ def _probe_openai_models(url, apikey):
         return False, f'Could not reach {url}: {e.reason}'
     except Exception as e:
         return False, f'Could not reach {url}: {e}'
-
-
-def _save_ai_vars(request, script, fields, redirect_url, redirect_name):
-    """Shared POST handler for the AI sub-pages (speech/image/search).
-
-    Builds a JSON payload from the listed fields and lets the settings CLI
-    validate and write it (stdin, so secrets never appear in ps). Empty
-    values delete the key, same as before. Answers AJAX with a redirect
-    like settings_ai (save only, no reapply - the openwebui playbook
-    picks the vars up on its next run).
-    """
-    is_ajax = is_ajax_request(request)
-    try:
-        payload = json.dumps({
-            field: request.POST.get(field, '').strip() for field in fields
-        })
-        ok, stdout, stderr = run_command(
-            f'{script} set --json-stdin', timeout=30, stdin_data=payload)
-        if not ok:
-            err = (stderr or stdout or 'Failed to save AI settings.')
-            if is_ajax:
-                return JsonResponse({'ok': False, 'error': err}, status=400)
-            messages.error(request, f'Error: {err}')
-            return redirect(redirect_name)
-        if is_ajax:
-            return JsonResponse({'ok': True,
-                                 'message': 'AI settings saved.',
-                                 'redirect': redirect_url})
-        messages.success(request, 'AI settings saved.')
-    except Exception as e:
-        if is_ajax:
-            return JsonResponse({'ok': False, 'error': str(e)}, status=500)
-        messages.error(request, f'Error: {e}')
-
-
-_AI_SPEECH_FIELDS = ['ai_stt_url', 'ai_stt_key', 'ai_stt_model',
-                     'ai_tts_url', 'ai_tts_key', 'ai_tts_model']
-_AI_IMAGE_FIELDS = ['ai_image_url', 'ai_image_model',
-                    'ai_image_edit_url', 'ai_image_edit_model']
-_AI_SEARCH_FIELDS = ['ai_tika_url', 'ai_searxng_url']
-
-
-def _render_ai_page(request, template, page_key, page_title, page_icon):
-    config = _get_inventory_config()
-    vars_ = config.get('all', {}).get('vars', {})
-    badge = get_page_badge(page_key, vars_)
-    return render(request, template, {
-        'vars': vars_,
-        'page_key': page_key,
-        'page_icon': page_icon,
-        'page_title': page_title,
-        'page_explain': PAGE_EXPLAIN[page_key],
-        'page_status': badge[0],
-        'page_status_label': badge[1],
-        'page_status_text': badge[2],
-    })
-
-
-@login_required
-def settings_ai_speech(request):
-    if request.method == 'POST':
-        resp = _save_ai_vars(request, 'symbios-settings-ai-speech.sh',
-                             _AI_SPEECH_FIELDS, '/settings/ai-speech/',
-                             'settings_ai_speech')
-        if resp is not None:
-            return resp
-        return redirect('settings_ai_speech')
-    return _render_ai_page(request, 'main/settings_ai_speech.html',
-                           'ai-speech', 'AI Speech', 'bi-mic')
-
-
-@login_required
-def settings_ai_image(request):
-    if request.method == 'POST':
-        resp = _save_ai_vars(request, 'symbios-settings-ai-image.sh',
-                             _AI_IMAGE_FIELDS, '/settings/ai-image/',
-                             'settings_ai_image')
-        if resp is not None:
-            return resp
-        return redirect('settings_ai_image')
-    return _render_ai_page(request, 'main/settings_ai_image.html',
-                           'ai-image', 'AI Image', 'bi-image')
-
-
-@login_required
-def settings_ai_search(request):
-    if request.method == 'POST':
-        resp = _save_ai_vars(request, 'symbios-settings-ai-search.sh',
-                             _AI_SEARCH_FIELDS, '/settings/ai-search/',
-                             'settings_ai_search')
-        if resp is not None:
-            return resp
-        return redirect('settings_ai_search')
-    return _render_ai_page(request, 'main/settings_ai_search.html',
-                           'ai-search', 'AI Search & RAG', 'bi-search')
 
 
 def _test_url_list(request, fallback_vars, url_param_names):
@@ -884,118 +739,6 @@ def settings_ai_image_test(request):
 @login_required
 def settings_ai_search_test(request):
     return _test_url_list(request, {}, ['ai_tika_url', 'ai_searxng_url'])
-
-
-@login_required
-def settings_auth(request):
-    config = _get_inventory_config()
-    vars_ = config.get('all', {}).get('vars', {})
-
-    if request.method == 'POST':
-        is_ajax = is_ajax_request(request)
-        twofa_wanted = request.POST.get('twofa_enabled', 'false') == 'true'
-        # Validation (SMTP precondition) and the inventory write live in
-        # the settings CLI; the playbook apply is chained behind it so a
-        # validation failure aborts before anything is applied.
-        set_cmd = 'symbios-settings-auth.sh set --twofa {}'.format(
-            'true' if twofa_wanted else 'false')
-        try:
-            if is_ajax:
-                from .utils.jobs import create_job
-                cmd = f'{set_cmd} && symbios-run-playbook.sh base-services/authelia.yml'
-                job_id = create_job(cmd, timeout=3600)
-                return JsonResponse({'ok': True, 'job': job_id,
-                                     'title': 'Applying auth settings...',
-                                     'message': 'Auth settings saved.',
-                                     'command': cmd})
-            ok, stdout, stderr = run_command(set_cmd, timeout=30)
-            if not ok:
-                messages.error(request, f'Error: {stderr or stdout}')
-                return redirect('settings_auth')
-            messages.success(request, 'Auth settings saved.')
-            try:
-                ok, out = run_playbook('base-services/authelia.yml', timeout=180)
-                if ok:
-                    messages.success(request, 'Authelia playbook completed successfully.')
-                else:
-                    messages.warning(request, 'Authelia playbook completed with issues.')
-            except Exception as e:
-                messages.warning(request, 'Could not run Authelia playbook: ' + str(e))
-        except Exception as e:
-            if is_ajax:
-                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
-            messages.error(request, f'Error: {e}')
-        return redirect('settings_auth')
-
-    badge = get_page_badge('auth', vars_)
-    return render(request, 'main/settings_auth.html', {
-        'vars': vars_,
-        'page_key': 'auth',
-        'page_icon': 'bi-shield-lock',
-        'page_title': 'Login & 2FA',
-        'page_explain': PAGE_EXPLAIN['auth'],
-        'page_status': badge[0],
-        'page_status_label': badge[1],
-        'page_status_text': badge[2],
-    })
-
-
-@login_required
-def settings_acme(request):
-    config = _get_inventory_config()
-    vars_ = config.get('all', {}).get('vars', {})
-
-    if request.method == 'POST':
-        is_ajax = is_ajax_request(request)
-        action = request.POST.get('action', 'save')
-        # Validation and the inventory write live in the settings CLI;
-        # the playbook apply is chained behind it so a validation
-        # failure aborts before anything is applied.
-        if action == 'remove':
-            set_cmd = 'symbios-settings-acme.sh remove'
-        else:
-            acme_server = request.POST.get('acme_server', '').strip()
-            set_cmd = f'symbios-settings-acme.sh set --server {shlex.quote(acme_server)}'
-        try:
-            if is_ajax:
-                from .utils.jobs import create_job
-                cmd = f'{set_cmd} && symbios-run-playbook.sh base-services/traefik.yml'
-                job_id = create_job(cmd, timeout=3600)
-                return JsonResponse({'ok': True, 'job': job_id,
-                                     'title': 'Applying ACME settings...',
-                                     'message': 'ACME settings saved.',
-                                     'command': cmd})
-            # Shared helper: runs the script, maps exit codes/output to a
-            # modal-ready answer (validation errors abort before reapply).
-            result = run_settings_script(set_cmd, timeout=30)
-            if not result:
-                return settings_failed(request, result, 'settings_acme')
-            messages.success(request, 'ACME settings saved.')
-            try:
-                ok, out = run_playbook('base-services/traefik.yml', timeout=180)
-                if ok:
-                    messages.success(request, 'Traefik playbook completed successfully.')
-                else:
-                    messages.warning(request, 'Traefik playbook completed with issues.')
-            except Exception as e:
-                messages.warning(request, 'Could not run Traefik playbook: ' + str(e))
-        except Exception as e:
-            if is_ajax:
-                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
-            messages.error(request, f'Error: {e}')
-        return redirect('settings_acme')
-
-    badge = get_page_badge('acme', vars_)
-    return render(request, 'main/settings_acme.html', {
-        'vars': vars_,
-        'page_key': 'acme',
-        'page_icon': 'bi-patch-check',
-        'page_title': 'Security Certificates (TLS)',
-        'page_explain': PAGE_EXPLAIN['acme'],
-        'page_status': badge[0],
-        'page_status_label': badge[1],
-        'page_status_text': badge[2],
-    })
 
 
 @login_required
@@ -1729,92 +1472,6 @@ def settings_playbooks_delete(request):
     return JsonResponse({'ok': True, 'message': f'Deleted {fn}'})
 
 
-@login_required
-def settings_security(request):
-    config = _get_inventory_config()
-    if 'all' not in config:
-        config['all'] = {}
-    if 'vars' not in config['all']:
-        config['all']['vars'] = {}
-    vars_ = config['all']['vars']
-
-    if request.method == 'POST':
-        is_ajax = is_ajax_request(request)
-
-        # Only process fields that are actually present in the POST data
-        # (two separate forms share this view). Validation and the
-        # inventory write live in the settings CLI.
-        set_parts = []
-        if 'password_policy' in request.POST:
-            set_parts.append('--policy {}'.format(
-                shlex.quote(request.POST['password_policy'])))
-        webui_public_access = None
-        old_public_access = vars_.get('webui_public_access', False)
-        if 'webui_public_access' in request.POST:
-            webui_public_access = request.POST['webui_public_access'] == 'true'
-            set_parts.append('--public-access {}'.format(
-                'true' if webui_public_access else 'false'))
-        if not set_parts:
-            if is_ajax:
-                return JsonResponse({'ok': True,
-                                     'message': 'Security settings saved.',
-                                     'redirect': '/settings/security/'})
-            messages.success(request, 'Security settings saved.')
-            return redirect('settings_security')
-        set_cmd = 'symbios-settings-security.sh set ' + ' '.join(set_parts)
-        # The write runs synchronously (fast, no playbook): validation
-        # failures abort here with an error, before any reapply job.
-        try:
-            ok, stdout, stderr = run_command(set_cmd, timeout=30)
-            if not ok:
-                err = (stderr or stdout or 'Failed to save security settings.')
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': err}, status=400)
-                messages.error(request, f'Error: {err}')
-                return redirect('settings_security')
-        except Exception as e:
-            if is_ajax:
-                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
-            messages.error(request, f'Error: {e}')
-            return redirect('settings_security')
-
-        # Re-apply traefik playbook only if public access actually changed
-        if (webui_public_access is not None
-                and old_public_access != webui_public_access):
-            from .utils.jobs import create_job
-            cmd = 'symbios-run-playbook.sh base-services/traefik.yml'
-            job_id = create_job(cmd, timeout=300)
-            title = 'Updating network access...'
-            msg = ('Internet access enabled.' if webui_public_access
-                   else 'Internet access disabled - only local networks allowed.')
-            if is_ajax:
-                return JsonResponse({'ok': True, 'job': job_id,
-                                     'title': title,
-                                     'message': msg,
-                                     'command': cmd})
-            messages.success(request, msg)
-            messages.info(request, title)
-            return redirect('settings_security')
-
-        msg = 'Security settings saved.'
-        if is_ajax:
-            return JsonResponse({'ok': True, 'message': msg,
-                                 'redirect': '/settings/security/'})
-        messages.success(request, msg)
-        return redirect('settings_security')
-
-    return render(request, 'main/settings_security.html', {
-        'vars': vars_,
-        'page_key': 'security',
-        'page_icon': 'bi-shield-check',
-        'page_title': 'Security',
-        'page_explain': PAGE_EXPLAIN.get('security', ''),
-        'page_status': get_page_badge('security', vars_)[0],
-        'page_status_label': get_page_badge('security', vars_)[1],
-        'page_status_text': get_page_badge('security', vars_)[2],
-    })
-
-
 # ---------------------------------------------------------------------------
 # Updates - manual update triggers and automatic-update status
 # ---------------------------------------------------------------------------
@@ -1935,87 +1592,10 @@ def settings_updates(request):
     })
 
 
-
 # Editable standard media locations (see mediapaths.md). Missing
 # directories are created by base-services/media.yml on apply; the shared
 # media GID is fixed infrastructure and intentionally not editable here.
-MEDIA_VARS = [
-    ('media_root', 'Media root', 'Base directory for all media below.'),
-    ('media_audio', 'Audio', 'Read-only music/podcast library.'),
-    ('media_images', 'Images', 'Read-only photo library.'),
-    ('media_videos', 'Videos', 'Read-only movie/series library.'),
-    ('media_books', 'Books', 'Read-only e-book library.'),
-    ('media_documents', 'Documents', 'Document archive (e.g. Paperless).'),
-    ('media_inbox', 'Inbox', 'The only shared writable ingest.'),
-    ('media_shared', 'Shares', 'Base directory for group shares.'),
-]
-
 # CLI flags per media key for symbios-settings-media.sh (mirrors the
 # script's field list; the view only forwards values, validation lives
 # in the script).
-_MEDIA_FLAGS = {
-    'media_root': '--media-root',
-    'media_audio': '--audio',
-    'media_images': '--images',
-    'media_videos': '--videos',
-    'media_books': '--books',
-    'media_documents': '--documents',
-    'media_inbox': '--inbox',
-    'media_shared': '--shared',
-}
 
-
-@login_required
-def settings_media(request):
-    config = _get_inventory_config()
-    if 'all' not in config:
-        config['all'] = {}
-    if 'vars' not in config['all']:
-        config['all']['vars'] = {}
-    vars_ = config['all']['vars']
-
-    if request.method == 'POST':
-        is_ajax = is_ajax_request(request)
-        # Validation (required + absolute paths) and the inventory write
-        # live in the settings CLI; values are forwarded with their flags.
-        set_cmd = 'symbios-settings-media.sh set'
-        for key, _label, _hint in MEDIA_VARS:
-            value = request.POST.get(key, '').strip()
-            set_cmd += f' {_MEDIA_FLAGS[key]} {shlex.quote(value)}'
-        try:
-            if is_ajax:
-                job_id, title, cmd = _start_reapply(
-                    playbooks=['base-services/media.yml'], prefix=set_cmd)
-                resp = {'ok': True, 'job': job_id, 'title': title,
-                        'message': 'Media settings saved.',
-                        'command': cmd}
-                return JsonResponse(resp)
-            ok, stdout, stderr = run_command(set_cmd, timeout=30)
-            if not ok:
-                messages.error(request, f'Error: {stderr or stdout}')
-                return redirect('settings_media')
-            messages.success(request, 'Media settings saved.')
-            messages.info(request, 'Reapplying media playbook in the background...')
-            _start_reapply(playbooks=['base-services/media.yml'])
-            return redirect('settings_media')
-        except Exception as e:
-            if is_ajax:
-                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
-            messages.error(request, f'Error: {e}')
-            return redirect('settings_media')
-
-    badge = get_page_badge('media', vars_)
-    media_fields = [{'key': key, 'label': label, 'hint': hint,
-                     'value': vars_.get(key, '')} for key, label, hint in MEDIA_VARS]
-    return render(request, 'main/settings_media.html', {
-        'vars': vars_,
-        'media_vars': MEDIA_VARS,
-        'media_fields': media_fields,
-        'page_key': 'media',
-        'page_icon': 'bi-collection-play',
-        'page_title': 'Media',
-        'page_explain': PAGE_EXPLAIN['media'],
-        'page_status': badge[0],
-        'page_status_label': badge[1],
-        'page_status_text': badge[2],
-    })
