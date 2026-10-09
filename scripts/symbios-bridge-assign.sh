@@ -41,7 +41,9 @@ source "$g_symbios_dir/symbios-lib.sh"
 g_marker="SymbiOS Network Bridge Assignments"
 g_pairs_file="$(mktemp)"
 g_old_pairs_file="$(mktemp)"
-trap 'rm -f "${g_pairs_file}" "${g_old_pairs_file}"' EXIT
+# Own temp files first, then the gaboshlib EXIT trap (rm -r $g_tmp).
+# A plain trap ... EXIT here would replace it and leak the $g_tmp dir.
+trap 'rm -f "${g_pairs_file}" "${g_old_pairs_file}"; eval "${g_trap_exit:-}"' EXIT
 
 # Parse a JSON/YAML dict into "iface<TAB>bridge" lines (stdin -> stdout).
 # Validates names against [A-Za-z0-9_.@-] and rejects non-dict input.

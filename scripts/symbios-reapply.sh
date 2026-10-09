@@ -128,7 +128,9 @@ then
 fi
 
 echo $$ > "$g_pid_file"
-trap f_cleanup EXIT
+# Chained with the gaboshlib EXIT trap (rm -r $g_tmp) so the $g_tmp dir is
+# not leaked (a plain trap f_cleanup EXIT would replace it).
+trap 'f_cleanup; eval "${g_trap_exit:-}"' EXIT
 
 # Ensure directories exist
 mkdir -p "$g_log_dir"
