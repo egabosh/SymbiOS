@@ -56,20 +56,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 function f_valid_name {
   [[ -n "$1" ]] && [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]]
@@ -86,13 +76,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -130,7 +116,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for list: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   # Names via the inventory CLI (no JSON parsing in bash).
   "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" \
@@ -159,42 +145,42 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --name)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_name="$2"
       shift 2
       ;;
     --mode)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_mode="$2"
       f_given_mode="yes"
       shift 2
       ;;
     --interface)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_interface="$2"
       f_given_interface="yes"
       shift 2
       ;;
     --fetch-cmd)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_fetch_cmd="$2"
       f_given_fetch_cmd="yes"
       shift 2
       ;;
     --cron)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_cron="$2"
       f_given_cron="yes"
       shift 2
       ;;
     --ufw-ports)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_ufw_ports="$2"
       f_given_ufw="yes"
       shift 2
       ;;
     --enabled)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_enabled="$2"
       f_given_enabled="yes"
       shift 2
@@ -209,13 +195,13 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
 
 f_valid_name "${f_name}" \
-  || f_fail_validation "Invalid tunnel name (a-z, 0-9, _ and - only)"
+  || f_ss_fail_validation "Invalid tunnel name (a-z, 0-9, _ and - only)"
 
 if [[ "${f_command}" == "remove" ]]
 then
@@ -224,20 +210,9 @@ then
   if ! f_out="$("$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" \
     dict-del openvpn_clients "${f_name}" ${f_check_flag} 2>&1)"
   then
-    f_fail_technical "Failed to write inventory: ${f_out}"
+    f_ss_fail_technical "Failed to write inventory: ${f_out}"
   fi
-  g_echo "${f_out}"
-  if [[ "${f_check}" == "yes" ]]
-  then
-    g_echo_note "Check mode - nothing was changed"
-    exit 0
-  fi
-  if grep -q "^unchanged$" <<< "${f_out}"
-  then
-    g_echo_note "openvpn-unchanged"
-  else
-    g_echo_note "openvpn-changed"
-  fi
+  f_ss_result "${f_out}" "openvpn" "${f_check}"
   exit 0
 fi
 
@@ -247,7 +222,7 @@ if [[ "${f_given_mode}" == "no" && "${f_given_interface}" == "no" \
    && "${f_given_fetch_cmd}" == "no" && "${f_given_cron}" == "no" \
    && "${f_given_ufw}" == "no" && "${f_given_enabled}" == "no" ]]
 then
-  f_fail_validation "Nothing to save - pass at least one field option"
+  f_ss_fail_validation "Nothing to save - pass at least one field option"
 fi
 
 if [[ "${f_given_mode}" == "yes" && "${f_mode}" != "upload" && "${f_mode}" != "fetch" ]]
@@ -259,14 +234,14 @@ if [[ "${f_given_interface}" == "yes" ]]
 then
   [[ -z "${f_interface}" ]] && f_interface="tun0"
   f_valid_name "${f_interface}" \
-    || f_fail_validation "Invalid interface name"
+    || f_ss_fail_validation "Invalid interface name"
 fi
 if [[ "${f_given_cron}" == "yes" ]]
 then
   [[ -z "${f_cron}" ]] && f_cron="*/5 * * * *"
   if [[ "$(printf '%s' "${f_cron}" | wc -w)" != "5" ]]
   then
-    f_fail_validation "Refresh schedule must have 5 fields (e.g. */5 * * * *)"
+    f_ss_fail_validation "Refresh schedule must have 5 fields (e.g. */5 * * * *)"
   fi
 fi
 if [[ "${f_given_mode}" == "yes" && "${f_mode}" == "fetch" ]]
@@ -275,16 +250,16 @@ then
   # re-read here; the WebUI form always sends both).
   if [[ "${f_given_fetch_cmd}" == "no" || -z "${f_fetch_cmd}" ]]
   then
-    f_fail_validation "Fetch mode needs a fetch command"
+    f_ss_fail_validation "Fetch mode needs a fetch command"
   fi
 fi
 if [[ "${f_given_enabled}" == "yes" ]]
 then
-  case "${f_enabled,,}" in
-    true|1|yes|on) f_enabled="true" ;;
-    false|0|no|off) f_enabled="false" ;;
-    *) f_fail_validation "Invalid --enabled value: ${f_enabled} (expected true|false)" ;;
-  esac
+  if ! f_parsed_bool="$(f_ss_parse_bool "${f_enabled}")"
+  then
+    f_ss_fail_validation "Invalid --enabled value: ${f_enabled} (expected true|false)"
+  fi
+  f_enabled="${f_parsed_bool}"
 fi
 
 # Parse "8123/tcp, 8889" into a JSON array (same rules as the WebUI).
@@ -317,11 +292,11 @@ then
     f_proto="${f_proto,,}"
     if ! [[ "${f_p}" =~ ^[0-9]+$ ]] || [[ "10#${f_p}" -lt 1 || "10#${f_p}" -gt 65535 ]]
     then
-      f_fail_validation "Invalid port: ${f_p}"
+      f_ss_fail_validation "Invalid port: ${f_p}"
     fi
     if [[ "${f_proto}" != "tcp" && "${f_proto}" != "udp" ]]
     then
-      f_fail_validation "Invalid protocol: ${f_proto}"
+      f_ss_fail_validation "Invalid protocol: ${f_proto}"
     fi
     [[ "${f_first}" == "yes" ]] || f_ufw_json="${f_ufw_json}, "
     f_first="no"
@@ -371,9 +346,8 @@ f_check_flag=""
 if ! f_out="$(printf '%s' "${f_entry}" \
   | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" dict-merge openvpn_clients "${f_name}" ${f_check_flag} 2>&1)"
 then
-  f_fail_technical "Failed to write inventory: ${f_out}"
+  f_ss_fail_technical "Failed to write inventory: ${f_out}"
 fi
-g_echo "${f_out}"
 
 # The configured flag travels in a second transaction (same as before: one
 # save marks the domain configured).
@@ -382,21 +356,11 @@ then
   if ! f_flag_out="$(printf '%s' '{"openvpn_configured": true}' \
     | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge 2>&1)"
   then
-    f_fail_technical "Failed to write inventory: ${f_flag_out}"
+    f_ss_fail_technical "Failed to write inventory: ${f_flag_out}"
   fi
-  g_echo "${f_flag_out}"
+  f_out="${f_out}
+${f_flag_out}"
 fi
 
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "openvpn-unchanged"
-else
-  g_echo_note "openvpn-changed"
-fi
+f_ss_result "${f_out}" "openvpn" "${f_check}"
 exit 0

@@ -44,20 +44,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 # Field names of this domain (order kept for get/schema output).
 f_fields="ai_stt_url ai_stt_key ai_stt_model ai_tts_url ai_tts_key ai_tts_model"
@@ -73,13 +63,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -132,7 +118,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   for f_field in ${f_fields}
   do
@@ -172,31 +158,31 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --stt-url)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_stt_url="$2"
       f_given_stt_url="yes"
       shift 2
       ;;
     --stt-model)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_stt_model="$2"
       f_given_stt_model="yes"
       shift 2
       ;;
     --tts-url)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_tts_url="$2"
       f_given_tts_url="yes"
       shift 2
       ;;
     --tts-model)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_tts_model="$2"
       f_given_tts_model="yes"
       shift 2
       ;;
     --stt-key=*|--tts-key=*|--stt-key|--tts-key)
-      f_fail_validation "STT/TTS keys are secrets and must be passed via --json-stdin, never as argv"
+      f_ss_fail_validation "STT/TTS keys are secrets and must be passed via --json-stdin, never as argv"
       ;;
     --json-stdin)
       f_json_stdin="yes"
@@ -212,7 +198,7 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
@@ -260,84 +246,29 @@ if [[ "${f_given_stt_url}" == "no" && "${f_given_stt_model}" == "no" \
    && "${f_given_tts_url}" == "no" && "${f_given_tts_model}" == "no" \
    && "${f_given_stt_key}" == "no" && "${f_given_tts_key}" == "no" ]]
 then
-  f_fail_validation "Nothing to set - pass field options and/or --json-stdin"
+  f_ss_fail_validation "Nothing to set - pass field options and/or --json-stdin"
 fi
 
 # URLs must be single-line without whitespace; models and keys must be
 # single-line. Empty values are allowed (they delete the key).
-for f_pair_name in ai_stt_url ai_tts_url
-do
-  case "${f_pair_name}" in
-    ai_stt_url) f_val="${f_stt_url}" ;;
-    ai_tts_url) f_val="${f_tts_url}" ;;
-  esac
-  if [[ -n "${f_val}" ]] \
-    && { [[ "${f_val}" == *$'\n'* ]] || [[ "${f_val}" =~ [[:space:]] ]]; }
-  then
-    f_fail_validation "Invalid ${f_pair_name}: must be a single line without whitespace"
-  fi
-done
-for f_pair_name in ai_stt_model ai_tts_model ai_stt_key ai_tts_key
-do
-  case "${f_pair_name}" in
-    ai_stt_model) f_val="${f_stt_model}" ;;
-    ai_tts_model) f_val="${f_tts_model}" ;;
-    ai_stt_key) f_val="${f_new_stt_key}" ;;
-    ai_tts_key) f_val="${f_new_tts_key}" ;;
-  esac
-  if [[ -n "${f_val}" && "${f_val}" == *$'\n'* ]]
-  then
-    f_fail_validation "Invalid ${f_pair_name}: must be a single line"
-  fi
-done
+[[ -n "${f_stt_url}" ]] && f_ss_require_url "ai_stt_url" "${f_stt_url}"
+[[ -n "${f_tts_url}" ]] && f_ss_require_url "ai_tts_url" "${f_tts_url}"
+[[ -n "${f_stt_model}" ]] && f_ss_require_single_line "ai_stt_model" "${f_stt_model}"
+[[ -n "${f_tts_model}" ]] && f_ss_require_single_line "ai_tts_model" "${f_tts_model}"
+[[ -n "${f_new_stt_key}" ]] && f_ss_require_single_line "ai_stt_key" "${f_new_stt_key}"
+[[ -n "${f_new_tts_key}" ]] && f_ss_require_single_line "ai_tts_key" "${f_new_tts_key}"
 
 # --- transactional write (empty values delete the key) -------------------------
 
-# Append one key to the merge JSON: globals f_merge_first/f_merge.
-f_merge_add() {
-  local f_k="$1" f_v="$2" f_given="$3"
-  [[ "${f_given}" == "yes" ]] || return 0
-  [[ "${f_merge_first}" == "yes" ]] || f_merge="${f_merge}, "
-  f_merge_first="no"
-  if [[ -z "${f_v}" ]]
-  then
-    f_merge="${f_merge}\"${f_k}\": null"
-  else
-    f_merge="${f_merge}\"${f_k}\": $(printf '%s' "${f_v}" | f_json_escape)"
-  fi
-}
-
 f_merge="{"
 f_merge_first="yes"
-f_merge_add "ai_stt_url" "${f_stt_url}" "${f_given_stt_url}"
-f_merge_add "ai_stt_model" "${f_stt_model}" "${f_given_stt_model}"
-f_merge_add "ai_tts_url" "${f_tts_url}" "${f_given_tts_url}"
-f_merge_add "ai_tts_model" "${f_tts_model}" "${f_given_tts_model}"
-f_merge_add "ai_stt_key" "${f_new_stt_key}" "${f_given_stt_key}"
-f_merge_add "ai_tts_key" "${f_new_tts_key}" "${f_given_tts_key}"
+f_ss_merge_add "ai_stt_url" "${f_stt_url}" "${f_given_stt_url}"
+f_ss_merge_add "ai_stt_model" "${f_stt_model}" "${f_given_stt_model}"
+f_ss_merge_add "ai_tts_url" "${f_tts_url}" "${f_given_tts_url}"
+f_ss_merge_add "ai_tts_model" "${f_tts_model}" "${f_given_tts_model}"
+f_ss_merge_add "ai_stt_key" "${f_new_stt_key}" "${f_given_stt_key}"
+f_ss_merge_add "ai_tts_key" "${f_new_tts_key}" "${f_given_tts_key}"
 f_merge="${f_merge}}"
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "ai-speech-unchanged"
-else
-  g_echo_note "ai-speech-changed"
-fi
+f_ss_merge "${f_merge}" "ai-speech" "${f_check}"
 exit 0

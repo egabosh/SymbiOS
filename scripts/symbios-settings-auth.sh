@@ -38,20 +38,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 f_command="${1:-}"
 case "${f_command}" in
@@ -64,13 +54,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -101,7 +87,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   echo "twofa_enabled=${f_cur_twofa}"
   exit 0
@@ -116,7 +102,7 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --twofa)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_twofa="$2"
       shift 2
       ;;
@@ -134,27 +120,21 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
 
 if [[ -z "${f_new_twofa}" ]]
 then
-  f_fail_validation "Nothing to set - pass --twofa true|false"
+  f_ss_fail_validation "Nothing to set - pass --twofa true|false"
 fi
 
-case "${f_new_twofa,,}" in
-  true|1|yes|on)
-    f_new_twofa="true"
-    ;;
-  false|0|no|off)
-    f_new_twofa="false"
-    ;;
-  *)
-    f_fail_validation "Invalid --twofa value: ${f_new_twofa} (expected true|false)"
-    ;;
-esac
+if ! f_parsed_twofa="$(f_ss_parse_bool "${f_new_twofa}")"
+then
+  f_ss_fail_validation "Invalid --twofa value: ${f_new_twofa} (expected true|false)"
+fi
+f_new_twofa="${f_parsed_twofa}"
 
 # 2FA mails the second factor, so enabling without an SMTP sender makes no
 # sense (same rule the WebUI enforced before).
@@ -163,33 +143,11 @@ then
   if [[ -z "$(f_symbios_var smtp_server "")" ]] \
     || [[ -z "$(f_symbios_var smtp_from "")" ]]
   then
-    f_fail_validation "Cannot enable 2FA: no SMTP server configured (set smtp_server and smtp_from first)"
+    f_ss_fail_validation "Cannot enable 2FA: no SMTP server configured (set smtp_server and smtp_from first)"
   fi
 fi
 
 # --- transactional write (real JSON boolean) -----------------------------------
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '{"twofa_enabled": %s}' "${f_new_twofa}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "auth-unchanged"
-else
-  g_echo_note "auth-changed"
-fi
+f_ss_merge "$(printf '{"twofa_enabled": %s}' "${f_new_twofa}")" "auth" "${f_check}"
 exit 0

@@ -44,20 +44,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 f_command="${1:-}"
 case "${f_command}" in
@@ -70,13 +60,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -120,7 +106,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   echo "notify_mail_enabled=${f_cur_mail}"
   echo "notify_matrix_enabled=${f_cur_matrix}"
@@ -145,7 +131,7 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --mail)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_mail="$2"
       f_given_mail="yes"
       shift 2
@@ -156,7 +142,7 @@ do
       shift
       ;;
     --matrix)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_matrix="$2"
       f_given_matrix="yes"
       shift 2
@@ -167,13 +153,13 @@ do
       shift
       ;;
     --to)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_to="$2"
       f_given_to="yes"
       shift 2
       ;;
     --level)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_level="$2"
       f_given_level="yes"
       shift 2
@@ -188,7 +174,7 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
@@ -196,36 +182,25 @@ done
 if [[ "${f_given_mail}" == "no" && "${f_given_matrix}" == "no" \
    && "${f_given_to}" == "no" && "${f_given_level}" == "no" ]]
 then
-  f_fail_validation "Nothing to set - pass --mail, --matrix, --to and/or --level"
+  f_ss_fail_validation "Nothing to set - pass --mail, --matrix, --to and/or --level"
 fi
 
-for f_pair in "mail:${f_new_mail}:${f_given_mail}" \
-  "matrix:${f_new_matrix}:${f_given_matrix}"
-do
-  f_which="${f_pair%%:*}"
-  f_rest="${f_pair#*:}"
-  # Value cannot hold a colon here (booleans only), so %% is safe.
-  f_val="${f_rest%%:*}"
-  f_given="${f_rest##*:}"
-  [[ "${f_given}" == "yes" ]] || continue
-  case "${f_val,,}" in
-    true|1|yes|on)
-      f_val="true"
-      ;;
-    false|0|no|off)
-      f_val="false"
-      ;;
-    *)
-      f_fail_validation "Invalid --${f_which} value: ${f_val} (expected true|false)"
-      ;;
-  esac
-  if [[ "${f_which}" == "mail" ]]
+if [[ "${f_given_mail}" == "yes" ]]
+then
+  if ! f_parsed_bool="$(f_ss_parse_bool "${f_new_mail}")"
   then
-    f_new_mail="${f_val}"
-  else
-    f_new_matrix="${f_val}"
+    f_ss_fail_validation "Invalid --mail value: ${f_new_mail} (expected true|false)"
   fi
-done
+  f_new_mail="${f_parsed_bool}"
+fi
+if [[ "${f_given_matrix}" == "yes" ]]
+then
+  if ! f_parsed_bool="$(f_ss_parse_bool "${f_new_matrix}")"
+  then
+    f_ss_fail_validation "Invalid --matrix value: ${f_new_matrix} (expected true|false)"
+  fi
+  f_new_matrix="${f_parsed_bool}"
+fi
 
 [[ "${f_given_mail}" == "no" ]] && f_new_mail="${f_cur_mail}"
 [[ "${f_given_matrix}" == "no" ]] && f_new_matrix="${f_cur_matrix}"
@@ -245,7 +220,7 @@ then
   if [[ -z "$(f_symbios_var smtp_server "")" ]] \
     || [[ -z "$(f_symbios_var smtp_from "")" ]]
   then
-    f_fail_validation "Cannot enable mail notifications: no SMTP server configured (set it up under Settings Email Sending first)"
+    f_ss_fail_validation "Cannot enable mail notifications: no SMTP server configured (set it up under Settings Email Sending first)"
   fi
 fi
 if [[ "${f_new_matrix}" == "true" ]]
@@ -256,13 +231,13 @@ then
     || { [[ -z "$(f_symbios_var matrix_password "")" ]] \
       && [[ -z "$(f_symbios_var matrix_token "")" ]]; }
   then
-    f_fail_validation "Cannot enable matrix notifications: no matrix account configured (set it up under Settings Matrix Account first)"
+    f_ss_fail_validation "Cannot enable matrix notifications: no matrix account configured (set it up under Settings Matrix Account first)"
   fi
 fi
 if [[ "${f_given_to}" == "yes" && -n "${f_new_to}" ]] \
   && ! [[ "${f_new_to}" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]
 then
-  f_fail_validation "Invalid recipient email address format"
+  f_ss_fail_validation "Invalid recipient email address format"
 fi
 
 # --- transactional write (empty recipient deletes the key) -----------------------
@@ -282,27 +257,5 @@ then
 fi
 f_merge="${f_merge}}"
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "notifications-unchanged"
-else
-  g_echo_note "notifications-changed"
-fi
+f_ss_merge "${f_merge}" "notifications" "${f_check}"
 exit 0

@@ -50,20 +50,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 f_command="${1:-}"
 case "${f_command}" in
@@ -76,13 +66,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -133,7 +119,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   echo "ap_interface=${f_cur_iface}"
   echo "ap_name=${f_cur_name}"
@@ -160,29 +146,29 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --interface)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_iface="$2"
       shift 2
       ;;
     --name)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_name="$2"
       shift 2
       ;;
     --country)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_country="$2"
       f_given_country="yes"
       shift 2
       ;;
     --enabled)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_enabled="$2"
       f_given_enabled="yes"
       shift 2
       ;;
     --passphrase|--passphrase=*)
-      f_fail_validation "ap_passphrase is a secret and must be passed via --json-stdin, never as argv"
+      f_ss_fail_validation "ap_passphrase is a secret and must be passed via --json-stdin, never as argv"
       ;;
     --json-stdin)
       f_json_stdin="yes"
@@ -198,7 +184,7 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
@@ -244,11 +230,11 @@ fi
 
 # --- validation (same rules the WebUI enforced before) ---------------------------
 
-[[ -n "${f_iface}" ]] || f_fail_validation "Please select a wireless interface"
-[[ -n "${f_name}" ]] || f_fail_validation "Please enter a WLAN name (SSID)"
+[[ -n "${f_iface}" ]] || f_ss_fail_validation "Please select a wireless interface"
+[[ -n "${f_name}" ]] || f_ss_fail_validation "Please enter a WLAN name (SSID)"
 if [[ "${f_given_pw}" == "yes" && -n "${f_new_pw}" && "${#f_new_pw}" -lt 8 ]]
 then
-  f_fail_validation "WPA passphrase must be at least 8 characters"
+  f_ss_fail_validation "WPA passphrase must be at least 8 characters"
 fi
 if [[ "${f_given_country}" == "yes" ]]
 then
@@ -256,24 +242,24 @@ then
   if [[ -n "${f_country}" ]] \
     && { [[ "${#f_country}" != "2" ]] || ! [[ "${f_country}" =~ ^[A-Z]+$ ]]; }
   then
-    f_fail_validation "Country code must be two letters (e.g. DE, US)"
+    f_ss_fail_validation "Country code must be two letters (e.g. DE, US)"
   fi
 else
   f_country="${f_cur_country}"
 fi
 if [[ "${f_given_enabled}" == "yes" ]]
 then
-  case "${f_enabled,,}" in
-    true|1|yes|on) f_enabled="true" ;;
-    false|0|no|off) f_enabled="false" ;;
-    *) f_fail_validation "Invalid --enabled value: ${f_enabled} (expected true|false)" ;;
-  esac
+  if ! f_parsed_bool="$(f_ss_parse_bool "${f_enabled}")"
+  then
+    f_ss_fail_validation "Invalid --enabled value: ${f_enabled} (expected true|false)"
+  fi
+  f_enabled="${f_parsed_bool}"
 else
   f_enabled="${f_cur_enabled}"
 fi
 if [[ "${f_iface}" == *$'\n'* ]] || [[ "${f_name}" == *$'\n'* ]]
 then
-  f_fail_validation "Interface and name must be single-line values"
+  f_ss_fail_validation "Interface and name must be single-line values"
 fi
 
 # --- transactional write (empty passphrase clears the stored one) ------------------
@@ -289,27 +275,5 @@ then
 fi
 f_merge="${f_merge}}"
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "wlan-accesspoint-unchanged"
-else
-  g_echo_note "wlan-accesspoint-changed"
-fi
+f_ss_merge "${f_merge}" "wlan-accesspoint" "${f_check}"
 exit 0

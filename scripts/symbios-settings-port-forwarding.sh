@@ -51,29 +51,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
-
-# Normalize a boolean word to true/false, or fail.
-function f_parse_bool {
-  case "${1,,}" in
-    true|1|yes|on) echo "true" ;;
-    false|0|no|off) echo "false" ;;
-    *) return 1 ;;
-  esac
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 # Validate a port/proto pair, echo the canonical entry JSON on success.
 function f_ufw_entry {
@@ -105,13 +86,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 f_inv() {
   "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" "$@"
@@ -152,7 +129,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   echo "port_forwarding_method=$(f_symbios_var port_forwarding_method "")"
   echo "port_forwarding_configured=$(f_symbios_var port_forwarding_configured "")"
@@ -172,12 +149,12 @@ then
   do
     case "$1" in
       --port)
-        [[ $# -ge 2 ]] || f_fail_usage
+        [[ $# -ge 2 ]] || f_ss_fail_usage
         f_port="$2"
         shift 2
         ;;
       --proto)
-        [[ $# -ge 2 ]] || f_fail_usage
+        [[ $# -ge 2 ]] || f_ss_fail_usage
         f_proto="$2"
         shift 2
         ;;
@@ -191,13 +168,13 @@ then
         ;;
       *)
         echo "Unknown option: $1" >&2
-        f_fail_usage
+        f_ss_fail_usage
         ;;
     esac
   done
   if ! f_entry="$(f_ufw_entry "${f_port}" "${f_proto}")"
   then
-    f_fail_validation "Invalid port/proto: ${f_port}/${f_proto} (expected 1-65535 + tcp|udp)"
+    f_ss_fail_validation "Invalid port/proto: ${f_port}/${f_proto} (expected 1-65535 + tcp|udp)"
   fi
   f_op="list-add"
   [[ "${f_command}" == "ufw-remove" ]] && f_op="list-del"
@@ -205,20 +182,9 @@ then
   [[ "${f_check}" == "yes" ]] && f_check_flag="--check"
   if ! f_out="$(printf '%s' "${f_entry}" | f_inv "${f_op}" ufw_extra_inbound ${f_check_flag} 2>&1)"
   then
-    f_fail_technical "Failed to write inventory: ${f_out}"
+    f_ss_fail_technical "Failed to write inventory: ${f_out}"
   fi
-  g_echo "${f_out}"
-  if [[ "${f_check}" == "yes" ]]
-  then
-    g_echo_note "Check mode - nothing was changed"
-    exit 0
-  fi
-  if grep -q "^unchanged$" <<< "${f_out}"
-  then
-    g_echo_note "port-forwarding-unchanged"
-  else
-    g_echo_note "port-forwarding-changed"
-  fi
+  f_ss_result "${f_out}" "port-forwarding" "${f_check}"
   exit 0
 fi
 
@@ -236,19 +202,19 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --method)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_method="$2"
       f_given_method="yes"
       shift 2
       ;;
     --configured)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_conf="$2"
       f_given_conf="yes"
       shift 2
       ;;
     --static-ip-configured)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_static="$2"
       f_given_static="yes"
       shift 2
@@ -263,7 +229,7 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
@@ -274,7 +240,7 @@ if [[ "${f_given_method}" == "yes" ]]
 then
   case "${f_method}" in
     auto|manual|"") ;;
-    *) f_fail_validation "Invalid --method: ${f_method} (expected auto|manual|\"\")" ;;
+    *) f_ss_fail_validation "Invalid --method: ${f_method} (expected auto|manual|\"\")" ;;
   esac
   f_merge="${f_merge}\"port_forwarding_method\": $(printf '%s' "${f_method}" | f_json_escape)"
   f_merge_first="no"
@@ -289,16 +255,22 @@ then
 fi
 if [[ "${f_given_conf}" == "yes" ]]
 then
-  f_conf="$(f_parse_bool "${f_conf}")" \
-    || f_fail_validation "Invalid --configured value: ${f_conf} (expected true|false)"
+  if ! f_parsed_bool="$(f_ss_parse_bool "${f_conf}")"
+  then
+    f_ss_fail_validation "Invalid --configured value: ${f_conf} (expected true|false)"
+  fi
+  f_conf="${f_parsed_bool}"
   [[ "${f_merge_first}" == "yes" ]] || f_merge="${f_merge}, "
   f_merge_first="no"
   f_merge="${f_merge}\"port_forwarding_configured\": ${f_conf}"
 fi
 if [[ "${f_given_static}" == "yes" ]]
 then
-  f_static="$(f_parse_bool "${f_static}")" \
-    || f_fail_validation "Invalid --static-ip-configured value: ${f_static} (expected true|false)"
+  if ! f_parsed_bool="$(f_ss_parse_bool "${f_static}")"
+  then
+    f_ss_fail_validation "Invalid --static-ip-configured value: ${f_static} (expected true|false)"
+  fi
+  f_static="${f_parsed_bool}"
   [[ "${f_merge_first}" == "yes" ]] || f_merge="${f_merge}, "
   f_merge_first="no"
   f_merge="${f_merge}\"port_forwarding_static_ip_configured\": ${f_static}"
@@ -307,30 +279,8 @@ f_merge="${f_merge}}"
 
 if [[ "${f_merge}" == "{}" ]]
 then
-  f_fail_validation "Nothing to set - pass --method, --configured and/or --static-ip-configured"
+  f_ss_fail_validation "Nothing to set - pass --method, --configured and/or --static-ip-configured"
 fi
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "port-forwarding-unchanged"
-else
-  g_echo_note "port-forwarding-changed"
-fi
+f_ss_merge "${f_merge}" "port-forwarding" "${f_check}"
 exit 0

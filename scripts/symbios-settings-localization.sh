@@ -50,20 +50,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 # --- option parsing (before sourcing libs, so --help is cheap) ---------------
 
@@ -78,13 +68,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 # --- subcommand: keyboards / timezones (pure reads, no inventory) -------------
 
@@ -98,7 +84,7 @@ if [[ "${f_command}" == "timezones" ]]
 then
   if ! timedatectl list-timezones 2>/dev/null
   then
-    f_fail_technical "timedatectl list-timezones failed"
+    f_ss_fail_technical "timedatectl list-timezones failed"
   fi
   exit 0
 fi
@@ -142,7 +128,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   echo "timezone=${f_cur_timezone}"
   echo "keyboard=${f_cur_keyboard}"
@@ -166,19 +152,19 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --timezone)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_timezone="$2"
       f_given_timezone="yes"
       shift 2
       ;;
     --keyboard)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_keyboard="$2"
       f_given_keyboard="yes"
       shift 2
       ;;
     --locale)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_locale="$2"
       f_given_locale="yes"
       shift 2
@@ -197,7 +183,7 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
@@ -224,7 +210,7 @@ fi
 if [[ "${f_given_timezone}" == "no" && "${f_given_keyboard}" == "no" \
    && "${f_given_locale}" == "no" ]]
 then
-  f_fail_validation "Nothing to set - pass --timezone, --keyboard, --locale or --json-stdin"
+  f_ss_fail_validation "Nothing to set - pass --timezone, --keyboard, --locale or --json-stdin"
 fi
 
 # Options left out keep their current value.
@@ -243,11 +229,11 @@ do
   f_val="${f_pair#*:}"
   if [[ -z "${f_val}" ]]
   then
-    f_fail_validation "${f_name} must not be empty"
+    f_ss_fail_validation "${f_name} must not be empty"
   fi
   if [[ "${f_val}" == *$'\n'* ]]
   then
-    f_fail_validation "${f_name} must be a single line"
+    f_ss_fail_validation "${f_name} must be a single line"
   fi
 done
 
@@ -257,7 +243,7 @@ if f_tz_list="$(timedatectl list-timezones 2>/dev/null)" && [[ -n "${f_tz_list}"
 then
   if ! grep -qxF "${f_new_timezone}" <<< "${f_tz_list}"
   then
-    f_fail_validation "Unknown timezone: ${f_new_timezone}"
+    f_ss_fail_validation "Unknown timezone: ${f_new_timezone}"
   fi
 fi
 
@@ -267,14 +253,14 @@ if f_kb_list="$("$g_symbios_dir/symbios-list-keyboards.sh" 2>/dev/null)" && [[ -
 then
   if ! grep -qxF "${f_new_keyboard}" <<< "${f_kb_list}"
   then
-    f_fail_validation "Unknown keyboard layout: ${f_new_keyboard}"
+    f_ss_fail_validation "Unknown keyboard layout: ${f_new_keyboard}"
   fi
 fi
 
 # Locale syntax: language[_territory][.codeset][@modifier], e.g. de_DE.UTF-8.
 if ! [[ "${f_new_locale}" =~ ^[A-Za-z_]+(\.[A-Za-z0-9-]+)?(@[a-zA-Z]+)?$ ]]
 then
-  f_fail_validation "Invalid locale: ${f_new_locale} (expected e.g. de_DE.UTF-8)"
+  f_ss_fail_validation "Invalid locale: ${f_new_locale} (expected e.g. de_DE.UTF-8)"
 fi
 
 # --- transactional write -------------------------------------------------------
@@ -284,27 +270,6 @@ f_merge="$(printf '{"timezone": %s, "keyboard": %s, "locale": %s, "localization_
   "$(printf '%s' "${f_new_keyboard}" | f_json_escape)" \
   "$(printf '%s' "${f_new_locale}" | f_json_escape)")"
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "localization-unchanged: ${f_new_timezone} ${f_new_keyboard} ${f_new_locale}"
-else
-  g_echo_note "localization-changed: ${f_new_timezone} ${f_new_keyboard} ${f_new_locale}"
-fi
+f_ss_merge "${f_merge}" "localization" "${f_check}" \
+  "${f_new_timezone} ${f_new_keyboard} ${f_new_locale}"
 exit 0

@@ -40,20 +40,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 f_command="${1:-}"
 case "${f_command}" in
@@ -66,13 +56,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -108,7 +94,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   echo "password_policy=${f_cur_policy}"
   echo "webui_public_access=${f_cur_public}"
@@ -127,7 +113,7 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --policy)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_policy="$2"
       f_given_policy="yes"
       shift 2
@@ -138,7 +124,7 @@ do
       shift
       ;;
     --public-access)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_public="$2"
       f_given_public="yes"
       shift 2
@@ -158,14 +144,14 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
 
 if [[ "${f_given_policy}" == "no" && "${f_given_public}" == "no" ]]
 then
-  f_fail_validation "Nothing to set - pass --policy and/or --public-access"
+  f_ss_fail_validation "Nothing to set - pass --policy and/or --public-access"
 fi
 
 if [[ "${f_given_policy}" == "yes" ]]
@@ -174,24 +160,18 @@ then
     none|low|medium|high|paranoid)
       ;;
     *)
-      f_fail_validation "Invalid password policy: ${f_new_policy} (expected none|low|medium|high|paranoid)"
+      f_ss_fail_validation "Invalid password policy: ${f_new_policy} (expected none|low|medium|high|paranoid)"
       ;;
   esac
 fi
 
 if [[ "${f_given_public}" == "yes" ]]
 then
-  case "${f_new_public,,}" in
-    true|1|yes|on)
-      f_new_public="true"
-      ;;
-    false|0|no|off)
-      f_new_public="false"
-      ;;
-    *)
-      f_fail_validation "Invalid --public-access value: ${f_new_public} (expected true|false)"
-      ;;
-  esac
+  if ! f_parsed_public="$(f_ss_parse_bool "${f_new_public}")"
+  then
+    f_ss_fail_validation "Invalid --public-access value: ${f_new_public} (expected true|false)"
+  fi
+  f_new_public="${f_parsed_public}"
 fi
 
 # --- transactional write -------------------------------------------------------
@@ -210,27 +190,5 @@ then
 fi
 f_merge="${f_merge}}"
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "security-unchanged"
-else
-  g_echo_note "security-changed"
-fi
+f_ss_merge "${f_merge}" "security" "${f_check}"
 exit 0

@@ -56,20 +56,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 f_command="${1:-}"
 case "${f_command}" in
@@ -82,13 +72,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -145,7 +131,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   echo "backup_server_host=${f_cur_host}"
   echo "backup_server_port=${f_cur_port}"
@@ -176,31 +162,31 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --host)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_host="$2"
       f_given_host="yes"
       shift 2
       ;;
     --port)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_port="$2"
       f_given_port="yes"
       shift 2
       ;;
     --user)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_user="$2"
       f_given_user="yes"
       shift 2
       ;;
     --path)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_path="$2"
       f_given_path="yes"
       shift 2
       ;;
     --encryption)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_enc="$2"
       f_given_enc="yes"
       shift 2
@@ -236,7 +222,7 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
@@ -245,7 +231,7 @@ if [[ "${f_given_host}" == "no" && "${f_given_port}" == "no" \
    && "${f_given_user}" == "no" && "${f_given_path}" == "no" \
    && "${f_given_enc}" == "no" && "${f_given_excludes}" == "no" ]]
 then
-  f_fail_validation "Nothing to set - pass at least one field option"
+  f_ss_fail_validation "Nothing to set - pass at least one field option"
 fi
 
 # Options left out keep their current value. An explicitly empty port/user
@@ -263,20 +249,20 @@ fi
 if [[ -n "${f_new_host}" ]] \
   && { [[ "${f_new_host}" == *$'\n'* ]] || [[ "${f_new_host}" =~ [[:space:]] ]]; }
 then
-  f_fail_validation "Invalid --host: must be a single line without whitespace"
+  f_ss_fail_validation "Invalid --host: must be a single line without whitespace"
 fi
 if ! [[ "${f_new_port}" =~ ^[0-9]+$ ]] \
   || [[ "10#${f_new_port}" -lt 1 || "10#${f_new_port}" -gt 65535 ]]
 then
-  f_fail_validation "Invalid --port: ${f_new_port} (expected 1-65535)"
+  f_ss_fail_validation "Invalid --port: ${f_new_port} (expected 1-65535)"
 fi
 if [[ "${f_new_user}" == *$'\n'* ]] || [[ "${f_new_user}" =~ [[:space:]] ]]
 then
-  f_fail_validation "Invalid --user: must be a single line without whitespace"
+  f_ss_fail_validation "Invalid --user: must be a single line without whitespace"
 fi
 if [[ -n "${f_new_path}" && "${f_new_path}" == *$'\n'* ]]
 then
-  f_fail_validation "Invalid --path: must be a single line"
+  f_ss_fail_validation "Invalid --path: must be a single line"
 fi
 case "${f_new_enc,,}" in
   true|1|yes|on)
@@ -286,7 +272,7 @@ case "${f_new_enc,,}" in
     f_new_enc="false"
     ;;
   *)
-    f_fail_validation "Invalid --encryption value: ${f_new_enc} (expected true|false)"
+    f_ss_fail_validation "Invalid --encryption value: ${f_new_enc} (expected true|false)"
     ;;
 esac
 
@@ -305,27 +291,5 @@ else
   f_merge="${f_merge}}"
 fi
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "backup-unchanged"
-else
-  g_echo_note "backup-changed"
-fi
+f_ss_merge "${f_merge}" "backup" "${f_check}"
 exit 0

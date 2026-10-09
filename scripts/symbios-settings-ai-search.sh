@@ -35,20 +35,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 f_fields="ai_tika_url ai_searxng_url"
 
@@ -63,13 +53,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -103,7 +89,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   for f_field in ${f_fields}
   do
@@ -124,13 +110,13 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --tika-url)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_tika_url="$2"
       f_given_tika_url="yes"
       shift 2
       ;;
     --searxng-url)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_searxng_url="$2"
       f_given_searxng_url="yes"
       shift 2
@@ -145,14 +131,14 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
 
 if [[ "${f_given_tika_url}" == "no" && "${f_given_searxng_url}" == "no" ]]
 then
-  f_fail_validation "Nothing to set - pass --tika-url and/or --searxng-url"
+  f_ss_fail_validation "Nothing to set - pass --tika-url and/or --searxng-url"
 fi
 
 # URLs must be single-line. The SearXNG URL may carry a <query> placeholder
@@ -162,63 +148,21 @@ for f_val in "${f_tika_url}" "${f_searxng_url}"
 do
   if [[ -n "${f_val}" && "${f_val}" == *$'\n'* ]]
   then
-    f_fail_validation "URL values must be a single line"
+    f_ss_fail_validation "URL values must be a single line"
   fi
 done
 if [[ -n "${f_tika_url}" && "${f_tika_url}" =~ [[:space:]] ]]
 then
-  f_fail_validation "Invalid ai_tika_url: must not contain whitespace"
+  f_ss_fail_validation "Invalid ai_tika_url: must not contain whitespace"
 fi
 
 # --- transactional write (empty values delete the key) -------------------------
 
 f_merge="{"
 f_merge_first="yes"
-for f_name in ${f_fields}
-do
-  case "${f_name}" in
-    ai_tika_url)
-      f_val="${f_tika_url}"
-      f_given="${f_given_tika_url}"
-      ;;
-    ai_searxng_url)
-      f_val="${f_searxng_url}"
-      f_given="${f_given_searxng_url}"
-      ;;
-  esac
-  [[ "${f_given}" == "yes" ]] || continue
-  [[ "${f_merge_first}" == "yes" ]] || f_merge="${f_merge}, "
-  f_merge_first="no"
-  if [[ -z "${f_val}" ]]
-  then
-    f_merge="${f_merge}\"${f_name}\": null"
-  else
-    f_merge="${f_merge}\"${f_name}\": $(printf '%s' "${f_val}" | f_json_escape)"
-  fi
-done
+f_ss_merge_add "ai_tika_url" "${f_tika_url}" "${f_given_tika_url}"
+f_ss_merge_add "ai_searxng_url" "${f_searxng_url}" "${f_given_searxng_url}"
 f_merge="${f_merge}}"
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "ai-search-unchanged"
-else
-  g_echo_note "ai-search-changed"
-fi
+f_ss_merge "${f_merge}" "ai-search" "${f_check}"
 exit 0

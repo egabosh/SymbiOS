@@ -41,20 +41,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 f_command="${1:-}"
 case "${f_command}" in
@@ -67,13 +57,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -100,7 +86,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" \
     get --json file_manager_scripts 2>/dev/null \
@@ -137,13 +123,13 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
 
 [[ "${f_json_stdin}" == "yes" ]] \
-  || f_fail_validation "Nothing to set - pass --json-stdin"
+  || f_ss_fail_validation "Nothing to set - pass --json-stdin"
 
 f_json="$(cat)"
 if ! f_cleaned="$(printf '%s' "${f_json}" | python3 -c '
@@ -171,7 +157,7 @@ for item in raw:
 print(json.dumps(cleaned))
 ' 2>&1)"
 then
-  f_fail_validation "${f_cleaned}"
+  f_ss_fail_validation "${f_cleaned}"
 fi
 
 # --- transactional write (empty list deletes the key) ----------------------------
@@ -183,27 +169,5 @@ else
   f_merge="$(printf '{"file_manager_scripts": %s}' "${f_cleaned}")"
 fi
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "filemanager-unchanged"
-else
-  g_echo_note "filemanager-changed"
-fi
+f_ss_merge "${f_merge}" "filemanager" "${f_check}"
 exit 0

@@ -38,20 +38,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 # Domain fields in stable order: "inventory-key|flag-name".
 f_fields="media_root|--media-root media_audio|--audio media_images|--images media_videos|--videos media_books|--books media_documents|--documents media_inbox|--inbox media_shared|--shared"
@@ -67,13 +57,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -119,7 +105,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   for f_pair in ${f_fields}
   do
@@ -153,7 +139,7 @@ do
     f_flag="${f_pair#*|}"
     if [[ "$1" == "${f_flag}" ]]
     then
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       printf -v "f_val_${f_key}" '%s' "$2"
       printf -v "f_given_${f_key}" '%s' "yes"
       f_given_any="yes"
@@ -175,14 +161,14 @@ do
         ;;
       *)
         echo "Unknown option: $1" >&2
-        f_fail_usage
+        f_ss_fail_usage
         ;;
     esac
   fi
 done
 
 [[ "${f_given_any}" == "yes" ]] \
-  || f_fail_validation "Nothing to set - pass at least one path option"
+  || f_ss_fail_validation "Nothing to set - pass at least one path option"
 
 # Every given path is required (the WebUI form always sends all of them)
 # and must be absolute - same rules the view enforced before.
@@ -196,11 +182,11 @@ do
   f_val="${!f_ref}"
   if [[ -z "${f_val}" ]]
   then
-    f_fail_validation "Media path for ${f_key} is required"
+    f_ss_fail_validation "Media path for ${f_key} is required"
   fi
   if [[ "${f_val}" != /* ]] || [[ "${f_val}" == *$'\n'* ]]
   then
-    f_fail_validation "Media path for ${f_key} must be an absolute single-line path"
+    f_ss_fail_validation "Media path for ${f_key} must be an absolute single-line path"
   fi
 done
 
@@ -222,27 +208,5 @@ do
 done
 f_merge="${f_merge}}"
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "media-unchanged"
-else
-  g_echo_note "media-changed"
-fi
+f_ss_merge "${f_merge}" "media" "${f_check}"
 exit 0

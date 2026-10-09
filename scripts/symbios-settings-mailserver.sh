@@ -57,20 +57,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 f_command="${1:-}"
 case "${f_command}" in
@@ -83,13 +73,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -138,7 +124,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   echo "smtp_server=${f_cur_server}"
   echo "smtp_port=${f_cur_port}"
@@ -167,7 +153,7 @@ then
         ;;
       *)
         echo "Unknown option: $1" >&2
-        f_fail_usage
+        f_ss_fail_usage
         ;;
     esac
   done
@@ -176,33 +162,15 @@ then
   f_twofa="$(f_symbios_var twofa_enabled "")"
   if [[ "${f_twofa}" == "True" || "${f_twofa}" == "true" ]]
   then
-    f_fail_validation "Cannot delete SMTP configuration while 2-Factor Authentication (2FA) is enabled - disable 2FA under Settings Auth first"
+    f_ss_fail_validation "Cannot delete SMTP configuration while 2-Factor Authentication (2FA) is enabled - disable 2FA under Settings Auth first"
   fi
   if [[ -n "$(f_symbios_var notify_mail_enabled "")" ]] \
     && [[ "$(f_symbios_var notify_mail_enabled "")" == "True" \
       || "$(f_symbios_var notify_mail_enabled "")" == "true" ]]
   then
-    f_fail_validation "Cannot delete SMTP configuration while mail notifications are enabled - disable them under Settings Notifications first"
+    f_ss_fail_validation "Cannot delete SMTP configuration while mail notifications are enabled - disable them under Settings Notifications first"
   fi
-  f_check_flag=""
-  [[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-  if ! f_out="$(printf '%s' '{"smtp_server": null, "smtp_port": null, "smtp_user": null, "smtp_password": null, "smtp_from": null, "smtp_tls": null}' \
-    | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-  then
-    f_fail_technical "Failed to write inventory: ${f_out}"
-  fi
-  g_echo "${f_out}"
-  if [[ "${f_check}" == "yes" ]]
-  then
-    g_echo_note "Check mode - nothing was changed"
-    exit 0
-  fi
-  if grep -q "^unchanged$" <<< "${f_out}"
-  then
-    g_echo_note "mailserver-unchanged"
-  else
-    g_echo_note "mailserver-changed"
-  fi
+  f_ss_merge '{"smtp_server": null, "smtp_port": null, "smtp_user": null, "smtp_password": null, "smtp_from": null, "smtp_tls": null}' "mailserver" "${f_check}"
   exit 0
 fi
 
@@ -224,34 +192,34 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --server)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_server="$2"
       shift 2
       ;;
     --port)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_port="$2"
       shift 2
       ;;
     --user)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_user="$2"
       f_given_user="yes"
       shift 2
       ;;
     --from)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_from="$2"
       shift 2
       ;;
     --tls)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_tls="$2"
       f_given_tls="yes"
       shift 2
       ;;
     --password|--password=*)
-      f_fail_validation "smtp_password is a secret and must be passed via --json-stdin, never as argv"
+      f_ss_fail_validation "smtp_password is a secret and must be passed via --json-stdin, never as argv"
       ;;
     --json-stdin)
       f_json_stdin="yes"
@@ -267,7 +235,7 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
@@ -307,28 +275,30 @@ f_missing=()
 [[ -z "${f_from}" ]] && f_missing+=("Email Address")
 # The password field is pre-filled by the WebUI form, so an explicitly
 # empty password means "cleared by the user" and is rejected (same as the
-# WebUI before). Only a missing key keeps the stored password (CLI use).
-if [[ -z "${f_new_pw}" ]]
+# WebUI before). Only a missing key keeps the stored password (CLI use) -
+# unless none is stored yet, then it is required.
+if [[ -z "${f_new_pw}" ]] \
+  && { [[ "${f_given_pw}" == "yes" ]] || [[ "${f_cur_pw_set}" == "no" ]]; }
 then
   f_missing+=("Password")
 fi
 if [[ "${#f_missing[@]}" -gt 0 ]]
 then
-  f_fail_validation "Required fields missing: $(IFS=", "; echo "${f_missing[*]}")"
+  f_ss_fail_validation "Required fields missing: $(IFS=", "; echo "${f_missing[*]}")"
 fi
 
 if ! [[ "${f_from}" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]
 then
-  f_fail_validation "Invalid email address format (expected user@domain.tld)"
+  f_ss_fail_validation "Invalid email address format (expected user@domain.tld)"
 fi
 if ! [[ "${f_port}" =~ ^[0-9]+$ ]] || [[ "10#${f_port}" -lt 1 || "10#${f_port}" -gt 65535 ]]
 then
-  f_fail_validation "Invalid SMTP port: ${f_port} (expected 1-65535)"
+  f_ss_fail_validation "Invalid SMTP port: ${f_port} (expected 1-65535)"
 fi
 if [[ -n "${f_server}" ]] \
   && { [[ "${f_server}" == *$'\n'* ]] || [[ "${f_server}" =~ [[:space:]] ]]; }
 then
-  f_fail_validation "Invalid SMTP server: must be a single line without whitespace"
+  f_ss_fail_validation "Invalid SMTP server: must be a single line without whitespace"
 fi
 if [[ "${f_given_tls}" == "yes" ]]
 then
@@ -336,7 +306,7 @@ then
     ""|starttls|tls)
       ;;
     *)
-      f_fail_validation "Invalid encryption: ${f_tls} (expected empty, starttls or tls)"
+      f_ss_fail_validation "Invalid encryption: ${f_tls} (expected empty, starttls or tls)"
       ;;
   esac
 else
@@ -348,7 +318,8 @@ fi
 f_user="${f_user//\%EMAILADDRESS\%/${f_from}}"
 f_user="${f_user//\%EMAILLOCALPART\%/${f_from%%@*}}"
 
-# --- transactional write (empty password keeps the stored one) -------------------
+# --- transactional write (a given password is always non-empty here;
+# missing keys keep the stored value) ---------------------------------------------
 
 f_merge="$(printf '{"smtp_server": %s, "smtp_port": %s, "smtp_user": %s, "smtp_from": %s, "smtp_tls": %s' \
   "$(printf '%s' "${f_server}" | f_json_escape)" \
@@ -362,27 +333,5 @@ then
 fi
 f_merge="${f_merge}}"
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "mailserver-unchanged"
-else
-  g_echo_note "mailserver-changed"
-fi
+f_ss_merge "${f_merge}" "mailserver" "${f_check}"
 exit 0
