@@ -46,8 +46,19 @@ def _script(cmd, timeout=30, stdin_data=None):
     return run_command(cmd, timeout=timeout, stdin_data=stdin_data)
 
 
+# Process-local caches: schemas and detect option lists never change at
+# runtime (scripts change only via deploy, which restarts the container),
+# so one SSH round-trip per worker process suffices. Values (get --json)
+# are deliberately NOT cached - they must reflect the live state.
+_SCHEMA_CACHE = {}
+_DETECT_CACHE = {}
+
+
 def _load_schema(entry):
     """Fetch and normalize the script schema (list of field dicts)."""
+    cached = _SCHEMA_CACHE.get(entry['script'])
+    if cached is not None:
+        return [dict(f) for f in cached], None
     ok, stdout, stderr = _script('{} schema'.format(entry['script']),
                                  timeout=15)
     if not ok:
@@ -76,6 +87,7 @@ def _load_schema(entry):
             'detect': raw.get('detect') or '',
             'note': raw.get('note') or '',
         })
+    _SCHEMA_CACHE[entry['script']] = [dict(f) for f in fields]
     return fields, None
 
 
@@ -105,9 +117,12 @@ def _load_values(entry):
 
 
 def _resolve_detect(entry, field):
-    """Resolve a select's detect subcommand to an option list."""
+    """Resolve a select's detect subcommand to an option list (cached)."""
     if not field['detect']:
         return field['options']
+    key = (entry['script'], field['detect'])
+    if key in _DETECT_CACHE:
+        return _DETECT_CACHE[key]
     ok, stdout, _stderr = _script('{} {}'.format(entry['script'],
                                                 shlex.quote(field['detect'])),
                                   timeout=15)
@@ -116,7 +131,10 @@ def _resolve_detect(entry, field):
     options = [{'value': line, 'label': line}
                for line in (l.strip() for l in stdout.splitlines())
                if line]
-    return options or field['options']
+    if not options:
+        return field['options']
+    _DETECT_CACHE[key] = options
+    return options
 
 
 @login_required
