@@ -80,12 +80,6 @@
         group: root
         mode: '0700'
 
-    - name: Remove legacy fetch helpers from /etc/openvpn (unreleased layout)
-      ansible.builtin.shell: |
-        rm -f /etc/openvpn/fetch-*.sh && echo "cleaned"
-      changed_when: false
-      failed_when: false
-
     - name: Deploy fetch helpers for fetch-mode tunnels (encrypted volume)
       ansible.builtin.copy:
         content: |
@@ -208,7 +202,7 @@
       failed_when: false
 
     - name: Allow tunnel ports on the tunnel interface
-      ansible.builtin.include_tasks: tasks/openvpn-ufw.yml
+      ansible.builtin.include_tasks: ../shared-tasks/openvpn-ufw.yml
       loop: "{{ _openvpn_tunnels }}"
       loop_control:
         loop_var: tunnel_item
@@ -277,5 +271,7 @@
           {{ _openvpn_boot_starts | default('') }}fi
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/openvpn-client.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "openvpn-client"
+        state_playbook: "base-services/openvpn-client.yml"

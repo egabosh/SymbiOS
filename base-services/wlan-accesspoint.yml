@@ -90,6 +90,14 @@
       changed_when: false
       failed_when: false
 
+    # Optional hostapd stanzas (single-line: no {% %} flow inside content:).
+    - name: Render hostapd country and security blocks
+      ansible.builtin.set_fact:
+        ap_country_block: "{{ 'country_code=' + (ap_country | default('', true) | upper or keyboard | default('', true) | upper) + '\nieee80211d=1' if (ap_country | default('', true) | upper or keyboard | default('', true) | upper) else '' }}"
+        ap_security_block: "{{ 'wpa=2\nwpa_passphrase=' + (ap_passphrase | default('')) + '\nwpa_key_mgmt=WPA-PSK\nwpa_pairwise=TKIP\nrsn_pairwise=CCMP' if ap_passphrase | default('') else '# No passphrase - open network' }}"
+      changed_when: false
+      no_log: true
+
     - name: Set hostapd configuration
       ansible.builtin.copy:
         content: |
@@ -101,11 +109,7 @@
           hw_mode=g
           channel={{ _ap_channel.stdout | default('6') }}
 
-          {% set ap_country_code = ap_country | default('', true) | upper or keyboard | default('', true) | upper %}
-          {% if ap_country_code %}
-          country_code={{ ap_country_code }}
-          ieee80211d=1
-          {% endif %}
+          {{ ap_country_block }}
 
           wmm_enabled=0
           macaddr_acl=0
@@ -113,15 +117,7 @@
           ignore_broadcast_ssid=0
 
           # Security
-          {% if ap_passphrase | default('') %}
-          wpa=2
-          wpa_passphrase={{ ap_passphrase | default('') }}
-          wpa_key_mgmt=WPA-PSK
-          wpa_pairwise=TKIP
-          rsn_pairwise=CCMP
-          {% else %}
-          # No passphrase - open network
-          {% endif %}
+          {{ ap_security_block }}
         dest: "{{ ap_conf_file }}"
         owner: root
         group: root
@@ -201,8 +197,10 @@
       changed_when: true
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/wlan-accesspoint.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "wlan-accesspoint"
+        state_playbook: "base-services/wlan-accesspoint.yml"
 
   handlers:
     - name: restart hostapd

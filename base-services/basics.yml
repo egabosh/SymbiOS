@@ -861,16 +861,7 @@
           when: nocontainer.stat.exists == true
 
         - name: Create 8G swapfile on the encrypted data disk
-          ansible.builtin.shell: |
-            if [[ "$(stat -c%s {{ data_root }}/swapfile 2>/dev/null)" != "8589934592" ]] \
-               || ! blkid -s TYPE -o value {{ data_root }}/swapfile 2>/dev/null | grep -qx swap
-            then
-              swapoff {{ data_root }}/swapfile 2>/dev/null || true
-              fallocate -l 8G {{ data_root }}/swapfile
-              chmod 600 {{ data_root }}/swapfile
-              mkswap {{ data_root }}/swapfile
-              echo "swapfile-created"
-            fi
+          ansible.builtin.shell: "{{ git_root }}/scripts/symbios-swapfile.sh create {{ data_root }}"
           args:
             executable: /bin/bash
           register: swapfile_create
@@ -879,13 +870,7 @@
           when: nocontainer.stat.exists == true
 
         - name: Activate the data-disk swapfile now
-          ansible.builtin.shell: |
-            if swapon --show=NAME --noheadings 2>/dev/null | grep -qx {{ data_root }}/swapfile
-            then
-              echo "already-active"
-            else
-              swapon {{ data_root }}/swapfile && echo "swapon-ran"
-            fi
+          ansible.builtin.shell: "{{ git_root }}/scripts/symbios-swapfile.sh activate {{ data_root }}"
           args:
             executable: /bin/bash
           register: swapfile_on
@@ -894,16 +879,7 @@
           when: nocontainer.stat.exists == true
 
         - name: Remove the old unencrypted swapfile (only after the new one is active)
-          ansible.builtin.shell: |
-            if swapon --show=NAME --noheadings 2>/dev/null | grep -qx {{ data_root }}/swapfile
-            then
-              swapoff /var/swap 2>/dev/null || true
-              rm -f /var/swap
-              echo "old-swap-removed"
-            else
-              echo "new swap not active, keeping /var/swap" >&2
-              exit 1
-            fi
+          ansible.builtin.shell: "{{ git_root }}/scripts/symbios-swapfile.sh cleanup-legacy {{ data_root }}"
           args:
             executable: /bin/bash
           register: swapfile_cleanup
@@ -939,8 +915,10 @@
       when: nocontainer.stat.exists == true
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/basics.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "basics"
+        state_playbook: "base-services/basics.yml"
   handlers:
 
     - name: update-grub

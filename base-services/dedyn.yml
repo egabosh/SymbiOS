@@ -80,14 +80,6 @@
           */5 * * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/update_host_ip.sh ]] && update_host_ip.sh
         backup: yes
 
-    - name: Remove obsolete /usr/local/etc/dedyn.conf
-      # The DDNS config is read directly from inventory.yml by dedyn.sh
-      # (only /symbios is on the encrypted data partition). Clean up the
-      # old copy from the unencrypted root filesystem.
-      ansible.builtin.file:
-        path: /usr/local/etc/dedyn.conf
-        state: absent
-
     - name: IPv6 EUI-64 addressing (stable interface id for FRITZ!Box port forwards)
       block:
         - name: Check for NetworkManager
@@ -116,5 +108,7 @@
       when: ansible_facts['os_family'] == 'Debian'
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/dedyn.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "dedyn"
+        state_playbook: "base-services/dedyn.yml"

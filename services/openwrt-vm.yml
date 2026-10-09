@@ -723,23 +723,6 @@
     # we configure the bridges directly here. VM NICs attach to them via
     # <interface type='bridge'>.
 
-    # Remove legacy libvirt network definitions (migrated to ifupdown).
-    - name: Remove legacy OpenWrt libvirt networks
-      ansible.builtin.shell: |
-        set -e
-        N="{{ item.name }}"
-        if virsh net-info "$N" >/dev/null 2>&1; then
-          virsh net-destroy "$N" 2>/dev/null || true
-          virsh net-undefine "$N" 2>/dev/null || true
-          echo "legacy-network-removed: $N"
-        else
-          echo "no-legacy-network: $N"
-        fi
-      loop: "{{ ow_networks }}"
-      register: ow_net_cleanup
-      changed_when: "'legacy-network-removed' in ow_net_cleanup.stdout"
-      when: kvm_capable | bool
-
     # Write ifupdown bridge config for each internal segment. The bridge is
     # pure L2 (the VM owns the gateway and the per-segment dnsmasq). v4 stays
     # "manual": ifupdown's "inet dhcp" starts dhclient at boot (blocking ifup,
@@ -1107,9 +1090,7 @@
             <nvram>{{ service_root }}/ovmf/OVMF_VARS.fd</nvram>
           </os>
           <features>
-            {% if vm_arch == 'aarch64' %}
-            <acpi state='off'/>
-            {% endif %}
+            {{ "<acpi state='off'/>" if vm_arch == 'aarch64' else "" }}
           </features>
           <cpu mode='{{ vm_cpu_model }}'/>
           <clock offset='utc'/>
@@ -1178,10 +1159,10 @@
     # ── Traefik integration ──────────────────────────────────────────────
     # Traefik file-provider route for LuCI (Authelia-protected)
     - name: Create LDAP group for openwrt-vm access control
-      include_tasks: tasks/ldap-single-group.yml
+      include_tasks: ../shared-tasks/ldap-single-group.yml
 
     - name: Write Authelia access_control for openwrt-vm group restriction
-      include_tasks: tasks/authelia-acl.yml
+      include_tasks: ../shared-tasks/authelia-acl.yml
       vars:
         authelia_subjects:
           - "group:openwrt-vm"
@@ -1245,11 +1226,9 @@
 
     # ── Register playbook ────────────────────────────────────────────────
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
       when: kvm_capable | bool
 
   handlers:
     - name: Restart authelia
-      ansible.builtin.shell: docker compose restart
-      args:
-        chdir: /symbios/base-services/authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml

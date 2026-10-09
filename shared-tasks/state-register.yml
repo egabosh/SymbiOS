@@ -1,0 +1,9 @@
+# Shared task: register a playbook as installed in the state file.
+#
+# Required vars: service_name (used to derive the default path)
+# Optional vars: state_playbook (full path, default: services/<name>.yml).
+#   Base playbooks pass state_playbook: "base-services/<name>.yml".
+
+- name: Register playbook as installed
+  ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set {{ state_playbook | default('services/' + service_name + '.yml') }}"
+  changed_when: false

@@ -54,15 +54,10 @@
         update_cache: no
         install_recommends: no
 
-    # Legacy location kept for transition; new backups go to
-    # {{ data_root }}/backup.d (scanned by backup.sh)
-    - name: Create legacy backups dir /usr/local/sbin/backup.d
+    - name: Remove legacy backups dir /usr/local/sbin/backup.d
       ansible.builtin.file:
         path: /usr/local/sbin/backup.d
-        owner: root
-        group: root
-        state: directory
-        mode: '0700'
+        state: absent
 
     - name: Create backups dir {{ data_root }}/backup.d
       ansible.builtin.file:
@@ -99,5 +94,7 @@
     # up automatically (runchecks.sh scans the git tree).
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/backup.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "backup"
+        state_playbook: "base-services/backup.yml"

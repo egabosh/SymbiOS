@@ -68,9 +68,6 @@
     paperless_media_path: "{{ media_documents | default('/symbios/media/documents') }}"
     # Ingest directory: new scans land here via SFTP or member uploads.
     paperless_consume_path: "{{ media_inbox | default('/symbios/media/inbox') }}/paperless"
-    # Previous service-local defaults kept for the one-time migration below.
-    paperless_legacy_media: "/symbios/services/paperless/media"
-    paperless_legacy_consume: "/symbios/services/paperless/consume"
     # UIDs paperless writes with (must match USERMAP_UID below).
     paperless_uid: 998
   tasks:
@@ -112,10 +109,10 @@
         line: "#!/bin/bash -e"
 
     - name: Gen initial passwords if not exists
-      ansible.builtin.shell: ./genpw.sh
-      args:
-        chdir: /symbios/services/paperless
-        creates: /symbios/services/paperless/docker-compose.env
+      include_tasks: ../shared-tasks/genpw-run.yml
+      vars:
+        service_name: paperless
+        genpw_creates: /symbios/services/paperless/docker-compose.env
 
     - name: Generate OIDC client secret for Paperless
       ansible.builtin.shell: /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/paperless
@@ -231,34 +228,6 @@
       changed_when: false
       failed_when: false
 
-    - name: Check legacy service-local media and consume dirs for content to migrate
-      ansible.builtin.stat:
-        path: "{{ item.src }}"
-      register: paperless_legacy_dirs
-      loop:
-        - { src: "{{ paperless_legacy_media }}", dest: "{{ paperless_media_path }}" }
-        - { src: "{{ paperless_legacy_consume }}", dest: "{{ paperless_consume_path }}" }
-      when: item.src != item.dest
-
-    - name: Move legacy archive and consume content into the media dirs (one-time migration)
-      ansible.builtin.shell: |
-        mkdir -p "{{ item.item.dest }}"
-        mv "{{ item.item.src }}"/* "{{ item.item.dest }}/" 2>/dev/null || true
-        rmdir "{{ item.item.src }}" 2>/dev/null || true
-      loop: "{{ paperless_legacy_dirs.results }}"
-      when:
-        - item.stat is defined
-        - item.stat.exists | default(false)
-      changed_when: false
-      failed_when: false
-
-    - name: Remove the obsolete Samba share (uploads go via SFTP now)
-      ansible.builtin.blockinfile:
-        path: /etc/samba/smb-{{ ansible_facts['hostname'] }}.conf
-        marker: "# {mark} paperles ANSIBLE MANAGED BLOCK"
-        state: absent
-      failed_when: false
-
     - name: Give paperless permissions for consume dir
       ansible.builtin.file:
         path: "{{ paperless_consume_path }}"
@@ -266,43 +235,20 @@
         group: "{{ media_gid | default(31000) }}"
         mode: '2770'
 
-    - name: /symbios/base-services/traefik/providers/paperless.yml Routing Configuration
-      blockinfile:
-        path: /symbios/base-services/traefik/providers/paperless.yml
-        create: yes
-        mode: 0444
-        owner: root
-        group: docker
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          http:
-            routers:
-              paperless:
-                rule: "Host(`{{ service_domain }}`)"
-                service: paperless
-                entryPoints:
-                  - "https"
-                tls:
-                  certResolver: {{ acme_resolver }}
-                middlewares:
-                  - "secHeaders@file"
-                  - "authelia@file"
-            services:
-              paperless:
-                loadBalancer:
-                  servers:
-                    - url: "http://paperless:8000"
-        backup: yes
+    - name: Traefik provider snippet for paperless
+      include_tasks: ../shared-tasks/traefik-provider.yml
+      vars:
+        traefik_backend_url: "http://paperless:8000"
 
     - name: Ensure LDAP groups for OIDC login (paperless-users / paperless-admins)
-      include_tasks: tasks/oidc-groups.yml
+      include_tasks: ../shared-tasks/oidc-groups.yml
 
     # Redirect URI must match the django-allauth callback path; the old
     # /oidc/callback/ value was never used by paperless and would fail
     # with a redirect_uri mismatch. token_endpoint_auth_method must match
     # settings.token_auth_method above (see the Authelia paperless doc).
     - name: Write OIDC config in authelias configuration.yml for paperless
-      include_tasks: tasks/authelia-oidc.yml
+      include_tasks: ../shared-tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Paperless"
         oidc_redirect_uris:
@@ -310,7 +256,7 @@
         oidc_token_endpoint_auth_method: "client_secret_basic"
 
     - name: Write Authelia access_control for paperless group restriction
-      include_tasks: tasks/authelia-acl.yml
+      include_tasks: ../shared-tasks/authelia-acl.yml
       vars:
         authelia_subjects:
           - "group:paperless-users"
@@ -332,12 +278,12 @@
         owner: root
         group: root
 
-    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
+    # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck.yml
+      include_tasks: ../shared-tasks/runcheck.yml
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
     - name: run genpw.sh
@@ -352,8 +298,6 @@
         chdir: /symbios/services/paperless
 
     - name: Restart authelia
-      ansible.builtin.shell: docker compose restart
-      args:
-        chdir: /symbios/base-services/authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml
 
 

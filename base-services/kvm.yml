@@ -299,15 +299,6 @@
       notify: Restart libvirtd to activate qemu hook
       when: kvm_capable | default(false) | bool
 
-    # Remove the legacy openwrt-specific rc.local block that the old
-    # openwrt-vm playbook inserted (superseded by the generic block below).
-    - name: Remove legacy OpenWrt rc.local restore block
-      ansible.builtin.blockinfile:
-        path: /etc/rc.local
-        state: absent
-        marker: "# {mark} SymbiOS OpenWrt VM start"
-      when: kvm_capable | default(false) | bool
-
     # rc.local mounts /symbios after the LUKS boot-unlock, so the VM restore
     # must happen there (after the mount), not by systemd at boot.
     - name: Insert VM restore into rc.local boot sequence
@@ -341,8 +332,10 @@
 
     # Register playbook as installed
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/kvm.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "kvm"
+        state_playbook: "base-services/kvm.yml"
 
   handlers:
     # libvirtd reads the qemu hook path on each event, but there is a catch:

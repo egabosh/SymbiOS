@@ -364,5 +364,7 @@
           disable_fw_kms_setup=1
           
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/raspberry.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "raspberry"
+        state_playbook: "base-services/raspberry.yml"

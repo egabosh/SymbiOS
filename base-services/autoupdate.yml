@@ -78,5 +78,7 @@
         backup: yes
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/autoupdate.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "autoupdate"
+        state_playbook: "base-services/autoupdate.yml"

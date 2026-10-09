@@ -227,10 +227,9 @@
         line: "#!/bin/bash -e"
 
     - name: Gen initial passwords if not exists
-      ansible.builtin.shell: ./genpw.sh
-      args:
-        chdir: /symbios/services/home-assistant
-        creates: /symbios/services/home-assistant/env
+      include_tasks: ../shared-tasks/genpw-run.yml
+      vars:
+        service_name: home-assistant
 
     - name: /symbios/services/home-assistant/docker-compose.yml Container Configuration
       blockinfile:
@@ -331,8 +330,8 @@
                   - "https"
                 tls:
                   certResolver: {{ acme_resolver }}
-      middlewares:
-        - "secHeadersHA@file"
+                middlewares:
+                  - "secHeadersHA@file"
 
               matter:
                 rule: "Host(`matter.{{ base_domain }}`)"
@@ -357,14 +356,7 @@
         backup: yes
 
     - name: Ensure LDAP groups for OIDC login (home-assistant-users / home-assistant-admins)
-      include_tasks: tasks/oidc-groups.yml
-
-    - name: Remove legacy LDAP groups (old naming convention)
-      ansible.builtin.shell: |
-        {{ git_root }}/scripts/symbios-ldap-groups.sh --delete --name home-assistant
-        {{ git_root }}/scripts/symbios-ldap-groups.sh --delete --name home-assistant-admin
-      changed_when: false
-      failed_when: false
+      include_tasks: ../shared-tasks/oidc-groups.yml
 
     - name: Deploy LDAP group-change hook for HA admin sync
       ansible.builtin.copy:
@@ -382,7 +374,7 @@
         group: root
 
     - name: Write Authelia access_control for home-assistant group restriction
-      include_tasks: tasks/authelia-acl.yml
+      include_tasks: ../shared-tasks/authelia-acl.yml
       vars:
         authelia_policy: one_factor
         authelia_subjects:
@@ -449,7 +441,7 @@
       notify: Restart home-assistant
 
     - name: Write OIDC config in authelias configuration.yml for home-assistant
-      include_tasks: tasks/authelia-oidc.yml
+      include_tasks: ../shared-tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Home Assistant"
         oidc_require_pkce: true
@@ -511,39 +503,7 @@
     # The YAML http: block is ignored; instead we write the trusted proxy
     # settings directly into the storage file and promote pending -> stable.
     - name: Configure HA reverse proxy settings in .storage/http
-      ansible.builtin.shell: |
-        docker exec home-assistant python3 -c "
-        import json, os
-
-        path = '/config/.storage/http'
-        traefik_ip = '{{ traefik_ip }}'
-
-        with open(path) as f:
-            data = json.load(f)
-
-        stable = data['data'].get('stable') or {}
-        changed = False
-
-        if not stable.get('use_x_forwarded_for'):
-            stable['use_x_forwarded_for'] = True
-            changed = True
-
-        trusted = stable.get('trusted_proxies') or []
-        if traefik_ip not in trusted and traefik_ip + '/32' not in trusted:
-            trusted.append(traefik_ip)
-            stable['trusted_proxies'] = trusted
-            changed = True
-
-        if changed:
-            stable['error'] = None
-            stable['error_message'] = None
-            data['data']['stable'] = stable
-            with open(path, 'w') as f:
-                json.dump(data, f, indent=2)
-            print('HTTP config updated')
-        else:
-            print('HTTP config already correct')
-        "
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-home-assistant-http.sh {{ traefik_ip }}"
       register: ha_http_config
       changed_when: "'updated' in ha_http_config.stdout"
 
@@ -686,13 +646,13 @@
         interface: iot0
         direction: in
 
-    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
+    # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck.yml
+      include_tasks: ../shared-tasks/runcheck.yml
 
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
     - name: run genpw.sh
@@ -710,9 +670,7 @@
         chdir: /symbios/services/home-assistant
 
     - name: Restart authelia
-      ansible.builtin.shell: docker compose restart
-      args:
-        chdir: /symbios/base-services/authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml
 
     - name: Restart ha_pingcheck
       ansible.builtin.systemd:

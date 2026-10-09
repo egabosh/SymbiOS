@@ -242,7 +242,7 @@
     # "static-web" LDAP group is the access list and Authelia checks it while
     # handling the forward-auth request.
     - name: Create LDAP group for static-web access control
-      include_tasks: tasks/ldap-single-group.yml
+      include_tasks: ../shared-tasks/ldap-single-group.yml
 
     - name: Write Authelia access_control for static-web group restriction
       ansible.builtin.blockinfile:
@@ -256,16 +256,16 @@
       notify: Restart authelia
 
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck.yml
+      include_tasks: ../shared-tasks/runcheck.yml
       vars:
         service_name: static-web
         healthcheck_url: "https://{{ service_domain }}"
 
     - name: Ensure static-web is running
-      include_tasks: tasks/docker-start.yml
+      include_tasks: ../shared-tasks/docker-start.yml
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 
@@ -275,6 +275,4 @@
         chdir: "/symbios/services/{{ service_name }}"
 
     - name: Restart authelia
-      ansible.builtin.shell: docker compose restart
-      args:
-        chdir: /symbios/base-services/authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml

@@ -184,7 +184,7 @@
         validate: /bin/bash -n %s
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 

@@ -320,6 +320,12 @@
         insertbefore: BOF
         line: "#!/bin/bash"
 
+    # The coturn image appends --external-ip from DETECT_EXTERNAL_IP, so it
+    # is only set when no static address is configured (single-line: no {% %} in block:).
+    - name: Render coturn external-IP detection line
+      ansible.builtin.set_fact:
+        turn_detect_env_line: "{{ 'DETECT_EXTERNAL_IP: \"yes\"' if not turn_external_ip | trim else '' }}"
+
     # /symbios/services/turn/docker-compose.yml Container Configuration
     - name: /symbios/services/turn/docker-compose.yml Container Configuration
       blockinfile:
@@ -342,9 +348,7 @@
               # The image appends --external-ip from this variable, so it is
               # only set when no address is configured in the config file.
               environment:
-          {% if not turn_external_ip | trim %}
-                DETECT_EXTERNAL_IP: "yes"
-          {% endif %}
+                {{ turn_detect_env_line }}
               volumes:
                 - ./coturn:/etc/coturn
                 - /etc/localtime:/etc/localtime:ro
@@ -406,7 +410,7 @@
         backup: yes
 
     - name: Ensure turn is running
-      include_tasks: tasks/docker-start.yml
+      include_tasks: ../shared-tasks/docker-start.yml
 
     # The certificate can only be fetched once the Traefik router above exists
     # and Traefik has issued a certificate for the TURN hostname.
@@ -419,13 +423,13 @@
       no_log: true
 
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck-docker.yml
+      include_tasks: ../shared-tasks/runcheck-docker.yml
       vars:
         service_name: turn
         check_desc: "Verifies that the turn (coturn) container is running. A missing container marks the check as failed."
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 

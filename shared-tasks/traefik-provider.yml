@@ -6,6 +6,11 @@
 #
 # Required vars:  service_name, service_domain, traefik_backend_url
 # Optional vars:  traefik_middlewares (list; default: ["secHeaders@file", "authelia@file"])
+#   Rendered via a single-line map/join expression (no {% for %} in block:).
+
+- name: Render Traefik middlewares block
+  ansible.builtin.set_fact:
+    traefik_middlewares_block: "{{ (traefik_middlewares | default(['secHeaders@file', 'authelia@file'])) | map('regex_replace', '^(.*)$', '        - \"\\1\"') | join('\n') }}"
 
 - name: "/symbios/base-services/traefik/providers/{{ service_name }}.yml Routing Configuration"
   ansible.builtin.blockinfile:
@@ -26,9 +31,7 @@
             tls:
               certResolver: {{ acme_resolver }}
             middlewares:
-{% for mw in traefik_middlewares | default(['secHeaders@file', 'authelia@file']) %}
-              - "{{ mw }}"
-{% endfor %}
+      {{ traefik_middlewares_block }}
         services:
           {{ service_name }}:
             loadBalancer:

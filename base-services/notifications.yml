@@ -126,8 +126,10 @@
       notify: Rebuild aliases
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/notifications.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "notifications"
+        state_playbook: "base-services/notifications.yml"
 
   handlers:
     - name: Rebuild aliases

@@ -41,11 +41,7 @@
 
   pre_tasks:
     - name: Fail if base_domain is not configured
-      ansible.builtin.fail:
-        msg: >-
-          base_domain is not set. Configure a domain first via
-          the WebUI at /settings/ddns/ or edit inventory.yml directly.
-      when: base_domain is not defined or base_domain == '' or base_domain == 'none'
+      include_tasks: ../shared-tasks/base-domain-guard.yml
 
   tasks:
     # --- Mailclient marker (used by containers / Authelia) ---
@@ -224,8 +220,10 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/smtp.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "smtp"
+        state_playbook: "base-services/smtp.yml"
   handlers:
     - name: Restart postfix
       ansible.builtin.systemd:

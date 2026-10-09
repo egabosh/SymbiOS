@@ -165,8 +165,10 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/runchecks.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "runchecks"
+        state_playbook: "base-services/runchecks.yml"
   handlers:
 
     - name: Restart systemd

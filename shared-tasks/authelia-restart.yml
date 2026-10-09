@@ -1,0 +1,10 @@
+# Shared task: restart Authelia after access_control / OIDC changes.
+# Usable both as a regular task and (via include_tasks) from handlers.
+# No vars required.
+
+- name: Restart authelia
+  ansible.builtin.shell: docker compose restart
+  args:
+    chdir: /symbios/base-services/authelia
+  changed_when: false
+  failed_when: false
