@@ -31,6 +31,8 @@
 # generic YAML shapes, never domains. No Django dependencies.
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import sys
@@ -54,6 +56,38 @@ def e_technical(msg):
     """Print a technical error and exit 1."""
     print("symbios-config.py: error: {}".format(msg), file=sys.stderr)
     sys.exit(1)
+
+
+def ensure_parent(path):
+    """Create the parent dir (idempotent, safe outside the lock)."""
+    try:
+        parent = os.path.dirname(path)
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent, exist_ok=True)
+    except OSError as e:
+        e_technical("cannot create dir for {}: {}".format(path, e))
+
+
+@contextlib.contextmanager
+def locked(path):
+    """Hold an exclusive lock file across load/modify/write (see
+    symbios-inventory.py: locking only the write still loses updates)."""
+    try:
+        lock = open(path + ".lock", "w")
+    except OSError as e:
+        e_technical("cannot lock {}: {}".format(path, e))
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+    except OSError as e:
+        e_technical("cannot lock {}: {}".format(path, e))
+    try:
+        yield
+    finally:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        lock.close()
 
 
 def resolve_path(config_dir, rel):
@@ -83,13 +117,13 @@ def load_doc(path):
 
 
 def write_doc(path, doc, check_only):
-    """Write back atomically with .bak backup (or report only with check)."""
+    """Write back atomically with .bak backup (or report only with check).
+
+    Caller MUST hold locked(path): the load happened under the same lock.
+    """
     if check_only:
         return
     try:
-        parent = os.path.dirname(path)
-        if parent and not os.path.isdir(parent):
-            os.makedirs(parent, exist_ok=True)
         if os.path.exists(path):
             with open(path) as f:
                 old = f.read()
@@ -141,11 +175,13 @@ def cmd_write(args):
         e_usage("invalid YAML on stdin: {}".format(e))
     if doc is None:
         e_usage("stdin must hold a YAML document, got empty input")
-    old = load_doc(path)
-    if doc == old:
-        print("unchanged")
-        return
-    write_doc(path, doc, args.check)
+    ensure_parent(path)
+    with locked(path):
+        old = load_doc(path)
+        if doc == old:
+            print("unchanged")
+            return
+        write_doc(path, doc, args.check)
     print("wrote {} ({} top-level {})".format(
         args.file,
         len(doc) if isinstance(doc, (dict, list)) else 1,
@@ -164,19 +200,21 @@ def cmd_merge(args):
         e_usage("invalid JSON on stdin: {}".format(e))
     if not isinstance(data, dict):
         e_usage("stdin must hold a JSON object, got {}".format(type(data).__name__))
-    old = load_doc(path)
-    if old is None:
-        old = {}
-    if not isinstance(old, dict):
-        e_usage("existing {} is not a mapping".format(args.file))
-    merged = deep_merge(old, data)
-    if merged == old:
-        print("unchanged")
-        return
-    write_doc(path, merged, args.check)
-    print("merged {} ({} keys)".format(args.file, len(data)))
-    if args.check:
-        print("(check mode - nothing was written)")
+    ensure_parent(path)
+    with locked(path):
+        old = load_doc(path)
+        if old is None:
+            old = {}
+        if not isinstance(old, dict):
+            e_usage("existing {} is not a mapping".format(args.file))
+        merged = deep_merge(old, data)
+        if merged == old:
+            print("unchanged")
+            return
+        write_doc(path, merged, args.check)
+        print("merged {} ({} keys)".format(args.file, len(data)))
+        if args.check:
+            print("(check mode - nothing was written)")
 
 
 def main(argv=None):

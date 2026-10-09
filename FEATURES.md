@@ -12,7 +12,9 @@ and documented in the WebUI under **Services**.
 Conventions used below: all host operations run through `symbios-exec.sh`
 (the WebUI never touches host files directly); changing a setting always
 re-applies the owning playbook (live output in the exec modal); secrets are
-passed via stdin, never on the command line.
+passed via stdin, never on the command line. Companion: SCRIPTS.md
+describes the same domains from the CLI side
+(`symbios-settings-<slug>.sh`); documentation index: DOCS.md.
 
 ---
 
