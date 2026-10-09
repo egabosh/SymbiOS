@@ -439,34 +439,17 @@
       # Pin the host key used by the WebUI's SSH exec path. The WebUI connects
       # to the symbios_base_services network gateway (192.168.41.1:33); we record the real
       # host key under that IP and localhost so the fingerprint policy can match.
-      ansible.builtin.shell: |
-        set -e
-        KH="{{ docker_path }}/config/.ssh/known_hosts"
-        tmp=$(mktemp)
-        ssh-keyscan -t ed25519,ecdsa,rsa -p 22 127.0.0.1 > "$tmp" 2>/dev/null || true
-        if [ ! -s "$tmp" ]; then
-          echo "ssh-keyscan failed" >&2
-          exit 1
-        fi
-        tokens="192.168.41.1,localhost,127.0.0.1"
-        : > "$KH"
-        while read -r line; do
-          case "$line" in \#*) continue;; esac
-          keytype=$(echo "$line" | awk '{print $2}')
-          key=$(echo "$line" | awk '{print $3}')
-          [ -z "$keytype" ] && continue
-          echo "$tokens $keytype $key" >> "$KH"
-        done < "$tmp"
-        chmod 644 "$KH"
-        chown root:10000 "$KH"
-        rm -f "$tmp"
+      # Logic lives in scripts/symbios-seed-known-hosts.sh.
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-seed-known-hosts.sh {{ docker_path }}/config"
       args:
         executable: /bin/bash
       changed_when: false
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/symbios-ui.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "symbios-ui"
+        state_playbook: "base-services/symbios-ui.yml"
   handlers:
 
     - name: Restart {{ service_name }}

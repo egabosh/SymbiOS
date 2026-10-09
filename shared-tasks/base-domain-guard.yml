@@ -1,0 +1,10 @@
+# Shared task: fail early when base_domain is not configured.
+# Use at the top of every domain-dependent playbook (traefik, authelia,
+# smtp, mailcow, ...). No vars required.
+
+- name: Fail if base_domain is not configured
+  ansible.builtin.fail:
+    msg: >-
+      base_domain is not set. Configure a domain first via
+      the WebUI at /settings/ddns/ or edit inventory.yml directly.
+  when: base_domain is not defined or base_domain == '' or base_domain == 'none'

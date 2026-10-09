@@ -85,8 +85,6 @@
     # Inside the container it is always /sftp-share (the chroot root);
     # the writable landing point is the inbox below it.
     sftp_share_datadir: "{{ media_root | default('/symbios/media') }}"
-    # Previous default kept for the one-time migration below.
-    sftp_share_legacy_datadir: "/symbios/services/{{ service_name }}/data"
     # Group and gid that owns the share directory inside the container
     sftp_share_group: media
     sftp_share_gid: "{{ media_gid | default(31000) }}"
@@ -115,16 +113,11 @@
     when: sftp_wp_instances_slurp.content | default('') | length > 0
 
   - name: Create LDAP group {{ sftp_share_ldap_group }} for SFTP access control
-    include_tasks: tasks/ldap-single-group.yml
+    include_tasks: ../shared-tasks/ldap-single-group.yml
     vars:
       service_name: sftp-share
       ldap_group_name: "{{ sftp_share_ldap_group }}"
       ldap_group_gid: "{{ sftp_share_gid }}"
-
-  - name: Remove the obsolete SFTPUSERS sync hook (direct LDAP needs no materialization)
-    ansible.builtin.file:
-      path: "{{ data_root }}/ldap-groups.d/sftp-share-users.hook"
-      state: absent
 
   - name: Deploy LDAP group-change hook (ensure chroot home dirs for new members)
     ansible.builtin.copy:
@@ -159,22 +152,6 @@
       group: docker
       state: directory
       mode: '0550'
-
-  - name: Check the legacy share directory for content to migrate
-    ansible.builtin.stat:
-      path: "{{ sftp_share_legacy_datadir }}"
-    register: sftp_legacy_dir
-
-  - name: Move legacy share content into the media inbox (one-time migration)
-    ansible.builtin.shell: |
-      mkdir -p "{{ media_inbox | default('/symbios/media/inbox') }}"
-      mv "{{ sftp_share_legacy_datadir }}"/* "{{ media_inbox | default('/symbios/media/inbox') }}/" 2>/dev/null || true
-      rmdir "{{ sftp_share_legacy_datadir }}" 2>/dev/null || true
-    when:
-      - sftp_legacy_dir.stat.exists | default(false)
-      - sftp_share_legacy_datadir != sftp_share_datadir
-    changed_when: false
-    failed_when: false
 
   - name: Ensure the share directory exists (owned by media.yml, never managed here)
     ansible.builtin.file:
@@ -299,11 +276,6 @@
       path: /symbios/services/sftp-share/sftp-ldap-keys
       insertbefore: BOF
       line: "#!/bin/bash"
-
-  - name: Remove the obsolete SFTPUSERS env file (direct LDAP needs no local accounts)
-    ansible.builtin.file:
-      path: /symbios/services/sftp-share/env
-      state: absent
 
   - name: Create additional Config sftp-share-user.conf
     copy:
@@ -445,13 +417,8 @@
     notify:
     - Restart sftp-share
 
-  - name: Remove the obsolete manual user helper (LDAP group is the single source of truth)
-    ansible.builtin.file:
-      path: /symbios/services/sftp-share/sftp-share-user.sh
-      state: absent
-
   - name: Deploy healthcheck
-    include_tasks: tasks/runcheck-docker.yml
+    include_tasks: ../shared-tasks/runcheck-docker.yml
     vars:
       service_name: sftp-share
 
@@ -469,7 +436,7 @@
     failed_when: false
 
   - name: Register playbook as installed
-    include_tasks: tasks/state-register.yml
+    include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 

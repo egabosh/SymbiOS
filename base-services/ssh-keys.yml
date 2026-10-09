@@ -68,5 +68,7 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/ssh-keys.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "ssh-keys"
+        state_playbook: "base-services/ssh-keys.yml"

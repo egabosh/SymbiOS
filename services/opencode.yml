@@ -114,33 +114,10 @@
         backup: yes
       notify: Restart opencode
 
-    - name: /symbios/base-services/traefik/providers/opencode.yml Traefik Routing Configuration
-      blockinfile:
-        path: /symbios/base-services/traefik/providers/opencode.yml
-        create: yes
-        mode: 0444
-        owner: root
-        group: docker
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          http:
-            routers:
-              opencode:
-                rule: "Host(`opencode.{{ base_domain }}`)"
-                service: opencode
-                entryPoints:
-                  - "https"
-                tls:
-                  certResolver: {{ acme_resolver }}
-                middlewares:
-                  - "secHeaders@file"
-                  - "authelia@file"
-            services:
-              opencode:
-                loadBalancer:
-                  servers:
-                    - url: "http://opencode:80"
-        backup: yes
+    - name: Traefik provider snippet for opencode
+      include_tasks: ../shared-tasks/traefik-provider.yml
+      vars:
+        traefik_backend_url: "http://opencode:80"
 
     - name: /symbios/services/opencode/Dockerfile
       blockinfile:
@@ -199,6 +176,13 @@
         mode: "0644"
         force: false
 
+    # Optional provider auth lines (single-line expressions: no {% %} flow
+    # inside content:, see AGENTS.md).
+    - name: Render opencode provider auth lines
+      ansible.builtin.set_fact:
+        opencode_base_url_line: "{{ '\"baseURL\": \"' + ai_server + '\",' if ai_server | default('', true) else '' }}"
+        opencode_api_key_line: "{{ '\"apiKey\": \"' + ai_apikey + '\",' if (ai_server | default('', true)) and (ai_apikey | default('', true)) else '' }}"
+
     - name: /symbios/services/opencode/opencode-config/opencode.json
       copy:
         content: |
@@ -209,12 +193,8 @@
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "local-llm",
                 "options": {
-                {% if ai_server | default('', true) %}
-                  "baseURL": "{{ ai_server }}",
-                  {% if ai_apikey | default('', true) %}
-                  "apiKey": "{{ ai_apikey }}",
-                  {% endif %}
-                {% endif %}
+                  {{ opencode_base_url_line }}
+                  {{ opencode_api_key_line }}
                   "timeout": 180000,
                   "chunkTimeout": 1800000
                 },
@@ -259,29 +239,24 @@
 ##################
 
     - name: Ensure LDAP groups for OIDC login (opencode-users / opencode-admins)
-      include_tasks: tasks/oidc-groups.yml
-
-    - name: Remove legacy LDAP group (old naming convention)
-      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-ldap-groups.sh --delete --name opencode"
-      changed_when: false
-      failed_when: false
+      include_tasks: ../shared-tasks/oidc-groups.yml
 
     - name: Write Authelia access_control for opencode group restriction
-      include_tasks: tasks/authelia-acl.yml
+      include_tasks: ../shared-tasks/authelia-acl.yml
       vars:
         authelia_subjects:
           - "group:opencode-users"
           - "group:opencode-admins"
 
-    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
+    # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck.yml
+      include_tasks: ../shared-tasks/runcheck.yml
 
     - name: Ensure opencode is running
-      include_tasks: tasks/docker-start.yml
+      include_tasks: ../shared-tasks/docker-start.yml
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 
@@ -291,6 +266,4 @@
         chdir: /symbios/services/opencode
 
     - name: Restart authelia
-      ansible.builtin.shell: docker compose restart
-      args:
-        chdir: /symbios/base-services/authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml

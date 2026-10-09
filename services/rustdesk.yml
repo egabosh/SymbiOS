@@ -104,7 +104,7 @@
         proto: udp
 
     - name: Router port forwarding (UPnP/FRITZ!Box)
-      include_tasks: tasks/router-forward.yml
+      include_tasks: ../shared-tasks/router-forward.yml
 
     - name: /symbios/services/{{ service_name }}/docker-compose.yml Container Configuration
       blockinfile:
@@ -156,14 +156,14 @@
       notify: Restart rustdesk
 
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck-docker.yml
+      include_tasks: ../shared-tasks/runcheck-docker.yml
 
 
     - name: Ensure rustdesk is running
-      include_tasks: tasks/docker-start.yml
+      include_tasks: ../shared-tasks/docker-start.yml
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 

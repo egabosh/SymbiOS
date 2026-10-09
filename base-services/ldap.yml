@@ -720,8 +720,10 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/ldap.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "ldap"
+        state_playbook: "base-services/ldap.yml"
   handlers:
 
     # Rebuild and restart LDAP container

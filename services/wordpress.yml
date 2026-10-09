@@ -235,7 +235,7 @@
       no_log: true
 
     - name: Write Authelia access_control for restricted WordPress domains
-      ansible.builtin.include_tasks: tasks/authelia-acl.yml
+      ansible.builtin.include_tasks: ../shared-tasks/authelia-acl.yml
       loop: "{{ wordpress_instances | default([]) }}"
       when:
         - not (item.public | default(false) | bool)
@@ -246,7 +246,7 @@
         authelia_policy: "{{ wp_auth_policy | default('one_factor') }}"
 
     - name: Write Authelia access_control for WordPress phpMyAdmin domains
-      ansible.builtin.include_tasks: tasks/authelia-acl.yml
+      ansible.builtin.include_tasks: ../shared-tasks/authelia-acl.yml
       loop: "{{ wordpress_instances | default([]) }}"
       when:
         - item.phpmyadmin | default(false) | bool
@@ -311,7 +311,7 @@
 
     # Deploy one HTTP healthcheck per instance (https://<domain> every 5 min)
     - name: Deploy healthcheck for each instance
-      ansible.builtin.include_tasks: tasks/runcheck.yml
+      ansible.builtin.include_tasks: ../shared-tasks/runcheck.yml
       vars:
         service_name: "wordpress-{{ item.name }}"
         service_domain: "{{ item.domain }}"
@@ -389,7 +389,7 @@
 
     # Register playbook as installed in the state file
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 

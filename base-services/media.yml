@@ -86,46 +86,9 @@
     # Project IDs are stable without an allocation table: fixed 31010-31015
     # for the libraries, the owner uidNumber for homes, the owner gidNumber
     # for shares. Limits come from media_quota_* (GiB, 0 = unlimited).
-    - name: Apply project quotas on the fixed library dirs
-      ansible.builtin.shell: |
-        if [[ "{{ item.limit }}" -gt 0 ]]
-        then
-          chattr -p {{ item.projid }} "{{ item.path }}"
-          chattr +P "{{ item.path }}"
-          setquota -P {{ item.projid }} $(( {{ item.limit }} * 1048576 )) $(( {{ item.limit }} * 1048576 )) 0 0 "{{ media_root | default('/symbios/media') }}"
-        fi
-      loop:
-        - { projid: 31010, path: "{{ media_inbox | default('/symbios/media/inbox') }}", limit: "{{ media_quota_inbox | default(0) }}" }
-        - { projid: 31011, path: "{{ media_videos | default('/symbios/media/videos') }}", limit: "{{ media_quota_videos | default(0) }}" }
-        - { projid: 31012, path: "{{ media_audio | default('/symbios/media/audio') }}", limit: "{{ media_quota_audio | default(0) }}" }
-        - { projid: 31013, path: "{{ media_images | default('/symbios/media/images') }}", limit: "{{ media_quota_images | default(0) }}" }
-        - { projid: 31014, path: "{{ media_books | default('/symbios/media/books') }}", limit: "{{ media_quota_books | default(0) }}" }
-        - { projid: 31015, path: "{{ media_documents | default('/symbios/media/documents') }}", limit: "{{ media_quota_documents | default(0) }}" }
-      when: media_quota_supported.rc == 0
-      changed_when: false
-      failed_when: false
-
-    - name: Apply project quotas on homes (projid = owner uid) and shares (projid = owner gid)
-      ansible.builtin.shell: |
-        f_root="{{ media_root | default('/symbios/media') }}"
-        for f_dir in "${f_root}/home/"*/ "${f_root}/shared/"*/
-        do
-          [[ -d "${f_dir}" ]] || continue
-          if [[ "${f_dir}" == */home/* ]]
-          then
-            f_id="$(stat -c '%u' "${f_dir}")"
-            f_limit="{{ media_quota_home | default(0) }}"
-          else
-            f_id="$(stat -c '%g' "${f_dir}")"
-            f_limit="{{ media_quota_share | default(0) }}"
-          fi
-          if [[ "${f_limit}" -gt 0 ]]
-          then
-            chattr -p "${f_id}" "${f_dir}"
-            chattr +P "${f_dir}"
-            setquota -P "${f_id}" $(( f_limit * 1048576 )) $(( f_limit * 1048576 )) 0 0 "${f_root}"
-          fi
-        done
+    # Logic lives in scripts/symbios-media-quota.sh.
+    - name: Apply project quotas on libraries, homes and shares
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-media-quota.sh"
       when: media_quota_supported.rc == 0
       changed_when: false
       failed_when: false
@@ -184,11 +147,8 @@
       loop: "{{ media_dirs_rw }}"
       changed_when: false
 
-    - name: Remove renamed legacy library dirs when empty (music/photos)
-      ansible.builtin.shell: rmdir "{{ media_root | default('/symbios/media') }}/music" "{{ media_root | default('/symbios/media') }}/photos" 2>/dev/null
-      changed_when: false
-      failed_when: false
-
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/media.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "media"
+        state_playbook: "base-services/media.yml"

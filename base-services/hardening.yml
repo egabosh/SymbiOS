@@ -227,8 +227,10 @@
 
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/hardening.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "hardening"
+        state_playbook: "base-services/hardening.yml"
   handlers:
 
     - name: Restart sshd
@@ -245,24 +247,7 @@
     # too much swap is in use (swapoff could OOM the box) - then the next
     # reboot activates it via crypttab/fstab.
     - name: Reactivate swap
-      ansible.builtin.shell: |
-        set -u
-        f_used=$(free -m | awk '/^Swap:/ {print $3}')
-        f_free=$(free -m | awk '/^Mem:/ {print $7}')
-        if [ "${f_used}" -ge "${f_free}" ]
-        then
-          echo "too much swap in use (${f_used}M used, ${f_free}M free), reboot to activate encrypted swap"
-          exit 0
-        fi
-        swapoff -a
-        if systemctl restart systemd-cryptsetup@cryptswap 2>/dev/null
-        then
-          true
-        else
-          /lib/cryptsetup/cryptdisks_start cryptswap
-        fi
-        swapon -a
-        swapon --show=NAME --noheadings
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-reactivate-swap.sh"
       changed_when: true
       failed_when: false
 

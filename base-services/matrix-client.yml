@@ -329,8 +329,10 @@
       when: not matrix_client_active | bool
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/matrix-client.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "matrix-client"
+        state_playbook: "base-services/matrix-client.yml"
 
   handlers:
     - name: Restart matrix-notify

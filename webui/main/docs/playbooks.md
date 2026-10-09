@@ -168,6 +168,45 @@ to know: title, description, available actions, status checks, and log streams.
 
 ---
 
+## Playbook conventions
+
+Layout, sharing and syntax rules for every playbook in `services/` and
+`base-services/` (mirrors the Ansible section of `AGENTS.md`):
+
+- **Layout**: one play per file, `# docs:` header, `hosts: all`,
+  `vars: service_name/service_domain`. Tasks in standard order:
+  Guard -> Packages -> Directories -> Config -> LDAP -> Authelia -> Traefik
+  -> Compose -> Healthcheck -> Autoupdate -> State. No service-local
+  `tasks/` splits; complex services may use `<name>/templates/*.j2` and
+  `<name>/features/*`.
+- **Sharing**: only via top-level `shared-tasks/*.yml` with relative
+  `include_tasks: ../shared-tasks/<file>.yml` (from both `services/` and
+  `base-services/`). New shared tasks only with 3+ callers. Catalog below
+  in [Shared tasks](#shared-tasks).
+- **Shell**: `>10 lines shell => scripts/symbios-<service>-*.sh` (with
+  `-h/--help`, `bash -n` clean). Every `shell/command` needs
+  `changed_when`/`failed_when` (plus `creates:`/`removes:` where possible).
+  Secrets never travel as argv (stdin JSON or env + `no_log: true`).
+- **File modules**: default `blockinfile` (marker
+  `# {mark} ANSIBLE MANAGED BLOCK <name>`); `copy` only for 1:1 static
+  files; `template` + `.j2` only where loops/multi-line conditions are
+  unavoidable. No multi-line `{% for/if %}` inside `block:`/`content:`
+  (indent drift) - use single-line `{{ ... if ... else ... }}` or a
+  `set_fact` above the task.
+- **Traefik routing**: `shared-tasks/traefik-provider.yml` for the standard
+  single-router case; inline `blockinfile` only for multi-router/special
+  setups. The reverse-proxy WebUI (`symbios-traefik-proxy-apply.sh`) is
+  independent of this task.
+- **Healthcheck + state**: every service deploys `runcheck.yml` (HTTP) or
+  `runcheck-docker.yml` and ends with `state-register.yml` via include.
+- **Comments**: WHY not WHAT. Temporary migrations carry
+  `# REMOVE-AFTER: YYYY-MM`; no history essays (belong in commit messages).
+- **Check before commit**: `ansible-playbook --syntax-check`,
+  `ansible-playbook --check` on symbios-dev,
+  `runchecks-results.json` green. `validate:` + `backup: yes` on config writes.
+
+---
+
 ## Naming conventions
 
 Follow these naming rules so containers, networks, and services are consistent
@@ -240,19 +279,19 @@ sidebar derives its health icon from the playbook basename.
 
 ### Web-facing services (HTTP)
 
-For HTTP services include the shared task file `services/tasks/runcheck.yml`
-(same pattern as `tasks/oidc-groups.yml`; the path is relative to the
+For HTTP services include the shared task file `shared-tasks/runcheck.yml`
+(same pattern as `oidc-groups.yml`; the path is relative to the
 playbook's directory):
 
 ```yaml
     # Required vars in the playbook: service_name, service_domain
     # Optional var: healthcheck_url (default: https://{{ service_domain }})
     - name: Deploy runcheck
-      include_tasks: tasks/runcheck.yml
+      include_tasks: ../shared-tasks/runcheck.yml
 
     # Variant with a custom probe URL (e.g. openwebui on ai.<base_domain>):
     - name: Deploy runcheck
-      include_tasks: tasks/runcheck.yml
+      include_tasks: ../shared-tasks/runcheck.yml
       vars:
         healthcheck_url: "https://ai.{{ base_domain }}"
 ```
@@ -292,7 +331,7 @@ The CHECK_* variables feed the /health/ overview page:
 
 ## Shared tasks
 
-Service playbooks can reuse shared task files from `services/tasks/` via
+Service playbooks can reuse shared task files from `shared-tasks/` via
 `include_tasks`. This avoids duplicating common patterns (LDAP groups,
 Authelia config, healthchecks) across 13+ playbooks.
 
@@ -303,7 +342,7 @@ Authelia config, healthchecks) across 13+ playbooks.
 > in real `.j2` template files rendered with the `template` module
 > (precedent: `wordpress/templates/`, `sftp-share/templates/`).
 
-### `tasks/oidc-groups.yml` - dual-group LDAP setup
+### `shared-tasks/oidc-groups.yml` - dual-group LDAP setup
 
 Creates `<service>-users` and `<service>-admins` LDAP groups and adds
 the `admin` user to the admins group. Use for services with OIDC admin/user
@@ -312,10 +351,10 @@ distinction.
 ```yaml
     # Required vars: service_name, git_root
     - name: Create OIDC groups
-      include_tasks: tasks/oidc-groups.yml
+      include_tasks: ../shared-tasks/oidc-groups.yml
 ```
 
-### `tasks/ldap-single-group.yml` - single-group LDAP setup
+### `shared-tasks/ldap-single-group.yml` - single-group LDAP setup
 
 Creates a single LDAP group (e.g. `dabo`) and adds the admin user. Use for
 forward-auth services without OIDC admin/user distinction.
@@ -324,10 +363,10 @@ forward-auth services without OIDC admin/user distinction.
     # Required vars: service_name, git_root
     # Optional vars: ldap_admin_uid (default: admin)
     - name: Create LDAP group
-      include_tasks: tasks/ldap-single-group.yml
+      include_tasks: ../shared-tasks/ldap-single-group.yml
 ```
 
-### `tasks/authelia-acl.yml` - Authelia access control
+### `shared-tasks/authelia-acl.yml` - Authelia access control
 
 Writes an Authelia `access_control` block for a service domain. Supports
 single-group (forward-auth) and dual-group (OIDC) subject patterns.
@@ -338,14 +377,14 @@ single-group (forward-auth) and dual-group (OIDC) subject patterns.
 
     # Single-group forward-auth (dabo, kodidb):
     - name: Write Authelia access_control
-      include_tasks: tasks/authelia-acl.yml
+      include_tasks: ../shared-tasks/authelia-acl.yml
       vars:
         authelia_subjects:
           - "group:dabo"
 
     # Dual-group OIDC (home-assistant):
     - name: Write Authelia access_control
-      include_tasks: tasks/authelia-acl.yml
+      include_tasks: ../shared-tasks/authelia-acl.yml
       vars:
         authelia_policy: one_factor
         authelia_subjects:
@@ -353,7 +392,7 @@ single-group (forward-auth) and dual-group (OIDC) subject patterns.
           - - "group:home-assistant-admins"
 ```
 
-### `tasks/authelia-oidc.yml` - Authelia OIDC client config
+### `shared-tasks/authelia-oidc.yml` - Authelia OIDC client config
 
 Writes an OIDC client configuration block in Authelia's `configuration.yml`.
 
@@ -363,7 +402,7 @@ Writes an OIDC client configuration block in Authelia's `configuration.yml`.
     #                oidc_require_pkce, oidc_pkce_challenge_method, oidc_scopes (list)
 
     - name: Write OIDC config
-      include_tasks: tasks/authelia-oidc.yml
+      include_tasks: ../shared-tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Nextcloud"
         oidc_consent_mode: "implicit"
@@ -371,12 +410,12 @@ Writes an OIDC client configuration block in Authelia's `configuration.yml`.
           - "https://nextcloud.{{ base_domain }}/apps/user_oidc/code"
 ```
 
-### `tasks/runcheck.yml` - HTTP healthcheck probe
+### `shared-tasks/runcheck.yml` - HTTP healthcheck probe
 
 Deploys a wget-based healthcheck for HTTP services (documented in detail in
 the [Healthcheck scripts](#healthcheck-scripts) section above).
 
-### `tasks/runcheck-docker.yml` - Docker container healthcheck
+### `shared-tasks/runcheck-docker.yml` - Docker container healthcheck
 
 Deploys a `docker ps` based healthcheck for non-HTTP services (TCP/UDP
 relays, SSH tunnels, etc.).
@@ -387,10 +426,10 @@ relays, SSH tunnels, etc.).
     # (check_error overrides the default "container not running" message -
     # needed for one-shot jobs that are never running idle)
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck-docker.yml
+      include_tasks: ../shared-tasks/runcheck-docker.yml
 ```
 
-### `tasks/autoupdate.yml` - autoupdate script deployment
+### `shared-tasks/autoupdate.yml` - autoupdate script deployment
 
 Deploys an autoupdate module to `/symbios/autoupdate.d/`. The caller provides
 the full script content via `autoupdate_content`.
@@ -399,7 +438,7 @@ the full script content via `autoupdate_content`.
     # Required vars: service_name, autoupdate_content (full script text)
     # Optional vars: autoupdate_name (default: service_name), autoupdate_mode (default: "0400")
     - name: Deploy autoupdate module
-      include_tasks: tasks/autoupdate.yml
+      include_tasks: ../shared-tasks/autoupdate.yml
       vars:
         autoupdate_content: |
           #!/bin/bash
@@ -408,7 +447,7 @@ the full script content via `autoupdate_content`.
           # ... update logic ...
 ```
 
-### `tasks/docker-start.yml` - start Docker Compose stack
+### `shared-tasks/docker-start.yml` - start Docker Compose stack
 
 Starts the service's Docker Compose stack.
 
@@ -416,17 +455,68 @@ Starts the service's Docker Compose stack.
     # Required vars: service_name
     # Optional vars: docker_compose_args (extra args, e.g. --force-recreate)
     - name: Ensure service is running
-      include_tasks: tasks/docker-start.yml
+      include_tasks: ../shared-tasks/docker-start.yml
 ```
 
-### `tasks/state-register.yml` - register playbook in state file
+### `shared-tasks/state-register.yml` - register playbook in state file
 
 Registers the playbook as installed via `symbios-state.sh set`.
 
 ```yaml
-    # Required vars: service_name, git_root
+    # Required vars: service_name
+    # Optional vars: state_playbook (default: services/<name>.yml;
+    #   base playbooks pass state_playbook: "base-services/<name>.yml")
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
+```
+
+### `shared-tasks/traefik-provider.yml` - single-router Traefik snippet
+
+Deploys a standard single-router file-provider snippet (HTTPS + ACME).
+Multi-router/special setups (matrix, nextcloud, mailcow, home-assistant)
+still write `blockinfile` directly in the playbook.
+
+```yaml
+    # Required vars: service_name, service_domain, traefik_backend_url
+    # Optional vars: traefik_middlewares (default: ["secHeaders@file", "authelia@file"])
+    - name: Traefik provider snippet for dabo
+      include_tasks: ../shared-tasks/traefik-provider.yml
+      vars:
+        service_domain: "{{ service_domain }}"
+        traefik_backend_url: "http://symbios-dabo-django:80"
+```
+
+### `shared-tasks/base-domain-guard.yml` - fail without base_domain
+
+Fail early when no public domain is configured. No vars required.
+
+```yaml
+    - name: Fail if base_domain is not configured
+      include_tasks: ../shared-tasks/base-domain-guard.yml
+```
+
+### `shared-tasks/genpw-run.yml` - run genpw.sh once
+
+Executes the service `genpw.sh` idempotently (via `creates:`).
+The playbook owns the `genpw.sh` content; this task only runs it.
+
+```yaml
+    # Required vars: service_name
+    # Optional vars: genpw_creates (default: /symbios/services/<name>/env)
+    - name: Gen initial passwords if not exists
+      include_tasks: ../shared-tasks/genpw-run.yml
+      vars:
+        service_name: paperless
+```
+
+### `shared-tasks/authelia-restart.yml` - restart Authelia
+
+Restarts Authelia after `access_control`/OIDC changes. Usable as a
+regular task and from `handlers:` via `include_tasks`. No vars required.
+
+```yaml
+    - name: Restart authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml
 ```
 
 ---
@@ -483,7 +573,7 @@ shared task `tasks/runcheck-docker.yml`:
 
 ```yaml
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck-docker.yml
+      include_tasks: ../shared-tasks/runcheck-docker.yml
 ```
 
 For custom check commands (e.g. `openwrt-vm` with virsh), write the check
@@ -578,7 +668,7 @@ end of its task list (requires `service_name` and `git_root` vars):
 
 ```yaml
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 ```
 
 SymbiOS keeps a persistent record of which playbooks are currently installed in

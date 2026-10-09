@@ -27,7 +27,7 @@ import yaml
 
 REPO_BASE = "/repo"
 CONFIG_BASE = "/config"
-EXCLUDE_PLAYBOOKS = {"traefik-static.yml", "inventory.yml"}
+EXCLUDE_PLAYBOOKS = {"inventory.yml"}
 # User-uploaded playbooks live under /config/user-playbooks/ (writable),
 # while built-in playbooks live under /repo/{services,base-services} (read-only).
 _REPO_GROUPS = ("services", "base-services", "external-services")

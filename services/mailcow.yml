@@ -90,11 +90,7 @@
   pre_tasks:
     # Fail early if no public domain is configured yet.
     - name: Fail if base_domain is not configured
-      ansible.builtin.fail:
-        msg: >-
-          base_domain is not set. Configure a domain first via
-          the WebUI at /settings/ddns/ or edit inventory.yml directly.
-      when: base_domain is not defined or base_domain == '' or base_domain == 'none'
+      include_tasks: ../shared-tasks/base-domain-guard.yml
 
   tasks:
 
@@ -702,7 +698,7 @@
     # Autoupdate module: run mailcow's update.sh, then sync the Traefik
     # certificates into mailcow and restart the mail services that read them.
     - name: Deploy autoupdate script
-      include_tasks: tasks/autoupdate.yml
+      include_tasks: ../shared-tasks/autoupdate.yml
       vars:
         autoupdate_mode: '0550'
         autoupdate_content: |
@@ -761,13 +757,13 @@
 
     # LDAP groups for Authelia forward-auth access control
     - name: Ensure LDAP groups for mailcow access control
-      include_tasks: tasks/oidc-groups.yml
+      include_tasks: ../shared-tasks/oidc-groups.yml
 
     # Authelia access_control: only mailcow-users and mailcow-admins may reach
     # the mailcow Web UI. The enforced factor count follows the central
     # twofa_enabled variable (inventory.yml).
     - name: Write Authelia access_control for mailcow
-      include_tasks: tasks/authelia-acl.yml
+      include_tasks: ../shared-tasks/authelia-acl.yml
       vars:
         authelia_subjects:
           - - "group:mailcow-users"
@@ -782,7 +778,7 @@
       failed_when: false
 
     - name: Write OIDC config in authelias configuration.yml for mailcow
-      include_tasks: tasks/authelia-oidc.yml
+      include_tasks: ../shared-tasks/authelia-oidc.yml
       vars:
         service_name: "mailcow"
         oidc_client_name: "Mailcow"
@@ -804,44 +800,23 @@
     # always yields a working SSO setup. Values other than client_secret are
     # derived from base_domain; client_secret matches the Authelia OIDC client
     # secret stored in {{ mailcow_root }}/oidc_password by gen-oidc-client-secret.sh.
+    # Logic lives in scripts/symbios-mailcow-idp.sh (secrets stay in files,
+    # never in argv; the task keeps no_log: true).
     - name: Persist mailcow identity_provider configuration
-      ansible.builtin.shell: |
-        set -e
-        . {{ mailcow_root }}/mailcow.conf
-        f_secret=$(cat {{ mailcow_root }}/oidc_password)
-        f_mysql="docker exec -i $(docker ps -qf name=mysql-mailcow) mysql -u${DBUSER} -p${DBPASS} ${DBNAME} -N -e"
-        for f_row in \
-          "authsource|generic-oidc" \
-          "authorize_url|https://auth.{{ base_domain }}/api/oidc/authorization" \
-          "token_url|https://auth.{{ base_domain }}/api/oidc/token" \
-          "userinfo_url|https://auth.{{ base_domain }}/api/oidc/userinfo" \
-          "client_id|mailcow" \
-          "client_secret|${f_secret}" \
-          "redirect_url|https://{{ service_domain }}" \
-          "client_scopes|openid profile email" \
-          "default_template|Default" \
-          "templates|[\"Default\"]" \
-          "mappers|[\"mailcow_template\"]" \
-          "login_provisioning|1" \
-          "ignore_ssl_error|0"
-        do
-          f_key="${f_row%%|*}"
-          f_val="${f_row#*|}"
-          ${f_mysql} "INSERT INTO identity_provider (\`key\`, \`value\`) VALUES ('${f_key}', '${f_val}') ON DUPLICATE KEY UPDATE \`value\`=VALUES(\`value\`);"
-        done
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-mailcow-idp.sh {{ mailcow_root }} {{ base_domain }} {{ service_domain }}"
       no_log: true
       changed_when: false
       run_once: true
 
     # Docker-based healthcheck (non-HTTP; probes a core mailcow container)
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck-docker.yml
+      include_tasks: ../shared-tasks/runcheck-docker.yml
       vars:
         check_desc: "Verifies that the mailcow mail server containers are listed in docker ps."
 
     # Register playbook as installed in the state file
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 
@@ -855,6 +830,4 @@
       changed_when: false
 
     - name: Restart authelia
-      ansible.builtin.shell: docker compose restart
-      args:
-        chdir: /symbios/base-services/authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml

@@ -179,34 +179,11 @@
         backup: yes
       notify: Restart dabo
 
-    # Create Traefik provider file for dabo routing
-    - name: /symbios/base-services/traefik/providers/dabo.yml Routing Configuration
-      blockinfile:
-        path: /symbios/base-services/traefik/providers/dabo.yml
-        create: yes
-        mode: 0444
-        owner: root
-        group: docker
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          http:
-            routers:
-              dabo:
-                rule: "Host(`{{ service_domain }}`)"
-                service: dabo
-                entryPoints:
-                  - "https"
-                tls:
-                  certResolver: {{ acme_resolver }}
-                middlewares:
-                  - "secHeaders@file"
-                  - "authelia@file"
-            services:
-              dabo:
-                loadBalancer:
-                  servers:
-                    - url: "http://symbios-dabo-django:80"
-        backup: yes
+    # Traefik routing via the shared single-router task
+    - name: Traefik provider snippet for dabo
+      include_tasks: ../shared-tasks/traefik-provider.yml
+      vars:
+        traefik_backend_url: "http://symbios-dabo-django:80"
 
     # Create empty notify.local.conf (required by dabo containers)
     # Use shell because state=touch does not convert an existing directory to a file
@@ -251,13 +228,13 @@
 
     # Create LDAP group for dabo access control (forward-auth)
     - name: Create LDAP group for dabo access control
-      include_tasks: tasks/ldap-single-group.yml
+      include_tasks: ../shared-tasks/ldap-single-group.yml
 
     # Write Authelia access_control for dabo group restriction
     # The enforced factor count follows the central twofa_enabled variable
     # (inventory.yml): two_factor when 2FA is enabled, otherwise one_factor.
     - name: Write Authelia access_control for dabo group restriction
-      include_tasks: tasks/authelia-acl.yml
+      include_tasks: ../shared-tasks/authelia-acl.yml
       vars:
         authelia_subjects:
           - "group:dabo"
@@ -272,16 +249,16 @@
 
     # Ensure the dabo container is running
     - name: Ensure dabo is running
-      include_tasks: tasks/docker-start.yml
+      include_tasks: ../shared-tasks/docker-start.yml
 
     # Deploy healthcheck script
-    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
+    # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck.yml
+      include_tasks: ../shared-tasks/runcheck.yml
 
     # Register playbook as installed in the state file
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 
@@ -300,6 +277,4 @@
 
     # Restart Authelia when access_control changes
     - name: Restart authelia
-      ansible.builtin.shell: docker compose restart
-      args:
-        chdir: /symbios/base-services/authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml

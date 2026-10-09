@@ -164,10 +164,9 @@
         line: "#!/bin/bash -e"
 
     - name: Gen initial passwords if not exists
-      ansible.builtin.shell: ./genpw.sh
-      args:
-        chdir: /symbios/services/nextcloud
-        creates: /symbios/services/nextcloud/env
+      include_tasks: ../shared-tasks/genpw-run.yml
+      vars:
+        service_name: nextcloud
 
     - name: /symbios/services/nextcloud/fulldockerfile.sh (Download full Dockerfile)
       blockinfile:
@@ -531,7 +530,7 @@
     #######################
 
     - name: Ensure LDAP groups for OIDC login (nextcloud-users / nextcloud-admins)
-      include_tasks: tasks/oidc-groups.yml
+      include_tasks: ../shared-tasks/oidc-groups.yml
 
     - name: Create oidc client secret for Nextcloud
       ansible.builtin.shell: |
@@ -540,7 +539,7 @@
       failed_when: false
 
     - name: Write OIDC config in authelias configuration.yml for nextcloud
-      include_tasks: tasks/authelia-oidc.yml
+      include_tasks: ../shared-tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Nextcloud"
         oidc_consent_mode: "implicit"
@@ -559,38 +558,7 @@
         path: /symbios/services/nextcloud/nextcloud-data/config/config.php
 
     - name: Ensure the media libraries are registered as external storage (idempotent)
-      ansible.builtin.shell: |
-        cd /symbios/services/nextcloud
-        # config.php exists on the host even mid-restart, so wait for a live occ.
-        for i in $(seq 1 30)
-        do
-          if docker compose exec -T -u www-data nextcloud ./occ status 2>/dev/null | grep -q "installed: true"
-          then
-            break
-          fi
-          sleep 10
-        done
-        docker compose exec -T -u www-data nextcloud ./occ app:enable files_external >/dev/null 2>&1 || true
-        # Pregenerate thumbnails for the photo/video libraries in the
-        # background cronjob (the nextcloud-cron service runs it).
-        if [[ "{{ nextcloud_previews | default(true) }}" == "True" ]]
-        then
-          docker compose exec -T -u www-data nextcloud ./occ app:enable previewgenerator >/dev/null 2>&1 || true
-        else
-          docker compose exec -T -u www-data nextcloud ./occ app:disable previewgenerator >/dev/null 2>&1 || true
-        fi
-        for f_spec in "Media Audio|/media/audio" "Media Videos|/media/videos" "Media Images|/media/images" "Media Documents|/media/documents"
-        do
-          f_name="${f_spec%%|*}"
-          f_path="${f_spec##*|}"
-          # Name-based idempotency: if the mount point exists it is kept
-          # as-is (delete it once via occ when the datadir ever changes).
-          if ! docker compose exec -T -u www-data nextcloud ./occ files_external:list 2>/dev/null | grep -q -e "${f_name}" -e "${f_path}"
-          then
-            docker compose exec -T -u www-data nextcloud ./occ files_external:create "${f_name}" local null::null -c datadir="${f_path}"
-            echo "created ${f_name}"
-          fi
-        done
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-nextcloud-external-storage.sh {{ '--no-previews' if not (nextcloud_previews | default(true) | bool) else '' }}"
       register: nextcloud_media_ext
       changed_when: "'created ' in nextcloud_media_ext.stdout"
       failed_when: false
@@ -832,20 +800,15 @@
         owner: root
         group: root
 
-    - name: Remove obsolete periodic sync cron job (replaced by group-change hook)
-      ansible.builtin.file:
-        dest: /etc/cron.d/symbios-nextcloud-sync
-        state: absent
-
     - name: Reconcile Nextcloud admins on every apply (heals drift the hook never saw)
       ansible.builtin.shell: "{{ git_root }}/scripts/symbios-nextcloud-admin-sync.sh 2>&1"
       register: nextcloud_admin_sync
       changed_when: "'Promoting' in nextcloud_admin_sync.stdout or 'Demoting' in nextcloud_admin_sync.stdout"
       failed_when: false
 
-    # Deploy the shared autoupdate script (services/tasks/autoupdate.yml)
+    # Deploy the shared autoupdate script (shared-tasks/autoupdate.yml)
     - name: Deploy autoupdate script
-      include_tasks: tasks/autoupdate.yml
+      include_tasks: ../shared-tasks/autoupdate.yml
       vars:
         autoupdate_content: |
           # Change to service directory or skip update
@@ -895,18 +858,18 @@
           fi
 
     # Run the update script once when its content changed (handlers cannot
-    # be attached to include_tasks, see services/tasks/autoupdate.yml)
+    # be attached to include_tasks, see shared-tasks/autoupdate.yml)
     - name: Run nextcloud.update when it changed
       ansible.builtin.command: /bin/true
       changed_when: autoupdate_result is changed
       notify: run nextcloud.update
 
-    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
+    # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck.yml
+      include_tasks: ../shared-tasks/runcheck.yml
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
     - name: run genpw.sh
@@ -943,7 +906,5 @@
       notify: Restart nextcloud
 
     - name: Restart authelia
-      ansible.builtin.shell: docker compose restart
-      args:
-        chdir: /symbios/base-services/authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml
 

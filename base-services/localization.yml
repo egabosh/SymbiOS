@@ -134,8 +134,10 @@
       when: nocontainer.stat.exists == true and dconf_bin.rc == 0
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/localization.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "localization"
+        state_playbook: "base-services/localization.yml"
 
   handlers:
 

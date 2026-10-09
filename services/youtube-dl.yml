@@ -65,8 +65,6 @@
     # (see mediapaths.md) so Jellyfin picks them up. Points at a
     # service-local directory only when explicitly overridden.
     youtube_dl_downloaddir: "{{ media_videos | default('/symbios/media/videos') }}/downloads"
-    # Previous default kept for the one-time migration below.
-    youtube_dl_legacy_downloaddir: "{{ data_root }}/services/youtube-dl/downloads"
   tasks:
 
     - name: Create /symbios/services/youtube-dl dir
@@ -76,22 +74,6 @@
         group: docker
         state: directory
         mode: '0550'
-
-    - name: Check the legacy download directory for content to migrate
-      ansible.builtin.stat:
-        path: "{{ youtube_dl_legacy_downloaddir }}"
-      register: youtube_dl_legacy_dir
-
-    - name: Move legacy downloads into the media library (one-time migration)
-      ansible.builtin.shell: |
-        mkdir -p "{{ youtube_dl_downloaddir }}"
-        mv "{{ youtube_dl_legacy_downloaddir }}"/* "{{ youtube_dl_downloaddir }}/" 2>/dev/null || true
-        rmdir "{{ youtube_dl_legacy_downloaddir }}" 2>/dev/null || true
-      when:
-        - youtube_dl_legacy_dir.stat.exists | default(false)
-        - youtube_dl_legacy_downloaddir != youtube_dl_downloaddir
-      changed_when: false
-      failed_when: false
 
     - name: Create the download target directory
       ansible.builtin.file:
@@ -210,7 +192,7 @@
       changed_when: false
 
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck-docker.yml
+      include_tasks: ../shared-tasks/runcheck-docker.yml
       vars:
         service_name: youtube-dl
         # The container is a one-shot job that is never running idle, and its
@@ -224,7 +206,7 @@
         check_error: "Healthcheck failed for youtube-dl: compose config or download target directory missing"
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 

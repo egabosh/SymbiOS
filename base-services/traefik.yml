@@ -52,11 +52,7 @@
 
   pre_tasks:
     - name: Fail if base_domain is not configured
-      ansible.builtin.fail:
-        msg: >-
-          base_domain is not set. Configure a domain first via
-          the WebUI at /settings/ddns/ or edit inventory.yml directly.
-      when: base_domain is not defined or base_domain == '' or base_domain == 'none'
+      include_tasks: ../shared-tasks/base-domain-guard.yml
 
   tasks:
 
@@ -146,8 +142,7 @@
                 - --certificatesResolvers.letsencrypt.acme.httpChallenge.entryPoint=http
                 - --certificatesresolvers.letsencrypt.acme.email=ssl@{{ base_domain }}
                 - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
-                {% if acme_server %}- --certificatesresolvers.letsencrypt.acme.caServer={{ acme_server }}
-                {% endif %}
+                {{ '- --certificatesresolvers.letsencrypt.acme.caServer=' + acme_server if acme_server else '' }}
                 # non-docker services
                 - --providers.file=true
                 - --providers.file.directory=/etc/traefik/providers.local
@@ -354,8 +349,10 @@
         chdir: "{{ docker_path }}"
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/traefik.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "traefik"
+        state_playbook: "base-services/traefik.yml"
   handlers:
 
     - name: Restart traefik

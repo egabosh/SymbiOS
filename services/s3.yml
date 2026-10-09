@@ -274,35 +274,14 @@
         line: "#!/bin/bash"
 
     # /symbios/base-services/traefik/providers/s3.yml Traefik File Provider
-    - name: /symbios/base-services/traefik/providers/s3.yml Traefik File Provider
-      blockinfile:
-        path: "/symbios/base-services/traefik/providers/{{ service_name }}.yml"
-        create: yes
-        mode: 0444
-        owner: root
-        group: docker
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          http:
-            routers:
-              {{ service_name }}:
-                rule: "Host(`{{ service_domain }}`)"
-                entryPoints:
-                  - "https"
-                service: {{ service_name }}
-                tls:
-                  certResolver: {{ acme_resolver }}
-                middlewares:
-                  # No authelia@file here: restic clients cannot log in via a
-                  # browser. Authentication is the htpasswd list of the
-                  # rest-server itself.
-                  - "secHeaders@file"
-            services:
-              {{ service_name }}:
-                loadBalancer:
-                  servers:
-                    - url: "http://{{ service_name }}:8000"
-        backup: yes
+    # No authelia@file here: restic clients cannot log in via a browser.
+    # Authentication is the htpasswd list of the rest-server itself.
+    - name: Traefik provider snippet for s3
+      include_tasks: ../shared-tasks/traefik-provider.yml
+      vars:
+        traefik_backend_url: "http://{{ service_name }}:8000"
+        traefik_middlewares:
+          - "secHeaders@file"
 
     # rest-server refuses to start without a readable .htpasswd file, so the
     # initial user has to exist before the compose stack is started.
@@ -352,16 +331,16 @@
         group: root
 
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck-docker.yml
+      include_tasks: ../shared-tasks/runcheck-docker.yml
       vars:
         service_name: s3
         check_desc: "Verifies that the s3 (restic rest-server) container is running. A missing container marks the check as failed."
 
     - name: Ensure s3 is running
-      include_tasks: tasks/docker-start.yml
+      include_tasks: ../shared-tasks/docker-start.yml
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 

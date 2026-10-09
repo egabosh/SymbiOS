@@ -143,17 +143,10 @@
       notify: Restart openwebui
 
     - name: Ensure LDAP groups for OIDC login (openwebui-users / openwebui-admins)
-      include_tasks: tasks/oidc-groups.yml
-
-    - name: Remove legacy LDAP groups (old naming convention)
-      ansible.builtin.shell: |
-        {{ git_root }}/scripts/symbios-ldap-groups.sh --delete --name ai
-        {{ git_root }}/scripts/symbios-ldap-groups.sh --delete --name ai-admin
-      changed_when: false
-      failed_when: false
+      include_tasks: ../shared-tasks/oidc-groups.yml
 
     - name: Write OIDC config in authelias configuration.yml for openwebui
-      include_tasks: tasks/authelia-oidc.yml
+      include_tasks: ../shared-tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Open WebUI"
         # OpenWebUI authenticates at the token endpoint with HTTP Basic
@@ -209,39 +202,7 @@
       changed_when: false
 
     - name: Create / retrieve OpenWebUI API key (ensure admin user exists)
-      ansible.builtin.shell: |
-        DB=/symbios/services/openwebui/openwebui-data/webui.db
-
-        # Create initial admin user if none exists
-        USER_ID=$(sqlite3 "$DB" "SELECT id FROM \"user\" ORDER BY role='admin' DESC LIMIT 1")
-        if [ -z "$USER_ID" ]; then
-          UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
-          NOW=$(date +%s%3N)
-          sqlite3 "$DB" \
-            "INSERT INTO \"user\"(id,name,email,role,profile_image_url,created_at,updated_at,last_active_at) \
-             VALUES('$UUID','admin','admin@localhost','admin','/user.png',$NOW,$NOW,$NOW)"
-          USER_ID=$UUID
-        fi
-
-        # Look for an existing key named 'comfyui-automation'
-        KEY=$(sqlite3 "$DB" \
-          "SELECT key FROM api_key WHERE json_extract(data,'$.name')='comfyui-automation' LIMIT 1")
-        if [ -n "$KEY" ]; then
-          echo "$KEY"
-          exit 0
-        fi
-
-        # Generate a fresh UUID, API key and timestamp
-        UUID=$(python3 -c "import uuid; print(uuid.uuid4())")
-        API_KEY="sk-$(openssl rand -base64 48 | tr '+/' '-_' | tr -d '=')"
-        NOW=$(date +%s%3N)
-
-        # Insert the key into the database
-        sqlite3 "$DB" \
-          "INSERT INTO api_key(id,user_id,key,data,created_at,updated_at) \
-           VALUES('$UUID','$USER_ID','$API_KEY','{\"name\":\"comfyui-automation\"}',$NOW,$NOW)"
-
-        echo "$API_KEY"
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-openwebui-db.sh api-key"
       register: openwebui_api_key
       changed_when: false
       no_log: true
@@ -257,109 +218,16 @@
     # causing 400 when None → replace with empty string fallback
     # Applied via docker exec to survive container rebuilds; idempotent (check first).
     - name: Patch comfyui.py inside container (negative_prompt None fix)
-      ansible.builtin.shell: |
-        set -e
-        CID=$(docker compose ps -q 2>/dev/null | head -1)
-        [ -z "$CID" ] && exit 0
-        if docker exec "$CID" grep -q "payload.negative_prompt is not None" \
-          /app/backend/open_webui/utils/images/comfyui.py 2>/dev/null; then
-          exit 0
-        fi
-        docker exec "$CID" sed -i \
-          's|\(workflow\[node_id\]\[.inputs.\]\[node.key if node.key else .text.\]\s*=\s*\)payload\.negative_prompt$|\1payload.negative_prompt if payload.negative_prompt is not None else ""|' \
-          /app/backend/open_webui/utils/images/comfyui.py
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-openwebui-db.sh patch-comfyui"
       args:
         chdir: /symbios/services/openwebui
       changed_when: false
 
     - name: Set ComfyUI workflows in DB (key-value schema)
-      ansible.builtin.shell: |
-        python3 <<'PYEOF'
-        import json, sqlite3, time
-
-        DB = "/symbios/services/openwebui/openwebui-data/webui.db"
-
-        WF = {
-            "3": {"class_type": "KSampler", "inputs": {
-                "cfg": 8, "denoise": 1, "latent_image": ["5", 0], "model": ["4", 0],
-                "negative": ["6", 0], "positive": ["7", 0], "sampler_name": "euler",
-                "scheduler": "normal", "seed": 42, "steps": 20}},
-            "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "sd15.safetensors"}},
-            "5": {"class_type": "EmptyLatentImage", "inputs": {"batch_size": 1, "height": 512, "width": 512}},
-            "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": "NEGATIVE_PROMPT"}},
-            "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": "PROMPT"}},
-            "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
-            "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ComfyUI", "images": ["8", 0]}},
-        }
-        EDIT_WF = {
-            "3": {"class_type": "KSampler", "inputs": {
-                "cfg": 8, "denoise": 0.7, "latent_image": ["10", 0], "model": ["4", 0],
-                "negative": ["6", 0], "positive": ["7", 0], "sampler_name": "euler",
-                "scheduler": "normal", "seed": 42, "steps": 20}},
-            "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "sd15.safetensors"}},
-            "5": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
-            "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": "NEGATIVE_PROMPT"}},
-            "7": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["4", 1], "text": "PROMPT"}},
-            "8": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ComfyUI", "images": ["5", 0]}},
-            "10": {"class_type": "VAEEncode", "inputs": {"samples": ["11", 0], "vae": ["4", 2]}},
-            "11": {"class_type": "LoadImage", "inputs": {"image": ""}},
-        }
-        gen_nodes = [
-            {"type": "model",           "node_ids": ["4"], "key": "ckpt_name"},
-            {"type": "prompt",          "node_ids": ["7"], "key": "text"},
-            {"type": "negative_prompt", "node_ids": ["6"], "key": "text"},
-            {"type": "width",           "node_ids": ["5"], "key": "width"},
-            {"type": "height",          "node_ids": ["5"], "key": "height"},
-            {"type": "n",               "node_ids": ["5"], "key": "batch_size"},
-            {"type": "steps",           "node_ids": ["3"], "key": "steps"},
-            {"type": "seed",            "node_ids": ["3"], "key": "seed"},
-        ]
-        edit_nodes = [
-            {"type": "model",           "node_ids": ["4"], "key": "ckpt_name"},
-            {"type": "prompt",          "node_ids": ["7"], "key": "text"},
-            {"type": "negative_prompt", "node_ids": ["6"], "key": "text"},
-            {"type": "image",           "node_ids": ["11"], "key": "image"},
-        ]
-
-        db = sqlite3.connect(DB)
-        c = db.cursor()
-        now = int(time.time())
-
-        c.execute("SELECT key FROM config")
-        existing = {row[0] for row in c.fetchall()}
-
-        def upsert(key, value):
-            c.execute(
-                "INSERT INTO config (key, value, updated_at) VALUES (?, ?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
-                (key, json.dumps(value) if not isinstance(value, str) else value, now),
-            )
-
-        upsert("COMFYUI_WORKFLOW_NODES", gen_nodes)
-        upsert("image_generation.comfyui.workflow", json.dumps(WF))
-        upsert("image_generation.comfyui.nodes", gen_nodes)
-
-        upsert("IMAGES_EDIT_COMFYUI_WORKFLOW_NODES", edit_nodes)
-        upsert("IMAGES_EDIT_COMFYUI_WORKFLOW", json.dumps(EDIT_WF))
-        upsert("images.edit.comfyui.workflow", json.dumps(EDIT_WF))
-        upsert("images.edit.comfyui.nodes", edit_nodes)
-
-        upsert("ui.prompt_suggestions", [])
-
-        needs_restart = False
-        ai_server = "{{ ai_server | default('') }}"
-        ai_apikey = "{{ ai_apikey | default('') }}"
-        if ai_server and "openai.enable" not in existing:
-            upsert("openai.enable", True)
-            upsert("openai.api_base_urls", [ai_server])
-            upsert("openai.api_keys", [ai_apikey])
-            upsert("openai.api_configs", {})
-            needs_restart = True
-
-        db.commit()
-        db.close()
-        print("restart" if needs_restart else "done")
-        PYEOF
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-openwebui-db.sh workflows"
+      environment:
+        OWUI_AI_SERVER: "{{ ai_server | default('') }}"
+        OWUI_AI_APIKEY: "{{ ai_apikey | default('') }}"
       register: db_config_result
       changed_when: '"restart" in db_config_result.stdout'
       notify: Restart openwebui
@@ -367,59 +235,25 @@
     # Keep openai.base_url/api_key in sync after the inventory changed
     # (openai.enable is written once on first run by the task above).
     - name: Store OpenAI settings in OpenWebUI DB (base_url/api_key sync)
-      ansible.builtin.shell: |
-        DB=/symbios/services/openwebui/openwebui-data/webui.db
-        NEW_BASE='["{{ ai_server }}"]'
-        NEW_KEY='["{{ ai_apikey }}"]'
-        CUR_BASE=$(sqlite3 "$DB" "SELECT value FROM config WHERE key='openai.api_base_urls'")
-        CUR_KEY=$(sqlite3 "$DB" "SELECT value FROM config WHERE key='openai.api_keys'")
-        if [ "$CUR_BASE" != "$NEW_BASE" ] || [ "$CUR_KEY" != "$NEW_KEY" ]; then
-          sqlite3 "$DB" \
-            "INSERT INTO config (key, value, updated_at) VALUES
-               ('openai.enable', 'true', strftime('%s','now')*1000),
-               ('openai.api_base_urls', '$NEW_BASE', strftime('%s','now')*1000),
-               ('openai.api_keys', '$NEW_KEY', strftime('%s','now')*1000)
-             ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;"
-          echo changed
-        fi
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-openwebui-db.sh sync-openai"
+      environment:
+        OWUI_AI_SERVER: "{{ ai_server }}"
+        OWUI_AI_APIKEY: "{{ ai_apikey }}"
       register: openai_db_result
       changed_when: "'changed' in openai_db_result.stdout"
       notify: Restart openwebui
       no_log: true
       when: ai_server | default('', true) | length > 0
 
-    # Keep speech/image/retrieval backends in sync with the inventory
-    # (Settings -> AI Speech / AI Image / AI Search & RAG). The compose
-    # template writes the same values as ENV defaults, but rows already
-    # stored in webui.db take precedence at runtime - so stale rows (e.g.
-    # ai.lan leftovers from the first install) are updated here as well.
-    # JSON string encoding matches what OpenWebUI stores (quoted strings).
     - name: Store speech backends in OpenWebUI DB (STT/TTS sync)
-      ansible.builtin.shell: |
-        DB=/symbios/services/openwebui/openwebui-data/webui.db
-        NOW=$(date +%s%3N)
-        sync_kv() {
-          CUR=$(sqlite3 "$DB" "SELECT value FROM config WHERE key='$1'")
-          if [ "$CUR" != "$2" ]; then
-            sqlite3 "$DB" "INSERT INTO config (key, value, updated_at) VALUES ('$1', '$2', $NOW)
-              ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;"
-            echo changed
-          fi
-        }
-        CHANGED=""
-        STT_URL='{{ ai_stt_url | default('', true) }}'
-        STT_KEY='{{ ai_stt_key | default('', true) or ai_apikey | default('', true) }}'
-        STT_MODEL='{{ ai_stt_model | default('', true) }}'
-        TTS_URL='{{ ai_tts_url | default('', true) }}'
-        TTS_KEY='{{ ai_tts_key | default('', true) or ai_apikey | default('', true) }}'
-        TTS_MODEL='{{ ai_tts_model | default('', true) }}'
-        [ -n "$STT_URL" ] && CHANGED="$CHANGED$(sync_kv audio.stt.openai.api_base_url "\"$STT_URL\"")"
-        [ -n "$STT_KEY" ] && CHANGED="$CHANGED$(sync_kv audio.stt.openai.api_key "\"$STT_KEY\"")"
-        [ -n "$STT_MODEL" ] && CHANGED="$CHANGED$(sync_kv audio.stt.model "\"$STT_MODEL\"")"
-        [ -n "$TTS_URL" ] && CHANGED="$CHANGED$(sync_kv audio.tts.openai.api_base_url "\"$TTS_URL\"")"
-        [ -n "$TTS_KEY" ] && CHANGED="$CHANGED$(sync_kv audio.tts.openai.api_key "\"$TTS_KEY\"")"
-        [ -n "$TTS_MODEL" ] && CHANGED="$CHANGED$(sync_kv audio.tts.model "\"$TTS_MODEL\"")"
-        echo "$CHANGED"
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-openwebui-db.sh sync-speech"
+      environment:
+        OWUI_STT_URL: "{{ ai_stt_url | default('', true) }}"
+        OWUI_STT_KEY: "{{ ai_stt_key | default('', true) or ai_apikey | default('', true) }}"
+        OWUI_STT_MODEL: "{{ ai_stt_model | default('', true) }}"
+        OWUI_TTS_URL: "{{ ai_tts_url | default('', true) }}"
+        OWUI_TTS_KEY: "{{ ai_tts_key | default('', true) or ai_apikey | default('', true) }}"
+        OWUI_TTS_MODEL: "{{ ai_tts_model | default('', true) }}"
       register: stt_tts_db_result
       changed_when: "'changed' in stt_tts_db_result.stdout"
       notify: Restart openwebui
@@ -427,27 +261,12 @@
       when: (ai_stt_url | default('', true) | length > 0) or (ai_tts_url | default('', true) | length > 0)
 
     - name: Store image backend in OpenWebUI DB (ComfyUI sync)
-      ansible.builtin.shell: |
-        DB=/symbios/services/openwebui/openwebui-data/webui.db
-        NOW=$(date +%s%3N)
-        sync_kv() {
-          CUR=$(sqlite3 "$DB" "SELECT value FROM config WHERE key='$1'")
-          if [ "$CUR" != "$2" ]; then
-            sqlite3 "$DB" "INSERT INTO config (key, value, updated_at) VALUES ('$1', '$2', $NOW)
-              ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;"
-            echo changed
-          fi
-        }
-        CHANGED=""
-        IMG_URL='{{ ai_image_url | default('', true) }}'
-        IMG_MODEL='{{ ai_image_model | default('', true) }}'
-        IMG_EDIT_URL='{{ ai_image_edit_url | default('', true) or ai_image_url | default('', true) }}'
-        IMG_EDIT_MODEL='{{ ai_image_edit_model | default('', true) or ai_image_model | default('', true) }}'
-        [ -n "$IMG_URL" ] && CHANGED="$CHANGED$(sync_kv image_generation.comfyui.base_url "\"$IMG_URL\"")"
-        [ -n "$IMG_MODEL" ] && CHANGED="$CHANGED$(sync_kv image_generation.model "\"$IMG_MODEL\"")"
-        [ -n "$IMG_EDIT_URL" ] && CHANGED="$CHANGED$(sync_kv images.edit.comfyui.base_url "\"$IMG_EDIT_URL\"")"
-        [ -n "$IMG_EDIT_MODEL" ] && CHANGED="$CHANGED$(sync_kv images.edit.model "\"$IMG_EDIT_MODEL\"")"
-        echo "$CHANGED"
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-openwebui-db.sh sync-image"
+      environment:
+        OWUI_IMG_URL: "{{ ai_image_url | default('', true) }}"
+        OWUI_IMG_MODEL: "{{ ai_image_model | default('', true) }}"
+        OWUI_IMG_EDIT_URL: "{{ ai_image_edit_url | default('', true) or ai_image_url | default('', true) }}"
+        OWUI_IMG_EDIT_MODEL: "{{ ai_image_edit_model | default('', true) or ai_image_model | default('', true) }}"
       register: image_db_result
       changed_when: "'changed' in image_db_result.stdout"
       notify: Restart openwebui
@@ -455,23 +274,10 @@
       when: ai_image_url | default('', true) | length > 0
 
     - name: Store retrieval backends in OpenWebUI DB (Tika/SearXNG sync)
-      ansible.builtin.shell: |
-        DB=/symbios/services/openwebui/openwebui-data/webui.db
-        NOW=$(date +%s%3N)
-        sync_kv() {
-          CUR=$(sqlite3 "$DB" "SELECT value FROM config WHERE key='$1'")
-          if [ "$CUR" != "$2" ]; then
-            sqlite3 "$DB" "INSERT INTO config (key, value, updated_at) VALUES ('$1', '$2', $NOW)
-              ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at;"
-            echo changed
-          fi
-        }
-        CHANGED=""
-        TIKA_URL='{{ ai_tika_url | default('', true) }}'
-        SEARXNG_URL='{{ ai_searxng_url | default('', true) }}'
-        [ -n "$TIKA_URL" ] && CHANGED="$CHANGED$(sync_kv rag.tika_server_url "\"$TIKA_URL\"")"
-        [ -n "$SEARXNG_URL" ] && CHANGED="$CHANGED$(sync_kv web.search.searxng_query_url "\"$SEARXNG_URL\"")"
-        echo "$CHANGED"
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-openwebui-db.sh sync-retrieval"
+      environment:
+        OWUI_TIKA_URL: "{{ ai_tika_url | default('', true) }}"
+        OWUI_SEARXNG_URL: "{{ ai_searxng_url | default('', true) }}"
       register: retrieval_db_result
       changed_when: "'changed' in retrieval_db_result.stdout"
       notify: Restart openwebui
@@ -481,17 +287,17 @@
     - name: Flush handlers - restart OpenWebUI to pick up DB config
       ansible.builtin.meta: flush_handlers
 
-    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
+    # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck.yml
+      include_tasks: ../shared-tasks/runcheck.yml
       vars:
         healthcheck_url: "https://ai.{{ base_domain }}"
 
     - name: Ensure openwebui is running
-      include_tasks: tasks/docker-start.yml
+      include_tasks: ../shared-tasks/docker-start.yml
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
 
@@ -501,6 +307,4 @@
         chdir: /symbios/services/openwebui
 
     - name: Restart authelia
-      ansible.builtin.shell: docker compose restart
-      args:
-        chdir: /symbios/base-services/authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml

@@ -56,11 +56,7 @@
 
   pre_tasks:
     - name: Fail if base_domain is not configured
-      ansible.builtin.fail:
-        msg: >-
-          base_domain is not set. Configure a domain first via
-          the WebUI at /settings/ddns/ or edit inventory.yml directly.
-      when: base_domain is not defined or base_domain == '' or base_domain == 'none'
+      include_tasks: ../shared-tasks/base-domain-guard.yml
 
   tasks:
 
@@ -164,6 +160,11 @@
         admin_has_mail: "{{ admin_mail_check.rc == 0 }}"
       changed_when: false
 
+    - name: Render Authelia extra cookie lines
+      ansible.builtin.set_fact:
+        authelia_extra_cookie: "{{ '- domain: \"' + ddns_host + '\"\n                authelia_url: https://' + authelia_domain if ddns_host is defined and ddns_host and ddns_host != base_domain else '' }}"
+      changed_when: false
+
     - name: "{{ service_path }}/authelia-data/configuration.yml"
       blockinfile:
         path: "{{ service_path }}/authelia-data/configuration.yml"
@@ -183,10 +184,7 @@
             cookies:
               - domain: "{{ base_domain }}"
                 authelia_url: https://{{ authelia_domain }}
-              {% if ddns_host is defined and ddns_host and ddns_host != base_domain %}
-              - domain: "{{ ddns_host }}"
-                authelia_url: https://{{ authelia_domain }}
-              {% endif %}
+              {{ authelia_extra_cookie }}
 
             redis:
               host: symbios-base-authelia-redis
@@ -505,8 +503,10 @@
         chdir: "{{ service_path }}"
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/authelia.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "authelia"
+        state_playbook: "base-services/authelia.yml"
   handlers:
 
     - name: Restart authelia

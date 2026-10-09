@@ -151,11 +151,6 @@
         state: directory
         mode: '0755'
 
-    - name: Remove obsolete staged SSH key copy
-      ansible.builtin.file:
-        path: /root/.ssh/id_symbios_wol
-        state: absent
-
     - name: Render live config per target
       ansible.builtin.copy:
         dest: "{{ power_config_dir }}/live/{{ item.name }}.conf"
@@ -288,8 +283,10 @@
       loop: "{{ power_enabled_instances }}"
 
     - name: Register playbook as installed
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-state.sh set base-services/wol-suspend.yml"
-      changed_when: false
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "wol-suspend"
+        state_playbook: "base-services/wol-suspend.yml"
 
   handlers:
 

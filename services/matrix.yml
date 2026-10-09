@@ -304,10 +304,9 @@
         line: "#!/bin/bash -e"
 
     - name: Gen initial passwords if not exists
-      ansible.builtin.shell: ./genpw.sh
-      args:
-        chdir: /symbios/services/matrix
-        creates: /symbios/services/matrix/env
+      include_tasks: ../shared-tasks/genpw-run.yml
+      vars:
+        service_name: matrix
 
     - name: /symbios/services/matrix/nginx-matrix.conf
       blockinfile:
@@ -623,10 +622,10 @@
     ##########################
 
     - name: Ensure LDAP groups for OIDC login (matrix-users / matrix-admins)
-      include_tasks: tasks/oidc-groups.yml
+      include_tasks: ../shared-tasks/oidc-groups.yml
 
     - name: Write OIDC config in authelias configuration.yml for matrix
-      include_tasks: tasks/authelia-oidc.yml
+      include_tasks: ../shared-tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Matrix"
         oidc_redirect_uris:
@@ -635,14 +634,14 @@
     # Access control for Matrix web UIs (Element + admin panel)
     # Note: matrix and matrix-synapse routers stay unprotected for federation + OIDC callback
     - name: Write Authelia access_control for matrix-admin group restriction
-      include_tasks: tasks/authelia-acl.yml
+      include_tasks: ../shared-tasks/authelia-acl.yml
       vars:
         authelia_subjects:
           - "group:matrix-users"
           - "group:matrix-admins"
 
     - name: Write Authelia access_control for matrix-web group restriction
-      include_tasks: tasks/authelia-acl.yml
+      include_tasks: ../shared-tasks/authelia-acl.yml
       vars:
         service_name: matrix-web
         authelia_subjects:
@@ -682,55 +681,6 @@
         backup: yes
         validate: /bin/bash -n %s
 #      notify: run matrix.init
-
-    # --- Migration: pipe stack moved to base-services/matrix-client.yml ---
-    # The per-room pipes-runner (compose project pipelistener) is replaced by
-    # the single-room matrix-notify daemon. Remove the old artifacts; the
-    # matrix-client playbook redeploys whatever is still needed.
-    - name: Stop legacy pipelistener pipes-runner
-      ansible.builtin.shell: docker compose -p pipelistener -f /symbios/services/matrix/docker-compose.pipes-runner.yml down
-      args:
-        chdir: /symbios/services/matrix
-      failed_when: false
-      changed_when: false
-
-    - name: Remove legacy pipe artifacts
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /symbios/services/matrix/pipe-rooms.sh
-        - /symbios/services/matrix/pipes.json
-        - /symbios/services/matrix/pipes.json.rooms.new
-        - /symbios/services/matrix/compose.volumes.new
-        - /symbios/services/matrix/docker-compose.pipes-runner.yml
-        - /symbios/services/matrix/docker-compose.override.yml
-
-    - name: Remove legacy commander stores (device identities move to matrix-client)
-      ansible.builtin.shell: rm -rf /symbios/services/matrix/matrix-commander-data /symbios/services/matrix/matrix-commander-data-*
-      failed_when: false
-      changed_when: false
-
-    - name: Remove stale notify FIFOs (keep the matrix-client one)
-      ansible.builtin.shell: find /usr/local/share -maxdepth 1 -name 'matrix-room-*.fifo' ! -name 'matrix-room-notify.fifo' -delete
-      failed_when: false
-      changed_when: false
-
-    - name: Remove legacy watchdog crons (owned by matrix-client now)
-      ansible.builtin.cron:
-        name: "{{ item }}"
-        state: absent
-      loop:
-        - "Fix ignored matrix-commander devices"
-        - "Matrix device health"
-
-    - name: Remove legacy watchdog scripts (owned by matrix-client now)
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - /usr/local/sbin/fix-matrix-ignored-devices.sh
-        - /usr/local/sbin/matrix-device-health.sh
 
     - name: Run matrix.init after install
       ansible.builtin.shell: bash /symbios/services/matrix/matrix.init.sh
@@ -807,12 +757,12 @@
         hour: "6"
         job: "{{ git_root }}/scripts/symbios-synapse-purge.sh monthly >/symbios/services/matrix/purge.log 2>&1"
 
-    # Deploy the shared HTTP healthcheck (services/tasks/runcheck.yml)
+    # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
     - name: Deploy healthcheck
-      include_tasks: tasks/runcheck.yml
+      include_tasks: ../shared-tasks/runcheck.yml
 
     - name: Register playbook as installed
-      include_tasks: tasks/state-register.yml
+      include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
     - name: run genpw.sh
@@ -833,7 +783,5 @@
         chdir: /symbios/services/matrix
 
     - name: Restart authelia
-      ansible.builtin.shell: docker compose restart
-      args:
-        chdir: /symbios/base-services/authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml
 

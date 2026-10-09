@@ -1,0 +1,13 @@
+# Shared task: run the service genpw.sh once to create initial secrets.
+# The playbook owns the genpw.sh content (blockinfile above); this task only
+# executes it idempotently via creates: <env file>.
+#
+# Required vars: service_name
+# Optional vars: genpw_creates (default: /symbios/services/<name>/env),
+#                genpw_script (default: ./genpw.sh)
+
+- name: Gen initial passwords if not exists
+  ansible.builtin.shell: "{{ genpw_script | default('./genpw.sh') }}"
+  args:
+    chdir: /symbios/services/{{ service_name }}
+    creates: "{{ genpw_creates | default('/symbios/services/' + service_name + '/env') }}"
