@@ -21,6 +21,7 @@ from django.http import JsonResponse
 from .views import _get_inventory_config
 from .constants import CONFIG_PATH
 from .utils.ssh_exec import run_playbook, run_command
+from .utils.settings_cli import run_settings_script, settings_failed
 from .utils.http import is_ajax_request
 from .utils.secret_file import f_write_secret
 from .setup_status import get_page_badge, PAGE_EXPLAIN
@@ -595,116 +596,6 @@ def settings_dns_captcha(request):
 
 
 @login_required
-def settings_localization(request):
-    config = _get_inventory_config()
-    if 'all' not in config:
-        config['all'] = {}
-    if 'vars' not in config['all']:
-        config['all']['vars'] = {}
-    vars_ = config['all']['vars']
-
-    # Get available options from host via symbios-exec.sh
-    try:
-        # Get timezone list from host using timedatectl
-        timezones_cmd = 'timedatectl list-timezones'
-        ok, stdout, stderr = run_command(timezones_cmd, timeout=10)
-        if ok:
-            timezones = [line.strip() for line in stdout.split('\n') if line.strip()]
-            valid_timezones = [tz.replace('_', ' ') for tz in timezones]
-            valid_timezones_display = sorted(valid_timezones)
-        else:
-            # Fallback to static list
-            valid_timezones_display = sorted([
-                'Africa/Abidjan', 'Africa/Cairo', 'Africa/Johannesburg', 'Africa/Lagos', 'Africa/Nairobi',
-                'America/Anchorage', 'America/Argentina/Buenos_Aires', 'America/Bogota', 'America/Caracas',
-                'America/Chicago', 'America/Denver', 'America/Halifax', 'America/Lima', 'America/Los_Angeles',
-                'America/Mexico_City', 'America/New_York', 'America/Phoenix', 'America/Sao_Paulo',
-                'America/Toronto', 'America/Vancouver',
-                'Asia/Bangkok', 'Asia/Colombo', 'Asia/Dubai', 'Asia/Hong_Kong', 'Asia/Karachi',
-                'Asia/Kolkata', 'Asia/Kuala_Lumpur', 'Asia/Manila', 'Asia/Seoul', 'Asia/Shanghai',
-                'Asia/Singapore', 'Asia/Taipei', 'Asia/Tehran', 'Asia/Tokyo',
-                'Atlantic/Reykjavik', 'Australia/Melbourne', 'Australia/Perth', 'Australia/Sydney',
-                'Europe/Amsterdam', 'Europe/Berlin', 'Europe/Brussels', 'Europe/Bucharest',
-                'Europe/Copenhagen', 'Europe/Dublin', 'Europe/Helsinki', 'Europe/Istanbul',
-                'Europe/Lisbon', 'Europe/London', 'Europe/Madrid', 'Europe/Moscow', 'Europe/Oslo',
-                'Europe/Paris', 'Europe/Prague', 'Europe/Rome', 'Europe/Stockholm', 'Europe/Vienna',
-                'Europe/Warsaw', 'Europe/Zurich',
-                'Pacific/Auckland', 'Pacific/Fiji', 'Pacific/Honolulu', 'Pacific/Samoa',
-                'UTC',
-            ])
-    except Exception:
-        # Fallback to static list
-        valid_timezones_display = sorted([
-            'UTC',
-            'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
-            'Europe/London', 'Europe/Berlin', 'Europe/Paris', 'Europe/Moscow',
-            'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Kolkata', 'Asia/Dubai',
-            'Australia/Sydney', 'Pacific/Auckland', 'Pacific/Honolulu',
-        ])
-
-    # Get keyboard layouts dynamically from host via shell script.
-    keyboards = []
-    try:
-        ok, stdout, _ = run_command('symbios-list-keyboards.sh', timeout=10)
-        if ok and stdout:
-            keyboards = [line.strip() for line in stdout.split('\n') if line.strip()]
-    except Exception:
-        pass
-
-    if request.method == 'POST':
-        is_ajax = is_ajax_request(request)
-        timezone = request.POST.get('timezone', '').strip()
-        keyboard = request.POST.get('keyboard', '').strip()
-        locale = request.POST.get('locale', '').strip()
-        # All validation and the inventory write live in the settings CLI
-        # (single source of truth); the view only triggers it and reapplies.
-        # Validation failures abort the chained reapply (&&) and show up
-        # in the exec modal output.
-        set_cmd = ('symbios-settings-localization.sh set'
-                   f' --timezone {shlex.quote(timezone)}'
-                   f' --keyboard {shlex.quote(keyboard)}'
-                   f' --locale {shlex.quote(locale)}')
-        try:
-            if is_ajax:
-                job_id, title, cmd = _start_reapply(
-                    playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'],
-                    prefix=set_cmd)
-                resp = {'ok': True, 'job': job_id, 'title': title,
-                        'message': 'Localization settings saved.',
-                        'command': cmd}
-                if 'setup' in request.GET:
-                    resp['redirect'] = '/setup/'
-                return JsonResponse(resp)
-            ok, stdout, stderr = run_command(set_cmd, timeout=30)
-            if not ok:
-                messages.error(request, f'Error: {stderr or stdout}')
-                return redirect('settings_localization')
-            messages.success(request, 'Localization settings saved.')
-            messages.info(request, 'Reapplying localization playbooks in the background...')
-            _start_reapply(playbooks=['base-services/localization.yml', 'base-services/raspberry.yml'])
-        except Exception as e:
-            if is_ajax:
-                return JsonResponse({'ok': False, 'error': str(e)}, status=500)
-            messages.error(request, f'Error: {e}')
-        if 'setup' in request.GET:
-            return redirect('setup')
-        return redirect('settings_localization')
-
-    return render(request, 'main/settings_localization.html', {
-        'vars': vars_,
-        'all_timezones': valid_timezones_display,
-        'all_keyboards': keyboards,
-        'page_key': 'localization',
-        'page_icon': 'bi-clock-history',
-        'page_title': 'Language & Timezone',
-        'page_explain': PAGE_EXPLAIN['localization'],
-        'page_status': get_page_badge('localization', vars_)[0],
-        'page_status_label': get_page_badge('localization', vars_)[1],
-        'page_status_text': get_page_badge('localization', vars_)[2],
-    })
-
-
-@login_required
 def settings_ai(request):
     config = _get_inventory_config()
     if 'all' not in config:
@@ -1074,10 +965,11 @@ def settings_acme(request):
                                      'title': 'Applying ACME settings...',
                                      'message': 'ACME settings saved.',
                                      'command': cmd})
-            ok, stdout, stderr = run_command(set_cmd, timeout=30)
-            if not ok:
-                messages.error(request, f'Error: {stderr or stdout}')
-                return redirect('settings_acme')
+            # Shared helper: runs the script, maps exit codes/output to a
+            # modal-ready answer (validation errors abort before reapply).
+            result = run_settings_script(set_cmd, timeout=30)
+            if not result:
+                return settings_failed(request, result, 'settings_acme')
             messages.success(request, 'ACME settings saved.')
             try:
                 ok, out = run_playbook('base-services/traefik.yml', timeout=180)
