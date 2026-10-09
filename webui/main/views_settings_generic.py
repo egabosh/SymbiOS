@@ -156,14 +156,16 @@ def _render_generic(request, slug, entry, script):
                 value = json.dumps(value)
             field['value'] = value
     badge = get_page_badge(entry.get('explain') or slug, vars_)
-    test = entry.get('test')
-    if isinstance(test, dict):
-        # Endpoint travels JSON-quoted for the inline script.
-        test = dict(test, endpoint=json.dumps(test.get('endpoint', '')))
+    tests = entry.get('tests') or []
+    if isinstance(entry.get('test'), dict):
+        # Backwards compatibility for single-test entries.
+        tests = tests + [entry['test']]
     return render(request, 'main/settings_generic.html', {
         'slug': slug,
         'fields': fields,
-        'test': test,
+        'tests': [{'endpoint': t.get('endpoint', ''),
+                   'label': t.get('label') or 'Test connection'}
+                  for t in tests if isinstance(t, dict)],
         'load_error': err,
         'vars': vars_,
         'page_key': slug,
@@ -212,6 +214,15 @@ def _save_generic(request, slug, entry, script):
                       for name in gated)
         if not changed:
             playbooks = []
+    for extra in entry.get('conditional_playbooks') or []:
+        # Declarative extras: run these playbooks first when a posted
+        # field equals the expected value (e.g. matrix-client before
+        # notifications, only when matrix was enabled).
+        cond = (extra.get('when') or {})
+        posted = payload.get(cond.get('field'))
+        if (posted is not None
+                and str(posted).lower() == str(cond.get('equals')).lower()):
+            playbooks = list(extra.get('playbooks') or []) + list(playbooks)
     message = entry.get('message') or 'Settings saved.'
     if playbooks:
         flag = '--only {}'.format(' '.join(playbooks))

@@ -164,6 +164,39 @@ do
       f_given_level="yes"
       shift 2
       ;;
+    --json-stdin)
+      # Full field object for generic callers. Booleans arrive unquoted.
+      f_json="$(cat)"
+      for f_field in notify_mail_enabled notify_matrix_enabled notify_mail_to notify_level
+      do
+        [[ "${f_json}" == *'"'"${f_field}"'"'* ]] || continue
+        f_onoff="$(grep -o "\"${f_field}\"[[:space:]]*:[[:space:]]*[^,}]*" <<< "${f_json}" | head -1)"
+        f_onoff="${f_onoff##*:}"
+        f_onoff="${f_onoff#"${f_onoff%%[![:space:]]*}"}"
+        f_onoff="${f_onoff%"${f_onoff##*[![:space:]]}"}"
+        f_onoff="${f_onoff%\"}"
+        f_onoff="${f_onoff#\"}"
+        case "${f_field}" in
+          notify_mail_enabled)
+            f_new_mail="${f_onoff}"
+            f_given_mail="yes"
+            ;;
+          notify_matrix_enabled)
+            f_new_matrix="${f_onoff}"
+            f_given_matrix="yes"
+            ;;
+          notify_mail_to)
+            f_new_to="$(f_json_get "${f_json}" "${f_field}")" || f_new_to=""
+            f_given_to="yes"
+            ;;
+          notify_level)
+            f_new_level="$(f_json_get "${f_json}" "${f_field}")" || f_new_level=""
+            f_given_level="yes"
+            ;;
+        esac
+      done
+      shift
+      ;;
     --check)
       f_check="yes"
       shift

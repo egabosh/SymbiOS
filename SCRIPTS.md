@@ -403,6 +403,8 @@ texts opportunistically).
 | `symbios-restart-docker-services.sh` | Restart all Docker Compose stacks cleanly after boot | no args |
 | `symbios-uninstall.sh` | Uninstall a service (full wipe or program-only, per `# docs:` block) | `<playbook> full\|program` |
 | `symbios-update.sh` | Git pull + run changed installed playbooks | no args |
+| `symbios-settings-new.sh` | Scaffold a new settings CLI script + registry snippet | `<slug>` |
+| `symbios-settings-check.sh` | Convention checks (static repo greps / live contract) | `[--static [ROOT] \| [slug]]` |
 
 ### 4.2 System and host
 
@@ -492,6 +494,14 @@ texts opportunistically).
 | `symbios-wordpress-fix-perms.sh` | Docroot ownership + SFTP ACL repair | `<name> ...` |
 | `symbios-media-share.sh` | Group share dirs below `media_root/shared` | `--list\|--create\|--delete --name ...` |
 | `symbios-traefik-proxy-apply.sh` | Validate/apply reverse-proxy forwards (Traefik provider) | `[--apply\|--list\|--import <dir>]` |
+| `symbios-swapfile.sh` | 8G swapfile on the data disk (basics.yml) | `create\|activate\|cleanup-legacy [data_root]` |
+| `symbios-media-quota.sh` | Project quotas on media libraries/homes/shares (media.yml) | no args |
+| `symbios-seed-known-hosts.sh` | Pinned SSH known_hosts for the WebUI exec gateway (symbios-ui.yml) | `[config_dir]` |
+| `symbios-reactivate-swap.sh` | Reactivate encrypted swap without reboot (hardening.yml) | no args |
+| `symbios-home-assistant-http.sh` | HA .storage/http reverse-proxy settings (home-assistant.yml) | `<traefik_ip>` |
+| `symbios-mailcow-idp.sh` | Mailcow OIDC identity_provider rows (mailcow.yml) | `<mailcow_root> <base_domain> <service_domain>` |
+| `symbios-nextcloud-external-storage.sh` | Nextcloud external media mounts via occ (nextcloud.yml) | `[--no-previews]` |
+| `symbios-openwebui-db.sh` | OpenWebUI webui.db maintenance: api-key, workflows, backend syncs | `<api-key\|patch-comfyui\|workflows\|sync-openai\|sync-speech\|sync-image\|sync-retrieval>` |
 
 ### 4.8 Power management (WoL / idle suspend)
 
@@ -527,9 +537,11 @@ texts opportunistically).
 
 ## 5. Adding a settings domain (checklist)
 
-1. Scaffold from the pilot: copy `symbios-settings-localization.sh` structure
-   (`get`/`set`/`schema`, `--check`, exit 0/2/1, state token, `$g_symbios_dir`
-   sibling calls, secrets only via `--json-stdin`).
+1. Scaffold: `symbios-settings-new.sh <slug>` (contract: `get`/`set`/
+   `schema`, `--check`, exit 0/2/1, state token; sources
+   `symbios-settings-lib.sh` for fail/bool/URL/merge helpers).
+   Prefer a generic registry row (`settings_registry.py`) over a
+   hand-written view + template.
 2. Validate in the script, write via `symbios-inventory.py merge` (one
    transaction, values via stdin JSON when secrets are involved).
 3. Thin the WebUI view: `run_command('symbios-settings-<slug>.sh ...')` +
