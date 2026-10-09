@@ -168,7 +168,7 @@
               container_name: jellyfin
               restart: unless-stopped
               #env_file: env
-              user: "{{ jellyfin_uid }}{{ ':' + jellyfin_gid if jellyfin_gid else '' }}"
+              user: "{{ jellyfin_uid }}{{ (':' + (jellyfin_gid | string)) if jellyfin_gid else '' }}"
               #environment:
               volumes:
                 - ./data/config:/config

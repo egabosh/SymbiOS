@@ -110,7 +110,7 @@
                 ND_ENABLEUSEREDITING: "false"
               networks:
                 - symbios_services
-              user: "33{{ ':' + navidrome_music_gid if navidrome_music_gid else '' }}"
+              user: "33{{ (':' + (navidrome_music_gid | string)) if navidrome_music_gid else '' }}"
               volumes:
                 - ./navidrome-data:/data
                 - /etc/localtime:/etc/localtime:ro
