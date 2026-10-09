@@ -614,7 +614,9 @@ function f_cleanup_testuser {
   f_exec_try "symbios-ldap-user.sh --delete --uid symbios-dev-testuser" >/dev/null 2>&1
   rm -f "$g_log_dir"/cookie-* 2>/dev/null
 }
-trap f_cleanup_testuser EXIT
+# Chained with the gaboshlib EXIT trap (rm -r $g_tmp) so the $g_tmp dir is
+# not leaked (a plain trap ... EXIT would replace it).
+trap 'f_cleanup_testuser; eval "${g_trap_exit:-}"' EXIT
 
 # Verify Authelia can authenticate the test user (smoke test)
 f_authelia_domain="auth.${g_base_domain}"

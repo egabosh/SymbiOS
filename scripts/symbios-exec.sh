@@ -88,5 +88,9 @@ g_cmd_safe="$(echo "${g_cmd_safe}" | sed -E 's/(password|passwd|passphrase|apike
 g_logger "client=${g_client_ip} cmd=${g_cmd_safe}"
 echo "$(date -Iseconds) client=${g_client_ip} cmd=${g_cmd_safe}" >> /var/log/symbios-exec.log 2>/dev/null || true
 
-# Run the command as-is.
+# Run the command as-is. The own gaboshlib $g_tmp dir is removed first:
+# exec would replace this shell and skip its EXIT trap, leaking one
+# .g_tmp_symbios-exec.sh-<pid> dir per call (the inner command creates and
+# cleans its own $g_tmp).
+rm -rf "${g_tmp:-/nonexistent-symbios-exec-tmp}" 2>/dev/null || true
 exec bash -c "${g_cmd}"

@@ -135,7 +135,7 @@ then
     f_password="$(cat "${f_password_file}")"
     f_cleanup_files="${f_cleanup_files} ${f_password_file}"
   fi
-  trap 'rm -f ${f_cleanup_files} 2>/dev/null' EXIT HINT INT TERM
+  trap 'rm -f ${f_cleanup_files} 2>/dev/null; eval "${g_trap_exit:-}"' EXIT HUP INT TERM
 fi
 
 # Validate action

@@ -82,7 +82,9 @@ fi
 # type (string, number, list) survives shell quoting intact.
 EXTRA_VARS_FILE="$(mktemp /tmp/symbios-feature-vars.XXXXXX)"
 echo '{}' > "$EXTRA_VARS_FILE"
-trap 'rm -f "$EXTRA_VARS_FILE"' EXIT
+# Chained with the gaboshlib EXIT trap (rm -r $g_tmp) so the $g_tmp dir
+# is not leaked (a plain trap ... EXIT would replace it).
+trap 'rm -f "$EXTRA_VARS_FILE"; eval "${g_trap_exit:-}"' EXIT
 if [[ "$MAPPING" != "{}" ]] && [[ -n "$MAPPING" ]]
 then
   for ROW in $(echo "$MAPPING" | jq -r 'to_entries[] | "\(.key)|\(.value)"' 2>/dev/null)

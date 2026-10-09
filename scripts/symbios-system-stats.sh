@@ -37,7 +37,10 @@ f_cpu_a="${f_tmp}/symbios-stats-cpu-a.$$"
 f_cpu_b="${f_tmp}/symbios-stats-cpu-b.$$"
 f_disk_a="${f_tmp}/symbios-stats-disk-a.$$"
 f_disk_b="${f_tmp}/symbios-stats-disk-b.$$"
-trap 'rm -f "${f_cpu_a}" "${f_cpu_b}" "${f_disk_a}" "${f_disk_b}"' EXIT
+# Own snapshot files first, then the gaboshlib EXIT trap (rm -r $g_tmp).
+# A plain trap ... EXIT here would replace it and leak one
+# .g_tmp_symbios-system-stats.sh-<pid> dir per call.
+trap 'rm -f "${f_cpu_a}" "${f_cpu_b}" "${f_disk_a}" "${f_disk_b}"; eval "${g_trap_exit:-}"' EXIT
 
 # Collect the diskstats lines for the *real* block devices into a snapshot
 # file. Virtual / removable / RAID devices (loop, ram, zram, dm, md, sr, fd,
