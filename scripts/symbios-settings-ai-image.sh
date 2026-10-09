@@ -5,8 +5,8 @@
 # thin wrapper around this script, which owns validation and the
 # inventory.yml write. The inventory write goes through
 # symbios-inventory.py (merge, one transaction). Empty values delete the
-# key (same as the WebUI before). This domain carries no secrets, so plain
-# flags are sufficient (no --json-stdin needed).
+# key (same as the WebUI before). This domain carries no secrets; plain
+# flags work, and --json-stdin takes the full field object.
 
 function f_usage {
   cat << EOF
@@ -18,8 +18,9 @@ Commands:
   get [--json]                    Print current values (key=value lines,
                                   or a JSON object with --json)
   set [--image-url URL --image-model M --image-edit-url URL
-       --image-edit-model M] [--check]
+       --image-edit-model M | --json-stdin] [--check]
                                   Validate and write to inventory.yml.
+                                  --json-stdin reads the full field object.
                                   Empty values delete the key.
                                   --check changes nothing.
   schema                          Print the field description as JSON
@@ -112,6 +113,7 @@ f_given_image_url="no"
 f_given_image_model="no"
 f_given_image_edit_url="no"
 f_given_image_edit_model="no"
+f_json_stdin="no"
 f_check="no"
 
 while [[ $# -gt 0 ]]
@@ -141,6 +143,10 @@ do
       f_given_image_edit_model="yes"
       shift 2
       ;;
+    --json-stdin)
+      f_json_stdin="yes"
+      shift
+      ;;
     --check)
       f_check="yes"
       shift
@@ -158,9 +164,37 @@ done
 
 if [[ "${f_given_image_url}" == "no" && "${f_given_image_model}" == "no" \
    && "${f_given_image_edit_url}" == "no" \
-   && "${f_given_image_edit_model}" == "no" ]]
+   && "${f_given_image_edit_model}" == "no" && "${f_json_stdin}" == "no" ]]
 then
   f_ss_fail_validation "Nothing to set - pass at least one field option"
+fi
+
+if [[ "${f_json_stdin}" == "yes" ]]
+then
+  f_json="$(cat)"
+  for f_field in ai_image_url ai_image_model ai_image_edit_url ai_image_edit_model
+  do
+    [[ "${f_json}" == *'"'"${f_field}"'"'* ]] || continue
+    f_val="$(f_json_get "${f_json}" "${f_field}")" || f_val=""
+    case "${f_field}" in
+      ai_image_url)
+        f_image_url="${f_val}"
+        f_given_image_url="yes"
+        ;;
+      ai_image_model)
+        f_image_model="${f_val}"
+        f_given_image_model="yes"
+        ;;
+      ai_image_edit_url)
+        f_image_edit_url="${f_val}"
+        f_given_image_edit_url="yes"
+        ;;
+      ai_image_edit_model)
+        f_image_edit_model="${f_val}"
+        f_given_image_edit_model="yes"
+        ;;
+    esac
+  done
 fi
 
 # URLs must be single-line without whitespace (the WebUI test probe adds

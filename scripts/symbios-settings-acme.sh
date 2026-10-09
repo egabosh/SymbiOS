@@ -17,6 +17,9 @@ Commands:
   get [--json]                    Print current values (key=value lines,
                                   or a JSON object with --json)
   set --server URL [--check]      Validate and write to inventory.yml.
+                                  --json-stdin reads {"acme_server": ..}.
+                                  An empty server deletes the key (back to
+                                  the default CA), same as remove.
                                   --check changes nothing.
   remove [--check]                Delete the custom server (fall back to
                                   the default CA server).
@@ -93,6 +96,7 @@ fi
 # --- subcommand: set / remove --------------------------------------------------
 
 f_new_server=""
+f_given_server="no"
 f_remove="no"
 f_check="no"
 
@@ -108,11 +112,23 @@ do
       [[ $# -ge 2 ]] || f_ss_fail_usage
       [[ "${f_remove}" == "yes" ]] && f_ss_fail_usage
       f_new_server="$2"
+      f_given_server="yes"
       shift 2
       ;;
     --server=*)
       [[ "${f_remove}" == "yes" ]] && f_ss_fail_usage
       f_new_server="${1#--server=}"
+      f_given_server="yes"
+      shift
+      ;;
+    --json-stdin)
+      [[ "${f_remove}" == "yes" ]] && f_ss_fail_usage
+      f_json="$(cat)"
+      if [[ "${f_json}" == *'"acme_server"'* ]]
+      then
+        f_new_server="$(f_json_get "${f_json}" "acme_server")" || f_new_server=""
+        f_given_server="yes"
+      fi
       shift
       ;;
     --check)
@@ -130,23 +146,25 @@ do
   esac
 done
 
-if [[ "${f_remove}" == "no" && -z "${f_new_server}" ]]
+if [[ "${f_remove}" == "no" && "${f_given_server}" == "no" ]]
 then
   f_ss_fail_validation "Nothing to set - pass --server URL (or use remove)"
 fi
 
 # Single-line URL without whitespace. An explicit https:// scheme is not
-# required here - Traefik passes caServer through as configured.
-if [[ "${f_remove}" == "no" ]]
+# required here - Traefik passes caServer through as configured. An empty
+# server falls back to the default CA (same as remove).
+if [[ "${f_remove}" == "no" && -n "${f_new_server}" ]]
 then
   f_ss_require_url "--server" "${f_new_server}"
 fi
 
-# --- transactional write (remove deletes the key; the playbook default ""
-# and the {% if acme_server %} guard in traefik.yml treat a missing key
-# exactly like the empty string the WebUI used to write) ------------------------
+# --- transactional write (remove - or an empty server - deletes the key;
+# the playbook default "" and the {% if acme_server %} guard in traefik.yml
+# treat a missing key exactly like the empty string the WebUI used to
+# write) ------------------------------------------------------------------------
 
-if [[ "${f_remove}" == "yes" ]]
+if [[ "${f_remove}" == "yes" || -z "${f_new_server}" ]]
 then
   f_merge='{"acme_server": null}'
 else
