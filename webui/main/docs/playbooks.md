@@ -207,6 +207,28 @@ Layout, sharing and syntax rules for every playbook in `services/` and
 
 ---
 
+## Migrations (one-time transitions)
+
+Service playbooks stay declarative - one-time transitions (data moves,
+orphan cleanup, renames) live as dated files OUTSIDE the playbooks:
+
+- **Location**: `services/migrations/YYYY-MM-<service>-<slug>.yml` and
+  `base-services/migrations/YYYY-MM-<service>-<slug>.yml` (flat, one
+  directory each - a single `ls` shows everything pending; both are
+  subdirectories so the WebUI catalog never picks them up).
+- **Form**: plain playbook (`hosts: all`) with a header comment carrying
+  `reason:`, `applies-when:` (guard description) and
+  `remove-after: YYYY-MM`. Tasks must be idempotent (`stat`/`creates`
+  guards) so re-runs are no-ops. No state tracking, no auto-include.
+- **Lifecycle**: run once manually on affected hosts
+  (`ansible-playbook --connection=local --limit localhost --inventory ...`),
+  delete the file at `remove-after` (or once verified on all hosts).
+  Trivial single-host leftovers stay manual work (SSH), no file needed.
+- Not to be confused with top-level `migrations/` (per-host runbooks
+  like `defiant/`, `jarvis/` - a different axis).
+
+---
+
 ## Naming conventions
 
 Follow these naming rules so containers, networks, and services are consistent
