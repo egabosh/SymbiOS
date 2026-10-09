@@ -519,6 +519,7 @@ texts opportunistically).
 | File | Purpose |
 |------|---------|
 | `symbios-lib.sh` | Central config: `g_*` paths from `inventory.yml`, `f_symbios_var` (read), `f_symbios_var_set` (write via `symbios-inventory.py`), JSON/LDAP/Traefik helpers |
+| `symbios-settings-lib.sh` | Shared settings plumbing: `f_ss_fail_*` (exit 0/2/1), `f_ss_parse_bool`, `f_ss_require_url/single_line`, `f_ss_merge_add`, `f_ss_merge`, `f_ss_result` (merge + state token). Sourced by every `symbios-settings-*.sh` after `symbios-lib.sh` |
 | `symbios-backup-lib.sh` | Shared backup/restore helpers (sourced by `backup.sh`, `restore.sh`, ...) |
 | `symbios-wol-common.sh` | Shared WoL watcher helpers |
 

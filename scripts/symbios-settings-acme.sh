@@ -40,20 +40,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 f_command="${1:-}"
 case "${f_command}" in
@@ -66,13 +56,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -98,7 +84,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   echo "acme_server=${f_cur_server}"
   exit 0
@@ -119,13 +105,13 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --server)
-      [[ $# -ge 2 ]] || f_fail_usage
-      [[ "${f_remove}" == "yes" ]] && f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      [[ "${f_remove}" == "yes" ]] && f_ss_fail_usage
       f_new_server="$2"
       shift 2
       ;;
     --server=*)
-      [[ "${f_remove}" == "yes" ]] && f_fail_usage
+      [[ "${f_remove}" == "yes" ]] && f_ss_fail_usage
       f_new_server="${1#--server=}"
       shift
       ;;
@@ -139,22 +125,21 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
 
 if [[ "${f_remove}" == "no" && -z "${f_new_server}" ]]
 then
-  f_fail_validation "Nothing to set - pass --server URL (or use remove)"
+  f_ss_fail_validation "Nothing to set - pass --server URL (or use remove)"
 fi
 
 # Single-line URL without whitespace. An explicit https:// scheme is not
 # required here - Traefik passes caServer through as configured.
-if [[ "${f_remove}" == "no" ]] \
-  && { [[ "${f_new_server}" == *$'\n'* ]] || [[ "${f_new_server}" =~ [[:space:]] ]]; }
+if [[ "${f_remove}" == "no" ]]
 then
-  f_fail_validation "Invalid --server URL: must be a single line without whitespace"
+  f_ss_require_url "--server" "${f_new_server}"
 fi
 
 # --- transactional write (remove deletes the key; the playbook default ""
@@ -169,27 +154,5 @@ else
     "$(printf '%s' "${f_new_server}" | f_json_escape)")"
 fi
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "acme-unchanged"
-else
-  g_echo_note "acme-changed"
-fi
+f_ss_merge "${f_merge}" "acme" "${f_check}"
 exit 0

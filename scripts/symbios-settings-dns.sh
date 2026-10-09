@@ -62,20 +62,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 # Normalize a deSEC host: lowercase, strip, ensure the .dedyn.io suffix
 # (same rules the WebUI applied before).
@@ -108,13 +98,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -176,7 +162,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   echo "dns_mode=${f_cur_mode}"
   echo "ddns_host=${f_cur_host}"
@@ -207,41 +193,41 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --mode)
-      [[ $# -ge 2 ]] || f_fail_usage
-      [[ "${f_remove}" == "yes" ]] && f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      [[ "${f_remove}" == "yes" ]] && f_ss_fail_usage
       f_mode="$2"
       shift 2
       ;;
     --mode=*)
-      [[ "${f_remove}" == "yes" ]] && f_fail_usage
+      [[ "${f_remove}" == "yes" ]] && f_ss_fail_usage
       f_mode="${1#--mode=}"
       shift
       ;;
     --host)
-      [[ $# -ge 2 ]] || f_fail_usage
-      [[ "${f_remove}" == "yes" ]] && f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      [[ "${f_remove}" == "yes" ]] && f_ss_fail_usage
       f_host="$2"
       f_given_host="yes"
       shift 2
       ;;
     --domain)
-      [[ $# -ge 2 ]] || f_fail_usage
-      [[ "${f_remove}" == "yes" ]] && f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      [[ "${f_remove}" == "yes" ]] && f_ss_fail_usage
       f_domain="$2"
       shift 2
       ;;
     --ipv6)
-      [[ $# -ge 2 ]] || f_fail_usage
-      [[ "${f_remove}" == "yes" ]] && f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      [[ "${f_remove}" == "yes" ]] && f_ss_fail_usage
       f_ipv6="$2"
       f_given_ipv6="yes"
       shift 2
       ;;
     --ddns-apikey=*|--apikey|--apikey=*)
-      f_fail_validation "ddns_apikey is a secret and must be passed via --json-stdin, never as argv"
+      f_ss_fail_validation "ddns_apikey is a secret and must be passed via --json-stdin, never as argv"
       ;;
     --json-stdin)
-      [[ "${f_remove}" == "yes" ]] && f_fail_usage
+      [[ "${f_remove}" == "yes" ]] && f_ss_fail_usage
       f_json_stdin="yes"
       shift
       ;;
@@ -255,7 +241,7 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
@@ -264,7 +250,7 @@ if [[ "${f_remove}" == "yes" ]]
 then
   f_merge='{"ddns_apikey": "", "ddns_host": "", "ddns_ipv6": "", "dns_mode": "", "dns_configured": false, "base_domain": "symbios.local"}'
 else
-  [[ -z "${f_mode}" ]] && f_fail_validation "Nothing to set - pass --mode desec|self-managed"
+  [[ -z "${f_mode}" ]] && f_ss_fail_validation "Nothing to set - pass --mode desec|self-managed"
 
   if [[ "${f_json_stdin}" == "yes" ]]
   then
@@ -294,12 +280,12 @@ else
     desec)
       f_host="$(f_normalize_desec_host "${f_host}")"
       [[ -n "${f_host}" ]] \
-        || f_fail_validation "Please enter a deSEC hostname"
+        || f_ss_fail_validation "Please enter a deSEC hostname"
       # A dotted host must be a valid FQDN after normalization.
       f_label='[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?'
       if [[ ${#f_host} -gt 253 ]] || ! [[ "${f_host}" =~ ^${f_label}(\.${f_label})+$ ]]
       then
-        f_fail_validation "Invalid deSEC hostname: ${f_host}"
+        f_ss_fail_validation "Invalid deSEC hostname: ${f_host}"
       fi
       f_merge="$(printf '{"dns_mode": "desec", "ddns_host": %s, "base_domain": %s, "dns_configured": true' \
         "$(printf '%s' "${f_host}" | f_json_escape)" \
@@ -319,48 +305,26 @@ else
       f_domain="${f_domain#"${f_domain%%[![:space:]]*}"}"
       f_domain="${f_domain%"${f_domain##*[![:space:]]}"}"
       f_domain="${f_domain%.}"
-      [[ -n "${f_domain}" ]] || f_fail_validation "Please enter a domain"
+      [[ -n "${f_domain}" ]] || f_ss_fail_validation "Please enter a domain"
       f_label='[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?'
       if [[ ${#f_domain} -gt 253 ]] || ! [[ "${f_domain}" =~ ^${f_label}(\.${f_label})+$ ]]
       then
-        f_fail_validation "Invalid domain: ${f_domain} (expected a FQDN like example.com)"
+        f_ss_fail_validation "Invalid domain: ${f_domain} (expected a FQDN like example.com)"
       fi
       if [[ "${f_domain}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
       then
-        f_fail_validation "Domain must not be an IPv4 address: ${f_domain}"
+        f_ss_fail_validation "Domain must not be an IPv4 address: ${f_domain}"
       fi
       f_merge="$(printf '{"dns_mode": "self-managed", "ddns_apikey": "", "ddns_host": "", "ddns_ipv6": "", "base_domain": %s, "dns_configured": true}' \
         "$(printf '%s' "${f_domain}" | f_json_escape)")"
       ;;
     *)
-      f_fail_validation "Invalid --mode: ${f_mode} (expected desec|self-managed)"
+      f_ss_fail_validation "Invalid --mode: ${f_mode} (expected desec|self-managed)"
       ;;
   esac
 fi
 
 # --- transactional write ---------------------------------------------------------
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "dns-unchanged"
-else
-  g_echo_note "dns-changed"
-fi
+f_ss_merge "${f_merge}" "dns" "${f_check}"
 exit 0

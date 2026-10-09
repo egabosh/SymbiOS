@@ -57,20 +57,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 f_command="${1:-}"
 case "${f_command}" in
@@ -83,13 +73,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -136,7 +122,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   echo "matrix_homeserver=${f_cur_server}"
   echo "matrix_user=${f_cur_user}"
@@ -164,29 +150,11 @@ then
         ;;
       *)
         echo "Unknown option: $1" >&2
-        f_fail_usage
+        f_ss_fail_usage
         ;;
     esac
   done
-  f_check_flag=""
-  [[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-  if ! f_out="$(printf '%s' '{"matrix_homeserver": null, "matrix_user": null, "matrix_password": null, "matrix_token": null, "matrix_room": null, "notify_matrix_enabled": null}' \
-    | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-  then
-    f_fail_technical "Failed to write inventory: ${f_out}"
-  fi
-  g_echo "${f_out}"
-  if [[ "${f_check}" == "yes" ]]
-  then
-    g_echo_note "Check mode - nothing was changed"
-    exit 0
-  fi
-  if grep -q "^unchanged$" <<< "${f_out}"
-  then
-    g_echo_note "matrix-unchanged"
-  else
-    g_echo_note "matrix-changed"
-  fi
+  f_ss_merge '{"matrix_homeserver": null, "matrix_user": null, "matrix_password": null, "matrix_token": null, "matrix_room": null, "notify_matrix_enabled": null}' "matrix" "${f_check}"
   exit 0
 fi
 
@@ -206,22 +174,22 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --homeserver)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_server="$2"
       shift 2
       ;;
     --user)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_user="$2"
       shift 2
       ;;
     --room)
-      [[ $# -ge 2 ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
       f_room="$2"
       shift 2
       ;;
     --password|--password=*|--token|--token=*)
-      f_fail_validation "Matrix secrets must be passed via --json-stdin, never as argv"
+      f_ss_fail_validation "Matrix secrets must be passed via --json-stdin, never as argv"
       ;;
     --json-stdin)
       f_json_stdin="yes"
@@ -237,7 +205,7 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
@@ -287,7 +255,7 @@ then
 fi
 if [[ "${#f_missing[@]}" -gt 0 ]]
 then
-  f_fail_validation "Required fields missing: $(IFS=", "; echo "${f_missing[*]}")"
+  f_ss_fail_validation "Required fields missing: $(IFS=", "; echo "${f_missing[*]}")"
 fi
 
 # Scheme defaults to https (same as the WebUI and its probe).
@@ -298,15 +266,15 @@ then
 fi
 if [[ "${f_server}" == *$'\n'* ]] || [[ "${f_server}" =~ [[:space:]] ]]
 then
-  f_fail_validation "Invalid homeserver URL: must be a single line without whitespace"
+  f_ss_fail_validation "Invalid homeserver URL: must be a single line without whitespace"
 fi
 if ! [[ "${f_user}" =~ ^@[^:@[:space:]]+:[^:[:space:]]+$ ]]
 then
-  f_fail_validation "User ID must be a full Matrix ID like @sender:example.org"
+  f_ss_fail_validation "User ID must be a full Matrix ID like @sender:example.org"
 fi
 if [[ "${f_room}" != "#"* && "${f_room}" != "!"* ]]
 then
-  f_fail_validation "Room must be a room alias (starting with #) or a room ID (starting with !)"
+  f_ss_fail_validation "Room must be a room alias (starting with #) or a room ID (starting with !)"
 fi
 
 # --- transactional write (empty secrets delete their key) ------------------------
@@ -335,27 +303,5 @@ then
 fi
 f_merge="${f_merge}}"
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "matrix-unchanged"
-else
-  g_echo_note "matrix-changed"
-fi
+f_ss_merge "${f_merge}" "matrix" "${f_check}"
 exit 0

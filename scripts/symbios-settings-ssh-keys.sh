@@ -59,20 +59,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 # Strict check for one authorized_keys line: known type + base64 body.
 # Comments and empty lines are skipped by the caller, never passed here.
@@ -104,13 +94,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 f_keys_file="/root/.ssh/authorized_keys"
 
@@ -166,7 +152,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for list: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   for f_line in ${f_user_keys[@]+"${f_user_keys[@]}"}
   do
@@ -230,7 +216,7 @@ then
     [[ -z "${f_trimmed}" || "${f_trimmed}" == \#* ]] && continue
     if ! f_valid_key "${f_trimmed}"
     then
-      f_fail_validation "Invalid SSH public key on input line ${f_lineno}: ${f_trimmed:0:60}"
+      f_ss_fail_validation "Invalid SSH public key on input line ${f_lineno}: ${f_trimmed:0:60}"
     fi
     f_count=$((f_count + 1))
   done
@@ -249,19 +235,19 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --key)
-      [[ $# -ge 2 ]] || f_fail_usage
-      [[ "${f_command}" == "add" ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      [[ "${f_command}" == "add" ]] || f_ss_fail_usage
       f_new_key="$2"
       shift 2
       ;;
     --index)
-      [[ $# -ge 2 ]] || f_fail_usage
-      [[ "${f_command}" == "remove" ]] || f_fail_usage
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      [[ "${f_command}" == "remove" ]] || f_ss_fail_usage
       f_index="$2"
       shift 2
       ;;
     --stdin)
-      [[ "${f_command}" == "set" ]] || f_fail_usage
+      [[ "${f_command}" == "set" ]] || f_ss_fail_usage
       f_stdin="yes"
       shift
       ;;
@@ -275,7 +261,7 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
@@ -284,11 +270,11 @@ f_result_user=("${f_user_keys[@]+"${f_user_keys[@]}"}")
 
 if [[ "${f_command}" == "add" ]]
 then
-  [[ -n "${f_new_key}" ]] || f_fail_validation "Nothing to add - pass --key \"LINE\""
+  [[ -n "${f_new_key}" ]] || f_ss_fail_validation "Nothing to add - pass --key \"LINE\""
   f_trimmed="${f_new_key#"${f_new_key%%[![:space:]]*}"}"
   f_trimmed="${f_trimmed%"${f_trimmed##*[![:space:]]}"}"
   f_valid_key "${f_trimmed}" \
-    || f_fail_validation "Invalid SSH public key format"
+    || f_ss_fail_validation "Invalid SSH public key format"
   f_dup="no"
   for f_line in ${f_result_user[@]+"${f_result_user[@]}"}
   do
@@ -298,10 +284,10 @@ then
 elif [[ "${f_command}" == "remove" ]]
 then
   [[ "${f_index}" =~ ^[0-9]+$ ]] \
-    || f_fail_validation "Invalid --index: ${f_index} (expected a number)"
+    || f_ss_fail_validation "Invalid --index: ${f_index} (expected a number)"
   if [[ "${f_index}" -ge "${#f_result_user[@]}" ]]
   then
-    f_fail_validation "Invalid --index: ${f_index} (only ${#f_result_user[@]} user key(s), system keys are never indexed)"
+    f_ss_fail_validation "Invalid --index: ${f_index} (only ${#f_result_user[@]} user key(s), system keys are never indexed)"
   fi
   f_kept=()
   f_i=0
@@ -313,7 +299,7 @@ then
   f_result_user=("${f_kept[@]+"${f_kept[@]}"}")
 elif [[ "${f_command}" == "set" ]]
 then
-  [[ "${f_stdin}" == "yes" ]] || f_fail_validation "Nothing to set - pass --stdin"
+  [[ "${f_stdin}" == "yes" ]] || f_ss_fail_validation "Nothing to set - pass --stdin"
   f_result_user=()
   while IFS= read -r f_line || [[ -n "${f_line}" ]]
   do
@@ -327,7 +313,7 @@ then
       continue
     fi
     f_valid_key "${f_trimmed}" \
-      || f_fail_validation "Invalid SSH public key format: ${f_trimmed:0:60}"
+      || f_ss_fail_validation "Invalid SSH public key format: ${f_trimmed:0:60}"
     f_result_user+=("${f_trimmed}")
   done
 fi
@@ -365,9 +351,8 @@ f_payload="$(printf '%s\n' ${f_result_user[@]+"${f_result_user[@]}"})"
 if ! f_out="$(printf '%s\n' "${f_payload}" \
   | "$g_symbios_dir/symbios-write-authorized-keys.sh" 2>&1)"
 then
-  f_fail_technical "Failed to write authorized_keys: ${f_out}"
+  f_ss_fail_technical "Failed to write authorized_keys: ${f_out}"
 fi
 
-g_echo "${f_out}"
-g_echo_note "ssh-keys-changed: ${#f_result_user[@]} user key(s)"
+f_ss_result "${f_out}" "ssh-keys" "${f_check}" "${#f_result_user[@]} user key(s)"
 exit 0

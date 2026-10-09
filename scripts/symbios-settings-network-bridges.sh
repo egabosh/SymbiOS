@@ -38,20 +38,10 @@ Exit codes:
 EOF
 }
 
-function f_fail_usage {
-  f_usage >&2
-  exit 2
-}
-
-function f_fail_validation {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 2
-}
-
-function f_fail_technical {
-  g_echo_error "$1" || echo "Error: $1" >&2
-  exit 1
-}
+source /etc/bash/gaboshlib.include
+g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
+source "$g_symbios_dir/symbios-lib.sh"
+source "$g_symbios_dir/symbios-settings-lib.sh"
 
 f_command="${1:-}"
 case "${f_command}" in
@@ -64,13 +54,9 @@ case "${f_command}" in
     ;;
   *)
     echo "Unknown command: ${f_command}" >&2
-    f_fail_usage
+    f_ss_fail_usage
     ;;
 esac
-
-source /etc/bash/gaboshlib.include
-g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
-source "$g_symbios_dir/symbios-lib.sh"
 
 if [[ "${f_command}" == "schema" ]]
 then
@@ -98,7 +84,7 @@ then
   elif [[ $# -gt 0 ]]
   then
     echo "Unknown option for get: $1" >&2
-    f_fail_usage
+    f_ss_fail_usage
   fi
   "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" \
     dict-show bridge_assignments 2>/dev/null
@@ -127,13 +113,13 @@ do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      f_fail_usage
+      f_ss_fail_usage
       ;;
   esac
 done
 
 [[ "${f_json_stdin}" == "yes" ]] \
-  || f_fail_validation "Nothing to set - pass --json-stdin"
+  || f_ss_fail_validation "Nothing to set - pass --json-stdin"
 
 f_json="$(cat)"
 # NOTE: this python3 snippet only parses and cleans the stdin JSON object
@@ -167,34 +153,12 @@ for k, v in data.items():
 print(json.dumps(cleaned))
 " 2>&1)"
 then
-  f_fail_validation "${f_assignments}"
+  f_ss_fail_validation "${f_assignments}"
 fi
 
 # --- transactional write (whole-dict replace, same as the WebUI form) ------------
 
 f_merge="$(printf '{"bridge_assignments": %s}' "${f_assignments}")"
 
-f_check_flag=""
-[[ "${f_check}" == "yes" ]] && f_check_flag="--check"
-
-if ! f_out="$(printf '%s' "${f_merge}" \
-  | "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" merge ${f_check_flag} 2>&1)"
-then
-  f_fail_technical "Failed to write inventory: ${f_out}"
-fi
-
-g_echo "${f_out}"
-
-if [[ "${f_check}" == "yes" ]]
-then
-  g_echo_note "Check mode - nothing was changed"
-  exit 0
-fi
-
-if grep -q "^unchanged$" <<< "${f_out}"
-then
-  g_echo_note "network-bridges-unchanged"
-else
-  g_echo_note "network-bridges-changed"
-fi
+f_ss_merge "${f_merge}" "network-bridges" "${f_check}"
 exit 0
