@@ -38,6 +38,8 @@ Commands:
                                   --check validates only, changes nothing.
   schema                          Print the field description as JSON
                                   (for generic WebUI form rendering)
+  interfaces                      List wireless interfaces (iw scan with
+                                  fallback, for select options)
   -h, --help                      Show this help and exit
 
 Output: human status lines. The final line carries a machine-readable
@@ -61,7 +63,7 @@ case "${f_command}" in
     f_usage
     exit 0
     ;;
-  get|set|schema)
+  get|set|schema|interfaces)
     shift
     ;;
   *)
@@ -69,6 +71,25 @@ case "${f_command}" in
     f_ss_fail_usage
     ;;
 esac
+
+# --- subcommand: interfaces (pure read, no inventory) ------------------------------
+
+if [[ "${f_command}" == "interfaces" ]]
+then
+  if f_ifaces="$(iw dev 2>/dev/null | awk '/Interface/{print $2}' | sort -u)" \
+    && [[ -n "${f_ifaces}" ]]
+  then
+    printf '%s\n' "${f_ifaces}"
+    exit 0
+  fi
+  # Fallback hint scan (same as the WebUI before).
+  ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | while read -r f_iface
+  do
+    iw phy "$(iw dev "${f_iface}" info 2>/dev/null | awk '/wiphy/{print $2}')" \
+      info 2>/dev/null | grep -q 'supports' && echo "${f_iface}"
+  done 2>/dev/null || true
+  exit 0
+fi
 
 if [[ "${f_command}" == "schema" ]]
 then
