@@ -23,13 +23,11 @@ import json
 import threading
 
 from django.http import JsonResponse
-from django.shortcuts import Http404
 
 from .decorators import login_required
 from .plugin_catalog import (
     get_plugin,
     load_plugin_state,
-    has_plugin,
 )
 from .utils.ssh_exec import run_command
 from .utils.jobs import create_job

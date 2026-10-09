@@ -19,7 +19,6 @@ from django.http import JsonResponse
 import threading
 import uuid
 import os
-import re
 import yaml
 import shlex
 

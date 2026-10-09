@@ -20,13 +20,11 @@ External systems are remote hosts (Linux Mint, OpenWrt, etc.) that can be
 managed via SSH from the SymbiOS host. Playbooks in external-services/ are
 executed on these targets using ansible-playbook --connection=ssh.
 """
-import json
 import os
 import yaml
 import shlex
 
-from django.http import JsonResponse
-from django.shortcuts import render, redirect, get_object_or_404
+from django.shortcuts import render, redirect
 from django.contrib import messages as flash_messages
 
 from .decorators import login_required
