@@ -218,10 +218,14 @@ then
         continue
       fi
       f_cmd=$(f_expand_vars "$f_raw_cmd")
-      # Whitelist: only allow known cleanup commands
-      if [[ ! "$f_cmd" =~ ^(docker\ compose|systemctl|ufw|userdel|groupdel|smbpasswd|deluser|delgroup|virsh)([[:space:]]|$) ]]
+      # Whitelist: only allow known cleanup commands. symbios-*.sh names
+      # (no path, no args with slashes) are repo-controlled scripts from
+      # scripts/ (on PATH) - they are reviewed, --help documented and
+      # idempotent, unlike inline rm/ip shell.
+      if [[ ! "$f_cmd" =~ ^(docker\ compose|systemctl|ufw|userdel|groupdel|smbpasswd|deluser|delgroup|virsh)([[:space:]]|$) ]] \
+        && [[ ! "$f_cmd" =~ ^symbios-[a-z0-9-]+\.sh([[:space:]]|$) ]]
       then
-        g_echo_error "Invalid cleanup command (only docker compose/systemctl/ufw/userdel/groupdel/smbpasswd/deluser/delgroup allowed): $f_cmd"
+        g_echo_error "Invalid cleanup command (only docker compose/systemctl/ufw/userdel/groupdel/smbpasswd/deluser/delgroup/virsh/symbios-*.sh allowed): $f_cmd"
         exit 1
       fi
       g_echo_note "Running cleanup command: $f_cmd"

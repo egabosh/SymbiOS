@@ -95,9 +95,7 @@
 #   uninstall:
 #     stop: virsh destroy openwrt; virsh undefine openwrt --nvram
 #     commands:
-#       - rm -f /etc/network/interfaces.d/openwrt-lan /etc/network/interfaces.d/openwrt-iot /etc/network/interfaces.d/openwrt-tor /etc/network/interfaces.d/openwrt-misc
-#       - for b in openwrt-lan openwrt-iot openwrt-tor openwrt-misc; do ip link del "$b" 2>/dev/null || true; done
-#       - systemctl disable --now symbios-ow-bridge-dhcp.timer && rm -f /etc/systemd/system/symbios-ow-bridge-dhcp.service /etc/systemd/system/symbios-ow-bridge-dhcp.timer
+#       - symbios-openwrt-cleanup.sh
 #     program_paths:
 #       - /symbios/services/openwrt-vm/
 #       - /symbios/runchecks.d/symbios-healthcheck-openwrt-vm.check
@@ -557,110 +555,16 @@
         mode: "0755"
       when: kvm_capable | bool
 
-    # Patch raw image: GRUB serial console + first-boot scripts + credentials
+    # Patch raw image: GRUB serial console + first-boot scripts + credentials.
+    # Logic lives in scripts/symbios-openwrt-image.sh (hash via env, loop
+    # cleanup via trap). Template inputs come from the /tmp/ow-* tasks above.
     - name: Patch raw image (serial console + uci-defaults + postconfig + credentials)
-      ansible.builtin.shell: |
-        set -e
-        RAW="{{ service_root }}/iso/{{ openwrt_image_decompressed }}"
-
-        # Grow the raw image file to the requested disk size. The filesystem
-        # and rootfs partition (p2) are grown below to fill the whole disk,
-        # so the resulting qcow2 presents vm_disk_gb GB to the VM.
-        truncate -s {{ vm_disk_gb }}G "$RAW"
-
-        # Attach raw image to loop device with partition scanning
-        LOOP=$(losetup -fP --show "$RAW")
-        echo "Loop device: $LOOP"
-
-        # Wait for partition devices to appear
-        sleep 2
-        for i in $(seq 1 10); do
-          [ -b "${LOOP}p1" ] && [ -b "${LOOP}p2" ] && break
-          sleep 1
-        done
-        if [ ! -b "${LOOP}p1" ]; then
-          losetup -d "$LOOP"
-          echo "ERROR: Partition devices not found on $LOOP"
-          exit 1
-        fi
-
-        # --- Grow rootfs partition (p2) + filesystem to full disk size ---
-        # After truncate the backup GPT is no longer at the end of the disk.
-        # sgdisk -e relocates it, then parted can resize non-interactively.
-        sgdisk -e "$LOOP"
-        parted -s "$LOOP" resizepart 2 100%
-        partprobe "$LOOP" 2>/dev/null || partx -u "$LOOP"
-        e2fsck -fy "${LOOP}p2" >/dev/null 2>&1 || true
-        resize2fs "${LOOP}p2" >/dev/null
-        echo "rootfs-grown"
-
-        # --- Patch GRUB for serial console ---
-        mkdir -p /tmp/ow-mount
-        mount "${LOOP}p1" /tmp/ow-mount
-        if grep -q "console={{ serial_console_device }}" /tmp/ow-mount/EFI/openwrt/grub.cfg
-        then
-          echo "GRUB already patched"
-        else
-          sed -i "s/console=tty1/console={{ serial_console_device }},115200n8/g" \
-            /tmp/ow-mount/EFI/openwrt/grub.cfg
-          echo "GRUB patched"
-        fi
-        cat /tmp/ow-mount/EFI/openwrt/grub.cfg
-        umount /tmp/ow-mount
-
-        # --- Patch root filesystem (p2): first-boot scripts + credentials ---
-        mkdir -p /tmp/ow-mount
-        mount "${LOOP}p2" /tmp/ow-mount
-
-        # Inject the first-boot scripts (98 network, 99 preconfig, postconfig
-        # hotplug trigger + main script). Always overwrite so a previously
-        # baked raw image gets the current templates (no stale first-boot
-        # config from an older build).
-        for f in \
-          98-openwrt-network:/tmp/ow-uci-network \
-          99-openwrt-preconfig:/tmp/ow-uci-preconfig
-        do
-          NAME="${f%%:*}"; SRC="${f#*:}"
-          mkdir -p /tmp/ow-mount/etc/uci-defaults
-          cp "$SRC" "/tmp/ow-mount/etc/uci-defaults/$NAME"
-          chmod 755 "/tmp/ow-mount/etc/uci-defaults/$NAME"
-          echo "uci-defaults injected: $NAME"
-        done
-        mkdir -p /tmp/ow-mount/etc/hotplug.d/iface
-        cp /tmp/ow-postconfig-trigger /tmp/ow-mount/etc/hotplug.d/iface/80-openwrt-postconfig
-        chmod 644 /tmp/ow-mount/etc/hotplug.d/iface/80-openwrt-postconfig
-        echo "postconfig trigger injected"
-        cp /tmp/ow-postconfig /tmp/ow-mount/etc/openwrt-postconfig.sh
-        chmod 755 /tmp/ow-mount/etc/openwrt-postconfig.sh
-        echo "openwrt-postconfig.sh injected"
-
-        # Set root password in /etc/shadow (pre-computed SHA-512 hash).
-        # Applied unconditionally so a re-baked image always matches the env
-        # file even if a previous bake already hashed a different password.
-        # Full 9-field shadow line required by shadow-utils/login:
-        # login:passwd:lastchg:min:max:warn:inactive:expire:flag
-        # The default factory line is root::0:0:99999:7::: so we must keep
-        # the extra min-age field (0) or LuCI/auth cannot parse the entry.
-        sed -i '1s|^root:.*|root:{{ openwrt_root_password_hash.stdout }}:0:0:99999:7:::|' \
-          /tmp/ow-mount/etc/shadow
-        echo "root password set"
-
-        # Deploy host SSH public key (idempotent overwrite)
-        mkdir -p /tmp/ow-mount/etc/dropbear
-        cat > /tmp/ow-mount/etc/dropbear/authorized_keys << 'SSHEOF'
-        {{ lookup('file', '/root/.ssh/id_ed25519.pub') }}
-        SSHEOF
-        chmod 600 /tmp/ow-mount/etc/dropbear/authorized_keys
-        echo "SSH key deployed"
-
-        umount /tmp/ow-mount
-        rmdir /tmp/ow-mount || true
-
-        # Detach loop device
-        losetup -d "$LOOP"
-        echo "image-patched"
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-openwrt-image.sh patch --root {{ service_root }} --image {{ openwrt_image_decompressed }} --disk-gb {{ vm_disk_gb }} --serial {{ serial_console_device }} --pubkey-file /root/.ssh/id_ed25519.pub"
+      environment:
+        OWRT_ROOT_PW_HASH: "{{ openwrt_root_password_hash.stdout }}"
       register: image_patch_result
       changed_when: "'GRUB patched' in image_patch_result.stdout or 'uci-defaults injected' in image_patch_result.stdout or 'postconfig trigger injected' in image_patch_result.stdout or 'openwrt-postconfig.sh injected' in image_patch_result.stdout or 'root password set' in image_patch_result.stdout or 'SSH key deployed' in image_patch_result.stdout or 'rootfs-grown' in image_patch_result.stdout"
+      no_log: true
       when:
         - kvm_capable | bool
         - not qcow2_image.stat.exists | default(false) | bool
@@ -780,6 +684,8 @@
           fi
         done
         echo "bridges-up"
+      args:
+        executable: /bin/bash
       register: ow_bridges_up
       changed_when: false
       when: kvm_capable | bool
@@ -1078,62 +984,7 @@
     # NIC4: openwrt-tor (VM br-tor: 172.18.2.1, OpenVPN tap2) = eth3
     # NIC5: openwrt-misc (VM owns 172.18.3.1, pure-L2 host bridge) = eth4
     - name: Define OpenWrt VM
-      ansible.builtin.shell: |
-        cat > /tmp/openwrt-vm.xml << 'XMLEOF'
-        <domain type='kvm'>
-          <name>openwrt</name>
-          <memory unit='MiB'>{{ vm_ram_mb }}</memory>
-          <vcpu>{{ vm_vcpus }}</vcpu>
-          <os>
-            <type arch='{{ vm_arch }}' machine='{{ vm_machine }}'>hvm</type>
-            <loader readonly='yes' type='pflash'>{{ uefi_code }}</loader>
-            <nvram>{{ service_root }}/ovmf/OVMF_VARS.fd</nvram>
-          </os>
-          <features>
-            {{ "<acpi state='off'/>" if vm_arch == 'aarch64' else "" }}
-          </features>
-          <cpu mode='{{ vm_cpu_model }}'/>
-          <clock offset='utc'/>
-          <devices>
-            <disk type='file' device='disk'>
-              <driver name='qemu' type='qcow2' cache='none' io='native'/>
-              <source file='{{ service_root }}/images/openwrt.qcow2'/>
-              <target dev='vda' bus='virtio'/>
-            </disk>
-            <interface type='bridge'>
-              <source bridge='base-services'/>
-              <model type='virtio'/>
-              <rom bar='off'/>
-            </interface>
-            <interface type='bridge'>
-              <source bridge='openwrt-lan'/>
-              <model type='virtio'/>
-              <rom bar='off'/>
-            </interface>
-            <interface type='bridge'>
-              <source bridge='openwrt-iot'/>
-              <model type='virtio'/>
-              <rom bar='off'/>
-            </interface>
-            <interface type='bridge'>
-              <source bridge='openwrt-tor'/>
-              <model type='virtio'/>
-              <rom bar='off'/>
-            </interface>
-            <interface type='bridge'>
-              <source bridge='openwrt-misc'/>
-              <model type='virtio'/>
-              <rom bar='off'/>
-            </interface>
-            <serial type='pty'>
-              <target port='0'/>
-            </serial>
-          </devices>
-        </domain>
-        XMLEOF
-        virsh define /tmp/openwrt-vm.xml
-        rm -f /tmp/openwrt-vm.xml
-        echo "vm-defined"
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-openwrt-image.sh define --root {{ service_root }} --ram {{ vm_ram_mb }} --vcpus {{ vm_vcpus }} --arch {{ vm_arch }} --machine {{ vm_machine }} --uefi {{ uefi_code }} --cpu {{ vm_cpu_model }}"
       register: vm_define
       changed_when: "'vm-defined' in vm_define.stdout"
       when:

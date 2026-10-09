@@ -293,9 +293,7 @@
       notify: Restart paperless
 
     - name: Restart paperless
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/services/paperless
+      include_tasks: ../shared-tasks/compose-recreate.yml
 
     - name: Restart authelia
       include_tasks: ../shared-tasks/authelia-restart.yml

@@ -92,16 +92,15 @@
   tasks:
 
     - name: Allow port 21115:21119/tcp
-      community.general.ufw:
-        rule: allow
-        port: '21115:21119'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '21115:21119'
 
     - name: Allow port 21116/udp
-      community.general.ufw:
-        rule: allow
-        port: '21116'
-        proto: udp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '21116'
+        ufw_proto: udp
 
     - name: Router port forwarding (UPnP/FRITZ!Box)
       include_tasks: ../shared-tasks/router-forward.yml
@@ -168,7 +167,5 @@
   handlers:
 
     - name: Restart rustdesk
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/services/{{ service_name }}
+      include_tasks: ../shared-tasks/compose-recreate.yml
 

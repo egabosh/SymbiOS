@@ -648,34 +648,29 @@
     # Firewall rules for inbound mail. Ports 143/995/110 (plain IMAP/POP) are
     # kept closed by default; modern clients use 993/465/587 with TLS.
     - name: Allow SMTP (tcp 25)
-      community.general.ufw:
-        rule: allow
-        port: '25'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '25'
 
     - name: Allow SMTPS (tcp 465)
-      community.general.ufw:
-        rule: allow
-        port: '465'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '465'
 
     - name: Allow Submission (tcp 587)
-      community.general.ufw:
-        rule: allow
-        port: '587'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '587'
 
     - name: Allow IMAPS (tcp 993)
-      community.general.ufw:
-        rule: allow
-        port: '993'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '993'
 
     - name: Allow Sieve (tcp 4190)
-      community.general.ufw:
-        rule: allow
-        port: '4190'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '4190'
 
     # Mailcow backup module. Uses mailcow's own backup_and_restore.sh which
     # dumps the MySQL database, redis and crypto keys into BACKUPDIR.
@@ -821,9 +816,7 @@
   handlers:
 
     - name: Restart mailcow
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: "{{ mailcow_root }}"
+      include_tasks: ../shared-tasks/compose-recreate.yml
 
     - name: Restart unbound
       ansible.builtin.shell: docker restart $(docker ps -qaf name=unbound-mailcow)

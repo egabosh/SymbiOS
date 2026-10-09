@@ -1,0 +1,14 @@
+# Shared task: recreate a Docker Compose stack.
+#
+# Required vars: service_name (compose dir /symbios/services/<name>)
+# Optional vars: compose_args (default: up -d --force-recreate, e.g.
+#                up -d --remove-orphans for wordpress),
+#                compose_quiet (default: false; true masks the always-changed
+#                shell as changed_when: false for ensure-running tasks)
+# Usable as a regular task and (via include_tasks) from handlers.
+
+- name: Recreate {{ service_name }} compose stack
+  ansible.builtin.shell: docker compose {{ compose_args | default('up -d --force-recreate') }}
+  args:
+    chdir: /symbios/services/{{ service_name }}
+  changed_when: not (compose_quiet | default(false) | bool)

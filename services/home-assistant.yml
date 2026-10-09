@@ -508,9 +508,7 @@
       changed_when: "'updated' in ha_http_config.stdout"
 
     - name: Restart home-assistant if HTTP config changed
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/services/home-assistant
+      include_tasks: ../shared-tasks/compose-recreate.yml
       when: ha_http_config.changed
 
     - name: Wait for home-assistant to be ready after HTTP config change
@@ -524,12 +522,10 @@
       when: ha_http_config.changed
 
     - name: Allow port 8123/tcp on iot0 interface for healthchecks for example for shelly switches
-      community.general.ufw:
-        rule: allow
-        port: '8123'
-        proto: tcp
-        interface: iot0
-        direction: in
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '8123'
+        ufw_interface: iot0
 
     - name: Matter UDP ports
       ufw:
@@ -639,12 +635,10 @@
       notify: Restart ha_pingcheck
 
     - name: Allow port 8889/tcp on iot0 interface for ping healthchecks for example for shelly scripts
-      community.general.ufw:
-        rule: allow
-        port: '8889'
-        proto: tcp
-        interface: iot0
-        direction: in
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '8889'
+        ufw_interface: iot0
 
     # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
     - name: Deploy healthcheck
@@ -665,9 +659,7 @@
     #  ansible.builtin.shell: bash /symbios/services/home-assistant/home-assistant.init.sh
 
     - name: Restart home-assistant
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/services/home-assistant
+      include_tasks: ../shared-tasks/compose-recreate.yml
 
     - name: Restart authelia
       include_tasks: ../shared-tasks/authelia-restart.yml

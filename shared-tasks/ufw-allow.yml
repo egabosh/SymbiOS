@@ -1,0 +1,17 @@
+# Shared task: open or close a single UFW port.
+#
+# Required vars: ufw_port (string; ranges like '21115:21119' work)
+# Optional vars: ufw_proto (default: tcp), ufw_rule (default: allow),
+#                ufw_direction (default: in), ufw_interface (default: omit
+#                = global rule, else bound to an interface like iot0/tun0),
+#                ufw_src (default: omit = any source, else a CIDR like
+#                192.168.0.0/16 - loop the include for several sources)
+
+- name: UFW {{ ufw_rule | default('allow') }} {{ ufw_port }}/{{ ufw_proto | default('tcp') }}
+  community.general.ufw:
+    rule: "{{ ufw_rule | default('allow') }}"
+    port: "{{ ufw_port }}"
+    proto: "{{ ufw_proto | default('tcp') }}"
+    interface: "{{ ufw_interface | default(omit) }}"
+    direction: "{{ ufw_direction | default('in') }}"
+    src: "{{ ufw_src | default(omit) }}"

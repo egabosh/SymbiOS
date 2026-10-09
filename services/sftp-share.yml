@@ -140,10 +140,9 @@
       group: root
 
   - name: Allow all access to tcp port 28
-    community.general.ufw:
-      rule: allow
-      port: '28'
-      proto: tcp
+    include_tasks: ../shared-tasks/ufw-allow.yml
+    vars:
+      ufw_port: '28'
 
   - name: Create /symbios/services/sftp-share dir
     ansible.builtin.file:

@@ -168,7 +168,7 @@
               container_name: jellyfin
               restart: unless-stopped
               #env_file: env
-              user: "{{ jellyfin_uid }}{% if jellyfin_gid %}:{{ jellyfin_gid }}{% endif %}"
+              user: "{{ jellyfin_uid }}{{ ':' + jellyfin_gid if jellyfin_gid else '' }}"
               #environment:
               volumes:
                 - ./data/config:/config
@@ -266,7 +266,5 @@
 #      ansible.builtin.shell: bash /symbios/services/jellyfin/jellyfin.init.sh
 
     - name: Restart jellyfin
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/services/jellyfin
+      include_tasks: ../shared-tasks/compose-recreate.yml
 

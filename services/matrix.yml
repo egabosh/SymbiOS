@@ -778,9 +778,7 @@
 #      ansible.builtin.shell: bash /symbios/services/matrix/matrix.init.sh
 
     - name: Restart matrix
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/services/matrix
+      include_tasks: ../shared-tasks/compose-recreate.yml
 
     - name: Restart authelia
       include_tasks: ../shared-tasks/authelia-restart.yml

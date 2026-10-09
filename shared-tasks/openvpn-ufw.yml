@@ -6,16 +6,15 @@
 #                 this via `when: ... ufw_allow is defined`).
 # Rationale: ansible.builtin.subelements cannot traverse the [name, dict]
 # pair lists used by _openvpn_tunnels (key '1' on a list fails), so the
-# per-rule loop lives here instead of inline.
+# per-rule loop lives here instead of inline. Each rule goes through the
+# general shared-tasks/ufw-allow.yml (same directory).
 
 - name: Allow tunnel ports on the tunnel interface
-  community.general.ufw:
-    rule: allow
-    port: "{{ ufw_rule.port | string }}"
-    proto: "{{ ufw_rule.proto | default('tcp') }}"
-    interface: "{{ tunnel_vars.interface | default('tun0') }}"
-    direction: in
+  include_tasks: ufw-allow.yml
+  vars:
+    ufw_port: "{{ ufw_rule.port | string }}"
+    ufw_proto: "{{ ufw_rule.proto | default('tcp') }}"
+    ufw_interface: "{{ tunnel_vars.interface | default('tun0') }}"
   loop: "{{ tunnel_vars.ufw_allow }}"
   loop_control:
     loop_var: ufw_rule
-  changed_when: true

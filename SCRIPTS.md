@@ -504,6 +504,9 @@ texts opportunistically).
 | `symbios-mailcow-idp.sh` | Mailcow OIDC identity_provider rows (mailcow.yml) | `<mailcow_root> <base_domain> <service_domain>` |
 | `symbios-nextcloud-external-storage.sh` | Nextcloud external media mounts via occ (nextcloud.yml) | `[--no-previews]` |
 | `symbios-openwebui-db.sh` | OpenWebUI webui.db maintenance: api-key, workflows, backend syncs | `<api-key\|patch-comfyui\|workflows\|sync-openai\|sync-speech\|sync-image\|sync-retrieval>` |
+| `symbios-openwrt-cleanup.sh` | Remove OpenWrt host bridges + helper units (uninstall command) | no args |
+| `symbios-openwrt-image.sh` | Build OpenWrt image (patch) + define libvirt domain | `<patch\|define> --root ...` |
+| `symbios-ldap-offline-acl.sh` | LDAP offline sftp-reader ACL import + bind account | `<rewrite\|add-reader> --ldif/--basedn ...` |
 
 ### 4.8 Power management (WoL / idle suspend)
 
