@@ -548,10 +548,9 @@
 
 
     - name: Start nextcloud
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/services/nextcloud
-      changed_when: false
+      include_tasks: ../shared-tasks/compose-recreate.yml
+      vars:
+        compose_quiet: true
 
     - name: Wait until nextcloud install is finished
       wait_for:
@@ -895,9 +894,7 @@
       ansible.builtin.shell: bash /symbios/services/nextcloud/nextcloud.init.sh
 
     - name: Restart nextcloud
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/services/nextcloud
+      include_tasks: ../shared-tasks/compose-recreate.yml
 
     - name: run collabora.genpw.sh
       ansible.builtin.shell: ./collabora.genpw.sh

@@ -282,16 +282,14 @@
         backup: yes
 
     - name: Allow http from all clients
-      community.general.ufw:
-        rule: allow
-        port: '80'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '80'
 
     - name: Allow https from all clients
-      community.general.ufw:
-        rule: allow
-        port: '443'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '443'
 
     - name: Allow access from base-services to Docker-Host for services running without docker
       community.general.ufw:

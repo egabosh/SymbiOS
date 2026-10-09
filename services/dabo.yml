@@ -271,9 +271,7 @@
 
     # Restart the dabo container
     - name: Restart dabo
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/services/dabo
+      include_tasks: ../shared-tasks/compose-recreate.yml
 
     # Restart Authelia when access_control changes
     - name: Restart authelia

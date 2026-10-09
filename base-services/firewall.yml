@@ -57,17 +57,15 @@
         install_recommends: no
 
     - name: Allow all access to tcp port 33 (ssh)
-      community.general.ufw:
-        rule: allow
-        port: '33'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '33'
 
     - name: Allow chromecats port 8010 from all IPv4/IPv6 private networks
-      community.general.ufw:
-        rule: allow
-        port: '8010'
-        proto: tcp
-        src: "{{ item }}"
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '8010'
+        ufw_src: "{{ item }}"
       loop:
         - 10.0.0.0/8
         - 172.16.0.0/12
@@ -75,11 +73,10 @@
         - fc00::/7
 
     - name: Allow webui port 8080 from all IPv4/IPv6 private networks
-      community.general.ufw:
-        rule: allow
-        port: '8080'
-        proto: tcp
-        src: "{{ item }}"
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '8080'
+        ufw_src: "{{ item }}"
       loop:
         - 10.0.0.0/8
         - 172.16.0.0/12
@@ -87,10 +84,10 @@
         - fc00::/7
 
     - name: Allow extra inbound ports for IPv6 port forwarding
-      community.general.ufw:
-        rule: allow
-        port: "{{ item.port | string }}"
-        proto: "{{ item.proto }}"
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: "{{ item.port | string }}"
+        ufw_proto: "{{ item.proto }}"
       loop: "{{ ufw_extra_inbound | default([]) }}"
 
     - name: Deny everything per policy and enable UFW

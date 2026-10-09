@@ -118,34 +118,32 @@
 
     # Firewall rules: STUN/TURN control ports plus the relay range
     - name: Allow port 3478/tcp (STUN/TURN)
-      community.general.ufw:
-        rule: allow
-        port: '3478'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '3478'
 
     - name: Allow port 3478/udp (STUN/TURN)
-      community.general.ufw:
-        rule: allow
-        port: '3478'
-        proto: udp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '3478'
+        ufw_proto: udp
 
     - name: Allow port 5349/tcp (TURNS)
-      community.general.ufw:
-        rule: allow
-        port: '5349'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '5349'
 
     - name: Allow port 5349/udp (TURNS)
-      community.general.ufw:
-        rule: allow
-        port: '5349'
-        proto: udp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '5349'
+        ufw_proto: udp
 
     - name: Allow relay port range {{ turn_min_port }}-{{ turn_max_port }}/udp
-      community.general.ufw:
-        rule: allow
-        port: "{{ turn_min_port }}:{{ turn_max_port }}"
-        proto: udp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: "{{ turn_min_port }}:{{ turn_max_port }}"
+        ufw_proto: udp
 
     # /symbios/services/turn/coturn/turnserver.conf.tmpl
     - name: /symbios/services/turn/coturn/turnserver.conf.tmpl
@@ -434,6 +432,4 @@
   handlers:
 
     - name: Restart turn
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: "/symbios/services/{{ service_name }}"
+      include_tasks: ../shared-tasks/compose-recreate.yml

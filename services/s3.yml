@@ -345,6 +345,4 @@
   handlers:
 
     - name: Restart s3
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: "/symbios/services/{{ service_name }}"
+      include_tasks: ../shared-tasks/compose-recreate.yml

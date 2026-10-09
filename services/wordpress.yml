@@ -397,9 +397,9 @@
     # --remove-orphans drops containers whose instances were removed from the
     # config file; their data dirs are NOT touched).
     - name: Restart wordpress
-      ansible.builtin.shell: docker compose up -d --remove-orphans
-      args:
-        chdir: /symbios/services/wordpress
+      include_tasks: ../shared-tasks/compose-recreate.yml
+      vars:
+        compose_args: up -d --remove-orphans
 
     # Restart Authelia when access_control changes
     - name: Restart authelia

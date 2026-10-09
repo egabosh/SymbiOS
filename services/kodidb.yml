@@ -16,7 +16,7 @@
 # docs:
 #   name: KodiDB
 #   short_description: Deploy the KodiDB media database service
-#   description: Deploys KodiDB (MySQL/MariaDB for Kodi media databases) with phpMyAdmin for administration, exposed via Traefik.
+#   description: Deploys KodiDB (MySQL/MariaDB for Kodi media databases with SSL).
 #   url: "https://kodidb.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
@@ -81,9 +81,6 @@
         autoupdate_content: |
           #!/bin/bash -e
           cd /symbios/services/kodidb
-
-          # start phpmyadmin (if not) to force traefik to get a letsencrypt certificate
-          docker compose up -d kodidb--phpmyadmin
           mkdir -p ssl
 
           # take letsencrypt-certs from traefik and check for new ones
@@ -190,23 +187,6 @@
           ssl-key=/etc/mysql/key.pem
         backup: yes
 
-    - name: /symbios/services/kodidb/phpmyadmin-config.user.inc.php (use ssl in phpmyadmin)
-      blockinfile:
-        path: /symbios/services/kodidb/phpmyadmin-config.user.inc.php
-        create: yes
-        mode: 0444
-        owner: root
-        group: docker
-        marker: "// {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          // IP address / host of your instance
-          $cfg['Servers'][$i]['host'] = 'kodidb';
-          // Use SSL for connection
-          $cfg['Servers'][$i]['ssl'] = true;
-          // Disable SSL verification
-          $cfg['Servers'][$i]['ssl_verify'] = false;
-        backup: yes
-
     - name: /symbios/services/kodidb/docker-compose.yml Container Configuration
       blockinfile:
         path: /symbios/services/kodidb/docker-compose.yml
@@ -242,33 +222,20 @@
               ports:
                 - 0.0.0.0:3307:3306
 
-            kodidb--phpmyadmin:
-              image: phpmyadmin:latest
-              container_name: kodidb--phpmyadmin
-              restart: unless-stopped
-              env_file: {{ base_services_root }}/_defaults/mariadb/env.rootphpmyadmin
-              environment:
-                - PMA_ARBITRARY=0
-                - PMA_HOST=kodidb
-              volumes:
-                - /etc/localtime:/etc/localtime:ro
-                - ./phpmyadmin-config.user.inc.php:/etc/phpmyadmin/config.user.inc.php:ro
-              networks:
-                kodidb--network: {}
-                symbios_services: null
-
           networks:
             kodidb--network:
               driver: bridge
               driver_opts:
                 com.docker.network.bridge.name: br-kodidb
-            symbios_services:
-              external: true
 
         backup: yes        
       notify:
         - Restart mariadb
 
+    # No web UI: this router exists only so Traefik issues/renews the LE
+    # certificate for kodidb.<domain> (consumed by MariaDB SSL below).
+    # ACME HTTP-01 challenges are answered at entrypoint level, so the
+    # dead backend and the authelia middleware do not affect renewal.
     - name: /symbios/base-services/traefik/providers/kodidb.yml Traefik File Provider
       blockinfile:
         path: /symbios/base-services/traefik/providers/kodidb.yml
@@ -348,14 +315,13 @@
         validate: /bin/bash -n %s
 
     - name: Allow mysql/kodidb over network
-      community.general.ufw:
-        rule: allow
-        port: '3307'
-        proto: tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '3307'
 
-    # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
+    # Docker-based healthcheck (MariaDB has no HTTP endpoint since phpmyadmin removal)
     - name: Deploy healthcheck
-      include_tasks: ../shared-tasks/runcheck.yml
+      include_tasks: ../shared-tasks/runcheck-docker.yml
 
     - name: Ensure mariadb is running
       include_tasks: ../shared-tasks/docker-start.yml
@@ -366,9 +332,7 @@
   handlers:
 
     - name: Restart mariadb
-      ansible.builtin.shell: docker compose up -d --force-recreate
-      args:
-        chdir: /symbios/services/kodidb
+      include_tasks: ../shared-tasks/compose-recreate.yml
 
     - name: Restart authelia
       include_tasks: ../shared-tasks/authelia-restart.yml
