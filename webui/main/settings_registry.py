@@ -162,4 +162,13 @@ SETTINGS = {
              'label': 'Probe homeserver'},
         ],
     },
+    'wlan-ap': {
+        'script': 'symbios-settings-wlan-ap.sh',
+        'title': 'WLAN Access Point',
+        'icon': 'bi-wifi',
+        'explain': 'wlan-ap',
+        'playbooks': ['base-services/wlan-accesspoint.yml'],
+        'force': False,
+        'message': 'WLAN AP settings saved.',
+    },
 }

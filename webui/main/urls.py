@@ -35,7 +35,6 @@ from . import views_suspend
 from . import views_wol
 from . import views_external
 from . import views_plugins
-from . import views_wlan_ap
 from . import views_network_bridges
 from . import views_openvpn
 from . import views_filemanager
@@ -54,7 +53,8 @@ urlpatterns = [
     re_path(r'^services/(?P<playbook>.+\.yml)/source/$', views_services.services_source, name='services_source'),
     re_path(r'^services/(?P<playbook>.+\.yml)/access/$', views_services.services_access, name='services_access'),
     re_path(r'^services/(?P<playbook>.+\.yml)/instances/save/$', views_services.services_instances_save, name='services_instances_save'),
-    path('settings/wlan-accesspoint/', views_wlan_ap.settings_wlan_ap, name='settings_wlan_ap'),
+    path('settings/wlan-accesspoint/', views_settings_generic.settings_generic,
+         {'slug': 'wlan-ap'}, name='settings_wlan_ap'),
     path('settings/network-bridges/', views_network_bridges.settings_network_bridges, name='settings_network_bridges'),
     path('settings/network-bridges/list/', views_network_bridges.settings_network_bridges_list, name='settings_network_bridges_list'),
     path('settings/openvpn/', views_openvpn.settings_openvpn, name='settings_openvpn'),
