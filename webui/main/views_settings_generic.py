@@ -249,6 +249,9 @@ def _save_generic(request, slug, entry, script):
         changed[name] = posted
     if not changed:
         if is_ajax:
+            # Stored as a Django message so it survives the JS navigation
+            # and is shown on the reloaded page (the modal itself closes).
+            messages.info(request, 'Already up to date - nothing changed.')
             return JsonResponse({'ok': True, 'message': 'Already up to date.',
                                  'redirect': request.path})
         messages.info(request, 'Already up to date - nothing changed.')
@@ -289,6 +292,9 @@ def _save_generic(request, slug, entry, script):
         create_job(cmd, timeout=3600)
         return redirect(request.path)
     if is_ajax:
+        # Stored as a Django message so it survives the JS navigation and
+        # is shown on the reloaded page (the modal itself closes).
+        messages.success(request, message)
         return JsonResponse({'ok': True, 'message': message,
                              'redirect': request.path})
     messages.success(request, message)
