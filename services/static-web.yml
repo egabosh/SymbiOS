@@ -27,6 +27,8 @@
 # that are not listed stay public and only get the security headers.
 #
 # docs:
+#   uses_vars:
+#     - base_domain
 #   name: Static Web
 #   short_description: Serve static web content from plain directories
 #   description: Deploys a single nginx container that serves any number of static subdomains from local directories. Selected sites are protected by Authelia forward-auth against the static-web LDAP group.

@@ -15,6 +15,15 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
+#     - media_audio
+#     - media_documents
+#     - media_gid
+#     - media_images
+#     - media_videos
+#     - traefik_ip
 #   name: Nextcloud
 #   short_description: Deploy the Nextcloud service
 #   description: Deploys Nextcloud (file sync/collaboration) together with its database and storage, exposed via Traefik.

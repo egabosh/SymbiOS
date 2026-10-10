@@ -15,6 +15,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars:
+#     - matrix_homeserver
+#     - matrix_password
+#     - matrix_room
+#     - matrix_token
+#     - matrix_user
+#     - notify_matrix_enabled
 #   name: Matrix Client
 #   short_description: E2EE matrix sender for notifications
 #   description: Runs the persistent pipes-runner daemon (matrix-nio, E2EE via megolm) that delivers SymbiOS notifications into a single encrypted matrix room. symbios-notify.sh hands messages over via a FIFO, so sending costs no container start. Extracted from services/matrix.yml (single-room variant, works against any homeserver).

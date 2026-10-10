@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
+#     - twofa_enabled
 #   name: Matrix
 #   short_description: Deploy the Matrix communication server
 #   description: Deploys Matrix (Synapse) with Nginx reverse proxy, PostgreSQL, Redis, Element Web, Matrix Commander, and Admin UI. Exposed via Traefik.

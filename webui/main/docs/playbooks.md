@@ -179,6 +179,17 @@ Layout, sharing and syntax rules for every playbook in `services/` and
   -> Compose -> Healthcheck -> Autoupdate -> State. No service-local
   `tasks/` splits; complex services may use `<name>/templates/*.j2` and
   `<name>/features/*`.
+- **Declared variables (`uses_vars:`)**: every `# docs:` header lists the
+  inventory keys the playbook bakes into state (templates, env files, DB
+  writes, `when:` gates) - everything EXCEPT path infra (`data_root`,
+  `git_root`, `*_root`, ...) and derived play vars (`service_name`,
+  `service_domain`). Scripts reading inventory live at runtime (cron,
+  dispatchers) need NO entry; scripts running ONLY as playbook tasks
+  (their values take effect on reapply) belong to the calling playbook.
+  After a settings save, installed playbooks declaring any changed key
+  are reapplied automatically (`webui/main/utils/uses_vars.py`), after
+  the explicit registry chains. `symbios-check-uses-vars.py` verifies
+  coverage (used-but-undeclared fails).
 - **Sharing**: only via top-level `shared-tasks/*.yml` with relative
   `include_tasks: ../shared-tasks/<file>.yml` (from both `services/` and
   `base-services/`). New shared tasks only with 3+ callers. Catalog below

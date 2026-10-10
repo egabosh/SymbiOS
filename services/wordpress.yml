@@ -15,6 +15,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # docs:
+#   uses_vars:
+#     - base_domain
+#     - twofa_enabled
 #   name: WordPress
 #   short_description: Deploy multiple WordPress instances
 #   description: >-

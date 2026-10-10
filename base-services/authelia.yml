@@ -15,6 +15,15 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars:
+#     - base_domain
+#     - ddns_host
+#     - smtp_from
+#     - smtp_password
+#     - smtp_port
+#     - smtp_server
+#     - smtp_user
+#     - twofa_enabled
 #   name: Authelia
 #   short_description: Deploy and configure the Authelia identity provider for Auth and SSO
 #   description: Installs Authelia as the central authentication/authorization server with SSO (signe-sign-on). Users and groups are backed by OpenLDAP; optional second-factor authentication (2FA) is supported.

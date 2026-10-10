@@ -25,9 +25,12 @@
 # /symbios/services/s3/s3-user.sh on the host.
 #
 # docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
 #   name: S3
 #   short_description: Deploy a generic S3-compatible restic backup endpoint
-#   description: Deploys restic/rest-server as a generic S3-style REST backend for restic backups. Access is controlled by an htpasswd user list (not OIDC), because non-interactive restic clients cannot complete a browser login. Membership comes from the LDAP group s3-users and LDAP password changes are synced into htpasswd automatically. Troubleshooting tip: if a user cannot log in, set their password again via Users and Groups - this re-runs the password hook and repairs the htpasswd entry.
+#   description: Deploys restic/rest-server as a generic S3-style REST backend for restic backups. Access is controlled by an htpasswd user list (not OIDC), because non-interactive restic clients cannot complete a browser login. Membership comes from the LDAP group s3-users and LDAP password changes are synced into htpasswd automatically. Troubleshooting tip - if a user cannot log in, set their password again via Users and Groups - this re-runs the password hook and repairs the htpasswd entry.
 #   url: "https://s3.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'

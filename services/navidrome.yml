@@ -14,9 +14,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
+#     - media_audio
+#     - media_gid
+#     - twofa_enabled
 #   name: Navidrome
 #   short_description: Deploy the Navidrome music streaming server
-#   description: Deploys Navidrome, a self-hosted music server and streamer compatible with Subsonic/Airsonic, exposed via Traefik. Browser login runs via Authelia SSO (Remote-User header, auto-mapped to the same-named row); Subsonic clients (Supersonic, DSub, Feishin, ...) use /rest/* which bypasses Authelia, so they authenticate with Navidrome's local password. That password follows the LDAP password automatically via the ldap-groups.d password hook. Troubleshooting tip: if a client login fails, set the user's password again via Users and Groups - this re-runs the password hook and repairs the API password. Users who only ever logged in via SSO have no local password yet - the admin sets it once with /symbios/services/navidrome/navidrome-passwd.sh on the host.
+#   description: Deploys Navidrome, a self-hosted music server and streamer compatible with Subsonic/Airsonic, exposed via Traefik. Browser login runs via Authelia SSO (Remote-User header, auto-mapped to the same-named row); Subsonic clients (Supersonic, DSub, Feishin, ...) use /rest/* which bypasses Authelia, so they authenticate with Navidrome's local password. That password follows the LDAP password automatically via the ldap-groups.d password hook. Troubleshooting tip - if a client login fails, set the user's password again via Users and Groups - this re-runs the password hook and repairs the API password. Users who only ever logged in via SSO have no local password yet - the admin sets it once with /symbios/services/navidrome/navidrome-passwd.sh on the host.
 #   url: "https://navidrome.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'

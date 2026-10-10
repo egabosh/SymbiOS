@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
+#     - twofa_enabled
 #   name: KodiDB
 #   short_description: Deploy the KodiDB media database service
 #   description: Deploys KodiDB (MySQL/MariaDB for Kodi media databases with SSL).

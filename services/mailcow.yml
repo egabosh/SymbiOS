@@ -14,6 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
+#     - timezone
+#     - traefik_network_gateway
+#     - twofa_enabled
 #   name: Mailcow
 #   short_description: Deploy the Mailcow mail server (mailcow-dockerized)
 #   description: Deploys Mailcow with Traefik integration, LDAP groups, and Authelia access control. TLS certificates are provided by Traefik (ACME) and synced into the mailcow nginx. All persistent data (mailboxes, databases) lives in bind-backed named volumes under ./volumes/, i.e. as plain files inside the service directory.

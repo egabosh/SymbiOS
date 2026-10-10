@@ -15,6 +15,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars:
+#     - notify_level
+#     - notify_mail_enabled
+#     - notify_mail_to
+#     - notify_matrix_enabled
+#     - smtp_from
+#     - smtp_server
 #   name: Notifications
 #   short_description: Route system mails and health alerts to mail and matrix
 #   description: Deploys the notification dispatcher (symbios-notify.sh as /usr/local/bin/notify.sh, so gaboshlib g_echo_error/g_echo_warn deliver automatically) and routes system mails addressed to root to both the mail recipient and the matrix notify room.

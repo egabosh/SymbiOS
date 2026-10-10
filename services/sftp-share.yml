@@ -39,6 +39,11 @@
 # writable landing point is the inbox below it.
 #
 # docs:
+#   uses_vars:
+#     - base_domain
+#     - media_gid
+#     - media_quota_home
+#     - media_root
 #   name: SFTP Share
 #   short_description: Deploy the SFTP file-share service
 #   description: Deploys a scoped SFTP file-sharing container for secure external file exchange.

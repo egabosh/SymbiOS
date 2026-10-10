@@ -276,6 +276,16 @@ def _save_generic(request, slug, entry, script):
         if (posted is not None
                 and str(posted).lower() == str(cond.get('equals')).lower()):
             playbooks = list(extra.get('playbooks') or []) + list(playbooks)
+    # Dynamic completion: installed playbooks declaring any changed key
+    # in their docs uses_vars (explicit chains above keep author order
+    # and stay first). Never breaks saves on matcher errors.
+    try:
+        from .utils.uses_vars import consumers_for_keys
+        for pb in consumers_for_keys(set(changed)):
+            if pb not in playbooks:
+                playbooks.append(pb)
+    except Exception:
+        pass
     message = entry.get('message') or 'Settings saved.'
     if playbooks:
         flag = '--only {}'.format(' '.join(playbooks))

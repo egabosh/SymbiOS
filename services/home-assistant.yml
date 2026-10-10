@@ -15,6 +15,15 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
+#     - media_audio
+#     - media_images
+#     - media_videos
+#     - traefik_ip
+#     - traefik_network_gateway
+#     - twofa_enabled
 #   name: Home Assistant
 #   short_description: Deploy the Home Assistant service
 #   description: Deploys the Home Assistant container for home automation, managed by SymbiOS.
