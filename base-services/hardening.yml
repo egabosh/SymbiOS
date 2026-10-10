@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars: []
 #   name: Hardening
 #   short_description: Apply basic Debian Linux hardening
 #   description: 'Hardens the OS: tightens SSH configuration, encrypts swap with a random key per boot, applies kernel/sysctl and permission hardening, and reduces the attack surface of the host.'

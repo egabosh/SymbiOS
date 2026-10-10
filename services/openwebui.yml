@@ -15,6 +15,23 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # docs:
+#   uses_vars:
+#     - acme_resolver
+#     - ai_apikey
+#     - ai_image_edit_model
+#     - ai_image_edit_url
+#     - ai_image_model
+#     - ai_image_url
+#     - ai_searxng_url
+#     - ai_server
+#     - ai_stt_key
+#     - ai_stt_model
+#     - ai_stt_url
+#     - ai_tika_url
+#     - ai_tts_key
+#     - ai_tts_model
+#     - ai_tts_url
+#     - base_domain
 #   name: Open WebUI
 #   short_description: Deploy the Open WebUI with SearXNG
 #   description: Deploys Open WebUI (web interface for local LLMs) with SearXNG for web search. Exposed via Traefik.

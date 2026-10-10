@@ -27,6 +27,9 @@
 # certificate, fetched from the Traefik ACME store.
 #
 # docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
 #   name: TURN
 #   short_description: Deploy the coturn TURN/STUN NAT traversal server
 #   description: Deploys coturn as a generic TURN/STUN server for VoIP and WebRTC media relay. Uses the static-auth-secret (TURN REST API) mechanism, because the TURN protocol cannot carry OIDC or LDAP forward-auth.

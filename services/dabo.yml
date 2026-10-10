@@ -14,6 +14,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
+#     - twofa_enabled
 #   name: Dabo
 #   short_description: Deploy the Dabo crypto trading bot
 #   description: Deploys Dabo, a crypto trading bot with web UI, exposed via Traefik. Includes LDAP group-based access control.

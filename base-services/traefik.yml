@@ -15,6 +15,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars:
+#     - acme_server
+#     - base_domain
 #   name: Traefik
 #   short_description: Deploy and configure the Traefik reverse proxy
 #   description: Installs Traefik as the central reverse proxy / ingress, sets up entrypoints, TLS (ACME) and forward-auth integration with Authelia.
@@ -48,7 +51,6 @@
     docker_path: "{{ base_services_root }}/traefik"
     authelia_domain: "auth.{{ base_domain }}"
     traefik_domain: "traefik.{{ base_domain }}"
-    acme_server: ""
 
   pre_tasks:
     - name: Fail if base_domain is not configured
@@ -142,7 +144,7 @@
                 - --certificatesResolvers.letsencrypt.acme.httpChallenge.entryPoint=http
                 - --certificatesresolvers.letsencrypt.acme.email=ssl@{{ base_domain }}
                 - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
-                {{ '- --certificatesresolvers.letsencrypt.acme.caServer=' + acme_server if acme_server else '' }}
+                {{ '- --certificatesresolvers.letsencrypt.acme.caServer=' + acme_server if acme_server | default('') else '' }}
                 # non-docker services
                 - --providers.file=true
                 - --providers.file.directory=/etc/traefik/providers.local

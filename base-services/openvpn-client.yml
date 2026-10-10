@@ -15,6 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars:
+#     - openvpn_clients
 #   name: OpenVPN Client
 #   short_description: Manage OpenVPN client tunnels to remote networks
 #   description: Installs openvpn and manages client tunnels from inventory (openvpn_clients). Each tunnel is either uploaded once (mode upload) or refreshed from a fetch helper on a schedule (mode fetch, e.g. pulled from the router). Tunnel configs contain private keys and live encrypted on the data volume (base-services/openvpn/); they are bind-mounted into /etc/openvpn after the mount and the tunnels are started from rc.local (never via systemd autostart, which would run before the LUKS unlock). Managed through the WebUI under Settings -> OpenVPN Client.

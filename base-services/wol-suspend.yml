@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars: []
 #   name: WoL Suspend
 #   short_description: Wake-on-LAN and idle suspend for other hosts
 #   description: Watches the Traefik access log and sends Wake-on-LAN magic packets when a sleeping target is requested (wol-tail@ instances), and suspends idle targets over SSH (wol-idle@ instances). Targets are configured in the WebUI (/settings/wake-on-lan/ and /settings/suspend/), stored in <config>/power/targets.yml. The watchers depend on /symbios (SSH key, scripts, access log); the scripts wait for those paths instead of failing when the data disk unlocks late.

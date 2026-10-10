@@ -15,6 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars:
+#     - base_domain
 #   name: Reverse Proxy
 #   short_description: Publish external targets through Traefik
 #   description: Renders one Traefik file-provider snippet per configured forward (proxy-<name>.yml) from the data file <config>/traefik/forwards.yml (managed in the WebUI at /settings/reverse-proxy/). Each forward maps one public hostname to one backend (http/https + host/IP + port) with optional access control (open, local-only, Authelia). Traefik watches the providers directory, so no restart is needed.

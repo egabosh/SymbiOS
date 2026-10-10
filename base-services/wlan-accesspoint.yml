@@ -15,6 +15,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars:
+#     - ap_country
+#     - ap_enabled
+#     - ap_interface
+#     - ap_name
+#     - ap_passphrase
+#     - keyboard
 #   name: WLAN Access Point
 #   short_description: Configure a wireless LAN access point via hostapd
 #   description: Sets up a simple wireless LAN access point using hostapd. Provides WiFi connectivity only - no routing, DNS or DHCP.

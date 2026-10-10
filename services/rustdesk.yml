@@ -14,6 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # docs:
+#   uses_vars:
+#     - base_domain
+#     - port_forwarding_method
+#     - router_upnp_password
+#     - router_upnp_user
 #   name: RustDesk
 #   short_description: Deploy the RustDesk remote desktop server
 #   description: |

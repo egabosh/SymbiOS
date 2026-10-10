@@ -22,6 +22,9 @@
 # Start it with an arbitrary yt-dlp URL argument.
 #
 # docs:
+#   uses_vars:
+#     - media_gid
+#     - media_videos
 #   name: yt-dlp
 #   short_description: Deploy a yt-dlp downloader for ad-hoc video downloads
 #   description: Deploys a one-shot yt-dlp (youtube-dl) container that downloads a video into a configurable target directory. It exposes no port and needs no authentication; start it with the youtube-dl wrapper on the host.

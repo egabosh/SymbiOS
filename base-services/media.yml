@@ -21,6 +21,24 @@
 # only mount these paths, they never create them.
 #
 # docs:
+#   uses_vars:
+#     - media_audio
+#     - media_books
+#     - media_documents
+#     - media_gid
+#     - media_images
+#     - media_inbox
+#     - media_quota_audio
+#     - media_quota_books
+#     - media_quota_documents
+#     - media_quota_home
+#     - media_quota_images
+#     - media_quota_inbox
+#     - media_quota_share
+#     - media_quota_videos
+#     - media_root
+#     - media_shared
+#     - media_videos
 #   name: Media
 #   short_description: Create the shared standard media directories
 #   description: Creates the shared media directories with the fixed media group and ensures the matching LDAP group exists.

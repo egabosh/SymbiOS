@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 # docs:
+#   uses_vars:
+#     - base_domain
 #   name: RustDesk Client
 #   short_description: Install the RustDesk client with preconfigured server
 #   description: |

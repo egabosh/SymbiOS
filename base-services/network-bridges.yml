@@ -15,6 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
+#   uses_vars:
+#     - bridge_assignments
 #   name: Network Bridges
 #   short_description: Assign physical interfaces to Linux bridges
 #   description: Manages the assignment of unused physical interfaces (e.g. wlan0) to existing Linux bridges. Assignments are applied via ip link and persisted in /etc/rc.local so they survive a reboot.
