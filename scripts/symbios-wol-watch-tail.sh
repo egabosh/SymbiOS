@@ -36,9 +36,12 @@ f_wol_wait_ready "log"
 
 g_echo_note "wol-tail for ${WOL_NAME}: watching ${WOL_LOG_PATH}"
 
+# Both greps need --line-buffered: stdout to a pipe is block-buffered by
+# default, so rare matches would sit in the second grep's 4K buffer for hours
+# and the wake trigger would arrive far too late (or never).
 exec tail -F "${WOL_LOG_PATH}" 2>/dev/null \
   | grep -a --line-buffered -E "${WOL_WAKE_RE}" \
-  | grep -v '"RequestPath":"/"' \
+  | grep --line-buffered -v '"RequestPath":"/"' \
   | while read -r f_line
   do
     # Config may change at runtime (WebUI apply) - re-read each round.
