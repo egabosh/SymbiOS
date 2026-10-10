@@ -179,6 +179,20 @@
       loop: "{{ power_targets }}"
       notify: Restart wol instances
 
+    - name: List rendered live configs
+      ansible.builtin.find:
+        paths: "{{ power_config_dir }}/live"
+        patterns: "*.conf"
+      register: power_live_find
+
+    - name: Remove live configs of deleted targets
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ power_live_find.files | map(attribute='path') | list | difference(power_live_expected) }}"
+      vars:
+        power_live_expected: "{{ power_targets | map(attribute='name') | map('regex_replace', '^(.*)$', power_config_dir + '/live/\\1.conf') | list }}"
+
     - name: Deploy wol-tail template unit
       ansible.builtin.copy:
         dest: /etc/systemd/system/wol-tail@.service
