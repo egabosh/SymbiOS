@@ -128,6 +128,11 @@
   <span class="fw-semibold">Host System</span>
   <span class="ms-auto small text-muted" id="stats-time"></span>
 </div>
+{% if host_stats.net_iface %}
+<div class="small text-muted mb-2">
+  <code>{{ host_stats.net_iface }}</code> &middot; MAC <code>{{ host_stats.net_mac }}</code>{% if host_stats.net_duid %} &middot; DUID <code>{{ host_stats.net_duid }}</code>{% endif %}
+</div>
+{% endif %}
 <div id="host-stats" class="mb-3">
   {% if host_stats.cores %}
   <div class="row g-2">

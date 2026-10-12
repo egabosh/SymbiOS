@@ -200,9 +200,25 @@ f_uptime+="$(printf '%02d:%02d' "${f_up_hours}" "${f_up_minutes}")"
 
 f_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+# Primary interface (default route), its MAC and its DHCPv6 client DUID
+# (empty when NetworkManager is absent or no v6 lease is active).
+f_iface="$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')"
+f_mac=""
+f_duid=""
+if [[ -n "${f_iface}" ]]
+then
+  f_mac="$(cat "/sys/class/net/${f_iface}/address" 2>/dev/null)"
+  if command -v nmcli >/dev/null 2>&1
+  then
+    f_duid="$(nmcli -f DHCP6 dev show "${f_iface}" 2>/dev/null | sed -n 's/.*dhcp6_client_id *= *//p' | head -1)"
+  fi
+fi
+
 # Build the per-device I/O JSON array.
 printf '{"timestamp":"%s","cores":%d,"cpu_percent":%.1f,"cpu_iowait":%.1f,' \
   "${f_timestamp}" "${f_cores}" "${f_cpu_percent}" "${f_iowait_percent}"
+printf '"net_iface":"%s","net_mac":"%s","net_duid":"%s",' \
+  "${f_iface}" "${f_mac}" "${f_duid}"
 printf '"load1":%s,"load5":%s,"load15":%s,' "${f_load1}" "${f_load5}" "${f_load15}"
 printf '"mem_total_mb":%d,"mem_used_mb":%d,"mem_percent":%d,' \
   "${f_mem_total_mb}" "${f_mem_used_mb}" "${f_mem_percent}"
