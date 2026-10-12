@@ -231,69 +231,97 @@
               userPassword: {{ldap_password_hash}}
           no_log: true
 
-        - name: "{{ docker_path }}/ldap-config/config.ldif"
+        # Classic slapd.conf bootstrap, converted to slapd.d by the entrypoint
+        # via slaptest -f/-F. The classic parser loads schemas in include
+        # order before the database ACLs, so unlike slapadd -n 0 it has no
+        # schema-ordering problem with the nis/openssh-lpk attributes below.
+        # (A failed slapadd init once left slapd without any suffix database,
+        # hanging fresh installs in "Wait for LDAP to be ready" until the
+        # retry budget ran out.)
+        - name: "{{ docker_path }}/ldap-config/slapd.conf"
           blockinfile:
-            path: "{{ docker_path }}/ldap-config/config.ldif"
+            path: "{{ docker_path }}/ldap-config/slapd.conf"
             mode: "0440"
             owner: 10001
             group: 10001
             create: yes
             marker: "# {mark} ANSIBLE MANAGED BLOCK"
             block: |
-              dn: cn=config
-              objectClass: olcGlobal
-              cn: config
-              olcDisallows: bind_anon
-              olcRequires: authc
+              modulepath /usr/lib/ldap
+              moduleload back_mdb
+              moduleload argon2
+              disallow bind_anon
+              require authc
 
-              dn: cn=module,cn=config
-              objectClass: olcModuleList
-              cn: module
-              olcModulePath: /usr/lib/ldap
-              olcModuleLoad: back_mdb
-              olcModuleLoad: argon2
+              include /etc/ldap/schema/core.schema
+              include /etc/ldap/schema/cosine.schema
+              include /etc/ldap/schema/inetorgperson.schema
+              include /etc/ldap/schema/nis.schema
+              include /ldap-config/openssh-lpk.schema
 
-              dn: olcDatabase={0}config,cn=config
-              objectClass: olcDatabaseConfig
-              objectClass: olcConfig
-              olcDatabase: config
+              database config
 
-              dn: olcDatabase={1}mdb,cn=config
-              objectClass: olcDatabaseConfig
-              objectClass: olcMdbConfig
-              olcDatabase: mdb
-              olcSuffix: {{ldap_basedn}}
-              olcRootDN: cn=head-of-ldap,{{ldap_basedn}}
-              olcRootPW: {{ldap_password_hash}}
-              olcDbDirectory: /var/lib/ldap
-              olcDbIndex: objectClass eq
-              olcAccess: {0}to dn.base="" by * read
-              olcAccess: {1}to dn.base="cn=Subschema" by * read
-              olcAccess: {2}to attrs=userPassword
+              database mdb
+              suffix {{ldap_basedn}}
+              rootdn cn=head-of-ldap,{{ldap_basedn}}
+              rootpw {{ldap_password_hash}}
+              directory /var/lib/ldap
+              index objectClass eq
+              access to dn.base="" by * read
+              access to dn.base="cn=Subschema" by * read
+              access to attrs=userPassword
                 by self write
                 by anonymous auth
                 by dn="cn=readuser,{{ldap_basedn}}" auth
                 by * none
-              olcAccess: {3}to attrs=entry,uid,cn,objectClass,uidNumber,gidNumber,homeDirectory,loginShell,sshPublicKey,memberUid
+              access to attrs=entry,uid,cn,objectClass,uidNumber,gidNumber,homeDirectory,loginShell,sshPublicKey,memberUid
                 by self read
                 by dn="cn=sftp-reader,{{ldap_basedn}}" read
                 by dn="cn=readuser,{{ldap_basedn}}" read
                 by * none
-              olcAccess: {4}to dn.base="ou=users,{{ldap_basedn}}"
+              access to dn.base="ou=users,{{ldap_basedn}}"
                 by self read
                 by dn="cn=sftp-reader,{{ldap_basedn}}" read
                 by dn="cn=readuser,{{ldap_basedn}}" read
                 by * none
-              olcAccess: {5}to dn.base="ou=groups,{{ldap_basedn}}"
+              access to dn.base="ou=groups,{{ldap_basedn}}"
                 by self read
                 by dn="cn=sftp-reader,{{ldap_basedn}}" read
                 by dn="cn=readuser,{{ldap_basedn}}" read
                 by * none
-              olcAccess: {6}to *
+              access to *
                 by self read
                 by dn="cn=readuser,{{ldap_basedn}}" read
                 by * none
           no_log: true
+
+        # OpenSSH-LPK schema twin in classic format for the slapd.conf
+        # bootstrap above (the LDIF twin openssh-lpk.ldif stays for live
+        # schema adds on existing installs).
+        - name: "{{ docker_path }}/ldap-config/openssh-lpk.schema"
+          blockinfile:
+            path: "{{ docker_path }}/ldap-config/openssh-lpk.schema"
+            mode: "0440"
+            owner: 10001
+            group: 10001
+            create: yes
+            marker: "# {mark} ANSIBLE MANAGED BLOCK"
+            block: |
+              attributetype ( 1.3.6.1.4.1.24552.500.1.1.1.13 NAME 'sshPublicKey' DESC 'OpenSSH public key' EQUALITY octetStringMatch SYNTAX 1.3.6.1.4.1.1466.115.121.1.40 )
+              objectclass ( 1.3.6.1.4.1.24552.500.1.1.2.0 NAME 'ldapPublicKey' DESC 'OpenSSH public key objectclass' SUP top AUXILIARY MUST ( uid ) MAY ( sshPublicKey ) )
+          no_log: true
+
+        # Drop any stale container: it still serves the previous passwords
+        # (or is gone entirely after an outside `docker compose down`), so
+        # the wait task below would retry a hopeless bind until the retry
+        # budget runs out. The ensure-task recreates it from these files.
+        - name: Remove stale LDAP container after password regeneration
+          ansible.builtin.shell: docker compose down
+          args:
+            chdir: "{{ docker_path }}"
+          register: ldap_down
+          changed_when: "'Removed' in (ldap_down.stdout + ldap_down.stderr)"
+          failed_when: false
 
     - name: "{{ docker_path }}/ldap-config/openssh-lpk.ldif"
       blockinfile:
@@ -305,8 +333,9 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # OpenSSH LDAP public key schema (ldapPublicKey / sshPublicKey).
-          # Loaded into cn=config on fresh installs (see docker-entrypoint.sh)
-          # and live-added for existing installs (see openssh-lpk task below).
+          # On fresh installs it comes in via slapd.conf (see the
+          # openssh-lpk.schema twin); this LDIF twin is live-added on
+          # existing installs (see openssh-lpk task below).
           dn: cn=openssh-lpk,cn=schema,cn=config
           objectClass: olcSchemaConfig
           cn: openssh-lpk
@@ -359,20 +388,21 @@
           # Initialize LDAP configuration if not already done
           if ! [[ -s /ldap-config/slapd.conf.ldif.done ]]
           then
-            # Clean existing configuration
-            rm -rf /etc/ldap/slapd.d/*
-            mkdir /ldap-config/slapd.d
+            # Clean existing configuration. slapd.d is rebuilt from scratch
+            # below, so a stale directory (e.g. from a previous failed init
+            # after the marker was removed) must go.
+            # /var/lib/ldap is intentionally kept: it holds real user data.
+            rm -rf /ldap-config/slapd.d
+            mkdir -p /ldap-config/slapd.d
             chown -R openldap:openldap /var/lib/ldap /ldap-config/slapd.d
 
-            # Load configuration LDIF
-            slapadd -F /ldap-config/slapd.d -n 0 -l /ldap-config/config.ldif
-
-            # Load standard LDAP schemas
-            slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/core.ldif
-            slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/cosine.ldif
-            slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/inetorgperson.ldif
-            slapadd -F /ldap-config/slapd.d -n 0 -l /etc/ldap/schema/nis.ldif
-            slapadd -F /ldap-config/slapd.d -n 0 -l /ldap-config/openssh-lpk.ldif
+            # Convert the classic slapd.conf to slapd.d. The classic parser
+            # loads schemas in include order before the database ACLs, so it
+            # has no schema-ordering problem (slapadd -n 0 cannot bootstrap
+            # this config: ACLs reference nis/openssh-lpk attributes that are
+            # unknown until the schemas load, and a database entry cannot be
+            # slapadded in its own later invocation either).
+            slaptest -f /ldap-config/slapd.conf -F /ldap-config/slapd.d
 
             # Load base directory structure
             slapadd -F /ldap-config/slapd.d -l /ldap-config/base.ldif
@@ -526,8 +556,24 @@
     - name: Flush handlers to ensure LDAP container is started
       ansible.builtin.meta: flush_handlers
 
+    # Start (or recreate) the container explicitly. The restart handler
+    # above only fires when one of three files changed, so a missing or
+    # downed container (removed outside the playbook, failed build, ...)
+    # would otherwise hang the wait task below for the full retry budget.
+    # Failing here is immediate and shows the compose error instead.
+    - name: Ensure LDAP container is built and running
+      ansible.builtin.shell: docker compose up -d --build
+      args:
+        chdir: "{{ docker_path }}"
+      register: ldap_container_up
+      changed_when: "'Started' in (ldap_container_up.stdout + ldap_container_up.stderr) or 'Created' in (ldap_container_up.stdout + ldap_container_up.stderr) or 'Recreated' in (ldap_container_up.stdout + ldap_container_up.stderr) or 'Built' in (ldap_container_up.stdout + ldap_container_up.stderr)"
+
 # ADMIN_PASSWORD_TASKS_MARKER
-    # Wait for LDAP container to respond to authentication queries
+    # Wait for LDAP container to respond to authentication queries.
+    # The container is guaranteed running by the ensure-task above, so
+    # this loop only covers slapd startup, not image builds. Five minutes
+    # is generous even on slow SD cards; anything longer means a real
+    # failure (see container logs) and should not burn 30 more minutes.
     - name: Wait for LDAP to be ready
       ansible.builtin.shell:
         cmd: |
@@ -536,8 +582,8 @@
         chdir: "{{ docker_path }}"
       register: ldap_ready
       until: ldap_ready.rc == 0
-      retries: 60
-      delay: 30
+      retries: 30
+      delay: 10
       changed_when: false
       no_log: true
 
