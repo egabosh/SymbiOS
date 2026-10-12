@@ -1,8 +1,8 @@
 #!/bin/bash
 # SymbiOS - Scaffold a new symbios-settings-<slug>.sh CLI script.
 #
-# Creates the script skeleton from the template (contract: get/set/schema,
-# --check, exit 0/2/1, state token) plus the registry row snippet for
+# Creates the script skeleton from the template (contract: get/set/schema/
+# apply, --check, exit 0/2/1, state token) plus the registry row snippet for
 # webui/main/settings_registry.py. The new script manages flat string
 # fields under all.vars; adjust validation, secrets and merge building
 # for the domain afterwards. See AGENTS.md (Settings CLI-first).
@@ -83,7 +83,9 @@ Commands:
                                   Empty values delete the key.
                                   --check changes nothing.
   schema                          Print the field description as JSON
-                                  (for generic WebUI form rendering)
+                                   (for generic WebUI form rendering)
+  apply [--dry-run]               Resolve consuming playbooks (or show them
+                                  with --dry-run) and run each in order.
   -h, --help                      Show this help and exit
 
 Output: human status lines. The final line carries a machine-readable
@@ -101,13 +103,16 @@ g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
 source "$g_symbios_dir/symbios-settings-lib.sh"
 
+# Inventory keys managed here (for apply + coverage check).
+f_managed_vars=""
+
 f_command="${1:-}"
 case "${f_command}" in
   -h|--help|"")
     f_usage
     exit 0
     ;;
-  get|set|schema)
+  get|set|schema|apply)
     shift
     ;;
   *)
@@ -115,6 +120,12 @@ case "${f_command}" in
     f_ss_fail_usage
     ;;
 esac
+
+if [[ "${f_command}" == "apply" ]]
+then
+  f_ss_apply_cmd "$@"
+  exit $?
+fi
 
 # TODO: adjust fields, validation, secrets (--json-stdin) and merge below.
 TEMPLATE_EOF
@@ -130,8 +141,6 @@ Registry row snippet for webui/main/settings_registry.py:
         'title': '<Title>',
         'icon': 'bi-gear',
         'explain': '<explain-key>',
-        'playbooks': [],
-        'force': False,
         'message': '<Title> settings saved.',
     },
 
@@ -140,5 +149,6 @@ Contract smoke test (on the host, after rsync scripts/):
   symbios-settings-SLUG_PLACEHOLDER.sh get
   symbios-settings-SLUG_PLACEHOLDER.sh schema | python3 -c "import json,sys; json.load(sys.stdin)"
   symbios-settings-SLUG_PLACEHOLDER.sh set --check   # must change nothing
+  symbios-settings-SLUG_PLACEHOLDER.sh apply --dry-run  # lists consumers
 EOF
 exit 0

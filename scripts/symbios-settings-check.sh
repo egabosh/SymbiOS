@@ -7,10 +7,12 @@
 #   symbios-settings-check.sh [slug]           live contract checks, runs
 #     on the host (needs inventory + sibling scripts on PATH)
 #
-# Live checks per script: --help exits 0, get exits 0, schema is valid
-# JSON, an unknown command exits 2. Static checks: no direct inventory
-# writes in WebUI views, every settings script sources the shared lib
-# and dispatches get/set/schema, no secret travels as argv.
+# Live checks per script: --help exits 0, apply --dry-run exits 0, get
+# exits 0, schema is valid JSON, an unknown command exits 2. Static checks:
+# no direct inventory writes in WebUI views, every settings script sources
+# the shared lib and dispatches get/set/schema/apply, declares
+# f_managed_vars, every managed var has a uses_vars consumer, no secret
+# travels as argv.
 
 function f_usage {
   cat << EOF
@@ -121,7 +123,54 @@ then
     else
       g_echo "PASS: ${f_base} takes no secret as argv flag" 2>/dev/null || echo "PASS: ${f_base} takes no secret as argv flag"
     fi
+    if grep -q "|apply)" "${f_script}"
+    then
+      g_echo "PASS: ${f_base} dispatches apply" 2>/dev/null || echo "PASS: ${f_base} dispatches apply"
+    else
+      echo "FAIL: ${f_base} dispatches apply" >&2
+      f_failures=$((f_failures + 1))
+    fi
+    if grep -q '^f_managed_vars=' "${f_script}"
+    then
+      g_echo "PASS: ${f_base} declares f_managed_vars" 2>/dev/null || echo "PASS: ${f_base} declares f_managed_vars"
+    else
+      echo "FAIL: ${f_base} declares f_managed_vars" >&2
+      f_failures=$((f_failures + 1))
+    fi
   done
+
+  # 5. uses_vars coverage (hard fail): every var a settings script manages
+  # must be declared in uses_vars of at least one host playbook - that is
+  # what the apply resolver reads. Declarations are `#   uses_vars:` plus
+  # `#     - <bare word>` lines (other docs lists carry colons/quotes or
+  # deeper indent and never match the anchored pattern).
+  f_declared="$(grep -h -A25 '^#   uses_vars:' "${f_root}"/base-services/*.yml "${f_root}"/services/*.yml 2>/dev/null \
+    | grep -o '^#     - [a-z0-9_]*$' | awk '{print $3}' | sort -u)"
+  if [[ -z "${f_declared}" ]]
+  then
+    echo "FAIL: no uses_vars declarations found" >&2
+    f_failures=$((f_failures + 1))
+  else
+    for f_script in "${f_root}"/scripts/symbios-settings-*.sh
+    do
+      case "${f_script}" in
+        *-lib.sh|*-new.sh|*-check.sh|*-docs.sh) continue ;;
+      esac
+      f_base="$(basename "${f_script}")"
+      f_managed="$(grep '^f_managed_vars=' "${f_script}" | head -1 | cut -d'"' -f2)"
+      for f_var in ${f_managed}
+      do
+        if printf '%s\n' "${f_declared}" | grep -qx "${f_var}"
+        then
+          :
+        else
+          echo "FAIL: ${f_base} manages ${f_var} with no uses_vars consumer" >&2
+          f_failures=$((f_failures + 1))
+        fi
+      done
+    done
+    g_echo "PASS: uses_vars coverage checked" 2>/dev/null || echo "PASS: uses_vars coverage checked"
+  fi
 
   if [[ "${f_failures}" -gt 0 ]]
   then
@@ -143,7 +192,7 @@ else
   for f_path in "${g_symbios_dir}"/symbios-settings-*.sh
   do
     case "${f_path}" in
-      *-lib.sh|*-new.sh|*-check.sh) continue ;;
+      *-lib.sh|*-new.sh|*-check.sh|*-docs.sh) continue ;;
     esac
     f_scripts+=("$(basename "${f_path}")")
   done
@@ -160,6 +209,7 @@ do
   f_bin="${f_script}"
   command -v "${f_script}" >/dev/null 2>&1 || f_bin="${g_symbios_dir}/${f_script}"
   f_check "${f_script} --help" "${f_bin}" --help
+  f_check "${f_script} apply --dry-run" "${f_bin}" apply --dry-run
   # get vs list: read-capable verbs differ per backend (dict/file domains).
   if "${f_bin}" --help 2>&1 | grep -q "list \[--json\]"
   then

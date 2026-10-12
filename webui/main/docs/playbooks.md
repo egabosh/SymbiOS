@@ -186,9 +186,10 @@ Layout, sharing and syntax rules for every playbook in `services/` and
   `service_domain`). Scripts reading inventory live at runtime (cron,
   dispatchers) need NO entry; scripts running ONLY as playbook tasks
   (their values take effect on reapply) belong to the calling playbook.
-  After a settings save, installed playbooks declaring any changed key
-  are reapplied automatically (`webui/main/utils/uses_vars.py`), after
-  the explicit registry chains. `symbios-check-uses-vars.py` verifies
+  After a settings save, `<script> apply` re-runs declaring
+  base-services always and declaring services when installed
+  (`scripts/symbios-playbooks-for-vars.sh` resolves from these blocks -
+  no curated chains anywhere). `symbios-check-uses-vars.py` verifies
   coverage (used-but-undeclared fails).
 - **Sharing**: only via top-level `shared-tasks/*.yml` with relative
   `include_tasks: ../shared-tasks/<file>.yml` (from both `services/` and

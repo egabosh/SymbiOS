@@ -48,6 +48,12 @@ sourcing order). Provided functions:
   f_ss_result <out> <t> [c] [d]
                              emit output + token for a custom inventory call
                              (dict-merge, file writers, ...)
+  f_ss_playbooks_for_vars <var>...
+                             print consuming host playbooks (ordered)
+  f_ss_apply <var>...
+                             run consuming playbooks in order, abort on error
+  f_ss_apply_cmd             implements `apply [--dry-run]` from the
+                             caller's f_managed_vars (space-separated keys)
 
 Options:
   -h, --help  Show this help and exit
@@ -133,6 +139,80 @@ function f_ss_merge_add {
   else
     f_merge="${f_merge}\"${f_k}\": $(printf '%s' "${f_v}" | f_json_escape)"
   fi
+}
+
+# Resolve host playbooks consuming inventory vars (stdout, one per line;
+# stderr carries skip notes). Thin wrapper over symbios-playbooks-for-vars.sh.
+function f_ss_playbooks_for_vars {
+  "$g_ss_dir/symbios-playbooks-for-vars.sh" "$@"
+}
+
+# Apply inventory changes: resolve consumers for the given vars and run
+# each playbook in order via symbios-run-playbook.sh. Aborts on the first
+# failure (same && semantics as chained reapply jobs) and propagates its
+# exit code. Empty var lists, or lists resolving to nothing, print
+# "Nothing to apply." and exit 0 - by design (e.g. live-script vars).
+function f_ss_apply {
+  local f_v f_vars=() f_pbs="" f_pb
+  for f_v in "$@"
+  do
+    [[ -n "${f_v}" ]] || continue
+    f_vars+=("${f_v}")
+  done
+  if [[ "${#f_vars[@]}" -eq 0 ]]
+  then
+    g_echo "Nothing to apply."
+    return 0
+  fi
+  f_pbs="$("$g_ss_dir/symbios-playbooks-for-vars.sh" "${f_vars[@]}" 2>/dev/null)" \
+    || return 1
+  if [[ -z "${f_pbs}" ]]
+  then
+    g_echo "Nothing to apply."
+    return 0
+  fi
+  while read -r f_pb
+  do
+    [[ -n "${f_pb}" ]] || continue
+    "$g_ss_dir/symbios-run-playbook.sh" "${f_pb}" || return 1
+  done <<< "${f_pbs}"
+  return 0
+}
+
+# Implements the `apply` subcommand for settings scripts. Caller sets
+# f_managed_vars (space-separated inventory keys, may be empty) and shifts
+# past 'apply'; remaining args: [--dry-run]. Dry-run prints what would run.
+# Rule: list only keys that playbooks bake into state (declared in their
+# docs uses_vars). Keys read live at runtime (scripts, WebUI) and one-shot
+# markers (*_configured, mode flags no playbook reads) stay out - an empty
+# list is valid and apply then reports nothing to do.
+function f_ss_apply_cmd {
+  local f_dry="no"
+  while [[ $# -gt 0 ]]
+  do
+    case "$1" in
+      --dry-run)
+        f_dry="yes"
+        ;;
+      -h|--help)
+        f_usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        f_ss_fail_usage
+        ;;
+    esac
+    shift
+  done
+  # shellcheck disable=SC2086
+  if [[ "${f_dry}" == "yes" ]]
+  then
+    f_ss_playbooks_for_vars ${f_managed_vars}
+    return $?
+  fi
+  # shellcheck disable=SC2086
+  f_ss_apply ${f_managed_vars}
 }
 
 # Merge one JSON object transactionally and emit output + state token.

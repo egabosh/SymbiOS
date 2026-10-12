@@ -261,51 +261,15 @@ def _save_generic(request, slug, entry, script):
         stdin_data=json.dumps(changed))
     if not result:
         return settings_failed(request, result, request.path)
-    playbooks = entry.get('playbooks') or []
-    gated = entry.get('reapply_if_changed') or []
-    if gated and not any(name in changed for name in gated):
-        # None of the gated fields is in the changed set: the values
-        # reaching the script are identical, so no reapply is needed.
-        playbooks = []
-    for extra in entry.get('conditional_playbooks') or []:
-        # Declarative extras: run these playbooks first when a posted
-        # field equals the expected value (e.g. matrix-client before
-        # notifications, only when matrix was enabled).
-        cond = (extra.get('when') or {})
-        posted = payload.get(cond.get('field'))
-        if (posted is not None
-                and str(posted).lower() == str(cond.get('equals')).lower()):
-            playbooks = list(extra.get('playbooks') or []) + list(playbooks)
-    # Dynamic completion: installed playbooks declaring any changed key
-    # in their docs uses_vars (explicit chains above keep author order
-    # and stay first). Never breaks saves on matcher errors.
-    try:
-        from .utils.uses_vars import consumers_for_keys
-        for pb in consumers_for_keys(set(changed)):
-            if pb not in playbooks:
-                playbooks.append(pb)
-    except Exception:
-        pass
     message = entry.get('message') or 'Settings saved.'
-    if playbooks:
-        flag = '--only {}'.format(' '.join(playbooks))
-        if entry.get('force'):
-            flag = '--only --force {}'.format(' '.join(playbooks))
-        cmd = 'symbios-reapply.sh {}'.format(flag)
-        title = 'Reapplying: ' + ', '.join(playbooks)
-        if is_ajax:
-            job_id = create_job(cmd, timeout=3600)
-            return JsonResponse({'ok': True, 'job': job_id, 'title': title,
-                                 'message': message, 'command': cmd})
-        messages.success(request, message)
-        messages.info(request, 'Reapplying playbooks in the background...')
-        create_job(cmd, timeout=3600)
-        return redirect(request.path)
+    title = 'Applying {}...'.format(entry.get('title') or slug)
     if is_ajax:
-        # Stored as a Django message so it survives the JS navigation and
-        # is shown on the reloaded page (the modal itself closes).
-        messages.success(request, message)
-        return JsonResponse({'ok': True, 'message': message,
-                             'redirect': request.path})
+        # The sync set above already validated+wrote; the job only applies.
+        cmd = '{} apply'.format(script)
+        job_id = create_job(cmd, timeout=3600)
+        return JsonResponse({'ok': True, 'job': job_id, 'title': title,
+                             'message': message, 'command': cmd})
     messages.success(request, message)
+    messages.info(request, 'Applying in the background...')
+    create_job('{} apply'.format(script), timeout=3600)
     return redirect(request.path)

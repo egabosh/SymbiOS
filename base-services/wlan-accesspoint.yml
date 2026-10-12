@@ -16,6 +16,7 @@
 
 # docs:
 #   uses_vars:
+#     - ap_configured
 #     - ap_country
 #     - ap_enabled
 #     - ap_interface

@@ -407,6 +407,8 @@ texts opportunistically).
 | `symbios-update.sh` | Git pull + run changed installed playbooks | no args |
 | `symbios-settings-new.sh` | Scaffold a new settings CLI script + registry snippet | `<slug>` |
 | `symbios-settings-check.sh` | Convention checks (static repo greps / live contract) | `[--static [ROOT] \| [slug]]` |
+| `symbios-playbooks-for-vars.sh` | Resolve consuming playbooks for inventory keys (reads `uses_vars`, filters by install status, orders base-services then services) | `<VAR ...> \| --all` |
+| `symbios-playbook-refs.py` | Mechanical audit: which inventory keys playbooks actually use (tasks/templates/`when:`) | `[--map]` |
 
 ### 4.2 System and host
 
@@ -534,7 +536,7 @@ texts opportunistically).
 | File | Purpose |
 |------|---------|
 | `symbios-lib.sh` | Central config: `g_*` paths from `inventory.yml`, `f_symbios_var` (read), `f_symbios_var_set` (write via `symbios-inventory.py`), JSON/LDAP/Traefik helpers |
-| `symbios-settings-lib.sh` | Shared settings plumbing: `f_ss_fail_*` (exit 0/2/1), `f_ss_parse_bool`, `f_ss_require_url/single_line`, `f_ss_merge_add`, `f_ss_merge`, `f_ss_result` (merge + state token). Sourced by every `symbios-settings-*.sh` after `symbios-lib.sh` |
+| `symbios-settings-lib.sh` | Shared settings plumbing: `f_ss_fail_*` (exit 0/2/1), `f_ss_parse_bool`, `f_ss_require_url/single_line`, `f_ss_merge_add`, `f_ss_merge`, `f_ss_result` (merge + state token), `f_ss_playbooks_for_vars` / `f_ss_apply` / `f_ss_apply_cmd` (`apply` subcommand from `f_managed_vars`). Sourced by every `symbios-settings-*.sh` after `symbios-lib.sh` |
 | `symbios-backup-lib.sh` | Shared backup/restore helpers (sourced by `backup.sh`, `restore.sh`, ...) |
 | `symbios-wol-common.sh` | Shared WoL watcher helpers |
 
@@ -543,18 +545,22 @@ texts opportunistically).
 ## 5. Adding a settings domain (checklist)
 
 1. Scaffold: `symbios-settings-new.sh <slug>` (contract: `get`/`set`/
-   `schema`, `--check`, exit 0/2/1, state token; sources
+   `schema`/`apply`, `--check`, exit 0/2/1, state token; sources
    `symbios-settings-lib.sh` for fail/bool/URL/merge helpers).
    Prefer a generic registry row (`settings_registry.py`) over a
    hand-written view + template.
 2. Validate in the script, write via `symbios-inventory.py merge` (one
    transaction, values via stdin JSON when secrets are involved).
+   Declare `f_managed_vars` (only keys playbooks bake into state - see
+   AGENTS.md Applying) so `apply` resolves consumers from `uses_vars`.
 3. Thin the WebUI view: `run_command('symbios-settings-<slug>.sh ...')` +
-   `create_job()` reapply, exec-modal dual-mode AJAX/fallback. No
-   `_save_inventory_config` in migrated views. Probes (external HTTP),
+   `create_job('<script> apply')`, exec-modal dual-mode AJAX/fallback. No
+   `_save_inventory_config` in migrated views, no playbook chains
+   (`--only` lists) anywhere. Probes (external HTTP),
    rendering and job orchestration stay Python.
 4. Verify on the host: `--help`, `get`, `schema` (JSON parses),
    `set` round-trip, `--check` changes nothing, invalid input exits `2`,
+   `apply --dry-run` lists the expected consumers,
    inventory byte-identical afterwards when testing with current values.
 5. Add the script to the catalog in section 4 above and register secrets
    (if any) in the AGENTS.md secret inventory + `symbios-exec.sh` masking.

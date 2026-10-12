@@ -16,6 +16,7 @@
 #
 # docs:
 #   uses_vars:
+#     - acme_resolver
 #     - base_domain
 #     - twofa_enabled
 #   name: WordPress

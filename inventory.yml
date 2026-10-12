@@ -14,6 +14,8 @@ all:
     network_type: ""          # 'home' (behind router), 'root' (own public IP) or
                               # 'airgapped' (intranet without internet access)
     twofa_enabled: false      # Authelia 2FA enforcement for LDAP users
+    password_policy: 'medium' # LDAP password strength (none|low|medium|high|paranoid)
+    webui_public_access: false  # expose the WebUI via Traefik to the internet (default: LAN only)
     localization_configured: false  # true after the user saved the localization settings in the WebUI
     dns_configured: false           # true after the user saved the DNS settings in the WebUI
     # Docker network IPs (static, defined in base-services/traefik.yml)

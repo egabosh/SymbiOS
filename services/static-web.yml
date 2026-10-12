@@ -28,6 +28,7 @@
 #
 # docs:
 #   uses_vars:
+#     - acme_resolver
 #     - base_domain
 #   name: Static Web
 #   short_description: Serve static web content from plain directories

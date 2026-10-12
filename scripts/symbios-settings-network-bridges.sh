@@ -26,6 +26,8 @@ Commands:
                                   the WebUI form). --check changes nothing.
   schema                          Print the field description as JSON
                                   (for generic WebUI form rendering)
+  apply [--dry-run]               Resolve consuming playbooks (or show them
+                                  with --dry-run) and run each in order.
   -h, --help                      Show this help and exit
 
 Output: human status lines. The final line carries a machine-readable
@@ -38,6 +40,9 @@ Exit codes:
 EOF
 }
 
+# Inventory keys managed here (for apply + coverage check).
+f_managed_vars=""
+
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
@@ -49,7 +54,7 @@ case "${f_command}" in
     f_usage
     exit 0
     ;;
-  get|set|schema)
+  get|set|schema|apply)
     shift
     ;;
   *)
@@ -57,6 +62,12 @@ case "${f_command}" in
     f_ss_fail_usage
     ;;
 esac
+
+if [[ "${f_command}" == "apply" ]]
+then
+  f_ss_apply_cmd "$@"
+  exit $?
+fi
 
 if [[ "${f_command}" == "schema" ]]
 then

@@ -20,7 +20,7 @@ from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from .views import _get_inventory_config
-from .views_settings import _start_reapply
+from .utils.jobs import create_job
 from .utils.ssh_exec import run_command
 from .utils.http import is_ajax_request
 from .setup_status import get_page_badge, PAGE_EXPLAIN
@@ -32,19 +32,12 @@ import urllib.request
 import urllib.error
 
 
-# Playbooks that configure all domain-dependent services. A DNS domain is the
-# prerequisite for the reverse proxy (Traefik, which also handles the ACME
-# certificates) and the Authelia SSO, so these are only applied once DNS is
-# configured. They are run with --force because they may not be installed yet.
-_DNS_CHAIN = [
-    'base-services/traefik.yml',
-    'base-services/authelia.yml',
-]
-_DNS_CHAIN_DESEC = ['base-services/dedyn.yml'] + _DNS_CHAIN
-
-# The system hostname follows base_domain. It is applied first so the reapply
+# The system hostname follows base_domain. It is applied first so the apply
 # runs under the new name, and its output appears in the same exec modal.
 _HOSTNAME_CMD = 'symbios-set-hostname.sh'
+
+# After set + hostname, consumers resolve dynamically from uses_vars.
+_APPLY_CMD = 'symbios-settings-dns.sh apply'
 
 
 @login_required
@@ -68,22 +61,22 @@ def settings_dns(request):
         dns_mode = request.POST.get('dns_mode', 'desec')
         # Validation and the inventory write live in the settings CLI
         # (single source of truth). Secrets travel via stdin JSON, never
-        # as argv. Playbook chains abort on validation failure (&&).
+        # as argv. The chain aborts on validation failure (&&): set writes,
+        # then the hostname follows the new domain, then apply resolves
+        # consuming playbooks dynamically from uses_vars.
         try:
             if action == 'remove':
                 set_cmd = 'symbios-settings-dns.sh remove'
                 stdin_data = None
-                playbooks = None
                 message = 'DNS configuration removed.'
-                title = 'Removing DNS config and reapplying...'
+                title = 'Removing DNS config and applying...'
             elif dns_mode == 'self-managed':
                 self_domain = request.POST.get('self_domain', '').strip()
                 set_cmd = ('symbios-settings-dns.sh set --mode self-managed'
                            f' --domain {shlex.quote(self_domain)}')
                 stdin_data = None
-                playbooks = _DNS_CHAIN
                 message = f'DNS settings saved for {self_domain}.'
-                title = None
+                title = 'Applying DNS...'
             else:
                 # deSEC mode: host/key/ipv6 as stdin JSON (secret-safe).
                 # Host normalization (.dedyn.io suffix, lowercase) lives
@@ -95,23 +88,13 @@ def settings_dns(request):
                 })
                 set_cmd = 'symbios-settings-dns.sh set --mode desec --json-stdin'
                 stdin_data = payload
-                playbooks = _DNS_CHAIN_DESEC
                 message = 'DNS settings saved.'
-                title = None
+                title = 'Applying DNS...'
+            cmd = f'{set_cmd} && {_HOSTNAME_CMD} && {_APPLY_CMD}'
             if is_ajax:
-                if playbooks:
-                    job_id, job_title, cmd = _start_reapply(
-                        playbooks=playbooks, force=True,
-                        prefix=f'{set_cmd} && {_HOSTNAME_CMD}',
-                        stdin_data=stdin_data)
-                else:
-                    from .utils.jobs import create_job
-                    cmd = f'{set_cmd} && {_HOSTNAME_CMD} && symbios-reapply.sh'
-                    job_id = create_job(cmd, timeout=3600,
-                                        stdin_data=stdin_data)
-                    job_title = title
+                job_id = create_job(cmd, timeout=3600, stdin_data=stdin_data)
                 resp = {'ok': True, 'job': job_id,
-                        'title': job_title,
+                        'title': title,
                         'message': message,
                         'command': cmd}
                 if 'setup' in request.GET:
@@ -123,15 +106,8 @@ def settings_dns(request):
                 messages.error(request, f'Error: {stderr or stdout}')
                 return redirect('settings_dns')
             messages.success(request, message)
-            if playbooks:
-                # Apply the domain-dependent playbooks (DDNS, Traefik,
-                # ACME, Authelia) in the background, with the new domain.
-                messages.info(request, 'Reapplying DNS playbooks in the background...')
-                _start_reapply(playbooks=playbooks, force=True,
-                               prefix=_HOSTNAME_CMD)
-            else:
-                messages.info(request, 'Reapplying all playbooks in the background...')
-                _start_reapply(prefix=_HOSTNAME_CMD)
+            messages.info(request, 'Applying DNS playbooks in the background...')
+            create_job(f'{_HOSTNAME_CMD} && {_APPLY_CMD}', timeout=3600)
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)

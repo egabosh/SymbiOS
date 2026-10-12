@@ -39,6 +39,8 @@ Commands:
                                   Forget a recorded IPv6 forward.
   schema                          Print the field description as JSON
                                   (for generic WebUI form rendering)
+  apply [--dry-run]               Resolve consuming playbooks (or show them
+                                  with --dry-run) and run each in order.
   -h, --help                      Show this help and exit
 
 Output: human status lines. The final line carries a machine-readable
@@ -50,6 +52,9 @@ Exit codes:
   1  technical error (inventory unreadable, ...)
 EOF
 }
+
+# Inventory keys managed here (for apply + coverage check).
+f_managed_vars="port_forwarding_method ufw_extra_inbound"
 
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
@@ -81,7 +86,7 @@ case "${f_command}" in
     f_usage
     exit 0
     ;;
-  get|set|ufw-add|ufw-remove|schema)
+  get|set|ufw-add|ufw-remove|schema|apply)
     shift
     ;;
   *)
@@ -89,6 +94,12 @@ case "${f_command}" in
     f_ss_fail_usage
     ;;
 esac
+
+if [[ "${f_command}" == "apply" ]]
+then
+  f_ss_apply_cmd "$@"
+  exit $?
+fi
 
 f_inv() {
   "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" "$@"

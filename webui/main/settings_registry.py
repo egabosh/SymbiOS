@@ -17,8 +17,10 @@
 """Registry for generically rendered settings pages.
 
 Each entry maps a URL slug (/settings/<slug>/) to its settings CLI script
-plus the page chrome and the reapply chain. Adding a domain is one row
-here - no new view, no new template. Conventions (see views_settings_generic):
+plus page chrome. Adding a domain is one row here - no new view, no new
+template. Applying a change runs `<script> apply`, which resolves consuming
+playbooks dynamically from uses_vars (see symbios-playbooks-for-vars.sh);
+no chains live here. Conventions (see views_settings_generic):
 
 - The script answers `schema` (field list or {"fields": [...]}) and
   `get --json` (flat value object).
@@ -30,8 +32,6 @@ here - no new view, no new template. Conventions (see views_settings_generic):
   option per line, e.g. "timezones").
 - Secret current values never come back (`get --json` reports
   <name>_set); the form renders them empty with a "configured" hint.
-- `reapply_if_changed` (optional field list) limits the reapply to real
-  flips of those fields (e.g. traefik only when public access changed).
 """
 
 SETTINGS = {
@@ -40,9 +40,6 @@ SETTINGS = {
         'title': 'Language & Timezone',
         'icon': 'bi-clock-history',
         'explain': 'localization',
-        'playbooks': ['base-services/localization.yml',
-                      'base-services/raspberry.yml'],
-        'force': False,
         'message': 'Localization settings saved.',
     },
     'ai': {
@@ -50,8 +47,6 @@ SETTINGS = {
         'title': 'AI',
         'icon': 'bi-cpu',
         'explain': 'ai',
-        'playbooks': [],
-        'force': False,
         'message': 'AI settings saved.',
         'tests': [{'endpoint': '/settings/ai/test/',
                  'label': 'Test connection'}],
@@ -61,8 +56,6 @@ SETTINGS = {
         'title': 'AI Speech',
         'icon': 'bi-mic',
         'explain': 'ai-speech',
-        'playbooks': [],
-        'force': False,
         'message': 'AI settings saved.',
         'tests': [{'endpoint': '/settings/ai-speech/test/',
                  'label': 'Test connection'}],
@@ -72,8 +65,6 @@ SETTINGS = {
         'title': 'AI Image',
         'icon': 'bi-image',
         'explain': 'ai-image',
-        'playbooks': [],
-        'force': False,
         'message': 'AI settings saved.',
         'tests': [{'endpoint': '/settings/ai-image/test/',
                  'label': 'Test connection'}],
@@ -83,8 +74,6 @@ SETTINGS = {
         'title': 'AI Search & RAG',
         'icon': 'bi-search',
         'explain': 'ai-search',
-        'playbooks': [],
-        'force': False,
         'message': 'AI settings saved.',
         'tests': [{'endpoint': '/settings/ai-search/test/',
                  'label': 'Test connection'}],
@@ -94,8 +83,6 @@ SETTINGS = {
         'title': 'Login & 2FA',
         'icon': 'bi-shield-lock',
         'explain': 'auth',
-        'playbooks': ['base-services/authelia.yml'],
-        'force': False,
         'message': 'Auth settings saved.',
     },
     'acme': {
@@ -103,8 +90,6 @@ SETTINGS = {
         'title': 'Security Certificates (TLS)',
         'icon': 'bi-patch-check',
         'explain': 'acme',
-        'playbooks': ['base-services/traefik.yml'],
-        'force': False,
         'message': 'ACME settings saved.',
     },
     'security': {
@@ -112,20 +97,13 @@ SETTINGS = {
         'title': 'Security',
         'icon': 'bi-shield-check',
         'explain': 'security',
-        'playbooks': ['base-services/traefik.yml'],
-        'force': False,
         'message': 'Security settings saved.',
-        # Reapply only when one of these fields actually flipped (a
-        # policy-only save needs no traefik run).
-        'reapply_if_changed': ['webui_public_access'],
     },
     'media': {
         'script': 'symbios-settings-media.sh',
         'title': 'Media',
         'icon': 'bi-collection-play',
         'explain': 'media',
-        'playbooks': ['base-services/media.yml'],
-        'force': False,
         'message': 'Media settings saved.',
     },
     'notifications': {
@@ -133,15 +111,7 @@ SETTINGS = {
         'title': 'Notifications',
         'icon': 'bi-bell',
         'explain': 'notifications',
-        'playbooks': ['base-services/notifications.yml'],
-        'force': False,
         'message': 'Notification settings saved.',
-        # matrix-client first, but only when matrix was enabled - then
-        # the daemon is up before the alias points at its FIFO.
-        'conditional_playbooks': [
-            {'playbooks': ['base-services/matrix-client.yml'],
-             'when': {'field': 'notify_matrix_enabled', 'equals': True}},
-        ],
         'tests': [
             {'endpoint': '/settings/notifications/test-mail/',
              'label': 'Send test mail'},
@@ -154,8 +124,6 @@ SETTINGS = {
         'title': 'Matrix Account',
         'icon': 'bi-chat-dots',
         'explain': 'matrix',
-        'playbooks': ['base-services/matrix-client.yml'],
-        'force': False,
         'message': 'Matrix account saved. Verify the new device, then check the room.',
         'tests': [
             {'endpoint': '/settings/matrix/probe/',
@@ -167,8 +135,6 @@ SETTINGS = {
         'title': 'WLAN Access Point',
         'icon': 'bi-wifi',
         'explain': 'wlan-ap',
-        'playbooks': ['base-services/wlan-accesspoint.yml'],
-        'force': False,
         'message': 'WLAN AP settings saved.',
     },
 }

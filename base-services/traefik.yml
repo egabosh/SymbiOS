@@ -16,8 +16,10 @@
 
 # docs:
 #   uses_vars:
+#     - acme_resolver
 #     - acme_server
 #     - base_domain
+#     - webui_public_access
 #   name: Traefik
 #   short_description: Deploy and configure the Traefik reverse proxy
 #   description: Installs Traefik as the central reverse proxy / ingress, sets up entrypoints, TLS (ACME) and forward-auth integration with Authelia.
