@@ -210,7 +210,9 @@ then
   f_mac="$(cat "/sys/class/net/${f_iface}/address" 2>/dev/null)"
   if command -v nmcli >/dev/null 2>&1
   then
-    f_duid="$(nmcli -f DHCP6 dev show "${f_iface}" 2>/dev/null | sed -n 's/.*dhcp6_client_id *= *//p' | head -1)"
+    # DUID in OpenWrt uci format (lowercase, no colons) so it can be
+    # pasted directly into dhcp.host.<name>.duid.
+    f_duid="$(nmcli -f DHCP6 dev show "${f_iface}" 2>/dev/null | sed -n 's/.*dhcp6_client_id *= *//p' | head -1 | tr -d ':' | tr 'A-Z' 'a-z')"
   fi
 fi
 
