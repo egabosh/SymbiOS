@@ -811,6 +811,28 @@
           * * * * * root {{ git_root }}/scripts/symbios-dashboard-snapshot.sh >/dev/null 2>&1
 
 
+    - name: Install arpwatch (passive LAN device discovery for the dashboard)
+      ansible.builtin.apt:
+        name: arpwatch
+        state: present
+        update_cache: no
+        install_recommends: no
+      when: nocontainer.stat.exists == true
+
+    - name: /etc/cron.d/symbios-arpwatch (reconcile passive listeners)
+      ansible.builtin.copy:
+        dest: /etc/cron.d/symbios-arpwatch
+        mode: 0644
+        owner: root
+        group: root
+        content: |
+          # Keep one arpwatch instance per LAN interface running (dynamic NIC
+          # discovery: added cards are picked up, removed ones are stopped).
+          # symbios-network-scan.sh reads their data files - no active probing.
+          */5 * * * * root {{ git_root }}/scripts/symbios-arpwatch.sh >/dev/null 2>&1
+      when: nocontainer.stat.exists == true
+
+
     - name: Install yq binary (YAML processor for service uninstall)
       block:
         - name: Check if yq is already installed

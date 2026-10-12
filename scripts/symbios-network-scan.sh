@@ -182,14 +182,57 @@ then
   f_json_error "No scanable private networks found."
 fi
 
-# --- Scan the collected subnets --------------------------------------------
-f_raw=""
-if command -v nmap >/dev/null 2>&1
-then
-  f_raw=$(nmap -sn -T4 --min-rate 200 "${g_cidrs[@]}" 2>/dev/null)
-else
-  f_raw="* neighbor fallback *"
-fi
+# --- Collect device rows (passive sources only) ------------------------------
+# No active probing: arpwatch data files (MAC, IP, time, hostname as seen on
+# the wire; entries older than a day are skipped so departed devices fade
+# out) plus the kernel neighbor table (currently present devices). Neighbor
+# rows are emitted first so arpwatch rows - which carry hostnames - win the
+# merge in f_emit.
+f_now="$(date +%s)"
+f_arp_max_age=$(( 24 * 3600 ))
+
+# Normalize a MAC to uppercase zero-padded form (arpwatch omits leading
+# zeros, nmap-style sources pad them).
+f_normmac() {
+  local f_in="$1" f_out="" f_oct
+  local IFS=':'
+  read -ra f_octs <<< "${f_in}" || true
+  unset IFS
+  for f_oct in ${f_octs[@]+"${f_octs[@]}"}
+  do
+    f_oct="${f_oct^^}"
+    if [[ "${#f_oct}" -eq 1 ]]
+    then
+      f_oct="0${f_oct}"
+    fi
+    if [[ -n "${f_out}" ]]
+    then
+      f_out+=":"
+    fi
+    f_out+="${f_oct}"
+  done
+  printf '%s' "${f_out}"
+}
+
+# Vendor from the OUI database (works for any row, not just self rows).
+f_oui_vendor() {
+  local f_oui="${1//:/}" f_v=""
+  f_oui="${f_oui:0:6}"
+  f_oui="${f_oui^^}"
+  if [[ -f /usr/share/ieee-data/oui.txt ]]
+  then
+    f_v="$(awk -v o="${f_oui}" '$1==o { sub(/^[^ \t]+[ \t]+\([^)]*\)[ \t]+/, ""); print; exit }' /usr/share/ieee-data/oui.txt 2>/dev/null)"
+  fi
+  # oui.txt uses CRLF line endings; strip the trailing carriage return.
+  f_v="${f_v%$'\r'}"
+  if [[ -z "${f_v}" ]] && [[ -f /usr/share/nmap/nmap-mac-prefixes ]]
+  then
+    f_v="$(awk -v o="${f_oui}" '$1==o { sub(/^[^ \t]+[ \t]+/, ""); print; exit }' /usr/share/nmap/nmap-mac-prefixes 2>/dev/null)"
+  fi
+  printf '%s' "${f_v}"
+}
+
+# (Device rows are collected further below, after the helper definitions.)
 
 # Map a device IP back to one of the scanned subnets.
 f_cidr_of() {
@@ -306,71 +349,74 @@ f_mark_wifi() {
     | sed "s/\"interface\":\"[a-z0-9._-]*\"/\"interface\":\"${f_ap}\"/")"
 }
 
-# --- Scan results -----------------------------------------------------------
-if [[ "${f_raw}" == "* neighbor fallback *" ]]
-then
-  # Fallback: kernel neighbor table for all scanned subnets.
-  while IFS= read -r f_line
-  do
-    f_fip="$(echo "${f_line}" | awk '{print $1}')"
-    f_fmac="$(echo "${f_line}" | awk '{print $5}')"
-    f_state="$(echo "${f_line}" | awk '{print $6}')"
-    [[ -z "$(f_cidr_of "${f_fip}")" ]] && continue
-    if [[ "${f_state}" == "REACHABLE" ]] || [[ "${f_state}" == "STALE" ]] \
-       || [[ "${f_state}" == "DELAY" ]] || [[ "${f_state}" == "PROBE" ]]
-    then
-      f_emit "" "${f_fip}" "${f_fmac}"
-    fi
-  done < <(ip neigh show 2>/dev/null)
-else
-  # Parse the nmap output. A scan report starts a new device; a MAC line
-  # belongs to the current device. Devices like the host itself may have no
-  # MAC line, so every scan report is emitted.
-  f_cur_name=""; f_cur_ip=""; f_cur_mac=""; f_cur_vendor=""; f_cur=""
-  while IFS= read -r f_line
-  do
-    if [[ "${f_line}" == "Nmap scan report for "* ]]
-    then
-      if [[ -n "${f_cur}" ]]
-      then
-        IFS='|' read -r f_cur_name f_cur_ip f_cur_mac f_cur_vendor <<< "${f_cur}"
-        f_emit "${f_cur_name}" "${f_cur_ip}" "${f_cur_mac}" "${f_cur_vendor}"
-      fi
-      f_subject="${f_line#Nmap scan report for }"
-      f_name=""
-      f_ip=""
-      if [[ "${f_subject}" == *" ("*")" ]]
-      then
-        f_name="${f_subject%% (*}"
-        f_ip="${f_subject#* (}"
-        f_ip="${f_ip%)}"
-      else
-        f_ip="${f_subject}"
-      fi
-      f_cur="${f_name}|${f_ip}||"
-    elif [[ "${f_line}" == "MAC Address: "* ]]
-    then
-      if [[ -n "${f_cur}" ]]
-      then
-        f_rest="${f_line#MAC Address: }"
-        f_mac="${f_rest%% *}"
-        f_vendor=""
-        if [[ "${f_rest}" == *" ("*")" ]]
-        then
-          f_vendor="${f_rest#* (}"
-          f_vendor="${f_vendor%)}"
-        fi
-        IFS='|' read -r f_cur_name f_cur_ip _f_cur_mac _f_cur_vendor <<< "${f_cur}"
-        f_cur="${f_cur_name}|${f_cur_ip}|${f_mac}|${f_vendor}"
-      fi
-    fi
-  done <<< "${f_raw}"
-  if [[ -n "${f_cur}" ]]
+# --- Collect device rows (passive sources only) ------------------------------
+# Neighbor rows first (no hostnames), arpwatch rows second (with hostnames,
+# winning the merge in f_emit).
+while IFS= read -r f_line
+do
+  f_fip="$(echo "${f_line}" | awk '{print $1}')"
+  f_fmac="$(echo "${f_line}" | awk '{print $5}')"
+  f_state="$(echo "${f_line}" | awk '{print $6}')"
+  [[ "${f_fip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+  [[ -z "$(f_cidr_of "${f_fip}")" ]] && continue
+  if [[ "${f_state}" == "REACHABLE" ]] || [[ "${f_state}" == "STALE" ]] \
+     || [[ "${f_state}" == "DELAY" ]] || [[ "${f_state}" == "PROBE" ]]
   then
-    IFS='|' read -r f_cur_name f_cur_ip f_cur_mac f_cur_vendor <<< "${f_cur}"
-    f_emit "${f_cur_name}" "${f_cur_ip}" "${f_cur_mac}" "${f_cur_vendor}"
+    f_emit "" "${f_fip}" "$(f_normmac "${f_fmac}")"
   fi
-fi
+done < <(ip -4 neigh show 2>/dev/null)
+
+for f_dat in /var/lib/arpwatch/*.dat
+do
+  [[ -f "${f_dat}" ]] || continue
+  while IFS= read -r f_line
+  do
+    f_amac="$(echo "${f_line}" | awk '{print $1}')"
+    f_aip="$(echo "${f_line}" | awk '{print $2}')"
+    f_atime="$(echo "${f_line}" | awk '{print $3}')"
+    [[ "${f_amac}" =~ ^([0-9A-Fa-f]{1,2}:){5}[0-9A-Fa-f]{1,2}$ ]] || continue
+    [[ "${f_aip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+    [[ "${f_atime}" =~ ^[0-9]+$ ]] || continue
+    if [[ $(( f_now - f_atime )) -gt "${f_arp_max_age}" ]]
+    then
+      continue
+    fi
+    [[ -z "$(f_cidr_of "${f_aip}")" ]] && continue
+    f_aname="$(echo "${f_line}" | awk '{print $4}')"
+    f_aname="${f_aname%.}"
+    if [[ "${f_aname}" == "${f_aip}" ]]
+    then
+      f_aname=""
+    fi
+    f_amac="$(f_normmac "${f_amac}")"
+    f_emit "${f_aname}" "${f_aip}" "${f_amac}" "$(f_oui_vendor "${f_amac}")"
+  done < "${f_dat}"
+done
+
+# --- The host itself (never in passive sources) -------------------------------
+# Emit own addresses explicitly; f_emit flags them via g_host_ips, the
+# vendor loop below fills the OUI vendor. Rows that claim one of our IPs
+# with a foreign MAC (bridge/proxy-ARP noise, seen on iot0) are dropped
+# first so exactly one authoritative row per own IP remains.
+for f_sip in ${g_host_ips[@]+"${g_host_ips[@]}"}
+do
+  f_siface="$(f_iface_of "${f_sip}")"
+  [[ -z "${f_siface}" ]] && continue
+  f_smac="$(ip -o link show dev "${f_siface}" 2>/dev/null | awk '{ for (i=1;i<=NF;i++) if ($i=="link/ether") { print toupper($(i+1)); exit } }')"
+  [[ -z "${f_smac}" ]] && continue
+  f_kept=()
+  for f_k in ${f_order[@]+"${f_order[@]}"}
+  do
+    if [[ "${f_row[${f_k}]}" == *"\"ip\":\"${f_sip}\""* ]]
+    then
+      unset "f_row[${f_k}]"
+    else
+      f_kept+=("${f_k}")
+    fi
+  done
+  f_order=(${f_kept[@]+"${f_kept[@]}"})
+  f_emit "" "${f_sip}" "${f_smac}"
+done
 
 # --- WiFi stations of the hostapd access point ------------------------------
 # Associated stations are read via `iw` (works without the hostapd control
@@ -400,7 +446,7 @@ do
         f_mark_wifi "${f_sta_key}" "${f_wlan}" "${f_sta_sig}"
       else
         # Not seen in the scan: resolve the IP via the neighbor table.
-        f_sta_ip="$(ip neigh 2>/dev/null | awk -v m="${f_sta_mac,,}" \
+        f_sta_ip="$(ip -4 neigh 2>/dev/null | awk -v m="${f_sta_mac,,}" \
           '{ if (tolower($5)==m) { print $1; exit } }')"
         f_emit "" "${f_sta_ip}" "${f_sta_mac}" "" "true" "${f_wlan}" "${f_sta_sig}"
       fi
@@ -409,41 +455,28 @@ do
   done < <(iw dev "${f_wlan}" station dump 2>/dev/null)
 done < <(iw dev 2>/dev/null | grep '^	Interface')
 
-# --- Fill the host's own rows (self) with MAC + vendor -----------------------
-# nmap never emits a MAC line for the local host itself (it learns MACs only
-# from ARP replies of other hosts), so self rows with an empty MAC fall back to
-# reading the interface MAC from the kernel and the vendor from the OUI
+# --- Fill the host's own rows (self) with vendor ------------------------------
+# Rows without a vendor (e.g. the local host itself) fall back to the OUI
 # database (/usr/share/ieee-data/oui.txt, fallback nmap-mac-prefixes).
-f_self_mac() {
-  ip -o link show dev "$1" 2>/dev/null | awk '{ for (i=1;i<=NF;i++) if ($i=="link/ether") { print toupper($(i+1)); exit } }'
-}
-f_self_vendor() {
-  local f_oui="${1//:/}" f_v=""
-  f_oui="${f_oui:0:6}"
-  f_oui="${f_oui^^}"
-  if [[ -f /usr/share/ieee-data/oui.txt ]]
-  then
-    f_v="$(awk -v o="${f_oui}" '$1==o { sub(/^[^ \t]+[ \t]+\([^)]*\)[ \t]+/, ""); print; exit }' /usr/share/ieee-data/oui.txt 2>/dev/null)"
-  fi
-  # oui.txt uses CRLF line endings; strip the trailing carriage return.
-  f_v="${f_v%$'\r'}"
-  if [[ -z "${f_v}" ]] && [[ -f /usr/share/nmap/nmap-mac-prefixes ]]
-  then
-    f_v="$(awk -v o="${f_oui}" '$1==o { sub(/^[^ \t]+[ \t]+/, ""); print; exit }' /usr/share/nmap/nmap-mac-prefixes 2>/dev/null)"
-  fi
-  printf '%s' "${f_v}"
-}
 for (( f_r = 0; f_r < ${#f_order[@]}; f_r++ ))
 do
   f_cur="${f_row[${f_order[$f_r]}]}"
-  # Skip rows that already carry a MAC or are not the host itself.
-  [[ "${f_cur}" == *'"self":true'* ]] || continue
-  [[ "${f_cur}" == *'"mac":""'* ]] || continue
-  f_ifn="$(printf '%s' "${f_cur}" | sed -nE 's/.*"interface":"([a-z0-9._-]*)".*/\1/p')"
-  [[ -z "${f_ifn}" ]] && continue
-  f_ownmac="$(f_self_mac "${f_ifn}")"
-  [[ -z "${f_ownmac}" ]] && continue
-  f_ownver="$(f_self_vendor "${f_ownmac}")"
+  # Only rows still missing a vendor.
+  [[ "${f_cur}" == *'"vendor":""'* ]] || continue
+  f_ownmac=""
+  if [[ "${f_cur}" == *'"mac":""'* ]]
+  then
+    # No MAC at all (e.g. the host itself): read it from the interface.
+    [[ "${f_cur}" == *'"self":true'* ]] || continue
+    f_ifn="$(printf '%s' "${f_cur}" | sed -nE 's/.*"interface":"([a-z0-9._-]*)".*/\1/p')"
+    [[ -z "${f_ifn}" ]] && continue
+    f_ownmac="$(ip -o link show dev "${f_ifn}" 2>/dev/null | awk '{ for (i=1;i<=NF;i++) if ($i=="link/ether") { print toupper($(i+1)); exit } }')"
+    [[ -z "${f_ownmac}" ]] && continue
+  else
+    f_ownmac="$(printf '%s' "${f_cur}" | sed -nE 's/.*"mac":"([0-9A-Fa-f:]*)".*/\1/p')"
+    [[ -z "${f_ownmac}" ]] && continue
+  fi
+  f_ownver="$(f_oui_vendor "${f_ownmac}")"
   f_ownver="${f_ownver//\\/\\\\}"
   f_ownver="${f_ownver//\"/\\\"}"
   f_ownver="${f_ownver//&/\\&}"
