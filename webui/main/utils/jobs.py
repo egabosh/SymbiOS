@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Shared in-memory job registry for background command execution.
+"""Shared job registry for background command execution.
 
 The WebUI runs a single gunicorn worker, so this dict is shared across all
 requests within the process. Jobs capture live command output for the browser
@@ -26,9 +26,14 @@ module polls the resulting log file over the SSH gateway. A WebUI restart,
 gunicorn worker recycle or SSH connection drop can therefore never abort the
 remote command (e.g. a long /symbios disk migration). It keeps running on the
 host and writes its progress to /var/log/symbios/jobs/.
+
+A restart does wipe this registry, so unknown job ids are re-attached to
+their host log when the host still knows them: the browser keeps polling
+the same id and seamlessly follows the job across the restart.
 """
 
 import json
+import re
 import shlex
 import threading
 import uuid
@@ -37,6 +42,10 @@ from .ssh_exec import run_command
 
 _JOBS = {}
 _JOBS_LOCK = threading.Lock()
+
+# Job ids are uuid hex from create_job; anything else is rejected before
+# it reaches a host shell command (ids arrive via browser query params).
+_JOB_ID_RE = re.compile(r'^[0-9a-f]{32}$')
 
 # Host wrapper that starts commands detached and serves their log output.
 # Polling is done via short SSH calls (never a long-lived channel).
@@ -85,9 +94,43 @@ def get_job_output(job_id):
     """Return (output, done, success, command) for a job, or None if unknown."""
     job = _JOBS.get(job_id)
     if job is None:
-        return None
+        job = _reattach_job(job_id)
+        if job is None:
+            return None
     with job['lock']:
         return job['output'], job['done'], job['success'], job['command']
+
+
+def _reattach_job(job_id):
+    """Re-attach an unknown job id to its host log file.
+
+    Returns the job entry, or None when the host knows nothing about the
+    id (never started, or pruned) or cannot be reached. Spawns a fresh
+    poller that replays the host log from the start, so the browser
+    keeps following the same id across a WebUI restart.
+    """
+    if not job_id or not _JOB_ID_RE.match(job_id):
+        return None
+    try:
+        ok, stdout, stderr = run_command(
+            '{} poll {} 0'.format(DETACHED_SCRIPT, job_id), timeout=60)
+        if not ok:
+            return None
+        data = json.loads(stdout)
+    except Exception:
+        return None
+    if data.get('status') == 'unknown':
+        return None
+    job = {'output': '', 'done': False, 'success': False, 'lock': threading.Lock(),
+           'command': ''}
+    with _JOBS_LOCK:
+        # A concurrent poll may have re-attached first: use one entry.
+        existing = _JOBS.get(job_id)
+        if existing is not None:
+            return existing
+        _JOBS[job_id] = job
+    threading.Thread(target=_poll_job, args=(job, job_id), daemon=True).start()
+    return job
 
 
 def _poll_job(job, job_id):
@@ -131,6 +174,14 @@ def _poll_job(job, job_id):
             threading.Event().wait(3)
             continue
         consecutive_failures = 0
+
+        if data.get('status') == 'unknown':
+            # Host pruned a job we still track (or it never existed):
+            # finish explicitly instead of waiting forever.
+            with job['lock']:
+                job['output'] += '\n[ERROR] Job unknown on host; assuming it is gone.\n'
+                job['done'] = True
+            return
 
         text = data.get('output', '')
         if text:

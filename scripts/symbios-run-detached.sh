@@ -31,8 +31,10 @@
 #       Reads stdin (passphrase / keys) into a 0600 input file, then starts
 #       the command detached. Prints {"ok":true,"job":"<id>"} immediately.
 #   symbios-run-detached.sh poll <job-id> <byte-offset>
-#       Prints {"ok":true,"status":"running|done","rc":"N","size":<bytes>,
-#               "output":"<new text since byte-offset>"}.
+#       Prints {"ok":true,"status":"running|done|unknown","rc":"N",
+#               "size":<bytes>,"output":"<new text since byte-offset>"}.
+#       "unknown" means no log/done/pid file exists for the id (never
+#       started, or pruned) - pollers must finish, never wait on it.
 #
 # Job files (created/owned by root):
 #   /var/log/symbios/jobs/<id>.input   stdin payload (chmod 600, deleted on exit)
@@ -54,9 +56,11 @@ never on /symbios (the disk migration swaps /symbios).
   start <job-id> '<command>'   Reads stdin (passphrase / keys) into a 0600
                                input file, starts the command detached.
                                Prints {"ok":true,"job":"<id>"} immediately.
-  poll <job-id> <byte-offset>  Prints {"ok":true,"status":"running|done",
-                               "rc":"N","size":<bytes>,
+  poll <job-id> <byte-offset>  Prints {"ok":true,"status":"running|done|
+                               unknown","rc":"N","size":<bytes>,
                                "output":"<new text since byte-offset>"}.
+                               "unknown" (no files for the id) finishes
+                               pollers instead of waiting forever.
 
 Job files (created/owned by root):
   /var/log/symbios/jobs/<id>.input   stdin payload (chmod 600, deleted on exit)
@@ -149,6 +153,15 @@ f_poll() {
   local f_size=0 f_new="" f_status="running" f_rc="" f_pid=""
 
   [[ -z "$g_job_id" ]] && f_json_error "No job id"
+  if [[ ! -f "$f_log" ]] && [[ ! -f "$f_done" ]] && [[ ! -f "$f_pidfile" ]]
+  then
+    # Unknown id (never started, or pruned): report explicitly so pollers
+    # finish instead of waiting on output that will never come. A started
+    # job always has at least its pid file, so this cannot misfire on a
+    # live job whose log is still empty.
+    printf '{"ok":true,"status":"unknown","rc":"","size":0,"output":""}'
+    return 0
+  fi
   [[ -f "$f_log" ]] && f_size=$(wc -c < "$f_log")
 
   if [[ -n "$f_offset" ]] && [[ "$f_offset" -lt "$f_size" ]]
