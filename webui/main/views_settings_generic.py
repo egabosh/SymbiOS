@@ -218,6 +218,9 @@ def _is_unchanged(field, posted, old_values):
 
 def _save_generic(request, slug, entry, script):
     is_ajax = is_ajax_request(request)
+    # Setup-assistant flow (?setup=1): saves return to /setup/ instead
+    # of the settings page (same convention as the dedicated DNS view).
+    in_setup = 'setup' in request.GET
     fields, err = _load_schema(entry)
     if fields is None:
         if is_ajax:
@@ -253,9 +256,9 @@ def _save_generic(request, slug, entry, script):
             # and is shown on the reloaded page (the modal itself closes).
             messages.info(request, 'Already up to date - nothing changed.')
             return JsonResponse({'ok': True, 'message': 'Already up to date.',
-                                 'redirect': request.path})
+                                 'redirect': '/setup/' if in_setup else request.path})
         messages.info(request, 'Already up to date - nothing changed.')
-        return redirect(request.path)
+        return redirect('setup' if in_setup else request.path)
     result = run_settings_script(
         '{} set --json-stdin'.format(script), timeout=30,
         stdin_data=json.dumps(changed))
@@ -267,9 +270,12 @@ def _save_generic(request, slug, entry, script):
         # The sync set above already validated+wrote; the job only applies.
         cmd = '{} apply'.format(script)
         job_id = create_job(cmd, timeout=3600)
-        return JsonResponse({'ok': True, 'job': job_id, 'title': title,
-                             'message': message, 'command': cmd})
+        resp = {'ok': True, 'job': job_id, 'title': title,
+                'message': message, 'command': cmd}
+        if in_setup:
+            resp['redirect'] = '/setup/'
+        return JsonResponse(resp)
     messages.success(request, message)
     messages.info(request, 'Applying in the background...')
     create_job('{} apply'.format(script), timeout=3600)
-    return redirect(request.path)
+    return redirect('setup' if in_setup else request.path)
