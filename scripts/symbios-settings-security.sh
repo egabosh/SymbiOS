@@ -80,7 +80,8 @@ then
 [
   {"name": "password_policy", "type": "select", "label": "Password policy",
    "required": false, "default": "medium", "secret": false,
-   "options": ["none", "low", "medium", "high", "paranoid"]},
+   "options": ["none", "low", "medium", "high", "paranoid"],
+   "note": "Levels: none (1+ characters), low (8+), medium (10+ with letter, digit and special character), high (16+, same mix), paranoid (32+, same mix). Enforced for LDAP user passwords."},
   {"name": "webui_public_access", "type": "bool", "label": "WebUI public (internet) access",
    "required": false, "default": false, "secret": false}
 ]
