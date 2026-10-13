@@ -63,6 +63,9 @@
     # setup, or a USB interface appears late. This oneshot unit retries the
     # same script (no stdin: it re-reads inventory.yml) until it succeeds so
     # the assignments survive reboots regardless of boot ordering.
+    # Boot policy (AGENTS.md): the unit ExecStart lives below /symbios
+    # (git_root), so it is NOT boot-enabled - symbios-after-mount.sh starts
+    # it from rc.local after the mount instead.
     - name: Deploy bridge-assignment retry service
       ansible.builtin.copy:
         dest: /etc/systemd/system/symbios-bridge-assign.service
@@ -80,10 +83,10 @@
         group: root
         mode: "0644"
 
-    - name: Enable and start bridge-assignment retry service
+    - name: Disable bridge-assignment boot autostart (started by symbios-after-mount.sh)
       ansible.builtin.systemd:
         name: symbios-bridge-assign.service
-        enabled: true
+        enabled: false
         state: started
         daemon_reload: true
 

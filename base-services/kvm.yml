@@ -315,6 +315,9 @@
           #    host shutdown (a stopped VM has no save and stays stopped).
           # 2) Power-loss / crash fallback: if no managed save was written but
           #    the qemu hook recorded "running", cold-start those VMs.
+          # The default storage pool lives below /symbios and cannot be active
+          # before the mount (boot policy, AGENTS.md) - start it here first.
+          virsh pool-start default 2>/dev/null || true
           systemctl start libvirt-guests 2>/dev/null || true
           for f_state in /var/lib/symbios-vm-state/*
           do

@@ -417,6 +417,7 @@ texts opportunistically).
 | `symbios-set-hostname.sh` | Hostname from `base_domain`, idempotent, `--check` mode (template model) | `[--check]` |
 | `symbios-power.sh` | Reboot / shutdown the host (WebUI, exec-modal notice) | `reboot\|shutdown` |
 | `symbios-data-partition.sh` | `/symbios` data partition incl. LUKS setup/mount/rollback. Pre-mount: hardcodes paths, never sources `symbios-lib.sh` | `list\|status\|setup\|rollback` |
+| `symbios-after-mount.sh` | Post-mount dispatcher (rootfs): starts all `/symbios`-dependent units in order (boot policy, AGENTS.md) | `[-h\|--help]`, no args |
 | `symbios-detect-network-type.sh` | Connection type (`home`/`root`/`airgapped`) as JSON | no args |
 | `symbios-get-local-ip.sh` | Local RFC1918 IPv4 (`.host-ip` file, `hostname -I` fallback) | no args |
 | `symbios-get-local-ips.sh` | Hostname + LAN IPv4 + global IPv6 as JSON | no args |

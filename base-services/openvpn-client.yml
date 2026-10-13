@@ -225,6 +225,26 @@
       changed_when: false
       failed_when: false
 
+    # Boot policy (AGENTS.md): a tunnel removed from the inventory must not
+    # stay boot-enabled (its config placeholder is empty before the mount and
+    # the unit would fail-loop at boot). Runtime enablement vanishes on
+    # reboot, persistent enablement is removed here.
+    - name: Disable autostart of orphan tunnels (removed from inventory)
+      ansible.builtin.shell: |
+        g_known=" {{ (openvpn_clients | default({})).keys() | list | join(' ') }} "
+        for f_unit in $(systemctl list-unit-files 'openvpn@*.service' --no-legend 2>/dev/null | awk '$2 ~ /^enabled/ {print $1}')
+        do
+          f_base="${f_unit#openvpn@}"
+          f_base="${f_base%.service}"
+          [[ "${g_known}" == *" ${f_base} "* ]] && continue
+          systemctl disable "${f_unit}" 2>/dev/null && echo "disabled ${f_base}"
+        done
+      args:
+        executable: /bin/bash
+      register: _openvpn_orphan_disable
+      changed_when: '"disabled " in _openvpn_orphan_disable.stdout'
+      failed_when: false
+
     - name: Start enabled tunnels now
       ansible.builtin.systemd:
         name: "openvpn@{{ item.0 }}"

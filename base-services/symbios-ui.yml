@@ -242,6 +242,15 @@
         group: root
         mode: "0755"
 
+    - name: Install after-mount dispatcher (boot policy, rootfs)
+      ansible.builtin.copy:
+        src: "{{ git_root }}/scripts/symbios-after-mount.sh"
+        dest: /usr/local/sbin/symbios-after-mount.sh
+        owner: root
+        group: root
+        mode: "0755"
+        validate: /bin/bash -n %s
+
     - name: Get current default target
       ansible.builtin.command:
         cmd: systemctl get-default
@@ -253,7 +262,7 @@
         cmd: systemctl set-default multi-user.target
       when: current_default_target.stdout != 'multi-user.target'
 
-    - name: Disable docker and containerd auto-start (handled by rc.local)
+    - name: Disable docker and containerd auto-start (handled by symbios-after-mount.sh)
       ansible.builtin.systemd:
         name: "{{ item }}"
         enabled: no
@@ -288,19 +297,27 @@
             /usr/local/sbin/symbios-boot-unlock/unlock.py
             # Mount /symbios (no passphrase needed once LUKS is open, fstab entry is noauto)
             mount /symbios 2>/dev/null || true
-            if [[ -x /symbios/run-after-mount.sh ]] 
+            if [[ -x /symbios/run-after-mount.sh ]]
             then
               if ! /symbios/run-after-mount.sh
               then
                 echo "ERROR /symbios/run-after-mount.sh FAILED!!!"
               fi
             fi
+            # Start all /symbios-dependent host services in order (boot policy: AGENTS.md)
+            if [[ -x /usr/local/sbin/symbios-after-mount.sh ]]
+            then
+              /usr/local/sbin/symbios-after-mount.sh || echo "ERROR symbios-after-mount.sh FAILED!!!"
+            fi
           else
             echo "WARNING: No LUKS device (CRYPT_LUKS_SYMBIOS_DATA) found - /symbios not encrypted."
+            # No unlock needed - start the dependents directly.
+            if [[ -x /usr/local/sbin/symbios-after-mount.sh ]]
+            then
+              /usr/local/sbin/symbios-after-mount.sh || echo "ERROR symbios-after-mount.sh FAILED!!!"
+            fi
           fi
-          systemctl start docker
           [[ -x /usr/sbin/lightdm ]] && systemctl start lightdm
-          sleep 30 ; systemctl start runchecks
 
     - name: Deploy rc-local systemd unit with Install section
       ansible.builtin.copy:

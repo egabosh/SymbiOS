@@ -152,13 +152,16 @@
 
     # The watchdog runs independently of runchecks.service, so it can detect
     # (and restart) a dead daemon - closing the self-monitoring blind spot.
+    # Boot policy (AGENTS.md): the watchdog ExecStart lives below /symbios
+    # (git_root), so the timer is NOT boot-enabled - symbios-after-mount.sh
+    # starts it from rc.local after the mount instead.
     - name: Enable runchecks-watchdog.timer
       ansible.builtin.systemd:
         name: runchecks-watchdog.timer
         state: started
-        enabled: true
+        enabled: false
 
-    - name: 'disable via systemd - started by rc.local'
+    - name: 'disable via systemd - started by symbios-after-mount.sh'
       command: systemctl disable runchecks
       args:
         creates: /etc/systemd/system/multi-user.target.wants/runchecks.service

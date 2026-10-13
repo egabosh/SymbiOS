@@ -205,8 +205,10 @@
 
           [Service]
           Type=simple
-          # Scripts, SSH key and log live under /symbios; the script waits for
-          # those paths (late LUKS unlock) instead of failing at boot.
+          # Scripts, SSH key and log live under /symbios: instances are NOT
+          # boot-enabled (boot policy, AGENTS.md) - symbios-after-mount.sh
+          # starts them from rc.local after the mount. RestartSec covers a
+          # re-locked volume at runtime.
           ExecStart={{ git_root }}/scripts/symbios-wol-watch-tail.sh %i
           Restart=always
           RestartSec=60
@@ -228,8 +230,10 @@
 
           [Service]
           Type=simple
-          # Scripts, SSH key and log live under /symbios; the script waits for
-          # those paths (late LUKS unlock) instead of failing at boot.
+          # Scripts, SSH key and log live under /symbios: instances are NOT
+          # boot-enabled (boot policy, AGENTS.md) - symbios-after-mount.sh
+          # starts them from rc.local after the mount. RestartSec covers a
+          # re-locked volume at runtime.
           ExecStart={{ git_root }}/scripts/symbios-wol-watch-idle.sh %i
           Restart=always
           RestartSec=60
@@ -242,11 +246,11 @@
     - name: Flush handlers for unit files
       ansible.builtin.meta: flush_handlers
 
-    - name: Enable and start instances for active targets
+    - name: Start instances for active targets (boot start via symbios-after-mount.sh)
       ansible.builtin.systemd:
         name: "{{ item.0.unit }}@{{ item.1.name }}"
         state: started
-        enabled: true
+        enabled: false
         daemon_reload: false
       loop: "{{ [{'unit': 'wol-tail', 'flag': 'wake'}, {'unit': 'wol-idle', 'flag': 'suspend'}] | product(power_targets) | list }}"
       vars:
@@ -289,11 +293,11 @@
         mode: '0644'
         content: "{{ power_active_instances | join('\n') }}\n"
 
-    - name: Restart enabled instances (pick up new script code)
+    - name: Restart started instances (pick up new script code, still no boot autostart)
       ansible.builtin.systemd:
         name: "{{ item }}"
         state: restarted
-        enabled: true
+        enabled: false
         daemon_reload: false
       loop: "{{ power_enabled_instances }}"
 
@@ -313,6 +317,6 @@
       ansible.builtin.systemd:
         name: "{{ item }}"
         state: restarted
-        enabled: true
+        enabled: false
         daemon_reload: true
       loop: "{{ power_enabled_instances | default([]) }}"

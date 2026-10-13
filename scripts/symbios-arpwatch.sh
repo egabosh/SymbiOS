@@ -71,17 +71,37 @@ do
   fi
 done < <(ip -o -4 addr show scope global 2>/dev/null | awk '{print $2, $4}')
 
-# Enable and start missing instances.
+# Start missing instances (start only, never enable - boot policy in AGENTS.md:
+# tunnel/bridge interfaces like iot0 exist only after rc.local created them,
+# so a persistent enablement would fail-loop at boot (Restart=on-failure).
+# The 5-minute cron plus symbios-after-mount.sh reconcile every boot).
 for f_iface in ${g_ifaces[@]+"${g_ifaces[@]}"}
 do
-  if systemctl is-enabled "arpwatch@${f_iface}" >/dev/null 2>&1 \
-     && systemctl is-active "arpwatch@${f_iface}" >/dev/null 2>&1
+  if systemctl is-active "arpwatch@${f_iface}" >/dev/null 2>&1
   then
     continue
   fi
-  g_echo_note "enabling arpwatch@${f_iface}"
-  systemctl enable --now "arpwatch@${f_iface}" 2>&1 | tail -1
+  g_echo_note "starting arpwatch@${f_iface}"
+  systemctl start "arpwatch@${f_iface}" 2>&1 | tail -1
 done
+
+# Migration: drop persistent enablement created by older versions (boot
+# policy: no boot-enabled arpwatch instances). Running instances stay up.
+while read -r f_file f_state f_rest
+do
+  [[ "${f_file}" == arpwatch@* ]] || continue
+  case "${f_state}" in
+    enabled|enabled-runtime)
+      ;;
+    *)
+      continue
+      ;;
+  esac
+  f_unit="${f_file%.service}"
+  [[ -z "${f_unit}" ]] && continue
+  g_echo_note "disabling boot autostart of ${f_unit}"
+  systemctl disable "${f_unit}" 2>&1 | tail -1
+done < <(systemctl list-unit-files 'arpwatch@*.service' --no-legend 2>/dev/null)
 
 # Disable and stop instances of interfaces that are gone.
 while read -r f_unit f_rest
