@@ -288,6 +288,13 @@
             /usr/local/sbin/symbios-boot-unlock/unlock.py
             # Mount /symbios (no passphrase needed once LUKS is open, fstab entry is noauto)
             mount /symbios 2>/dev/null || true
+            if [[ -x /symbios/run-after-mount.sh ]] 
+            then
+              if ! /symbios/run-after-mount.sh
+              then
+                echo "ERROR /symbios/run-after-mount.sh FAILED!!!"
+              fi
+            fi
           else
             echo "WARNING: No LUKS device (CRYPT_LUKS_SYMBIOS_DATA) found - /symbios not encrypted."
           fi
