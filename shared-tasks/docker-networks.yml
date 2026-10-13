@@ -1,0 +1,28 @@
+# Shared task: ensure the platform Docker networks exist.
+#
+# Creates symbios_base_services and symbios_services idempotently
+# (create-if-missing). The nightly docker system prune removes them
+# whenever no container is attached, so every compose stack that
+# declares them external must include this before `compose up`.
+# Callers: base-services/docker.yml (canonical owner), traefik.yml.
+# No vars required.
+
+- name: Ensure symbios_base_services network exists
+  ansible.builtin.shell: |
+    docker network inspect symbios_base_services >/dev/null 2>&1 && exit 0
+    docker network create --ipv6 --driver bridge \
+      --opt com.docker.network.bridge.name=base-services \
+      --subnet 192.168.41.0/24 --gateway 192.168.41.1 \
+      --subnet fdaa:a192:b168:cd41::/64 --gateway fdaa:a192:b168:cd41::1 \
+      symbios_base_services
+  changed_when: false
+
+- name: Ensure symbios_services network exists
+  ansible.builtin.shell: |
+    docker network inspect symbios_services >/dev/null 2>&1 && exit 0
+    docker network create --ipv6 --driver bridge \
+      --opt com.docker.network.bridge.name=services \
+      --subnet 192.168.42.0/24 --gateway 192.168.42.1 \
+      --subnet fdaa:a192:b168:cd42::/64 --gateway fdaa:a192:b168:cd42::1 \
+      symbios_services
+  changed_when: false

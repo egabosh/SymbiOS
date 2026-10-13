@@ -400,6 +400,18 @@ forward-auth services without OIDC admin/user distinction.
       include_tasks: ../shared-tasks/ldap-single-group.yml
 ```
 
+### `shared-tasks/docker-networks.yml` - platform Docker networks
+
+Creates `symbios_base_services` and `symbios_services` idempotently
+(create-if-missing, no vars). Every compose stack declaring them external
+must include this before `compose up`: the nightly `docker system prune`
+removes them whenever no container is attached.
+
+```yaml
+    - name: Ensure platform networks exist
+      include_tasks: ../shared-tasks/docker-networks.yml
+```
+
 ### `shared-tasks/authelia-acl.yml` - Authelia access control
 
 Writes an Authelia `access_control` block for a service domain. Supports

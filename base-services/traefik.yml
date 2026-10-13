@@ -346,24 +346,10 @@
 
 
     - name: Ensure platform networks exist (nightly prune removes unused ones)
-      # Canonical definition lives in base-services/docker.yml - keep the
-      # subnets/gateways in sync. Traefik cannot start without these
-      # (compose declares them external), and prune deletes them whenever
-      # no container is attached (e.g. before Traefik's first start).
-      ansible.builtin.shell: |
-        docker network inspect symbios_base_services >/dev/null 2>&1 || \
-          docker network create --ipv6 --driver bridge \
-            --opt com.docker.network.bridge.name=base-services \
-            --subnet 192.168.41.0/24 --gateway 192.168.41.1 \
-            --subnet fdaa:a192:b168:cd41::/64 --gateway fdaa:a192:b168:cd41::1 \
-            symbios_base_services
-        docker network inspect symbios_services >/dev/null 2>&1 || \
-          docker network create --ipv6 --driver bridge \
-            --opt com.docker.network.bridge.name=services \
-            --subnet 192.168.42.0/24 --gateway 192.168.42.1 \
-            --subnet fdaa:a192:b168:cd42::/64 --gateway fdaa:a192:b168:cd42::1 \
-            symbios_services
-      changed_when: false
+      # Traefik cannot start without these (compose declares them
+      # external). Shared with base-services/docker.yml, the canonical
+      # owner of the subnet definitions.
+      ansible.builtin.include_tasks: ../shared-tasks/docker-networks.yml
 
     - name: Ensure traefik is running
       # A plain up keeps a stopped container as-is - including a stale

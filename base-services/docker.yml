@@ -355,25 +355,8 @@
           #innodb_log_buffer_size=512K
         backup: yes
 
-    - name: Create symbios_base_services network
-      ansible.builtin.shell: |
-        docker network inspect symbios_base_services >/dev/null 2>&1 && exit 0
-        docker network create --ipv6 --driver bridge \
-          --opt com.docker.network.bridge.name=base-services \
-          --subnet 192.168.41.0/24 --gateway 192.168.41.1 \
-          --subnet fdaa:a192:b168:cd41::/64 --gateway fdaa:a192:b168:cd41::1 \
-          symbios_base_services
-      changed_when: false
-
-    - name: Create symbios_services network
-      ansible.builtin.shell: |
-        docker network inspect symbios_services >/dev/null 2>&1 && exit 0
-        docker network create --ipv6 --driver bridge \
-          --opt com.docker.network.bridge.name=services \
-          --subnet 192.168.42.0/24 --gateway 192.168.42.1 \
-          --subnet fdaa:a192:b168:cd42::/64 --gateway fdaa:a192:b168:cd42::1 \
-          symbios_services
-      changed_when: false
+    - name: Ensure platform Docker networks exist
+      ansible.builtin.include_tasks: ../shared-tasks/docker-networks.yml
 
 
     - name: Register playbook as installed
