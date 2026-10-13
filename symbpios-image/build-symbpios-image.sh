@@ -338,8 +338,9 @@ echo "Package pre-installation complete"
 # Step 4b: De-duplicate first-boot identities.
 # The chroot package installs (dbus postinst etc.) generate /etc/machine-id
 # and SSH host keys once; every clone would otherwise share them (same
-# DHCPv6 DUID, same D-Bus ID, same host keys). An empty machine-id and
-# missing host keys are regenerated uniquely on first boot, so remove them.
+# DHCPv6 DUID, same D-Bus ID, same host keys). An empty machine-id is
+# refilled uniquely by systemd on first boot; missing host keys are created
+# by install.sh (ssh-keygen -A) before its final reboot, so remove them.
 echo "Resetting first-boot identities..."
 truncate -s 0 "${g_mount_point_root}/etc/machine-id"
 rm -f "${g_mount_point_root}/var/lib/dbus/machine-id"

@@ -89,6 +89,14 @@ fi
 # Run base-services playbooks
 f_run_playbook "${g_git_root}/base-services/basics.yml"
 
+# Generate SSH host keys on first boot. The image ships without any so
+# clones never share host keys; ssh-keygen -A creates all missing default
+# types. The installer reboots on success, so sshd picks them up next boot.
+if ! [[ -f /etc/ssh/ssh_host_ed25519 ]]
+then
+  ssh-keygen -A
+fi
+
 # optional set password for symbios user (interactive on physical console)
 # Systemd's rc-local.service sets stdin=/dev/null, so we redirect from
 # the actual console TTY to make passwd read keyboard input correctly.
