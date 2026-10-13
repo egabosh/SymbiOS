@@ -679,7 +679,8 @@
         ufw_port: '4190'
 
     # Mailcow backup module. Uses mailcow's own backup_and_restore.sh which
-    # dumps the MySQL database, redis and crypto keys into BACKUPDIR.
+    # dumps the MySQL database, redis and crypto keys into g_backupdir
+    # (set by scripts/backup.sh to ${backup_root}/db).
     - name: "{{ data_root }}/backup.d/mailcow.backup"
       blockinfile:
         path: "{{ data_root }}/backup.d/mailcow.backup"
@@ -690,8 +691,8 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           cd {{ mailcow_root }}
-          mkdir -p ${BACKUPDIR}/mailcow-backup
-          BACKUP_LOCATION=${BACKUPDIR}/mailcow-backup ./helper-scripts/backup_and_restore.sh backup all --delete-days 1 \
+          mkdir -p ${g_backupdir}/mailcow-backup
+          BACKUP_LOCATION=${g_backupdir}/mailcow-backup ./helper-scripts/backup_and_restore.sh backup all --delete-days 1 \
             || g_echo_error "Mailcow backup failed"
         backup: yes
         validate: /bin/bash -n %s

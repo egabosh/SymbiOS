@@ -296,22 +296,23 @@
         block: |
           . {{ base_services_root }}/_defaults/mariadb/envroot.db
 
-          DAYS=7
-          TIMESTAMP=$(date +"%Y%m%d%H%M")
+          g_days=7
+          g_timestamp=$(date +"%Y%m%d%H%M")
+          mkdir -p $g_backupdir
 
           for i in $(echo "show databases" | mariadb -u root -h localhost --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD} | egrep -v "^Database$|^performance_schema$|^information_schema$")
           do
-            if mariadb-dump  -u root -h localhost --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD} $i 2>${g_tmp}/dberr >$BACKUPDIR/KODIDB-$i-$TIMESTAMP.sql
+            if mariadb-dump  -u root -h localhost --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD} $i 2>${g_tmp}/dberr >$g_backupdir/KODIDB-$i-$g_timestamp.sql
             then
-              gzip $BACKUPDIR/KODIDB-$i-$TIMESTAMP.sql
+              gzip $g_backupdir/KODIDB-$i-$g_timestamp.sql
             else
               g_echo_error "MariaDB Backup failed $(cat ${g_tmp}/dberr)"
             fi
             # dont delete last old backups!
-            OLD_BACKUPS=$(ls -1 $BACKUPDIR/KODIDB-$i*.gz 2>/dev/null | wc -l)
-            [ -n "$OLD_BACKUPS" ] && if [ $OLD_BACKUPS -gt $DAYS ]
+            g_old_backups=$(ls -1 $g_backupdir/KODIDB-$i*.gz 2>/dev/null | wc -l)
+            [ -n "$g_old_backups" ] && if [ $g_old_backups -gt $g_days ]
             then
-              find $BACKUPDIR -name "KODIDB-$i*.gz" -daystart -mtime +$DAYS -delete
+              find $g_backupdir -name "KODIDB-$i*.gz" -daystart -mtime +$g_days -delete
             fi
           done
           unset MARIADB_ROOT_PASSWORD
