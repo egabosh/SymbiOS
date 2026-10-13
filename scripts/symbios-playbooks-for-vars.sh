@@ -72,7 +72,21 @@ then
   exit 2
 fi
 
-source /etc/bash/gaboshlib.include 2>/dev/null || true
+# NOTE: source WITHOUT 2>/dev/null - gaboshlib saves stderr to fd 9 at
+# source time, and a redirect here would poison fd 9 with /dev/null.
+# The -r test keeps it silent where the file is absent.
+# shellcheck disable=SC1091
+[[ -r /etc/bash/gaboshlib.include ]] && source /etc/bash/gaboshlib.include || true
+# gaboshlib diverts stderr into a red colorizer on stdout (DEBUG trap).
+# That is fine for terminals, but this script's stdout is machine-read
+# (f_ss_apply feeds it to symbios-run-playbook.sh), so kill the trap
+# first and then restore real stderr (fd 9 is gaboshlib's saved copy;
+# probe it silently - a direct guard redirect would void the restore).
+trap - DEBUG
+if (exec 2>&9) 2>/dev/null
+then
+  exec 2>&9
+fi
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
 # Repo root: scripts/ lives at <root>/scripts.
 g_repo_root="$(cd "${g_symbios_dir}/.." && pwd)"
