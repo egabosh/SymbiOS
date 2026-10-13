@@ -31,6 +31,10 @@ Also intercepts all forms with data-exec="true" attribute:
   let _needsReload = false;
   let _redirectUrl = null;
   let _pollRetries = 0;
+  /* Success message from the submit response. Shown only when the job
+     actually succeeds: showing it at submit time claims success before the
+     command ran, contradicting a later "Failed" status in the modal. */
+  let _successMessage = null;
   /* Set to 'reboot'/'shutdown' when the job output mentions a host power
      action (e.g. disk migration finishing with "reboot in 1 minute", or the
      power buttons announcing "Shutting down ..."): later connection losses
@@ -133,6 +137,8 @@ Also intercepts all forms with data-exec="true" attribute:
     running = false;
     currentJob = null;
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    if (success && _successMessage) showAlert(_successMessage, 'success');
+    _successMessage = null;
     statusEl.innerHTML = success
       ? '<i class="bi bi-check-circle-fill exec-status-ok me-1"></i><span class="exec-status-ok fw-bold">Completed successfully</span>'
       : '<i class="bi bi-x-circle-fill exec-status-err me-1"></i><span class="exec-status-err fw-bold">Failed</span>';
@@ -155,6 +161,7 @@ Also intercepts all forms with data-exec="true" attribute:
     outputEl.dataset.rawLen = '0';
     rawLen = 0;
     _pollRetries = 0;
+    _successMessage = null;
     _powerAction = null;
     _longOutageNoted = false;
     _redirectUrl = null;
@@ -273,7 +280,7 @@ Also intercepts all forms with data-exec="true" attribute:
         if (d.job) {
           start(d.job, d.title || 'Running...', d.command);
           if (d.redirect) _redirectUrl = d.redirect;
-          if (d.message) showAlert(d.message, 'success');
+          if (d.message) _successMessage = d.message;
         } else if (d.redirect) {
           close();
           window.location.href = d.redirect;

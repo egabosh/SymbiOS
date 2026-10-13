@@ -232,6 +232,10 @@ function f_validate_password_policy {
       f_policy="${f_policy%%#*}"
       f_policy="${f_policy%%,*}"
       f_policy="$(echo "${f_policy}" | tr -d '[:space:]')"
+      # Strip YAML quotes: inventory values are often quoted
+      # (password_policy: 'medium'), same as f_symbios_var does.
+      f_policy="${f_policy//\'/}"
+      f_policy="${f_policy//\"/}"
     fi
   fi
 
