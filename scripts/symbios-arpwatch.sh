@@ -87,21 +87,20 @@ done
 
 # Migration: drop persistent enablement created by older versions (boot
 # policy: no boot-enabled arpwatch instances). Running instances stay up.
-while read -r f_file f_state f_rest
+# Enumerated via the wants-dir symlinks: list-unit-files does not list
+# enabled template instances on this systemd version.
+shopt -s nullglob
+for f_link in /etc/systemd/system/multi-user.target.wants/arpwatch@*.service
 do
-  [[ "${f_file}" == arpwatch@* ]] || continue
-  case "${f_state}" in
-    enabled|enabled-runtime)
-      ;;
-    *)
-      continue
-      ;;
-  esac
-  f_unit="${f_file%.service}"
-  [[ -z "${f_unit}" ]] && continue
-  g_echo_note "disabling boot autostart of ${f_unit}"
-  systemctl disable "${f_unit}" 2>&1 | tail -1
-done < <(systemctl list-unit-files 'arpwatch@*.service' --no-legend 2>/dev/null)
+  f_unit="$(basename "${f_link}" .service)"
+  [[ -z "${f_unit}" || "${f_unit}" == "arpwatch@" ]] && continue
+  if systemctl is-enabled "${f_unit}" >/dev/null 2>&1
+  then
+    g_echo_note "disabling boot autostart of ${f_unit}"
+    systemctl disable "${f_unit}" 2>&1 | tail -1
+  fi
+done
+shopt -u nullglob
 
 # Disable and stop instances of interfaces that are gone.
 while read -r f_unit f_rest

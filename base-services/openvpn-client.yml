@@ -228,17 +228,21 @@
     # Boot policy (AGENTS.md): a tunnel removed from the inventory must not
     # stay boot-enabled (its config placeholder is empty before the mount and
     # the unit would fail-loop at boot). Runtime enablement vanishes on
-    # reboot, persistent enablement is removed here.
+    # reboot, persistent enablement is removed here. Enumerated via the
+    # wants-dir symlinks: list-unit-files does not list enabled template
+    # instances on this systemd version.
     - name: Disable autostart of orphan tunnels (removed from inventory)
       ansible.builtin.shell: |
+        shopt -s nullglob
         g_known=" {{ (openvpn_clients | default({})).keys() | list | join(' ') }} "
-        for f_unit in $(systemctl list-unit-files 'openvpn@*.service' --no-legend 2>/dev/null | awk '$2 ~ /^enabled/ {print $1}')
+        for f_link in /etc/systemd/system/multi-user.target.wants/openvpn@*.service /run/systemd/system/multi-user.target.wants/openvpn@*.service
         do
-          f_base="${f_unit#openvpn@}"
-          f_base="${f_base%.service}"
+          f_base="$(basename "${f_link}" .service)"
+          f_base="${f_base#openvpn@}"
           [[ "${g_known}" == *" ${f_base} "* ]] && continue
-          systemctl disable "${f_unit}" 2>/dev/null && echo "disabled ${f_base}"
+          systemctl disable "openvpn@${f_base}" 2>/dev/null && echo "disabled ${f_base}"
         done
+        shopt -u nullglob
       args:
         executable: /bin/bash
       register: _openvpn_orphan_disable
