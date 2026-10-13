@@ -150,9 +150,21 @@
                 - "{{ media_gid | default(31000) }}"
               volumes:
                 - ./data:/usr/src/paperless/data
-                - {{ paperless_media_path }}:/usr/src/paperless/media:rw
+                # Long syntax with create_host_path:false: fail closed when
+                # the volume is missing instead of consuming into void.
+                - type: bind
+                  source: {{ paperless_media_path }}
+                  target: /usr/src/paperless/media
+                  read_only: false
+                  bind:
+                    create_host_path: false
                 - ./export:/usr/src/paperless/export
-                - {{ paperless_consume_path }}:/usr/src/paperless/consume:rw
+                - type: bind
+                  source: {{ paperless_consume_path }}
+                  target: /usr/src/paperless/consume
+                  read_only: false
+                  bind:
+                    create_host_path: false
               depends_on:
                 - paperless-broker
               env_file: docker-compose.env

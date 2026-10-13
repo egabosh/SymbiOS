@@ -135,7 +135,14 @@
               working_dir: /downloaddir
               volumes:
                 - /etc/localtime:/etc/localtime:ro
-                - {{ youtube_dl_downloaddir }}:/downloaddir:rw
+                # Long syntax with create_host_path:false: fail closed when
+                # the volume is missing instead of downloading into void.
+                - type: bind
+                  source: {{ youtube_dl_downloaddir }}
+                  target: /downloaddir
+                  read_only: false
+                  bind:
+                    create_host_path: false
         backup: yes
       notify: Rebuild youtube-dl
 

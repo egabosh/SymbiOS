@@ -181,9 +181,26 @@
                 - ./data/config:/config
                 - ./data/cache:/cache
                 - /etc/localtime:/etc/localtime
-                - {{ jellyfin_videos_path }}:/media/videos:ro
-                - {{ jellyfin_audio_path }}:/media/audio:ro
-                - {{ jellyfin_images_path }}:/media/images:ro
+                # Long syntax with create_host_path:false: fail closed when
+                # the volume is missing instead of serving empty libraries.
+                - type: bind
+                  source: {{ jellyfin_videos_path }}
+                  target: /media/videos
+                  read_only: true
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ jellyfin_audio_path }}
+                  target: /media/audio
+                  read_only: true
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ jellyfin_images_path }}
+                  target: /media/images
+                  read_only: true
+                  bind:
+                    create_host_path: false
               networks:
                 - symbios_services
           # optional hardware acceleration

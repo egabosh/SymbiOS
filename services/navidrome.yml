@@ -87,45 +87,16 @@
         mode: '0750'
 
 
+    # Compose is a real template (not blockinfile): the music mount is
+    # conditional multiline YAML, and loops do not survive blockinfile
+    # (indentation drift) - same pattern as sftp-share.
     - name: /symbios/services/navidrome/docker-compose.yml Container Configuration
-      blockinfile:
-        path: /symbios/services/navidrome/docker-compose.yml
-        create: yes
+      ansible.builtin.template:
+        src: navidrome/templates/docker-compose.yml.j2
+        dest: /symbios/services/navidrome/docker-compose.yml
         mode: 0440
         owner: root
         group: docker
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-
-          name: ""
-
-          services:
-            navidrome:
-              image: deluan/navidrome:latest
-              container_name: navidrome
-              restart: unless-stopped
-              environment:
-                ND_SCANSCHEDULE: 24h
-                ND_LOGLEVEL: warn
-                ND_SESSIONTIMEOUT: 24h
-                ND_ENABLEINSIGHTSCOLLECTOR: false
-                ND_LASTFM_ENABLED: false
-                ND_LISTENBRAINZ_ENABLED: false
-                ND_SCANNER_PURGEMISSING: always
-                ND_EXTAUTH_TRUSTEDSOURCES: "0.0.0.0/0"
-                ND_ENABLEUSEREDITING: "false"
-              networks:
-                - symbios_services
-              user: "33{{ (':' + (navidrome_music_gid | string)) if navidrome_music_gid else '' }}"
-              volumes:
-                - ./navidrome-data:/data
-                - /etc/localtime:/etc/localtime:ro
-                {{ '- ' + navidrome_music_path + ':/music:ro' if navidrome_music_path else '' }}
-
-          networks:
-            symbios_services:
-              external: true
-
         backup: yes
       notify: Restart navidrome
 

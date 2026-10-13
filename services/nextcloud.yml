@@ -326,10 +326,32 @@
                 - ./remoteip.conf:/etc/apache2/conf-enabled/remoteip.conf:ro
                 - /etc/localtime:/etc/localtime:ro
                 - /etc/hosts:/etc/hosts:ro
-                - {{ nextcloud_media_audio }}:/media/audio:ro
-                - {{ nextcloud_media_videos }}:/media/videos:ro
-                - {{ nextcloud_media_images }}:/media/images:ro
-                - {{ nextcloud_media_documents }}:/media/documents:ro
+                # Long syntax with create_host_path:false: fail closed when
+                # the volume is missing instead of serving empty libraries.
+                - type: bind
+                  source: {{ nextcloud_media_audio }}
+                  target: /media/audio
+                  read_only: true
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ nextcloud_media_videos }}
+                  target: /media/videos
+                  read_only: true
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ nextcloud_media_images }}
+                  target: /media/images
+                  read_only: true
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ nextcloud_media_documents }}
+                  target: /media/documents
+                  read_only: true
+                  bind:
+                    create_host_path: false
               depends_on:
                 - nextcloud-db
                 - nextcloud-redis
@@ -391,10 +413,32 @@
               volumes:
                 - ./nextcloud-data:/var/www/html
                 - /etc/localtime:/etc/localtime:ro
-                - {{ nextcloud_media_audio }}:/media/audio:ro
-                - {{ nextcloud_media_videos }}:/media/videos:ro
-                - {{ nextcloud_media_images }}:/media/images:ro
-                - {{ nextcloud_media_documents }}:/media/documents:ro
+                # Long syntax with create_host_path:false: fail closed when
+                # the volume is missing instead of serving empty libraries.
+                - type: bind
+                  source: {{ nextcloud_media_audio }}
+                  target: /media/audio
+                  read_only: true
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ nextcloud_media_videos }}
+                  target: /media/videos
+                  read_only: true
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ nextcloud_media_images }}
+                  target: /media/images
+                  read_only: true
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ nextcloud_media_documents }}
+                  target: /media/documents
+                  read_only: true
+                  bind:
+                    create_host_path: false
               entrypoint: /cron.sh
               environment:
                 - PHP_MEMORY_LIMIT=1024M

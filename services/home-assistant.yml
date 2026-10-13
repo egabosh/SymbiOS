@@ -259,9 +259,26 @@
               volumes:
                 - ./config:/config
                 - ./media:/media
-                - {{ ha_media_audio }}:/media/audio:ro
-                - {{ ha_media_videos }}:/media/videos:ro
-                - {{ ha_media_images }}:/media/images:ro
+                # Long syntax with create_host_path:false: fail closed when
+                # the volume is missing instead of serving empty libraries.
+                - type: bind
+                  source: {{ ha_media_audio }}
+                  target: /media/audio
+                  read_only: true
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ ha_media_videos }}
+                  target: /media/videos
+                  read_only: true
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ ha_media_images }}
+                  target: /media/images
+                  read_only: true
+                  bind:
+                    create_host_path: false
                 - /etc/localtime:/etc/localtime:ro
                 - /run/dbus:/run/dbus:ro
               network_mode: host
