@@ -15,19 +15,104 @@
       <div class="card-body" id="home-status">
         <span class="spinner-border spinner-border-sm"></span> Checking...
       </div>
+      <div class="card-body border-top" id="unlock-box" style="display:none">
+        <div class="small text-muted mb-2">Unlock opens the device for inspection only - nothing is mounted or formatted. Afterwards look inside via the <a href="{% url "settings_raid_btrfs" %}">btrfs</a> or <a href="{% url "settings_raid_md" %}">mdadm</a> pages.</div>
+        <form id="unlock-form" data-exec="true" method="POST" action="{% url "settings_disk_unlock" %}">
+          {% csrf_token %}
+          <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+              <label class="form-label fw-semibold">Encrypted device</label>
+              <select class="form-select" id="unlock-device" name="device" required>
+                <option value="">-- select LUKS device --</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Passphrase</label>
+              <input type="password" class="form-control" name="password" required
+                     placeholder="Passphrase for the selected device" autocomplete="off">
+            </div>
+            <div class="col-md-3">
+              <button type="submit" class="btn btn-warning">
+                <i class="bi bi-unlock"></i> Unlock
+              </button>
+            </div>
+          </div>
+        </form>
+        <div id="luks-open-list" class="mt-2 small"></div>
+      </div>
     </div>
   </div>
 </div>
 
-<!-- Available disks -->
+<!-- Physical disks -->
 <div class="row mb-3">
   <div class="col-md-12">
     <div class="card">
       <div class="card-header">
-        <i class="bi bi-disc"></i> Available Disks
+        <i class="bi bi-disc"></i> Physical Disks
+        <span class="text-muted small">- whole disks only, never partitions</span>
       </div>
       <div class="card-body" id="disk-list">
         <span class="spinner-border spinner-border-sm"></span> Scanning...
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Arrays & encrypted volumes -->
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-hdd-stack"></i> Arrays &amp; Encrypted Volumes
+        <span class="text-muted small">- btrfs, mdadm and locked LUKS (display only)</span>
+      </div>
+      <div class="card-body" id="raid-list">
+        <span class="spinner-border spinner-border-sm"></span> Scanning...
+      </div>
+      <div class="card-body border-top small text-muted" id="raid-note">
+        Locked LUKS partitions of equal size on different disks are probably one encrypted
+        volume or filesystem, but this cannot be verified while locked.
+        Unlock first, then check the <a href="{% url "settings_raid_btrfs" %}">btrfs</a>
+        or <a href="{% url "settings_raid_md" %}">mdadm</a> pages.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Locate a disk -->
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-search"></i> Locate a Disk
+      </div>
+      <div class="card-body">
+        <div class="alert alert-info small mb-3">
+          <i class="bi bi-info-circle"></i>
+          Sustained reads for N seconds - watch the activity LED or listen to find
+          the physical disk. Max 120s. Works for any disk, RAID member or not.
+        </div>
+        <form id="locate-form" data-exec="true" method="POST" action="{% url "settings_disk_locate" %}">
+          {% csrf_token %}
+          <div class="row g-2 align-items-end">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Disk</label>
+              <select class="form-select" id="locate-device" name="device" required>
+                <option value="">-- select a disk --</option>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-semibold">Seconds</label>
+              <input class="form-control" name="seconds" value="30">
+            </div>
+            <div class="col-md-3">
+              <button type="submit" class="btn btn-outline-secondary">
+                <i class="bi bi-search"></i> Locate
+              </button>
+            </div>
+          </div>
+        </form>
       </div>
     </div>
   </div>
@@ -89,9 +174,9 @@
 </div>
 </div>
 
-<!-- Setup form -->
+<!-- Setup + Adopt forms -->
 <div class="row">
-  <div class="col-md-8">
+  <div class="col-md-6">
     <div class="card">
       <div class="card-header">
         <i class="bi bi-gear"></i> Move Data to a New Disk
@@ -160,8 +245,50 @@
     </div>
   </div>
 
-  <div class="col-md-4">
+  <div class="col-md-6">
     <div class="card">
+      <div class="card-header">
+        <i class="bi bi-folder-symlink"></i> Use Existing Disk (no formatting)
+      </div>
+      <div class="card-body">
+        <div class="alert alert-info small">
+          <i class="bi bi-info-circle"></i>
+          Adopt an existing <code>ext4</code>/<code>btrfs</code> partition or an
+          already unlocked LUKS mapper as <code>/symbios</code>
+          (<code>SYMBIOS_DATA</code>) <strong>without erasing it</strong>.
+          Optionally copy your current data onto it first.
+        </div>
+        <form id="adopt-form" data-exec="true" method="POST" action="{% url "settings_disk_adopt" %}">
+          {% csrf_token %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Source partition / mapper</label>
+            <select class="form-select" id="adopt-device" name="device" required>
+              <option value="">-- select a partition --</option>
+            </select>
+            <div class="form-text">Whole disks are never offered here - pick a partition below.</div>
+          </div>
+          <div class="mb-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="adopt-copy" name="copy" value="yes">
+              <label class="form-check-label" for="adopt-copy">
+                Copy current /symbios data onto it first (rsync)
+              </label>
+            </div>
+          </div>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary" onclick="adoptCheck()">
+              <i class="bi bi-search"></i> Check
+            </button>
+            <button type="submit" class="btn btn-success">
+              <i class="bi bi-play-fill"></i> Adopt
+            </button>
+            <span id="adopt-result" class="align-self-center small"></span>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card mt-3">
       <div class="card-header">
         <i class="bi bi-info-circle"></i> How it works
       </div>
@@ -180,7 +307,8 @@
         <div class="alert alert-warning small py-2 px-3 mb-0">
           <i class="bi bi-exclamation-triangle-fill"></i>
           <strong>Important:</strong> Back up your data first.
-          The target disk will be <strong>completely erased</strong>.
+          The target disk will be <strong>completely erased</strong> (Move Data only;
+          Adopt never formats).
         </div>
       </div>
     </div>
@@ -189,7 +317,7 @@
 
 <script>
 var diskData = [];
-var raidData = {btrfs: [], mdadm: [], active_swaps: []};
+var raidData = {btrfs: [], mdadm: [], active_swaps: [], luks_pairs: [], luks_singles: []};
 
 document.addEventListener('DOMContentLoaded', function() {
   refreshAll();
@@ -216,20 +344,67 @@ function findModelForDevice(devPath) {
   return search(diskData);
 }
 
+function loadLuks() {
+  fetch('{% url "settings_disk_luks" %}')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var sel = document.getElementById('unlock-device');
+      var openBox = document.getElementById('luks-open-list');
+      var unlockBox = document.getElementById('unlock-box');
+      sel.innerHTML = '<option value="">-- select LUKS device --</option>';
+      openBox.innerHTML = '';
+      var devs = (data && data.ok && data.devices) || [];
+      var locked = 0;
+      devs.forEach(function(d) {
+        var gb = d.size_bytes ? (d.size_bytes / 1073741824).toFixed(1) + 'G' : '';
+        if (!d.open) {
+          locked++;
+          var opt = document.createElement('option');
+          opt.value = d.device;
+          opt.textContent = d.device + (gb ? ' (' + gb + ')' : '') + (d.label ? ' [' + d.label + ']' : '');
+          sel.appendChild(opt);
+        } else {
+          var map = d.mapper ? '/dev/mapper/' + d.mapper : '';
+          openBox.innerHTML += '<span class="badge bg-success me-1">' + d.device + ' open as ' + map + '</span> ' +
+            '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="lockDevice(\'' + map + '\')">Lock again</button> ';
+        }
+      });
+      unlockBox.style.display = locked ? '' : 'none';
+    })
+    .catch(function() {});
+}
+
+/* All manual POSTs need the CSRF token (else Django answers 403 HTML,
+   which breaks the JSON parsing - "unexpected character at line 1"). */
+function csrfToken() {
+  var el = document.querySelector('#adopt-form input[name=csrfmiddlewaretoken]');
+  return el ? el.value : '';
+}
+
+function lockDevice(mapper) {
+  var fd = new FormData();
+  fd.append('csrfmiddlewaretoken', csrfToken());
+  fd.append('target', mapper);
+  fetch('{% url "settings_disk_lock" %}', {method: 'POST', body: fd, headers: {'X-Requested-With': 'XMLHttpRequest'}})
+    .then(function(r) { return r.json(); })
+    .then(function() { loadLuks(); loadDisks(); });
+}
+
 function loadStatus() {
+  loadLuks();
   fetch('{% url "settings_disk_status" %}')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       var el = document.getElementById('home-status');
 
-      /* LUKS locked - needs boot unlock */
+      /* LUKS data volume locked - needs unlock via form below */
       if (data.luks_name && !data.luks_open) {
         el.innerHTML =
           '<div class="d-flex align-items-center gap-3">' +
             '<i class="bi bi-lock-fill fs-3 text-warning"></i>' +
             '<div>' +
               '<strong>Data disk is locked</strong>' +
-              '<div class="small text-muted">Reboot and unlock via the boot screen to access your data.</div>' +
+              '<div class="small text-muted">Select the device below to unlock it for inspection.</div>' +
             '</div>' +
           '</div>';
         document.getElementById('luks-password-section').style.display = 'none';
@@ -295,10 +470,13 @@ function loadDisks() {
       var data = res[0];
       if (res[1] && res[1].ok) raidData = res[1];
       var el = document.getElementById('disk-list');
+      var raidEl = document.getElementById('raid-list');
       var select = document.getElementById('setup-device');
+      var adoptSelect = document.getElementById('adopt-device');
 
       if (!data.ok) {
         el.innerHTML = '<div class="text-danger">' + data.error + '</div>';
+        raidEl.innerHTML = '<div class="text-muted">No RAID data</div>';
         return;
       }
 
@@ -307,25 +485,30 @@ function loadDisks() {
 
       if (diskData.length === 0) {
         el.innerHTML = '<div class="text-muted">No disks found</div>';
+        raidEl.innerHTML = '<div class="text-muted">No arrays found</div>';
         return;
       }
 
-      /* Build simplified table - physical disks only, no partitions */
+      /* Table 1 - physical disks only */
       var html = '<div class="table-responsive"><table class="table table-sm align-middle">';
-      html += '<thead><tr><th>Disk</th><th>UUID</th><th>LABEL</th><th>Size</th><th>Status</th></tr></thead><tbody>';
+      html += '<thead><tr><th>Disk</th><th>Transport</th><th class="text-end">Size</th><th>Content</th><th>Use</th></tr></thead><tbody>';
 
       /* Build select options */
       select.innerHTML = '<option value="">-- select a disk --</option>';
+      adoptSelect.innerHTML = '<option value="">-- select a partition --</option>';
+      document.getElementById('locate-device').innerHTML = '<option value="">-- select a disk --</option>';
 
       diskData.forEach(function(dev) {
-        html += renderDevice(dev);
+        html += renderPhysicalDisk(dev);
         addDeviceOptions(dev, select);
+        addAdoptOptions(dev, adoptSelect);
+        addLocateOption(dev);
       });
-
-      html += renderRaidRows();
+      addBtrfsAdoptOptions(adoptSelect);
 
       html += '</tbody></table></div>';
       el.innerHTML = html;
+      raidEl.innerHTML = renderArraysCard();
     })
     .catch(function(err) {
       document.getElementById('disk-list').innerHTML =
@@ -333,25 +516,24 @@ function loadDisks() {
     });
 }
 
-/* Render a disk row - only physical disks, skip partitions */
-function renderDevice(dev) {
-  /* Only show physical disks (skip partitions, loops, etc.) */
+/* Render one physical disk row: model + path, transport, size, child fstypes, use badge */
+function renderPhysicalDisk(dev) {
   if (dev.type !== 'disk') return '';
 
-  /* Determine status from this disk or its children */
   var status = getStatus(dev);
   var rowClass = '';
   if (status === 'system') rowClass = 'table-danger';
   else if (status === 'data') rowClass = 'table-success';
   else if (status === 'raid' || status === 'luks') rowClass = 'table-warning';
 
-  var diskLabel = dev.model || dev.name;
+  var diskLabel = (dev.model || dev.name) + '<div class="small text-muted"><code>' + dev.path + '</code></div>';
+  var content = childFstypes(dev) || '<span class="text-muted">empty</span>';
 
   var html = '<tr class="' + rowClass + '">';
   html += '<td>' + diskLabel + '</td>';
-  html += '<td class="text-muted small"><code>' + (dev.uuid || '-') + '</code></td>';
-  html += '<td>' + (dev.label || '-') + '</td>';
-  html += '<td>' + dev.size + '</td>';
+  html += '<td class="small">' + (dev.tran || (dev.rm ? 'USB' : '-')) + '</td>';
+  html += '<td class="text-end text-nowrap">' + dev.size + '</td>';
+  html += '<td class="small">' + content + '</td>';
   html += '<td>';
   if (status === 'system') html += '<span class="badge bg-danger">System disk</span>';
   else if (status === 'data') html += '<span class="badge bg-success">Data disk</span>';
@@ -360,6 +542,78 @@ function renderDevice(dev) {
   else html += '<span class="badge bg-secondary">Available</span>';
   html += '</td>';
   html += '</tr>';
+  return html;
+}
+
+/* Comma-separated fstypes of children, e.g. "crypto_LUKS, btrfs" */
+function childFstypes(dev) {
+  var out = [];
+  function walk(d) {
+    (d.children || []).forEach(function(c) {
+      if (c.fstype && out.indexOf(c.fstype) === -1) out.push(c.fstype);
+      walk(c);
+    });
+  }
+  walk(dev);
+  return out.join(', ');
+}
+
+/* Second card: btrfs filesystems, mdadm arrays, locked LUKS pairs - each with real size */
+function renderArraysCard() {
+  var html = '<div class="table-responsive"><table class="table table-sm align-middle">';
+  html += '<thead><tr><th>Volume</th><th class="text-end">Usable size</th><th>Members</th><th>Mount</th><th>Health / Status</th></tr></thead><tbody>';
+  var empty = true;
+  (raidData.btrfs || []).forEach(function(fs) {
+    empty = false;
+    var lvl = (fs.level && fs.level !== 'unknown') ? 'raid-' + fs.level : 'multi-device';
+    var members = (fs.members || []).map(function(m) {
+      var model = findModelForDevice(m);
+      return '<code>' + m + '</code>' + (model ? ' <span class="text-muted small">' + model + '</span>' : '');
+    }).join('<br>');
+    html += '<tr class="table-info"><td>btrfs ' + (fs.label || fs.uuid || '') +
+      '<div class="small text-muted"><code>' + (fs.uuid || '-') + '</code></div></td>' +
+      '<td class="text-end text-nowrap">' + (fs.devices || (fs.members || []).length) + ' devices</td>' +
+      '<td class="small">' + (members || '-') + '</td>' +
+      '<td class="small">' + (fs.mountpoint || '-') + '</td>' +
+      '<td><span class="badge bg-info">btrfs ' + lvl + '</span></td></tr>';
+  });
+  (raidData.mdadm || []).forEach(function(arr) {
+    empty = false;
+    var members = (arr.members || []).map(function(m) {
+      var model = findModelForDevice(m);
+      return '<code>' + m + '</code>' + (model ? ' <span class="text-muted small">' + model + '</span>' : '');
+    }).join('<br>');
+    html += '<tr class="table-info"><td><code>' + arr.device + '</code>' +
+      '<div class="small text-muted">mdadm ' + (arr.level || '') + '</div></td>' +
+      '<td class="text-end text-muted">see RAID page</td>' +
+      '<td class="small">' + (members || '-') + '</td>' +
+      '<td class="small">' + (arr.mountpoint || '-') + '</td>' +
+      '<td><span class="badge bg-info">mdadm ' + (arr.level || '') + '</span></td></tr>';
+  });
+  (raidData.luks_pairs || []).forEach(function(pair) {
+    empty = false;
+    var members = (pair.members || []).map(function(m) {
+      var model = findModelForDevice(m);
+      return '<code>' + m + '</code>' + (model ? ' <span class="text-muted small">' + model + '</span>' : '');
+    }).join('<br>');
+    html += '<tr class="table-warning"><td>Locked LUKS<div class="small text-muted">' + pair.size + ' each</div></td>' +
+      '<td class="text-end text-nowrap">' + pair.size + ' (each)</td>' +
+      '<td class="small">' + (members || '-') + '</td>' +
+      '<td class="small">-</td>' +
+      '<td><span class="badge bg-warning text-dark">locked pair, unverified</span></td></tr>';
+  });
+  /* Single locked LUKS devices (no same-size partner - e.g. a lone disk). */
+  (raidData.luks_singles || []).forEach(function(s) {
+    empty = false;
+    var model = findModelForDevice(s.device);
+    html += '<tr class="table-warning"><td>Locked LUKS<div class="small text-muted">single device</div></td>' +
+      '<td class="text-end text-nowrap">' + s.size + '</td>' +
+      '<td class="small"><code>' + s.device + '</code>' + (model ? ' <span class="text-muted small">' + model + '</span>' : '') + '</td>' +
+      '<td class="small">-</td>' +
+      '<td><span class="badge bg-warning text-dark">locked, unverified</span></td></tr>';
+  });
+  if (empty) html += '<tr><td colspan="5" class="text-muted">No arrays or encrypted volumes detected.</td></tr>';
+  html += '</tbody></table></div>';
   return html;
 }
 
@@ -432,40 +686,7 @@ function getStatus(dev) {
   return 'available';
 }
 
-/* Info rows for RAID arrays (btrfs + mdadm) - display only, never targets */
-function renderRaidRows() {
-  var html = '';
-  (raidData.btrfs || []).forEach(function(fs) {
-    var lvl = (fs.level && fs.level !== 'unknown') ? 'RAID ' + fs.level : 'multi-device';
-    html += '<tr class="table-info"><td>btrfs ' + (fs.label || fs.uuid || '') + '</td>' +
-      '<td class="text-muted small"><code>' + (fs.uuid || '-') + '</code></td>' +
-      '<td>' + (fs.mountpoint || '-') + '</td>' +
-      '<td>' + (fs.members || []).length + ' devices</td>' +
-      '<td><span class="badge bg-info">btrfs ' + lvl + '</span></td></tr>';
-  });
-  (raidData.mdadm || []).forEach(function(arr) {
-    html += '<tr class="table-info"><td>' + arr.device + '</td>' +
-      '<td class="text-muted small"><code>-</code></td>' +
-      '<td>' + (arr.mountpoint || '-') + '</td>' +
-      '<td>' + (arr.members || []).join(', ') + '</td>' +
-      '<td><span class="badge bg-info">mdadm ' + (arr.level || '') + '</span></td></tr>';
-  });
-  /* Locked LUKS pairs: same-size encrypted partitions on different
-     disks, probably one encrypted volume - unverified while locked. */
-  (raidData.luks_pairs || []).forEach(function(pair) {
-    html += '<tr class="table-warning"><td>locked LUKS (' + pair.size + ')</td>' +
-      '<td class="text-muted small"><code>-</code></td>' +
-      '<td>-</td>' +
-      '<td>' + (pair.members || []).join(', ') + '</td>' +
-      '<td><span class="badge bg-warning text-dark">locked pair, unverified</span></td></tr>';
-  });
-  return html;
-}
-
-/* Add options to the target disk select - only unmounted disks.
-   RAID members/arrays, LUKS holders and active swaps are never offered:
-   formatting them would destroy data beyond the selected disk (the
-   setup script refuses them server-side as a backstop). */
+/* Add options to the target disk select - only unmounted whole disks. */
 function addDeviceOptions(dev, select) {
   if (dev.type !== 'disk') return;
   var hasMountedChild = hasMountedChildren(dev);
@@ -481,6 +702,74 @@ function addDeviceOptions(dev, select) {
   opt.dataset.model = dev.model || '';
   opt.dataset.size = dev.size || '';
   select.appendChild(opt);
+}
+
+/* Members of a multi-device btrfs count as ONE adopt candidate (any member
+   path mounts the whole filesystem) - never offer them one by one. */
+function multiDeviceBtrfsMembers() {
+  var paths = {};
+  (raidData.btrfs || []).forEach(function(fs) {
+    if ((fs.members || []).length > 1) {
+      (fs.members || []).forEach(function(m) { paths[m] = fs; });
+    }
+  });
+  return paths;
+}
+
+/* Adopt select offers partitions and open mappers (ext4/btrfs), never whole disks. */
+function addAdoptOptions(dev, select) {
+  var multi = multiDeviceBtrfsMembers();
+  function walk(d) {
+    (d.children || []).forEach(function(c) {
+      if (multi[c.path]) return; /* covered by the single fs entry below */
+      if ((c.fstype === 'ext4' || c.fstype === 'btrfs') && !c.mountpoint) {
+        var opt = document.createElement('option');
+        opt.value = c.path;
+        opt.textContent = c.path + ' (' + c.fstype + (c.size ? ', ' + c.size : '') + ')';
+        select.appendChild(opt);
+      }
+      if (c.path && c.path.indexOf('/dev/mapper/') === 0 && !c.mountpoint) {
+        var opt2 = document.createElement('option');
+        opt2.value = c.path;
+        opt2.textContent = c.path + ' (mapper)';
+        select.appendChild(opt2);
+      }
+      walk(c);
+    });
+    if (d.path && d.path.indexOf('/dev/mapper/') === 0 && !d.mountpoint && d.type !== 'disk') {
+      var opt3 = document.createElement('option');
+      opt3.value = d.path;
+      opt3.textContent = d.path + ' (mapper)';
+      select.appendChild(opt3);
+    }
+  }
+  walk(dev);
+}
+
+/* One adopt entry per multi-device btrfs (label + member count + paths). */
+function addBtrfsAdoptOptions(select) {
+  var seen = {};
+  (raidData.btrfs || []).forEach(function(fs) {
+    if ((fs.members || []).length < 2) return;
+    if (seen[fs.uuid]) return;
+    seen[fs.uuid] = 1;
+    if (fs.mountpoint) return; /* already mounted (maybe as /symbios) */
+    var opt = document.createElement('option');
+    opt.value = fs.members[0];
+    opt.textContent = 'btrfs ' + (fs.label || fs.uuid.slice(0, 8)) +
+      ' (' + fs.members.length + ' devices: ' + fs.members.join(', ') + ')';
+    select.appendChild(opt);
+  });
+}
+
+/* Locate select offers every physical disk (RAID members included). */
+function addLocateOption(dev) {
+  if (dev.type !== 'disk') return;
+  var sel = document.getElementById('locate-device');
+  var opt = document.createElement('option');
+  opt.value = dev.path;
+  opt.textContent = dev.path + (dev.size ? ' (' + dev.size + ')' : '') + (dev.model ? ' ' + dev.model : '');
+  sel.appendChild(opt);
 }
 
 function hasMountedChildren(dev) {
@@ -545,6 +834,28 @@ function checkLukspasswords() {
   } else {
     mismatch.style.display = 'none';
   }
+}
+
+function adoptCheck() {
+  var device = document.getElementById('adopt-device').value;
+  var res = document.getElementById('adopt-result');
+  if (!device) {
+    SymbiOS.exec.showAlert('Please select a partition.', 'danger');
+    return;
+  }
+  var copy = document.getElementById('adopt-copy').checked ? 'yes' : 'no';
+  var fd = new FormData();
+  fd.append('csrfmiddlewaretoken', csrfToken());
+  fd.append('device', device);
+  fd.append('copy', copy);
+  fd.append('check_only', '1');
+  fetch('{% url "settings_disk_adopt" %}', {method: 'POST', body: fd, headers: {'X-Requested-With': 'XMLHttpRequest'}})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      res.textContent = data.ok ? (data.message || 'Check passed.') : ('Check failed: ' + (data.error || 'unknown'));
+      res.className = 'align-self-center small ' + (data.ok ? 'text-success' : 'text-danger');
+    })
+    .catch(function(err) { res.textContent = 'Check failed: ' + err.message; });
 }
 
 /* Frontend validation for LUKS password change form */
@@ -620,6 +931,21 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
       (encrypt ? '\n2. Encrypt with a passphrase' : '') +
       '\n' + (encrypt ? '3' : '2') + '. Copy your data to the new disk' +
       '\n' + (encrypt ? '4' : '3') + '. Switch to the new disk\n\nContinue?')) {
+    e.preventDefault();
+  }
+});
+
+document.getElementById('adopt-form').addEventListener('submit', function(e) {
+  var device = document.getElementById('adopt-device').value;
+  if (!device) {
+    e.preventDefault();
+    SymbiOS.exec.showAlert('Please select a partition.', 'danger');
+    return;
+  }
+  var copy = document.getElementById('adopt-copy').checked;
+  if (!confirm('Adopt ' + device + ' as /symbios without formatting?\n\n' +
+      (copy ? 'Current data will be copied onto it first.\n' : 'Current data stays where it is (only fstab is switched).\n') +
+      'The previous location stays available via Rollback.\n\nContinue?')) {
     e.preventDefault();
   }
 });

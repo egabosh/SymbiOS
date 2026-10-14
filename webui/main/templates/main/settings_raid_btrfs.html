@@ -1,0 +1,275 @@
+{% extends "main/base.html" %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-hdd-stack-fill"></i> btrfs Filesystems (mounted + unmounted)</span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadAll()">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body" id="fs-list">
+        <span class="spinner-border spinner-border-sm"></span> Scanning...
+      </div>
+      <div class="card-body border-top small text-muted">
+        Unmounted filesystems show profiles as <code>unknown</code> and no error counters -
+        those need a mount. Locked-LUKS members stay invisible until unlocked on the
+        <a href="{% url "settings_disk" %}">Data Disk</a> page.
+        Any non-zero error counter (w/r/f/c/g) deserves attention.
+        Scrub, balance, add, remove and replace are kernel operations and
+        <strong>only work on mounted filesystems</strong> - that is a btrfs
+        requirement, not a UI limitation.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-arrow-repeat"></i> Replace a Disk</div>
+      <div class="card-body">
+        <div class="alert alert-info small">Online replace - filesystem stays mounted. May take hours. Only unused disks are offered as replacement.</div>
+        <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="btrfs" %}" onsubmit="return needMount('rep-fs') && confirm('Replace device?');">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="replace">
+          <input type="hidden" name="mountpoint" id="rep-mnt" value="">
+          <div class="mb-2"><label class="form-label">Filesystem</label><select class="form-select fs-sel" id="rep-fs" data-mnt="rep-mnt" data-members="rep-old"></select></div>
+          <div class="mb-2"><label class="form-label">Failing device (member)</label><select class="form-select" name="old" id="rep-old" required></select></div>
+          <div class="mb-2"><label class="form-label">New device (unused)</label><select class="form-select" name="new" id="rep-new" required></select></div>
+          <button class="btn btn-warning" type="submit">Replace</button>
+        </form>
+      </div>
+    </div>
+    <div class="card mt-3">
+      <div class="card-header"><i class="bi bi-plus-circle"></i> Add / Remove / Balance</div>
+      <div class="card-body">
+        <div class="alert alert-info small">Add, remove and replace rebalance automatically - no manual step needed. Manual balance below is only for profile conversion or cleanup.</div>
+        <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="btrfs" %}" class="mb-3" onsubmit="return needMount('add-fs');">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add">
+          <input type="hidden" name="mountpoint" id="add-mnt" value="">
+          <div class="row g-2 align-items-end">
+            <div class="col-5"><label class="form-label">Filesystem</label><select class="form-select fs-sel" id="add-fs" data-mnt="add-mnt" data-members=""></select></div>
+            <div class="col-5"><label class="form-label">Unused device</label><select class="form-select" name="device" id="add-dev" required></select></div>
+            <div class="col-2"><button class="btn btn-outline-primary" type="submit">Add</button></div>
+          </div>
+          <div class="form-text">Adds the device and rebalances to RAID1.</div>
+        </form>
+        <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="btrfs" %}" class="mb-3" onsubmit="return needMount('rem-fs') && confirm('Remove device? Fails if remaining space is insufficient.');">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="remove">
+          <input type="hidden" name="mountpoint" id="rem-mnt" value="">
+          <div class="row g-2 align-items-end">
+            <div class="col-5"><label class="form-label">Filesystem</label><select class="form-select fs-sel" id="rem-fs" data-mnt="rem-mnt" data-members="rem-dev"></select></div>
+            <div class="col-5"><label class="form-label">Member</label><select class="form-select" name="device" id="rem-dev" required></select></div>
+            <div class="col-2"><button class="btn btn-outline-danger" type="submit">Remove</button></div>
+          </div>
+        </form>
+        <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="btrfs" %}" onsubmit="return needMountSel(this);">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="balance">
+          <div class="row g-2 align-items-end">
+            <div class="col-10"><label class="form-label">Mounted filesystem to balance (RAID1)</label><select class="form-select" name="mountpoint" id="bal-mnt" required></select></div>
+            <div class="col-2"><button class="btn btn-outline-success" type="submit">Balance</button></div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-shield-check"></i> Scrub</div>
+      <div class="card-body">
+        <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="btrfs" %}" class="mb-2">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="scrub">
+          <input type="hidden" name="op" value="start">
+          <div class="row g-2 align-items-end">
+            <div class="col-10"><label class="form-label">Mounted filesystem</label><select class="form-select scrub-mnt" name="mountpoint" required></select></div>
+            <div class="col-2"><button class="btn btn-outline-primary" type="submit">Start</button></div>
+          </div>
+        </form>
+        <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="btrfs" %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="scrub">
+          <input type="hidden" name="op" value="cancel">
+          <div class="row g-2 align-items-end">
+            <div class="col-10"><label class="form-label">Mounted filesystem</label><select class="form-select scrub-mnt" name="mountpoint" required></select></div>
+            <div class="col-2"><button class="btn btn-outline-danger" type="submit">Cancel</button></div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+var btrfsFs = [];
+var freeDevs = [];
+var allDisks = [];
+
+function fsByUuid(uuid) {
+  for (var i = 0; i < btrfsFs.length; i++) {
+    if (btrfsFs[i].uuid === uuid) return btrfsFs[i];
+  }
+  return null;
+}
+
+/* Block if the selected filesystem is not mounted (ops need a mount). */
+function needMount(selId) {
+  var f = fsByUuid(document.getElementById(selId).value);
+  if (!f || !f.mountpoint) {
+    SymbiOS.exec.showAlert('This filesystem is not mounted - mount it first (see Data Disk page).', 'warning');
+    return false;
+  }
+  return true;
+}
+function needMountSel(form) {
+  if (!form.mountpoint.value) {
+    SymbiOS.exec.showAlert('No mounted filesystem available.', 'warning');
+    return false;
+  }
+  return true;
+}
+
+function memberPaths() {
+  var paths = {};
+  btrfsFs.forEach(function(f) { (f.members || []).forEach(function(m) { paths[m] = 1; }); });
+  ((window._raidScan || {}).mdadm || []).forEach(function(arr) {
+    paths[arr.device] = 1;
+    (arr.members || []).forEach(function(m) { paths[m] = 1; });
+  });
+  (((window._raidScan || {}).active_swaps) || []).forEach(function(s) { paths[s] = 1; });
+  return paths;
+}
+
+function subtreeUsed(d, paths) {
+  if (d.mountpoint) return true;
+  if (paths[d.path]) return true;
+  if (d.fstype === 'crypto_LUKS' || d.fstype === 'LVM2_member' || d.fstype === 'swap' || d.fstype === 'linux_raid_member') return true;
+  for (var i = 0; i < (d.children || []).length; i++) {
+    if (subtreeUsed(d.children[i], paths)) return true;
+  }
+  return false;
+}
+
+function fillSelect(id, items, emptyLabel) {
+  var sel = typeof id === 'string' ? document.getElementById(id) : id;
+  sel.innerHTML = '';
+  if (!items.length) {
+    var o = document.createElement('option');
+    o.value = '';
+    o.textContent = emptyLabel || '-- none --';
+    sel.appendChild(o);
+    return;
+  }
+  items.forEach(function(it) {
+    var o = document.createElement('option');
+    o.value = it.value;
+    o.textContent = it.label;
+    sel.appendChild(o);
+  });
+}
+
+function fsLabel(f) {
+  return 'btrfs ' + (f.label || f.uuid.slice(0, 8)) + (f.mountpoint ? ' (' + f.mountpoint + ')' : ' (not mounted)');
+}
+
+/* Scrub cell: progress bar while a scrub is running, last result otherwise. */
+function scrubCell(f) {
+  if (f.scrub_running && f.scrub_percent >= 0) {
+    var pct = Math.min(100, Math.max(0, f.scrub_percent));
+    return '<div class="progress" style="min-width:120px" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100">' +
+      '<div class="progress-bar progress-bar-striped progress-bar-animated" style="width:' + pct + '%">' + pct + '%</div></div>' +
+      '<div class="small">' + (f.scrub || 'running') + '</div>';
+  }
+  return f.scrub || '-';
+}
+
+/* Sync one filesystem select: hidden mountpoint + member select. */
+function syncFs(sel) {
+  var f = fsByUuid(sel.value);
+  var mntEl = document.getElementById(sel.dataset.mnt);
+  if (mntEl) mntEl.value = (f && f.mountpoint) || '';
+  if (sel.dataset.members) {
+    fillSelect(sel.dataset.members, ((f && f.members) || []).map(function(m) { return {value: m, label: m}; }), '-- no members --');
+  }
+}
+function syncAllFs() {
+  document.querySelectorAll('.fs-sel').forEach(syncFs);
+}
+
+function loadAll() {
+  var el = document.getElementById('fs-list');
+  el.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Scanning...';
+  Promise.all([
+    fetch('{% url "settings_raid_btrfs_status" %}').then(function(r) { return r.json(); }),
+    fetch('{% url "settings_disk_list" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; }),
+    fetch('{% url "settings_disk_raid" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; })
+  ]).then(function(res) {
+    var data = res[0];
+    btrfsFs = (data.ok && data.filesystems) || [];
+    window._raidScan = (res[2] && res[2].ok) ? res[2] : {mdadm: [], btrfs: [], active_swaps: []};
+    // Merge unmounted members from the disk-page raid scan (sees the same
+    // `btrfs filesystem show`, keeps member lists complete).
+    var paths = memberPaths();
+    var devs = (res[1] && res[1].ok && res[1].devices) || [];
+    freeDevs = [];
+    devs.forEach(function(dev) {
+      if (dev.type !== 'disk') return;
+      if (!subtreeUsed(dev, paths)) {
+        freeDevs.push({path: dev.path, label: dev.path + ' (whole disk' + (dev.size ? ', ' + dev.size : '') + (dev.model ? ', ' + dev.model : '') + ')'});
+        return;
+      }
+      (dev.children || []).forEach(function(c) {
+        if (!c.mountpoint && !c.fstype && !paths[c.path]) {
+          freeDevs.push({path: c.path, label: c.path + ' (partition' + (c.size ? ', ' + c.size : '') + ')'});
+        }
+      });
+    });
+    allDisks = devs.filter(function(d) { return d.type === 'disk'; }).map(function(d) {
+      return {path: d.path, label: d.path + (d.size ? ' (' + d.size + ')' : '') + (d.model ? ' ' + d.model : '')};
+    });
+    if (!btrfsFs.length) {
+      el.innerHTML = '<div class="text-muted">No btrfs filesystems found. Unlock encrypted members on the <a href="{% url "settings_disk" %}">Data Disk</a> page first.</div>';
+    } else {
+      var html = '<div class="table-responsive"><table class="table table-sm align-middle">';
+      html += '<thead><tr><th>Filesystem</th><th>Profiles</th><th>Members</th><th>Mount</th><th>Errors</th><th>Scrub</th></tr></thead><tbody>';
+      btrfsFs.forEach(function(f) {
+        html += '<tr class="' + (f.degraded ? 'table-danger' : (!f.mountpoint ? 'table-warning' : '')) + '"><td>' + (f.label || '(no label)') +
+          '<div class="small text-muted"><code>' + f.uuid + '</code></div></td>' +
+          '<td class="small">data:' + (f.data_profile || '?') + '<br>meta:' + (f.metadata_profile || '?') + '</td>' +
+          '<td class="small">' + ((f.members || []).join('<br>') || '-') + '</td>' +
+          '<td class="small">' + (f.mountpoint || '<span class="badge bg-warning text-dark">not mounted</span>') + (f.degraded ? '<br><span class="badge bg-danger">degraded</span>' : '') + '</td>' +
+          '<td class="small"><code>' + (f.device_stats || '-') + '</code></td>' +
+          '<td class="small text-muted">' + scrubCell(f) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+      el.innerHTML = html;
+    }
+    // Populate selects
+    document.querySelectorAll('.fs-sel').forEach(function(sel) {
+      var cur = sel.value;
+      fillSelect(sel, btrfsFs.map(function(f) { return {value: f.uuid, label: fsLabel(f)}; }), '-- no filesystems --');
+      if (cur) sel.value = cur;
+    });
+    syncAllFs();
+    var mounted = btrfsFs.filter(function(f) { return f.mountpoint; }).map(function(f) { return {value: f.mountpoint, label: f.mountpoint + ' (' + (f.label || f.uuid.slice(0, 8)) + ')'}; });
+    document.querySelectorAll('.scrub-mnt').forEach(function(sel) { fillSelect(sel, mounted, '-- none mounted --'); });
+    fillSelect('bal-mnt', mounted, '-- none mounted --');
+    var freeItems = freeDevs.map(function(d) { return {value: d.path, label: d.label}; });
+    fillSelect('rep-new', freeItems, '-- no unused devices --');
+    fillSelect('add-dev', freeItems, '-- no unused devices --');
+  }).catch(function(err) { el.innerHTML = '<div class="text-danger">Failed: ' + err.message + '</div>'; });
+}
+document.querySelectorAll('.fs-sel').forEach(function(sel) {
+  sel.addEventListener('change', function() { syncFs(sel); });
+});
+document.addEventListener('DOMContentLoaded', loadAll);
+</script>
+{% endblock %}

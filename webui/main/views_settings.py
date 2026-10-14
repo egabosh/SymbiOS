@@ -714,6 +714,282 @@ def settings_disk_change_password(request):
         return JsonResponse({'ok': False, 'error': f'Password change failed:\n{output[-2000:]}'})
 
 
+@login_required
+def settings_disk_luks(request):
+    """AJAX GET - list LUKS devices with open state (for explicit unlock choice)."""
+    ok, stdout, stderr = run_command(f'{_DATA_PART_SCRIPT} luks', timeout=30)
+    if not ok:
+        return JsonResponse({'ok': False, 'error': stderr or 'luks scan failed'})
+    try:
+        return JsonResponse(json.loads(stdout))
+    except json.JSONDecodeError as e:
+        return JsonResponse({'ok': False, 'error': f'Failed to parse luks info: {e}'})
+
+
+@login_required
+def settings_disk_unlock(request):
+    """AJAX POST - open a LUKS device for inspection (no mount, no format)."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    device = request.POST.get('device', '').strip()
+    password = request.POST.get('password', '').strip()
+    if not device or not device.startswith('/dev/'):
+        return JsonResponse({'ok': False, 'error': 'Select a LUKS device first'})
+    if not password:
+        return JsonResponse({'ok': False, 'error': 'Passphrase is required'})
+
+    f_pw_file = f_write_secret('luks-unlock', password)
+    cmd = f'{_DATA_PART_SCRIPT} unlock {shlex.quote(device)} {f_pw_file}'
+
+    is_ajax = is_ajax_request(request)
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=120)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': f'Unlocking {device}...',
+                             'message': f'Opening {device} for inspection (nothing is mounted).',
+                             'command': cmd})
+
+    ok, stdout, stderr = run_command(cmd, timeout=120)
+    output = stdout
+    if stderr:
+        output = output + '\n' + stderr
+    try:
+        return JsonResponse(json.loads(output))
+    except json.JSONDecodeError:
+        if ok:
+            return JsonResponse({'ok': True, 'message': 'LUKS volume opened.'})
+        return JsonResponse({'ok': False, 'error': f'Unlock failed:\n{output[-2000:]}'})
+
+
+@login_required
+def settings_disk_lock(request):
+    """AJAX POST - close an opened LUKS mapper again."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    target = request.POST.get('target', '').strip()
+    if not target or not target.startswith('/dev/'):
+        return JsonResponse({'ok': False, 'error': 'Invalid mapper or device'})
+
+    cmd = f'{_DATA_PART_SCRIPT} lock {shlex.quote(target)}'
+    is_ajax = is_ajax_request(request)
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=60)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': f'Locking {target}...',
+                             'message': f'Closing {target}.',
+                             'command': cmd})
+
+    ok, stdout, stderr = run_command(cmd, timeout=60)
+    output = stdout + ('\n' + stderr if stderr else '')
+    try:
+        return JsonResponse(json.loads(output))
+    except json.JSONDecodeError:
+        if ok:
+            return JsonResponse({'ok': True, 'message': 'LUKS volume closed.'})
+        return JsonResponse({'ok': False, 'error': f'Lock failed:\n{output[-2000:]}'})
+
+
+@login_required
+def settings_disk_locate(request):
+    """AJAX POST - identify a disk by sustained reads (LED / sound)."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    device = request.POST.get('device', '').strip()
+    seconds = request.POST.get('seconds', '30').strip()
+    if not device or not device.startswith('/dev/'):
+        return JsonResponse({'ok': False, 'error': 'Select a disk first'})
+    if not seconds.isdigit():
+        seconds = '30'
+
+    cmd = f'{_DATA_PART_SCRIPT} locate {shlex.quote(device)} {shlex.quote(seconds)}'
+    is_ajax = is_ajax_request(request)
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=300)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': f'Locating {device}...',
+                             'message': f'Reading {device} - watch the LED or listen.',
+                             'command': cmd})
+
+    ok, stdout, stderr = run_command(cmd, timeout=300)
+    output = stdout + ('\n' + stderr if stderr else '')
+    try:
+        return JsonResponse(json.loads(output))
+    except json.JSONDecodeError:
+        if ok:
+            return JsonResponse({'ok': True, 'message': 'Locate read finished.'})
+        return JsonResponse({'ok': False, 'error': f'Locate failed:\n{output[-2000:]}'})
+
+
+@login_required
+def settings_disk_adopt(request):
+    """AJAX POST - adopt an existing partition/mapper as /symbios (no format)."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    device = request.POST.get('device', '').strip()
+    copy = 'yes' if request.POST.get('copy', 'no') == 'yes' else 'no'
+    check_only = request.POST.get('check_only', '') == '1'
+
+    if not device:
+        return JsonResponse({'ok': False, 'error': 'No device selected'})
+    if not device.startswith('/dev/'):
+        return JsonResponse({'ok': False, 'error': 'Invalid device path'})
+
+    cmd_parts = [f'{_DATA_PART_SCRIPT} adopt', shlex.quote(device)]
+    if copy == 'yes':
+        cmd_parts.append('--copy')
+    if check_only:
+        cmd_parts.append('--check')
+    cmd = ' '.join(cmd_parts)
+
+    if check_only:
+        ok, stdout, stderr = run_command(cmd, timeout=60)
+        output = stdout + ('\n' + stderr if stderr else '')
+        try:
+            return JsonResponse(json.loads(output))
+        except json.JSONDecodeError:
+            if ok:
+                return JsonResponse({'ok': True, 'message': 'Adopt check passed.'})
+            return JsonResponse({'ok': False, 'error': f'Adopt check failed:\n{output[-2000:]}'})
+
+    is_ajax = is_ajax_request(request)
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=900)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': 'Adopting existing disk as /symbios...',
+                             'message': f'Switching /symbios to {device} without formatting.',
+                             'command': cmd})
+
+    ok, stdout, stderr = run_command(cmd, timeout=900)
+    output = stdout
+    if stderr:
+        output = output + '\n' + stderr
+    try:
+        return JsonResponse(json.loads(output))
+    except json.JSONDecodeError:
+        if ok:
+            return JsonResponse({'ok': True, 'message': 'Adopt complete.'})
+        return JsonResponse({'ok': False, 'error': f'Adopt failed:\n{output[-2000:]}'})
+
+
+_RAID_MD_SCRIPT = '/usr/local/sbin/symbios-raid-md.sh'
+_RAID_BTRFS_SCRIPT = '/usr/local/sbin/symbios-raid-btrfs.sh'
+
+
+def _raid_page(request, page_key, script):
+    config = _get_inventory_config()
+    vars_ = config.get('all', {}).get('vars', {})
+    badge = get_page_badge(page_key, vars_)
+    template = f'main/settings_{page_key.replace("-", "_")}.html'
+    titles = {'raid-md': ('RAID (mdadm)', 'bi-hdd-stack'),
+              'raid-btrfs': ('RAID (btrfs)', 'bi-hdd-stack-fill')}
+    title, icon = titles.get(page_key, ('RAID', 'bi-hdd-stack'))
+    return render(request, template, {
+        'vars': vars_,
+        'page_key': page_key,
+        'page_icon': icon,
+        'page_title': title,
+        'page_explain': PAGE_EXPLAIN.get(page_key, ''),
+        'page_status': badge[0],
+        'page_status_label': badge[1],
+        'page_status_text': badge[2],
+        'raid_script': script,
+    })
+
+
+@login_required
+def settings_raid_md(request):
+    """RAID page for mdadm arrays (incl. RAID5)."""
+    return _raid_page(request, 'raid-md', _RAID_MD_SCRIPT)
+
+
+@login_required
+def settings_raid_btrfs(request):
+    """RAID page for btrfs multi-device filesystems."""
+    return _raid_page(request, 'raid-btrfs', _RAID_BTRFS_SCRIPT)
+
+
+@login_required
+def settings_raid_md_status(request):
+    """AJAX GET - mdadm arrays as JSON."""
+    ok, stdout, stderr = run_command(f'{_RAID_MD_SCRIPT} status', timeout=30)
+    if not ok:
+        return JsonResponse({'ok': False, 'error': stderr or 'mdadm status failed'})
+    try:
+        return JsonResponse(json.loads(stdout))
+    except json.JSONDecodeError as e:
+        return JsonResponse({'ok': False, 'error': f'Failed to parse mdadm status: {e}'})
+
+
+@login_required
+def settings_raid_btrfs_status(request):
+    """AJAX GET - btrfs filesystems as JSON."""
+    ok, stdout, stderr = run_command(f'{_RAID_BTRFS_SCRIPT} status', timeout=30)
+    if not ok:
+        return JsonResponse({'ok': False, 'error': stderr or 'btrfs status failed'})
+    try:
+        return JsonResponse(json.loads(stdout))
+    except json.JSONDecodeError as e:
+        return JsonResponse({'ok': False, 'error': f'Failed to parse btrfs status: {e}'})
+
+
+@login_required
+def settings_raid_action(request, kind):
+    """AJAX POST - run a RAID op as an exec-modal job (mdadm or btrfs)."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+    script = _RAID_MD_SCRIPT if kind == 'md' else _RAID_BTRFS_SCRIPT
+    action = request.POST.get('action', '').strip()
+    allowed = {'replace', 'add', 'remove', 'grow', 'create',
+               'scrub', 'balance'}
+    if action not in allowed:
+        return JsonResponse({'ok': False, 'error': 'Invalid action'})
+    # Order matters: scripts take positional args
+    # (e.g. md create <level> <dev...>, replace <array> <old> <new>).
+    args = []
+    # Multi-select posts several `devices` values - collect them all, last.
+    extra_devices = []
+    for val in request.POST.getlist('devices'):
+        for part in re.split(r'[,\s]+', val.strip()):
+            if part.startswith('/dev/'):
+                extra_devices.append(shlex.quote(part))
+    for key in ('array', 'mountpoint', 'level', 'op',
+                'old', 'new', 'device', 'seconds'):
+        val = request.POST.get(key, '').strip()
+        if val:
+            if key in ('array', 'mountpoint', 'old', 'new', 'device'):
+                if not val.startswith('/'):
+                    return JsonResponse({'ok': False, 'error': f'Invalid path: {val}'})
+                args.append(shlex.quote(val))
+            else:
+                args.append(shlex.quote(val))
+    args.extend(extra_devices)
+    cmd = ' '.join([script, action] + args)
+    is_ajax = is_ajax_request(request)
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=86400)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': f'RAID {action} running...',
+                             'message': f'Running: {action}',
+                             'command': cmd})
+    ok, stdout, stderr = run_command(cmd, timeout=86400)
+    output = stdout + ('\n' + stderr if stderr else '')
+    try:
+        return JsonResponse(json.loads(output))
+    except json.JSONDecodeError:
+        if ok:
+            return JsonResponse({'ok': True, 'message': f'RAID {action} complete.'})
+        return JsonResponse({'ok': False, 'error': f'RAID {action} failed:\n{output[-2000:]}'})
+
+
 # ---------------------------------------------------------------------------
 # Playbooks management
 # ---------------------------------------------------------------------------

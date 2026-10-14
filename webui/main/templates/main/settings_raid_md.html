@@ -1,0 +1,219 @@
+{% extends "main/base.html" %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-hdd-stack"></i> mdadm Arrays (RAID1 / RAID5, ext4)</span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="loadAll()">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body" id="array-list">
+        <span class="spinner-border spinner-border-sm"></span> Scanning...
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-arrow-repeat"></i> Replace a Disk</div>
+      <div class="card-body">
+        <div class="alert alert-info small">Fail + remove the old disk, add the new one, wait for resync. May take hours. Only unused disks are offered as replacement.</div>
+        <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="md" %}" onsubmit="return confirm('Replace disk and start resync?');">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="replace">
+          <div class="mb-2"><label class="form-label">Array</label><select class="form-select" name="array" id="rep-array" required></select></div>
+          <div class="mb-2"><label class="form-label">Failing device (member)</label><select class="form-select" name="old" id="rep-old" required></select></div>
+          <div class="mb-2"><label class="form-label">New device (unused)</label><select class="form-select" name="new" id="rep-new" required></select></div>
+          <button class="btn btn-warning" type="submit"><i class="bi bi-arrow-repeat"></i> Replace</button>
+        </form>
+      </div>
+    </div>
+    <div class="card mt-3">
+      <div class="card-header"><i class="bi bi-plus-circle"></i> Add / Remove / Grow</div>
+      <div class="card-body">
+        <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="md" %}" class="mb-3">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="add">
+          <div class="row g-2 align-items-end">
+            <div class="col-5"><label class="form-label">Array</label><select class="form-select" name="array" id="add-array" required></select></div>
+            <div class="col-5"><label class="form-label">Unused device</label><select class="form-select" name="device" id="add-dev" required></select></div>
+            <div class="col-2"><button class="btn btn-outline-primary" type="submit">Add</button></div>
+          </div>
+        </form>
+        <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="md" %}" class="mb-3" onsubmit="return confirm('Remove device from array?');">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="remove">
+          <div class="row g-2 align-items-end">
+            <div class="col-5"><label class="form-label">Array</label><select class="form-select" name="array" id="rem-array" required></select></div>
+            <div class="col-5"><label class="form-label">Member</label><select class="form-select" name="device" id="rem-dev" required></select></div>
+            <div class="col-2"><button class="btn btn-outline-danger" type="submit">Remove</button></div>
+          </div>
+        </form>
+        <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="md" %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="grow">
+          <div class="row g-2 align-items-end">
+            <div class="col-10"><label class="form-label">Array to grow (+ ext4 filesystem)</label><select class="form-select" name="array" id="grow-array" required></select></div>
+            <div class="col-2"><button class="btn btn-outline-success" type="submit">Grow</button></div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-plus-square"></i> Create New RAID</div>
+      <div class="card-body">
+        <div class="alert alert-danger small">Erases all selected devices! New arrays always use ext4.</div>
+        <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="md" %}" onsubmit="return confirm('Create array? ALL data on the listed devices will be erased!');">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="create">
+          <div class="mb-2"><label class="form-label">Level</label>
+            <select class="form-select" name="level"><option value="raid1">RAID1 (mirror, 2+ disks)</option><option value="raid5">RAID5 (parity, 3+ disks)</option></select>
+          </div>
+          <div class="mb-2"><label class="form-label">Devices (unused only, Ctrl-click for several)</label>
+            <select class="form-select" name="devices" id="create-devs" multiple size="5" required></select>
+          </div>
+          <button class="btn btn-primary" type="submit">Create (ext4)</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var mdArrays = [];
+var freeDevs = [];
+var allDisks = [];
+
+function raidMemberPaths() {
+  var paths = {};
+  (window._raidScan || {mdadm: []}).mdadm.forEach(function(arr) {
+    paths[arr.device] = 1;
+    (arr.members || []).forEach(function(m) { paths[m] = 1; });
+  });
+  ((window._raidScan || {}).btrfs || []).forEach(function(fs) {
+    (fs.members || []).forEach(function(m) { paths[m] = 1; });
+  });
+  (((window._raidScan || {}).active_swaps) || []).forEach(function(s) { paths[s] = 1; });
+  return paths;
+}
+
+function subtreeUsed(d, memberPaths) {
+  if (d.mountpoint) return true;
+  if (memberPaths[d.path]) return true;
+  if (d.fstype === 'crypto_LUKS' || d.fstype === 'LVM2_member' || d.fstype === 'swap' || d.fstype === 'linux_raid_member') return true;
+  for (var i = 0; i < (d.children || []).length; i++) {
+    if (subtreeUsed(d.children[i], memberPaths)) return true;
+  }
+  return false;
+}
+
+/* Unused devices: whole disks whose subtree is fully free, plus free
+   partitions (no fs, unmounted, no RAID/LUKS/LVM/swap anywhere below). */
+function collectFree(devs, memberPaths) {
+  var out = [];
+  devs.forEach(function(dev) {
+    if (dev.type !== 'disk') return;
+    if (!subtreeUsed(dev, memberPaths)) {
+      out.push({path: dev.path, label: dev.path + ' (whole disk' + (dev.size ? ', ' + dev.size : '') + (dev.model ? ', ' + dev.model : '') + ')'});
+      return;
+    }
+    (dev.children || []).forEach(function(c) {
+      if (!c.mountpoint && !c.fstype && !memberPaths[c.path]) {
+        out.push({path: c.path, label: c.path + ' (partition' + (c.size ? ', ' + c.size : '') + ')'});
+      }
+    });
+  });
+  return out;
+}
+
+function fillSelect(id, items, emptyLabel) {
+  var sel = document.getElementById(id);
+  sel.innerHTML = '';
+  if (!items.length) {
+    var o = document.createElement('option');
+    o.value = '';
+    o.textContent = emptyLabel || '-- none --';
+    sel.appendChild(o);
+    return;
+  }
+  items.forEach(function(it) {
+    var o = document.createElement('option');
+    o.value = it.value;
+    o.textContent = it.label;
+    sel.appendChild(o);
+  });
+}
+
+function membersOf(arrayPath) {
+  for (var i = 0; i < mdArrays.length; i++) {
+    if (mdArrays[i].device === arrayPath) return mdArrays[i].members || [];
+  }
+  return [];
+}
+
+function refreshMemberSelects() {
+  ['rep-array', 'add-array', 'rem-array', 'grow-array'].forEach(function(id) {
+    var sel = document.getElementById(id);
+    var cur = sel.value;
+    fillSelect(id, mdArrays.map(function(a) { return {value: a.device, label: a.device + ' (' + (a.level || '?') + ')'}; }), '-- no arrays --');
+    if (cur) sel.value = cur;
+  });
+  var repMembers = membersOf(document.getElementById('rep-array').value).map(function(m) { return {value: m, label: m}; });
+  fillSelect('rep-old', repMembers, '-- select array first --');
+  var remMembers = membersOf(document.getElementById('rem-array').value).map(function(m) { return {value: m, label: m}; });
+  fillSelect('rem-dev', remMembers, '-- select array first --');
+  fillSelect('rep-new', freeDevs.map(function(d) { return {value: d.path, label: d.label}; }), '-- no unused devices --');
+  fillSelect('add-dev', freeDevs.map(function(d) { return {value: d.path, label: d.label}; }), '-- no unused devices --');
+  fillSelect('create-devs', freeDevs.map(function(d) { return {value: d.path, label: d.label}; }), '-- no unused devices --');
+}
+
+function loadAll() {
+  var el = document.getElementById('array-list');
+  el.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Scanning...';
+  Promise.all([
+    fetch('{% url "settings_raid_md_status" %}').then(function(r) { return r.json(); }),
+    fetch('{% url "settings_disk_list" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; }),
+    fetch('{% url "settings_disk_raid" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; })
+  ]).then(function(res) {
+    var data = res[0];
+    window._raidScan = (res[2] && res[2].ok) ? res[2] : {mdadm: [], btrfs: [], active_swaps: []};
+    mdArrays = (data.ok && data.arrays) || [];
+    var devs = (res[1] && res[1].ok && res[1].devices) || [];
+    freeDevs = collectFree(devs, raidMemberPaths());
+    allDisks = devs.filter(function(d) { return d.type === 'disk'; }).map(function(d) {
+      return {path: d.path, label: d.path + (d.size ? ' (' + d.size + ')' : '') + (d.model ? ' ' + d.model : '')};
+    });
+    if (!mdArrays.length) {
+      el.innerHTML = '<div class="text-muted">No mdadm arrays found. Create one below or check the <a href="{% url "settings_raid_btrfs" %}">btrfs page</a>.</div>';
+    } else {
+      var html = '<div class="table-responsive"><table class="table table-sm align-middle">';
+      html += '<thead><tr><th>Array</th><th>Level / State</th><th>Members</th><th>Mount</th><th>Sync</th><th>Detail</th></tr></thead><tbody>';
+      mdArrays.forEach(function(a) {
+        var bad = (a.state && a.state !== 'active') || (a.sync && a.sync.length);
+        html += '<tr class="' + (bad ? 'table-warning' : '') + '"><td><code>' + a.device + '</code></td>' +
+          '<td>' + (a.level || '-') + ' / ' + (a.state || '-') + '</td>' +
+          '<td class="small">' + ((a.members || []).join('<br>') || '-') + '</td>' +
+          '<td class="small">' + (a.mountpoint || '-') + '</td>' +
+          '<td class="small">' + (a.sync || 'idle') + '</td>' +
+          '<td class="small text-muted">' + (a.detail || '-') + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+      el.innerHTML = html;
+    }
+    refreshMemberSelects();
+  }).catch(function(err) { el.innerHTML = '<div class="text-danger">Failed: ' + err.message + '</div>'; });
+}
+['rep-array', 'rem-array'].forEach(function(id) {
+  document.getElementById(id).addEventListener('change', refreshMemberSelects);
+});
+document.addEventListener('DOMContentLoaded', loadAll);
+</script>
+{% endblock %}

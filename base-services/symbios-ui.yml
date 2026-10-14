@@ -242,6 +242,18 @@
         group: root
         mode: "0755"
 
+    - name: Install RAID managers (mdadm + btrfs)
+      ansible.builtin.copy:
+        src: "{{ git_root }}/scripts/{{ item }}"
+        dest: "/usr/local/sbin/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+        validate: /bin/bash -n %s
+      loop:
+        - symbios-raid-md.sh
+        - symbios-raid-btrfs.sh
+
     - name: Install after-mount dispatcher (boot policy, rootfs)
       ansible.builtin.copy:
         src: "{{ git_root }}/scripts/symbios-after-mount.sh"

@@ -27,6 +27,11 @@
 #   raid                          List RAID arrays + active swaps (JSON)
 #   status                        Show /symbios mount + LUKS status (JSON)
 #   setup <device> [encrypt=yes] [password-file=path]   Migrate /symbios to new disk
+#   unlock <device> <password-file>   Open a LUKS device for inspection
+#   lock <mapper|device>          Close an opened LUKS volume again
+#   luks                          List LUKS devices + open state (JSON)
+#   locate <device> [seconds]     Identify a disk by sustained reads
+#   adopt <device> [--copy] [--check]   Use existing partition/mapper as /symbios
 #   rollback                      Undo last migration, restore original /symbios
 #                           Unmount /symbios and close LUKS
 #   change-password <current-pw-file> <new-pw-file>   Change LUKS passphrase
@@ -48,6 +53,19 @@ Actions:
   status                        Show /symbios mount + LUKS status (JSON)
   setup <device> [encrypt=yes] [password-file=path]
                                 Migrate /symbios to a new disk
+  unlock <device> <password-file>
+                                Open a LUKS device for inspection (no
+                                mount, no formatting - use Adopt to make
+                                it /symbios)
+  lock <mapper|device>          Close an opened LUKS volume again
+  luks                          List LUKS devices + open state (JSON)
+  locate <device> [seconds]     Identify a disk by sustained reads
+                                (dd, default 30s, max 120s)
+  adopt <device> [--copy] [--check]
+                                Use an existing partition (or open LUKS
+                                mapper) as /symbios without formatting.
+                                --copy migrates current data onto it,
+                                --check only reports what would happen.
   rollback                      Undo the last migration, restore original
                                 /symbios (unmounts /symbios, closes LUKS)
   change-password <current-pw-file> <new-pw-file>
@@ -125,9 +143,22 @@ function f_log_step {
 
 # Append one locked-LUKS group to the raid JSON under construction
 # (globals f_raid_luks/f_raid_luks_first, group in f_luks_group with
-# f_luks_group_count members of f_luks_prev_size bytes). Groups below
-# 2 members are dropped silently. Resets the group vars.
+# f_luks_group_count members of f_luks_prev_size bytes). Groups of 2+
+# become pair candidates; single devices are reported separately as
+# f_raid_luks_single (e.g. a lone encrypted disk is not half a pair).
+# Resets the group vars.
 function f_luks_flush {
+  if [[ "${f_luks_group_count}" -eq 1 ]]
+  then
+    local f_human
+    f_human=$(numfmt --to=iec "${f_luks_prev_size}" 2>/dev/null || echo "${f_luks_prev_size}")
+    [[ "${f_raid_luks_single_first}" == "yes" ]] || f_raid_luks_single="${f_raid_luks_single}, "
+    f_raid_luks_single_first="no"
+    f_raid_luks_single="${f_raid_luks_single}{\"size\":$(printf '%s' "${f_human}" | f_json_escape)"
+    f_raid_luks_single="${f_raid_luks_single},\"device\":$(printf '/dev/%s' "${f_luks_prev_name}" | f_json_escape)}"
+    f_luks_group="" f_luks_group_count=0 f_luks_parents="" f_luks_prev_name=""
+    return 0
+  fi
   [[ "${f_luks_group_count}" -ge 2 ]] || return 0
   local f_human
   f_human=$(numfmt --to=iec "${f_luks_prev_size}" 2>/dev/null || echo "${f_luks_prev_size}")
@@ -380,11 +411,19 @@ function f_main {
     # excluded (same-size swap pairs are normal, not RAID).
     f_raid_luks=""
     f_raid_luks_first="yes"
+    f_raid_luks_single=""
+    f_raid_luks_single_first="yes"
     f_luks_prev_size="" f_luks_group="" f_luks_group_count=0
     f_luks_parents="" f_luks_prev_name=""
     while read -r f_l_name f_l_parent f_l_size f_l_fstype
     do
       [[ "${f_l_fstype}" == "crypto_LUKS" ]] || continue
+      # Open (unlocked) LUKS shows its content via btrfs/mdadm already -
+      # only still-locked devices belong into pairs/singles.
+      if lsblk -n -l -o TYPE "/dev/${f_l_name}" 2>/dev/null | grep -qx "crypt"
+      then
+        continue
+      fi
       # Whole-disk LUKS has no parent: use its own name so two such
       # disks can still pair, while same-disk partitions never do.
       [[ -z "${f_l_parent}" ]] && f_l_parent="${f_l_name}"
@@ -406,7 +445,7 @@ function f_main {
       fi
     done < <(lsblk -n -l -b -o NAME,PKNAME,SIZE,FSTYPE 2>/dev/null | sort -k3,3n -k2,2 || true)
     f_luks_flush
-    f_json_ok "\"btrfs\":[${f_raid_btrfs}],\"mdadm\":[${f_raid_md}],\"active_swaps\":[${f_raid_swaps}],\"luks_pairs\":[${f_raid_luks}]"
+    f_json_ok "\"btrfs\":[${f_raid_btrfs}],\"mdadm\":[${f_raid_md}],\"active_swaps\":[${f_raid_swaps}],\"luks_pairs\":[${f_raid_luks}],\"luks_singles\":[${f_raid_luks_single}]"
     ;;
 
   # ------------------------------------------------------------------
@@ -767,6 +806,231 @@ EOF
     ;;
 
   # ------------------------------------------------------------------
+  unlock)
+    # Open a LUKS device for inspection only: no mount, no formatting.
+    # The caller picks the exact device (several LUKS volumes may exist).
+    # Mapper: symbios-luks for the SymbiOS data volume, unlock-<name>
+    # for anything else. Report the mapper so the WebUI can point at
+    # the RAID pages for a look inside.
+    local f_device="${1:-}" f_pw_file="${2:-}" f_password=""
+    [[ -z "${f_device}" ]] && f_json_error "No device selected"
+    [[ "${f_device}" == /dev/* ]] || f_json_error "Invalid device path"
+    [[ -z "${f_pw_file}" ]] && f_json_error "Password file is required"
+    local f_unlock_fs
+    f_unlock_fs=$(blkid -s TYPE -o value "${f_device}" 2>/dev/null || true)
+    [[ "${f_unlock_fs}" == "crypto_LUKS" ]] || \
+      f_json_error "${f_device} is not a LUKS device (found: ${f_unlock_fs:-nothing})."
+    if [[ -f "${f_pw_file}" ]]
+    then
+      IFS= read -rs f_password < "${f_pw_file}" || true
+      rm -f "${f_pw_file}" 2>/dev/null || true
+    fi
+    [[ -z "${f_password}" ]] && f_json_error "Passphrase is required"
+    local f_want_mapper="${g_mapper_name}"
+    local f_data_luks
+    f_data_luks=$(f_find_luks)
+    if [[ -n "${f_data_luks}" ]] && [[ "${f_device}" != "/dev/${f_data_luks}" ]]
+    then
+      # Bash expansion (not basename|tr): basename's trailing newline
+      # was translated into a "-" suffix (unlock-sdb3- bug).
+      local f_base="${f_device##*/}"
+      f_base="${f_base//[^a-zA-Z0-9]/-}"
+      f_base="${f_base%-}"
+      f_want_mapper="unlock-${f_base}"
+    fi
+    if [[ -e "/dev/mapper/${f_want_mapper}" ]]
+    then
+      f_log_ok "${f_device} already open as ${f_want_mapper}"
+    else
+      f_log_step "Opening ${f_device} as ${f_want_mapper}"
+      printf '%s' "${f_password}" | cryptsetup open "${f_device}" "${f_want_mapper}" || \
+        f_json_error "Failed to open ${f_device}. Is the passphrase correct?"
+      f_log_ok "LUKS volume opened"
+    fi
+    f_password=""
+    local f_mapper_dev="/dev/mapper/${f_want_mapper}"
+    local f_inner_fs
+    f_inner_fs=$(blkid -s TYPE -o value "${f_mapper_dev}" 2>/dev/null || true)
+    [[ -z "${f_inner_fs}" ]] && f_inner_fs="unknown (still encrypted or empty)"
+    f_json_ok "\"message\":\"${f_device} opened as ${f_mapper_dev} (${f_inner_fs}) - nothing mounted, nothing formatted.\",\"mapper\":\"${f_mapper_dev}\",\"fstype\":\"${f_inner_fs}\""
+    ;;
+
+  # ------------------------------------------------------------------
+  lock)
+    # Close an opened LUKS mapper again (by mapper name or source device).
+    local f_target="${1:-}"
+    [[ -z "${f_target}" ]] && f_json_error "No mapper or device given"
+    local f_mapper="${f_target##*/}"
+    if [[ "${f_target}" == /dev/mapper/* ]]
+    then
+      f_mapper="${f_target#/dev/mapper/}"
+    elif [[ "${f_target}" == /dev/* ]]
+    then
+      f_mapper=$(lsblk -n -l -o NAME,TYPE "${f_target}" 2>/dev/null | \
+        awk '$2 == "crypt" {print $1; exit}')
+      [[ -z "${f_mapper}" ]] && f_json_error "${f_target} is not open."
+    fi
+    [[ "${f_mapper}" == "${g_mapper_name}" ]] && \
+      findmnt -n -o TARGET "${g_mountpoint}" 2>/dev/null | grep -qx "${g_mountpoint}" && \
+      f_json_error "This mapper holds the mounted /symbios - unmount it first."
+    cryptsetup close "${f_mapper}" 2>&1 || \
+      f_json_error "Could not close ${f_mapper} (still mounted?)."
+    f_json_ok "\"message\":\"${f_mapper} closed.\""
+    ;;
+
+  # ------------------------------------------------------------------
+  luks)
+    # List all LUKS devices with label/uuid/size and open state as JSON,
+    # so the WebUI unlock dialog can offer an explicit device choice.
+    local f_luks_out="" f_luks_first="yes"
+    local f_l_name f_l_size f_l_label f_l_uuid f_l_mapper f_l_open
+    while read -r f_l_name f_l_size
+    do
+      [[ -z "${f_l_name}" ]] && continue
+      f_l_label=$(blkid -s LABEL -o value "/dev/${f_l_name}" 2>/dev/null || true)
+      f_l_uuid=$(blkid -s UUID -o value "/dev/${f_l_name}" 2>/dev/null || true)
+      f_l_mapper=$(lsblk -n -l -o NAME,TYPE "/dev/${f_l_name}" 2>/dev/null | \
+        awk '$2 == "crypt" {print $1; exit}')
+      f_l_open="false"
+      [[ -n "${f_l_mapper}" ]] && f_l_open="true"
+      [[ "${f_luks_first}" == "yes" ]] || f_luks_out="${f_luks_out}, "
+      f_luks_first="no"
+      f_luks_out="${f_luks_out}{\"device\":\"/dev/${f_l_name}\""
+      f_luks_out="${f_luks_out},\"size_bytes\":${f_l_size:-0}"
+      f_luks_out="${f_luks_out},\"label\":$(printf '%s' "${f_l_label}" | f_json_escape)"
+      f_luks_out="${f_luks_out},\"uuid\":$(printf '%s' "${f_l_uuid}" | f_json_escape)"
+      f_luks_out="${f_luks_out},\"open\":${f_l_open}"
+      f_luks_out="${f_luks_out},\"mapper\":$(printf '%s' "${f_l_mapper}" | f_json_escape)}"
+    done < <(lsblk -n -l -b -o NAME,SIZE,FSTYPE 2>/dev/null | \
+      awk '$3 == "crypto_LUKS" {print $1, $2}' || true)
+    f_json_ok "\"devices\":[${f_luks_out}]"
+    ;;
+
+  # ------------------------------------------------------------------
+  adopt)
+    # Use an existing partition or open mapper as /symbios without formatting.
+    local f_device="${1:-}" f_copy="no" f_check="no" f_arg
+    shift 2>/dev/null || true
+    [[ -z "${f_device}" ]] && f_json_error "No device selected"
+    [[ "${f_device}" == /dev/* ]] || f_json_error "Invalid device path"
+    for f_arg in "$@"
+    do
+      if [[ "${f_arg}" == "--copy" ]]
+      then
+        f_copy="yes"
+      elif [[ "${f_arg}" == "--check" ]]
+      then
+        f_check="yes"
+      fi
+    done
+    # Refuse whole-disk or array targets: adopt works on a partition,
+    # an md device or an open mapper, never on a bare disk.
+    if [[ "${f_device}" == /dev/md* ]] || [[ "${f_device}" == /dev/mapper/* ]]
+    then
+      true
+    else
+      local f_adopt_type
+      f_adopt_type=$(lsblk -n -l -o TYPE "${f_device}" 2>/dev/null | head -1) || \
+        f_json_error "Unknown device: ${f_device}"
+      [[ "${f_adopt_type}" == "part" ]] || \
+        f_json_error "${f_device} is a ${f_adopt_type:-unknown device}, not a partition - adopt needs a partition, md array or open LUKS mapper."
+    fi
+    local f_adopt_fs f_adopt_label f_adopt_uuid
+    f_adopt_fs=$(blkid -s TYPE -o value "${f_device}" 2>/dev/null || true)
+    f_adopt_label=$(blkid -s LABEL -o value "${f_device}" 2>/dev/null || true)
+    f_adopt_uuid=$(blkid -s UUID -o value "${f_device}" 2>/dev/null || true)
+    [[ -z "${f_adopt_fs}" ]] && f_json_error "${f_device} has no detectable filesystem. Format it via Move Data first."
+    case "${f_adopt_fs}" in
+      ext4|btrfs)
+        ;;
+      crypto_LUKS|swap|LVM2_member|linux_raid_member)
+        f_json_error "${f_device} holds ${f_adopt_fs} - unlock or break it up first, then adopt the filesystem inside."
+        ;;
+      *)
+        f_json_error "${f_device} has filesystem ${f_adopt_fs} - only ext4 or btrfs can hold /symbios."
+        ;;
+    esac
+    local f_cur_mount
+    f_cur_mount=$(findmnt -n -o TARGET "${f_device}" 2>/dev/null || true)
+    if [[ -n "${f_cur_mount}" ]] && [[ "${f_cur_mount}" != "${g_mountpoint}" ]]
+    then
+      f_json_error "${f_device} is mounted at ${f_cur_mount}. Unmount it first."
+    fi
+    if [[ "${f_cur_mount}" == "${g_mountpoint}" ]]
+    then
+      f_json_ok '"message":"This device is already mounted as /symbios.","can_rollback":false'
+    fi
+    # Trial mount read-only to verify the filesystem opens cleanly.
+    mkdir -p /symbios.new
+    if ! mount -o ro "${f_device}" /symbios.new 2>/dev/null
+    then
+      f_json_error "${f_device} could not be mounted read-only. Check the filesystem (fsck/btrfs check) first."
+    fi
+     umount /symbios.new 2>/dev/null || true
+    if [[ "${f_check}" == "yes" ]]
+    then
+      local f_adopt_size
+      f_adopt_size=$(blockdev --getsize64 "${f_device}" 2>/dev/null || echo 0)
+      f_json_ok "\"message\":\"Adopt check OK: ${f_adopt_fs} filesystem (${f_adopt_size} bytes) can become /symbios.\",\"fstype\":\"${f_adopt_fs}\",\"label\":\"${f_adopt_label}\",\"copy\":\"${f_copy}\""
+    fi
+    # Save rollback state, then switch fstab to the adopted device.
+    local f_old_fstab_line f_old_home_device f_old_home_fstype
+    f_old_fstab_line=$(grep -E '[[:space:]]/symbios[[:space:]]' /etc/fstab 2>/dev/null || echo "")
+    f_old_home_device=$(findmnt -n -o SOURCE "${g_mountpoint}" 2>/dev/null || echo "")
+    f_old_home_fstype=$(findmnt -n -o FSTYPE "${g_mountpoint}" 2>/dev/null || echo "rootfs")
+    [[ -z "${f_old_home_device}" ]] && f_old_home_device=$(findmnt -n -o SOURCE / 2>/dev/null || echo "")
+    f_save_state "${f_old_home_device}" "${f_old_home_fstype}" "${f_device}" \
+      "no" "" "${f_old_fstab_line}"
+    f_log_ok "State saved (can rollback later)"
+    if [[ "${f_copy}" == "yes" ]]
+    then
+      f_log_step "Copying current ${g_mountpoint} onto adopted device"
+      mkdir -p /symbios.new
+      mount "${f_device}" /symbios.new || f_setup_error "Mount adopted device failed"
+      rsync -av --progress \
+        --exclude='.trashed-*' \
+        --exclude='.symbios-data-migration.state' \
+        "${g_mountpoint}/" /symbios.new/ 2>&1 || {
+         umount /symbios.new 2>/dev/null || true
+        f_setup_error "rsync failed"
+      }
+       umount /symbios.new 2>/dev/null || true
+      f_log_ok "Data copy complete"
+    fi
+    f_log_step "Switching ${g_mountpoint} to adopted device"
+     umount "${g_mountpoint}" 2>/dev/null || true
+    rm -rf "${g_mountpoint}"/* 2>/dev/null || true
+    sed -i '\#.*[[:space:]]/symbios[[:space:]]#d' /etc/fstab
+    if [[ "${f_device}" == /dev/mapper/* ]]
+    then
+      echo "${f_device} ${g_mountpoint} ${f_adopt_fs} defaults,noatime,nofail,noauto 0 2" >> /etc/fstab
+    elif [[ -n "${f_adopt_uuid}" ]]
+    then
+      echo "UUID=${f_adopt_uuid} ${g_mountpoint} ${f_adopt_fs} defaults,noatime,nofail,noauto 0 2" >> /etc/fstab
+    else
+      echo "${f_device} ${g_mountpoint} ${f_adopt_fs} defaults,noatime,nofail,noauto 0 2" >> /etc/fstab
+    fi
+    mount "${g_mountpoint}" || f_setup_error "Mount ${g_mountpoint} failed"
+    f_log_ok "${g_mountpoint} is now on ${f_device} (${f_adopt_fs}, data kept)"
+    f_json_ok '"message":"Adopted existing filesystem as /symbios without formatting.","can_rollback":true'
+    ;;
+
+  # ------------------------------------------------------------------
+  locate)
+    # Identify a physical disk by sustained reads: watch the activity
+    # LED or listen. Single home for disk location (was duplicated on
+    # both RAID pages before).
+    local f_dev="${1:-}" f_secs="${2:-30}"
+    [[ -z "${f_dev}" ]] && f_json_error "Usage: $0 locate <device> [seconds]"
+    [[ "${f_dev}" == /dev/* ]] || f_json_error "Invalid device path"
+    [[ "${f_secs}" =~ ^[0-9]+$ ]] || f_secs=30
+    [[ "${f_secs}" -gt 120 ]] && f_secs=120
+    f_log "Reading ${f_dev} for ${f_secs}s - watch the activity LED or listen"
+    timeout "${f_secs}" dd "if=${f_dev}" of=/dev/null bs=1M iflag=direct 2>&1 | tail -2 || true
+    f_json_ok '"message":"Locate read finished."'
+    ;;
+
+  # ------------------------------------------------------------------
   rollback)
     f_do_rollback
     ;;
@@ -836,7 +1100,7 @@ EOF
     ;;
 
   *)
-    f_json_error "Usage: $0 {list|raid|status|setup|rollback|change-password}"
+    f_json_error "Usage: $0 {list|raid|status|setup|unlock|lock|luks|locate|adopt|rollback|change-password}"
     ;;
   esac
 }

@@ -86,7 +86,18 @@ PAGE_EXPLAIN = {
     'disk': (
         'By default, all data is stored on the system SD card. A separate '
         'hard disk provides more space and \u2014 optionally encrypted \u2014 '
-        'more security.'
+        'more security. You can also unlock an encrypted disk or adopt '
+        'an existing filesystem without formatting it.'
+    ),
+    'raid-md': (
+        'Classic Linux RAID (mdadm) for whole disks or partitions, '
+        'including RAID1 and RAID5 (always ext4). Replace failed disks, '
+        'add spares and grow arrays.'
+    ),
+    'raid-btrfs': (
+        'Modern btrfs multi-device storage (usually RAID1 for data and '
+        'metadata). Replace disks, add or remove devices, run scrubs '
+        'and balances, and watch per-device error counters.'
     ),
     'localization': (
         'Timezone, keyboard and language are used so that times and input '
@@ -143,6 +154,8 @@ PAGE_CHECK = {
     'acme': 'certs',
     'disk': 'disk',
     'backup': 'backup',
+    'raid-md': 'raid-mdadm',
+    'raid-btrfs': 'raid-mdadm',
 }
 
 
