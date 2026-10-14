@@ -221,7 +221,7 @@ function loadAll() {
     var devs = (res[1] && res[1].ok && res[1].devices) || [];
     freeDevs = [];
     devs.forEach(function(dev) {
-      if (dev.type !== 'disk') return;
+      if (dev.type !== 'disk' && dev.type !== 'loop') return;
       if (!subtreeUsed(dev, paths)) {
         freeDevs.push({path: dev.path, label: dev.path + ' (whole disk' + (dev.size ? ', ' + dev.size : '') + (dev.model ? ', ' + dev.model : '') + ')'});
         return;

@@ -117,10 +117,14 @@ function subtreeUsed(d, memberPaths) {
 
 /* Unused devices: whole disks whose subtree is fully free, plus free
    partitions (no fs, unmounted, no RAID/LUKS/LVM/swap anywhere below). */
+function isDiskLike(d) {
+  return d.type === 'disk' || d.type === 'loop';
+}
+
 function collectFree(devs, memberPaths) {
   var out = [];
   devs.forEach(function(dev) {
-    if (dev.type !== 'disk') return;
+    if (!isDiskLike(dev)) return;
     if (!subtreeUsed(dev, memberPaths)) {
       out.push({path: dev.path, label: dev.path + ' (whole disk' + (dev.size ? ', ' + dev.size : '') + (dev.model ? ', ' + dev.model : '') + ')'});
       return;
@@ -188,7 +192,7 @@ function loadAll() {
     mdArrays = (data.ok && data.arrays) || [];
     var devs = (res[1] && res[1].ok && res[1].devices) || [];
     freeDevs = collectFree(devs, raidMemberPaths());
-    allDisks = devs.filter(function(d) { return d.type === 'disk'; }).map(function(d) {
+    allDisks = devs.filter(isDiskLike).map(function(d) {
       return {path: d.path, label: d.path + (d.size ? ' (' + d.size + ')' : '') + (d.model ? ' ' + d.model : '')};
     });
     if (!mdArrays.length) {

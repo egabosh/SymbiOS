@@ -330,7 +330,9 @@ function f_main {
 
   # ------------------------------------------------------------------
   list)
-    lsblk -e 1,7,11,252 -J \
+    # Major 7 (loop) is NOT excluded: loopback devices are the supported
+    # way to try RAID/LUKS flows in the WebUI without touching real disks.
+    lsblk -e 1,11,252 -J \
       -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,LABEL,TRAN,RM 2>&1 || \
       f_json_error "lsblk failed"
     ;;

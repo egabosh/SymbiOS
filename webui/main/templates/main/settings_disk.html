@@ -516,9 +516,15 @@ function loadDisks() {
     });
 }
 
+/* Loopback devices count as disks: they are the supported way to try
+   RAID/LUKS flows in the WebUI without touching real hardware. */
+function isDiskLike(dev) {
+  return dev.type === 'disk' || dev.type === 'loop';
+}
+
 /* Render one physical disk row: model + path, transport, size, child fstypes, use badge */
 function renderPhysicalDisk(dev) {
-  if (dev.type !== 'disk') return '';
+  if (!isDiskLike(dev)) return '';
 
   var status = getStatus(dev);
   var rowClass = '';
@@ -688,7 +694,7 @@ function getStatus(dev) {
 
 /* Add options to the target disk select - only unmounted whole disks. */
 function addDeviceOptions(dev, select) {
-  if (dev.type !== 'disk') return;
+  if (!isDiskLike(dev)) return;
   var hasMountedChild = hasMountedChildren(dev);
   if (dev.mountpoint || hasMountedChild) return;
   if (hasRaidInTree(dev) || hasLuksInTree(dev)) return;
@@ -764,7 +770,7 @@ function addBtrfsAdoptOptions(select) {
 
 /* Locate select offers every physical disk (RAID members included). */
 function addLocateOption(dev) {
-  if (dev.type !== 'disk') return;
+  if (!isDiskLike(dev)) return;
   var sel = document.getElementById('locate-device');
   var opt = document.createElement('option');
   opt.value = dev.path;

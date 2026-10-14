@@ -175,6 +175,9 @@ function f_main {
     f_log "Adding ${f_new} to ${f_array}"
     mdadm "${f_array}" --add "${f_new}" 2>&1 || \
       f_json_error "Could not add ${f_new} to ${f_array}"
+    # Give the kernel a moment to start recovery: on fast/small arrays
+    # the first check below would otherwise miss it entirely.
+    sleep 5
     f_log "Waiting for resync (this may take hours)..."
     while grep -qE '(resync|recovery|reshape)' /proc/mdstat 2>/dev/null
     do
