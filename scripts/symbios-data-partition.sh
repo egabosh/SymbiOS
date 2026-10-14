@@ -543,15 +543,14 @@ EOF
     fi
 
     # Refuse targets whose formatting would destroy data beyond the
-    # selected disk: RAID members/arrays (kills the whole array, possibly
-    # on other disks), LUKS/LVM holders (encrypted data), active swap,
-    # anything mounted anywhere in the subtree, and non-disk devices.
-    # The WebUI hides these from the target select; this is the
-    # server-side backstop against a forged request.
-    if [[ "$f_device" == /dev/md* ]]
-    then
-      f_json_error "$f_device is an mdadm RAID array - break it up first if you really want to repurpose these disks."
-    fi
+    # selected device: RAID members (kills the whole array, possibly on
+    # other disks), LUKS/LVM holders (encrypted data), active swap,
+    # anything mounted anywhere in the subtree, and devices that are
+    # neither a whole disk nor an mdadm array. Whole mdadm arrays ARE
+    # valid targets (migrating /symbios onto a RAID) - formatting one
+    # only affects the array itself, never its former members' data
+    # beyond it. The WebUI hides refused devices from the target
+    # select; this is the server-side backstop against forged requests.
     local f_tree
     f_tree=$(lsblk -n -l -o NAME,TYPE,FSTYPE,MOUNTPOINT "$f_device" 2>/dev/null) || \
       f_json_error "Cannot inspect $f_device"
@@ -560,8 +559,11 @@ EOF
     f_top_type=$(echo "$f_tree" | head -1 | awk '{print $2}')
     f_top_label="${f_top_type}"
     [[ "${f_top_type}" == "part" ]] && f_top_label="partition"
-    [[ "${f_top_type}" == "disk" ]] || \
-      f_json_error "$f_device is a ${f_top_label}, not a whole disk - select the disk itself."
+    [[ "${f_top_type}" == "raid" ]] && f_top_label="RAID array"
+    if [[ "${f_top_type}" != "disk" ]] && [[ "${f_top_type}" != "raid" ]]
+    then
+      f_json_error "$f_device is a ${f_top_label}, not a whole disk or RAID array."
+    fi
     local f_row f_name f_type f_fstype f_mount
     while read -r f_name f_type f_fstype f_mount
     do
@@ -912,7 +914,9 @@ EOF
   adopt)
     # Use an existing partition or open mapper as /symbios without formatting.
     local f_device="${1:-}" f_copy="no" f_check="no" f_arg
-    shift 2>/dev/null || true
+    # Shift ONE (the device): shifting more would silently drop --copy
+    # and --check and turn a dry run into a real adopt (seen live once).
+    shift 1 2>/dev/null || true
     [[ -z "${f_device}" ]] && f_json_error "No device selected"
     [[ "${f_device}" == /dev/* ]] || f_json_error "Invalid device path"
     for f_arg in "$@"
@@ -925,22 +929,36 @@ EOF
         f_check="yes"
       fi
     done
-    # Refuse whole-disk or array targets: adopt works on a partition,
-    # an md device or an open mapper, never on a bare disk.
+    # Adopt works on a partition, a loop device (testing), an md array
+    # or an open mapper - never on a bare disk with a partition table
+    # (mounting that would hide the partitions). A disk carrying a
+    # filesystem directly (e.g. a USB stick) is fine.
+    local f_adopt_type=""
     if [[ "${f_device}" == /dev/md* ]] || [[ "${f_device}" == /dev/mapper/* ]]
     then
-      true
+      f_adopt_type="virtual"
     else
-      local f_adopt_type
       f_adopt_type=$(lsblk -n -l -o TYPE "${f_device}" 2>/dev/null | head -1) || \
         f_json_error "Unknown device: ${f_device}"
-      [[ "${f_adopt_type}" == "part" ]] || \
-        f_json_error "${f_device} is a ${f_adopt_type:-unknown device}, not a partition - adopt needs a partition, md array or open LUKS mapper."
     fi
     local f_adopt_fs f_adopt_label f_adopt_uuid
     f_adopt_fs=$(blkid -s TYPE -o value "${f_device}" 2>/dev/null || true)
     f_adopt_label=$(blkid -s LABEL -o value "${f_device}" 2>/dev/null || true)
     f_adopt_uuid=$(blkid -s UUID -o value "${f_device}" 2>/dev/null || true)
+    case "${f_adopt_type}" in
+      part|loop|virtual)
+        ;;
+      disk)
+        # Bare disk only when it holds the filesystem directly.
+        if [[ "${f_adopt_fs}" != "ext4" ]] && [[ "${f_adopt_fs}" != "btrfs" ]]
+        then
+          f_json_error "${f_device} is a whole disk without a directly usable filesystem - adopt needs a partition, md array or open LUKS mapper."
+        fi
+        ;;
+      *)
+        f_json_error "${f_device} is a ${f_adopt_type:-unknown device} - adopt needs a partition, loop device, md array or open LUKS mapper."
+        ;;
+    esac
     [[ -z "${f_adopt_fs}" ]] && f_json_error "${f_device} has no detectable filesystem. Format it via Move Data first."
     case "${f_adopt_fs}" in
       ext4|btrfs)
@@ -969,6 +987,24 @@ EOF
       f_json_error "${f_device} could not be mounted read-only. Check the filesystem (fsck/btrfs check) first."
     fi
      umount /symbios.new 2>/dev/null || true
+    # Without --copy the current data stays where it is as a fallback -
+    # so adopting away from a rootfs-backed /symbios without copying
+    # would orphan live data: refuse that combination outright. This
+    # runs before --check so a dry run reports the real outcome.
+    local f_old_fstab_line f_old_home_device f_old_home_fstype f_old_is_mount
+    f_old_fstab_line=$(grep -E '[[:space:]]/symbios[[:space:]]' /etc/fstab 2>/dev/null || echo "")
+    f_old_home_device=$(findmnt -n -o SOURCE "${g_mountpoint}" 2>/dev/null || echo "")
+    f_old_home_fstype=$(findmnt -n -o FSTYPE "${g_mountpoint}" 2>/dev/null || echo "rootfs")
+    f_old_is_mount="yes"
+    if [[ -z "${f_old_home_device}" ]]
+    then
+      f_old_is_mount="no"
+      f_old_home_device=$(findmnt -n -o SOURCE / 2>/dev/null || echo "")
+    fi
+    if [[ "${f_old_is_mount}" == "no" ]] && [[ "${f_copy}" == "no" ]]
+    then
+      f_json_error "/symbios currently lives on the root filesystem. Adopting without --copy would orphan that data - rerun with Copy enabled."
+    fi
     if [[ "${f_check}" == "yes" ]]
     then
       local f_adopt_size
@@ -976,11 +1012,6 @@ EOF
       f_json_ok "\"message\":\"Adopt check OK: ${f_adopt_fs} filesystem (${f_adopt_size} bytes) can become /symbios.\",\"fstype\":\"${f_adopt_fs}\",\"label\":\"${f_adopt_label}\",\"copy\":\"${f_copy}\""
     fi
     # Save rollback state, then switch fstab to the adopted device.
-    local f_old_fstab_line f_old_home_device f_old_home_fstype
-    f_old_fstab_line=$(grep -E '[[:space:]]/symbios[[:space:]]' /etc/fstab 2>/dev/null || echo "")
-    f_old_home_device=$(findmnt -n -o SOURCE "${g_mountpoint}" 2>/dev/null || echo "")
-    f_old_home_fstype=$(findmnt -n -o FSTYPE "${g_mountpoint}" 2>/dev/null || echo "rootfs")
-    [[ -z "${f_old_home_device}" ]] && f_old_home_device=$(findmnt -n -o SOURCE / 2>/dev/null || echo "")
     f_save_state "${f_old_home_device}" "${f_old_home_fstype}" "${f_device}" \
       "no" "" "${f_old_fstab_line}"
     f_log_ok "State saved (can rollback later)"
@@ -1001,7 +1032,14 @@ EOF
     fi
     f_log_step "Switching ${g_mountpoint} to adopted device"
      umount "${g_mountpoint}" 2>/dev/null || true
-    rm -rf "${g_mountpoint}"/* 2>/dev/null || true
+    # Only clean the old mountpoint when the data was just copied onto
+    # the new device. Without --copy the old location is the fallback
+    # and must never be deleted (deleting it destroyed a live system
+    # once - the old data is simply covered by the new mount instead).
+    if [[ "${f_copy}" == "yes" ]]
+    then
+      rm -rf "${g_mountpoint}"/* 2>/dev/null || true
+    fi
     sed -i '\#.*[[:space:]]/symbios[[:space:]]#d' /etc/fstab
     if [[ "${f_device}" == /dev/mapper/* ]]
     then

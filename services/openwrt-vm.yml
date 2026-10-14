@@ -820,18 +820,22 @@
     # MASQUERADE traffic from base-services to uplink (VM internet access).
     - name: UFW NAT masquerade for VM internet access
       ansible.builtin.shell: |
+        # NOTE: no trailing comment on RULE - iptables-restore (used by
+        # ufw-init) rejects inline comments and breaks `ufw enable`.
+        # The marker lives on its own full-line comment instead.
         set -e
-        RULE="-A POSTROUTING -s 192.168.41.0/24 ! -d 192.168.41.0/24 -j MASQUERADE # openwrt-vm-masquerade"
+        RULE="-A POSTROUTING -s 192.168.41.0/24 ! -d 192.168.41.0/24 -j MASQUERADE"
+        MARKER="# openwrt-vm-masquerade"
         if grep -q "openwrt-vm-masquerade" /etc/ufw/before.rules; then
           echo "nat-rule-exists"
         elif grep -q '^\*nat' /etc/ufw/before.rules; then
           LAST_COMMIT=$(grep -n '^COMMIT' /etc/ufw/before.rules | tail -1 | cut -d: -f1)
           if [ -n "$LAST_COMMIT" ]; then
-            sed -i "${LAST_COMMIT}i $RULE" /etc/ufw/before.rules
+            sed -i "${LAST_COMMIT}i ${MARKER}\n${RULE}" /etc/ufw/before.rules
             echo "nat-rule-added"
           fi
         else
-          printf '\n*nat\n:PREROUTING ACCEPT [0:0]\n:POSTROUTING ACCEPT [0:0]\n%s\nCOMMIT\n' "$RULE" \
+          printf '\n*nat\n:PREROUTING ACCEPT [0:0]\n:POSTROUTING ACCEPT [0:0]\n%s\n%s\nCOMMIT\n' "$MARKER" "$RULE" \
             >> /etc/ufw/before.rules
           echo "nat-section-added"
         fi

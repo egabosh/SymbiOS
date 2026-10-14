@@ -265,7 +265,7 @@
             <select class="form-select" id="adopt-device" name="device" required>
               <option value="">-- select a partition --</option>
             </select>
-            <div class="form-text">Whole disks are never offered here - pick a partition below.</div>
+            <div class="form-text">Whole disks are never offered here - pick a partition, RAID array or mapper. Arrays appear once unmounted.</div>
           </div>
           <div class="mb-3">
             <div class="form-check">
@@ -505,6 +505,8 @@ function loadDisks() {
         addLocateOption(dev);
       });
       addBtrfsAdoptOptions(adoptSelect);
+      addArraySetupOptions(select);
+      addArrayAdoptOptions(adoptSelect);
 
       html += '</tbody></table></div>';
       el.innerHTML = html;
@@ -750,6 +752,48 @@ function addAdoptOptions(dev, select) {
     }
   }
   walk(dev);
+}
+
+/* Unmounted mdadm arrays usable as setup/adopt candidates.
+   Mounted arrays or LUKS/LVM/swap holders are never offered (the
+   script refuses them server-side as a backstop). */
+function usableArrays() {
+  var multi = multiDeviceBtrfsMembers();
+  var out = [];
+  (raidData.mdadm || []).forEach(function(arr) {
+    if (arr.mountpoint) return;
+    var info = findDeviceByPath(window._diskData || [], arr.device);
+    var fstype = (info && info.fstype) || '';
+    if (fstype === 'crypto_LUKS' || fstype === 'LVM2_member' || fstype === 'swap') return;
+    if (multi[arr.device]) return; /* member of a multi-device btrfs */
+    out.push({device: arr.device, level: arr.level || '?', fstype: fstype,
+              size: (info && info.size) || ''});
+  });
+  return out;
+}
+
+/* Target Disk select: unused whole disks plus usable RAID arrays
+   (migrating /symbios onto a RAID formats the array itself). */
+function addArraySetupOptions(select) {
+  usableArrays().forEach(function(a) {
+    var opt = document.createElement('option');
+    opt.value = a.device;
+    opt.textContent = 'RAID ' + a.device + ' (' + a.level +
+      (a.size ? ', ' + a.size : '') + ') - will be formatted';
+    select.appendChild(opt);
+  });
+}
+
+/* Adopt select: usable arrays holding ext4/btrfs (kept as-is, no format). */
+function addArrayAdoptOptions(select) {
+  usableArrays().forEach(function(a) {
+    if (a.fstype !== 'ext4' && a.fstype !== 'btrfs') return;
+    var opt = document.createElement('option');
+    opt.value = a.device;
+    opt.textContent = 'mdadm ' + a.device + ' (' + a.fstype +
+      (a.size ? ', ' + a.size : '') + ')';
+    select.appendChild(opt);
+  });
 }
 
 /* One adopt entry per multi-device btrfs (label + member count + paths). */
