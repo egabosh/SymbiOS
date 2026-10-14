@@ -189,6 +189,7 @@
 
 <script>
 var diskData = [];
+var raidData = {btrfs: [], mdadm: [], active_swaps: []};
 
 document.addEventListener('DOMContentLoaded', function() {
   refreshAll();
@@ -286,9 +287,13 @@ function loadStatus() {
 }
 
 function loadDisks() {
-  fetch('{% url "settings_disk_list" %}')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
+  Promise.all([
+    fetch('{% url "settings_disk_list" %}').then(function(r) { return r.json(); }),
+    fetch('{% url "settings_disk_raid" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; })
+  ])
+    .then(function(res) {
+      var data = res[0];
+      if (res[1] && res[1].ok) raidData = res[1];
       var el = document.getElementById('disk-list');
       var select = document.getElementById('setup-device');
 
@@ -317,6 +322,8 @@ function loadDisks() {
         addDeviceOptions(dev, select);
       });
 
+      html += renderRaidRows();
+
       html += '</tbody></table></div>';
       el.innerHTML = html;
     })
@@ -336,6 +343,7 @@ function renderDevice(dev) {
   var rowClass = '';
   if (status === 'system') rowClass = 'table-danger';
   else if (status === 'data') rowClass = 'table-success';
+  else if (status === 'raid' || status === 'luks') rowClass = 'table-warning';
 
   var diskLabel = dev.model || dev.name;
 
@@ -347,10 +355,67 @@ function renderDevice(dev) {
   html += '<td>';
   if (status === 'system') html += '<span class="badge bg-danger">System disk</span>';
   else if (status === 'data') html += '<span class="badge bg-success">Data disk</span>';
+  else if (status === 'raid') html += '<span class="badge bg-warning text-dark">RAID: ' + raidRole(dev) + '</span>';
+  else if (status === 'luks') html += '<span class="badge bg-warning text-dark">holds LUKS data</span>';
   else html += '<span class="badge bg-secondary">Available</span>';
   html += '</td>';
   html += '</tr>';
   return html;
+}
+
+/* All RAID member / array / active-swap paths from the raid scan */
+function raidPaths() {
+  var paths = {};
+  (raidData.btrfs || []).forEach(function(fs) {
+    (fs.members || []).forEach(function(m) { paths[m] = 'btrfs ' + (fs.label || fs.uuid || ''); });
+  });
+  (raidData.mdadm || []).forEach(function(arr) {
+    paths[arr.device] = 'mdadm ' + (arr.level || '');
+    (arr.members || []).forEach(function(m) { paths[m] = 'mdadm ' + (arr.level || ''); });
+  });
+  (raidData.active_swaps || []).forEach(function(s) { paths[s] = 'active swap'; });
+  return paths;
+}
+
+/* True when this device or any descendant is a RAID member/array or swap */
+function hasRaidInTree(dev) {
+  var paths = raidPaths();
+  function walk(d) {
+    if (paths[d.path]) return true;
+    for (var i = 0; i < (d.children || []).length; i++) {
+      if (walk(d.children[i])) return true;
+    }
+    return false;
+  }
+  return walk(dev);
+}
+
+/* Human-readable RAID role of this device or its descendants, or '' */
+function raidRole(dev) {
+  var paths = raidPaths();
+  if (paths[dev.path]) return paths[dev.path];
+  function walk(d) {
+    for (var i = 0; i < (d.children || []).length; i++) {
+      var c = d.children[i];
+      if (paths[c.path]) return 'holds ' + paths[c.path];
+      var sub = walk(c);
+      if (sub) return sub;
+    }
+    return '';
+  }
+  return walk(dev);
+}
+
+/* True when this device or any descendant holds LUKS-encrypted data */
+function hasLuksInTree(dev) {
+  function walk(d) {
+    if (d.fstype === 'crypto_LUKS') return true;
+    for (var i = 0; i < (d.children || []).length; i++) {
+      if (walk(d.children[i])) return true;
+    }
+    return false;
+  }
+  return walk(dev);
 }
 
 /* Determine disk status from mount points (this disk or any child) */
@@ -362,14 +427,41 @@ function getStatus(dev) {
     if (child.mountpoint === '/') return 'system';
     if (child.mountpoint === '/symbios') return 'data';
   }
+  if (hasRaidInTree(dev)) return 'raid';
+  if (hasLuksInTree(dev)) return 'luks';
   return 'available';
 }
 
-/* Add options to the target disk select - only unmounted disks */
+/* Info rows for RAID arrays (btrfs + mdadm) - display only, never targets */
+function renderRaidRows() {
+  var html = '';
+  (raidData.btrfs || []).forEach(function(fs) {
+    var lvl = (fs.level && fs.level !== 'unknown') ? 'RAID ' + fs.level : 'multi-device';
+    html += '<tr class="table-info"><td>btrfs ' + (fs.label || fs.uuid || '') + '</td>' +
+      '<td class="text-muted small"><code>' + (fs.uuid || '-') + '</code></td>' +
+      '<td>' + (fs.mountpoint || '-') + '</td>' +
+      '<td>' + (fs.members || []).length + ' devices</td>' +
+      '<td><span class="badge bg-info">btrfs ' + lvl + '</span></td></tr>';
+  });
+  (raidData.mdadm || []).forEach(function(arr) {
+    html += '<tr class="table-info"><td>' + arr.device + '</td>' +
+      '<td class="text-muted small"><code>-</code></td>' +
+      '<td>' + (arr.mountpoint || '-') + '</td>' +
+      '<td>' + (arr.members || []).join(', ') + '</td>' +
+      '<td><span class="badge bg-info">mdadm ' + (arr.level || '') + '</span></td></tr>';
+  });
+  return html;
+}
+
+/* Add options to the target disk select - only unmounted disks.
+   RAID members/arrays, LUKS holders and active swaps are never offered:
+   formatting them would destroy data beyond the selected disk (the
+   setup script refuses them server-side as a backstop). */
 function addDeviceOptions(dev, select) {
   if (dev.type !== 'disk') return;
   var hasMountedChild = hasMountedChildren(dev);
   if (dev.mountpoint || hasMountedChild) return;
+  if (hasRaidInTree(dev) || hasLuksInTree(dev)) return;
 
   var opt = document.createElement('option');
   opt.value = dev.path;

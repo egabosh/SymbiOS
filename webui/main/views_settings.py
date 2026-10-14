@@ -503,6 +503,19 @@ def settings_disk_list(request):
         return JsonResponse({'ok': False, 'error': f'Failed to parse lsblk: {e}'})
 
 
+@login_required
+def settings_disk_raid(request):
+    """AJAX GET - list RAID arrays (btrfs + mdadm) and active swaps."""
+    ok, stdout, stderr = run_command(
+        f'{_DATA_PART_SCRIPT} raid', timeout=30)
+    if not ok:
+        return JsonResponse({'ok': False, 'error': stderr or 'raid scan failed'})
+    try:
+        return JsonResponse(json.loads(stdout))
+    except json.JSONDecodeError as e:
+        return JsonResponse({'ok': False, 'error': f'Failed to parse raid info: {e}'})
+
+
 def _describe_block(dev):
     """Build a flat description dict for a block device (recursive for children)."""
     item = {

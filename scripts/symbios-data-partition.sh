@@ -24,6 +24,7 @@
 #
 # Actions:
 #   list                          List block devices (JSON)
+#   raid                          List RAID arrays + active swaps (JSON)
 #   status                        Show /symbios mount + LUKS status (JSON)
 #   setup <device> [encrypt=yes] [password-file=path]   Migrate /symbios to new disk
 #   rollback                      Undo last migration, restore original /symbios
@@ -43,6 +44,7 @@ docker/containerd data dirs, homes, backups). Moving it to a separate
 
 Actions:
   list                          List block devices (JSON)
+  raid                          List RAID arrays + active swaps (JSON)
   status                        Show /symbios mount + LUKS status (JSON)
   setup <device> [encrypt=yes] [password-file=path]
                                 Migrate /symbios to a new disk
@@ -119,6 +121,30 @@ function f_log_error {
 
 function f_log_step {
   f_log "--- STEP: $* ---"
+}
+
+# Append one parsed `btrfs filesystem show` block to the raid JSON under
+# construction (globals f_raid_btrfs/f_raid_btrfs_first, block data in
+# f_b_label/f_b_uuid/f_b_devices/f_b_members). Resets the block vars.
+function f_btrfs_flush {
+  [[ -z "${f_b_uuid}" ]] && return 0
+  local f_b_level="unknown" f_b_mount="" f_b_df=""
+  f_b_mount=$(findmnt -n -o TARGET "UUID=${f_b_uuid}" 2>/dev/null || true)
+  if [[ -n "${f_b_mount}" ]]
+  then
+    f_b_df=$(btrfs filesystem df "${f_b_mount}" 2>/dev/null | \
+      awk '/^Data, /{gsub(/:.*/,"",$2); print $2; exit}' || true)
+    [[ -n "${f_b_df}" ]] && f_b_level="${f_b_df}"
+  fi
+  [[ "${f_raid_btrfs_first}" == "yes" ]] || f_raid_btrfs="${f_raid_btrfs}, "
+  f_raid_btrfs_first="no"
+  f_raid_btrfs="${f_raid_btrfs}{\"label\":$(printf '%s' "${f_b_label}" | f_json_escape)"
+  f_raid_btrfs="${f_raid_btrfs},\"uuid\":$(printf '%s' "${f_b_uuid}" | f_json_escape)"
+  f_raid_btrfs="${f_raid_btrfs},\"devices\":\"${f_b_devices}\""
+  f_raid_btrfs="${f_raid_btrfs},\"level\":$(printf '%s' "${f_b_level}" | f_json_escape)"
+  f_raid_btrfs="${f_raid_btrfs},\"mountpoint\":$(printf '%s' "${f_b_mount}" | f_json_escape)"
+  f_raid_btrfs="${f_raid_btrfs},\"members\":[${f_b_members}]}"
+  f_b_label="" f_b_uuid="" f_b_devices="" f_b_members=""
 }
 
 # ---------------------------------------------------------------------------
@@ -264,6 +290,78 @@ function f_main {
     ;;
 
   # ------------------------------------------------------------------
+  raid)
+    # Report RAID arrays (btrfs multi-device + mdadm) and active swaps
+    # as JSON, so the WebUI can hide member disks from the setup target
+    # select: formatting a member destroys the whole array, not just
+    # that disk. Members are matched by /dev path in the caller.
+    f_raid_btrfs=""
+    f_raid_btrfs_first="yes"
+    f_b_label="" f_b_uuid="" f_b_devices="" f_b_members=""
+    while IFS= read -r f_line
+    do
+      if [[ "${f_line}" == Label:* ]]
+      then
+        f_btrfs_flush
+        f_b_label="${f_line#*Label: }"
+        f_b_label="${f_b_label%%  uuid:*}"
+        f_b_label="${f_b_label//\'/}"
+        f_b_uuid="${f_line##*uuid: }"
+      elif [[ "${f_line}" == *"Total devices"* ]]
+      then
+        f_b_devices="${f_line#*Total devices }"
+        f_b_devices="${f_b_devices%% *}"
+      elif [[ "${f_line}" == *"path /dev/"* ]]
+      then
+        f_b_path="/dev/${f_line##*path /dev/}"
+        f_b_path="${f_b_path%% *}"
+        [[ -n "${f_b_members}" ]] && f_b_members="${f_b_members}, "
+        f_b_members="${f_b_members}$(printf '%s' "${f_b_path}" | f_json_escape)"
+      fi
+    done < <(btrfs filesystem show 2>/dev/null || true)
+    f_btrfs_flush
+    f_raid_md=""
+    f_raid_md_first="yes"
+    if [[ -r /proc/mdstat ]]
+    then
+      while IFS= read -r f_line
+      do
+        if [[ "${f_line}" =~ ^(md[0-9]+)[[:space:]]*:[[:space:]]*active[[:space:]]+([^[:space:]]+)[[:space:]]+(.*)$ ]]
+        then
+          f_m_dev="/dev/${BASH_REMATCH[1]}"
+          f_m_level="${BASH_REMATCH[2]}"
+          f_m_rest="${BASH_REMATCH[3]}"
+          f_m_members=""
+          for f_m_tok in ${f_m_rest}
+          do
+            [[ "${f_m_tok}" == *\[*\]* ]] || continue
+            f_m_tok="${f_m_tok%%\[*}"
+            [[ -n "${f_m_members}" ]] && f_m_members="${f_m_members}, "
+            f_m_members="${f_m_members}$(printf '/dev/%s' "${f_m_tok}" | f_json_escape)"
+          done
+          f_m_mount=$(findmnt -n -o TARGET "${f_m_dev}" 2>/dev/null || true)
+          [[ "${f_raid_md_first}" == "yes" ]] || f_raid_md="${f_raid_md}, "
+          f_raid_md_first="no"
+          f_raid_md="${f_raid_md}{\"device\":$(printf '%s' "${f_m_dev}" | f_json_escape)"
+          f_raid_md="${f_raid_md},\"level\":$(printf '%s' "${f_m_level}" | f_json_escape)"
+          f_raid_md="${f_raid_md},\"mountpoint\":$(printf '%s' "${f_m_mount}" | f_json_escape)"
+          f_raid_md="${f_raid_md},\"members\":[${f_m_members}]}"
+        fi
+      done < /proc/mdstat
+    fi
+    f_raid_swaps=""
+    f_raid_swaps_first="yes"
+    while IFS= read -r f_swap
+    do
+      [[ -z "${f_swap}" ]] && continue
+      [[ "${f_raid_swaps_first}" == "yes" ]] || f_raid_swaps="${f_raid_swaps}, "
+      f_raid_swaps_first="no"
+      f_raid_swaps="${f_raid_swaps}$(printf '%s' "${f_swap}" | f_json_escape)"
+    done < <(swapon --show=NAME --noheadings 2>/dev/null || true)
+    f_json_ok "\"btrfs\":[${f_raid_btrfs}],\"mdadm\":[${f_raid_md}],\"active_swaps\":[${f_raid_swaps}]"
+    ;;
+
+  # ------------------------------------------------------------------
   status)
     local f_data_device="" f_data_fstype="" f_data_size=""
     local f_data_used="" f_data_avail=""
@@ -354,6 +452,60 @@ EOF
       fi
       f_json_error "Device is mounted at $f_cur_mount. Unmount it first."
     fi
+
+    # Refuse targets whose formatting would destroy data beyond the
+    # selected disk: RAID members/arrays (kills the whole array, possibly
+    # on other disks), LUKS/LVM holders (encrypted data), active swap,
+    # anything mounted anywhere in the subtree, and non-disk devices.
+    # The WebUI hides these from the target select; this is the
+    # server-side backstop against a forged request.
+    if [[ "$f_device" == /dev/md* ]]
+    then
+      f_json_error "$f_device is an mdadm RAID array - break it up first if you really want to repurpose these disks."
+    fi
+    local f_tree
+    f_tree=$(lsblk -n -l -o NAME,TYPE,FSTYPE,MOUNTPOINT "$f_device" 2>/dev/null) || \
+      f_json_error "Cannot inspect $f_device"
+    [[ -z "$f_tree" ]] && f_json_error "Unknown device: $f_device"
+    local f_top_type f_top_label
+    f_top_type=$(echo "$f_tree" | head -1 | awk '{print $2}')
+    f_top_label="${f_top_type}"
+    [[ "${f_top_type}" == "part" ]] && f_top_label="partition"
+    [[ "${f_top_type}" == "disk" ]] || \
+      f_json_error "$f_device is a ${f_top_label}, not a whole disk - select the disk itself."
+    local f_row f_name f_type f_fstype f_mount
+    while read -r f_name f_type f_fstype f_mount
+    do
+      [[ -n "${f_mount}" ]] && \
+        f_json_error "/dev/${f_name} is mounted at ${f_mount}. Unmount it first."
+      case "${f_fstype}" in
+        linux_raid_member)
+          f_json_error "/dev/${f_name} is an mdadm RAID member - break up the array first."
+          ;;
+        LVM2_member)
+          f_json_error "/dev/${f_name} holds an LVM volume group - remove it first."
+          ;;
+        crypto_LUKS)
+          f_json_error "/dev/${f_name} holds encrypted (LUKS) data - unlock and wipe it first if you really want this disk."
+          ;;
+        swap)
+          if swapon --show=NAME --noheadings 2>/dev/null | grep -qx "/dev/${f_name}"
+          then
+            f_json_error "/dev/${f_name} is active swap - swap it off first."
+          fi
+          ;;
+        btrfs)
+          f_bdevs=$(btrfs filesystem show 2>/dev/null | awk -v dev="/dev/${f_name}" '
+            /^Label:/ { label=$0; sub(/^.*Label: \x27/, "", label); sub(/\x27.*$/, "", label); devs=""; }
+            /Total devices/ { devs=$3; }
+            $0 ~ "path " dev "( |$)" { print devs "|" label; exit; }')
+          if [[ -n "${f_bdevs}" ]] && [[ "${f_bdevs%%|*}" != "1" ]] && [[ "${f_bdevs%%|*}" != "" ]]
+          then
+            f_json_error "/dev/${f_name} is a member of btrfs filesystem ${f_bdevs##*|} (${f_bdevs%%|*} devices) - formatting it destroys the whole array."
+          fi
+          ;;
+      esac
+    done <<< "$f_tree"
 
     local f_data_size f_disk_size
     f_data_size=$(du -sb "${g_mountpoint}/" 2>/dev/null | awk '{print $1}') || f_data_size=0
@@ -636,7 +788,7 @@ EOF
     ;;
 
   *)
-    f_json_error "Usage: $0 {list|status|setup|rollback|change-password}"
+    f_json_error "Usage: $0 {list|raid|status|setup|rollback|change-password}"
     ;;
   esac
 }

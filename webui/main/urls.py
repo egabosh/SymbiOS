@@ -105,6 +105,7 @@ urlpatterns = [
     path('settings/updates/', views_settings.settings_updates, name='settings_updates'),
     path('settings/disk/', views_settings.settings_disk, name='settings_disk'),
     path('settings/disk/list/', views_settings.settings_disk_list, name='settings_disk_list'),
+    path('settings/disk/raid/', views_settings.settings_disk_raid, name='settings_disk_raid'),
     path('settings/disk/status/', views_settings.settings_disk_status, name='settings_disk_status'),
     path('settings/disk/setup/', views_settings.settings_disk_setup, name='settings_disk_setup'),
     path('settings/disk/rollback/', views_settings.settings_disk_rollback, name='settings_disk_rollback'),
