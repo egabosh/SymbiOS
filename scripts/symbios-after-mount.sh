@@ -116,26 +116,20 @@ fi
 # 6. Host nslcd (LDAP NSS lookups). /home and /root are symlinks below
 # /symbios, so its mount namespace (InaccessibleDirectories=/home) fails
 # before the mount - and its server is a container that needs docker first.
-# Wait for slapd on the loopback port, then start. Backgrounded so a slow
-# container never blocks the boot.
+# Wait for slapd on the loopback port, then start. Deferred work MUST be a
+# detached systemd-run unit, never `( ... ) &`: gaboshlib kills all
+# background jobs in its EXIT trap (g_kill_all_background_jobs).
 if systemctl cat nslcd.service >/dev/null 2>&1
 then
-  ( for i in $(seq 1 30)
-    do
-      (exec 3<>/dev/tcp/127.0.0.1/389) 2>/dev/null && break
-      sleep 10
-    done
-    systemctl start nslcd.service 2>/dev/null || true
-  ) &
+  systemd-run --unit=symbios-nslcd-wait --collect /bin/bash -c 'for i in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/389) 2>/dev/null && break; sleep 10; done; exec /bin/systemctl start nslcd.service' 2>/dev/null || \
+    g_echo_warn "nslcd wait unit failed to schedule"
 fi
 
 # 7. Health daemon + watchdog timer, delayed so post-mount starters
 # (OpenVPN, hostapd, VM restore blocks later in rc.local) settle first.
-# Backgrounded: rc.local must never block on a sleep.
-( sleep 30
-  systemctl start runchecks.service 2>/dev/null || true
-  systemctl start runchecks-watchdog.timer 2>/dev/null || true
-) &
+# Same detachment rule as above: transient timer unit, not a background sleep.
+systemd-run --unit=symbios-runchecks-delayed --collect --on-active=30s /bin/systemctl start runchecks.service runchecks-watchdog.timer 2>/dev/null || \
+  g_echo_warn "runchecks delayed start failed to schedule"
 
 g_echo_note "after-mount dispatch done"
 exit 0
