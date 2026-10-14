@@ -50,11 +50,20 @@ def _run_upnp(args, timeout=15):
     # expected failures (e.g. a rule the router refuses), which it signals
     # with exit code 1. Parse stdout first and let the caller see the real
     # error; the raw stderr only carries shell-banner noise and must not
-    # shadow the structured answer.
+    # shadow the structured answer. Fall back to the last JSON-looking
+    # line so stray inventory/status lines on stdout cannot break the page.
     try:
         return json.loads(stdout)
     except (json.JSONDecodeError, ValueError):
         pass
+    if stdout:
+        for line in reversed(stdout.splitlines()):
+            line = line.strip()
+            if line.startswith('{') and line.endswith('}'):
+                try:
+                    return json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
     if not ok:
         raise RuntimeError(stderr or 'Command failed')
     raise RuntimeError(f'Invalid JSON from script: {stdout[:500]}')
@@ -182,6 +191,10 @@ def settings_port_forwarding(request):
     # Change actions must not repeat the expensive GET-time router introspection
     # (IPv6 status ~9s, mapping list ~7s). Resolve only what each action needs
     # so the exec-modal gets the job id immediately.
+    # Fallback (non-AJAX) redirects below use request.get_full_path() instead
+    # of the named URL so the setup-assistant flag (?setup=1) survives
+    # synchronous posts - notably the Step-1 method buttons, which carry no
+    # data-exec. Without a query string both targets are identical.
     if request.method == 'POST':
         action = request.POST.get('action', '')
 
@@ -204,7 +217,7 @@ def settings_port_forwarding(request):
                             return JsonResponse({'ok': False, 'error': err},
                                                 status=400)
                         messages.error(request, f'Error: {err}')
-                        return redirect('settings_port_forwarding')
+                        return redirect(request.get_full_path())
                 if is_ajax:
                     resp = {'ok': True}
                     if 'setup' in request.GET and method == 'manual':
@@ -212,7 +225,7 @@ def settings_port_forwarding(request):
                     return JsonResponse(resp)
                 if 'setup' in request.GET and method == 'manual':
                     return redirect('setup')
-                return redirect('settings_port_forwarding')
+                return redirect(request.get_full_path())
 
             elif action == 'save-credentials':
                 username = request.POST.get('username', '').strip()
@@ -236,7 +249,7 @@ def settings_port_forwarding(request):
                                          'title': 'Saving router login...',
                                          'message': 'Router login saved.'})
                 messages.success(request, 'Router login saved.')
-                return redirect('settings_port_forwarding')
+                return redirect(request.get_full_path())
 
             elif action == 'quick-enable':
                 # One-click: ensure static IP (FRITZ!Box), then add the
@@ -289,7 +302,7 @@ def settings_port_forwarding(request):
                     messages.error(request, f'Failed: {stderr or stdout}')
                 if ok and 'setup' in request.GET:
                     return redirect('setup')
-                return redirect('settings_port_forwarding')
+                return redirect(request.get_full_path())
 
             elif action == 'secure-static-ip':
                 # Explicitly make the server's IPv4 permanent on the router so
@@ -318,7 +331,7 @@ def settings_port_forwarding(request):
                         messages.error(request, result.get('error', 'Failed to secure static IP.'))
                 else:
                     messages.error(request, f'Failed: {stderr or stdout}')
-                return redirect('settings_port_forwarding')
+                return redirect(request.get_full_path())
 
             elif action == 'add':
                 ext_port = request.POST.get('ext_port', '').strip()
@@ -335,7 +348,7 @@ def settings_port_forwarding(request):
                     if is_ajax:
                         return JsonResponse({'ok': False, 'error': 'All port fields are required'}, status=400)
                     messages.error(request, 'All port fields are required.')
-                    return redirect('settings_port_forwarding')
+                    return redirect(request.get_full_path())
 
                 args = (f'add {shlex.quote(ext_port)} {shlex.quote(protocol)} {shlex.quote(int_port)} {shlex.quote(int_client)} '
                         f'{shlex.quote(description)} {shlex.quote(accesstype)}')
@@ -372,7 +385,7 @@ def settings_port_forwarding(request):
                     messages.error(request, result.get('error', 'Failed to add port forwarding.'))
                 else:
                     messages.error(request, f'Failed: {stderr or stdout}')
-                return redirect('settings_port_forwarding')
+                return redirect(request.get_full_path())
 
             elif action == 'delete':
                 ext_port = request.POST.get('ext_port', '').strip()
@@ -381,7 +394,7 @@ def settings_port_forwarding(request):
                     if is_ajax:
                         return JsonResponse({'ok': False, 'error': 'Port number required'}, status=400)
                     messages.error(request, 'Port number required.')
-                    return redirect('settings_port_forwarding')
+                    return redirect(request.get_full_path())
 
                 args = f'delete {ext_port} {protocol}'
                 if is_ajax:
@@ -397,7 +410,7 @@ def settings_port_forwarding(request):
                     messages.success(request, result.get('message', 'Port forwarding deleted.'))
                 else:
                     messages.error(request, result.get('error', 'Failed to delete port forwarding.'))
-                return redirect('settings_port_forwarding')
+                return redirect(request.get_full_path())
 
             elif action == 'remove-credentials':
                 # Drop the stored router login entirely.
@@ -412,13 +425,13 @@ def settings_port_forwarding(request):
                     messages.success(request, 'Router login removed.')
                 else:
                     messages.error(request, result.get('error', 'Failed to remove router login.'))
-                return redirect('settings_port_forwarding')
+                return redirect(request.get_full_path())
 
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)
             messages.error(request, f'Error: {e}')
-            return redirect('settings_port_forwarding')
+            return redirect(request.get_full_path())
 
     # --- GET: full page render ---
     pf_method = vars_.get('port_forwarding_method', '')
@@ -597,7 +610,20 @@ def settings_port_forwarding_config(request):
                 cmd = f'{SCRIPT} config {shlex.quote(username)} {shlex.quote(password)}'
             ok, stdout, stderr = run_command(cmd, timeout=10)
             if ok and stdout:
-                result = json.loads(stdout)
+                try:
+                    result = json.loads(stdout)
+                except (json.JSONDecodeError, ValueError):
+                    result = None
+                    for line in reversed(stdout.splitlines()):
+                        line = line.strip()
+                        if line.startswith('{') and line.endswith('}'):
+                            try:
+                                result = json.loads(line)
+                                break
+                            except (json.JSONDecodeError, ValueError):
+                                continue
+                    if result is None:
+                        raise
                 return JsonResponse(result)
             return JsonResponse({'ok': False, 'error': stderr or 'Failed to save credentials'})
         except Exception as e:

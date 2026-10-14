@@ -245,10 +245,16 @@ case "$ACTION" in
   # ------------------------------------------------------------------
   config)
     # Remove stored credentials (e.g. from the WebUI "Remove credentials").
+    # NOTE: stdout must stay a single JSON line (the WebUI parses it with
+    # json.loads) - inventory writes go via merge on stdin and stay quiet.
     if [[ "$1" == "remove" ]]
     then
-      f_symbios_var_set router_upnp_user ""
-      f_symbios_var_set router_upnp_password ""
+      if ! printf '{"router_upnp_user": "", "router_upnp_password": ""}' \
+        | "${g_symbios_dir}/symbios-inventory.py" --inventory "${g_inventory}" merge >/dev/null 2>&1
+      then
+        echo '{"ok":false,"error":"Failed to clear router credentials."}'
+        exit 1
+      fi
       rm -f "$UPNP_CONFIG_FILE"
       echo '{"ok":true,"configured":false,"message":"Router login removed."}'
       exit 0
@@ -296,10 +302,22 @@ case "$ACTION" in
     # Save credentials. Both fields may be empty (many routers, e.g. generic
     # UPnP, require no login); only 'config remove' and a bare 'config'
     # (status) are the no-write invocations.
+    # NOTE: stdout must stay a single JSON line - the merge stays quiet and
+    # the password travels via stdin JSON, never as argv nor in output.
     if [[ -n "$f_pw_file" ]] || [[ $f_pos_count -ge 2 ]]
     then
-      f_symbios_var_set router_upnp_user "$f_config_user"
-      f_symbios_var_set router_upnp_password "$f_config_password"
+      f_merge_json="$(printf '{"router_upnp_user": %s, "router_upnp_password": %s}' \
+        "$(printf '%s' "${f_config_user}" | f_json_escape)" \
+        "$(printf '%s' "${f_config_password}" | f_json_escape)")"
+      # Clear the plaintext password from memory as soon as it is serialized.
+      f_config_password=""
+      if ! printf '%s' "${f_merge_json}" \
+        | "${g_symbios_dir}/symbios-inventory.py" --inventory "${g_inventory}" merge >/dev/null 2>&1
+      then
+        echo '{"ok":false,"error":"Failed to save router credentials."}'
+        exit 1
+      fi
+      f_merge_json=""
       rm -f "$UPNP_CONFIG_FILE"
       echo '{"ok":true,"message":"Router login saved."}'
       exit 0
