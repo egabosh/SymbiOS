@@ -450,6 +450,15 @@ function renderRaidRows() {
       '<td>' + (arr.members || []).join(', ') + '</td>' +
       '<td><span class="badge bg-info">mdadm ' + (arr.level || '') + '</span></td></tr>';
   });
+  /* Locked LUKS pairs: same-size encrypted partitions on different
+     disks, probably one encrypted volume - unverified while locked. */
+  (raidData.luks_pairs || []).forEach(function(pair) {
+    html += '<tr class="table-warning"><td>locked LUKS (' + pair.size + ')</td>' +
+      '<td class="text-muted small"><code>-</code></td>' +
+      '<td>-</td>' +
+      '<td>' + (pair.members || []).join(', ') + '</td>' +
+      '<td><span class="badge bg-warning text-dark">locked pair, unverified</span></td></tr>';
+  });
   return html;
 }
 

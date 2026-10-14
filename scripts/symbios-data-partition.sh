@@ -123,6 +123,21 @@ function f_log_step {
   f_log "--- STEP: $* ---"
 }
 
+# Append one locked-LUKS group to the raid JSON under construction
+# (globals f_raid_luks/f_raid_luks_first, group in f_luks_group with
+# f_luks_group_count members of f_luks_prev_size bytes). Groups below
+# 2 members are dropped silently. Resets the group vars.
+function f_luks_flush {
+  [[ "${f_luks_group_count}" -ge 2 ]] || return 0
+  local f_human
+  f_human=$(numfmt --to=iec "${f_luks_prev_size}" 2>/dev/null || echo "${f_luks_prev_size}")
+  [[ "${f_raid_luks_first}" == "yes" ]] || f_raid_luks="${f_raid_luks}, "
+  f_raid_luks_first="no"
+  f_raid_luks="${f_raid_luks}{\"size\":$(printf '%s' "${f_human}" | f_json_escape)"
+  f_raid_luks="${f_raid_luks},\"members\":[${f_luks_group}]}"
+  f_luks_group="" f_luks_group_count=0 f_luks_parents="" f_luks_prev_name=""
+}
+
 # Append one parsed `btrfs filesystem show` block to the raid JSON under
 # construction (globals f_raid_btrfs/f_raid_btrfs_first, block data in
 # f_b_label/f_b_uuid/f_b_devices/f_b_members). Resets the block vars.
@@ -358,7 +373,40 @@ function f_main {
       f_raid_swaps_first="no"
       f_raid_swaps="${f_raid_swaps}$(printf '%s' "${f_swap}" | f_json_escape)"
     done < <(swapon --show=NAME --noheadings 2>/dev/null || true)
-    f_json_ok "\"btrfs\":[${f_raid_btrfs}],\"mdadm\":[${f_raid_md}],\"active_swaps\":[${f_raid_swaps}]"
+    # Locked LUKS pairs: same-size crypto_LUKS partitions on different
+    # disks are likely one encrypted RAID/filesystem, but locked devices
+    # hide their content (btrfs/mdadm cannot see them). Report as
+    # unverified candidates - never as fact. Swap partitions are
+    # excluded (same-size swap pairs are normal, not RAID).
+    f_raid_luks=""
+    f_raid_luks_first="yes"
+    f_luks_prev_size="" f_luks_group="" f_luks_group_count=0
+    f_luks_parents="" f_luks_prev_name=""
+    while read -r f_l_name f_l_parent f_l_size f_l_fstype
+    do
+      [[ "${f_l_fstype}" == "crypto_LUKS" ]] || continue
+      # Whole-disk LUKS has no parent: use its own name so two such
+      # disks can still pair, while same-disk partitions never do.
+      [[ -z "${f_l_parent}" ]] && f_l_parent="${f_l_name}"
+      if [[ -n "${f_luks_prev_size}" ]] && [[ "${f_l_size}" == "${f_luks_prev_size}" ]] && \
+         [[ " ${f_luks_parents} " != *" ${f_l_parent} "* ]]
+      then
+        if [[ "${f_luks_group_count}" -eq 1 ]]
+        then
+          f_luks_group="$(printf '/dev/%s' "${f_luks_prev_name}" | f_json_escape), "
+        fi
+        f_luks_group="${f_luks_group}$(printf '/dev/%s' "${f_l_name}" | f_json_escape)"
+        f_luks_group_count=$((f_luks_group_count + 1))
+        f_luks_parents="${f_luks_parents} ${f_l_parent}"
+      else
+        f_luks_flush
+        f_luks_prev_size="${f_l_size}"
+        f_luks_parents=" ${f_l_parent} "
+        f_luks_prev_name="${f_l_name}" f_luks_group="" f_luks_group_count=1
+      fi
+    done < <(lsblk -n -l -b -o NAME,PKNAME,SIZE,FSTYPE 2>/dev/null | sort -k3,3n -k2,2 || true)
+    f_luks_flush
+    f_json_ok "\"btrfs\":[${f_raid_btrfs}],\"mdadm\":[${f_raid_md}],\"active_swaps\":[${f_raid_swaps}],\"luks_pairs\":[${f_raid_luks}]"
     ;;
 
   # ------------------------------------------------------------------
