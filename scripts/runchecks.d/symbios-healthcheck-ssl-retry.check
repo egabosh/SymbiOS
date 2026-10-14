@@ -1,0 +1,71 @@
+CHECK_CATEGORY="network"
+CHECK_TITLE="SSL Retry"
+CHECK_DESC="Restarts Traefik when a configured domain still lacks a certificate."
+CHECK_DETAIL="Compares Host() domains from the Traefik providers with the|certificates in acme.json. Missing certs mean ACME failed (DNS or|port 80 not ready at first start) - Traefik does not retry those|on its own, so the check restarts the container to force a new|attempt. At most once every 6 hours (backoff also respects the|Let's Encrypt failed-validation rate limit)."
+
+# No f_check_cache here: healing must run every cycle (the check itself
+# is a few local greps, no network I/O).
+
+# Retry backoff: worst case one restart per window, each attempting a
+# handful of domains - far below the Let's Encrypt limit of 5 failed
+# validations per account/hostname/hour.
+f_retry_after_min=360
+f_stamp_file="/tmp/symbios-ssl-retry.stamp"
+
+# Only meaningful when DNS is configured.
+g_base_domain=$(f_symbios_var base_domain "" 2>/dev/null)
+if [[ -z "$g_base_domain" ]]
+then
+  return 2>/dev/null || true
+fi
+
+# Traefik must exist and run - otherwise starting it is the apply flow's
+# job, not this check's (a restart of a stopped container helps nothing).
+if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx symbios-base-traefik
+then
+  return 2>/dev/null || true
+fi
+
+g_providers_dir="${g_base_services_root}/traefik/providers"
+g_acme_json="${g_providers_dir}/../letsencrypt/acme.json"
+[[ -d "${g_providers_dir}" ]] || return 2>/dev/null || true
+
+# Configured domains: Host(`...`) rules in the file provider snippets.
+f_configured=$(grep -ho 'Host(`[^`]*`)' "${g_providers_dir}"/*.yml 2>/dev/null | \
+  grep -o '`[^`]*`' | tr -d '`' | sort -u || true)
+[[ -n "${f_configured}" ]] || return 2>/dev/null || true
+
+# Certified domains: mains + SANs from acme.json (absent file = none yet).
+f_certified=""
+if [[ -f "${g_acme_json}" ]]
+then
+  f_mains=$(grep -o '"main"[[:space:]]*:[[:space:]]*"[^"]*"' "${g_acme_json}" 2>/dev/null | \
+    grep -o '"[^"]*"$' | tr -d '"' || true)
+  f_sans=$(grep -o '"sans"[[:space:]]*:[[:space:]]*\[[^]]*\]' "${g_acme_json}" 2>/dev/null | \
+    grep -o '"[a-zA-Z0-9.*-]*"' | tr -d '"' || true)
+  f_certified=$(printf '%s\n%s' "${f_mains}" "${f_sans}" | grep . | sort -u || true)
+fi
+
+f_missing=$(comm -23 <(printf '%s\n' "${f_configured}") \
+  <(printf '%s\n' "${f_certified}") | grep . || true)
+if [[ -z "${f_missing}" ]]
+then
+  return 2>/dev/null || true
+fi
+f_missing_one=$(echo "${f_missing}" | tr '\n' ' ')
+
+# Backoff: restart at most once per window, then only report.
+if [[ -f "${f_stamp_file}" ]] && ! find "${f_stamp_file}" -mmin +"${f_retry_after_min}" 2>/dev/null | grep -q .
+then
+  g_echo_error "No certificate for ${f_missing_one}- ACME retry in backoff, Traefik restarts automatically later"
+  return 2>/dev/null || true
+fi
+
+if docker restart symbios-base-traefik >/dev/null 2>&1
+then
+  touch "${f_stamp_file}"
+  g_echo_error "No certificate for ${f_missing_one}- restarted Traefik to retry ACME (dashboard turns green once issued)"
+else
+  g_echo_error "No certificate for ${f_missing_one}- Traefik restart failed"
+fi
+return 2>/dev/null || true
