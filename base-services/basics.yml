@@ -627,6 +627,13 @@
       - Restart rsyslog
       when: nocontainer.stat.exists == true
 
+    # hd-idle spins down idle disks. SymbiOS leaves it OFF by default: system
+    # and data disks (USB SSD, LUKS, databases/VMs) must never spin down, and
+    # with the Debian default START_HD_IDLE=false the enabled unit exits
+    # instantly and hits the systemd start limit at every boot (FAILED noise).
+    # Manage it explicitly: stopped, disabled, failed-state cleared. Admins
+    # who need it for archive HDDs set START_HD_IDLE=true with -a <disk> and
+    # enable it by hand (a reapply will undo that - no inventory knob yet).
     - name: hd-idle for spinning down disks after XXX seconds idle
       blockinfile:
         path: /etc/default/hd-idle
@@ -636,10 +643,25 @@
         group: root
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          HD_IDLE_OPTS="-i 300 -l /var/log/hd-idle.log"          
+          START_HD_IDLE=false
+          HD_IDLE_OPTS="-i 300 -l /var/log/hd-idle.log"
         backup: yes
-      notify:
-      - Restart hd-idle
+      when: nocontainer.stat.exists == true
+
+    - name: Disable hd-idle (spindown off by default, no boot restart-loop)
+      ansible.builtin.systemd:
+        name: hd-idle
+        enabled: false
+        state: stopped
+        daemon_reload: true
+      register: hd_idle_disabled
+      failed_when: false
+      when: nocontainer.stat.exists == true
+
+    - name: Clear hd-idle failed state from the unconfigured restart-loop
+      ansible.builtin.command: systemctl reset-failed hd-idle.service
+      changed_when: false
+      failed_when: false
       when: nocontainer.stat.exists == true
 
     - name: /etc/default/btrfsmaintenance
@@ -956,11 +978,6 @@
     - name: Restart rsyslog
       service:
         name: rsyslog
-        state: restarted
-
-    - name: Restart hd-idle
-      service:
-        name: hd-idle
         state: restarted
 
     - name: Restart postfix

@@ -216,6 +216,18 @@
     # still locked (fstab noauto, mount happens in rc.local after unlock)
     # and an enabled unit would fail against the empty placeholder. Start
     # happens here (apply time) and from rc.local (every boot after mount).
+    # The distro catch-all openvpn.service starts every /etc/openvpn/*.conf at
+    # boot - including the empty placeholders that only become real configs
+    # after the mount (bind from the encrypted volume). Tunnels are managed
+    # exclusively as openvpn@<name> instances from rc.local, so the catch-all
+    # stays disabled (boot policy, AGENTS.md).
+    - name: Disable legacy openvpn.service catch-all (tunnels start via rc.local)
+      ansible.builtin.systemd:
+        name: openvpn
+        enabled: false
+        daemon_reload: true
+      failed_when: false
+
     - name: Disable boot autostart for all tunnels (started via rc.local)
       ansible.builtin.systemd:
         name: "openvpn@{{ item.0 }}"

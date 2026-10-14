@@ -726,6 +726,19 @@
       no_log: true
 
 
+    # Boot policy (AGENTS.md): host nslcd must not autostart. /home and /root
+    # are symlinks below /symbios (basics.yml), so its mount namespace setup
+    # (InaccessibleDirectories=/home) fails with 226/NAMESPACE before the
+    # mount - and its server is a container that needs docker first.
+    # symbios-after-mount.sh starts it once 127.0.0.1:389 answers.
+    - name: Disable nslcd boot autostart (started by symbios-after-mount.sh)
+      ansible.builtin.systemd:
+        name: nslcd
+        enabled: false
+        state: started
+        daemon_reload: true
+      failed_when: false
+
     - name: Register playbook as installed
       include_tasks: ../shared-tasks/state-register.yml
       vars:

@@ -113,7 +113,23 @@ then
     g_echo_warn "arpwatch reconcile failed"
 fi
 
-# 6. Health daemon + watchdog timer, delayed so post-mount starters
+# 6. Host nslcd (LDAP NSS lookups). /home and /root are symlinks below
+# /symbios, so its mount namespace (InaccessibleDirectories=/home) fails
+# before the mount - and its server is a container that needs docker first.
+# Wait for slapd on the loopback port, then start. Backgrounded so a slow
+# container never blocks the boot.
+if systemctl cat nslcd.service >/dev/null 2>&1
+then
+  ( for i in $(seq 1 30)
+    do
+      (exec 3<>/dev/tcp/127.0.0.1/389) 2>/dev/null && break
+      sleep 10
+    done
+    systemctl start nslcd.service 2>/dev/null || true
+  ) &
+fi
+
+# 7. Health daemon + watchdog timer, delayed so post-mount starters
 # (OpenVPN, hostapd, VM restore blocks later in rc.local) settle first.
 # Backgrounded: rc.local must never block on a sleep.
 ( sleep 30
