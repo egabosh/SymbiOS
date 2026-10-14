@@ -417,7 +417,10 @@ function f_main {
     f_raid_luks_single_first="yes"
     f_luks_prev_size="" f_luks_group="" f_luks_group_count=0
     f_luks_parents="" f_luks_prev_name=""
-    while read -r f_l_name f_l_parent f_l_size f_l_fstype
+    # Column order NAME,SIZE,FSTYPE,PKNAME: the parent may be empty
+    # (loop/whole-disk LUKS) and a trailing empty field survives read,
+    # while an empty middle field would shift everything (loop6 bug).
+    while read -r f_l_name f_l_size f_l_fstype f_l_parent
     do
       [[ "${f_l_fstype}" == "crypto_LUKS" ]] || continue
       # Open (unlocked) LUKS shows its content via btrfs/mdadm already -
@@ -445,7 +448,7 @@ function f_main {
         f_luks_parents=" ${f_l_parent} "
         f_luks_prev_name="${f_l_name}" f_luks_group="" f_luks_group_count=1
       fi
-    done < <(lsblk -n -l -b -o NAME,PKNAME,SIZE,FSTYPE 2>/dev/null | sort -k3,3n -k2,2 || true)
+    done < <(lsblk -n -l -b -o NAME,SIZE,FSTYPE,PKNAME 2>/dev/null | sort -k2,2n -k1,1 || true)
     f_luks_flush
     f_json_ok "\"btrfs\":[${f_raid_btrfs}],\"mdadm\":[${f_raid_md}],\"active_swaps\":[${f_raid_swaps}],\"luks_pairs\":[${f_raid_luks}],\"luks_singles\":[${f_raid_luks_single}]"
     ;;
