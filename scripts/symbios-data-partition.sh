@@ -788,6 +788,7 @@ EOF
         f_log_ok "OpenLDAP snapshot saved to ${g_mountpoint}/backups"
       fi
       local f_cid f_cname
+      f_stopped_containers=""
       for f_cid in $(docker ps -q)
       do
         f_cname=$(docker inspect --format '{{.Name}}' "$f_cid" 2>/dev/null)
@@ -798,6 +799,7 @@ EOF
           *)
             docker stop "$f_cid" >/dev/null 2>&1 || true
             f_log "Stopped $f_cname"
+            f_stopped_containers="${f_stopped_containers} ${f_cname#/}"
             ;;
         esac
       done
@@ -847,8 +849,34 @@ EOF
       echo "$f_luks_name" > /config/.luks-name 2>/dev/null || true
     fi
 
+    # Re-save the rollback state onto the NEW disk: the old copy was
+    # excluded from rsync and deleted with the old location, so without
+    # this no rollback survives the migration (seen live on valiant).
+    f_save_state "$f_old_home_device" "$f_old_home_fstype" "$f_device" \
+      "$f_encrypt" ${g_mapper_name} "$f_old_fstab_line"
+    f_log_ok "Rollback state re-saved on new disk"
+
      umount /symbios.new 2>/dev/null || true
     rm -rf /symbios.new 2>/dev/null || true
+
+    # Restart the containers stopped for the copy: `docker stop` marks
+    # them stopped, so unless-stopped policies would NOT bring them back
+    # after the reboot below (seen live on valiant). Best effort - the
+    # reboot finalizes everything anyway.
+    if [[ -n "${f_stopped_containers:-}" ]] && command -v docker &>/dev/null
+    then
+      f_log_step "Restarting stopped Docker services before reboot"
+      local f_restart
+      for f_restart in ${f_stopped_containers}
+      do
+        if docker start "${f_restart}" >/dev/null 2>&1
+        then
+          f_log_ok "Restarted ${f_restart}"
+        else
+          f_log_error "Could not restart ${f_restart} (starts again after reboot via playbook if needed)"
+        fi
+      done
+    fi
 
     f_log_step "Migration complete!"
     f_log_ok "${g_mountpoint} is now on $f_device"

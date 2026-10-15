@@ -397,8 +397,7 @@ function findModelForDevice(devPath) {
 }
 
 function loadLuks() {
-  fetch('{% url "settings_disk_luks" %}')
-    .then(function(r) { return r.json(); })
+  fetchTimeout('{% url "settings_disk_luks" %}')
     .then(function(data) {
       var sel = document.getElementById('unlock-device');
       var openBox = document.getElementById('luks-open-list');
@@ -445,10 +444,35 @@ function lockDevice(mapper) {
     .then(function() { loadLuks(); loadDisks(); });
 }
 
+/* Fetches never hang forever: after a host reboot the exec gateway can
+   stall until the container restarts - show an error with retry instead
+   of an eternal spinner (seen live after a disk migration). */
+function fetchTimeout(url, ms) {
+  ms = ms || 30000;
+  var ctrl = new AbortController();
+  var timer = setTimeout(function() { ctrl.abort(); }, ms);
+  return fetch(url, {signal: ctrl.signal}).then(function(r) {
+    clearTimeout(timer);
+    return r.json();
+  }, function(err) {
+    clearTimeout(timer);
+    throw err;
+  });
+}
+
+function timedOut(err) {
+  return err && (err.name === 'AbortError' || /abort/i.test(err.message || ''));
+}
+
+function statusError(msg) {
+  document.getElementById('home-status').innerHTML =
+    '<div class="text-danger">Failed to load status: ' + msg + ' ' +
+    '<button type="button" class="btn btn-sm btn-outline-secondary ms-2" onclick="refreshAll()">Retry</button></div>';
+}
+
 function loadStatus() {
   loadLuks();
-  fetch('{% url "settings_disk_status" %}')
-    .then(function(r) { return r.json(); })
+  fetchTimeout('{% url "settings_disk_status" %}')
     .then(function(data) {
       var el = document.getElementById('home-status');
 
@@ -511,15 +535,22 @@ function loadStatus() {
       }
     })
     .catch(function(err) {
-      document.getElementById('home-status').innerHTML =
-        '<div class="text-danger">Failed to load status: ' + err.message + '</div>';
+      statusError(timedOut(err) ? 'timed out (host unreachable?)' : err.message);
     });
+}
+
+function disksError(msg) {
+  document.getElementById('disk-list').innerHTML =
+    '<div class="text-danger">Failed to load disks: ' + msg + ' ' +
+    '<button type="button" class="btn btn-sm btn-outline-secondary ms-2" onclick="refreshAll()">Retry</button></div>';
+  document.getElementById('raid-list').innerHTML =
+    '<div class="text-muted">No RAID data (load failed).</div>';
 }
 
 function loadDisks() {
   Promise.all([
-    fetch('{% url "settings_disk_list" %}').then(function(r) { return r.json(); }),
-    fetch('{% url "settings_disk_raid" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; })
+    fetchTimeout('{% url "settings_disk_list" %}'),
+    fetchTimeout('{% url "settings_disk_raid" %}').catch(function() { return {ok: false}; })
   ])
     .then(function(res) {
       var data = res[0];
@@ -571,8 +602,7 @@ function loadDisks() {
       raidEl.innerHTML = renderArraysCard();
     })
     .catch(function(err) {
-      document.getElementById('disk-list').innerHTML =
-        '<div class="text-danger">Failed to load disks: ' + err.message + '</div>';
+      disksError(timedOut(err) ? 'timed out (host unreachable?)' : err.message);
     });
 }
 

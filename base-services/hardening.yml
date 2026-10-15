@@ -114,6 +114,11 @@
           findtime = 10m
           maxretry = 5
           backend = systemd
+          # Never ban local addresses: loopback, all RFC1918 LANs and
+          # IPv6 link-local/ULA. Internet attackers are still banned.
+          # (A ban of the LAN gateway/NAT IP once locked the admin out
+          # of his own fresh-migrated host.)
+          ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fe80::/10 fd00::/8
           [sshd]
           enabled = true
           port = 22,33
