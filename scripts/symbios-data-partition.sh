@@ -128,6 +128,36 @@ function f_json_error {
   exit 1
 }
 
+# Move the active swapfile from the old location to the new disk.
+# The kernel keeps the OLD file registered even after it is covered by
+# the new mount (then rm fails with EPERM and the old file lingers on
+# the system disk - seen live on valiant). Call before unmounting the
+# old location (still resolves there) and swapon the copy afterwards.
+function f_swap_migrate {
+  if swapon --show=NAME --noheadings 2>/dev/null | grep -qx "${g_mountpoint}/swapfile"
+  then
+    f_log_step "Releasing swap on old location"
+    if swapoff "${g_mountpoint}/swapfile" 2>/dev/null
+    then
+      f_log_ok "Old swap released"
+    else
+      f_log_error "Could not release old swap (reboot clears it)"
+    fi
+  fi
+}
+
+function f_swap_activate {
+  if [[ -f "${g_mountpoint}/swapfile" ]]
+  then
+    if swapon "${g_mountpoint}/swapfile" 2>/dev/null
+    then
+      f_log_ok "Swap active on new disk"
+    else
+      f_log "No swap activated (symbios-swap.service retries at boot)"
+    fi
+  fi
+}
+
 function f_json_ok {
   local f_data="$1"
   printf '{"ok":true,%s}\n' "$f_data"
@@ -814,6 +844,8 @@ EOF
     }
     f_log_ok "Data copy complete"
 
+    f_swap_migrate
+
     f_log_step "Unmounting old ${g_mountpoint}"
      umount "${g_mountpoint}" 2>/dev/null || true
     f_log_ok "Old ${g_mountpoint} unmounted"
@@ -843,6 +875,7 @@ EOF
       f_setup_error "Mount ${g_mountpoint} failed"
     }
     f_log_ok "${g_mountpoint} is now on new partition"
+    f_swap_activate
 
     if [[ "$f_encrypt" == "yes" ]]
     then
@@ -1141,6 +1174,12 @@ EOF
       f_log_ok "Data copy complete"
     fi
     f_log_step "Switching ${g_mountpoint} to adopted device"
+    # Only with --copy the new disk carries everything (incl. swapfile):
+    # release the old swap first so no stale file lingers on the old disk.
+    if [[ "${f_copy}" == "yes" ]]
+    then
+      f_swap_migrate
+    fi
      umount "${g_mountpoint}" 2>/dev/null || true
     # Only clean the old mountpoint when the data was just copied onto
     # the new device. Without --copy the old location is the fallback
@@ -1162,6 +1201,10 @@ EOF
     fi
     mount "${g_mountpoint}" || f_setup_error "Mount ${g_mountpoint} failed"
     f_log_ok "${g_mountpoint} is now on ${f_device} (${f_adopt_fs}, data kept)"
+    if [[ "${f_copy}" == "yes" ]]
+    then
+      f_swap_activate
+    fi
     f_json_ok '"message":"Adopted existing filesystem as /symbios without formatting.","can_rollback":true'
     ;;
 
