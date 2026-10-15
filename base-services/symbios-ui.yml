@@ -234,23 +234,12 @@
         group: root
         mode: "0755"
 
-    - name: Install data partition manager
-      ansible.builtin.copy:
-        src: "{{ git_root }}/scripts/symbios-data-partition.sh"
-        dest: /usr/local/sbin/symbios-data-partition.sh
-        owner: root
-        group: root
-        mode: "0755"
-
-    - name: Install RAID managers (mdadm + btrfs)
-      ansible.builtin.copy:
-        src: "{{ git_root }}/scripts/{{ item }}"
-        dest: "/usr/local/sbin/{{ item }}"
-        owner: root
-        group: root
-        mode: "0755"
-        validate: /bin/bash -n %s
+    - name: Remove legacy rootfs copies (only boot helpers stay there)
+      ansible.builtin.file:
+        path: "/usr/local/sbin/{{ item }}"
+        state: absent
       loop:
+        - symbios-data-partition.sh
         - symbios-raid-md.sh
         - symbios-raid-btrfs.sh
 

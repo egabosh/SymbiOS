@@ -467,7 +467,10 @@ def settings_backup_runnow(request):
 # Data Disk - move /symbios data root to a separate disk
 # ---------------------------------------------------------------------------
 
-_DATA_PART_SCRIPT = '/usr/local/sbin/symbios-data-partition.sh'
+# Host scripts are called by bare name: symbios-exec.sh puts git_root/scripts
+# on PATH, and these only ever run post-boot with /symbios mounted - so
+# unlike boot helpers they need no copy below /usr/local/sbin.
+_DATA_PART_SCRIPT = 'symbios-data-partition.sh'
 
 
 @login_required
@@ -934,8 +937,8 @@ def settings_disk_adopt(request):
         return JsonResponse({'ok': False, 'error': f'Adopt failed:\n{output[-2000:]}'})
 
 
-_RAID_MD_SCRIPT = '/usr/local/sbin/symbios-raid-md.sh'
-_RAID_BTRFS_SCRIPT = '/usr/local/sbin/symbios-raid-btrfs.sh'
+_RAID_MD_SCRIPT = 'symbios-raid-md.sh'
+_RAID_BTRFS_SCRIPT = 'symbios-raid-btrfs.sh'
 
 
 def _raid_page(request, page_key, script):
