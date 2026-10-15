@@ -857,7 +857,7 @@ def settings_disk_wipe(request):
 
     if not device or not device.startswith('/dev/'):
         return JsonResponse({'ok': False, 'error': 'Select a disk first'})
-    if mode not in ('quick', 'zero', 'random', 'discard'):
+    if mode not in ('quick', 'zero', 'random'):
         return JsonResponse({'ok': False, 'error': 'Invalid wipe mode'})
 
     cmd = f'{_DATA_PART_SCRIPT} wipe {shlex.quote(device)} {shlex.quote(mode)}'

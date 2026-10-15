@@ -33,7 +33,7 @@
 #   luks                          List LUKS devices + open state (JSON)
 #   locate <device> [seconds]     Identify a disk by sustained reads
 #   adopt <device> [--copy] [--check]   Use existing partition/mapper as /symbios
-#   wipe <device> <mode>          Erase a disk (quick|zero|random|discard)
+#   wipe <device> <mode>          Erase a disk (quick|zero|random)
 #   rollback                      Undo last migration, restore original /symbios
 #                           Unmount /symbios and close LUKS
 #   change-password <current-pw-file> <new-pw-file>   Change LUKS passphrase
@@ -69,10 +69,11 @@ Actions:
                                 mapper) as /symbios without formatting.
                                 --copy migrates current data onto it,
                                 --check only reports what would happen.
-  wipe <device> <quick|zero|random|discard>
-                                Erase a disk or partition for reuse
-                                (RAID/LUKS members allowed on purpose,
-                                the running system is refused)
+  wipe <device> <quick|zero|random>
+                                Erase a disk for reuse (RAID members
+                                allowed on purpose, the running system
+                                is refused). No discard/TRIM mode: firmware
+                                secure-erase is unverifiable.
   rollback                      Undo the last migration, restore original
                                 /symbios (unmounts /symbios, closes LUKS)
   change-password <current-pw-file> <new-pw-file>
@@ -1153,20 +1154,19 @@ EOF
 
   # ------------------------------------------------------------------
   wipe)
-    # Destroy all data on a disk or partition so it can be reused
-    # (e.g. as a Move Data target): quick (signatures + first 10MiB),
-    # zero (whole disk zeros), random (whole disk urandom) or discard
-    # (instant blkdiscard for SSD/NVMe, fails cleanly on HDDs).
-    # RAID members and LUKS holders are ALLOWED on purpose - clearing
-    # them is the job. Only the running system is untouchable.
+    # Destroy all data on a disk so it can be reused (e.g. as a Move
+    # Data target): quick (signatures + first 10MiB), zero (whole disk
+    # zeros) or random (whole disk urandom). RAID members and LUKS
+    # holders are ALLOWED on purpose - clearing them is the job. Only
+    # the running system is untouchable.
     local f_device="${1:-}" f_w_mode="${2:-}"
     [[ -z "${f_device}" ]] && f_json_error "No device selected"
     [[ "${f_device}" == /dev/* ]] || f_json_error "Invalid device path"
     case "${f_w_mode}" in
-      quick|zero|random|discard)
+      quick|zero|random)
         ;;
       *)
-        f_json_error "Mode must be quick, zero, random or discard"
+        f_json_error "Mode must be quick, zero or random"
         ;;
     esac
     local f_w_type
@@ -1223,48 +1223,24 @@ EOF
     local f_w_was
     f_w_was=$(blkid -s TYPE -o value "${f_device}" 2>/dev/null || true)
     [[ -z "${f_w_was}" ]] && f_w_was="unformatted"
-    if [[ "${f_w_mode}" == "discard" ]]
+    if [[ "${f_w_mode}" == "quick" ]]
     then
-      # Probe TRIM support BEFORE destroying anything: blkdiscard
-      # refuses partitioned disks and non-flash behind USB bridges.
-      # Partitions share the parent disk's queue.
-      local f_w_base f_w_pdisk f_w_disc
-      f_w_base=$(basename "${f_device}")
-      f_w_pdisk=$(lsblk -n -l -o PKNAME "${f_device}" 2>/dev/null | head -1 || true)
-      [[ -n "${f_w_pdisk}" ]] && f_w_base="${f_w_pdisk}"
-      f_w_disc=$(cat "/sys/block/${f_w_base}/queue/discard_max_bytes" 2>/dev/null || echo 0)
-      if [[ "${f_w_disc:-0}" -le 0 ]] 2>/dev/null
-      then
-        f_json_error "${f_device} reports no TRIM support (discard_max_bytes=0, e.g. USB bridge or HDD) - use zero or random instead. Nothing was touched."
-      fi
-      # Signatures first: blkdiscard rejects disks that still hold
-      # partitions, and afterwards nothing identifies the old content.
+      f_log_step "Removing signatures on ${f_device}"
       wipefs -a "${f_device}" 2>&1 || f_json_error "wipefs failed"
-      if ! blkdiscard "${f_device}" 2>&1
-      then
-        f_json_error "blkdiscard failed on ${f_device} although TRIM was announced - signatures are already gone (wipefs), try zero or random for the rest."
-      fi
-      f_log_ok "Discard complete"
+      f_log_step "Zeroing first 10MiB on ${f_device}"
+      dd if=/dev/zero "of=${f_device}" bs=1M count=10 conv=fsync status=progress 2>&1 | tail -2 || \
+        f_json_error "dd failed"
+    elif [[ "${f_w_mode}" == "zero" ]]
+    then
+      f_log_step "Zeroing ${f_device} completely (takes a while)"
+      dd if=/dev/zero "of=${f_device}" bs=4M conv=fsync status=progress 2>&1 | tail -2 || \
+        f_json_error "dd failed"
     else
-      if [[ "${f_w_mode}" == "quick" ]]
-      then
-        f_log_step "Removing signatures on ${f_device}"
-        wipefs -a "${f_device}" 2>&1 || f_json_error "wipefs failed"
-        f_log_step "Zeroing first 10MiB on ${f_device}"
-        dd if=/dev/zero "of=${f_device}" bs=1M count=10 conv=fsync status=progress 2>&1 | tail -2 || \
-          f_json_error "dd failed"
-      elif [[ "${f_w_mode}" == "zero" ]]
-      then
-        f_log_step "Zeroing ${f_device} completely (takes a while)"
-        dd if=/dev/zero "of=${f_device}" bs=4M conv=fsync status=progress 2>&1 | tail -2 || \
-          f_json_error "dd failed"
-      else
-        f_log_step "Overwriting ${f_device} with random data (takes a long while)"
-        dd if=/dev/urandom "of=${f_device}" bs=4M conv=fsync status=progress 2>&1 | tail -2 || \
-          f_json_error "dd failed"
-      fi
-      f_log_ok "Write complete"
+      f_log_step "Overwriting ${f_device} with random data (takes a long while)"
+      dd if=/dev/urandom "of=${f_device}" bs=4M conv=fsync status=progress 2>&1 | tail -2 || \
+        f_json_error "dd failed"
     fi
+    f_log_ok "Write complete"
     blockdev --rereadpt "${f_device}" 2>/dev/null || partprobe "${f_device}" 2>/dev/null || true
     local f_w_now
     f_w_now=$(blkid -s TYPE -o value "${f_device}" 2>/dev/null || true)
