@@ -1194,16 +1194,31 @@ EOF
     then
       f_json_error "${f_device} lives on the system disk (${f_w_root_disk}) - wiping it would kill the running system."
     fi
-    # Refuse anything mounted (self or children) and active swap.
+    # Refuse anything mounted (self or children) and active swap
+    # (for whole disks: swap anywhere below counts too).
     local f_w_mounts
     f_w_mounts=$(lsblk -n -l -o MOUNTPOINT "${f_device}" 2>/dev/null | grep -v '^$' || true)
     if [[ -n "${f_w_mounts}" ]]
     then
       f_json_error "${f_device} is mounted (${f_w_mounts//$'\n'/, }) - unmount it first."
     fi
-    if swapon --show=NAME --noheadings 2>/dev/null | grep -qx "${f_device}"
+    local f_w_swap
+    f_w_swap=$(swapon --show=NAME --noheadings 2>/dev/null || true)
+    if echo "${f_w_swap}" | grep -qx "${f_device}"
     then
       f_json_error "${f_device} is active swap - swap it off first."
+    fi
+    if [[ "${f_w_type}" == "disk" ]]
+    then
+      local f_w_child
+      while read -r f_w_child
+      do
+        [[ -z "${f_w_child}" ]] && continue
+        if echo "${f_w_swap}" | grep -qx "${f_w_child}"
+        then
+          f_json_error "${f_device} contains active swap (${f_w_child}) - swap it off first."
+        fi
+      done < <(lsblk -n -l -o PATH "${f_device}" 2>/dev/null | tail -n +2 || true)
     fi
     local f_w_was
     f_w_was=$(blkid -s TYPE -o value "${f_device}" 2>/dev/null || true)

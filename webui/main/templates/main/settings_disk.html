@@ -90,10 +90,12 @@
       <div class="card-body">
         <div class="alert alert-danger small">
           <i class="bi bi-exclamation-triangle-fill"></i>
-          Destroys <strong>everything</strong> on the selected disk or partition -
-          including RAID memberships and LUKS headers. Afterwards it shows up as
+          Destroys <strong>everything</strong> on the selected whole disk -
+          including partition tables, RAID memberships and LUKS headers.
+          Afterwards it shows up as
           <span class="badge bg-secondary">Available</span> (e.g. for Move Data).
-          The system disk can never be selected here.
+          Single partitions are never offered here, and the system disk
+          can never be selected.
         </div>
         <form id="wipe-form" data-exec="true" method="POST" action="{% url "settings_disk_wipe" %}">
           {% csrf_token %}
@@ -114,7 +116,7 @@
               <div class="form-check"><input class="form-check-input" type="radio" name="mode" value="random" id="wipe-random">
                 <label class="form-check-label" for="wipe-random">Full random <span class="text-muted">(whole disk urandom, slowest)</span></label></div>
               <div class="form-check"><input class="form-check-input" type="radio" name="mode" value="discard" id="wipe-discard">
-                <label class="form-check-label" for="wipe-discard">Discard <span class="text-muted">(instant, SSD/NVMe only)</span></label></div>
+                <label class="form-check-label" for="wipe-discard">Discard <span class="text-muted">(TRIM: instant secure-erase by the drive firmware, flash only - HDDs unsupported)</span></label></div>
             </div>
             <div class="col-md-3 d-flex flex-column justify-content-end gap-2">
               <div class="form-check">
@@ -892,53 +894,45 @@ function addLocateOption(dev) {
   sel.appendChild(opt);
 }
 
-/* Wipe select: disks and partitions with a content summary. The system
-   disk (or anything mounted at / or /symbios) and active swap never
-   show up - everything else is fair game (RAID/LUKS on purpose). */
+/* Wipe select: whole disks only (never single partitions - wiping one
+   partition of a shared disk is a footgun). The system disk, anything
+   mounted, and disks with active swap never show up. */
 function wipeContentOf(dev) {
   var parts = [];
-  if (dev.fstype) parts.push(dev.fstype);
+  function walk(d) {
+    if (d.fstype && parts.indexOf(d.fstype) === -1) parts.push(d.fstype);
+    (d.children || []).forEach(walk);
+  }
+  walk(dev);
   var role = raidRole(dev);
   if (role) parts.push(role);
   return parts.join(', ') || 'unformatted';
 }
 
+function subtreeHasSwap(dev) {
+  var found = false;
+  function walk(d) {
+    if ((raidData.active_swaps || []).indexOf(d.path) !== -1) found = true;
+    (d.children || []).forEach(walk);
+  }
+  walk(dev);
+  return found;
+}
+
 function addWipeOptions(dev, select) {
   if (!isDiskLike(dev)) return;
   if (getStatus(dev) === 'system' || getStatus(dev) === 'data') return;
-  var paths = raidPaths();
-  function walk(d) {
-    if (d.mountpoint) return;
-    if ((raidData.active_swaps || []).indexOf(d.path) !== -1) return;
-    if (d.type === 'disk' || d.type === 'part' || (d.type === 'loop' && !d.children)) {
-      var opt = document.createElement('option');
-      opt.value = d.path;
-      var t = d.path + (d.size ? ' (' + d.size + ')' : '');
-      var ident = d.serial || d.byid || d.model || '';
-      if (ident) t += ' ' + ident;
-      t += ' - holds: ' + wipeContentOf(d.type === 'disk' ? dev : d);
-      opt.textContent = t;
-      opt.dataset.content = wipeContentOf(d.type === 'disk' ? dev : d);
-      select.appendChild(opt);
-    }
-    (d.children || []).forEach(walk);
-  }
-  /* Whole disk first, then its partitions. */
-  (function wholeFirst(d) {
-    if (!d.mountpoint && (raidData.active_swaps || []).indexOf(d.path) === -1 &&
-        (d.type === 'disk' || d.type === 'loop')) {
-      var opt = document.createElement('option');
-      opt.value = d.path;
-      var t = d.path + (d.size ? ' (' + d.size + ')' : '');
-      var ident = d.serial || d.byid || d.model || '';
-      if (ident) t += ' ' + ident;
-      t += ' (whole disk) - holds: ' + wipeContentOf(d);
-      opt.textContent = t;
-      opt.dataset.content = wipeContentOf(d);
-      select.appendChild(opt);
-    }
-  })(dev);
-  (dev.children || []).forEach(walk);
+  if (dev.mountpoint || hasMountedChildren(dev)) return;
+  if (subtreeHasSwap(dev)) return;
+  var opt = document.createElement('option');
+  opt.value = dev.path;
+  var t = dev.path + (dev.size ? ' (' + dev.size + ')' : '');
+  var ident = dev.serial || dev.byid || dev.model || '';
+  if (ident) t += ' ' + ident;
+  t += ' - holds: ' + wipeContentOf(dev);
+  opt.textContent = t;
+  opt.dataset.content = wipeContentOf(dev);
+  select.appendChild(opt);
 }
 
 function refreshWipeInfo() {
