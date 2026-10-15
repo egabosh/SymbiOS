@@ -1225,10 +1225,24 @@ EOF
     [[ -z "${f_w_was}" ]] && f_w_was="unformatted"
     if [[ "${f_w_mode}" == "discard" ]]
     then
-      # blkdiscard only works where the device supports it (SSD/NVMe).
+      # Probe TRIM support BEFORE destroying anything: blkdiscard
+      # refuses partitioned disks and non-flash behind USB bridges.
+      # Partitions share the parent disk's queue.
+      local f_w_base f_w_pdisk f_w_disc
+      f_w_base=$(basename "${f_device}")
+      f_w_pdisk=$(lsblk -n -l -o PKNAME "${f_device}" 2>/dev/null | head -1 || true)
+      [[ -n "${f_w_pdisk}" ]] && f_w_base="${f_w_pdisk}"
+      f_w_disc=$(cat "/sys/block/${f_w_base}/queue/discard_max_bytes" 2>/dev/null || echo 0)
+      if [[ "${f_w_disc:-0}" -le 0 ]] 2>/dev/null
+      then
+        f_json_error "${f_device} reports no TRIM support (discard_max_bytes=0, e.g. USB bridge or HDD) - use zero or random instead. Nothing was touched."
+      fi
+      # Signatures first: blkdiscard rejects disks that still hold
+      # partitions, and afterwards nothing identifies the old content.
+      wipefs -a "${f_device}" 2>&1 || f_json_error "wipefs failed"
       if ! blkdiscard "${f_device}" 2>&1
       then
-        f_json_error "blkdiscard not supported on ${f_device} - use zero or random instead."
+        f_json_error "blkdiscard failed on ${f_device} although TRIM was announced - signatures are already gone (wipefs), try zero or random for the rest."
       fi
       f_log_ok "Discard complete"
     else

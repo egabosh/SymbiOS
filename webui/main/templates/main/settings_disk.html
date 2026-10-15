@@ -123,7 +123,7 @@
                 <input class="form-check-input" type="checkbox" id="wipe-confirm">
                 <label class="form-check-label" for="wipe-confirm">I know all data on it is lost</label>
               </div>
-              <button type="submit" class="btn btn-danger">
+              <button type="submit" class="btn btn-danger" id="wipe-btn" disabled>
                 <i class="bi bi-trash"></i> Wipe
               </button>
             </div>
@@ -1039,17 +1039,17 @@ document.getElementById('luks-password-form').addEventListener('submit', functio
   var newPw2 = document.getElementById('luks-new-password-confirm').value;
 
   if (!current) {
-    e.preventDefault();
+    blockSubmit(e);
     SymbiOS.exec.showAlert('Please enter the current passphrase.', 'danger');
     return;
   }
   if (!newPw) {
-    e.preventDefault();
+    blockSubmit(e);
     SymbiOS.exec.showAlert('Please enter a new passphrase.', 'danger');
     return;
   }
   if (newPw !== newPw2) {
-    e.preventDefault();
+    blockSubmit(e);
     SymbiOS.exec.showAlert('New passphrases do not match.', 'danger');
     return;
   }
@@ -1062,13 +1062,13 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
   var password = document.getElementById('setup-password').value;
 
   if (!device) {
-    e.preventDefault();
+    blockSubmit(e);
     SymbiOS.exec.showAlert('Please select a disk.', 'danger');
     return;
   }
 
   if (encrypt && !password) {
-    e.preventDefault();
+    blockSubmit(e);
     SymbiOS.exec.showAlert('Please enter a passphrase.', 'danger');
     return;
   }
@@ -1076,7 +1076,7 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
   if (encrypt) {
     var pw2 = document.getElementById('setup-password-confirm').value;
     if (password !== pw2) {
-      e.preventDefault();
+      blockSubmit(e);
       SymbiOS.exec.showAlert('Passphrases do not match.', 'danger');
       return;
     }
@@ -1088,7 +1088,7 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
     var devBytes = parseSizeBytes(devInfo.size);
     var homeBytes = parseSizeBytes(window._dataSize || '0');
     if (devBytes > 0 && homeBytes > 0 && devBytes < homeBytes * 1.1) {
-      e.preventDefault();
+      blockSubmit(e);
       var devLabel = devInfo.model ? devInfo.model + ' (' + devInfo.size + ')' : devInfo.size;
       SymbiOS.exec.showAlert('Disk (' + devLabel + ') may be too small for your data (' + window._dataSize + ').', 'warning');
       return;
@@ -1105,22 +1105,35 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
       (encrypt ? '\n2. Encrypt with a passphrase' : '') +
       '\n' + (encrypt ? '3' : '2') + '. Copy your data to the new disk' +
       '\n' + (encrypt ? '4' : '3') + '. Switch to the new disk\n\nContinue?')) {
-    e.preventDefault();
+    blockSubmit(e);
   }
 });
 
+/* Block a data-exec submit so hard the exec-modal interceptor (which
+   listens on document and ignores preventDefault) never fires. */
+function blockSubmit(e) {
+  blockSubmit(e);
+  e.stopImmediatePropagation();
+}
+
 document.getElementById('wipe-device').addEventListener('change', refreshWipeInfo);
+
+/* The Wipe button stays disabled until the checkbox is ticked - the
+   submit validator below is only the second line of defense. */
+document.getElementById('wipe-confirm').addEventListener('change', function() {
+  document.getElementById('wipe-btn').disabled = !this.checked;
+});
 
 document.getElementById('wipe-form').addEventListener('submit', function(e) {
   var device = document.getElementById('wipe-device').value;
   if (!device) {
-    e.preventDefault();
     SymbiOS.exec.showAlert('Please select a disk.', 'danger');
+    blockSubmit(e);
     return;
   }
   if (!document.getElementById('wipe-confirm').checked) {
-    e.preventDefault();
     SymbiOS.exec.showAlert('Please confirm that all data on it is lost.', 'danger');
+    blockSubmit(e);
     return;
   }
   var mode = 'quick';
@@ -1129,14 +1142,14 @@ document.getElementById('wipe-form').addEventListener('submit', function(e) {
   var opt = document.getElementById('wipe-device').selectedOptions[0];
   var holds = opt && opt.dataset.content ? ' (currently holds: ' + opt.dataset.content + ')' : '';
   if (!confirm('ERASE ' + device + holds + ' with method "' + mode + '"?\n\nALL data on it will be DESTROYED. This cannot be undone.\n\nContinue?')) {
-    e.preventDefault();
+    blockSubmit(e);
   }
 });
 
 document.getElementById('adopt-form').addEventListener('submit', function(e) {
   var device = document.getElementById('adopt-device').value;
   if (!device) {
-    e.preventDefault();
+    blockSubmit(e);
     SymbiOS.exec.showAlert('Please select a partition.', 'danger');
     return;
   }
@@ -1144,7 +1157,7 @@ document.getElementById('adopt-form').addEventListener('submit', function(e) {
   if (!confirm('Adopt ' + device + ' as /symbios without formatting?\n\n' +
       (copy ? 'Current data will be copied onto it first.\n' : 'Current data stays where it is (only fstab is switched).\n') +
       'The previous location stays available via Rollback.\n\nContinue?')) {
-    e.preventDefault();
+    blockSubmit(e);
   }
 });
 </script>
