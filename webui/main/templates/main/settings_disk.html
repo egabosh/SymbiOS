@@ -90,12 +90,12 @@
       <div class="card-body">
         <div class="alert alert-danger small">
           <i class="bi bi-exclamation-triangle-fill"></i>
-          Destroys <strong>everything</strong> on the selected whole disk -
-          including partition tables, RAID memberships and LUKS headers.
+          Destroys <strong>everything</strong> on the selected whole disk.
           Afterwards it shows up as
           <span class="badge bg-secondary">Available</span> (e.g. for Move Data).
-          Single partitions are never offered here, and the system disk
-          can never be selected.
+          Only unused disks are offered - nothing mounted, nothing in a
+          RAID array (break those up on the RAID pages first), never
+          single partitions, never the system disk.
         </div>
         <form id="wipe-form" data-exec="true" method="POST" action="{% url "settings_disk_wipe" %}">
           {% csrf_token %}
@@ -895,8 +895,10 @@ function addLocateOption(dev) {
 }
 
 /* Wipe select: whole disks only (never single partitions - wiping one
-   partition of a shared disk is a footgun). The system disk, anything
-   mounted, and disks with active swap never show up. */
+   partition of a shared disk is a footgun). Only plain unused disks:
+   no mounts, no RAID members/arrays (those are managed on the RAID
+   pages - break up arrays there first), no active swap, never the
+   system disk. LUKS singles without RAID involvement stay offered. */
 function wipeContentOf(dev) {
   var parts = [];
   function walk(d) {
@@ -904,8 +906,6 @@ function wipeContentOf(dev) {
     (d.children || []).forEach(walk);
   }
   walk(dev);
-  var role = raidRole(dev);
-  if (role) parts.push(role);
   return parts.join(', ') || 'unformatted';
 }
 
@@ -923,6 +923,7 @@ function addWipeOptions(dev, select) {
   if (!isDiskLike(dev)) return;
   if (getStatus(dev) === 'system' || getStatus(dev) === 'data') return;
   if (dev.mountpoint || hasMountedChildren(dev)) return;
+  if (hasRaidInTree(dev)) return;
   if (subtreeHasSwap(dev)) return;
   var opt = document.createElement('option');
   opt.value = dev.path;
