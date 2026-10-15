@@ -91,7 +91,10 @@ Also intercepts all forms with data-exec="true" attribute:
             } else {
               appendNote('Host unreachable for a while - check whether it rebooted or lost network before resubmitting anything.');
             }
-          }          if (_pollRetries >= MAX_POLL_RETRIES) {
+          }          /* Awaited reboots never time out: the host only comes back
+             after the user unlocks LUKS, which can take a long while.
+             The user closes the modal manually. */
+          if (_pollRetries >= MAX_POLL_RETRIES && _powerAction !== 'reboot') {
             finish(false);
             return;
           }
@@ -125,7 +128,7 @@ Also intercepts all forms with data-exec="true" attribute:
             appendNote('Host unreachable for a while - check whether it rebooted or lost network before resubmitting anything.');
           }
         }
-        if (_pollRetries >= MAX_POLL_RETRIES) {
+        if (_pollRetries >= MAX_POLL_RETRIES && _powerAction !== 'reboot') {
           finish(false);
           return;
         }
@@ -195,10 +198,18 @@ Also intercepts all forms with data-exec="true" attribute:
     }
   }
 
-  function start(jobId, title, command) {
+  /* opts.reboot_expected pre-arms the reboot outage message from the
+     start: jobs like disk migration reboot at the end, and a disconnect
+     just before the reboot lines stream out would otherwise show the
+     generic "check whether it rebooted" scare text. */
+  function start(jobId, title, command, opts) {
     open(title, command);
     currentJob = jobId;
     _pollRetries = 0;
+    if (opts && opts.reboot_expected) {
+      _powerAction = 'reboot';
+      appendNote('This job reboots the server when finished - losing connection near the end is expected. Wait, unlock LUKS if asked, then close this window and check status. Do NOT resubmit.');
+    }
     poll();
   }
 
@@ -278,7 +289,7 @@ Also intercepts all forms with data-exec="true" attribute:
           return;
         }
         if (d.job) {
-          start(d.job, d.title || 'Running...', d.command);
+          start(d.job, d.title || 'Running...', d.command, d);
           if (d.redirect) _redirectUrl = d.redirect;
           if (d.message) _successMessage = d.message;
         } else if (d.redirect) {

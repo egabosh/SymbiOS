@@ -611,7 +611,8 @@ def settings_disk_setup(request):
         return JsonResponse({'ok': True, 'job': job_id,
                              'title': 'Migrating /symbios to new disk...',
                              'message': f'Setting up {device} as /symbios.',
-                             'command': cmd})
+                             'command': cmd,
+                             'reboot_expected': True})
 
     # Fallback: synchronous execution
     ok, stdout, stderr = run_command(cmd, timeout=600)
