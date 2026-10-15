@@ -70,6 +70,31 @@ else
   g_echo_warn "container runtime start failed"
 fi
 
+# 1b. Base-service containers always come back after boot. `docker stop`
+# (e.g. by the data-disk migration for a consistent copy) marks them
+# stopped, which unless-stopped policies then keep stopped forever.
+# Platform services (traefik, authelia, ldap, webui, ...) must not stay
+# down - user services keep their stopped state and are untouched.
+if command -v docker >/dev/null 2>&1
+then
+  for f_i in $(seq 1 30)
+  do
+    docker ps >/dev/null 2>&1 && break
+    sleep 2
+  done
+  f_base_stopped=$(docker ps -a --format '{{.Names}} {{.State}}' 2>/dev/null | \
+    awk '$1 ~ /^symbios-base-/ && $2 != "running" {print $1}' || true)
+  for f_c in ${f_base_stopped}
+  do
+    if docker start "${f_c}" >/dev/null 2>&1
+    then
+      g_echo_note "base container started: ${f_c}"
+    else
+      g_echo_warn "base container start failed: ${f_c}"
+    fi
+  done
+fi
+
 # 2. Network bridge assignments. The unit ExecStart lives below /symbios
 # (git_root), so it is disabled at boot and only started here. It retries
 # internally until late bridges (openwrt-*) exist.
