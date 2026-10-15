@@ -126,7 +126,8 @@ function collectFree(devs, memberPaths) {
   devs.forEach(function(dev) {
     if (!isDiskLike(dev)) return;
     if (!subtreeUsed(dev, memberPaths)) {
-      out.push({path: dev.path, label: dev.path + ' (whole disk' + (dev.size ? ', ' + dev.size : '') + (dev.model ? ', ' + dev.model : '') + ')'});
+      var ident = dev.serial || dev.byid || dev.model || '';
+      out.push({path: dev.path, label: dev.path + ' (whole disk' + (dev.size ? ', ' + dev.size : '') + (ident ? ', ' + ident : '') + ')'});
       return;
     }
     (dev.children || []).forEach(function(c) {

@@ -23,7 +23,8 @@
 # (optionally LUKS-encrypted) disk keeps sensitive data off the root FS.
 #
 # Actions:
-#   list                          List block devices (JSON)
+#   list                          List block devices (JSON, incl. serials)
+#   byid                          Persistent /dev/disk/by-id names (JSON)
 #   raid                          List RAID arrays + active swaps (JSON)
 #   status                        Show /symbios mount + LUKS status (JSON)
 #   setup <device> [encrypt=yes] [password-file=path]   Migrate /symbios to new disk
@@ -32,6 +33,7 @@
 #   luks                          List LUKS devices + open state (JSON)
 #   locate <device> [seconds]     Identify a disk by sustained reads
 #   adopt <device> [--copy] [--check]   Use existing partition/mapper as /symbios
+#   wipe <device> <mode>          Erase a disk (quick|zero|random|discard)
 #   rollback                      Undo last migration, restore original /symbios
 #                           Unmount /symbios and close LUKS
 #   change-password <current-pw-file> <new-pw-file>   Change LUKS passphrase
@@ -48,7 +50,8 @@ docker/containerd data dirs, homes, backups). Moving it to a separate
 (optionally LUKS-encrypted) disk keeps sensitive data off the root FS.
 
 Actions:
-  list                          List block devices (JSON)
+  list                          List block devices (JSON, incl. serials)
+  byid                          Persistent /dev/disk/by-id names (JSON)
   raid                          List RAID arrays + active swaps (JSON)
   status                        Show /symbios mount + LUKS status (JSON)
   setup <device> [encrypt=yes] [password-file=path]
@@ -66,6 +69,10 @@ Actions:
                                 mapper) as /symbios without formatting.
                                 --copy migrates current data onto it,
                                 --check only reports what would happen.
+  wipe <device> <quick|zero|random|discard>
+                                Erase a disk or partition for reuse
+                                (RAID/LUKS members allowed on purpose,
+                                the running system is refused)
   rollback                      Undo the last migration, restore original
                                 /symbios (unmounts /symbios, closes LUKS)
   change-password <current-pw-file> <new-pw-file>
@@ -332,9 +339,54 @@ function f_main {
   list)
     # Major 7 (loop) is NOT excluded: loopback devices are the supported
     # way to try RAID/LUKS flows in the WebUI without touching real disks.
+    # SERIAL tells identical models apart (e.g. two WD80EFZX with
+    # different serials); /dev/disk/by-id names come from `byid`.
     lsblk -e 1,11,252 -J \
-      -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,LABEL,TRAN,RM 2>&1 || \
+      -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,UUID,LABEL,TRAN,RM,SERIAL 2>&1 || \
       f_json_error "lsblk failed"
+    ;;
+
+  # ------------------------------------------------------------------
+  byid)
+    # Persistent /dev/disk/by-id names per device path as JSON. Unique
+    # even for identical models (ata-WDC_WD80EFZX-..._VJH5312X vs
+    # ..._VJH5VZKX). First pass takes readable ata/nvme/usb/mmc names,
+    # the second pass fills gaps (wwn, ...). dm/lvm/md aliases never win.
+    local f_byid_out="" f_byid_first="yes" f_byid_seen=""
+    local f_b f_tgt f_devname f_short
+    f_byid_add() {
+      case " ${f_byid_seen} " in
+        *" ${f_devname} "*) return 1 ;;
+      esac
+      f_byid_seen="${f_byid_seen} ${f_devname}"
+      [[ "${f_byid_first}" == "yes" ]] || f_byid_out="${f_byid_out}, "
+      f_byid_first="no"
+      f_byid_out="${f_byid_out}$(printf '%s' "${f_devname}" | f_json_escape)"
+      f_byid_out="${f_byid_out}:$(printf '%s' "${f_short}" | f_json_escape)"
+      return 0
+    }
+    for f_b in /dev/disk/by-id/*
+    do
+      [[ -L "${f_b}" ]] || continue
+      f_tgt=$(readlink "${f_b}") || continue
+      f_devname="/dev/${f_tgt##*/}"
+      f_short="${f_b##*/}"
+      case "${f_short}" in
+        ata-*|nvme-*|usb-*|mmc-*) f_byid_add || true ;;
+      esac
+    done
+    for f_b in /dev/disk/by-id/*
+    do
+      [[ -L "${f_b}" ]] || continue
+      f_tgt=$(readlink "${f_b}") || continue
+      f_devname="/dev/${f_tgt##*/}"
+      f_short="${f_b##*/}"
+      case "${f_short}" in
+        dm-*|lvm-*|md-*) continue ;;
+      esac
+      f_byid_add || true
+    done
+    f_json_ok "\"byid\":{${f_byid_out}}"
     ;;
 
   # ------------------------------------------------------------------
@@ -902,12 +954,38 @@ EOF
       [[ -n "${f_l_mapper}" ]] && f_l_open="true"
       [[ "${f_luks_first}" == "yes" ]] || f_luks_out="${f_luks_out}, "
       f_luks_first="no"
+      # Parent disk identity (model/serial/by-id): partitions of
+      # identical disks (sdb3 vs sdc3) are otherwise indistinguishable.
+      local f_l_parent f_l_model f_l_serial f_l_byid
+      f_l_parent=$(lsblk -n -l -o PKNAME "/dev/${f_l_name}" 2>/dev/null | head -1 || true)
+      f_l_model=""
+      f_l_serial=""
+      f_l_byid=""
+      if [[ -n "${f_l_parent}" ]]
+      then
+        f_l_model=$(lsblk -n -l -o MODEL "/dev/${f_l_parent}" 2>/dev/null | head -1 | sed 's/^ *//;s/ *$//' || true)
+        f_l_serial=$(lsblk -n -l -o SERIAL "/dev/${f_l_parent}" 2>/dev/null | head -1 | sed 's/^ *//;s/ *$//' || true)
+        f_l_byid=""
+        for f_b in /dev/disk/by-id/ata-* /dev/disk/by-id/nvme-* /dev/disk/by-id/usb-* /dev/disk/by-id/mmc-*
+        do
+          [[ -L "${f_b}" ]] || continue
+          if [[ "$(readlink "${f_b}" 2>/dev/null)" == *"${f_l_parent}" ]]
+          then
+            f_l_byid=$(basename "${f_b}")
+            break
+          fi
+        done 2>/dev/null
+      fi
       f_luks_out="${f_luks_out}{\"device\":\"/dev/${f_l_name}\""
       f_luks_out="${f_luks_out},\"size_bytes\":${f_l_size:-0}"
       f_luks_out="${f_luks_out},\"label\":$(printf '%s' "${f_l_label}" | f_json_escape)"
       f_luks_out="${f_luks_out},\"uuid\":$(printf '%s' "${f_l_uuid}" | f_json_escape)"
       f_luks_out="${f_luks_out},\"open\":${f_l_open}"
-      f_luks_out="${f_luks_out},\"mapper\":$(printf '%s' "${f_l_mapper}" | f_json_escape)}"
+      f_luks_out="${f_luks_out},\"mapper\":$(printf '%s' "${f_l_mapper}" | f_json_escape)"
+      f_luks_out="${f_luks_out},\"parent\":$(printf '%s' "${f_l_parent}" | f_json_escape)"
+      f_luks_out="${f_luks_out},\"model\":$(printf '%s' "${f_l_model}" | f_json_escape)"
+      f_luks_out="${f_luks_out},\"serial\":$(printf '%s' "${f_l_serial}" | f_json_escape)"
+      f_luks_out="${f_luks_out},\"byid\":$(printf '%s' "${f_l_byid}" | f_json_escape)}"
     done < <(lsblk -n -l -b -o NAME,SIZE,FSTYPE 2>/dev/null | \
       awk '$3 == "crypto_LUKS" {print $1, $2}' || true)
     f_json_ok "\"devices\":[${f_luks_out}]"
@@ -1074,6 +1152,101 @@ EOF
     ;;
 
   # ------------------------------------------------------------------
+  wipe)
+    # Destroy all data on a disk or partition so it can be reused
+    # (e.g. as a Move Data target): quick (signatures + first 10MiB),
+    # zero (whole disk zeros), random (whole disk urandom) or discard
+    # (instant blkdiscard for SSD/NVMe, fails cleanly on HDDs).
+    # RAID members and LUKS holders are ALLOWED on purpose - clearing
+    # them is the job. Only the running system is untouchable.
+    local f_device="${1:-}" f_w_mode="${2:-}"
+    [[ -z "${f_device}" ]] && f_json_error "No device selected"
+    [[ "${f_device}" == /dev/* ]] || f_json_error "Invalid device path"
+    case "${f_w_mode}" in
+      quick|zero|random|discard)
+        ;;
+      *)
+        f_json_error "Mode must be quick, zero, random or discard"
+        ;;
+    esac
+    local f_w_type
+    f_w_type=$(lsblk -n -l -o TYPE "${f_device}" 2>/dev/null | head -1) || \
+      f_json_error "Unknown device: ${f_device}"
+    case "${f_w_type}" in
+      disk|part|loop)
+        ;;
+      *)
+        f_json_error "${f_device} is a ${f_w_type:-unknown device} - wipe needs a disk, partition or loop device."
+        ;;
+    esac
+    # Never touch the disk the running system lives on.
+    local f_w_root_src f_w_root_disk f_w_dev_disk
+    f_w_root_src=$(findmnt -n -o SOURCE / 2>/dev/null || true)
+    f_w_root_disk=$(lsblk -n -l -o PKNAME "${f_w_root_src}" 2>/dev/null | head -1 || true)
+    [[ -z "${f_w_root_disk}" ]] && f_w_root_disk=$(basename "${f_w_root_src}" | sed 's/p\?[0-9]*$//')
+    if [[ "${f_w_type}" == "disk" || "${f_w_type}" == "loop" ]]
+    then
+      f_w_dev_disk=$(basename "${f_device}")
+    else
+      f_w_dev_disk=$(lsblk -n -l -o PKNAME "${f_device}" 2>/dev/null | head -1 || true)
+    fi
+    if [[ -n "${f_w_root_disk}" ]] && [[ "${f_w_dev_disk}" == "${f_w_root_disk}" ]]
+    then
+      f_json_error "${f_device} lives on the system disk (${f_w_root_disk}) - wiping it would kill the running system."
+    fi
+    # Refuse anything mounted (self or children) and active swap.
+    local f_w_mounts
+    f_w_mounts=$(lsblk -n -l -o MOUNTPOINT "${f_device}" 2>/dev/null | grep -v '^$' || true)
+    if [[ -n "${f_w_mounts}" ]]
+    then
+      f_json_error "${f_device} is mounted (${f_w_mounts//$'\n'/, }) - unmount it first."
+    fi
+    if swapon --show=NAME --noheadings 2>/dev/null | grep -qx "${f_device}"
+    then
+      f_json_error "${f_device} is active swap - swap it off first."
+    fi
+    local f_w_was
+    f_w_was=$(blkid -s TYPE -o value "${f_device}" 2>/dev/null || true)
+    [[ -z "${f_w_was}" ]] && f_w_was="unformatted"
+    if [[ "${f_w_mode}" == "discard" ]]
+    then
+      # blkdiscard only works where the device supports it (SSD/NVMe).
+      if ! blkdiscard "${f_device}" 2>&1
+      then
+        f_json_error "blkdiscard not supported on ${f_device} - use zero or random instead."
+      fi
+      f_log_ok "Discard complete"
+    else
+      if [[ "${f_w_mode}" == "quick" ]]
+      then
+        f_log_step "Removing signatures on ${f_device}"
+        wipefs -a "${f_device}" 2>&1 || f_json_error "wipefs failed"
+        f_log_step "Zeroing first 10MiB on ${f_device}"
+        dd if=/dev/zero "of=${f_device}" bs=1M count=10 conv=fsync status=progress 2>&1 | tail -2 || \
+          f_json_error "dd failed"
+      elif [[ "${f_w_mode}" == "zero" ]]
+      then
+        f_log_step "Zeroing ${f_device} completely (takes a while)"
+        dd if=/dev/zero "of=${f_device}" bs=4M conv=fsync status=progress 2>&1 | tail -2 || \
+          f_json_error "dd failed"
+      else
+        f_log_step "Overwriting ${f_device} with random data (takes a long while)"
+        dd if=/dev/urandom "of=${f_device}" bs=4M conv=fsync status=progress 2>&1 | tail -2 || \
+          f_json_error "dd failed"
+      fi
+      f_log_ok "Write complete"
+    fi
+    blockdev --rereadpt "${f_device}" 2>/dev/null || partprobe "${f_device}" 2>/dev/null || true
+    local f_w_now
+    f_w_now=$(blkid -s TYPE -o value "${f_device}" 2>/dev/null || true)
+    if [[ -n "${f_w_now}" ]]
+    then
+      f_json_error "Wipe ran but ${f_device} still shows ${f_w_now} - inspect manually."
+    fi
+    f_json_ok "\"message\":\"${f_device} wiped (${f_w_mode}; was: ${f_w_was}) - ready to reuse.\""
+    ;;
+
+  # ------------------------------------------------------------------
   rollback)
     f_do_rollback
     ;;
@@ -1143,7 +1316,7 @@ EOF
     ;;
 
   *)
-    f_json_error "Usage: $0 {list|raid|status|setup|unlock|lock|luks|locate|adopt|rollback|change-password}"
+    f_json_error "Usage: $0 {list|byid|raid|status|setup|unlock|lock|luks|locate|adopt|wipe|rollback|change-password}"
     ;;
   esac
 }

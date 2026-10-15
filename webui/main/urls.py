@@ -115,6 +115,7 @@ urlpatterns = [
     path('settings/disk/lock/', views_settings.settings_disk_lock, name='settings_disk_lock'),
     path('settings/disk/luks/', views_settings.settings_disk_luks, name='settings_disk_luks'),
     path('settings/disk/locate/', views_settings.settings_disk_locate, name='settings_disk_locate'),
+    path('settings/disk/wipe/', views_settings.settings_disk_wipe, name='settings_disk_wipe'),
     path('settings/disk/adopt/', views_settings.settings_disk_adopt, name='settings_disk_adopt'),
     path('settings/raid-md/', views_settings.settings_raid_md, name='settings_raid_md'),
     path('settings/raid-md/status/', views_settings.settings_raid_md_status, name='settings_raid_md_status'),

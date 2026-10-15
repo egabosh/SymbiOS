@@ -80,6 +80,58 @@
   </div>
 </div>
 
+<!-- Wipe a disk for reuse -->
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="card border-danger">
+      <div class="card-header">
+        <i class="bi bi-trash"></i> Wipe a Disk (erase for reuse)
+      </div>
+      <div class="card-body">
+        <div class="alert alert-danger small">
+          <i class="bi bi-exclamation-triangle-fill"></i>
+          Destroys <strong>everything</strong> on the selected disk or partition -
+          including RAID memberships and LUKS headers. Afterwards it shows up as
+          <span class="badge bg-secondary">Available</span> (e.g. for Move Data).
+          The system disk can never be selected here.
+        </div>
+        <form id="wipe-form" data-exec="true" method="POST" action="{% url "settings_disk_wipe" %}">
+          {% csrf_token %}
+          <div class="row g-2">
+            <div class="col-md-5">
+              <label class="form-label fw-semibold">Disk / partition</label>
+              <select class="form-select" id="wipe-device" name="device" required>
+                <option value="">-- select a disk --</option>
+              </select>
+              <div class="form-text" id="wipe-info"></div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Method</label>
+              <div class="form-check"><input class="form-check-input" type="radio" name="mode" value="quick" checked id="wipe-quick">
+                <label class="form-check-label" for="wipe-quick">Quick <span class="text-muted">(signatures + first 10MiB, seconds)</span></label></div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="mode" value="zero" id="wipe-zero">
+                <label class="form-check-label" for="wipe-zero">Full zeros <span class="text-muted">(whole disk, slow on TB)</span></label></div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="mode" value="random" id="wipe-random">
+                <label class="form-check-label" for="wipe-random">Full random <span class="text-muted">(whole disk urandom, slowest)</span></label></div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="mode" value="discard" id="wipe-discard">
+                <label class="form-check-label" for="wipe-discard">Discard <span class="text-muted">(instant, SSD/NVMe only)</span></label></div>
+            </div>
+            <div class="col-md-3 d-flex flex-column justify-content-end gap-2">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="wipe-confirm">
+                <label class="form-check-label" for="wipe-confirm">I know all data on it is lost</label>
+              </div>
+              <button type="submit" class="btn btn-danger">
+                <i class="bi bi-trash"></i> Wipe
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Locate a disk -->
 <div class="row mb-3">
   <div class="col-md-12">
@@ -361,7 +413,10 @@ function loadLuks() {
           locked++;
           var opt = document.createElement('option');
           opt.value = d.device;
-          opt.textContent = d.device + (gb ? ' (' + gb + ')' : '') + (d.label ? ' [' + d.label + ']' : '');
+          var where = d.serial || d.byid || '';
+          if (!where && d.model) where = d.model;
+          if (d.parent && where.indexOf(d.parent) === -1) where = (where ? where + ' on ' : '') + d.parent;
+          opt.textContent = d.device + (gb ? ' (' + gb + ')' : '') + (where ? ' [' + where + ']' : '') + (d.label ? ' {' + d.label + '}' : '');
           sel.appendChild(opt);
         } else {
           var map = d.mapper ? '/dev/mapper/' + d.mapper : '';
@@ -497,16 +552,19 @@ function loadDisks() {
       select.innerHTML = '<option value="">-- select a disk --</option>';
       adoptSelect.innerHTML = '<option value="">-- select a partition --</option>';
       document.getElementById('locate-device').innerHTML = '<option value="">-- select a disk --</option>';
+      document.getElementById('wipe-device').innerHTML = '<option value="">-- select a disk --</option>';
 
       diskData.forEach(function(dev) {
         html += renderPhysicalDisk(dev);
         addDeviceOptions(dev, select);
         addAdoptOptions(dev, adoptSelect);
         addLocateOption(dev);
+        addWipeOptions(dev, document.getElementById('wipe-device'));
       });
       addBtrfsAdoptOptions(adoptSelect);
       addArraySetupOptions(select);
       addArrayAdoptOptions(adoptSelect);
+      refreshWipeInfo();
 
       html += '</tbody></table></div>';
       el.innerHTML = html;
@@ -534,7 +592,10 @@ function renderPhysicalDisk(dev) {
   else if (status === 'data') rowClass = 'table-success';
   else if (status === 'raid' || status === 'luks') rowClass = 'table-warning';
 
-  var diskLabel = (dev.model || dev.name) + '<div class="small text-muted"><code>' + dev.path + '</code></div>';
+  /* Serial/by-id tell identical models apart (two WD80EFZX). */
+  var ident = dev.serial || dev.byid || '';
+  var diskLabel = (dev.model || dev.name) + '<div class="small text-muted"><code>' + dev.path + '</code>' +
+    (ident ? '<br>' + ident : '') + '</div>';
   var content = childFstypes(dev) || '<span class="text-muted">empty</span>';
 
   var html = '<tr class="' + rowClass + '">';
@@ -706,6 +767,8 @@ function addDeviceOptions(dev, select) {
   var label = dev.size;
   if (dev.model) label += ' - ' + dev.model;
   else label += ' - ' + dev.name;
+  var ident = dev.serial || dev.byid || '';
+  if (ident) label += ' [' + ident + ']';
   opt.textContent = label;
   opt.dataset.model = dev.model || '';
   opt.dataset.size = dev.size || '';
@@ -813,13 +876,80 @@ function addBtrfsAdoptOptions(select) {
 }
 
 /* Locate select offers every physical disk (RAID members included). */
+function devIdentLabel(dev) {
+  var t = dev.path + (dev.size ? ' (' + dev.size + ')' : '') + (dev.model ? ' ' + dev.model : '');
+  var ident = dev.serial || dev.byid || '';
+  if (ident) t += ' [' + ident + ']';
+  return t;
+}
+
 function addLocateOption(dev) {
   if (!isDiskLike(dev)) return;
   var sel = document.getElementById('locate-device');
   var opt = document.createElement('option');
   opt.value = dev.path;
-  opt.textContent = dev.path + (dev.size ? ' (' + dev.size + ')' : '') + (dev.model ? ' ' + dev.model : '');
+  opt.textContent = devIdentLabel(dev);
   sel.appendChild(opt);
+}
+
+/* Wipe select: disks and partitions with a content summary. The system
+   disk (or anything mounted at / or /symbios) and active swap never
+   show up - everything else is fair game (RAID/LUKS on purpose). */
+function wipeContentOf(dev) {
+  var parts = [];
+  if (dev.fstype) parts.push(dev.fstype);
+  var role = raidRole(dev);
+  if (role) parts.push(role);
+  return parts.join(', ') || 'unformatted';
+}
+
+function addWipeOptions(dev, select) {
+  if (!isDiskLike(dev)) return;
+  if (getStatus(dev) === 'system' || getStatus(dev) === 'data') return;
+  var paths = raidPaths();
+  function walk(d) {
+    if (d.mountpoint) return;
+    if ((raidData.active_swaps || []).indexOf(d.path) !== -1) return;
+    if (d.type === 'disk' || d.type === 'part' || (d.type === 'loop' && !d.children)) {
+      var opt = document.createElement('option');
+      opt.value = d.path;
+      var t = d.path + (d.size ? ' (' + d.size + ')' : '');
+      var ident = d.serial || d.byid || d.model || '';
+      if (ident) t += ' ' + ident;
+      t += ' - holds: ' + wipeContentOf(d.type === 'disk' ? dev : d);
+      opt.textContent = t;
+      opt.dataset.content = wipeContentOf(d.type === 'disk' ? dev : d);
+      select.appendChild(opt);
+    }
+    (d.children || []).forEach(walk);
+  }
+  /* Whole disk first, then its partitions. */
+  (function wholeFirst(d) {
+    if (!d.mountpoint && (raidData.active_swaps || []).indexOf(d.path) === -1 &&
+        (d.type === 'disk' || d.type === 'loop')) {
+      var opt = document.createElement('option');
+      opt.value = d.path;
+      var t = d.path + (d.size ? ' (' + d.size + ')' : '');
+      var ident = d.serial || d.byid || d.model || '';
+      if (ident) t += ' ' + ident;
+      t += ' (whole disk) - holds: ' + wipeContentOf(d);
+      opt.textContent = t;
+      opt.dataset.content = wipeContentOf(d);
+      select.appendChild(opt);
+    }
+  })(dev);
+  (dev.children || []).forEach(walk);
+}
+
+function refreshWipeInfo() {
+  var sel = document.getElementById('wipe-device');
+  var info = document.getElementById('wipe-info');
+  var opt = sel.options[sel.selectedIndex];
+  if (opt && opt.dataset.content) {
+    info.innerHTML = 'Currently holds: <code>' + opt.dataset.content + '</code> - all of it will be destroyed.';
+  } else {
+    info.textContent = '';
+  }
 }
 
 function hasMountedChildren(dev) {
@@ -981,6 +1111,30 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
       (encrypt ? '\n2. Encrypt with a passphrase' : '') +
       '\n' + (encrypt ? '3' : '2') + '. Copy your data to the new disk' +
       '\n' + (encrypt ? '4' : '3') + '. Switch to the new disk\n\nContinue?')) {
+    e.preventDefault();
+  }
+});
+
+document.getElementById('wipe-device').addEventListener('change', refreshWipeInfo);
+
+document.getElementById('wipe-form').addEventListener('submit', function(e) {
+  var device = document.getElementById('wipe-device').value;
+  if (!device) {
+    e.preventDefault();
+    SymbiOS.exec.showAlert('Please select a disk.', 'danger');
+    return;
+  }
+  if (!document.getElementById('wipe-confirm').checked) {
+    e.preventDefault();
+    SymbiOS.exec.showAlert('Please confirm that all data on it is lost.', 'danger');
+    return;
+  }
+  var mode = 'quick';
+  var checked = document.querySelector('#wipe-form input[name=mode]:checked');
+  if (checked) mode = checked.value;
+  var opt = document.getElementById('wipe-device').selectedOptions[0];
+  var holds = opt && opt.dataset.content ? ' (currently holds: ' + opt.dataset.content + ')' : '';
+  if (!confirm('ERASE ' + device + holds + ' with method "' + mode + '"?\n\nALL data on it will be DESTROYED. This cannot be undone.\n\nContinue?')) {
     e.preventDefault();
   }
 });

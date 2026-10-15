@@ -489,15 +489,26 @@ def settings_disk(request):
 
 @login_required
 def settings_disk_list(request):
-    """AJAX GET - list block devices via shell script."""
+    """AJAX GET - list block devices via shell script.
+
+    Merges /dev/disk/by-id names (unique even for identical models)
+    into every node by device path."""
     ok, stdout, stderr = run_command(
         f'{_DATA_PART_SCRIPT} list', timeout=10)
     if not ok:
         return JsonResponse({'ok': False, 'error': stderr or 'lsblk failed'})
+    byid = {}
+    ok_b, stdout_b, _ = run_command(
+        f'{_DATA_PART_SCRIPT} byid', timeout=10)
+    if ok_b:
+        try:
+            byid = json.loads(stdout_b).get('byid', {})
+        except (json.JSONDecodeError, AttributeError):
+            byid = {}
     try:
         data = json.loads(stdout)
         devices = data.get('blockdevices', [])
-        filtered = [_describe_block(dev) for dev in devices]
+        filtered = [_describe_block(dev, byid) for dev in devices]
         return JsonResponse({'ok': True, 'devices': filtered})
     except json.JSONDecodeError as e:
         return JsonResponse({'ok': False, 'error': f'Failed to parse lsblk: {e}'})
@@ -516,11 +527,13 @@ def settings_disk_raid(request):
         return JsonResponse({'ok': False, 'error': f'Failed to parse raid info: {e}'})
 
 
-def _describe_block(dev):
+def _describe_block(dev, byid=None):
     """Build a flat description dict for a block device (recursive for children)."""
+    byid = byid or {}
+    path = '/dev/' + dev.get('name', '')
     item = {
         'name': dev.get('name', ''),
-        'path': '/dev/' + dev.get('name', ''),
+        'path': path,
         'size': dev.get('size', ''),
         'type': dev.get('type', ''),
         'fstype': dev.get('fstype') or '',
@@ -530,10 +543,12 @@ def _describe_block(dev):
         'label': (dev.get('label') or '').strip(),
         'tran': dev.get('tran') or '',
         'rm': dev.get('rm', False),
+        'serial': (dev.get('serial') or '').strip(),
+        'byid': byid.get(path, ''),
         'children': [],
     }
     for child in dev.get('children', []) or []:
-        item['children'].append(_describe_block(child))
+        item['children'].append(_describe_block(child, byid))
     return item
 
 
@@ -824,6 +839,45 @@ def settings_disk_locate(request):
         if ok:
             return JsonResponse({'ok': True, 'message': 'Locate read finished.'})
         return JsonResponse({'ok': False, 'error': f'Locate failed:\n{output[-2000:]}'})
+
+
+@login_required
+def settings_disk_wipe(request):
+    """AJAX POST - erase a disk/partition for reuse (exec modal job).
+
+    RAID members and LUKS holders are allowed on purpose; the running
+    system, mounted filesystems and active swap are refused server-side.
+    Full modes take hours on TB disks (timeout 24h, dd status=progress
+    streams live output)."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    device = request.POST.get('device', '').strip()
+    mode = request.POST.get('mode', '').strip()
+
+    if not device or not device.startswith('/dev/'):
+        return JsonResponse({'ok': False, 'error': 'Select a disk first'})
+    if mode not in ('quick', 'zero', 'random', 'discard'):
+        return JsonResponse({'ok': False, 'error': 'Invalid wipe mode'})
+
+    cmd = f'{_DATA_PART_SCRIPT} wipe {shlex.quote(device)} {shlex.quote(mode)}'
+    is_ajax = is_ajax_request(request)
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=86400)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': f'Wiping {device} ({mode})...',
+                             'message': f'Erasing {device} - all data on it is destroyed.',
+                             'command': cmd})
+
+    ok, stdout, stderr = run_command(cmd, timeout=86400)
+    output = stdout + ('\n' + stderr if stderr else '')
+    try:
+        return JsonResponse(json.loads(output))
+    except json.JSONDecodeError:
+        if ok:
+            return JsonResponse({'ok': True, 'message': f'{device} wiped.'})
+        return JsonResponse({'ok': False, 'error': f'Wipe failed:\n{output[-2000:]}'})
 
 
 @login_required
