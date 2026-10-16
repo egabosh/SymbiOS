@@ -22,7 +22,9 @@
 #   close       - unmount /symbios, close LUKS
 
 g_luks_label="CRYPT_LUKS_SYMBIOS_DATA"
-g_mapper_name="symbios-luks"
+# (renamed from symbios-luks in v1 - still recognized until rebooted).
+g_mapper_name="symbios-data"
+g_mapper_legacy="symbios-luks"
 
 # Find the LUKS device carrying our label (exact match only - a foreign
 # or unlabeled LUKS volume must never be mistaken for the data volume).
@@ -35,7 +37,8 @@ function f_find_luks {
 }
 
 function f_luks_is_open {
-  cryptsetup status "$g_mapper_name" 2>/dev/null | head -1 | grep -q "is active"
+  cryptsetup status "$g_mapper_name" 2>/dev/null | head -1 | grep -q "is active" || \
+    cryptsetup status "$g_mapper_legacy" 2>/dev/null | head -1 | grep -q "is active"
 }
 
 function f_json_escape {
@@ -94,6 +97,7 @@ function f_unlock {
 function f_close {
   umount /symbios 2>/dev/null || true
   cryptsetup close "$g_mapper_name" 2>/dev/null || true
+  cryptsetup close "$g_mapper_legacy" 2>/dev/null || true
   printf '{"ok":true,"message":"/symbios unmounted and LUKS closed"}\n'
 }
 

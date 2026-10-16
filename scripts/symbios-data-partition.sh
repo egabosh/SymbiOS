@@ -102,8 +102,11 @@ g_luks_label="CRYPT_LUKS_SYMBIOS_DATA"
 g_data_label="SYMBIOS_DATA"
 
 # Mount point and LUKS mapper name for the /symbios data root
+# (renamed from symbios-luks in v1 - the transition helpers below still
+# recognize the legacy name until every host has rebooted once).
 g_mountpoint="/symbios"
-g_mapper_name="symbios-luks"
+g_mapper_name="symbios-data"
+g_mapper_legacy="symbios-luks"
 
 f_state_file="/symbios/.symbios-data-migration.state"
 
@@ -384,6 +387,7 @@ function f_do_rollback {
   then
     f_log_step "Closing LUKS volume ${f_luks_name}"
     cryptsetup close "${f_luks_name}" 2>/dev/null || true
+    cryptsetup close "${g_mapper_legacy}" 2>/dev/null || true
     f_log_ok "LUKS volume closed"
   fi
 
@@ -1039,7 +1043,7 @@ EOF
   unlock)
     # Open a LUKS device for inspection only: no mount, no formatting.
     # The caller picks the exact device (several LUKS volumes may exist).
-    # Mapper: symbios-luks for the SymbiOS data volume, unlock-<name>
+    # Mapper: symbios-data for the SymbiOS data volume, unlock-<name>
     # for anything else. Report the mapper so the WebUI can point at
     # the RAID pages for a look inside.
     local f_device="${1:-}" f_pw_file="${2:-}" f_password=""
@@ -1447,6 +1451,7 @@ EOF
   umount)
     umount "${g_mountpoint}" 2>/dev/null || true
     cryptsetup close ${g_mapper_name} 2>/dev/null || true
+    cryptsetup close ${g_mapper_legacy} 2>/dev/null || true
     f_json_ok '"message":"${g_mountpoint} unmounted and LUKS volume closed."'
     ;;
 
