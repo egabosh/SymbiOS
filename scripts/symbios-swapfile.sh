@@ -61,9 +61,15 @@ function f_swap_cleanup_legacy {
   local f_root="${1}"
   if swapon --show=NAME --noheadings 2>/dev/null | grep -qx "${f_root}/swapfile"
   then
-    swapoff /var/swap 2>/dev/null || true
-    rm -f /var/swap
-    echo "old-swap-removed"
+    # Only report a change when there was actually something to remove:
+    # rm -f succeeds silently on a missing file and would otherwise mark
+    # every playbook run as changed.
+    if [[ -e /var/swap ]]
+    then
+      swapoff /var/swap 2>/dev/null || true
+      rm -f /var/swap
+      echo "old-swap-removed"
+    fi
   else
     echo "new swap not active, keeping /var/swap" >&2
     return 1
