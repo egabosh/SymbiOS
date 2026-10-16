@@ -87,20 +87,16 @@ then
   exit 0
 fi
 
-# Open every LUKS partition carrying our label. Multi-device volumes
-# (e.g. btrfs RAID1 on two LUKS partitions) need every member open; the
-# first becomes symbios-media, further ones symbios-media-2/3/...
+# Open every LUKS partition carrying our label, numbered uniformly from 1
+# (symbios-media-1, symbios-media-2, ...). Multi-device volumes (e.g. btrfs
+# RAID1 on two LUKS partitions) need every member open; single disks are
+# simply member 1, so setup and boot always agree on the names.
 function f_open_luks {
   local f_dev f_idx=1 f_mapper
   while read -r f_dev
   do
     [[ -z "${f_dev}" ]] && continue
-    if [[ "${f_idx}" -eq 1 ]]
-    then
-      f_mapper="${g_mapper_base}"
-    else
-      f_mapper="${g_mapper_base}-${f_idx}"
-    fi
+    f_mapper="${g_mapper_base}-${f_idx}"
     if [[ ! -b "/dev/mapper/${f_mapper}" ]]
     then
       if [[ ! -s "${g_keyfile}" ]]

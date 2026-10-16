@@ -87,9 +87,12 @@ set -euo pipefail
 g_luks_label="CRYPT_LUKS_SYMBIOS_MEDIA"
 g_data_label="SYMBIOS_MEDIA"
 
-# Mount point and LUKS mapper name for the media volume
+# Mount point and LUKS mapper names for the media volume (uniformly
+# numbered from 1: symbios-media-1, symbios-media-2, ... - one dm device
+# per LUKS member is mandatory, single disks are simply member 1).
 g_mountpoint="/symbios/media"
-g_mapper_name="symbios-media"
+g_mapper_name="symbios-media-1"
+g_mapper_base="symbios-media"
 
 # The data volume labels: a media setup target must never carry those
 # (formatting one would destroy /symbios).
@@ -807,7 +810,7 @@ EOF
         awk '$2 == "crypt" {print $1; exit}')
       [[ -z "${f_mapper}" ]] && f_json_error "${f_target} is not open."
     fi
-    [[ "${f_mapper}" == "${g_mapper_name}"* ]] || \
+    [[ "${f_mapper}" == "${g_mapper_base}"-* ]] || \
       f_json_error "This is not a media mapper - use the data disk page."
     mountpoint -q "${g_mountpoint}" 2>/dev/null && \
       f_json_error "The mapper holds the mounted media volume - unmount it first."
@@ -852,9 +855,9 @@ EOF
   # ------------------------------------------------------------------
   umount)
     umount "${g_mountpoint}" 2>/dev/null || true
-    cryptsetup close ${g_mapper_name} 2>/dev/null || true
-    cryptsetup close ${g_mapper_name}-2 2>/dev/null || true
-    cryptsetup close ${g_mapper_name}-3 2>/dev/null || true
+    cryptsetup close ${g_mapper_base}-1 2>/dev/null || true
+    cryptsetup close ${g_mapper_base}-2 2>/dev/null || true
+    cryptsetup close ${g_mapper_base}-3 2>/dev/null || true
     f_json_ok '"message":"Media volume unmounted and LUKS closed."'
     ;;
 
