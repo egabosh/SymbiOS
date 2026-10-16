@@ -561,8 +561,12 @@
     # downed container (removed outside the playbook, failed build, ...)
     # would otherwise hang the wait task below for the full retry budget.
     # Failing here is immediate and shows the compose error instead.
+    # NOTE: no --build here (rebuilds belong to the handler above):
+    # up --build reports "Built" even from cache and would mark every
+    # run as changed. Plain up still builds a missing image, starts a
+    # downed container, and stays quiet (Running) otherwise.
     - name: Ensure LDAP container is built and running
-      ansible.builtin.shell: docker compose up -d --build
+      ansible.builtin.shell: docker compose up -d
       args:
         chdir: "{{ docker_path }}"
       register: ldap_container_up
