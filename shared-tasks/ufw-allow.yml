@@ -7,7 +7,7 @@
 #                ufw_src (default: omit = any source, else a CIDR like
 #                192.168.0.0/16 - loop the include for several sources)
 
-- name: UFW {{ ufw_rule | default('allow') }} {{ ufw_port }}/{{ ufw_proto | default('tcp') }}
+- name: UFW {{ ufw_rule | default('allow') }} {{ ufw_port }}/{{ ufw_proto | default('tcp') }} from {{ ufw_src | default('anywhere') }}
   community.general.ufw:
     rule: "{{ ufw_rule | default('allow') }}"
     port: "{{ ufw_port }}"
