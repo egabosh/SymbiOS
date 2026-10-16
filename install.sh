@@ -121,6 +121,7 @@ f_run_playbook ${g_git_root}/base-services/autoupdate.yml
 f_run_playbook ${g_git_root}/base-services/docker.yml
 f_run_playbook ${g_git_root}/base-services/dedyn.yml
 f_run_playbook ${g_git_root}/base-services/ldap.yml
+f_run_playbook ${g_git_root}/base-services/media-volume.yml
 f_run_playbook ${g_git_root}/base-services/media.yml
 
 # Detect Raspberry Pi and install platform-specific playbooks

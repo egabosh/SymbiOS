@@ -73,6 +73,17 @@
     media_shared_base: "{{ media_shared | default('/symbios/media/shared') }}"
   tasks:
 
+    - name: Warn when a labeled media volume exists but is not mounted
+      ansible.builtin.shell: blkid -L SYMBIOS_MEDIA >/dev/null 2>&1 && ! mountpoint -q "{{ media_root | default('/symbios/media') }}"
+      register: media_volume_unmounted
+      changed_when: false
+      failed_when: false
+
+    - name: Show media volume warning
+      ansible.builtin.debug:
+        msg: "A SYMBIOS_MEDIA volume exists but {{ media_root | default('/symbios/media') }} is not mounted - unlock it via Settings/Disk or check symbios-media-mount.sh before relying on media dirs."
+      when: media_volume_unmounted.rc == 0
+
     - name: Ensure the media LDAP group with fixed GID exists
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --gid {{ media_gid_number }} --name media"
       changed_when: false

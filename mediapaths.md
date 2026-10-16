@@ -56,6 +56,25 @@ Defaults live under `data_root`. Per-host overrides may point anywhere,
 including external volumes - which only exist after the volume is mounted,
 so validate (or offer creation) before pointing a library at them.
 
+## Media volume (optional second disk)
+
+Large hosts keep the media libraries on their own disk instead of the data
+disk: filesystem label `SYMBIOS_MEDIA`, LUKS label
+`CRYPT_LUKS_SYMBIOS_MEDIA` (both exact match, never guessed), mounted at
+`media_root` (default `/symbios/media`) with no `fstab` entry. The boot
+mount (`scripts/symbios-media-mount.sh`, called from `rc.local` after
+`/symbios` is up) opens the LUKS volume with the keyfile
+`/symbios/.keys/media-volume.key` (host-only, `0600`, backup-excluded) and
+is never boot-blocking; containers use `bind.create_host_path: false` so a
+missing volume fails closed instead of scanning void. Management via the
+Data Disk WebUI page (volume toggle) and
+`scripts/symbios-media-partition.sh` (`setup`/`adopt`/`rollback`, no reboot
+- only the media consumers are recreated). Host-specific legacy paths stay
+reachable via the compat bind `media_compat_bind` (default empty, e.g.
+`/data-crypt/share` on migrated hosts with old client paths). Per-host
+legacy library names (e.g. `media_audio` pointing at `Musik/Uploaddatum`)
+stay ordinary inventory overrides.
+
 ## Access model (implemented)
 
 Three tiers below `media_root`:

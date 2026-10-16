@@ -416,7 +416,9 @@ texts opportunistically).
 |--------|---------|-------|
 | `symbios-set-hostname.sh` | Hostname from `base_domain`, idempotent, `--check` mode (template model) | `[--check]` |
 | `symbios-power.sh` | Reboot / shutdown the host (WebUI, exec-modal notice) | `reboot\|shutdown` |
-| `symbios-data-partition.sh` | `/symbios` data partition incl. LUKS setup/mount/rollback. Pre-mount: hardcodes paths, never sources `symbios-lib.sh` | `list\|status\|setup\|rollback` |
+| `symbios-data-partition.sh` | `/symbios` data partition incl. LUKS setup/mount/rollback. Label-based explicit mounts (no fstab), exact label match only | `list\|status\|setup\|rollback` |
+| `symbios-media-partition.sh` | Optional `SYMBIOS_MEDIA` volume (labels `SYMBIOS_MEDIA` / `CRYPT_LUKS_SYMBIOS_MEDIA`) incl. setup/adopt/rollback, no reboot | `status\|setup\|adopt\|rollback` |
+| `symbios-media-mount.sh` | Boot mount of the media volume (keyfile on `/symbios`, compat bind, never boot-blocking) | no args |
 | `symbios-after-mount.sh` | Post-mount dispatcher (rootfs): starts all `/symbios`-dependent units in order (boot policy, AGENTS.md) | `[-h\|--help]`, no args |
 | `symbios-detect-network-type.sh` | Connection type (`home`/`root`/`airgapped`) as JSON | no args |
 | `symbios-get-local-ip.sh` | Local RFC1918 IPv4 (`.host-ip` file, `hostname -I` fallback) | no args |

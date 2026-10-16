@@ -231,20 +231,110 @@ function f_btrfs_flush {
   f_b_label="" f_b_uuid="" f_b_devices="" f_b_members=""
 }
 
+# Mount the data volume explicitly by device path. There is deliberately
+# no /etc/fstab entry for /symbios: the boot mounts by LABEL in rc.local
+# (see base-services/symbios-ui.yml), so a locked or missing volume can
+# never stall the boot and no fstab editing is needed during migrations.
+function f_mount_data {
+  local f_dev="$1" f_fs="$2"
+  case "${f_fs}" in
+    ext4)
+      # prjquota needs the quota+project mkfs features (setup formats that
+      # way); adopted foreign filesystems may lack them - then plain mount.
+      mount -t ext4 -o defaults,noatime,prjquota "${f_dev}" "${g_mountpoint}" 2>/dev/null || \
+        mount -t ext4 -o defaults,noatime "${f_dev}" "${g_mountpoint}"
+      ;;
+    btrfs)
+      mount -t btrfs -o defaults,noatime "${f_dev}" "${g_mountpoint}"
+      ;;
+    *)
+      mount "${f_dev}" "${g_mountpoint}"
+      ;;
+  esac
+}
+
+# Rename our canonical labels on a retired device to non-canonical names
+# (X-SYMBIOS_DATA). The boot mount matches labels exactly, so a retired
+# disk can stay attached without ever shadowing the new one. Best effort
+# with verification - returns nonzero when the canonical labels survive.
+function f_retire_old_labels {
+  local f_dev="$1" f_fs="$2"
+  local f_retired="X-${g_data_label}" f_retired_luks="X-${g_luks_label}"
+  [[ "${f_dev}" == /dev/mapper/* ]] && return 1
+  local f_type
+  f_type=$(blkid -s TYPE -o value "${f_dev}" 2>/dev/null || true)
+  case "${f_type}" in
+    crypto_LUKS)
+      cryptsetup config "${f_dev}" --label "${f_retired_luks}" 2>/dev/null || return 1
+      ;;
+    ext4)
+      e2label "${f_dev}" "${f_retired}" 2>/dev/null || return 1
+      ;;
+    btrfs)
+      mkdir -p /symbios.oldlabel
+      mount -o ro "${f_dev}" /symbios.oldlabel 2>/dev/null || return 1
+      btrfs filesystem label /symbios.oldlabel "${f_retired}" 2>/dev/null || {
+         umount /symbios.oldlabel 2>/dev/null || true
+        return 1
+      }
+       umount /symbios.oldlabel 2>/dev/null || true
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  # Verify the canonical labels are really gone from this device (exact
+  # match with quotes - retired X- names contain the base as substring).
+  if blkid "${f_dev}" 2>/dev/null | grep -q "LABEL=\"${g_data_label}\"\|LABEL=\"${g_luks_label}\""
+  then
+    return 1
+  fi
+  return 0
+}
+
+# Restore canonical labels on a device (rollback counterpart). The device
+# is addressed by path, so this works even while the labels are retired.
+function f_restore_old_labels {
+  local f_dev="$1" f_fs="$2"
+  [[ "${f_dev}" == /dev/mapper/* ]] && return 1
+  local f_type
+  f_type=$(blkid -s TYPE -o value "${f_dev}" 2>/dev/null || true)
+  case "${f_type}" in
+    crypto_LUKS)
+      cryptsetup config "${f_dev}" --label "${g_luks_label}" 2>/dev/null || return 1
+      ;;
+    ext4)
+      e2label "${f_dev}" "${g_data_label}" 2>/dev/null || return 1
+      ;;
+    btrfs)
+      mkdir -p /symbios.oldlabel
+      mount -o ro "${f_dev}" /symbios.oldlabel 2>/dev/null || return 1
+      btrfs filesystem label /symbios.oldlabel "${g_data_label}" 2>/dev/null || {
+         umount /symbios.oldlabel 2>/dev/null || true
+        return 1
+      }
+       umount /symbios.oldlabel 2>/dev/null || true
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # State file helpers (used only in setup / rollback)
 # ---------------------------------------------------------------------------
 
 function f_save_state {
   local f_old_device="$1" f_old_fstype="$2" f_new_device="$3"
-  local f_encrypt="$4" f_luks_name="$5" f_old_fstab_line="$6"
+  local f_encrypt="$4" f_luks_name="$5"
   cat > "${f_state_file}" <<EOF
 old_device=${f_old_device}
 old_fstype=${f_old_fstype}
 new_device=${f_new_device}
 encrypt=${f_encrypt}
 luks_name=${f_luks_name}
-old_fstab_line=${f_old_fstab_line}
 timestamp=$(date -Iseconds)
 EOF
   chmod 600 "${f_state_file}"
@@ -262,7 +352,6 @@ function f_load_state {
   f_new_device=$(grep '^new_device=' "${f_state_file}" | cut -d= -f2-)
   f_encrypt=$(grep '^encrypt=' "${f_state_file}" | cut -d= -f2-)
   f_luks_name=$(grep '^luks_name=' "${f_state_file}" | cut -d= -f2-)
-  f_old_fstab_line=$(grep '^old_fstab_line=' "${f_state_file}" | cut -d= -f2-)
   f_migration_timestamp=$(grep '^timestamp=' "${f_state_file}" | cut -d= -f2-)
   return 0
 }
@@ -277,7 +366,7 @@ function f_clear_state {
 
 function f_do_rollback {
   local f_old_device="" f_old_fstype="" f_new_device="" f_encrypt=""
-  local f_luks_name="" f_old_fstab_line=""
+  local f_luks_name=""
 
   if ! f_load_state
   then
@@ -298,14 +387,24 @@ function f_do_rollback {
     f_log_ok "LUKS volume closed"
   fi
 
-  f_log_step "Restoring /etc/fstab"
+  # Swap the labels back: the new device keeps retired names, the original
+  # device gets the canonical labels again. The boot mounts by label, so no
+  # fstab handling is needed (any legacy /symbios fstab line is removed).
   sed -i '\#.*[[:space:]]/symbios[[:space:]]#d' /etc/fstab
-  if [[ -n "${f_old_fstab_line}" ]]
+  if [[ "${f_old_fstype}" != "rootfs" ]]
   then
-    echo "${f_old_fstab_line}" >> /etc/fstab
-    f_log_ok "fstab restored from backup"
+    f_retire_old_labels "${f_new_device}" "${f_old_fstype}" 2>/dev/null || \
+      f_log_error "Could not retire labels on ${f_new_device} - remove or relabel it manually (duplicate labels confuse the boot mount)."
+    if ! f_restore_old_labels "${f_old_device}" "${f_old_fstype}"
+    then
+      f_json_error "Rollback failed: could not restore labels on ${f_old_device}. Check manually."
+    fi
+    f_log_ok "Labels swapped back to ${f_old_device}"
   else
-    f_log_ok "No previous ${g_mountpoint} fstab entry (was on root filesystem)"
+    # Back to rootfs data: make sure the new disk no longer carries our
+    # labels so the boot mount ignores it.
+    f_retire_old_labels "${f_new_device}" "ext4" 2>/dev/null || \
+      f_log_error "Could not retire labels on ${f_new_device} - remove or relabel it manually."
   fi
 
   f_log_step "Mounting original ${g_mountpoint}"
@@ -313,9 +412,9 @@ function f_do_rollback {
   then
     f_log_ok "${g_mountpoint} returns to root filesystem"
   else
-    mount "${g_mountpoint}" 2>/dev/null || {
-      f_log_error "Failed to mount original ${g_mountpoint}! Check /etc/fstab manually."
-      f_json_error "Rollback failed: could not mount original ${g_mountpoint}. Check /etc/fstab."
+    f_mount_data "${f_old_device}" "${f_old_fstype}" 2>/dev/null || {
+      f_log_error "Failed to mount original ${g_mountpoint}! Labels were swapped back - retry the mount manually."
+      f_json_error "Rollback failed: could not mount original ${g_mountpoint} from ${f_old_device}."
     }
     f_log_ok "Original ${g_mountpoint} mounted"
   fi
@@ -339,20 +438,14 @@ function f_setup_error {
 }
 
 # ---------------------------------------------------------------------------
-# Helper: find LUKS device by label (with fallback to any crypto_LUKS)
-# ---------------------------------------------------------------------------
-
+# Find the LUKS device carrying our label (exact match only - a foreign
+# or unlabeled LUKS volume must never be mistaken for the data volume).
 function f_find_luks {
   # Prints device name (e.g. sda1) or empty string
   local f_dev
   f_dev=$(lsblk -n -l -o FSTYPE,LABEL,NAME 2>/dev/null | \
     awk -v label="$g_luks_label" \
-      '$1 == "crypto_LUKS" && ($2 == label || $2 == "") {print $3; exit}')
-  if [[ -z "$f_dev" ]]
-  then
-    f_dev=$(lsblk -n -l -o FSTYPE,NAME 2>/dev/null | \
-      awk '$1 == "crypto_LUKS" {print $2; exit}')
-  fi
+      '$1 == "crypto_LUKS" && $2 == label {print $3; exit}')
   echo "$f_dev"
 }
 
@@ -709,8 +802,6 @@ EOF
 
     f_log_step "Saving state for rollback"
 
-    local f_old_fstab_line
-    f_old_fstab_line=$(grep -E '[[:space:]]/symbios[[:space:]]' /etc/fstab 2>/dev/null || echo "")
     local f_old_home_device="" f_old_home_fstype=""
     if [[ -n "$f_root_dev" ]]
     then
@@ -721,9 +812,18 @@ EOF
       f_old_home_fstype=$(findmnt -n -o FSTYPE "${g_mountpoint}" 2>/dev/null || echo "")
     fi
 
-    f_save_state "$f_old_home_device" "$f_old_home_fstype" "$f_device" \
-      "$f_encrypt" ${g_mapper_name} "$f_old_fstab_line"
+    f_save_state "$f_old_home_device" "$f_old_fstype" "$f_device" \
+      "$f_encrypt" ${g_mapper_name}
     f_log_ok "State saved (can rollback later)"
+
+    # A previous LUKS mapper as migration source is not supported: its
+    # labels cannot be retired while it is open, and the mapper name is
+    # taken. Retire the old disk manually first.
+    if [[ "${f_old_fstype}" != "rootfs" ]] && [[ "${f_old_home_device}" == /dev/mapper/* ]]
+    then
+      f_clear_state
+      f_json_error "Previous ${g_mountpoint} is a LUKS mapper (${f_old_home_device}). Second migrations from an encrypted volume need manual label handling - retire the old disk first."
+    fi
 
     # Resume detection: if a previous run was interrupted (state file present,
     # the LUKS volume already open and /symbios.new mounted), we continue the
@@ -854,26 +954,21 @@ EOF
     rm -rf "${g_mountpoint}"/* 2>/dev/null || true
     f_log_ok "Old ${g_mountpoint} cleaned"
 
-    f_log_step "Updating /etc/fstab"
+    f_log_step "Removing legacy ${g_mountpoint} fstab entries (mounts are explicit by label now)"
     sed -i '\#.*[[:space:]]/symbios[[:space:]]#d' /etc/fstab
+    f_log_ok "fstab cleaned (no ${g_mountpoint} entry needed anymore)"
+
+    f_log_step "Mounting new ${g_mountpoint} (explicit, no fstab)"
     if [[ "$f_encrypt" == "yes" ]]
     then
-      # nofail: never wait at boot for a locked/missing volume (boot-unlock
-      # via console prompt or web page happens after boot, see symbios-boot-unlock).
-      echo "/dev/mapper/$f_luks_name ${g_mountpoint} ext4 defaults,noatime,nofail,noauto,prjquota 0 2" >> /etc/fstab
-    else
-      local f_uuid
-      f_uuid=$(blkid -s UUID -o value "$f_device" 2>/dev/null) || {
-        f_setup_error "blkid failed"
+      mount -t ext4 -o defaults,noatime,prjquota "/dev/mapper/${f_luks_name}" "${g_mountpoint}" || {
+        f_setup_error "Mount ${g_mountpoint} failed"
       }
-      echo "UUID=$f_uuid ${g_mountpoint} ext4 defaults,noatime,nofail,noauto,prjquota 0 2" >> /etc/fstab
+    else
+      mount -t ext4 -o defaults,noatime,prjquota "$f_device" "${g_mountpoint}" || {
+        f_setup_error "Mount ${g_mountpoint} failed"
+      }
     fi
-    f_log_ok "fstab updated"
-
-    f_log_step "Mounting new ${g_mountpoint}"
-    mount "${g_mountpoint}" || {
-      f_setup_error "Mount ${g_mountpoint} failed"
-    }
     f_log_ok "${g_mountpoint} is now on new partition"
     f_swap_activate
 
@@ -885,9 +980,23 @@ EOF
     # Re-save the rollback state onto the NEW disk: the old copy was
     # excluded from rsync and deleted with the old location, so without
     # this no rollback survives the migration (seen live on valiant).
-    f_save_state "$f_old_home_device" "$f_old_home_fstype" "$f_device" \
-      "$f_encrypt" ${g_mapper_name} "$f_old_fstab_line"
+    f_save_state "$f_old_home_device" "$f_old_fstype" "$f_device" \
+      "$f_encrypt" ${g_mapper_name}
     f_log_ok "Rollback state re-saved on new disk"
+
+    # Retire our labels on the previous device so the label-based boot
+    # mount can never pick the old disk while both are attached. Rootfs
+    # data (first migration) has nothing to retire; mapper sources were
+    # refused above.
+    if [[ "${f_old_fstype}" != "rootfs" ]]
+    then
+      if f_retire_old_labels "${f_old_home_device}" "${f_old_fstype}"
+      then
+        f_log_ok "Labels retired on previous device ${f_old_home_device}"
+      else
+        f_log_error "Could not retire labels on ${f_old_home_device} - remove or relabel it manually (duplicate labels confuse the boot mount)."
+      fi
+    fi
 
      umount /symbios.new 2>/dev/null || true
     rm -rf /symbios.new 2>/dev/null || true
@@ -1134,8 +1243,7 @@ EOF
     # so adopting away from a rootfs-backed /symbios without copying
     # would orphan live data: refuse that combination outright. This
     # runs before --check so a dry run reports the real outcome.
-    local f_old_fstab_line f_old_home_device f_old_home_fstype f_old_is_mount
-    f_old_fstab_line=$(grep -E '[[:space:]]/symbios[[:space:]]' /etc/fstab 2>/dev/null || echo "")
+    local f_old_home_device f_old_home_fstype f_old_is_mount
     f_old_home_device=$(findmnt -n -o SOURCE "${g_mountpoint}" 2>/dev/null || echo "")
     f_old_home_fstype=$(findmnt -n -o FSTYPE "${g_mountpoint}" 2>/dev/null || echo "rootfs")
     f_old_is_mount="yes"
@@ -1154,9 +1262,10 @@ EOF
       f_adopt_size=$(blockdev --getsize64 "${f_device}" 2>/dev/null || echo 0)
       f_json_ok "\"message\":\"Adopt check OK: ${f_adopt_fs} filesystem (${f_adopt_size} bytes) can become /symbios.\",\"fstype\":\"${f_adopt_fs}\",\"label\":\"${f_adopt_label}\",\"copy\":\"${f_copy}\""
     fi
-    # Save rollback state, then switch fstab to the adopted device.
-    f_save_state "${f_old_home_device}" "${f_old_home_fstype}" "${f_device}" \
-      "no" "" "${f_old_fstab_line}"
+    # Save rollback state, then switch to the adopted device (explicit
+    # mount, no fstab entry - the boot mounts by label).
+    f_save_state "${f_old_home_device}" "${f_old_fstype}" "${f_device}" \
+      "no" ""
     f_log_ok "State saved (can rollback later)"
     if [[ "${f_copy}" == "yes" ]]
     then
@@ -1189,18 +1298,25 @@ EOF
     then
       rm -rf "${g_mountpoint}"/* 2>/dev/null || true
     fi
+    f_log_step "Removing legacy ${g_mountpoint} fstab entries (mounts are explicit by label now)"
     sed -i '\#.*[[:space:]]/symbios[[:space:]]#d' /etc/fstab
-    if [[ "${f_device}" == /dev/mapper/* ]]
-    then
-      echo "${f_device} ${g_mountpoint} ${f_adopt_fs} defaults,noatime,nofail,noauto 0 2" >> /etc/fstab
-    elif [[ -n "${f_adopt_uuid}" ]]
-    then
-      echo "UUID=${f_adopt_uuid} ${g_mountpoint} ${f_adopt_fs} defaults,noatime,nofail,noauto 0 2" >> /etc/fstab
-    else
-      echo "${f_device} ${g_mountpoint} ${f_adopt_fs} defaults,noatime,nofail,noauto 0 2" >> /etc/fstab
-    fi
-    mount "${g_mountpoint}" || f_setup_error "Mount ${g_mountpoint} failed"
+    f_mount_data "${f_device}" "${f_adopt_fs}" || f_setup_error "Mount ${g_mountpoint} failed"
     f_log_ok "${g_mountpoint} is now on ${f_device} (${f_adopt_fs}, data kept)"
+    # With --copy the previous location is superseded: retire our labels
+    # there so the label-based boot mount cannot pick the old disk.
+    # Mapper sources cannot be retired while open - refused below.
+    if [[ "${f_copy}" == "yes" ]] && [[ "${f_old_is_mount}" == "yes" ]]
+    then
+      if [[ "${f_old_home_device}" == /dev/mapper/* ]]
+      then
+        f_log_error "Previous ${g_mountpoint} is a LUKS mapper (${f_old_home_device}) - retire its labels manually (duplicate labels confuse the boot mount)."
+      elif f_retire_old_labels "${f_old_home_device}" "${f_old_fstype}"
+      then
+        f_log_ok "Labels retired on previous device ${f_old_home_device}"
+      else
+        f_log_error "Could not retire labels on ${f_old_home_device} - remove or relabel it manually."
+      fi
+    fi
     if [[ "${f_copy}" == "yes" ]]
     then
       f_swap_activate

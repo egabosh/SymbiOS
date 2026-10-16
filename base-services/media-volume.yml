@@ -1,0 +1,85 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Optional media volume (see mediapaths.md): owns the keyfile directory
+# and mountpoint/compat structure for the label-triggered SYMBIOS_MEDIA
+# volume (LUKS label CRYPT_LUKS_SYMBIOS_MEDIA). The volume itself is
+# created via the WebUI (settings/disk, symbios-media-partition.sh) or
+# adopted manually; this playbook only prepares the host side. Secrets
+# stay in scripts (setup/save-key write the keyfile), the playbook never
+# touches key material. Must run before media.yml (dirs/perms/quotas).
+#
+# docs:
+#   uses_vars:
+#     - media_compat_bind
+#     - media_root
+#   name: Media Volume
+#   short_description: Prepare the host for the optional media volume
+#   description: Creates the keyfile directory and mountpoint structure for the label-triggered SYMBIOS_MEDIA volume.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Directory / Storage
+#
+---
+- name: media-volume
+  hosts: all
+  vars:
+    service_name: media-volume
+    media_keys_dir: "{{ data_root | default('/symbios') }}/.keys"
+  tasks:
+
+    - name: Create the keyfile directory (host only, never container-mounted)
+      ansible.builtin.file:
+        path: "{{ media_keys_dir }}"
+        owner: root
+        group: root
+        mode: '0700'
+        state: directory
+
+    - name: Create the media mountpoint (covered by the volume once mounted)
+      ansible.builtin.file:
+        path: "{{ media_root | default('/symbios/media') }}"
+        owner: root
+        group: root
+        mode: '0755'
+        state: directory
+
+    - name: Create the legacy compat bind dir when configured
+      ansible.builtin.file:
+        path: "{{ media_compat_bind }}"
+        owner: root
+        group: root
+        mode: '0755'
+        state: directory
+      when: media_compat_bind | default('') | length > 0
+
+    - name: Keep the keyfile dir out of backups (LUKS key material)
+      ansible.builtin.shell: echo '"/.keys/"' | {{ git_root }}/scripts/symbios-inventory.py --inventory {{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/inventory.yml list-add backup_exclude
+      changed_when: false
+      failed_when: false
+
+    - name: Register playbook as installed
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "media-volume"
+        state_playbook: "base-services/media-volume.yml"

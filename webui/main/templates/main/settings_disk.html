@@ -19,6 +19,7 @@
         <div class="small text-muted mb-2">Unlock opens the device for inspection only - nothing is mounted or formatted. Afterwards look inside via the <a href="{% url "settings_raid_btrfs" %}">btrfs</a> or <a href="{% url "settings_raid_md" %}">mdadm</a> pages.</div>
         <form id="unlock-form" data-exec="true" method="POST" action="{% url "settings_disk_unlock" %}">
           {% csrf_token %}
+          <input type="hidden" name="volume" value="data" class="volume-field">
           <div class="row g-2 align-items-end">
             <div class="col-md-5">
               <label class="form-label fw-semibold">Encrypted device</label>
@@ -41,6 +42,17 @@
         <div id="luks-open-list" class="mt-2 small"></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Volume selector -->
+<div class="row mb-3">
+  <div class="col-md-12">
+    <div class="btn-group" role="group" aria-label="Volume">
+      <button type="button" class="btn btn-outline-primary" id="vol-data" onclick="setVolume('data')">Data disk (/symbios)</button>
+      <button type="button" class="btn btn-outline-primary" id="vol-media" onclick="setVolume('media')">Media volume (/symbios/media)</button>
+    </div>
+    <span class="text-muted small ms-2">Select which volume the forms below act on. The media volume is optional.</span>
   </div>
 </div>
 
@@ -190,6 +202,7 @@
         </div>
         <form id="luks-password-form" data-exec="true" method="POST" action="{% url "settings_disk_change_password" %}">
           {% csrf_token %}
+          <input type="hidden" name="volume" value="data" class="volume-field">
           <div class="mb-3">
             <label class="form-label fw-semibold">Current Passphrase</label>
             <input type="password" class="form-control" id="luks-current-password"
@@ -231,7 +244,7 @@
   <div class="col-md-6">
     <div class="card">
       <div class="card-header">
-        <i class="bi bi-gear"></i> Move Data to a New Disk
+        <i class="bi bi-gear"></i> Move Data to a New Disk <span class="text-muted small" id="setup-target-label">(/symbios)</span>
       </div>
       <div class="card-body">
         <div class="alert alert-info small">
@@ -243,6 +256,7 @@
 
         <form id="setup-form" data-exec="true" method="POST" action="{% url "settings_disk_setup" %}">
           {% csrf_token %}
+          <input type="hidden" name="volume" value="data" class="volume-field">
           <div class="mb-3">
             <label class="form-label fw-semibold">Target Disk</label>
             <select class="form-select" id="setup-device" name="device" required>
@@ -300,7 +314,7 @@
   <div class="col-md-6">
     <div class="card">
       <div class="card-header">
-        <i class="bi bi-folder-symlink"></i> Use Existing Disk (no formatting)
+        <i class="bi bi-folder-symlink"></i> Use Existing Disk (no formatting) <span class="text-muted small" id="adopt-target-label">(/symbios)</span>
       </div>
       <div class="card-body">
         <div class="alert alert-info small">
@@ -312,6 +326,7 @@
         </div>
         <form id="adopt-form" data-exec="true" method="POST" action="{% url "settings_disk_adopt" %}">
           {% csrf_token %}
+          <input type="hidden" name="volume" value="data" class="volume-field">
           <div class="mb-3">
             <label class="form-label fw-semibold">Source partition / mapper</label>
             <select class="form-select" id="adopt-device" name="device" required>
@@ -370,13 +385,33 @@
 <script>
 var diskData = [];
 var raidData = {btrfs: [], mdadm: [], active_swaps: [], luks_pairs: [], luks_singles: []};
+var activeVolume = 'data';
 
 document.addEventListener('DOMContentLoaded', function() {
-  refreshAll();
+  setVolume('data');
+  loadDisks();
 });
+
+function volumeTarget() {
+  return activeVolume === 'media' ? '/symbios/media' : '/symbios';
+}
+
+/* Switch the volume the forms below act on (data/media). Status and
+   unlock list follow the selection. */
+function setVolume(v) {
+  activeVolume = v;
+  document.getElementById('vol-data').className = 'btn ' + (v === 'data' ? 'btn-primary' : 'btn-outline-primary');
+  document.getElementById('vol-media').className = 'btn ' + (v === 'media' ? 'btn-primary' : 'btn-outline-primary');
+  document.querySelectorAll('.volume-field').forEach(function(el) { el.value = v; });
+  document.getElementById('setup-target-label').textContent = '(' + volumeTarget() + ')';
+  document.getElementById('adopt-target-label').textContent = '(' + volumeTarget() + ')';
+  loadStatus();
+  loadLuks();
+}
 
 function refreshAll() {
   loadStatus();
+  loadLuks();
   loadDisks();
 }
 
@@ -397,7 +432,7 @@ function findModelForDevice(devPath) {
 }
 
 function loadLuks() {
-  fetchTimeout('{% url "settings_disk_luks" %}')
+  fetchTimeout('{% url "settings_disk_luks" %}?volume=' + activeVolume)
     .then(function(data) {
       var sel = document.getElementById('unlock-device');
       var openBox = document.getElementById('luks-open-list');
@@ -439,6 +474,7 @@ function lockDevice(mapper) {
   var fd = new FormData();
   fd.append('csrfmiddlewaretoken', csrfToken());
   fd.append('target', mapper);
+  fd.append('volume', activeVolume);
   fetch('{% url "settings_disk_lock" %}', {method: 'POST', body: fd, headers: {'X-Requested-With': 'XMLHttpRequest'}})
     .then(function(r) { return r.json(); })
     .then(function() { loadLuks(); loadDisks(); });
@@ -471,72 +507,115 @@ function statusError(msg) {
 }
 
 function loadStatus() {
-  loadLuks();
-  fetchTimeout('{% url "settings_disk_status" %}')
-    .then(function(data) {
-      var el = document.getElementById('home-status');
+  Promise.all([
+    fetchTimeout('{% url "settings_disk_status" %}').catch(function(err) { return {ok: false, error: String((err && err.message) || err)}; }),
+    fetchTimeout('{% url "settings_disk_status" %}?volume=media').catch(function(err) { return {ok: false, error: String((err && err.message) || err)}; })
+  ]).then(function(res) {
+    var el = document.getElementById('home-status');
+    el.innerHTML = dataStatusHtml(res[0]) + mediaStatusHtml(res[1]);
+    updateLuksPasswordSection(res[0]);
+  }).catch(function(err) {
+    statusError(timedOut(err) ? 'timed out (host unreachable?)' : err.message);
+  });
+}
 
-      /* LUKS data volume locked - needs unlock via form below */
-      if (data.luks_name && !data.luks_open) {
-        el.innerHTML =
-          '<div class="d-flex align-items-center gap-3">' +
-            '<i class="bi bi-lock-fill fs-3 text-warning"></i>' +
-            '<div>' +
-              '<strong>Data disk is locked</strong>' +
-              '<div class="small text-muted">Select the device below to unlock it for inspection.</div>' +
-            '</div>' +
-          '</div>';
-        document.getElementById('luks-password-section').style.display = 'none';
-        return;
-      }
+/* Data volume block (existing behavior, now as an HTML string). */
+function dataStatusHtml(data) {
+  if (!data.ok) {
+    return '<div class="d-flex align-items-center gap-3">' +
+      '<i class="bi bi-exclamation-triangle fs-3 text-danger"></i>' +
+      '<div><strong>Data status unavailable</strong>' +
+      '<div class="small text-muted">' + (data.error || 'unknown') + '</div></div></div>';
+  }
 
-      /* Show LUKS password change section when encrypted device is open */
-      if (data.luks_name && data.luks_open) {
-        document.getElementById('luks-password-section').style.display = '';
-      } else {
-        document.getElementById('luks-password-section').style.display = 'none';
-      }
+  /* LUKS data volume locked - needs unlock via form below */
+  if (data.luks_name && !data.luks_open) {
+    return '<div class="d-flex align-items-center gap-3">' +
+      '<i class="bi bi-lock-fill fs-3 text-warning"></i>' +
+      '<div>' +
+        '<strong>Data disk is locked</strong>' +
+        '<div class="small text-muted">Select the device below to unlock it for inspection.</div>' +
+      '</div>' +
+    '</div>';
+  }
 
-      if (data.data_device) {
-        window._dataSize = data.data_size;
+  if (data.data_device) {
+    window._dataSize = data.data_size;
 
-        /* Determine if data is on the system disk or a separate disk */
-        var isOnRoot = data.data_device.indexOf('mmcblk') !== -1 ||
-                       data.data_device.indexOf('nvme0n1') !== -1 ||
-                       data.data_fstype === 'rootfs';
-        var model = findModelForDevice(data.data_device);
+    /* Determine if data is on the system disk or a separate disk */
+    var isOnRoot = data.data_device.indexOf('mmcblk') !== -1 ||
+                   data.data_device.indexOf('nvme0n1') !== -1 ||
+                   data.data_fstype === 'rootfs';
+    var model = findModelForDevice(data.data_device);
 
-        var html = '<div class="d-flex align-items-center gap-3">';
-        if (isOnRoot) {
-          html += '<i class="bi bi-info-circle fs-3 text-muted"></i>';
-          html += '<div>';
-          html += '<strong>Data is on the system disk</strong>';
-          html += '<div class="small text-muted">' + data.data_size + ' total, ' + data.data_used + ' used, ' + data.data_avail + ' free</div>';
-        } else {
-          html += '<i class="bi bi-check-circle-fill fs-3 text-success"></i>';
-          html += '<div>';
-          html += '<strong>Data is on a separate disk</strong>';
-          html += '<div class="small text-muted">';
-          if (model) html += model + ' &middot; ';
-          html += data.data_size + ' &middot; ' + data.data_used + ' used, ' + data.data_avail + ' free';
-          html += '</div>';
-        }
-        html += '</div></div>';
-        el.innerHTML = html;
-      } else {
-        el.innerHTML =
-          '<div class="d-flex align-items-center gap-3">' +
-            '<i class="bi bi-info-circle fs-3 text-muted"></i>' +
-            '<div>' +
-              '<strong>Data is on the system disk</strong>' +
-              '<div class="small text-muted">Using the root partition for all data.</div>' +
-            '</div>' +
-          '</div>';
-      }
-    })
-    .catch(function(err) {
-      statusError(timedOut(err) ? 'timed out (host unreachable?)' : err.message);
-    });
+    var html = '<div class="d-flex align-items-center gap-3">';
+    if (isOnRoot) {
+      html += '<i class="bi bi-info-circle fs-3 text-muted"></i>';
+      html += '<div>';
+      html += '<strong>Data is on the system disk</strong>';
+      html += '<div class="small text-muted">' + data.data_size + ' total, ' + data.data_used + ' used, ' + data.data_avail + ' free</div>';
+    } else {
+      html += '<i class="bi bi-check-circle-fill fs-3 text-success"></i>';
+      html += '<div>';
+      html += '<strong>Data is on a separate disk</strong>';
+      html += '<div class="small text-muted">';
+      if (model) html += model + ' &middot; ';
+      html += data.data_size + ' &middot; ' + data.data_used + ' used, ' + data.data_avail + ' free';
+      html += '</div>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+  return '<div class="d-flex align-items-center gap-3">' +
+    '<i class="bi bi-info-circle fs-3 text-muted"></i>' +
+    '<div>' +
+      '<strong>Data is on the system disk</strong>' +
+      '<div class="small text-muted">Using the root partition for all data.</div>' +
+    '</div>' +
+  '</div>';
+}
+
+/* Media volume block (compact - the volume is optional). */
+function mediaStatusHtml(m) {
+  var html = '<div class="d-flex align-items-center gap-3 mt-2 pt-2 border-top">';
+  if (!m.ok) {
+    html += '<i class="bi bi-question-circle fs-3 text-muted"></i>' +
+      '<div><strong>Media volume: status unavailable</strong>' +
+      '<div class="small text-muted">' + (m.error || 'unknown') + '</div></div>';
+  } else if (m.mounted) {
+    window._mediaSize = m.media_size;
+    html += '<i class="bi bi-check-circle-fill fs-3 text-success"></i>' +
+      '<div><strong>Media volume is on a separate disk</strong>' +
+      '<div class="small text-muted">' + m.media_size + ' &middot; ' + m.media_used + ' used, ' + m.media_avail + ' free' +
+      (m.media_source ? ' &middot; <code>' + m.media_source + '</code>' : '') + '</div></div>';
+  } else if (m.luks_device && !m.luks_open) {
+    html += '<i class="bi bi-lock-fill fs-3 text-warning"></i>' +
+      '<div><strong>Media volume is locked</strong>' +
+      '<div class="small text-muted">Select Media above and unlock the device below.</div></div>';
+  } else {
+    html += '<i class="bi bi-info-circle fs-3 text-muted"></i>' +
+      '<div><strong>No media volume</strong>' +
+      '<div class="small text-muted">Optional - media lives on the system disk until you set one up below.</div></div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+/* Show LUKS password change section when the data device is encrypted+open. */
+function updateLuksPasswordSection(data) {
+  if (!data.ok) {
+    document.getElementById('luks-password-section').style.display = 'none';
+    return;
+  }
+  if (data.luks_name && !data.luks_open) {
+    document.getElementById('luks-password-section').style.display = 'none';
+    return;
+  }
+  if (data.luks_name && data.luks_open) {
+    document.getElementById('luks-password-section').style.display = '';
+  } else {
+    document.getElementById('luks-password-section').style.display = 'none';
+  }
 }
 
 function disksError(msg) {
@@ -1051,6 +1130,7 @@ function adoptCheck() {
   fd.append('csrfmiddlewaretoken', csrfToken());
   fd.append('device', device);
   fd.append('copy', copy);
+  fd.append('volume', activeVolume);
   fd.append('check_only', '1');
   fetch('{% url "settings_disk_adopt" %}', {method: 'POST', body: fd, headers: {'X-Requested-With': 'XMLHttpRequest'}})
     .then(function(r) { return r.json(); })
@@ -1111,15 +1191,16 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
     }
   }
 
-  /* Frontend size check */
+  /* Frontend size check (against the selected volume) */
   var devInfo = findDeviceByPath(window._diskData || [], device);
   if (devInfo) {
     var devBytes = parseSizeBytes(devInfo.size);
-    var homeBytes = parseSizeBytes(window._dataSize || '0');
+    var volSize = activeVolume === 'media' ? (window._mediaSize || '0') : (window._dataSize || '0');
+    var homeBytes = parseSizeBytes(volSize);
     if (devBytes > 0 && homeBytes > 0 && devBytes < homeBytes * 1.1) {
       blockSubmit(e);
       var devLabel = devInfo.model ? devInfo.model + ' (' + devInfo.size + ')' : devInfo.size;
-      SymbiOS.exec.showAlert('Disk (' + devLabel + ') may be too small for your data (' + window._dataSize + ').', 'warning');
+      SymbiOS.exec.showAlert('Disk (' + devLabel + ') may be too small for your data (' + volSize + ').', 'warning');
       return;
     }
   }
@@ -1133,7 +1214,7 @@ document.getElementById('setup-form').addEventListener('submit', function(e) {
   if (!confirm('WARNING: All data on ' + devLabel + ' will be erased!\n\nThis will:\n1. Format the disk' +
       (encrypt ? '\n2. Encrypt with a passphrase' : '') +
       '\n' + (encrypt ? '3' : '2') + '. Copy your data to the new disk' +
-      '\n' + (encrypt ? '4' : '3') + '. Switch to the new disk\n\nContinue?')) {
+      '\n' + (encrypt ? '4' : '3') + '. Switch ' + volumeTarget() + ' to the new disk\n\nContinue?')) {
     blockSubmit(e);
   }
 });
@@ -1183,7 +1264,7 @@ document.getElementById('adopt-form').addEventListener('submit', function(e) {
     return;
   }
   var copy = document.getElementById('adopt-copy').checked;
-  if (!confirm('Adopt ' + device + ' as /symbios without formatting?\n\n' +
+  if (!confirm('Adopt ' + device + ' as ' + volumeTarget() + ' without formatting?\n\n' +
       (copy ? 'Current data will be copied onto it first.\n' : 'Current data stays where it is (only fstab is switched).\n') +
       'The previous location stays available via Rollback.\n\nContinue?')) {
     blockSubmit(e);

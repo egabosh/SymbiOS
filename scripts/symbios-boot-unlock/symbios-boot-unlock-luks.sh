@@ -24,16 +24,13 @@
 g_luks_label="CRYPT_LUKS_SYMBIOS_DATA"
 g_mapper_name="symbios-luks"
 
+# Find the LUKS device carrying our label (exact match only - a foreign
+# or unlabeled LUKS volume must never be mistaken for the data volume).
 function f_find_luks {
   local f_dev
   f_dev=$(lsblk -n -l -o FSTYPE,LABEL,NAME 2>/dev/null | \
     awk -v label="$g_luks_label" \
-      '$1 == "crypto_LUKS" && ($2 == label || $2 == "") {print $3; exit}')
-  if [[ -z "$f_dev" ]]
-  then
-    f_dev=$(lsblk -n -l -o FSTYPE,NAME 2>/dev/null | \
-      awk '$1 == "crypto_LUKS" {print $2; exit}')
-  fi
+      '$1 == "crypto_LUKS" && $2 == label {print $3; exit}')
   echo "$f_dev"
 }
 

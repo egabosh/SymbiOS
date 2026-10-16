@@ -129,6 +129,7 @@ Slug: `media`
 | `media_documents` | path | Documents archive | yes | /symbios/media/documents |  |
 | `media_inbox` | path | Inbox | yes | /symbios/media/inbox |  |
 | `media_shared` | path | Shares base | yes | /symbios/media/shared |  |
+| `media_compat_bind` | path | Legacy compat bind target (empty = none) |  |  |  |
 
 ## `symbios-settings-network-bridges`
 Slug: `network-bridges`

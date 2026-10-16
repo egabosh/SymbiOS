@@ -1,0 +1,15 @@
+CHECK_CATEGORY="storage"
+CHECK_TITLE="Media Volume"
+CHECK_DESC="Checks the optional SYMBIOS_MEDIA volume (label-triggered mount)."
+CHECK_DETAIL="Warns when a SYMBIOS_MEDIA filesystem exists but /symbios/media is not mounted.|An absent volume is fine (the media volume is optional)."
+
+# Check: a labeled but unmounted media volume means the boot mount failed
+# (locked LUKS, missing keyfile) - containers fail closed, but the admin
+# should know. blkid + mountpoint are cheap, no check cache needed.
+if blkid -L SYMBIOS_MEDIA >/dev/null 2>&1
+then
+  if ! mountpoint -q /symbios/media 2>/dev/null
+  then
+    g_echo_error "SYMBIOS_MEDIA volume exists but /symbios/media is not mounted (unlock via Settings/Disk or check the boot log)."
+  fi
+fi

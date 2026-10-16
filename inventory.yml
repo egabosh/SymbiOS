@@ -146,6 +146,7 @@ all:
     backup_encryption: false
     backup_exclude:
       - "/services/*-vm/iso/*.img"
+      - "/.keys/"
     # Local snapshot retention (grandfather-father-son). The data root is a
     # small SD card, so keep the tree bounded; defaults in symbios-backup-lib.sh.
     #backup_keep_daily: 7
@@ -171,6 +172,10 @@ all:
     nextcloud_media_scan_mounts:
       - Media Documents
     media_shared: "/symbios/media/shared"
+    # Legacy compat bind target for the media volume (empty = none).
+    # When set, the boot mount bind-mounts the media volume there as well
+    # (e.g. /data-crypt/share on migrated hosts with old client paths).
+    media_compat_bind: ''
     # Per-directory quotas in GiB (project quotas, see mediapaths.md).
     # Enforced only when the filesystem is mounted with prjquota
     # (new data partitions get it automatically); 0 = unlimited.

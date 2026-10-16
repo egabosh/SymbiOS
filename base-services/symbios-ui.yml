@@ -286,37 +286,40 @@
         regexp: '^exit 0'
         line: 'exit 0'
 
+    - name: Remove legacy data/media fstab entries (mounts are explicit by label now)
+      ansible.builtin.shell: sed -i '\#.*[[:space:]]/symbios[[:space:]]#d' /etc/fstab && sed -i '\#.*[[:space:]]/symbios/media[[:space:]]#d' /etc/fstab
+      changed_when: false
+      failed_when: false
+
     - name: Insert SymbiOS boot sequence before exit 0
       ansible.builtin.blockinfile:
         path: /etc/rc.local
         insertbefore: 'exit 0'
         marker: "# {mark} SymbiOS boot sequence"
         block: |
-          # Start the boot unlock server only if a LUKS device exists
-          if blkid | grep -q 'LABEL="CRYPT_LUKS_SYMBIOS_DATA"'
+          # Mount the data volume by label (no fstab entry - explicit mounts
+          # so a locked or missing volume never stalls the boot). Encrypted
+          # volumes are opened via the boot-unlock page or console prompt.
+          if blkid -s LABEL -o value 2>/dev/null | grep -qx 'CRYPT_LUKS_SYMBIOS_DATA'
           then
             /usr/local/sbin/symbios-boot-unlock/unlock.py
-            # Mount /symbios (no passphrase needed once LUKS is open, fstab entry is noauto)
-            mount /symbios 2>/dev/null || true
-            if [[ -x /symbios/run-after-mount.sh ]]
-            then
-              if ! /symbios/run-after-mount.sh
-              then
-                echo "ERROR /symbios/run-after-mount.sh FAILED!!!"
-              fi
-            fi
-            # Start all /symbios-dependent host services in order (boot policy: AGENTS.md)
-            if [[ -x /usr/local/sbin/symbios-after-mount.sh ]]
-            then
-              /usr/local/sbin/symbios-after-mount.sh || echo "ERROR symbios-after-mount.sh FAILED!!!"
-            fi
+            mount -t ext4 -o defaults,noatime,prjquota LABEL=SYMBIOS_DATA /symbios 2>/dev/null || \
+              mount LABEL=SYMBIOS_DATA /symbios 2>/dev/null || true
           else
-            echo "WARNING: No LUKS device (CRYPT_LUKS_SYMBIOS_DATA) found - /symbios not encrypted."
-            # No unlock needed - start the dependents directly.
-            if [[ -x /usr/local/sbin/symbios-after-mount.sh ]]
-            then
-              /usr/local/sbin/symbios-after-mount.sh || echo "ERROR symbios-after-mount.sh FAILED!!!"
-            fi
+            # Unencrypted data volume (labeled filesystem) or rootfs data
+            mount -t ext4 -o defaults,noatime,prjquota LABEL=SYMBIOS_DATA /symbios 2>/dev/null || \
+              mount LABEL=SYMBIOS_DATA /symbios 2>/dev/null || true
+          fi
+          # Optional media volume (label-triggered, keyfile lives on /symbios -
+          # see scripts/symbios-media-mount.sh). Missing volume: no-op.
+          if [[ -x /symbios/git/SymbiOS/scripts/symbios-media-mount.sh ]]
+          then
+            /symbios/git/SymbiOS/scripts/symbios-media-mount.sh || echo "ERROR symbios-media-mount.sh FAILED!!!"
+          fi
+          # Start all /symbios-dependent host services in order (boot policy: AGENTS.md)
+          if [[ -x /usr/local/sbin/symbios-after-mount.sh ]]
+          then
+            /usr/local/sbin/symbios-after-mount.sh || echo "ERROR symbios-after-mount.sh FAILED!!!"
           fi
           [[ -x /usr/sbin/lightdm ]] && systemctl start lightdm
 

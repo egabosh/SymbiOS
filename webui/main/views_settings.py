@@ -471,6 +471,19 @@ def settings_backup_runnow(request):
 # on PATH, and these only ever run post-boot with /symbios mounted - so
 # unlike boot helpers they need no copy below /usr/local/sbin.
 _DATA_PART_SCRIPT = 'symbios-data-partition.sh'
+_MEDIA_PART_SCRIPT = 'symbios-media-partition.sh'
+
+
+def _volume_script(request):
+    """Partition script for the requested volume (data/media).
+
+    Device-level pages (list/raid/luks/locate/wipe) always use the data
+    script; volume actions (status/setup/adopt/unlock/lock/...) route by
+    the `volume` parameter (GET or POST, default data)."""
+    volume = (request.POST.get('volume') or request.GET.get('volume') or 'data').strip()
+    if volume == 'media':
+        return _MEDIA_PART_SCRIPT
+    return _DATA_PART_SCRIPT
 
 
 @login_required
@@ -557,9 +570,10 @@ def _describe_block(dev, byid=None):
 
 @login_required
 def settings_disk_status(request):
-    """AJAX GET - check /symbios mount status and LUKS status."""
+    """AJAX GET - check /symbios (or /symbios/media with ?volume=media) mount and LUKS status."""
+    script = _volume_script(request)
     ok, stdout, stderr = run_command(
-        f'{_DATA_PART_SCRIPT} status', timeout=15)
+        f'{script} status', timeout=15)
     if not ok:
         return JsonResponse({
             'ok': False, 'error': stderr or 'status check failed',
@@ -583,11 +597,14 @@ def settings_disk_status(request):
 
 @login_required
 def settings_disk_setup(request):
-    """AJAX POST - format, optionally encrypt, and mount a disk as /symbios.
-    Returns a job_id for the exec modal (streams live output)."""
+    """AJAX POST - format, optionally encrypt, and migrate a volume.
+    `volume` selects data (/symbios, reboot) or media (/symbios/media, no reboot)."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
+    script = _volume_script(request)
+    is_media = script == _MEDIA_PART_SCRIPT
+    target = '/symbios/media' if is_media else '/symbios'
     device = request.POST.get('device', '').strip()
     encrypt = 'yes' if request.POST.get('encrypt', 'no') == 'yes' else 'no'
     password = request.POST.get('password', '').strip()
@@ -602,9 +619,9 @@ def settings_disk_setup(request):
     f_pw_file = None
     if encrypt == 'yes':
         f_pw_file = f_write_secret('luks-passphrase', password)
-        cmd_parts = [f'{_DATA_PART_SCRIPT} setup', device, encrypt, f_pw_file]
+        cmd_parts = [f'{script} setup', device, encrypt, f_pw_file]
     else:
-        cmd_parts = [f'{_DATA_PART_SCRIPT} setup', device, encrypt]
+        cmd_parts = [f'{script} setup', device, encrypt]
     cmd = ' '.join(cmd_parts)
 
     is_ajax = is_ajax_request(request)
@@ -612,10 +629,10 @@ def settings_disk_setup(request):
         from .utils.jobs import create_job
         job_id = create_job(cmd, timeout=600)
         return JsonResponse({'ok': True, 'job': job_id,
-                             'title': 'Migrating /symbios to new disk...',
-                             'message': f'Setting up {device} as /symbios.',
+                             'title': f'Migrating {target} to new disk...',
+                             'message': f'Setting up {device} as {target}.',
                              'command': cmd,
-                             'reboot_expected': True})
+                             'reboot_expected': not is_media})
 
     # Fallback: synchronous execution
     ok, stdout, stderr = run_command(cmd, timeout=600)
@@ -634,11 +651,12 @@ def settings_disk_setup(request):
 
 @login_required
 def settings_disk_rollback(request):
-    """AJAX POST - rollback last /symbios migration via exec modal."""
+    """AJAX POST - rollback last volume migration via exec modal."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
-    cmd = f'{_DATA_PART_SCRIPT} rollback'
+    script = _volume_script(request)
+    cmd = f'{script} rollback'
 
     is_ajax = is_ajax_request(request)
     if is_ajax:
@@ -664,11 +682,12 @@ def settings_disk_rollback(request):
 
 @login_required
 def settings_disk_umount(request):
-    """AJAX POST - unmount and close a LUKS /symbios volume."""
+    """AJAX POST - unmount and close a LUKS volume."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
-    cmd = f'{_DATA_PART_SCRIPT} umount'
+    script = _volume_script(request)
+    cmd = f'{script} umount'
     is_ajax = is_ajax_request(request)
     if is_ajax:
         from .utils.jobs import create_job
@@ -688,10 +707,11 @@ def settings_disk_umount(request):
 
 @login_required
 def settings_disk_change_password(request):
-    """AJAX POST - change LUKS passphrase for an encrypted /symbios device."""
+    """AJAX POST - change LUKS passphrase for an encrypted device."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
+    script = _volume_script(request)
     current_password = request.POST.get('current_password', '').strip()
     new_password = request.POST.get('new_password', '').strip()
 
@@ -705,7 +725,7 @@ def settings_disk_change_password(request):
     f_old_pw = f_write_secret('luks-current-password', current_password)
     f_new_pw = f_write_secret('luks-new-password', new_password)
     cmd_parts = [
-        f'{_DATA_PART_SCRIPT} change-password',
+        f'{script} change-password',
         f_old_pw,
         f_new_pw,
     ]
@@ -736,7 +756,8 @@ def settings_disk_change_password(request):
 @login_required
 def settings_disk_luks(request):
     """AJAX GET - list LUKS devices with open state (for explicit unlock choice)."""
-    ok, stdout, stderr = run_command(f'{_DATA_PART_SCRIPT} luks', timeout=30)
+    script = _volume_script(request)
+    ok, stdout, stderr = run_command(f'{script} luks', timeout=30)
     if not ok:
         return JsonResponse({'ok': False, 'error': stderr or 'luks scan failed'})
     try:
@@ -759,7 +780,8 @@ def settings_disk_unlock(request):
         return JsonResponse({'ok': False, 'error': 'Passphrase is required'})
 
     f_pw_file = f_write_secret('luks-unlock', password)
-    cmd = f'{_DATA_PART_SCRIPT} unlock {shlex.quote(device)} {f_pw_file}'
+    script = _volume_script(request)
+    cmd = f'{script} unlock {shlex.quote(device)} {f_pw_file}'
 
     is_ajax = is_ajax_request(request)
     if is_ajax:
@@ -792,7 +814,7 @@ def settings_disk_lock(request):
     if not target or not target.startswith('/dev/'):
         return JsonResponse({'ok': False, 'error': 'Invalid mapper or device'})
 
-    cmd = f'{_DATA_PART_SCRIPT} lock {shlex.quote(target)}'
+    cmd = f'{_volume_script(request)} lock {shlex.quote(target)}'
     is_ajax = is_ajax_request(request)
     if is_ajax:
         from .utils.jobs import create_job
@@ -899,7 +921,10 @@ def settings_disk_adopt(request):
     if not device.startswith('/dev/'):
         return JsonResponse({'ok': False, 'error': 'Invalid device path'})
 
-    cmd_parts = [f'{_DATA_PART_SCRIPT} adopt', shlex.quote(device)]
+    script = _volume_script(request)
+    is_media = script == _MEDIA_PART_SCRIPT
+    target = '/symbios/media' if is_media else '/symbios'
+    cmd_parts = [f'{script} adopt', shlex.quote(device)]
     if copy == 'yes':
         cmd_parts.append('--copy')
     if check_only:
@@ -921,8 +946,8 @@ def settings_disk_adopt(request):
         from .utils.jobs import create_job
         job_id = create_job(cmd, timeout=900)
         return JsonResponse({'ok': True, 'job': job_id,
-                             'title': 'Adopting existing disk as /symbios...',
-                             'message': f'Switching /symbios to {device} without formatting.',
+                             'title': f'Adopting existing disk as {target}...',
+                             'message': f'Switching {target} to {device} without formatting.',
                              'command': cmd})
 
     ok, stdout, stderr = run_command(cmd, timeout=900)
