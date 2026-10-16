@@ -105,6 +105,15 @@
         ufw_proto: "{{ item.proto }}"
       loop: "{{ ufw_extra_inbound | default([]) }}"
 
+    # HTTPS for the boot-unlock page (before Traefik exists) and Traefik
+    # itself (later): without this, a locked /symbios after reboot is only
+    # reachable via provider console - the web unlock API stays silent
+    # behind the firewall (seen Oct 2026: curl hung, UFW BLOCK on :443).
+    - name: Allow https from all clients
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '443'
+
     - name: Deny everything per policy and enable UFW
       community.general.ufw:
         state: enabled
