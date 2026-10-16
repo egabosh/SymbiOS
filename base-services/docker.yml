@@ -206,6 +206,13 @@
         update_cache: yes
         install_recommends: no
 
+    - name: Discover docker0 gateway IP for container DNS
+      ansible.builtin.shell: ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
+      register: docker_bridge_ip
+      changed_when: false
+      failed_when: false
+      when: docker_stub_dns | default(false) | bool
+
     # https://github.com/nextcloud/docker/issues/1103
     # default-address-pools: hand out only a /24 (10.42.0.0/24, 10.42.1.0/24, ...)
     # per bridge network instead of a whole /16 per bridge.
@@ -260,19 +267,9 @@
         name: docker
         state: started
 
-    # Container/Build DNS via host stub (opt-in per host with
-    # docker_stub_dns: true): default-bridge and build containers receive
-    # the daemon DNS verbatim (no embedded DNS), so a localhost address is
-    # unreachable there. Use the discovered docker0 gateway IP instead;
-    # 127.0.0.2 stays second for user-defined networks (their embedded DNS
-    # forwards from the host netns). Unset/empty keeps docker defaults, so
-    # other hosts see no behavior change.
-    - name: Discover docker0 gateway IP for container DNS
-      ansible.builtin.shell: ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
-      register: docker_bridge_ip
-      changed_when: false
-      failed_when: false
-      when: docker_stub_dns | default(false) | bool
+    # Extra stub listeners so containers reach the host DNS stub
+    # (see discovery task above; 127.0.0.2 covers user-defined networks
+    # whose embedded DNS forwards from the host netns).
 
     - name: Extra stub listeners so containers reach the host DNS stub
       ansible.builtin.blockinfile:
