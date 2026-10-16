@@ -221,7 +221,8 @@
             "ipv6": true,
             "fixed-cidr-v6": "fdab::/64",
             "experimental": true,
-            "ip6tables": true
+            "ip6tables": true{% if docker_stub_dns | default(false) | bool and (docker_bridge_ip.stdout | default('')) | length > 0 %},
+            "dns": ["{{ docker_bridge_ip.stdout }}", "127.0.0.2"]{% endif %}
           }
       register: daemon_json
 
@@ -258,6 +259,37 @@
       ansible.builtin.service:
         name: docker
         state: started
+
+    # Container/Build DNS via host stub (opt-in per host with
+    # docker_stub_dns: true): default-bridge and build containers receive
+    # the daemon DNS verbatim (no embedded DNS), so a localhost address is
+    # unreachable there. Use the discovered docker0 gateway IP instead;
+    # 127.0.0.2 stays second for user-defined networks (their embedded DNS
+    # forwards from the host netns). Unset/empty keeps docker defaults, so
+    # other hosts see no behavior change.
+    - name: Discover docker0 gateway IP for container DNS
+      ansible.builtin.shell: ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
+      register: docker_bridge_ip
+      changed_when: false
+      failed_when: false
+      when: docker_stub_dns | default(false) | bool
+
+    - name: Extra stub listeners so containers reach the host DNS stub
+      ansible.builtin.blockinfile:
+        path: /etc/systemd/resolved.conf.d/10-docker-dns.conf
+        create: yes
+        mode: '0644'
+        owner: root
+        group: root
+        marker: "# {mark} DOCKER DNS STUB"
+        block: |
+          [Resolve]
+          DNSStubListenerExtra=127.0.0.2
+          DNSStubListenerExtra={{ docker_bridge_ip.stdout }}
+      when:
+        - docker_stub_dns | default(false) | bool
+        - docker_bridge_ip.stdout | default('') | length > 0
+      notify: Restart systemd-resolved
 
 
     - name: "{{ base_services_root }}/_defaults/mariadb/genrootpw"
@@ -369,6 +401,11 @@
     - name: Restart docker
       service:
         name: docker
+        state: restarted
+
+    - name: Restart systemd-resolved
+      service:
+        name: systemd-resolved
         state: restarted
 
 

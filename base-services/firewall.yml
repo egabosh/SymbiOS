@@ -85,6 +85,19 @@
         - 192.168.0.0/16
         - fc00::/7
 
+    # Container DNS via host stub (pairs with docker_stub_dns in
+    # docker.yml): default-bridge/build containers query the daemon DNS
+    # directly, so the stub must be reachable from private/docker nets.
+    # Gated like the daemon side - no open port without opt-in.
+    - name: Allow DNS port 53 from all IPv4/IPv6 private networks
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '53'
+        ufw_proto: "{{ item.1 }}"
+        ufw_src: "{{ item.0 }}"
+      loop: "{{ ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', 'fc00::/7'] | product(['tcp', 'udp']) | list }}"
+      when: docker_stub_dns | default(false) | bool
+
     - name: Allow extra inbound ports for IPv6 port forwarding
       include_tasks: ../shared-tasks/ufw-allow.yml
       vars:
