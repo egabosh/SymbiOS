@@ -41,6 +41,10 @@ Actions (exactly one required):
   --delete --uid <name>                                    Delete a user
   --modify --uid <name> [--password-file <path>] [--email <addr>]  Modify user
 
+--password-file is CONSUMED: the file is deleted when the call finishes, so
+give every invocation its own file. A missing or empty file aborts with an
+error instead of storing an empty password.
+
 Create options:
   --email <addr>        Email address (default: <uid>@<base_domain>)
   --displayname <name>  Display name (defaults to uid)
@@ -127,14 +131,27 @@ do
   esac
 done
 
-# Read password from file if provided
+# Read password from file if provided.
+#
+# The file is CONSUMED: it is deleted when this script exits, so it carries
+# the password for exactly ONE call. A loop over several users must build a
+# fresh file per user - reusing one file wrote an EMPTY userPassword for
+# every user after the first (silently, because the policy check is skipped
+# for an empty value). Missing and empty files are therefore hard errors.
 if [[ -n "${f_password_file}" ]]
 then
-  if [[ -f "${f_password_file}" ]]
+  if [[ ! -f "${f_password_file}" ]]
   then
-    f_password="$(cat "${f_password_file}")"
-    f_cleanup_files="${f_cleanup_files} ${f_password_file}"
+    g_echo_error "Password file not found: ${f_password_file}"
+    exit 1
   fi
+  f_password="$(cat "${f_password_file}")"
+  if [[ -z "${f_password}" ]]
+  then
+    g_echo_error "Password file is empty: ${f_password_file} (refusing to write an empty password)"
+    exit 1
+  fi
+  f_cleanup_files="${f_password_file}"
   trap 'rm -f ${f_cleanup_files} 2>/dev/null; eval "${g_trap_exit:-}"' EXIT HUP INT TERM
 fi
 
@@ -278,9 +295,52 @@ function f_validate_password_policy {
   esac
 }
 
+# Hash a password with a scheme slapd itself supports.
+#
+# Why this exists: the LDIF below used to carry the PLAINTEXT password. slapd
+# hashes on write only when olcPasswordHash is set, and the classic slapd.conf
+# directive password-hash cannot fix that on OpenLDAP 2.6 - slaptest always
+# maps it onto the frontend database, never onto mdb where it would have to
+# be. So every password set through this script (also the path the WebUI user
+# dialog and the password change use) stayed readable in the database and in
+# every LDAP backup.
+#
+# ARGON2 first: the argon2 module is loaded by base-services/ldap.yml and the
+# Nextcloud password import stores {ARGON2} hashes, so both use one scheme.
+# The password travels via stdin, never as an argument.
+function f_ldap_hash_password {
+  local f_compose="${g_base_services_root}/ldap/docker-compose.yml" f_out
+  f_out="$(printf '%s\n%s\n' "${f_password}" "${f_password}" \
+    | docker compose -f "${f_compose}" exec -T openldap \
+        slappasswd -o module-path=/usr/lib/ldap -o module-load=argon2 \
+        -h '{ARGON2}' 2>/dev/null | head -1)"
+  if [[ "${f_out}" == "{ARGON2}"* ]]
+  then
+    printf '%s' "${f_out}"
+    return 0
+  fi
+  # No argon2 module: stay hashed with SSHA rather than writing plaintext.
+  f_out="$(printf '%s\n%s\n' "${f_password}" "${f_password}" \
+    | docker compose -f "${f_compose}" exec -T openldap slappasswd -h '{SSHA}' 2>/dev/null | head -1)"
+  if [[ "${f_out}" == "{SSHA}"* ]]
+  then
+    printf '%s' "${f_out}"
+    return 0
+  fi
+  return 1
+}
+
 if [[ -n "${f_password}" ]] && [[ "${f_action}" != "delete" ]]
 then
   f_validate_password_policy "${f_password}" || exit 1
+  # Store the hash, never the plaintext. f_password itself stays available for
+  # the password-set hooks below (e.g. S3 htpasswd), which need the secret.
+  f_password_hash="$(printf '%s' "${f_password}" | f_ldap_hash_password)"
+  if [[ -z "${f_password_hash}" ]]
+  then
+    g_echo_error "Could not hash the password (slappasswd in the LDAP container failed) - refusing to write plaintext"
+    exit 1
+  fi
 fi
 
 # Read LDAP connection details from inventory
@@ -327,7 +387,7 @@ displayName: ${f_displayname}
 uidNumber: ${f_uid_number}
 gidNumber: 10000
 homeDirectory: /home/${f_uid}
-userPassword: ${f_password}"
+userPassword: ${f_password_hash}"
 
     if [[ -n "${f_email}" ]]
     then
@@ -442,7 +502,7 @@ mail: ${f_email}"
       fi
       f_ldif="${f_ldif}
 replace: userPassword
-userPassword: ${f_password}"
+userPassword: ${f_password_hash}"
     fi
 
     f_ldif="${f_ldif}
