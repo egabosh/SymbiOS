@@ -17,6 +17,7 @@
 # docs:
 #   uses_vars:
 #     - keyboard
+#   applies_when: raspberry_pi
 #   name: Raspberry Pi
 #   short_description: Raspberry Pi specific Debian setup
 #   description: Applies Raspberry-Pi-specific tweaks (boot/firmware, hardware enablement and onboarding) for running SymbiOS on Pi hardware. Manages no persistent service of its own.
@@ -51,6 +52,29 @@
     wifi_country_code: "{{ wifi_country_overrides.get(wifi_country_base, wifi_country_base) | upper }}"
 
   tasks:
+
+    # Guard - this playbook installs a Pi desktop stack and touches Pi
+    # hardware config. Running it elsewhere fails late with confusing apt
+    # errors (ttf-mscorefonts-installer is not in Debian proper), so abort
+    # up front with a readable reason. install.sh and
+    # symbios-playbooks-for-vars.sh (applies_when) gate it already; this
+    # catches manual runs.
+    - name: Guard - Detect Raspberry Pi hardware
+      ansible.builtin.stat:
+        path: /proc/device-tree/model
+      register: pi_device_tree
+      changed_when: false
+
+    - name: Guard - Abort on non-Pi hardware
+      ansible.builtin.assert:
+        that:
+          - pi_device_tree.stat.exists
+        fail_msg: >-
+          raspberry.yml is Raspberry Pi specific (declares
+          applies_when: raspberry_pi); this host has no
+          /proc/device-tree/model and is therefore no Pi. Install order
+          and settings apply skip it there.
+      when: not pi_device_tree.stat.exists
 
     - name: Install packages for cinnamon, desktop-stuff and tools
       apt:

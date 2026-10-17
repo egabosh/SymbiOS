@@ -191,6 +191,14 @@ Layout, sharing and syntax rules for every playbook in `services/` and
   (`scripts/symbios-playbooks-for-vars.sh` resolves from these blocks -
   no curated chains anywhere). `symbios-check-uses-vars.py` verifies
   coverage (used-but-undeclared fails).
+- **Platform gate (`applies_when:`)**: a hardware-conditional playbook
+  declares `applies_when: raspberry_pi` next to `uses_vars:`; the
+  resolver skips it on hosts that do not match (same
+  `/proc/device-tree/model` test as `install.sh`), reported as
+  `skip: ... (not applicable here: raspberry_pi)`. Without the key such
+  a playbook lands in EVERY `apply` chain that touches one of its vars -
+  `uses_vars: keyboard` once pulled the Pi desktop stack onto an x86
+  server. Manual runs are still caught by the playbook's own Guard task.
 - **Sharing**: only via top-level `shared-tasks/*.yml` with relative
   `include_tasks: ../shared-tasks/<file>.yml` (from both `services/` and
   `base-services/`). New shared tasks only with 3+ callers. Catalog below

@@ -14,6 +14,25 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# docs:
+#   applies_when: raspberry_pi
+#   name: Firefox
+#   short_description: Firefox / LibreWolf policies
+#   description: Installs Firefox and deploys the managed browser policy files. Part of the Raspberry Pi desktop setup, so it runs on Pi hardware only (same gate as raspberry.yml).
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Base services / Hardware
+#   service_control:
+#     services: []
+#
+
 - name: Firefox setup
   hosts: all
   tasks:

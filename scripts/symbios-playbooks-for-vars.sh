@@ -6,7 +6,9 @@
 # ignored) and prints the playbooks listing any of the given vars, one per
 # line, in run order (install.sh order for base-services, alphabetical for
 # services/). Uninstalled services/* are skipped (never auto-install apps);
-# base-services/* always run (platform converges). Skipped entries go to
+# base-services/* always run (platform converges). Playbooks whose docs
+# header declares `applies_when:` for a platform this host does not match
+# (e.g. `raspberry_pi`) are skipped as well. Skipped entries go to
 # stderr as info, never fail the call.
 #
 # This is pure lookup: execution lives in symbios-settings-lib.sh
@@ -25,7 +27,8 @@ install.sh order for base-services, alphabetical for services/.
 
 By default uninstalled services/* are skipped (reported on stderr);
 base-services/* always run (platform converges, incl. first install).
---all lists skipped services too (marked).
+A playbook declaring "applies_when: raspberry_pi" in its docs header is
+skipped on non-Pi hardware; --all lists such entries too (marked).
 
 Examples:
   $(basename "$0") timezone
@@ -135,6 +138,46 @@ function f_is_installed {
   "${g_symbios_dir}/symbios-state.sh" is-installed "${f_pb}" >/dev/null 2>&1
 }
 
+# Platform gate from the docs header: `applies_when:` (absent or `always`
+# = unconditional, `raspberry_pi` = Pi hardware only). Mirrors the
+# detection in install.sh. An unknown value never skips: running a
+# playbook is cheaper than silently dropping its config.
+function f_applies_when {
+  local f_file="$1" f_val
+  f_val="$(awk '
+    /^# *applies_when: */ {
+      line = $0
+      sub(/^# *applies_when: */, "", line)
+      gsub(/^[ \t]+|[ \t]+$/, "", line)
+      gsub(/^["\x27]|["\x27]$/, "", line)
+      print line
+      exit
+    }
+  ' "${f_file}" 2>/dev/null)"
+  printf '%s' "${f_val}"
+}
+
+function f_is_pi {
+  [[ -f /proc/device-tree/model ]] && grep -qi "raspberry" /proc/device-tree/model
+}
+
+function f_applies_here {
+  local f_rel="$1" f_when
+  f_when="$(f_applies_when "${g_repo_root}/${f_rel}")"
+  case "${f_when}" in
+    ""|always)
+      return 0
+      ;;
+    raspberry_pi)
+      f_is_pi
+      return $?
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 for f_rel in ${f_ordered[@]+"${f_ordered[@]}"}
 do
   f_hit="no"
@@ -151,6 +194,17 @@ do
     done
   done < <(f_uses_vars "${g_repo_root}/${f_rel}")
   [[ "${f_hit}" == "yes" ]] || continue
+  if ! f_applies_here "${f_rel}"
+  then
+    f_when="$(f_applies_when "${g_repo_root}/${f_rel}")"
+    if [[ "${f_all}" == "yes" ]]
+    then
+      echo "${f_rel} (not applicable here: ${f_when})"
+    else
+      echo "skip: ${f_rel} (not applicable here: ${f_when})" >&2
+    fi
+    continue
+  fi
   if [[ "${f_rel}" == services/* ]]
   then
     if f_is_installed "${f_rel}"
