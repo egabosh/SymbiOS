@@ -118,6 +118,28 @@ function f_ldap_add_reader {
     openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 32 > "${f_pwfile}"
     chmod 600 "${f_pwfile}"
   fi
+  # Hash server-side before storing. slapd only hashes on write when
+  # olcPasswordHash is set, and the classic slapd.conf directive password-hash
+  # cannot provide it on OpenLDAP 2.6 (slaptest maps it onto the frontend
+  # database, never onto mdb), so a plaintext value would sit readable in the
+  # database and in every LDAP backup. Same scheme as symbios-ldap-user.sh.
+  # The plaintext stays in f_pwfile - the SFTP container binds with it.
+  local f_pw f_hash
+  f_pw="$(cat "${f_pwfile}")"
+  f_hash="$(printf '%s\n%s\n' "${f_pw}" "${f_pw}" \
+    | docker compose exec -T openldap \
+        slappasswd -o module-path=/usr/lib/ldap -o module-load=argon2 \
+        -h '{ARGON2}' 2>/dev/null | head -1)"
+  if [[ "${f_hash}" != "{ARGON2}"* ]]
+  then
+    f_hash="$(printf '%s\n%s\n' "${f_pw}" "${f_pw}" \
+      | docker compose exec -T openldap slappasswd -h '{SSHA}' 2>/dev/null | head -1)"
+  fi
+  if [[ -z "${f_hash}" ]]
+  then
+    g_echo_error "Could not hash the sftp-reader password (slappasswd failed)"
+    return 1
+  fi
   docker compose exec -T openldap ldapadd -x -H ldap://localhost \
     -D "cn=head-of-ldap,${f_base}" -w "${LDAP_ADMIN_PW}" << EOF
 dn: cn=sftp-reader,${f_base}
@@ -125,7 +147,7 @@ objectClass: simpleSecurityObject
 objectClass: organizationalRole
 cn: sftp-reader
 description: Least-privilege bind account for the SFTP container. Do not remove!
-userPassword: $(cat "${f_pwfile}")
+userPassword: ${f_hash}
 EOF
 }
 
