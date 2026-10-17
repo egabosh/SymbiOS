@@ -107,8 +107,15 @@ def parse_docs_uses(path):
     if not isinstance(docs, dict):
         return True, [], False
     uses = docs.get('uses_vars')
-    if uses is None:
+    if uses is None and 'uses_vars' not in docs:
+        # Key absent: the playbook declares nothing at all.
         return True, None, True
+    if uses is None:
+        # Key present but empty ("uses_vars:" with no entries) - an explicit
+        # declaration that the playbook consumes NO inventory key. Without
+        # this branch an empty list was indistinguishable from a missing key
+        # and every var-free playbook failed the check.
+        return True, [], True
     return True, list(uses), True
 
 
