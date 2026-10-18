@@ -248,6 +248,9 @@
     # unbound.conf is owned here as a full file: mailcow's update.sh does a
     # git pull that would revert partial blockinfile edits, and the defaults
     # (root-hints recursion, IPv6) do not fit this setup.
+    #
+    # Upstream: Docker's embedded resolver at 127.0.0.11, present in every
+    # user-defined bridge network. 
     - name: "{{ mailcow_root }}/data/conf/unbound/unbound.conf"
       ansible.builtin.copy:
         dest: "{{ mailcow_root }}/data/conf/unbound/unbound.conf"
@@ -269,7 +272,6 @@
             access-control: 172.16.0.0/12 allow
             access-control: 192.168.0.0/16 allow
             access-control: 127.0.0.0/8 allow
-            access-control: 192.168.188.0/24 allow
             directory: "/etc/unbound"
             username: unbound
             auto-trust-anchor-file: trusted-key.key
@@ -286,7 +288,7 @@
 
           forward-zone:
             name: "."
-            forward-addr: 192.168.188.1
+            forward-addr: {{ mailcow_dns_forwarder | default('127.0.0.11') }}
 
           remote-control:
             control-enable: yes
