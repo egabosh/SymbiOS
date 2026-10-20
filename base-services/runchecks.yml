@@ -77,12 +77,19 @@
         state: directory
         mode: '0700'
 
-    - name: "{{ git_root }}/scripts/runchecks.d/services"
+    - name: "{{ data_root }}/runchecks.d/services"
       lineinfile:
-        path: "{{ git_root }}/scripts/runchecks.d/services"
+        path: "{{ data_root }}/runchecks.d/services"
         create: yes
         insertbefore: EOF
         line: "cron rsyslog sshd"
+
+    # The list used to live in the git checkout, which is source territory.
+    # Runtime data belongs below the data root.
+    - name: Remove the obsolete service list from the git checkout
+      ansible.builtin.file:
+        path: "{{ git_root }}/scripts/runchecks.d/services"
+        state: absent
 
     - name: /etc/systemd/system/runchecks.service
       ansible.builtin.copy:

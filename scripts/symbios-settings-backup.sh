@@ -29,8 +29,10 @@ Commands:
                                   backup_exclude one pattern per line;
                                   or a JSON object with --json)
   set [--host H --port P --user U --path P --encryption true|false
-       --exclude-stdin] [--check]
+       --enabled true|false --exclude-stdin] [--check]
                                   Validate and write to inventory.yml.
+                                  --enabled switches the nightly backup on
+                                  or off (off by default).
                                   Options left out keep their current value;
                                   an empty --port/--user falls back to 22 /
                                   root (same as the WebUI). --exclude-stdin
@@ -59,7 +61,7 @@ EOF
 }
 
 # Inventory keys managed here (for apply + coverage check).
-f_managed_vars=""
+f_managed_vars="backup_enabled"
 
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
@@ -103,6 +105,9 @@ then
    "placeholder": "/backups/symbios"},
   {"name": "backup_encryption", "type": "bool", "label": "Encrypt backups",
    "required": true, "default": false, "secret": false},
+  {"name": "backup_enabled", "type": "bool", "label": "Nightly backup",
+   "required": true, "default": false, "secret": false,
+   "note": "The backup job only runs when this is switched on."},
   {"name": "backup_exclude", "type": "multiline", "label": "Exclude patterns",
    "required": false, "default": [], "secret": false,
    "note": "One rsync pattern per line, # comments allowed"}
@@ -122,6 +127,13 @@ then
 else
   f_cur_enc="false"
 fi
+f_cur_enabled="$(f_symbios_var backup_enabled "false")"
+if [[ "${f_cur_enabled}" == "True" || "${f_cur_enabled}" == "true" ]]
+then
+  f_cur_enabled="true"
+else
+  f_cur_enabled="false"
+fi
 # The exclude list is a YAML list - the grep-based f_symbios_var cannot
 # read it, so use the inventory CLI (JSON) instead.
 f_cur_excludes_json="$("$g_symbios_dir/symbios-inventory.py" \
@@ -131,12 +143,13 @@ if [[ "${f_command}" == "get" ]]
 then
   if [[ "${1:-}" == "--json" ]]
   then
-    printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_encryption": %s, "backup_exclude": %s}\n' \
+    printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_encryption": %s, "backup_enabled": %s, "backup_exclude": %s}\n' \
       "$(printf '%s' "${f_cur_host}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_port}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_user}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_path}" | f_json_escape)" \
       "${f_cur_enc}" \
+      "${f_cur_enabled}" \
       "${f_cur_excludes_json}"
     exit 0
   elif [[ $# -gt 0 ]]
@@ -149,6 +162,7 @@ then
   echo "backup_server_user=${f_cur_user}"
   echo "backup_server_path=${f_cur_path}"
   echo "backup_encryption=${f_cur_enc}"
+  echo "backup_enabled=${f_cur_enabled}"
   echo "backup_exclude=${f_cur_excludes_json}"
   exit 0
 fi
@@ -160,11 +174,13 @@ f_new_port=""
 f_new_user=""
 f_new_path=""
 f_new_enc=""
+f_new_enabled=""
 f_given_host="no"
 f_given_port="no"
 f_given_user="no"
 f_given_path="no"
 f_given_enc="no"
+f_given_enabled="no"
 f_given_excludes="no"
 f_excludes_json="[]"
 f_check="no"
@@ -202,12 +218,18 @@ do
       f_given_enc="yes"
       shift 2
       ;;
+    --enabled)
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      f_new_enabled="$2"
+      f_given_enabled="yes"
+      shift 2
+      ;;
     --json-stdin)
       # Full field object for generic callers (e.g. the schema renderer).
       # backup_exclude arrives as a newline string, split like the
       # --exclude-stdin textarea lines.
       f_json="$(cat)"
-      for f_field in backup_server_host backup_server_port backup_server_user backup_server_path backup_encryption backup_exclude
+      for f_field in backup_server_host backup_server_port backup_server_user backup_server_path backup_encryption backup_enabled backup_exclude
       do
         [[ "${f_json}" == *'"'"${f_field}"'"'* ]] || continue
         if [[ "${f_field}" == "backup_exclude" ]]
@@ -238,7 +260,7 @@ do
         fi
         f_val="$(f_json_get "${f_json}" "${f_field}")" || f_val=""
         # Booleans arrive unquoted - match generously.
-        if [[ "${f_field}" == "backup_encryption" ]]
+        if [[ "${f_field}" == "backup_encryption" || "${f_field}" == "backup_enabled" ]]
         then
           f_onoff="$(grep -o "\"${f_field}\"[[:space:]]*:[[:space:]]*[^,}]*" <<< "${f_json}" | head -1)"
           f_onoff="${f_onoff##*:}"
@@ -246,8 +268,14 @@ do
           f_onoff="${f_onoff%"${f_onoff##*[![:space:]]}"}"
           f_onoff="${f_onoff%\"}"
           f_onoff="${f_onoff#\"}"
-          f_new_enc="${f_onoff}"
-          f_given_enc="yes"
+          if [[ "${f_field}" == "backup_enabled" ]]
+          then
+            f_new_enabled="${f_onoff}"
+            f_given_enabled="yes"
+          else
+            f_new_enc="${f_onoff}"
+            f_given_enc="yes"
+          fi
           continue
         fi
         case "${f_field}" in
@@ -309,7 +337,8 @@ done
 
 if [[ "${f_given_host}" == "no" && "${f_given_port}" == "no" \
    && "${f_given_user}" == "no" && "${f_given_path}" == "no" \
-   && "${f_given_enc}" == "no" && "${f_given_excludes}" == "no" ]]
+   && "${f_given_enc}" == "no" && "${f_given_enabled}" == "no" \
+   && "${f_given_excludes}" == "no" ]]
 then
   f_ss_fail_validation "Nothing to set - pass at least one field option"
 fi
@@ -321,6 +350,7 @@ fi
 [[ "${f_given_user}" == "no" ]] && f_new_user="${f_cur_user}"
 [[ "${f_given_path}" == "no" ]] && f_new_path="${f_cur_path}"
 [[ "${f_given_enc}" == "no" ]] && f_new_enc="${f_cur_enc}"
+[[ "${f_given_enabled}" == "no" ]] && f_new_enabled="${f_cur_enabled}"
 [[ -z "${f_new_port}" ]] && f_new_port="22"
 [[ -z "${f_new_user}" ]] && f_new_user="root"
 
@@ -355,15 +385,27 @@ case "${f_new_enc,,}" in
     f_ss_fail_validation "Invalid --encryption value: ${f_new_enc} (expected true|false)"
     ;;
 esac
+case "${f_new_enabled,,}" in
+  true|1|yes|on)
+    f_new_enabled="true"
+    ;;
+  false|0|no|off)
+    f_new_enabled="false"
+    ;;
+  *)
+    f_ss_fail_validation "Invalid --enabled value: ${f_new_enabled} (expected true|false)"
+    ;;
+esac
 
 # --- transactional write -------------------------------------------------------
 
-f_merge="$(printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_encryption": %s' \
+f_merge="$(printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_encryption": %s, "backup_enabled": %s' \
   "$(printf '%s' "${f_new_host}" | f_json_escape)" \
   "$(printf '%s' "${f_new_port}" | f_json_escape)" \
   "$(printf '%s' "${f_new_user}" | f_json_escape)" \
   "$(printf '%s' "${f_new_path}" | f_json_escape)" \
-  "${f_new_enc}")"
+  "${f_new_enc}" \
+  "${f_new_enabled}")"
 if [[ "${f_given_excludes}" == "yes" ]]
 then
   f_merge="${f_merge}, \"backup_exclude\": ${f_excludes_json}}"

@@ -6,6 +6,13 @@ CHECK_DETAIL="Watches the success marker written by the nightly backup job.|Dail
 # Healthcheck for the nightly backup job
 f_check_cache "symbios-healthcheck-backup" || return 2>/dev/null || true
 
+# The backup is optional (backup_enabled in the inventory, default off).
+# A host without a backup job has nothing to report.
+if [[ "$(f_symbios_var backup_enabled false)" != "true" ]]
+then
+  return 0
+fi
+
 g_backup_marker="${g_log_dir}/backup-last-success"
 
 if [[ ! -f "$g_backup_marker" ]]

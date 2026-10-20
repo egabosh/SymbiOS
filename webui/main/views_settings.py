@@ -274,12 +274,15 @@ def settings_backup(request):
         # no secrets are involved in this domain.
         encryption = ('true' if request.POST.get('backup_encryption') == 'on'
                       else 'false')
+        enabled = ('true' if request.POST.get('backup_enabled') == 'on'
+                   else 'false')
         set_cmd = ('symbios-settings-backup.sh set'
                    f' --host {shlex.quote(request.POST.get("backup_server_host", "").strip())}'
                    f' --port {shlex.quote(request.POST.get("backup_server_port", "").strip())}'
                    f' --user {shlex.quote(request.POST.get("backup_server_user", "").strip())}'
                    f' --path {shlex.quote(request.POST.get("backup_server_path", "").strip())}'
                    f' --encryption {encryption}'
+                   f' --enabled {enabled}'
                    ' --exclude-stdin')
         stdin_data = request.POST.get('backup_exclude', '')
         try:

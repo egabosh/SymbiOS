@@ -15,10 +15,11 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
-#   uses_vars: []
+#   uses_vars:
+#     - backup_enabled
 #   name: Backup
 #   short_description: Configure automated backups
-#   description: Installs a nightly backup job (cron) that dumps databases/LDAP and snapshots the whole /symbios data root - locally, to an SSH/SFTP server or as encrypted archive. Restores are possible per service or for the whole system via the WebUI (Settings -> Backup).
+#   description: Installs a nightly backup job (cron) that dumps databases/LDAP and snapshots the whole /symbios data root - locally, to an SSH/SFTP server or as encrypted archive. The job is only installed while backup_enabled is true (default off). Restores are possible per service or for the whole system via the WebUI (Settings -> Backup).
 #   author: Oliver Bohlen
 #   version: '2.0'
 #   license: GPLv3
@@ -78,6 +79,9 @@
         state: directory
         mode: '0700'
 
+    # The nightly job only runs while the backup is enabled (Settings ->
+    # Backup). When it is switched off the cron file is removed, so the
+    # host does not fill up with snapshots nobody asked for.
     - name: /etc/cron.d/backup_local
       blockinfile:
         path: /etc/cron.d/backup_local
@@ -90,6 +94,13 @@
           SHELL=/bin/bash
           5 0 * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/backup.sh ]] && backup.sh
         backup: yes
+      when: backup_enabled | default(false) | bool
+
+    - name: Remove the cron file when the backup is disabled
+      ansible.builtin.file:
+        path: /etc/cron.d/backup_local
+        state: absent
+      when: not (backup_enabled | default(false) | bool)
 
     # The backup healthcheck lives in scripts/runchecks.d/ and is picked
     # up automatically (runchecks.sh scans the git tree).

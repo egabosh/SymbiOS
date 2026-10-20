@@ -137,6 +137,12 @@
     wordpress_oidc_plugin_version: "3.11.3"
     # The OIDC issuer of the local Authelia (the portal the users log in at).
     wordpress_oidc_issuer: "https://auth.{{ base_domain }}"
+    # WP-CLI, mounted into the instance containers. The static export plugin
+    # of an instance can be crawled and exported from the host with it.
+    # The URL serves the current stable release, so the version does not
+    # need to be maintained here. The file is only fetched when it is
+    # missing, so a later playbook run works without network access.
+    wp_cli_url: "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"
     # Instance list is managed by the WebUI (Instances tab) and stored in the
     # writable config dir, NOT in inventory.yml (which stays base-system only).
     wp_instances_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/wordpress/instances.yml"
@@ -314,6 +320,17 @@
         oidc_issuer: "{{ wordpress_oidc_issuer }}"
       loop: "{{ wordpress_instances | default([]) }}"
       notify: Restart wordpress
+
+    # WP-CLI for the instances: the static export plugin can be triggered
+    # and diagnosed from the host (crawl and export of a site).
+    - name: Fetch WP-CLI
+      ansible.builtin.get_url:
+        url: "{{ wp_cli_url }}"
+        dest: /symbios/services/wordpress/wp-cli.phar
+        mode: '0755'
+        owner: root
+        group: root
+      when: wp_cli_url | length > 0
 
     # Render the single compose stack (shared MariaDB + one container per instance)
     - name: /symbios/services/wordpress/docker-compose.yml

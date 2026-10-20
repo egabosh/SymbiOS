@@ -48,12 +48,27 @@ services:
     volumes:
       - ./{{ wp.name }}-data:/var/www/html
       - /etc/localtime:/etc/localtime:ro
+      # WP-CLI for the instance (crawl and export of the static export
+      # plugin, diagnostics). The file is fetched by the playbook.
+      - type: bind
+        source: ./wp-cli.phar
+        target: /usr/local/bin/wp
+        read_only: true
+        bind:
+          create_host_path: false
 {% if wp.static_export_site is defined %}
       # Static export target: the document root of the static web site is
       # mounted at the export path of the plugin, so the plugin writes the
       # export straight into the site.
       - /symbios/services/static-web/htdocs/{{ wp.static_export_site }}:{{ wp.static_export_path | default('/var/www/static-export') }}
 {% endif %}
+    # The static export plugin keeps many files open while it crawls and
+    # copies the site. The default limit of the container (1024) is too
+    # low for a site of this size.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 524288
     depends_on:
       db:
         condition: service_healthy

@@ -5,10 +5,12 @@ CHECK_DETAIL="Verifies hostapd.service is active via systemctl.|hostapd provides
 
 # Healthcheck for hostapd (WLAN Access Point)
 f_check_cache "symbios-healthcheck-wlan-ap" || return 2>/dev/null || true
-# Only relevant while the AP is enabled (ap_enabled in inventory).
-# When the master switch is off, a stopped hostapd is the expected state.
+# Only relevant while the AP is configured (ap_configured) and enabled
+# (ap_enabled) in the inventory. Without a configuration there is nothing
+# to check: a host without WLAN hardware must not report an error.
+f_ap_configured="$(f_symbios_var ap_configured false)"
 f_ap_enabled="$(f_symbios_var ap_enabled true)"
-if [[ "${f_ap_enabled}" == "true" ]] && ! systemctl is-active hostapd.service >/dev/null 2>&1
+if [[ "${f_ap_configured}" == "true" ]] && [[ "${f_ap_enabled}" == "true" ]] && ! systemctl is-active hostapd.service >/dev/null 2>&1
 then
   g_echo_error "Healthcheck failed for wlan-ap: hostapd not active"
 fi

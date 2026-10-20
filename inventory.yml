@@ -144,6 +144,10 @@ all:
     # The OpenWrt VM image is a large sparse ISO that would be materialized
     # by the hardlink snapshot - exclude the VM images from the backup.
     backup_encryption: false
+    # Master switch for the nightly backup job (Settings -> Backup). The
+    # job is only installed while this is true; the default is off, because
+    # a snapshot of the data root needs a lot of space.
+    backup_enabled: false
     backup_exclude:
       - "/services/*-vm/iso/*.img"
       - "/.keys/"

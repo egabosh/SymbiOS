@@ -31,6 +31,21 @@
 <div class="row">
   <div class="col-md-8">
 
+    <!-- Master switch: the nightly job -->
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-clock-history"></i> <strong>Nightly backup</strong></div>
+      <div class="card-body">
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" name="backup_enabled" id="backup_enabled"
+                 role="switch" {% if vars.backup_enabled %}checked{% endif %}>
+          <label class="form-check-label" for="backup_enabled">
+            <strong>Run a backup every night</strong>
+            <span class="text-muted small">- the job is installed on the host only while this is switched on. A snapshot of the whole data root needs a lot of space, so the default is off. A manual backup (button below) works either way.</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
     <!-- Step 1: target -->
     <div class="card mb-3">
       <div class="card-header"><i class="bi bi-1-circle"></i> <strong>Where should your backups go?</strong></div>

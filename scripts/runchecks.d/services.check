@@ -1,10 +1,11 @@
 CHECK_CATEGORY="system"
 CHECK_TITLE="System Services"
 CHECK_DESC="Checks that required system services are running."
-CHECK_DETAIL="Reads a list of required services from|/usr/local/sbin/runchecks.d/services.|For each service, checks if a matching process is running.|Missing services may indicate a failed startup."
+CHECK_DETAIL="Reads a list of required services from|the data partition (runchecks.d/services).|For each service, checks if a matching process is running.|Missing services may indicate a failed startup."
 
-# Verify required system services are running
-for g_service in $(cat /usr/local/sbin/runchecks.d/services | sort)
+# Verify required system services are running. The list is runtime data and
+# lives next to the healthchecks below the data root, not in the git checkout.
+for g_service in $(cat "${g_data_root}/runchecks.d/services" 2>/dev/null | sort)
 do
   if ! ps aux | grep -v grep | grep -q "$g_service"
   then
