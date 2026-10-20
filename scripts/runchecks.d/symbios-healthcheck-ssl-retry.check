@@ -39,11 +39,30 @@ f_configured=$(grep -ho 'Host(`[^`]*`)' "${g_providers_dir}"/*.yml 2>/dev/null |
 f_certified=""
 if [[ -f "${g_acme_json}" ]]
 then
-  f_mains=$(grep -o '"main"[[:space:]]*:[[:space:]]*"[^"]*"' "${g_acme_json}" 2>/dev/null | \
-    grep -o '"[^"]*"$' | tr -d '"' || true)
-  f_sans=$(grep -o '"sans"[[:space:]]*:[[:space:]]*\[[^]]*\]' "${g_acme_json}" 2>/dev/null | \
-    grep -o '"[a-zA-Z0-9.*-]*"' | tr -d '"' || true)
-  f_certified=$(printf '%s\n%s' "${f_mains}" "${f_sans}" | grep . | sort -u || true)
+  # The sans lists are written multi-line, so a line based grep only sees
+  # the main names and reports every SAN as missing. Read the store with a
+  # JSON parser instead.
+  f_certified=$(python3 - "${g_acme_json}" <<'PYEOF' 2>/dev/null
+import json
+import sys
+
+try:
+    with open(sys.argv[1]) as fh:
+        data = json.load(fh)
+except (OSError, ValueError):
+    sys.exit(0)
+
+for resolver in data.values():
+    if not isinstance(resolver, dict):
+        continue
+    for cert in resolver.get("Certificates") or []:
+        domain = cert.get("domain") or {}
+        for name in [domain.get("main", "")] + list(domain.get("sans") or []):
+            if name:
+                print(name)
+PYEOF
+)
+  f_certified=$(printf '%s\n' "${f_certified}" | grep . | sort -u || true)
 fi
 
 f_missing=$(comm -23 <(printf '%s\n' "${f_configured}") \
