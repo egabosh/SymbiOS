@@ -149,27 +149,6 @@
         state: directory
         mode: '0550'
 
-    # Remove the directories of instances that were removed from the
-    # config file (the content would otherwise linger in the service
-    # directory).
-    - name: Detect orphaned static-web directories
-      ansible.builtin.find:
-        paths: "{{ item }}"
-        file_type: directory
-      register: static_web_dirs
-      loop:
-        - "/symbios/services/{{ service_name }}/htdocs"
-        - "/symbios/services/{{ service_name }}/nginx"
-
-    - name: Remove orphaned static-web directories
-      ansible.builtin.file:
-        path: "{{ item.path }}"
-        state: absent
-      loop: "{{ static_web_dirs.results | default([]) | map(attribute='files') | flatten | selectattr('isdir', 'defined') | selectattr('isdir') | list }}"
-      when: item.path | regex_replace('^.*/', '') not in _static_web_current_names
-      vars:
-        _static_web_current_names: "{{ static_web_instances | default([]) | map(attribute='name') | list }}"
-
     # One nginx container per instance, each with its own vhost directory.
     - name: Create nginx config dir per instance
       ansible.builtin.file:
