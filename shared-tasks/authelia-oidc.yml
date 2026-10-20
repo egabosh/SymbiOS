@@ -7,6 +7,13 @@
 #
 # Required vars:  service_name, service_domain, oidc_redirect_uris (list)
 # Optional vars:  oidc_client_name        (default: service_name)
+# Optional vars:  oidc_secret_file        (default: <data_root>/services/<service_name>/oidc_digest)
+#                           For services that keep the secrets of several
+#                           instances in one service directory.
+# Optional vars:  oidc_claims_policy      (default: none)
+#                           Name of a claims policy of the OIDC provider
+#                           (see the claims_policies section in
+#                           base-services/authelia.yml).
 # Optional vars:  oidc_consent_mode       (default: "implicit")
 # NOTE: 'intersect' is NOT a valid Authelia consent_mode (would break
 # Authelia's config load and crash it). Valid: auto, implicit, explicit,
@@ -26,7 +33,7 @@
   ansible.builtin.blockinfile:
     path: /symbios/base-services/authelia/authelia-data/configuration.yml
     marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC {{ service_name }}"
-    block: "      # {{ oidc_client_name | default(service_name) }}\n      - client_id: '{{ service_name }}'\n        client_name: '{{ oidc_client_name | default(service_name) }}'\n        client_secret: '{{ lookup('file', data_root ~ '/services/' ~ service_name ~ '/oidc_digest') }}'\n        public: false\n        require_pkce: {{ oidc_require_pkce | default(true) | lower }}\n        pkce_challenge_method: '{{ oidc_pkce_challenge_method | default('S256') }}'\n        authorization_policy: '{{ lookup('file', data_root ~ '/base-services/authelia/authorization_policy') }}'\n        consent_mode: '{{ oidc_consent_mode | default('implicit') }}'\n        redirect_uris:\n          - '{{ oidc_redirect_uris | first }}'\n        scopes:\n          - 'openid'\n          - 'profile'\n          - 'email'\n          - 'groups'\n        response_types:\n          - 'code'\n        grant_types:\n          - 'authorization_code'\n        access_token_signed_response_alg: 'none'\n        userinfo_signed_response_alg: 'none'\n        token_endpoint_auth_method: '{{ oidc_token_endpoint_auth_method | default('client_secret_post') }}'"
+    block: "      # {{ oidc_client_name | default(service_name) }}\n      - client_id: '{{ service_name }}'\n        client_name: '{{ oidc_client_name | default(service_name) }}'\n        client_secret: '{{ lookup('file', oidc_secret_file | default(data_root ~ '/services/' ~ service_name ~ '/oidc_digest')) }}'\n        public: false\n        require_pkce: {{ oidc_require_pkce | default(true) | lower }}\n        pkce_challenge_method: '{{ oidc_pkce_challenge_method | default('S256') }}'\n        authorization_policy: '{{ lookup('file', data_root ~ '/base-services/authelia/authorization_policy') }}'\n        consent_mode: '{{ oidc_consent_mode | default('implicit') }}'\n        claims_policy: '{{ oidc_claims_policy | default('') }}'\n        redirect_uris:\n          - '{{ oidc_redirect_uris | first }}'\n        scopes:\n          - 'openid'\n          - 'profile'\n          - 'email'\n          - 'groups'\n        response_types:\n          - 'code'\n        grant_types:\n          - 'authorization_code'\n        access_token_signed_response_alg: 'none'\n        userinfo_signed_response_alg: 'none'\n        token_endpoint_auth_method: '{{ oidc_token_endpoint_auth_method | default('client_secret_post') }}'"
     insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
     backup: yes
   notify: Restart authelia

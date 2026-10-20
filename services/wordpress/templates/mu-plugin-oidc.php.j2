@@ -1,0 +1,101 @@
+<?php
+/**
+ * SymbiOS - OpenID Connect login for the WordPress instance {{ wp.name }}.
+ *
+ * Deployed by services/wordpress.yml (must-use plugin, always active).
+ * Configures the "OpenID Connect Generic" plugin against the local
+ * Authelia and restricts the login to the members of the LDAP group
+ * {{ wp.group }}.
+ *
+ * The plugin reads its configuration from the constants below (they take
+ * precedence over the options in the database), so no database writes are
+ * needed to roll the login out.
+ *
+ * @package SymbiOS
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+define( 'OIDC_CLIENT_ID', '{{ oidc_client_id }}' );
+define( 'OIDC_CLIENT_SECRET', '{{ oidc_client_secret }}' );
+define( 'OIDC_CLIENT_SCOPE', 'openid profile email groups' );
+define( 'OIDC_ISSUER', '{{ oidc_issuer }}' );
+define( 'OIDC_ENDPOINT_LOGIN_URL', '{{ oidc_issuer }}/api/oidc/authorization' );
+define( 'OIDC_ENDPOINT_TOKEN_URL', '{{ oidc_issuer }}/api/oidc/token' );
+define( 'OIDC_ENDPOINT_USERINFO_URL', '{{ oidc_issuer }}/api/oidc/userinfo' );
+define( 'OIDC_ENDPOINT_JWKS_URL', '{{ oidc_issuer }}/jwks.json' );
+define( 'OIDC_LOGIN_TYPE', 'auto' );
+define( 'OIDC_CREATE_IF_DOES_NOT_EXIST', 1 );
+define( 'OIDC_LINK_EXISTING_USERS', 1 );
+define( 'OIDC_ENFORCE_PRIVACY', {{ 1 if wp.private else 0 }} );
+
+/**
+ * Settings that have no constant: the identity is the e-mail claim, so the
+ * account is found by the mail address (the LDAP mail attributes carry the
+ * same addresses as the migrated WordPress accounts).
+ */
+add_filter( 'openid-connect-generic-settings', 'symbios_oidc_settings' );
+
+function symbios_oidc_settings( $settings ) {
+	$settings->identity_key           = 'email';
+	$settings->identify_with_username = false;
+	// The format strings take the claim in braces.
+	$settings->email_format           = '{email}';
+	$settings->displayname_format     = '{name}';
+	$settings->nickname_key           = 'preferred_username';
+	// The identity provider of this host resolves to a private address
+	// (the container reaches the host over the services network), so the
+	// plugin would block the token request by its SSRF protection.
+	$settings->allow_internal_idp     = true;
+	return $settings;
+}
+
+/**
+ * Only members of the instance group may log in.
+ *
+ * The plugin resolves the account by the e-mail claim and creates it on the
+ * first login, so the group check has to happen before that. The check runs
+ * for the login of an existing account and for the creation of a new one.
+ */
+add_filter( 'openid-connect-generic-user-login-test', 'symbios_oidc_group_allowed', 10, 2 );
+add_filter( 'openid-connect-generic-user-creation-test', 'symbios_oidc_group_allowed', 10, 2 );
+
+function symbios_oidc_group_allowed( $allow, $user_claim ) {
+	$groups = array();
+	if ( is_array( $user_claim ) && isset( $user_claim['groups'] ) && is_array( $user_claim['groups'] ) ) {
+		$groups = $user_claim['groups'];
+	}
+	if ( in_array( '{{ wp.group }}', $groups, true ) ) {
+		return $allow;
+	}
+	return false;
+}
+
+/**
+ * Members of the instance group get the administrator role.
+ *
+ * Only members pass the check above, so the role is granted unconditionally
+ * here. The plugin creates new accounts with the subscriber role.
+ */
+add_action( 'openid-connect-generic-user-logged-in', 'symbios_oidc_grant_role' );
+
+function symbios_oidc_grant_role( $user ) {
+	if ( ! $user instanceof WP_User ) {
+		return;
+	}
+	$user->add_role( 'administrator' );
+}
+
+/**
+ * The classic WordPress login is disabled: the group check above only
+ * covers the OIDC path, so a login with a WordPress password would bypass
+ * it. The OpenID Connect login does not use this filter, existing sessions
+ * stay valid.
+ */
+add_filter( 'authenticate', 'symbios_oidc_block_classic_login', 5, 3 );
+
+function symbios_oidc_block_classic_login( $user, $username, $password ) {
+	return new WP_Error( 'symbios_oidc_only', 'Bitte melde dich ueber die OIDC-Anmeldung an.' );
+}

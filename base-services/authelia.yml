@@ -448,6 +448,16 @@
               jwks:
                 - key: |
                    {{ oidc_key.stdout | indent(9, first=False) }}
+              # Claims policies (the key is the name a client refers to with
+              # its claims_policy option). Since v4.38 the email claim is not
+              # released by default; services that identify their users by
+              # the mail address (WordPress) need it.
+              claims_policies:
+                email:
+                  id_token:
+                    - 'email'
+                  access_token:
+                    - 'email'
               cors:
                 endpoints:
                   - "authorization"

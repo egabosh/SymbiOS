@@ -28,22 +28,17 @@
 #     data lives in <config>/services/wordpress/instances.yml, not in
 #     inventory.yml). Each instance gets its own WordPress container, its own
 #     database and user on ONE shared MariaDB, a Traefik route (domain plus
-#     optional aliases) and a healthcheck. The instance domain is the main
-#     domain of the site: it is forced into WP_HOME/WP_SITEURL, so the site
-#     answers on it and redirects the aliases to it. Instances without the
-#     "public" flag are protected by Authelia forward-auth (LDAP group
-#     wordpress-<name>); optional phpMyAdmin is always protected and runs on
-#     its own host in the scope of the base domain
-#     (wordpress-<instance>-phpmyadmin.<base_domain>, or the explicit
-#     phpmyadmin_domain of the instance). Hosts whose domain is not in the
-#     Authelia session cookie scope (the portal URL has to share the cookie
-#     scope with the domain) cannot be protected - the playbook fails then.
-#     An instance can publish a static export of the site into a share
-#     (static_export_share) that a static-web site serves; the share is
-#     mounted into the container at the export path of the plugin
-#     (static_export_path), so the plugin needs no reconfiguration.
+#     optional aliases) and a healthcheck. The login runs in WordPress
+#     (OpenID Connect against the local Authelia); only the members of the
+#     group wordpress-<instance> may log in. An instance with "public: false"
+#     requires a login for the whole site, a public one only guards the
+#     admin area. The optional phpMyAdmin is always protected by the forward
+#     auth against the same group. An instance can publish a static export
+#     of the site into a share (static_export_share) that a static-web site
+#     serves; the share is mounted into the container at the export path of
+#     the plugin (static_export_path), so the plugin needs no reconfiguration.
 #   author: Oliver Bohlen
-#   version: '1.2'
+#   version: '1.3'
 #   license: GPLv3
 #   copyright: Copyright (c) 2026, Oliver Bohlen
 #   min_ansible_version: '2.11'
@@ -132,6 +127,13 @@
     #   when: not (item.public | default(false) | bool) or (item.phpmyadmin | default(false) | bool) or (item.sftp | default(false) | bool)
     # Authelia policy follows the central twofa_enabled variable.
     wp_auth_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
+    # The OpenID Connect login of the instances: the plugin is installed per
+    # instance, the client in Authelia is created per instance, the group
+    # check runs in the must-use plugin.
+    wordpress_oidc_plugin: "daggerhart-openid-connect-generic"
+    wordpress_oidc_plugin_version: "3.11.3"
+    # The OIDC issuer of the local Authelia (the portal the users log in at).
+    wordpress_oidc_issuer: "https://auth.{{ base_domain }}"
     # Instance list is managed by the WebUI (Instances tab) and stored in the
     # writable config dir, NOT in inventory.yml (which stays base-system only).
     wp_instances_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/wordpress/instances.yml"
@@ -226,6 +228,89 @@
         {{ wordpress_instances | default([]) | map(attribute='name') | join(' ') }}
       changed_when: false
 
+    # OIDC login per instance: a client secret, the OIDC client in Authelia,
+    # the plugin in the instance and the must-use plugin that configures it
+    # and restricts the login to the members of the instance group.
+    - name: Create the OIDC client secret of each instance
+      ansible.builtin.shell: >
+        /symbios/base-services/authelia/gen-oidc-client-secret.sh
+        /symbios/services/wordpress/{{ item.name }}-oidc
+      loop: "{{ wordpress_instances | default([]) }}"
+      changed_when: false
+
+    - name: Write the OIDC client of each instance in Authelia
+      ansible.builtin.include_tasks: ../shared-tasks/authelia-oidc.yml
+      vars:
+        service_name: "wordpress-{{ item.name }}"
+        oidc_client_name: "WordPress {{ item.name }}"
+        oidc_secret_file: "/symbios/services/wordpress/{{ item.name }}-oidc/oidc_digest"
+        # The OpenID Connect Generic plugin does not support PKCE, so the
+        # client must neither require it nor name a challenge method
+        # (Authelia enforces PKCE as soon as a method is set).
+        oidc_require_pkce: false
+        oidc_pkce_challenge_method: ''
+        # The accounts are identified by the mail address, so the claim
+        # has to be released (see base-services/authelia.yml).
+        oidc_claims_policy: 'email'
+        # The plugin uses the admin-ajax endpoint of the instance as the
+        # redirect URI of the flow (see the plugin setting
+        # "alternate_redirect_uri" - the default is the admin-ajax variant).
+        oidc_redirect_uris:
+          - "https://{{ item.domain }}/wp-admin/admin-ajax.php?action=openid-connect-authorize"
+      loop: "{{ wordpress_instances | default([]) }}"
+
+    - name: Read the WordPress .env
+      ansible.builtin.set_fact:
+        wp_env: "{{ wp_env | default({}) | combine({ (item | split('=') | first): (item | split('=', 1) | last) }) }}"
+      loop: >-
+        {{ lookup('file', '/symbios/services/wordpress/.env').splitlines()
+           | select('search', '=') | reject('search', '^#') | list }}
+      changed_when: false
+
+    - name: Install the OpenID Connect plugin in each instance
+      ansible.builtin.shell: |
+        set -e
+        docker run --rm --user 33:33 --network symbios-wordpress_symbios-wordpress \
+          -e WORDPRESS_DB_HOST=db \
+          -e WORDPRESS_DB_USER="{{ wp_env['WORDPRESS_' ~ (item.name | upper | regex_replace('-', '_')) ~ '_DB_USER'] }}" \
+          -e WORDPRESS_DB_PASSWORD="{{ wp_env['WORDPRESS_' ~ (item.name | upper | regex_replace('-', '_')) ~ '_DB_PASSWORD'] }}" \
+          -e WORDPRESS_DB_NAME="{{ wp_env['WORDPRESS_' ~ (item.name | upper | regex_replace('-', '_')) ~ '_DB_NAME'] }}" \
+          -v "/symbios/services/wordpress/{{ item.name }}-data:/var/www/html" \
+          wordpress:cli wp plugin install {{ wordpress_oidc_plugin }} \
+          --version={{ wordpress_oidc_plugin_version }} --activate --quiet
+      loop: "{{ wordpress_instances | default([]) }}"
+      changed_when: false
+      register: wp_oidc_plugin_install
+      failed_when: wp_oidc_plugin_install.rc != 0
+
+    - name: Create the must-use plugin directory of each instance
+      ansible.builtin.file:
+        path: "/symbios/services/wordpress/{{ item.name }}-data/wp-content/mu-plugins"
+        owner: www-data
+        group: www-data
+        state: directory
+        mode: '0755'
+      loop: "{{ wordpress_instances | default([]) }}"
+
+    - name: Deploy the OIDC must-use plugin of each instance
+      ansible.builtin.template:
+        src: wordpress/templates/mu-plugin-oidc.php.j2
+        dest: "/symbios/services/wordpress/{{ item.name }}-data/wp-content/mu-plugins/symbios-oidc.php"
+        owner: www-data
+        group: www-data
+        mode: '0640'
+      vars:
+        wp:
+          name: "{{ item.name }}"
+          domain: "{{ item.domain }}"
+          group: "wordpress-{{ item.name }}"
+          private: "{{ not (item.public | default(false) | bool) }}"
+        oidc_client_id: "wordpress-{{ item.name }}"
+        oidc_client_secret: "{{ lookup('file', '/symbios/services/wordpress/' ~ item.name ~ '-oidc/oidc_password') }}"
+        oidc_issuer: "{{ wordpress_oidc_issuer }}"
+      loop: "{{ wordpress_instances | default([]) }}"
+      notify: Restart wordpress
+
     # Render the single compose stack (shared MariaDB + one container per instance)
     - name: /symbios/services/wordpress/docker-compose.yml
       ansible.builtin.template:
@@ -249,38 +334,25 @@
     # The protection of a host depends on its domain the same way. Hosts
     # outside the Authelia scope cannot be protected at all - the playbook
     # fails then instead of falling back to another mechanism.
+    #
+    # The site itself is not protected by the forward auth: the login runs
+    # in WordPress (OpenID Connect), which works on every domain. A
+    # non-public instance is protected by the plugin (enforce_privacy), a
+    # public one only guards the admin area.
     - name: Determine the phpMyAdmin domain and the auth protection of every instance
       ansible.builtin.set_fact:
         wordpress_phpmyadmin_domains: "{{ wordpress_phpmyadmin_domains | default({}) | combine({item.name: _wp_phpmyadmin_domain}) }}"
-        wordpress_auth: "{{ wordpress_auth | default({}) | combine({item.name: _wp_site_auth}) }}"
         wordpress_phpmyadmin_auth: "{{ wordpress_phpmyadmin_auth | default({}) | combine({item.name: _wp_phpmyadmin_auth}) }}"
       vars:
         _wp_auth_scopes: "{{ [base_domain] + (authelia_cookie_domains | default([])) | map('trim') | select() | list }}"
         _wp_phpmyadmin_domain: "{{ (item.phpmyadmin_domain | default('') | trim) or ('wordpress-' ~ item.name ~ '-phpmyadmin.' ~ base_domain) }}"
         # A host is in the Authelia scope when the host itself or the host
         # without its first label is a configured session cookie domain.
-        _wp_site_auth: "{{ 'none' if (item.public | default(false) | bool) else ('authelia' if ((item.domain in _wp_auth_scopes) or ((item.domain | regex_replace('^[^.]+\\.', '')) in _wp_auth_scopes)) else 'unprotected') }}"
         _wp_phpmyadmin_auth: "{{ 'authelia' if ((_wp_phpmyadmin_domain in _wp_auth_scopes) or ((_wp_phpmyadmin_domain | regex_replace('^[^.]+\\.', '')) in _wp_auth_scopes)) else 'unprotected' }}"
       loop: "{{ wordpress_instances | default([]) }}"
       loop_control:
         label: "{{ item.name }}"
       changed_when: false
-
-    # A host outside the Authelia scope cannot be authenticated at all:
-    # the portal URL does not share the cookie scope with the domain, so
-    # the forward auth would answer with 400 instead of the login page.
-    - name: Fail on protected hosts outside the Authelia session cookie scope
-      ansible.builtin.assert:
-        that: wordpress_auth[item.name] != 'unprotected'
-        fail_msg: >-
-          The site domain of the WordPress instance {{ item.name }} ({{ item.domain }}) is
-          not covered by a session cookie domain of Authelia, so it cannot be protected.
-          Add the domain to authelia_cookie_domains or make the instance public.
-      loop: "{{ wordpress_instances | default([]) }}"
-      when:
-        - not (item.public | default(false) | bool)
-      loop_control:
-        label: "{{ item.name }}"
 
     - name: Fail on phpMyAdmin hosts outside the Authelia session cookie scope
       ansible.builtin.assert:
@@ -368,18 +440,9 @@
       when: item.sftp | default(false) | bool
       no_log: true
 
-    - name: Write Authelia access_control for restricted WordPress domains
-      ansible.builtin.include_tasks: ../shared-tasks/authelia-acl.yml
-      loop: "{{ wordpress_instances | default([]) }}"
-      when:
-        - not (item.public | default(false) | bool)
-        - wordpress_auth[item.name] == 'authelia'
-      vars:
-        service_name: "wordpress-{{ item.name }}"
-        service_domain: "{{ item.domain }}"
-        authelia_subjects: ["group:wordpress-{{ item.name }}"]
-        authelia_policy: "{{ wp_auth_policy | default('one_factor') }}"
-
+    # The site itself carries no Authelia rule: the login runs in WordPress
+    # (OpenID Connect) and the group check happens in the must-use plugin.
+    # Only the phpMyAdmin endpoint is protected by the forward auth.
     - name: Write Authelia access_control for WordPress phpMyAdmin domains
       ansible.builtin.include_tasks: ../shared-tasks/authelia-acl.yml
       loop: "{{ wordpress_instances | default([]) }}"
@@ -405,16 +468,12 @@
           {{ (wp_acl_cfg.content | b64decode | regex_findall('^# BEGIN ANSIBLE MANAGED BLOCK (wordpress-[^ ]+) ACCESS CONTROL$', multiline=True) | list)
              | difference(_wp_acl_current) }}
       vars:
-        # Only the instances that are really protected by Authelia own a
-        # rule; the others are protected by the Traefik basic auth.
+        # Only the phpMyAdmin endpoints own a rule (the site is protected by
+        # the OpenID Connect login in WordPress).
         _wp_acl_authelia: >-
           {{ wordpress_phpmyadmin_auth | default({}) | dict2items | selectattr('value', 'eq', 'authelia') | map(attribute='key') | list }}
         _wp_acl_current: >-
-          {{ wordpress_instances | default([]) | map(attribute='name')
-             | select('in', _wp_acl_authelia) | list
-             | map('regex_replace', '^', 'wordpress-')
-             | list
-             + _wp_acl_authelia
+          {{ _wp_acl_authelia
              | map('regex_replace', '^', 'wordpress-')
              | map('regex_replace', '$', '-phpmyadmin')
              | list }}
