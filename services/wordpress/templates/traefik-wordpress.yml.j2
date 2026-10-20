@@ -14,8 +14,6 @@ http:
         - "secHeaders@file"
 {% if wordpress_auth[wp.name] == 'authelia' %}
         - "authelia@file"
-{% elif wordpress_auth[wp.name] == 'basic' %}
-        - "default-basic-auth@file"
 {% endif %}
 {% if wp.phpmyadmin | default(false) %}
     wordpress-{{ wp.name }}-phpmyadmin:
@@ -27,11 +25,7 @@ http:
         certResolver: {{ acme_resolver }}
       middlewares:
         - "secHeaders@file"
-{% if wordpress_phpmyadmin_auth[wp.name] == 'authelia' %}
         - "authelia@file"
-{% else %}
-        - "default-basic-auth@file"
-{% endif %}
 {% endif %}
 {% endfor %}
   services:

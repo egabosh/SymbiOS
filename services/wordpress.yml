@@ -32,11 +32,11 @@
 #     answers on it and redirects the aliases to it. Instances without the
 #     "public" flag are protected by Authelia forward-auth (LDAP group
 #     wordpress-<name>); optional phpMyAdmin is always protected and runs on
-#     its own host (wp-phpmyadmin.<domain without www./wp. prefix>, or the
-#     explicit phpmyadmin_domain of the instance). Hosts whose domain is not
-#     in the Authelia session cookie scope (the portal URL has to share the
-#     cookie scope with the domain) are protected by the Traefik basic auth
-#     instead.
+#     its own host in the scope of the base domain
+#     (wordpress-<instance>-phpmyadmin.<base_domain>, or the explicit
+#     phpmyadmin_domain of the instance). Hosts whose domain is not in the
+#     Authelia session cookie scope (the portal URL has to share the cookie
+#     scope with the domain) cannot be protected - the playbook fails then.
 #   author: Oliver Bohlen
 #   version: '1.2'
 #   license: GPLv3
@@ -67,7 +67,7 @@
 #         label: phpMyAdmin-Domain
 #         type: text
 #         pattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
-#         placeholder: wp-phpmyadmin.example.com
+#         placeholder: wordpress-blog-phpmyadmin.example.com
 #       aliases:
 #         label: Aliases
 #         type: list
@@ -185,16 +185,18 @@
       notify: Restart wordpress
 
     # The phpMyAdmin host of an instance: the explicit per-instance value
-    # wins, otherwise it is derived from the main domain
-    # (wp-phpmyadmin.<domain without a leading www./wp. prefix>).
-    # Computed once because the Traefik router and the Authelia rule must
-    # use the same host.
+    # wins, otherwise it is derived from the base domain
+    # (wordpress-<instance>-phpmyadmin.<base_domain>).
     #
-    # The protection of a host depends on its domain: Authelia can only
-    # protect a host whose cookie domain is listed in the session cookies
-    # (the portal URL has to share the cookie scope with the domain, see
-    # base-services/authelia.yml). Hosts on a foreign domain fall back to
-    # the Traefik basic auth, otherwise the forward auth answers with 400.
+    # The phpMyAdmin always runs in the scope of the base domain: Authelia
+    # can only protect a host whose cookie domain is listed in the session
+    # cookies (the portal URL has to share the cookie scope with the
+    # domain), so a phpMyAdmin on the foreign domain of an instance could
+    # never be authenticated.
+    #
+    # The protection of a host depends on its domain the same way. Hosts
+    # outside the Authelia scope cannot be protected at all - the playbook
+    # fails then instead of falling back to another mechanism.
     - name: Determine the phpMyAdmin domain and the auth protection of every instance
       ansible.builtin.set_fact:
         wordpress_phpmyadmin_domains: "{{ wordpress_phpmyadmin_domains | default({}) | combine({item.name: _wp_phpmyadmin_domain}) }}"
@@ -202,15 +204,45 @@
         wordpress_phpmyadmin_auth: "{{ wordpress_phpmyadmin_auth | default({}) | combine({item.name: _wp_phpmyadmin_auth}) }}"
       vars:
         _wp_auth_scopes: "{{ [base_domain] + (authelia_cookie_domains | default([])) | map('trim') | select() | list }}"
-        _wp_phpmyadmin_domain: "{{ (item.phpmyadmin_domain | default('') | trim) or ('wp-phpmyadmin.' ~ (item.domain | regex_replace('^(www|wp)\\.', ''))) }}"
+        _wp_phpmyadmin_domain: "{{ (item.phpmyadmin_domain | default('') | trim) or ('wordpress-' ~ item.name ~ '-phpmyadmin.' ~ base_domain) }}"
         # A host is in the Authelia scope when the host itself or the host
         # without its first label is a configured session cookie domain.
-        _wp_site_auth: "{{ 'none' if (item.public | default(false) | bool) else ('authelia' if ((item.domain in _wp_auth_scopes) or ((item.domain | regex_replace('^[^.]+\\.', '')) in _wp_auth_scopes)) else 'basic') }}"
-        _wp_phpmyadmin_auth: "{{ 'authelia' if ((_wp_phpmyadmin_domain in _wp_auth_scopes) or ((_wp_phpmyadmin_domain | regex_replace('^[^.]+\\.', '')) in _wp_auth_scopes)) else 'basic' }}"
+        _wp_site_auth: "{{ 'none' if (item.public | default(false) | bool) else ('authelia' if ((item.domain in _wp_auth_scopes) or ((item.domain | regex_replace('^[^.]+\\.', '')) in _wp_auth_scopes)) else 'unprotected') }}"
+        _wp_phpmyadmin_auth: "{{ 'authelia' if ((_wp_phpmyadmin_domain in _wp_auth_scopes) or ((_wp_phpmyadmin_domain | regex_replace('^[^.]+\\.', '')) in _wp_auth_scopes)) else 'unprotected' }}"
       loop: "{{ wordpress_instances | default([]) }}"
       loop_control:
         label: "{{ item.name }}"
       changed_when: false
+
+    # A host outside the Authelia scope cannot be authenticated at all:
+    # the portal URL does not share the cookie scope with the domain, so
+    # the forward auth would answer with 400 instead of the login page.
+    - name: Fail on protected hosts outside the Authelia session cookie scope
+      ansible.builtin.assert:
+        that: wordpress_auth[item.name] != 'unprotected'
+        fail_msg: >-
+          The site domain of the WordPress instance {{ item.name }} ({{ item.domain }}) is
+          not covered by a session cookie domain of Authelia, so it cannot be protected.
+          Add the domain to authelia_cookie_domains or make the instance public.
+      loop: "{{ wordpress_instances | default([]) }}"
+      when:
+        - not (item.public | default(false) | bool)
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Fail on phpMyAdmin hosts outside the Authelia session cookie scope
+      ansible.builtin.assert:
+        that: wordpress_phpmyadmin_auth[item.name] != 'unprotected'
+        fail_msg: >-
+          The phpMyAdmin host of the WordPress instance {{ item.name }}
+          ({{ wordpress_phpmyadmin_domains[item.name] }}) is not covered by a session cookie
+          domain of Authelia, so it cannot be protected. Use a host below
+          {{ base_domain }} or add the domain to authelia_cookie_domains.
+      loop: "{{ wordpress_instances | default([]) }}"
+      when:
+        - item.phpmyadmin | default(false) | bool
+      loop_control:
+        label: "{{ item.name }}"
 
     # Render the single Traefik file-provider snippet for all instances.
     # Traefik watches the providers directory, so no reload is required.
