@@ -43,8 +43,8 @@ services:
       WORDPRESS_DB_PASSWORD: ${WORDPRESS_{{ wp.name | upper | regex_replace('-', '_') }}_DB_PASSWORD}
       WORDPRESS_DB_NAME: ${WORDPRESS_{{ wp.name | upper | regex_replace('-', '_') }}_DB_NAME}
       WORDPRESS_CONFIG_EXTRA: |
-        define('WP_HOME', 'https://{{ wp.domain }}');
-        define('WP_SITEURL', 'https://{{ wp.domain }}');
+        define('WP_HOME', 'https://www.{{ wp.domain | regex_replace('^wp\.', '') }}');
+        define('WP_SITEURL', 'https://www.{{ wp.domain | regex_replace('^wp\.', '') }}');
     volumes:
       - ./{{ wp.name }}-data:/var/www/html
       - /etc/localtime:/etc/localtime:ro
