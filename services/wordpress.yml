@@ -333,8 +333,12 @@
     # keeps the file group at 33 so WordPress never loses group access to
     # SFTP-created files. The GID is resolved numerically from LDAP because
     # host NSS does not reliably resolve LDAP group names (only the local
-    # media entry is guaranteed). The recursive pass runs once (marker
-    # file), the default ACL is refreshed on every apply. Repair path for
+    # media entry is guaranteed).
+    #
+    # The pass runs on every apply, not once: the document root directory
+    # gets its mode applied above, and a mode change resets the ACL mask
+    # to the group bits - which masks the group entry down to r-x and
+    # takes the write access away from the SFTP users. Repair path for
     # drifted ownership: scripts/symbios-wordpress-fix-perms.sh
     - name: Install ACL tools for SFTP ACLs
       ansible.builtin.apt:
@@ -357,8 +361,6 @@
         touch "/symbios/services/wordpress/.sftp-acl-{{ item.name }}"
       environment:
         LDAP_ADMIN_PW: "{{ lookup('file', (config_dir | default('/symbios/base-services/symbios-ui/config')) + '/.ldap_admin_pw') }}"
-      args:
-        creates: "/symbios/services/wordpress/.sftp-acl-{{ item.name }}"
       loop: "{{ wordpress_instances | default([]) }}"
       when: item.sftp | default(false) | bool
       no_log: true
