@@ -84,6 +84,9 @@
 #       public:
 #         label: Public
 #         type: bool
+#       basic_auth:
+#         label: Basic-Auth
+#         type: bool
 #   service_control:
 #     services:
 #     - name: static-web

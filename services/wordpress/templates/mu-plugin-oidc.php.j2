@@ -29,7 +29,10 @@ define( 'OIDC_ENDPOINT_JWKS_URL', '{{ oidc_issuer }}/jwks.json' );
 define( 'OIDC_LOGIN_TYPE', 'auto' );
 define( 'OIDC_CREATE_IF_DOES_NOT_EXIST', 1 );
 define( 'OIDC_LINK_EXISTING_USERS', 1 );
-define( 'OIDC_ENFORCE_PRIVACY', {{ 1 if wp.private else 0 }} );
+// The login requirement of a private instance is enforced below, not with
+// the constant of the plugin: the static export crawls the site over HTTP
+// and is the only client that can authenticate server side, so it has to
+// be exempted there.
 
 /**
  * Settings that have no constant: the identity is the e-mail claim, so the
@@ -86,6 +89,48 @@ function symbios_oidc_grant_role( $user ) {
 		return;
 	}
 	$user->add_role( 'administrator' );
+}
+
+/**
+ * A private instance (public: false) requires a login for the whole site,
+ * not only for the admin area.
+ *
+ * The static export plugin crawls the site over HTTP with the basic auth
+ * credentials of the export account. It is exempted here, because it is
+ * the only client that can authenticate server side - a session based
+ * protection would hand it the login page instead of the content.
+ */
+{% if wp.private %}
+add_action( 'template_redirect', 'symbios_oidc_enforce_login', 0 );
+{% endif %}
+
+function symbios_oidc_enforce_login() {
+	if ( is_user_logged_in() ) {
+		return;
+	}
+	if ( symbios_oidc_is_export_crawler() ) {
+		return;
+	}
+	wp_redirect( wp_login_url() );
+	exit;
+}
+
+/**
+ * Whether the request carries the basic auth credentials of the export
+ * plugin (the static export crawler).
+ */
+function symbios_oidc_is_export_crawler() {
+	$user = isset( $_SERVER['PHP_AUTH_USER'] ) ? $_SERVER['PHP_AUTH_USER'] : '';
+	$pass = isset( $_SERVER['PHP_AUTH_PW'] ) ? $_SERVER['PHP_AUTH_PW'] : '';
+	if ( $user === '' || $pass === '' ) {
+		return false;
+	}
+	$options = get_option( 'wp2static-options' );
+	if ( ! is_array( $options ) ) {
+		return false;
+	}
+	return ( ( $options['basicAuthUser'] ?? '' ) === $user
+		&& ( $options['basicAuthPassword'] ?? '' ) === $pass );
 }
 
 /**

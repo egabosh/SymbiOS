@@ -17,6 +17,9 @@ http:
 {% if not (site.public | default(false) | bool) %}
         - "authelia@file"
 {% endif %}
+{% if site.basic_auth | default(false) | bool %}
+        - "default-basic-auth@file"
+{% endif %}
 {% endfor %}
   services:
 {% for site in static_web_instances | default([]) %}

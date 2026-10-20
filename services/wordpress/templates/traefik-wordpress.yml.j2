@@ -12,6 +12,9 @@ http:
         certResolver: {{ acme_resolver }}
       middlewares:
         - "secHeaders@file"
+{% if wp.basic_auth | default(false) | bool %}
+        - "default-basic-auth@file"
+{% endif %}
 {% if wp.phpmyadmin | default(false) %}
     wordpress-{{ wp.name }}-phpmyadmin:
       rule: "Host(`{{ wordpress_phpmyadmin_domains[wp.name] }}`)"

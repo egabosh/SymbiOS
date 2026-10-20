@@ -84,6 +84,9 @@
 #       public:
 #         label: Public
 #         type: bool
+#       basic_auth:
+#         label: Basic-Auth
+#         type: bool
 #       sftp:
 #         label: SFTP
 #         type: bool
