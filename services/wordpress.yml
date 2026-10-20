@@ -356,8 +356,11 @@
           | sed -n 's/^gidNumber: //p' | head -1)
         [ -n "$GID" ] || { echo "no GID for wordpress-{{ item.name }}"; exit 1; }
         chmod -R g+s "/symbios/services/wordpress/{{ item.name }}-data"
-        setfacl -R -m "g:${GID}:rwx" -m m::rwx "/symbios/services/wordpress/{{ item.name }}-data"
-        setfacl -R -d -m "g:${GID}:rwx" -m m::rwx "/symbios/services/wordpress/{{ item.name }}-data"
+        # o::--- removes the world permissions: the instance files carry the
+        # database credentials and the auth salts, so only the instance
+        # group (and WordPress itself as the owner) may read them.
+        setfacl -R -m "g:${GID}:rwx" -m m::rwx -m o::--- "/symbios/services/wordpress/{{ item.name }}-data"
+        setfacl -R -d -m "g:${GID}:rwx" -m m::rwx -m o::--- "/symbios/services/wordpress/{{ item.name }}-data"
         touch "/symbios/services/wordpress/.sftp-acl-{{ item.name }}"
       environment:
         LDAP_ADMIN_PW: "{{ lookup('file', (config_dir | default('/symbios/base-services/symbios-ui/config')) + '/.ldap_admin_pw') }}"
