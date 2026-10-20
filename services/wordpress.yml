@@ -19,6 +19,7 @@
 #     - acme_resolver
 #     - authelia_cookie_domains
 #     - base_domain
+#     - media_root
 #     - twofa_enabled
 #   name: WordPress
 #   short_description: Deploy multiple WordPress instances
@@ -37,6 +38,10 @@
 #     phpmyadmin_domain of the instance). Hosts whose domain is not in the
 #     Authelia session cookie scope (the portal URL has to share the cookie
 #     scope with the domain) cannot be protected - the playbook fails then.
+#     An instance can publish a static export of the site into a share
+#     (static_export_share) that a static-web site serves; the share is
+#     mounted into the container at the export path of the plugin
+#     (static_export_path), so the plugin needs no reconfiguration.
 #   author: Oliver Bohlen
 #   version: '1.2'
 #   license: GPLv3
@@ -68,6 +73,15 @@
 #         type: text
 #         pattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
 #         placeholder: wordpress-blog-phpmyadmin.example.com
+#       static_export_share:
+#         label: Static-Export-Share
+#         type: text
+#         pattern: '^[a-z0-9][a-z0-9-]*$'
+#         placeholder: my-site
+#       static_export_path:
+#         label: Static-Export-Pfad
+#         type: text
+#         placeholder: /var/www/www.example.com/htdocs
 #       aliases:
 #         label: Aliases
 #         type: list
@@ -166,6 +180,44 @@
         state: directory
         mode: '0755'
       loop: "{{ wordpress_instances | default([]) }}"
+
+    # A static export (WP2Static and friends) writes into a share that a
+    # static site serves. The share is mounted into the WordPress
+    # container at the export path of the plugin, so the plugin needs no
+    # reconfiguration. The share keeps its own ownership (the LDAP group
+    # of the share); WordPress writes through an ACL for its own uid.
+    - name: Resolve the static export share of the instances
+      ansible.builtin.set_fact:
+        wordpress_export_shares: "{{ wordpress_export_shares | default({}) | combine({item.name: _wp_export_share}) }}"
+      vars:
+        _wp_export_share: "{{ media_root | default('/symbios/media') }}/shared/{{ item.static_export_share }}"
+      loop: "{{ wordpress_instances | default([]) }}"
+      when: item.static_export_share is defined
+      changed_when: false
+
+    - name: Fail on a missing static export share
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ wordpress_export_shares | default({}) | dict2items | map(attribute='value') | list }}"
+      register: wp_export_share_stats
+      changed_when: false
+
+    - name: Assert that the static export shares exist
+      ansible.builtin.assert:
+        that: item.stat.exists
+        fail_msg: >-
+          The static export share of the WordPress instance does not exist ({{ item.item }}).
+          Create it first (e.g. with symbios-media-share.sh --create).
+      loop: "{{ wp_export_share_stats.results | default([]) }}"
+      changed_when: false
+
+    - name: Grant the WordPress user write access on the static export shares
+      ansible.builtin.shell: |
+        set -e
+        setfacl -R -m u:33:rwX "{{ item }}" && \
+        setfacl -R -d -m u:33:rwX "{{ item }}"
+      loop: "{{ wordpress_export_shares | default({}) | dict2items | map(attribute='value') | list }}"
+      changed_when: false
 
     # Generate/refresh the compose .env with root + per-instance credentials.
     - name: Generate WordPress .env secrets

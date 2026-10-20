@@ -1,0 +1,149 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Redirects a domain to another URL.
+#
+# Every instance is one domain (plus optional aliases) that is redirected
+# to a target URL; the path of the request is kept. The redirect is done
+# by Traefik (redirectRegex middleware), so neither a container nor a
+# document root is needed.
+#
+# docs:
+#   uses_vars:
+#     - acme_resolver
+#   name: Redirects
+#   short_description: Redirect domains to other sites
+#   description: >-
+#     Redirects a domain to another URL. The instances are managed in the
+#     WebUI under the Instances tab (the data lives in
+#     <config>/services/redirects/instances.yml, not in inventory.yml).
+#     The request path is kept, so a redirect target may carry a path
+#     prefix.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   config:
+#     title: Instances
+#     file: services/redirects/instances.yml
+#     fields:
+#       name:
+#         label: Name
+#         type: text
+#         required: true
+#         pattern: '^[a-z0-9][a-z0-9-]*$'
+#         placeholder: my-old-domain
+#       domain:
+#         label: Domain
+#         type: text
+#         required: true
+#         pattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
+#         placeholder: old.example.com
+#       aliases:
+#         label: Aliases
+#         type: list
+#         placeholder: www.old.example.com
+#       target:
+#         label: Target-URL
+#         type: text
+#         required: true
+#         pattern: '^https?://[^\s]+$'
+#         placeholder: https://www.example.com
+#   service_control:
+#     services:
+#     - name: redirects
+#       type: config
+#       status: test -f /symbios/base-services/traefik/providers/redirects.yml || exit 2
+#   uninstall:
+#     program_paths:
+#     - /symbios/base-services/traefik/providers/redirects.yml
+#     - /symbios/runchecks.d/symbios-healthcheck-redirects-*.check
+#
+---
+- name: redirects
+  hosts: all
+  gather_facts: no
+  vars:
+    service_name: redirects
+    # Instance list is managed by the WebUI (Instances tab) and stored in
+    # the writable config dir, NOT in inventory.yml (which stays
+    # base-system only).
+    redirect_instances_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/redirects/instances.yml"
+  tasks:
+
+    # Load the instance list from the WebUI-managed config file. When the
+    # file does not exist yet (service not configured), redirect_instances
+    # stays an empty list and the provider renders no router.
+    - name: Read instance config file
+      ansible.builtin.slurp:
+        src: "{{ redirect_instances_file }}"
+      register: redirect_instances_slurp
+      failed_when: false
+
+    - name: Set redirect_instances from config file
+      ansible.builtin.set_fact:
+        redirect_instances: "{{ (redirect_instances_slurp.content | default('') | b64decode) | from_yaml | default([]) }}"
+      when: redirect_instances_slurp.content | default('') | length > 0
+
+    # One router per instance, redirecting to the target of the instance.
+    # Traefik watches the providers directory, so no reload is required.
+    - name: /symbios/base-services/traefik/providers/redirects.yml Traefik File Provider
+      ansible.builtin.template:
+        src: redirects/templates/traefik-redirects.yml.j2
+        dest: /symbios/base-services/traefik/providers/redirects.yml
+        mode: '0444'
+        owner: root
+        group: docker
+        backup: yes
+
+    # One healthcheck per instance: probes the domain, so a broken
+    # redirect (or an unreachable target) is reported.
+    - name: Deploy healthcheck for each instance
+      ansible.builtin.include_tasks: ../shared-tasks/runcheck.yml
+      vars:
+        service_name: "redirects-{{ item.name }}"
+        service_domain: "{{ item.domain }}"
+      loop: "{{ redirect_instances | default([]) }}"
+
+    # Remove healthchecks of instances that were removed from the config
+    # file (the orphaned .check would otherwise keep failing every 5 min).
+    - name: Detect deployed redirect healthchecks
+      ansible.builtin.find:
+        paths: "{{ data_root }}/runchecks.d"
+        patterns: "symbios-healthcheck-redirects-*.check"
+      register: redirect_hc_existing
+
+    - name: Remove healthchecks of removed redirect instances
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ _redirect_hc_stale }}"
+      vars:
+        _redirect_hc_current: >-
+          {{ redirect_instances | default([]) | map(attribute='name')
+             | map('regex_replace', '^', data_root ~ '/runchecks.d/symbios-healthcheck-redirects-')
+             | map('regex_replace', '$', '.check')
+             | list }}
+        _redirect_hc_stale: "{{ redirect_hc_existing.files | map(attribute='path') | difference(_redirect_hc_current) | list }}"
+
+    - name: Register playbook as installed
+      ansible.builtin.include_tasks: ../shared-tasks/state-register.yml

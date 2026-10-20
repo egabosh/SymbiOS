@@ -48,6 +48,12 @@ services:
     volumes:
       - ./{{ wp.name }}-data:/var/www/html
       - /etc/localtime:/etc/localtime:ro
+{% if wp.static_export_share is defined %}
+      # Static export target: the share is mounted at the export path of
+      # the plugin, so the plugin writes the export straight into the
+      # share that the static site serves.
+      - {{ media_root | default('/symbios/media') }}/shared/{{ wp.static_export_share }}:{{ wp.static_export_path | default('/var/www/static-export') }}
+{% endif %}
     depends_on:
       db:
         condition: service_healthy
