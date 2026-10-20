@@ -45,6 +45,14 @@ services:
         bind:
           create_host_path: false
 {% endfor %}
+{% for site in static_web_sftp_mounts | default([]) %}
+      - type: bind
+        source: /symbios/services/static-web/htdocs/{{ site.name }}
+        target: /sftp-share/static-web/{{ site.name }}
+        read_only: false
+        bind:
+          create_host_path: false
+{% endfor %}
     networks:
       - sftp-share--network
       - symbios_base_services

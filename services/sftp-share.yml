@@ -104,6 +104,10 @@
     # with sftp:true are auto-exposed; run wordpress.yml first so the data
     # dirs and the instance ACLs exist before this playbook mounts them.
     wp_instances_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/wordpress/instances.yml"
+    # Static web instance list (same file static-web.yml manages). The
+    # document roots are mounted below /sftp-share/static-web/<name>; run
+    # static-web.yml first so the dirs and their ACLs exist.
+    static_web_instances_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/static-web/instances.yml"
   tasks:
 
   - name: Read WordPress instance list for SFTP auto-exposure
@@ -116,6 +120,17 @@
     ansible.builtin.set_fact:
         wordpress_sftp_mounts: "{{ (sftp_wp_instances_slurp.content | default('') | b64decode | from_yaml | default([])) | selectattr('sftp', 'defined') | selectattr('sftp') | list }}"
     when: sftp_wp_instances_slurp.content | default('') | length > 0
+
+  - name: Read static web instance list for SFTP auto-exposure
+    ansible.builtin.slurp:
+      src: "{{ static_web_instances_file }}"
+    register: sftp_static_web_instances_slurp
+    failed_when: false
+
+  - name: Set static web SFTP mounts from the static web instances
+    ansible.builtin.set_fact:
+        static_web_sftp_mounts: "{{ (sftp_static_web_instances_slurp.content | default('') | b64decode | from_yaml | default([])) }}"
+    when: sftp_static_web_instances_slurp.content | default('') | length > 0
 
   - name: Create LDAP group {{ sftp_share_ldap_group }} for SFTP access control
     include_tasks: ../shared-tasks/ldap-single-group.yml

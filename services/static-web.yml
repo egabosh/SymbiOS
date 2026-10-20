@@ -21,11 +21,10 @@
 # subdomain. Every instance gets its own nginx container and its own
 # Traefik router, so a broken site does not affect the others.
 #
-# "docroot" optionally points a site at an external directory (e.g. a
-# media share like /symbios/media/shared/<site>); external docroots are
-# mounted as-is and never created or modified. Without it the document
-# root is a directory below the service directory.
-#
+# The document root of a site lives below the service directory (app
+# owned data). sftp-share.yml mounts it into the SFTP share as
+# /sftp-share/static-web/<name>, and the group static-web-<name> is the
+# write gate for the SFTP users.
 # Auth model: sites with "public: false" are protected by Authelia
 # forward-auth restricted to the "static-web" LDAP group. OIDC is not
 # used because static content has no login form that could start an OIDC
@@ -45,10 +44,11 @@
 #     from a local directory. The instances are managed in the WebUI under
 #     the Instances tab (the data lives in
 #     <config>/services/static-web/instances.yml, not in inventory.yml).
-#     The document root of an instance is either a directory below the
-#     service directory or an external path (e.g. a media share) that is
-#     mounted read-only. Sites with "public: false" are protected by
-#     Authelia forward-auth against the static-web LDAP group.
+#     The document root of an instance lives below the service directory
+#     (app owned data) and is exposed to the SFTP share by sftp-share.yml
+#     (/sftp-share/static-web/<name>); the group static-web-<name> is the
+#     write gate. Sites with "public: false" are protected by Authelia
+#     forward-auth against the static-web LDAP group.
 #   author: Oliver Bohlen
 #   version: '1.1'
 #   license: GPLv3
@@ -81,10 +81,6 @@
 #         label: Aliases
 #         type: list
 #         placeholder: example.com
-#       docroot:
-#         label: Document-Root
-#         type: text
-#         placeholder: /symbios/media/shared/my-site
 #       public:
 #         label: Public
 #         type: bool
@@ -159,9 +155,10 @@
         mode: '0750'
       loop: "{{ static_web_instances | default([]) }}"
 
-    # One document root per site, each with a placeholder index page.
-    # Sites with an external docroot are skipped (owned by whoever
-    # provides the directory, e.g. the shares machinery).
+    # One document root per site, owned by the service (app owned data
+    # stays below /symbios/services/<name>/). The document root is exposed
+    # to the SFTP share (sftp-share.yml mounts it) and the group of the
+    # site is the write gate.
     - name: Create document root per site
       ansible.builtin.file:
         path: "/symbios/services/{{ service_name }}/htdocs/{{ item.name }}"
@@ -170,7 +167,6 @@
         state: directory
         mode: '0750'
       loop: "{{ static_web_instances | default([]) }}"
-      when: item.docroot is not defined
 
     - name: Create placeholder index page per site
       ansible.builtin.copy:
@@ -186,49 +182,36 @@
           <body><p>No content deployed for {{ item.domain }} yet.</p></body>
           </html>
       loop: "{{ static_web_instances | default([]) }}"
-      when: item.docroot is not defined
 
-    # Resolve external docroots (existence check for the fail-fast
-    # assert below; the Grant task consumes the same register).
-    - name: Resolve owning GIDs of external docroots
-      ansible.builtin.stat:
-        path: "{{ item.docroot }}"
-      loop: "{{ static_web_instances | default([]) | selectattr('docroot', 'defined') | list }}"
-      register: static_web_docroot_stats
-
-    # Document roots keep their own permissions (typically 2770/660 from
-    # SFTP uploads): nginx workers drop supplementary groups on startup,
-    # so group membership cannot grant them access. A numeric-uid ACL for
-    # the nginx worker (uid 101 in the official image) grants
-    # read/traverse directly; the default ACL inherits it to new uploads,
-    # so no normalization workflow is needed. SFTP isolation is unaffected
-    # (no other identity carries uid 101), hence even non-public sites may
-    # be share-backed.
-    - name: Grant nginx worker read access on the external document roots
-      ansible.builtin.shell: |
-        setfacl -R -m u:101:rX "{{ item.item.docroot }}" && \
-        setfacl -R -d -m u:101:rX "{{ item.item.docroot }}"
-      loop: "{{ static_web_docroot_stats.results | default([]) | selectattr('stat.exists') | list }}"
-      loop_control:
-        label: "{{ item.item.name | default('?') }}"
+    # The group of a site is the write gate: its members edit the content
+    # via SFTP (sftp-share.yml mounts the document root).
+    - name: Create the LDAP group of each site
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name static-web-{{ item.name }}"
+      loop: "{{ static_web_instances | default([]) }}"
       changed_when: false
+      failed_when: false
 
-    - name: Grant nginx worker read access on the internal document roots
+    # The nginx worker (uid 101) drops supplementary groups on startup, so
+    # group membership cannot grant it access. A numeric-uid ACL grants
+    # read/traverse directly; the default ACL inherits it to new uploads.
+    # The group of the site gets write access for the SFTP users.
+    - name: Grant nginx and SFTP access on the document roots
       ansible.builtin.shell: |
-        setfacl -R -m u:101:rX "{{ item }}" && \
-        setfacl -R -d -m u:101:rX "{{ item }}"
-      loop: >-
-        {{ static_web_instances | default([])
-           | selectattr('docroot', 'undefined') | map(attribute='name')
-           | map('regex_replace', '^', '/symbios/services/' ~ service_name ~ '/htdocs/') | list }}
+        set -e
+        GID=$(docker exec symbios-base-ldap ldapsearch -x -H ldap://localhost \
+          -D "cn=head-of-ldap,{{ ldap_basedn }}" -w "$LDAP_ADMIN_PW" \
+          -b "cn=static-web-{{ item.name }},ou=groups,{{ ldap_basedn }}" gidNumber 2>/dev/null \
+          | sed -n 's/^gidNumber: //p' | head -1)
+        [ -n "$GID" ] || { echo "no GID for static-web-{{ item.name }}"; exit 1; }
+        chown -R root:docker "/symbios/services/{{ service_name }}/htdocs/{{ item.name }}"
+        chmod -R g+s "/symbios/services/{{ service_name }}/htdocs/{{ item.name }}"
+        setfacl -R -m "u:101:rX" -m "g:${GID}:rwx" -m m::rwx "/symbios/services/{{ service_name }}/htdocs/{{ item.name }}"
+        setfacl -R -d -m "u:101:rX" -m "g:${GID}:rwx" -m m::rwx "/symbios/services/{{ service_name }}/htdocs/{{ item.name }}"
+      environment:
+        LDAP_ADMIN_PW: "{{ lookup('file', (config_dir | default('/symbios/base-services/symbios-ui/config')) + '/.ldap_admin_pw') }}"
+      loop: "{{ static_web_instances | default([]) }}"
       changed_when: false
-
-    - name: Fail on missing external docroots
-      ansible.builtin.assert:
-        that: item.stat.exists
-        fail_msg: "External docroot {{ item.item.docroot }} does not exist (site {{ item.item.name }}). Create it first (e.g. the media share)."
-      loop: "{{ static_web_docroot_stats.results | default([]) }}"
-      when: static_web_docroot_stats.results | default([]) | length > 0
+      no_log: true
 
     # Authelia can only protect a host whose cookie domain is listed in
     # the session cookies - the portal URL has to share the cookie scope

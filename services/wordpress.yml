@@ -19,7 +19,6 @@
 #     - acme_resolver
 #     - authelia_cookie_domains
 #     - base_domain
-#     - media_root
 #     - twofa_enabled
 #   name: WordPress
 #   short_description: Deploy multiple WordPress instances
@@ -34,9 +33,10 @@
 #     requires a login for the whole site, a public one only guards the
 #     admin area. The optional phpMyAdmin is always protected by the forward
 #     auth against the same group. An instance can publish a static export
-#     of the site into a share (static_export_share) that a static-web site
-#     serves; the share is mounted into the container at the export path of
-#     the plugin (static_export_path), so the plugin needs no reconfiguration.
+#     of the site into the document root of a static web site
+#     (static_export_site); that document root is mounted into the
+#     container at the export path of the plugin (static_export_path), so
+#     the plugin needs no reconfiguration.
 #   author: Oliver Bohlen
 #   version: '1.3'
 #   license: GPLv3
@@ -68,8 +68,8 @@
 #         type: text
 #         pattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
 #         placeholder: wordpress-blog-phpmyadmin.example.com
-#       static_export_share:
-#         label: Static-Export-Share
+#       static_export_site:
+#         label: Static-Export-Site
 #         type: text
 #         pattern: '^[a-z0-9][a-z0-9-]*$'
 #         placeholder: my-site
@@ -188,37 +188,38 @@
     # container at the export path of the plugin, so the plugin needs no
     # reconfiguration. The share keeps its own ownership (the LDAP group
     # of the share); WordPress writes through an ACL for its own uid.
-    - name: Resolve the static export share of the instances
+    - name: Resolve the static export target of the instances
       ansible.builtin.set_fact:
-        wordpress_export_shares: "{{ wordpress_export_shares | default({}) | combine({item.name: _wp_export_share}) }}"
+        wordpress_export_targets: "{{ wordpress_export_targets | default({}) | combine({item.name: _wp_export_target}) }}"
       vars:
-        _wp_export_share: "{{ media_root | default('/symbios/media') }}/shared/{{ item.static_export_share }}"
+        _wp_export_target: "/symbios/services/static-web/htdocs/{{ item.static_export_site }}"
       loop: "{{ wordpress_instances | default([]) }}"
-      when: item.static_export_share is defined
+      when: item.static_export_site is defined
       changed_when: false
 
-    - name: Fail on a missing static export share
+    - name: Fail on a missing static export target
       ansible.builtin.stat:
         path: "{{ item }}"
-      loop: "{{ wordpress_export_shares | default({}) | dict2items | map(attribute='value') | list }}"
-      register: wp_export_share_stats
+      loop: "{{ wordpress_export_targets | default({}) | dict2items | map(attribute='value') | list }}"
+      register: wp_export_target_stats
       changed_when: false
 
-    - name: Assert that the static export shares exist
+    - name: Assert that the static export targets exist
       ansible.builtin.assert:
         that: item.stat.exists
         fail_msg: >-
-          The static export share of the WordPress instance does not exist ({{ item.item }}).
-          Create it first (e.g. with symbios-media-share.sh --create).
-      loop: "{{ wp_export_share_stats.results | default([]) }}"
+          The static export target of the WordPress instance does not exist ({{ item.item }}).
+          Deploy the static web site first (services/static-web.yml), the export writes into
+          its document root.
+      loop: "{{ wp_export_target_stats.results | default([]) }}"
       changed_when: false
 
-    - name: Grant the WordPress user write access on the static export shares
+    - name: Grant the WordPress user write access on the static export targets
       ansible.builtin.shell: |
         set -e
         setfacl -R -m u:33:rwX "{{ item }}" && \
         setfacl -R -d -m u:33:rwX "{{ item }}"
-      loop: "{{ wordpress_export_shares | default({}) | dict2items | map(attribute='value') | list }}"
+      loop: "{{ wordpress_export_targets | default({}) | dict2items | map(attribute='value') | list }}"
       changed_when: false
 
     # Generate/refresh the compose .env with root + per-instance credentials.
