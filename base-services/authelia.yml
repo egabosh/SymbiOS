@@ -16,6 +16,7 @@
 
 # docs:
 #   uses_vars:
+#     - authelia_cookie_domains
 #     - base_domain
 #     - ddns_host
 #     - smtp_from
@@ -169,9 +170,19 @@
         admin_has_mail: "{{ admin_mail_check.rc == 0 }}"
       changed_when: false
 
+    - name: Compute extra session cookie domains
+      ansible.builtin.set_fact:
+        # Extra domains Authelia may set session cookies for (e.g. protected
+        # service sites on foreign domains like wp.olmusic.de)
+        authelia_extra_cookie_domains: "{{ ([ddns_host] if (ddns_host is defined and ddns_host) else []) + (authelia_cookie_domains | default([])) | unique | map('trim') | select() | reject('eq', base_domain) | list }}"
+      changed_when: false
+
     - name: Render Authelia extra cookie lines
       ansible.builtin.set_fact:
-        authelia_extra_cookie: "{{ '- domain: \"' + ddns_host + '\"\n                authelia_url: https://' + authelia_domain if ddns_host is defined and ddns_host and ddns_host != base_domain else '' }}"
+        # Continuation lines need 4 spaces (list item col) / 6 spaces (mapping key col):
+        # the blockinfile literal block strips 10 common spaces, so the rendered
+        # expression lands at column 5 and continuations must carry their own indent
+        authelia_extra_cookie: "{{ (authelia_extra_cookie_domains | map('regex_replace', '^(.*)$', '- domain: \"\\1\"\n      authelia_url: https://' ~ authelia_domain) | join('\n    ')) if authelia_extra_cookie_domains else '' }}"
       changed_when: false
 
     - name: "{{ service_path }}/authelia-data/configuration.yml"
