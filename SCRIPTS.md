@@ -474,7 +474,7 @@ texts opportunistically).
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | `runchecks.sh` | Health daemon: `runchecks.d/*.check` every 5 min -> JSON | no args |
-| `runchecks.d/` | 35 check scripts (basic + per-service healthchecks) | via `runchecks.sh` |
+| `runchecks.d/` | 37 check scripts (basic + per-service healthchecks) | via `runchecks.sh` |
 | `runchecks-watchdog.sh` | Restarts `runchecks.service` when results JSON goes stale | no args |
 | `symbios-run-check.sh` | Single health check on demand (JSON result) | `<check-name>` |
 | `symbios-system-stats.sh` | CPU/load/mem/swap/uptime/IO as JSON (`/proc` based) | no args |

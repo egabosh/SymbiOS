@@ -371,6 +371,19 @@ The CHECK_* variables feed the /health/ overview page:
         validate: /bin/bash -n %s
 ```
 
+### Platform checks (not tied to a service)
+
+Some checks belong to the platform instead of a service and live directly in
+the Git tree (`scripts/runchecks.d/`), so they are active on every host
+without a playbook:
+
+- `symbios-healthcheck-network-watchdog.check` - the uplink watchdog. It
+  probes the default gateway and, when the uplink is stuck (RX still works,
+  but the TX path is dead - the `NETDEV WATCHDOG: transmit queue 0 timed
+  out` case of the macb driver on the Raspberry Pi 5), it bounces the
+  interface and reports the recovery. A dead peer (router down) is never
+  bounced.
+
 ## Shared tasks
 
 Service playbooks can reuse shared task files from `shared-tasks/` via

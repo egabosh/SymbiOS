@@ -1,0 +1,68 @@
+CHECK_CATEGORY="network"
+CHECK_TITLE="Network Uplink Watchdog"
+CHECK_DESC="Recovers a stalled uplink (TX path dead, RX still working) by bouncing the interface."
+CHECK_DETAIL="Detects the kernel TX timeout (NETDEV WATCHDOG) on the uplink|and confirms that the gateway does not answer.|Bounces the interface to restart the TX path.|A dead peer (router down) is never bounced.|Known trigger: the macb TX completion bug of the Raspberry Pi 5."
+
+# Detect a stalled uplink and bounce it.
+#
+# Some NIC drivers lose a TX completion and never send again (macb on the
+# Raspberry Pi 5): the kernel reports "NETDEV WATCHDOG: transmit queue 0
+# timed out" and the TX path stays dead until the interface is bounced - RX
+# keeps working, so the host looks half connected.
+#
+# Two conditions must match before anything is changed: the kernel reported a
+# TX timeout for the uplink AND the gateway does not answer. A router outage
+# therefore never triggers a bounce.
+
+g_wd_iface="$(ip -4 route show default 2>/dev/null | grep -oP 'dev \K\S+' | head -1)"
+g_wd_gw="$(ip route show default 2>/dev/null | awk '{print $3; exit}')"
+if [[ -z "${g_wd_iface}" || -z "${g_wd_gw}" ]]
+then
+  return 0
+fi
+
+# Kernel TX timeouts for this interface. The 15-minute window covers the
+# 5-minute check cycle plus some slack.
+g_wd_stalls="$(journalctl -k --since '-15min' --no-pager -q 2>/dev/null \
+  | grep "NETDEV WATCHDOG" \
+  | grep -cE "(^|[^[:alnum:]_])${g_wd_iface}([:(])")"
+if [[ "${g_wd_stalls}" -eq 0 ]]
+then
+  return 0
+fi
+
+# The uplink must really be dead - a dead peer is not our bug.
+if ping -c2 -W2 -I "${g_wd_iface}" "${g_wd_gw}" >/dev/null 2>&1
+then
+  return 0
+fi
+
+# One bounce per 15 minutes, so a permanent stall does not bounce in a loop.
+g_wd_stamp="/run/symbios-net-watchdog.last"
+g_wd_now="$(date +%s)"
+if [[ -r "${g_wd_stamp}" ]] && [[ $(( g_wd_now - $(cat "${g_wd_stamp}") )) -lt 900 ]]
+then
+  g_echo_warn "TX stall on ${g_wd_iface} still active - no second bounce (cooldown)"
+  return 0
+fi
+date +%s > "${g_wd_stamp}"
+
+g_echo_warn "TX stall on ${g_wd_iface} (${g_wd_stalls} kernel TX timeouts, gateway ${g_wd_gw} unreachable) - bouncing the interface"
+ip link set dev "${g_wd_iface}" down
+sleep 3
+ip link set dev "${g_wd_iface}" up
+
+# Wait for the link to be back before verifying.
+g_wd_wait=0
+while [[ "${g_wd_wait}" -lt 20 ]] && [[ "$(cat "/sys/class/net/${g_wd_iface}/carrier" 2>/dev/null)" != "1" ]]
+do
+  sleep 1
+  g_wd_wait=$(( g_wd_wait + 1 ))
+done
+
+if ping -c2 -W2 -I "${g_wd_iface}" "${g_wd_gw}" >/dev/null 2>&1
+then
+  g_echo_warn "Uplink ${g_wd_iface} recovered after the bounce"
+else
+  g_echo_error "Uplink ${g_wd_iface} still unreachable after the bounce"
+fi
