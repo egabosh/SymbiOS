@@ -17,6 +17,7 @@
 # docs:
 #   uses_vars:
 #     - acme_resolver
+#     - authelia_cookie_domains
 #     - base_domain
 #     - twofa_enabled
 #   name: WordPress
@@ -26,9 +27,16 @@
 #     data lives in <config>/services/wordpress/instances.yml, not in
 #     inventory.yml). Each instance gets its own WordPress container, its own
 #     database and user on ONE shared MariaDB, a Traefik route (domain plus
-#     optional aliases) and a healthcheck. Instances without the "public" flag
-#     are protected by Authelia forward-auth (LDAP group wordpress-<name>);
-#     optional phpMyAdmin (wp-phpmyadmin.<domain>) is always protected.
+#     optional aliases) and a healthcheck. The instance domain is the main
+#     domain of the site: it is forced into WP_HOME/WP_SITEURL, so the site
+#     answers on it and redirects the aliases to it. Instances without the
+#     "public" flag are protected by Authelia forward-auth (LDAP group
+#     wordpress-<name>); optional phpMyAdmin is always protected and runs on
+#     its own host (wp-phpmyadmin.<domain without www./wp. prefix>, or the
+#     explicit phpmyadmin_domain of the instance). Hosts whose domain is not
+#     in the Authelia session cookie scope (the portal URL has to share the
+#     cookie scope with the domain) are protected by the Traefik basic auth
+#     instead.
 #   author: Oliver Bohlen
 #   version: '1.2'
 #   license: GPLv3
@@ -55,6 +63,11 @@
 #         required: true
 #         pattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
 #         placeholder: blog.example.com
+#       phpmyadmin_domain:
+#         label: phpMyAdmin-Domain
+#         type: text
+#         pattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
+#         placeholder: wp-phpmyadmin.example.com
 #       aliases:
 #         label: Aliases
 #         type: list
@@ -171,6 +184,34 @@
         group: docker
       notify: Restart wordpress
 
+    # The phpMyAdmin host of an instance: the explicit per-instance value
+    # wins, otherwise it is derived from the main domain
+    # (wp-phpmyadmin.<domain without a leading www./wp. prefix>).
+    # Computed once because the Traefik router and the Authelia rule must
+    # use the same host.
+    #
+    # The protection of a host depends on its domain: Authelia can only
+    # protect a host whose cookie domain is listed in the session cookies
+    # (the portal URL has to share the cookie scope with the domain, see
+    # base-services/authelia.yml). Hosts on a foreign domain fall back to
+    # the Traefik basic auth, otherwise the forward auth answers with 400.
+    - name: Determine the phpMyAdmin domain and the auth protection of every instance
+      ansible.builtin.set_fact:
+        wordpress_phpmyadmin_domains: "{{ wordpress_phpmyadmin_domains | default({}) | combine({item.name: _wp_phpmyadmin_domain}) }}"
+        wordpress_auth: "{{ wordpress_auth | default({}) | combine({item.name: _wp_site_auth}) }}"
+        wordpress_phpmyadmin_auth: "{{ wordpress_phpmyadmin_auth | default({}) | combine({item.name: _wp_phpmyadmin_auth}) }}"
+      vars:
+        _wp_auth_scopes: "{{ [base_domain] + (authelia_cookie_domains | default([])) | map('trim') | select() | list }}"
+        _wp_phpmyadmin_domain: "{{ (item.phpmyadmin_domain | default('') | trim) or ('wp-phpmyadmin.' ~ (item.domain | regex_replace('^(www|wp)\\.', ''))) }}"
+        # A host is in the Authelia scope when the host itself or the host
+        # without its first label is a configured session cookie domain.
+        _wp_site_auth: "{{ 'none' if (item.public | default(false) | bool) else ('authelia' if ((item.domain in _wp_auth_scopes) or ((item.domain | regex_replace('^[^.]+\\.', '')) in _wp_auth_scopes)) else 'basic') }}"
+        _wp_phpmyadmin_auth: "{{ 'authelia' if ((_wp_phpmyadmin_domain in _wp_auth_scopes) or ((_wp_phpmyadmin_domain | regex_replace('^[^.]+\\.', '')) in _wp_auth_scopes)) else 'basic' }}"
+      loop: "{{ wordpress_instances | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: false
+
     # Render the single Traefik file-provider snippet for all instances.
     # Traefik watches the providers directory, so no reload is required.
     - name: /symbios/base-services/traefik/providers/wordpress.yml
@@ -243,6 +284,7 @@
       loop: "{{ wordpress_instances | default([]) }}"
       when:
         - not (item.public | default(false) | bool)
+        - wordpress_auth[item.name] == 'authelia'
       vars:
         service_name: "wordpress-{{ item.name }}"
         service_domain: "{{ item.domain }}"
@@ -254,9 +296,10 @@
       loop: "{{ wordpress_instances | default([]) }}"
       when:
         - item.phpmyadmin | default(false) | bool
+        - wordpress_phpmyadmin_auth[item.name] == 'authelia'
       vars:
         service_name: "wordpress-{{ item.name }}-phpmyadmin"
-        service_domain: "wp-phpmyadmin.{{ item.domain | regex_replace('^wp\\.', '') }}"
+        service_domain: "{{ wordpress_phpmyadmin_domains[item.name] }}"
         authelia_subjects: ["group:wordpress-{{ item.name }}"]
         authelia_policy: "{{ wp_auth_policy | default('one_factor') }}"
 
@@ -273,11 +316,16 @@
           {{ (wp_acl_cfg.content | b64decode | regex_findall('^# BEGIN ANSIBLE MANAGED BLOCK (wordpress-[^ ]+) ACCESS CONTROL$', multiline=True) | list)
              | difference(_wp_acl_current) }}
       vars:
+        # Only the instances that are really protected by Authelia own a
+        # rule; the others are protected by the Traefik basic auth.
+        _wp_acl_authelia: >-
+          {{ wordpress_phpmyadmin_auth | default({}) | dict2items | selectattr('value', 'eq', 'authelia') | map(attribute='key') | list }}
         _wp_acl_current: >-
           {{ wordpress_instances | default([]) | map(attribute='name')
+             | select('in', _wp_acl_authelia) | list
              | map('regex_replace', '^', 'wordpress-')
              | list
-             + wordpress_instances | default([]) | map(attribute='name')
+             + _wp_acl_authelia
              | map('regex_replace', '^', 'wordpress-')
              | map('regex_replace', '$', '-phpmyadmin')
              | list }}
