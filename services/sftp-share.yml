@@ -395,7 +395,7 @@
         AcceptEnv LANG LC_*
         AllowTcpForwarding no
         AllowAgentForwarding no
-        AllowGroups {{ sftp_share_group }} static-web-*
+        AllowGroups {{ sftp_share_group }} shared-* static-web-*
         IgnoreRhosts yes
         PermitRootLogin no
         PermitTunnel no
