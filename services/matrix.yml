@@ -652,6 +652,10 @@
       include_tasks: ../shared-tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Matrix"
+        # Synapse maps the user from the ID token (it does not query the
+        # userinfo endpoint). Since Authelia v4.39 the ID token only carries
+        # the spec claims, so the profile claims must be copied into it.
+        oidc_claims_policy: "id_token"
         oidc_redirect_uris:
           - "https://matrix.{{ base_domain }}/_synapse/client/oidc/callback"
 

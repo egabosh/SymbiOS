@@ -458,6 +458,20 @@
                     - 'email'
                   access_token:
                     - 'email'
+                # Since v4.39 the ID token only carries the claims required by
+                # the OpenID Connect specification; the profile claims are
+                # available at the userinfo endpoint only. Clients that read
+                # the user from the ID token (Synapse) need them copied into
+                # it - this policy restores that behaviour.
+                id_token:
+                  id_token:
+                    - 'rat'
+                    - 'groups'
+                    - 'email'
+                    - 'email_verified'
+                    - 'alt_emails'
+                    - 'preferred_username'
+                    - 'name'
               cors:
                 endpoints:
                   - "authorization"
