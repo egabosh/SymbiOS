@@ -114,7 +114,12 @@
         group: docker
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          public_baseurl: https://matrix-synapse.{{ base_domain }}/
+          # The canonical host is matrix.<domain> (the nginx front proxies it
+          # to Synapse and every client uses it as homeserver). public_baseurl
+          # must match it: Synapse derives the OIDC redirect_uri from it and
+          # redirects non-canonical requests - a different host would send
+          # Authelia a redirect_uri that is not registered for the client.
+          public_baseurl: https://matrix.{{ base_domain }}/
           enable_registration: false
           max_upload_size: 2048M
           retention:
@@ -336,6 +341,16 @@
             location / {
               proxy_pass http://$synapse_upstream:8008;
               proxy_set_header X-Forwarded-For $remote_addr;
+              # Synapse compares the request host with public_baseurl and
+              # redirects non-canonical requests. With the default
+              # proxy_set_header Host (= upstream name) every request would
+              # bounce between the canonical URL and itself, which breaks
+              # the OIDC callback. Forward the original host and scheme.
+              proxy_set_header Host $http_host;
+              proxy_set_header X-Forwarded-Host $http_host;
+              # The public entry is always TLS (Traefik terminates it), so
+              # announce https regardless of the hop to this container.
+              proxy_set_header X-Forwarded-Proto https;
               client_max_body_size 2048m;
             }
 
