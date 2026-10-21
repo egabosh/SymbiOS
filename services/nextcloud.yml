@@ -692,12 +692,17 @@
             # document root can remove the app files while the marker stays.
             # Without the directory the app is broken even though the
             # database still lists it as installed.
-            if [ ! -f "app.${app}.installed" ] || [ ! -d "nextcloud-data/apps/${app}" ]
+            # occ app:install puts an app into custom_apps when the main
+            # apps directory is not writable, so both paths count.
+            if [ ! -f "app.${app}.installed" ] \
+              || { [ ! -d "nextcloud-data/apps/${app}" ] && [ ! -d "nextcloud-data/custom_apps/${app}" ]; }
             then
               docker compose exec -T -u www-data nextcloud ./occ app:install "${app}" >"app.${app}.installed" 2>&1
               f_rc=$?
               cat "app.${app}.installed" >> nextcloud.init.log
-              if [[ $f_rc -ne 0 ]] || [ ! -d "nextcloud-data/apps/${app}" ]
+              if [[ $f_rc -ne 0 ]] \
+                && [ ! -d "nextcloud-data/apps/${app}" ] \
+                && [ ! -d "nextcloud-data/custom_apps/${app}" ]
               then
                 echo "ERROR: app ${app} could not be installed (rc=${f_rc}) - see nextcloud.init.log" >&2
                 rm -f "app.${app}.installed"
