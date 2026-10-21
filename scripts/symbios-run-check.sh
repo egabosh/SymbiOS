@@ -74,20 +74,33 @@ then
   exit 1
 fi
 
-# Override g_echo_error to capture failures (same as runchecks.sh)
+# Override g_echo_error to capture failures (same as runchecks.sh): all
+# errors of the check are accumulated, so a failing check reports every
+# problem and not just the last one.
 function g_echo_error {
   g_current_check_failed=1
-  g_current_check_error="$*"
+  if [[ -n "$g_current_check_error" ]]
+  then
+    g_current_check_error="${g_current_check_error} | $*"
+  else
+    g_current_check_error="$*"
+  fi
 }
 
 g_current_check_failed=0
 g_current_check_error=""
 
-# Run check in subshell - bypasses f_check_cache, captures output
-g_check_output=$( {
-  . "$g_check_file"
-} 2>&1 )
-g_exit=$?
+# Run the check in the current shell: the check reports its result through
+# g_current_check_failed / g_current_check_error, and a subshell would throw
+# both away - every check would come back as "ok". The check's own output is
+# not part of the JSON result, so it goes to a temporary file.
+# The 5-minute cache marker is dropped first: an on-demand re-check has to
+# redo the work, not replay the previous cycle.
+rm -f "${g_tmp:-/tmp}/$(basename "$g_check_file" .check)" 2>/dev/null || true
+g_check_output_file="${g_tmp:-/tmp}/run-check-$$.out"
+. "$g_check_file" > "$g_check_output_file" 2>&1
+g_check_output=$(cat "$g_check_output_file" 2>/dev/null)
+rm -f "$g_check_output_file" 2>/dev/null || true
 
 # Extract metadata from the check file
 g_title=$(grep '^CHECK_TITLE=' "$g_check_file" 2>/dev/null | head -1 | sed 's/^CHECK_TITLE=//; s/^"//; s/"$//')

@@ -5,6 +5,11 @@
 # ${g_config_dir}/btrfs-scrub-state so the raid-mdadm.check entry can warn
 # when the last finished scan goes stale (see CHECK_DETAIL there).
 #
+# A filesystem whose last scrub did not complete is skipped: the reported
+# problem (hardware or transport) is still there, and a second scan would
+# only repeat the failure. The skip is logged; a successful manual scrub
+# (BTRFS_SCRUB_NOW=1) clears the state and the monthly scan resumes.
+#
 # Forcing: BTRFS_SCRUB_NOW=1 autoupdate.sh btrfs-scrub
 
 if [[ "${BTRFS_SCRUB_NOW:-0}" != "1" && "$(date -u +%d)" != "01" ]]
@@ -28,6 +33,22 @@ do
   g_scrub_seen="${g_scrub_seen} ${g_uuid}"
 
   g_started=$(date -u +%FT%TZ)
+
+  # Skip a filesystem whose last scrub did not complete. A failed scrub means
+  # the array (or the transport to it) is still broken: running the same scan
+  # again would only repeat the failure, and a scrub over a flaky link can
+  # take the volume offline for days. A successful scrub - manual or
+  # automatic - clears the state, so the monthly scan resumes on its own.
+  g_prev_line=$(grep "^${g_uuid} " "$g_scrub_state_file" 2>/dev/null | tail -1)
+  if [[ -n "$g_prev_line" ]] && echo "$g_prev_line" | grep -E -qi "aborted|\(error\)"
+  then
+    # The state line is "<uuid> <mountpoint> <started> <status>"
+    g_prev_status="${g_prev_line#* * * }"
+    g_echo "btrfs scrub ${g_uuid} (${g_mnt}): skipped - the last scrub did not complete (${g_prev_status})"
+    g_echo_note "Fix the reported problem first, then rescan with: BTRFS_SCRUB_NOW=1 autoupdate.sh btrfs-scrub"
+    continue
+  fi
+
   g_output=$(btrfs scrub start -B "$g_mnt" 2>&1)
   g_status=$(echo "$g_output" | grep -E -m1 "^[[:space:]]*status:" | sed 's/^[[:space:]]*//')
   [[ -z "$g_status" ]] && g_status="status: no status reported"

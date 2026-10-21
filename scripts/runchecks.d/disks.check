@@ -1,7 +1,7 @@
 CHECK_CATEGORY="system"
 CHECK_TITLE="Disk Health"
 CHECK_DESC="Checks all hard drives, SSDs and NVMe devices for SMART errors, temperature and wear - plus kernel-reported disk and filesystem errors."
-CHECK_DETAIL="Scans all block devices and queries SMART via smartctl.|Auto-detects SATA, SATA-over-USB (-d sat with fallback types), NVMe,|SCSI/SAS drives and reports model/transport per device.|Alerts on failed SMART health, USB bridge and CRC problems, ATA error-log|growth and failed or stale self-test results.|Counter changes are trend-checked against a baseline (only increases alert),|so long-known problem disks stay silent unless they get worse.|Acknowledged devices can be quieted via config/runchecks-snooze.conf until a date.|Also: SSD life, high temperatures, excessive spin-up/load cycles,|filesystems force-mounted read-only, btrfs/mdadm state (see RAID check)|and new kernel-log filesystem and disk I/O errors."
+CHECK_DETAIL="Scans all block devices and queries SMART via smartctl.|Auto-detects SATA, SATA-over-USB (-d sat with fallback types), NVMe,|SCSI/SAS drives and reports model/transport per device.|Alerts on failed SMART health, media damage (remapped, pending or uncorrectable|sectors - a disk with unreadable sectors is dying, whatever the trend says),|USB bridge and CRC problems, ATA error-log growth and failed or stale self-test results.|Counter changes are trend-checked against a baseline (only increases alert),|so long-known problem disks stay silent unless they get worse.|The baseline is keyed by the disk serial, so a USB re-enumeration does not|reset the history and a broken disk cannot hide behind a fresh baseline.|Acknowledged devices can be quieted via config/runchecks-snooze.conf until a date.|Also: SSD life, high temperatures, excessive spin-up/load cycles,|filesystems force-mounted read-only, btrfs/mdadm state (see RAID check)|and new kernel-log filesystem and disk I/O errors."
 
 # Persistent per-check state (config dir on SymbiOS host, /tmp elsewhere)
 if [[ -n "${g_config_dir:-}" && -d "${g_config_dir}" ]]
@@ -153,17 +153,26 @@ do
     [[ "${g_snooze_until[$g_dev]}" > "$(date -u +%Y-%m-%d)" ]] && g_dev_snoozed=1
   fi
 
-  # Skip idle disks: unchanged I/O statistics means the disk is spun down or
-  # suspended. Run SMART on first sight and whenever the disk is active.
+  # Skip the SMART query on idle disks: unchanged I/O statistics mean the
+  # disk is spun down, and a query would wake it up. The cached data is
+  # still evaluated - a failing disk that nobody touches must be reported -
+  # and refreshed at least once a day.
   g_statfile="${g_runcheck_state}/diskstat-${g_name}"
+  g_smartcache="${g_runcheck_state}/smart-${g_name}.txt"
+  g_refresh=1
   if [[ -f "$g_statfile" ]]
   then
     awk '{print $1,$2,$3,$4,$5,$6,$7,$8}' "/sys/block/${g_name}/stat" > "${g_runcheck_state}/diskstat-${g_name}-now"
     if diff -q "$g_statfile" "${g_runcheck_state}/diskstat-${g_name}-now" >/dev/null 2>&1
     then
-      continue
+      if [[ -f "$g_smartcache" ]] && \
+         [[ $(( $(date +%s) - $(stat -c %Y "$g_smartcache" 2>/dev/null || echo 0) )) -lt 86400 ]]
+      then
+        g_refresh=0
+      fi
+    else
+      mv -f "${g_runcheck_state}/diskstat-${g_name}-now" "$g_statfile"
     fi
-    mv -f "${g_runcheck_state}/diskstat-${g_name}-now" "$g_statfile"
   else
     awk '{print $1,$2,$3,$4,$5,$6,$7,$8}' "/sys/block/${g_name}/stat" > "$g_statfile"
   fi
@@ -184,28 +193,44 @@ do
 
   # Query SMART with the first device type that yields usable output
   g_smart=""
-  for g_dtype in "${g_device_types[@]}"
-  do
-    if [[ -n "$g_dtype" ]]
-    then
-      smartctl -a -d "$g_dtype" "$g_dev" > "${g_runcheck_state}/smart-${g_name}.txt" 2>&1
-    else
-      smartctl -a "$g_dev" > "${g_runcheck_state}/smart-${g_name}.txt" 2>&1
-    fi
-    if grep -E -qi "lacks SMART capability|SMART support is: *Unavailable|Read Device Identity failed|no medium present|device does not support SMART|Mandatory SMART command failed: exiting|Device or resource busy|unsupported field in scsi command|Inappropriate ioctl" "${g_runcheck_state}/smart-${g_name}.txt"
-    then
-      if [[ "$g_dtype" != "${g_device_types[-1]}" ]]
+  if [[ "$g_refresh" -eq 0 && -f "$g_smartcache" ]]
+  then
+    # Idle disk with fresh cache: reuse the last reading
+    g_smart="$g_smartcache"
+  else
+    for g_dtype in "${g_device_types[@]}"
+    do
+      if [[ -n "$g_dtype" ]]
       then
-        continue
+        smartctl -a -d "$g_dtype" "$g_dev" > "${g_runcheck_state}/smart-${g_name}.txt" 2>&1
+      else
+        smartctl -a "$g_dev" > "${g_runcheck_state}/smart-${g_name}.txt" 2>&1
       fi
-      : > "${g_runcheck_state}/smart-unsupported-${g_name}"
-      g_smart=""
+      if grep -E -qi "lacks SMART capability|SMART support is: *Unavailable|Read Device Identity failed|no medium present|device does not support SMART|Mandatory SMART command failed: exiting|Device or resource busy|unsupported field in scsi command|Inappropriate ioctl" "${g_runcheck_state}/smart-${g_name}.txt"
+      then
+        if [[ "$g_dtype" != "${g_device_types[-1]}" ]]
+        then
+          continue
+        fi
+        : > "${g_runcheck_state}/smart-unsupported-${g_name}"
+        g_smart=""
+        break
+      fi
+      g_smart="${g_runcheck_state}/smart-${g_name}.txt"
       break
-    fi
-    g_smart="${g_runcheck_state}/smart-${g_name}.txt"
-    break
-  done
+    done
+  fi
   [[ -n "$g_smart" ]] || continue
+
+  # Stable device identity: the kernel name changes whenever a USB disk is
+  # re-enumerated (sdd -> sdb), the disk serial does not. The state files
+  # are keyed by the serial, so the trend history stays attached to the
+  # physical disk and a re-enumeration cannot silently reset it.
+  g_dev_serial=$(grep -E -m1 "^(Serial Number|Serial number):" "$g_smart" 2>/dev/null | \
+                 sed 's/^[^:]*: *//' | tr -cd '[:alnum:]._-')
+  # The serial identifies the disk - with two identical drives in one
+  # enclosure the model string is useless for finding the right bay.
+  [[ -n "$g_dev_serial" ]] && g_dev_label="${g_dev_label} serial ${g_dev_serial}"
 
   # 1) Overall SMART health self-assessment (ATA and NVMe)
   g_health=$(grep -E -i "SMART overall-health self-assessment test result:" "$g_smart" | head -1)
@@ -258,6 +283,10 @@ do
   g_poh=""
   g_starts=""
   g_loads=""
+  g_raw_5=""
+  g_raw_196=""
+  g_raw_197=""
+  g_raw_198=""
   g_attrs_now="${g_runcheck_state}/smart-now-${g_name}"
   : > "$g_attrs_now"
   while IFS='|' read -r g_rec g_attr_id g_attr_name g_attr_val g_attr_worst g_attr_raw
@@ -271,6 +300,12 @@ do
     case "$g_attr_id" in
       5|10|196|197|198|199)
         echo "attr_${g_attr_id}=${g_attr_raw}" >> "$g_attrs_now"
+        case "$g_attr_id" in
+          5)   g_raw_5="$g_attr_raw" ;;
+          196) g_raw_196="$g_attr_raw" ;;
+          197) g_raw_197="$g_attr_raw" ;;
+          198) g_raw_198="$g_attr_raw" ;;
+        esac
         ;;
       177|231|232|233|248)
         echo "life_${g_attr_id}=${g_attr_val}" >> "$g_attrs_now"
@@ -302,9 +337,69 @@ do
   g_self_fail=$(sed -n '/Self-test log structure/,/Selective self-test log/p' "$g_smart" | grep -c -E -i "read failure|write failure|FAILED")
   echo "selftestfail=$g_self_fail" >> "$g_attrs_now"
 
+  # 5b) Absolute media damage. Sectors that could not be remapped are
+  #     physical damage, not a trend: a disk that was already broken when the
+  #     baseline was taken must not stay silent. Persistent alert, silenced
+  #     per device via runchecks-snooze.conf (like temperature and spin-up).
+  g_defect_parts=()
+  if [[ "${g_raw_5:-0}" -gt 0 || "${g_raw_196:-0}" -gt 0 ]]
+  then
+    g_defect_parts+=("remapped ${g_raw_5:-0} sectors (id 5/196)")
+  fi
+  if [[ "${g_raw_197:-0}" -gt 0 ]]
+  then
+    g_defect_parts+=("${g_raw_197} pending sectors (id 197, unreadable and not remapped)")
+  fi
+  if [[ "${g_raw_198:-0}" -gt 0 ]]
+  then
+    g_defect_parts+=("${g_raw_198} uncorrectable sectors (id 198, data lost)")
+  fi
+  if [[ ${#g_defect_parts[@]} -gt 0 ]]
+  then
+    g_defect_msg=$(printf '%s, ' "${g_defect_parts[@]}")
+    g_defect_msg="${g_defect_msg%, }"
+    g_st_hint=""
+    [[ "${g_self_fail:-0}" -gt 0 ]] && g_st_hint=" - the SMART self-test log also contains failures"
+    if [[ "${g_raw_197:-0}" -gt 0 || "${g_raw_198:-0}" -gt 0 ]]
+    then
+      # Unreadable or lost sectors: the disk is failing, data is at risk.
+      f_disk_alert "SMART $g_dev_label reports media damage: ${g_defect_msg}${g_st_hint} - the disk is failing, replace it"
+    else
+      # Only remapped sectors: the disk could repair itself so far.
+      f_disk_alert "SMART $g_dev_label reports media damage: ${g_defect_msg}${g_st_hint} - the disk is degrading, replace it soon"
+    fi
+  fi
+
   # 6) Trend comparison against the baseline (A): alert only when a counter
   #    increased (defects/CRC/error log/selftest) or a life attribute dropped.
-  g_base="${g_runcheck_state}/smart-baseline-${g_name}"
+  #    The baseline is keyed by the disk serial, not by the kernel name: a USB
+  #    re-enumeration renames the device (sdd -> sdb) and a baseline taken
+  #    under the new name would silently adopt the current values as "known".
+  g_state_id="${g_dev_serial:-${g_name}}"
+  g_base="${g_runcheck_state}/smart-baseline-${g_state_id}"
+  g_base_legacy=""
+  if [[ ! -f "$g_base" && -n "$g_dev_serial" ]]
+  then
+    # Migration: a baseline written by an older version is keyed by the kernel
+    # name. Adopt it when it belongs to the same disk (serial line) or when it
+    # is the legacy file of this device name.
+    for g_cand in "${g_runcheck_state}"/smart-baseline-*
+    do
+      [[ -f "$g_cand" ]] || continue
+      g_cand_serial=$(grep -m1 "^serial=" "$g_cand" 2>/dev/null | cut -d= -f2)
+      if [[ -n "$g_cand_serial" && "$g_cand_serial" == "$g_dev_serial" ]]
+      then
+        g_base_legacy="$g_cand"
+        break
+      fi
+      if [[ -z "$g_cand_serial" && "$(basename "$g_cand")" == "smart-baseline-${g_name}" ]]
+      then
+        g_base_legacy="$g_cand"
+        break
+      fi
+    done
+    [[ -n "$g_base_legacy" ]] && g_base="$g_base_legacy"
+  fi
   if [[ -f "$g_base" ]]
   then
     while IFS='=' read -r g_key g_val
@@ -327,6 +422,14 @@ do
         then
           if [[ "$g_key" == "attr_199" ]]
           then
+            # Bridge artifact: a USB/SAT bridge logs its own command aborts
+            # in the ATA error log and some bridges mirror that count into the
+            # CRC attribute. Only a CRC count clearly above the error log
+            # means real link errors - otherwise this is a false alarm.
+            if [[ -n "$g_ataerr" ]] && [[ "$g_val" -le $((g_ataerr + 10)) ]]
+            then
+              continue
+            fi
             g_echo_error "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val - check cable/USB bridge"
           else
             g_echo_error "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val"
@@ -344,7 +447,15 @@ do
       fi
     done < "$g_attrs_now"
   fi
-  mv -f "$g_attrs_now" "$g_base"
+  # Store the baseline under the identity key (serial) and drop the migrated
+  # legacy file - the history now lives in the serial-keyed file.
+  if [[ -n "$g_dev_serial" ]]
+  then
+    echo "serial=${g_dev_serial}" >> "$g_attrs_now"
+  fi
+  g_base_new="${g_runcheck_state}/smart-baseline-${g_state_id}"
+  mv -f "$g_attrs_now" "$g_base_new"
+  [[ -n "$g_base_legacy" && "$g_base_legacy" != "$g_base_new" ]] && rm -f "$g_base_legacy"
 
   # 7) Temperature (SCSI/SAS devices report it in the SMART data section)
   if [[ -z "$g_temp" ]]
@@ -368,4 +479,16 @@ do
       f_disk_alert "Disk $g_dev_label has excessive spin-up/load cycles (~$((g_spins * 24 / g_poh)) per day in ${g_poh} hours)"
     fi
   fi
+done
+
+# Remove legacy baselines (kernel-name keyed) of devices that are gone: they
+# come from the old naming scheme and can never be matched again. Baselines
+# with a serial line are kept - the disk may be temporarily absent.
+for g_orphan in "${g_runcheck_state}"/smart-baseline-*
+do
+  [[ -f "$g_orphan" ]] || continue
+  g_orphan_key=$(basename "$g_orphan" | sed 's/^smart-baseline-//')
+  [[ -e "/sys/block/${g_orphan_key}" ]] && continue
+  grep -q "^serial=" "$g_orphan" 2>/dev/null && continue
+  rm -f "$g_orphan"
 done
