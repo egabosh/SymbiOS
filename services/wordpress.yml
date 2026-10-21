@@ -120,7 +120,9 @@
   gather_facts: no
   vars:
     service_name: wordpress
-    service_domain: "{{ service_name }}.{{ base_domain }}"
+    # No service_domain on purpose: WordPress runs as instances, each with
+    # its own domain (see the Instances tab). A generic
+    # wordpress.<base_domain> would name a host that does not exist.
     # A WordPress instance needs a LDAP group + Authelia rule when it is NOT
     # public (forward-auth on the site) or when phpMyAdmin is enabled (the
     # phpMyAdmin endpoint is always protected). The LDAP group is also the
