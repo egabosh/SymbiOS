@@ -387,6 +387,7 @@ displayName: ${f_displayname}
 uidNumber: ${f_uid_number}
 gidNumber: 10000
 homeDirectory: /home/${f_uid}
+loginShell: /usr/sbin/nologin
 userPassword: ${f_password_hash}"
 
     if [[ -n "${f_email}" ]]

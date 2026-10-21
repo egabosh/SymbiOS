@@ -208,6 +208,19 @@
             && apt-get install -y openssh-server ldap-utils libnss-ldapd libpam-ldapd strace \
             && rm -rf /var/lib/apt/lists/* \
             && mkdir -p -m0755 /run/sshd
+        # Drop the system accounts this container never uses. With nsswitch
+        # "passwd files ldap" a local account shadows the LDAP user of the
+        # same name (the login then runs with the wrong uid and the files in
+        # the share belong to the system account, not to the LDAP user).
+        # Kept on purpose: root, sshd (OpenSSH privilege separation) and
+        # nslcd (LDAP client daemon started by the entrypoint).
+        RUN for f_user in daemon bin sys sync games man lp mail news uucp \
+              proxy www-data backup list irc _apt nobody messagebus \
+              systemd-network systemd-timesync; \
+            do \
+              userdel -r "${f_user}" 2>/dev/null || true; \
+            done \
+            && rm -rf /var/backups /var/list /var/www /run/ircd
         ENV LANG en_US.utf8
         COPY ./docker-entrypoint.sh /
         ENTRYPOINT ["/docker-entrypoint.sh"]
