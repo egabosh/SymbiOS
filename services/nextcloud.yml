@@ -688,9 +688,20 @@
           # Install and enable Nextcloud apps
           for app in admin_audit bookmarks calendar contacts files_external gpoddersync impersonate maps news notes oauth2 passwords phonetrack photos spreed tasks twofactor_backupcodes twofactor_totp richdocuments user_oidc user_ldap
           do
-            if [ ! -f "app.${app}.installed" ]
+            # The marker alone is not enough: a data reset or a sync of the
+            # document root can remove the app files while the marker stays.
+            # Without the directory the app is broken even though the
+            # database still lists it as installed.
+            if [ ! -f "app.${app}.installed" ] || [ ! -d "nextcloud-data/apps/${app}" ]
             then
-              docker compose exec -T -u www-data nextcloud ./occ app:install "${app}" | tee -a nextcloud.init.log >"app.${app}.installed" 2>&1
+              docker compose exec -T -u www-data nextcloud ./occ app:install "${app}" >"app.${app}.installed" 2>&1
+              f_rc=$?
+              cat "app.${app}.installed" >> nextcloud.init.log
+              if [[ $f_rc -ne 0 ]] || [ ! -d "nextcloud-data/apps/${app}" ]
+              then
+                echo "ERROR: app ${app} could not be installed (rc=${f_rc}) - see nextcloud.init.log" >&2
+                rm -f "app.${app}.installed"
+              fi
             fi
             docker compose exec -T -u www-data nextcloud ./occ app:enable "${app}" | tee -a nextcloud.init.log >>"app.${app}.installed" 2>&1
           done
