@@ -175,6 +175,11 @@
               issuer: "https://auth.{{ base_domain }}"
               client_id: "matrix"
               client_secret: "{{ lookup('file', '/symbios/services/matrix/oidc_password') }}"
+              # The Authelia client for matrix uses token_endpoint_auth_method
+              # client_secret_post; Synapse would default to
+              # client_secret_basic and the token exchange would fail with
+              # invalid_client.
+              client_auth_method: client_secret_post
               authorization_endpoint: "https://auth.{{ base_domain }}/api/oidc/authorization"
               token_endpoint: "https://auth.{{ base_domain }}/api/oidc/token"
               userinfo_endpoint: "https://auth.{{ base_domain }}/api/oidc/userinfo"
