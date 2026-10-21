@@ -29,11 +29,21 @@
 # it only if the user has a mail attribute. This avoids a broken dynamic
 # rendering via set_fact + Jinja2 for-loop in blockinfile's block: param.
 
+- name: "build claims_policy line for {{ service_name }}"
+  ansible.builtin.set_fact:
+    # The claims_policy line must be omitted entirely when no policy is
+    # wanted: an empty value (claims_policy: '') is NOT the same as no key
+    # in Authelia v4.39 - it releases no user claims at all (no
+    # preferred_username), which breaks the user mapping of the client.
+    # The line carries its indentation and its trailing newline, so the
+    # block below can splice it in without leaving a blank line behind.
+    oidc_claims_policy_line: "{{ (\"        claims_policy: '\" ~ oidc_claims_policy ~ \"'\n\") if (oidc_claims_policy is defined and oidc_claims_policy | length > 0) else '' }}"
+
 - name: "write OIDC config in authelias configuration.yml for {{ service_name }}"
   ansible.builtin.blockinfile:
     path: /symbios/base-services/authelia/authelia-data/configuration.yml
     marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC {{ service_name }}"
-    block: "      # {{ oidc_client_name | default(service_name) }}\n      - client_id: '{{ service_name }}'\n        client_name: '{{ oidc_client_name | default(service_name) }}'\n        client_secret: '{{ lookup('file', oidc_secret_file | default(data_root ~ '/services/' ~ service_name ~ '/oidc_digest')) }}'\n        public: false\n        require_pkce: {{ oidc_require_pkce | default(true) | lower }}\n        pkce_challenge_method: '{{ oidc_pkce_challenge_method | default('S256') }}'\n        authorization_policy: '{{ lookup('file', data_root ~ '/base-services/authelia/authorization_policy') }}'\n        consent_mode: '{{ oidc_consent_mode | default('implicit') }}'\n        claims_policy: '{{ oidc_claims_policy | default('') }}'\n        redirect_uris:\n          - '{{ oidc_redirect_uris | first }}'\n        scopes:\n          - 'openid'\n          - 'profile'\n          - 'email'\n          - 'groups'\n        response_types:\n          - 'code'\n        grant_types:\n          - 'authorization_code'\n        access_token_signed_response_alg: 'none'\n        userinfo_signed_response_alg: 'none'\n        token_endpoint_auth_method: '{{ oidc_token_endpoint_auth_method | default('client_secret_post') }}'"
+    block: "      # {{ oidc_client_name | default(service_name) }}\n      - client_id: '{{ service_name }}'\n        client_name: '{{ oidc_client_name | default(service_name) }}'\n        client_secret: '{{ lookup('file', oidc_secret_file | default(data_root ~ '/services/' ~ service_name ~ '/oidc_digest')) }}'\n        public: false\n        require_pkce: {{ oidc_require_pkce | default(true) | lower }}\n        pkce_challenge_method: '{{ oidc_pkce_challenge_method | default('S256') }}'\n        authorization_policy: '{{ lookup('file', data_root ~ '/base-services/authelia/authorization_policy') }}'\n        consent_mode: '{{ oidc_consent_mode | default('implicit') }}'\n{{ oidc_claims_policy_line }}        redirect_uris:\n          - '{{ oidc_redirect_uris | first }}'\n        scopes:\n          - 'openid'\n          - 'profile'\n          - 'email'\n          - 'groups'\n        response_types:\n          - 'code'\n        grant_types:\n          - 'authorization_code'\n        access_token_signed_response_alg: 'none'\n        userinfo_signed_response_alg: 'none'\n        token_endpoint_auth_method: '{{ oidc_token_endpoint_auth_method | default('client_secret_post') }}'"
     insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
     backup: yes
   notify: Restart authelia
