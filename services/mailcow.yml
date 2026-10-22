@@ -713,3 +713,22 @@
               docker compose up -d --force-recreate
             fi
           fi
+
+    # Docker-based healthcheck (non-HTTP; probes a core mailcow container)
+    - name: Deploy healthcheck
+      include_tasks: ../shared-tasks/runcheck-docker.yml
+      vars:
+        check_desc: "Verifies that the mailcow mail server containers are listed in docker ps."
+
+    # Register playbook as installed in the state file
+    - name: Register playbook as installed
+      include_tasks: ../shared-tasks/state-register.yml
+
+  handlers:
+
+    - name: Restart mailcow
+      include_tasks: ../shared-tasks/compose-recreate.yml
+
+    - name: Restart unbound
+      ansible.builtin.shell: docker restart $(docker ps -qaf name=unbound-mailcow)
+      changed_when: false
