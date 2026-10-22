@@ -730,27 +730,32 @@
           fi
 
           #  richdocuments Collabora Office (Nextcloud Office App)
+          # The WOPI URLs depend on base_domain, so they are re-asserted on
+          # every apply - a stale wopi_url breaks Office after a domain
+          # change. The app activation (secret, connectivity test) stays a
+          # one-time step, it fails when Collabora is not reachable.
           if ! [ -s app.richdocuments.configured ]
           then
-            docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments wopi_allowlist --value="0.0.0.0/0,::0" >>app.richdocuments.configured
             docker compose exec -T -u www-data nextcloud ./occ richdocuments:activate-config >>app.richdocuments.configured
-            docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments wopi_callback_url   --value="https://nextcloud.{{ base_domain }}" >>app.richdocuments.configured
-            docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments wopi_url            --value="https://office.{{ base_domain }}" >>app.richdocuments.configured
-            docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments public_wopi_url     --value="https://office.{{ base_domain }}" >>app.richdocuments.configured
-            docker compose exec -T -u www-data nextcloud ./occ config:system:set overwrite.cli.url --value="https://nextcloud.{{ base_domain }}"
-            docker compose exec -T -u www-data nextcloud ./occ config:system:set trusted_proxies 1 --value="{{ trusted_proxies_cidr }}"
-            docker compose exec -T -u www-data nextcloud ./occ config:system:set trusted_proxies 2 --value="fdaa:a192:b168:cd41::/64"
+            date >> app.richdocuments.configured
           fi
+          docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments wopi_allowlist --value="0.0.0.0/0,::0" >/dev/null
+          docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments wopi_callback_url   --value="https://nextcloud.{{ base_domain }}" >/dev/null
+          docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments wopi_url            --value="https://office.{{ base_domain }}" >/dev/null
+          docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments public_wopi_url     --value="https://office.{{ base_domain }}" >/dev/null
+          docker compose exec -T -u www-data nextcloud ./occ config:system:set overwrite.cli.url --value="https://nextcloud.{{ base_domain }}" >/dev/null
+          docker compose exec -T -u www-data nextcloud ./occ config:system:set trusted_proxies 1 --value="{{ trusted_proxies_cidr }}" >/dev/null
+          docker compose exec -T -u www-data nextcloud ./occ config:system:set trusted_proxies 2 --value="fdaa:a192:b168:cd41::/64" >/dev/null
 
           # Redis password
-          if ! [ -s app.redis.configured ]
+          # Re-asserted on every apply: the password comes from the env file
+          # and is rotated with the stack. A stale value in the system config
+          # makes every request fail with an authentication error.
+          if [ -s /symbios/services/nextcloud/env ]
           then
-            if [ -s /symbios/services/nextcloud/env ]
-            then
-              redis_password=$(grep ^REDIS_PASSWORD= /symbios/services/nextcloud/env | cut -d= -f2-)
-              docker compose exec -T -u www-data nextcloud ./occ config:system:set redis password --value="${redis_password}"
-              date >> app.redis.configured
-            fi
+            redis_password=$(grep ^REDIS_PASSWORD= /symbios/services/nextcloud/env | cut -d= -f2-)
+            docker compose exec -T -u www-data nextcloud ./occ config:system:set redis password --value="${redis_password}" >/dev/null
+            date >> app.redis.configured
           fi
 
           # OIDC via Authelia (user_oidc)
