@@ -22,7 +22,7 @@
 #     - twofa_enabled
 #   name: Mailcow
 #   short_description: Deploy the Mailcow mail server (mailcow-dockerized)
-#   description: Deploys Mailcow with Traefik integration, LDAP groups, and Authelia access control. TLS certificates are provided by Traefik (ACME) and synced into the mailcow nginx. All persistent data (mailboxes, databases) lives in bind-backed named volumes under ./volumes/, i.e. as plain files inside the service directory.
+#   description: Deploys Mailcow with Traefik integration. TLS certificates are provided by Traefik (ACME) and synced into the mailcow nginx. All persistent data (mailboxes, databases) lives in bind-mounted volumes under ./volumes/, i.e. as plain files inside the service directory. Mailcow manages its own users, so there are no LDAP groups and no Authelia protection - the login of the Mailcow runs in Mailcow itself.
 #   url: "https://mail.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
@@ -35,8 +35,7 @@
 #     - '13'
 #   category: Service
 #   access:
-#     admin_group: mailcow-admins
-#     user_group: mailcow-users
+#     none: Mailcow manages its own users and runs its own login
 #   service_control:
 #     services:
 #     - name: mailcow
@@ -55,11 +54,8 @@
 #       - /symbios/runchecks.d/symbios-healthcheck-mailcow.check
 #       - /symbios/autoupdate.d/mailcow.update
 #       - /symbios/backup.d/mailcow.backup
-#     ldap_groups:
-#       - mailcow-users
-#       - mailcow-admins
-#     authelia_blocks:
-#       - "mailcow ACCESS CONTROL"
+#     ldap_groups: []
+#     authelia_blocks: []
 #   actions:
 #     start: docker compose -f /symbios/services/mailcow/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/mailcow/docker-compose.yml down
@@ -428,10 +424,8 @@
             </emailProvider>
           </clientConfig>
 
-    # Traefik file-provider for the mailcow Web UI.
-    # Authelia forward-auth protects the login page; the mailcow UI can later
-    # be connected to Authelia via Generic OIDC (System > Configuration >
-    # Access > Identity Provider) in addition to forward-auth.
+    # Traefik file-provider for the mailcow Web UI. Mailcow manages its
+    # own users and runs its own login; there is no Authelia forward-auth.
     - name: "/symbios/base-services/traefik/providers/mailcow.yml Routing Configuration"
       blockinfile:
         path: /symbios/base-services/traefik/providers/mailcow.yml
@@ -452,7 +446,6 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
-                  - "authelia@file"
             services:
               mailcow:
                 loadBalancer:
@@ -720,78 +713,3 @@
               docker compose up -d --force-recreate
             fi
           fi
-
-    # LDAP groups for Authelia forward-auth access control
-    - name: Ensure LDAP groups for mailcow access control
-      include_tasks: ../shared-tasks/oidc-groups.yml
-
-    # Authelia access_control: only mailcow-users and mailcow-admins may reach
-    # the mailcow Web UI. The enforced factor count follows the central
-    # twofa_enabled variable (inventory.yml).
-    - name: Write Authelia access_control for mailcow
-      include_tasks: ../shared-tasks/authelia-acl.yml
-      vars:
-        authelia_subjects:
-          - - "group:mailcow-users"
-          - - "group:mailcow-admins"
-
-    # OIDC: register mailcow as an OpenID Connect client in Authelia so that
-    # mailbox users can log into the mailcow web UI via SSO (Generic-OIDC).
-    - name: Create oidc client secret for mailcow
-      ansible.builtin.shell: |
-        /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/mailcow
-      changed_when: false
-      failed_when: false
-
-    - name: Write OIDC config in authelias configuration.yml for mailcow
-      include_tasks: ../shared-tasks/authelia-oidc.yml
-      vars:
-        service_name: "mailcow"
-        oidc_client_name: "Mailcow"
-        oidc_redirect_uris:
-          - "https://mail.{{ base_domain }}"
-        # Mailcow's Generic-OIDC does not send a PKCE code_challenge in its
-        # SSO flow. Both require_pkce and pkce_challenge_method must be
-        # disabled: a non-empty pkce_challenge_method would re-enable PKCE
-        # enforcement (see Authelia docs -> OIDC clients -> require_pkce).
-        oidc_require_pkce: false
-        oidc_pkce_challenge_method: ""
-
-    # Persist the mailcow Generic-OIDC identity provider configuration in the
-    # mailcow database. These rows are normally written by the WebUI
-    # (System > Configuration > Access > Identity Provider), but silently
-    # missing 'mappers'/'templates' rows make the OIDC login return an empty
-    # page with no mailbox provisioned (array_search on null in
-    # functions.inc.php). Enforce the full key set idempotently so a re-apply
-    # always yields a working SSO setup. Values other than client_secret are
-    # derived from base_domain; client_secret matches the Authelia OIDC client
-    # secret stored in {{ mailcow_root }}/oidc_password by gen-oidc-client-secret.sh.
-    # Logic lives in scripts/symbios-mailcow-idp.sh (secrets stay in files,
-    # never in argv; the task keeps no_log: true).
-    - name: Persist mailcow identity_provider configuration
-      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-mailcow-idp.sh {{ mailcow_root }} {{ base_domain }} {{ service_domain }}"
-      no_log: true
-      changed_when: false
-      run_once: true
-
-    # Docker-based healthcheck (non-HTTP; probes a core mailcow container)
-    - name: Deploy healthcheck
-      include_tasks: ../shared-tasks/runcheck-docker.yml
-      vars:
-        check_desc: "Verifies that the mailcow mail server containers are listed in docker ps."
-
-    # Register playbook as installed in the state file
-    - name: Register playbook as installed
-      include_tasks: ../shared-tasks/state-register.yml
-
-  handlers:
-
-    - name: Restart mailcow
-      include_tasks: ../shared-tasks/compose-recreate.yml
-
-    - name: Restart unbound
-      ansible.builtin.shell: docker restart $(docker ps -qaf name=unbound-mailcow)
-      changed_when: false
-
-    - name: Restart authelia
-      include_tasks: ../shared-tasks/authelia-restart.yml
