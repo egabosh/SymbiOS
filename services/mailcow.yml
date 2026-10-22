@@ -74,11 +74,52 @@
     service_name: mailcow
     service_domain: "mail.{{ base_domain }}"
     mailcow_root: "{{ services_root }}/mailcow"
-    # All persistent mailcow data lives in these upstream named volumes.
-    # They are bind-backed to {{ mailcow_root }}/volumes/<name> (see the
-    # docker-compose.override.yml task below), so the whole mail store is
-    # visible as plain files inside the service directory instead of
-    # hiding under /var/lib/docker/volumes.
+    # All persistent mailcow data lives in the upstream named volumes.
+    # The override replaces them by plain bind mounts onto directories in
+    # the service directory, so the whole mail store is visible as plain
+    # files there instead of hiding under /var/lib/docker/volumes - and
+    # a "docker system prune -af" can not delete it while the stack is
+    # down. Key: service -> list of [volume name, target path].
+    mailcow_bind_mounts:
+      acme-mailcow:
+        - [mysql-socket-vol-1, /var/run/mysqld]
+      clamd-mailcow:
+        - [clamd-db-vol-1, /var/lib/clamav]
+      dovecot-mailcow:
+        - [vmail-vol-1, /var/vmail]
+        - [vmail-index-vol-1, /var/vmail_index]
+        - [crypt-vol-1, /mail_crypt]
+        - [rspamd-vol-1, /var/lib/rspamd]
+        - [mysql-socket-vol-1, /var/run/mysqld]
+      mysql-mailcow:
+        - [mysql-vol-1, /var/lib/mysql]
+        - [mysql-socket-vol-1, /var/run/mysqld]
+      nginx-mailcow:
+        - [sogo-web-vol-1, /usr/local/lib/GNUstep/SOGo]
+      php-fpm-mailcow:
+        - [rspamd-vol-1, /var/lib/rspamd]
+        - [mysql-socket-vol-1, /var/run/mysqld]
+      postfix-mailcow:
+        - [postfix-vol-1, /var/spool/postfix]
+        - [crypt-vol-1, /var/lib/zeyple]
+        - [rspamd-vol-1, /var/lib/rspamd]
+        - [mysql-socket-vol-1, /var/run/mysqld]
+      postfix-tlspol-mailcow:
+        - [postfix-tlspol-vol-1, /var/lib/postfix-tlspol]
+      redis-mailcow:
+        - [redis-vol-1, /data]
+      rspamd-mailcow:
+        - [rspamd-vol-1, /var/lib/rspamd]
+      sogo-mailcow:
+        - [mysql-socket-vol-1, /var/run/mysqld]
+        - [sogo-web-vol-1, /sogo_web]
+        - [sogo-userdata-backup-vol-1, /sogo_backup]
+      watchdog-mailcow:
+        - [rspamd-vol-1, /var/lib/rspamd]
+        - [mysql-socket-vol-1, /var/run/mysqld]
+        - [postfix-vol-1, /var/spool/postfix]
+    # The directories that back the volumes (the names of the upstream
+    # volumes, the data lives in them).
     mailcow_bind_volumes:
       - vmail-vol-1
       - vmail-index-vol-1
@@ -317,108 +358,18 @@
     # docker-compose.override.yml adds the autoconfig/autodiscover nginx
     # container (for client autodiscovery, see config-v1.1.xml below).
     # The container joins symbios_services so Traefik can reach it by name.
-    # The same file re-defines the upstream named volumes as bind-backed
-    # (driver_opts type=none + o=bind) pointing at ./volumes/<name>.
-    # Volume NAMES stay unchanged, so upstream docker-compose.yml,
-    # update.sh and helper-scripts/backup_and_restore.sh keep working.
-    # NOTE for pre-existing installs: docker reuses already-created named
-    # volumes and ignores driver_opts afterwards. Moving an old install to
-    # binds is manual: stop the stack, copy
-    # /var/lib/docker/volumes/mailcowdockerized_<name>/_data/ to
-    # ./volumes/<name>/ (numeric IDs preserved), `docker volume rm` the old
-    # ones, then `docker compose up -d`.
-    - name: "{{ mailcow_root }}/docker-compose.override.yml Autoconfig Container Configuration"
-      blockinfile:
-        path: "{{ mailcow_root }}/docker-compose.override.yml"
-        create: yes
+    # The same file replaces the upstream named volumes by plain bind
+    # mounts onto ./volumes/<name> (see mailcow_bind_mounts): the mail
+    # store then lives as ordinary files in the service directory, and
+    # "docker system prune -af" can not remove it while the stack is
+    # down.
+    - name: "{{ mailcow_root }}/docker-compose.override.yml"
+      ansible.builtin.template:
+        src: mailcow/templates/docker-compose.override.yml.j2
+        dest: "{{ mailcow_root }}/docker-compose.override.yml"
         mode: '0440'
         owner: root
         group: docker
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-
-          services:
-            autoconfig:
-              image: nginx:latest
-              container_name: symbios-mailcow-autoconfig
-              restart: unless-stopped
-              volumes:
-                - ./autoconfig/htdocs:/usr/share/nginx/html:ro
-                - /etc/localtime:/etc/localtime:ro
-              networks:
-                - autoconfig--network
-                - symbios_services
-
-          networks:
-            autoconfig--network:
-              driver: bridge
-              driver_opts:
-                com.docker.network.bridge.name: br-mcow-acfg
-            symbios_services:
-              external: true
-
-          volumes:
-            vmail-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/vmail-vol-1"
-                o: bind
-            vmail-index-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/vmail-index-vol-1"
-                o: bind
-            mysql-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/mysql-vol-1"
-                o: bind
-            mysql-socket-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/mysql-socket-vol-1"
-                o: bind
-            redis-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/redis-vol-1"
-                o: bind
-            rspamd-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/rspamd-vol-1"
-                o: bind
-            postfix-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/postfix-vol-1"
-                o: bind
-            postfix-tlspol-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/postfix-tlspol-vol-1"
-                o: bind
-            crypt-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/crypt-vol-1"
-                o: bind
-            sogo-web-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/sogo-web-vol-1"
-                o: bind
-            sogo-userdata-backup-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/sogo-userdata-backup-vol-1"
-                o: bind
-            clamd-db-vol-1:
-              driver_opts:
-                type: none
-                device: "{{ mailcow_root }}/volumes/clamd-db-vol-1"
-                o: bind
-        backup: yes
       notify: Restart mailcow
 
     # Autodiscovery/autoconfig document root
