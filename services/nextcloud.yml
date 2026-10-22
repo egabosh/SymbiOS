@@ -909,11 +909,47 @@
 
           # Update full Dockerfile
           /symbios/services/nextcloud/fulldockerfile.sh
-          # Nextcloud maintenance and app-update
+
+          # Core update, in the order the Nextcloud manual prescribes:
+          #
+          # 1. update the apps - the appstore serves the version that is
+          #    compatible with the running core
+          # 2. pull the new image and recreate the container - the core
+          #    version IS the image. The entrypoint detects the version
+          #    mismatch and runs "occ upgrade", which updates the shipped
+          #    apps and disables the third party apps that are not
+          #    compatible with the new core.
+          # 3. update the apps again - now the appstore serves the versions
+          #    for the new core
+          # 4. enable the apps again and re-assert the configuration. The
+          #    init script does that (it knows the app list of the
+          #    playbook) and waits for the container.
+          #
+          # Without step 3 and 4 the apps stay disabled until the next
+          # manual playbook run - a disabled user_oidc means no login.
+          # The sequence lives here, not spread over the module order of
+          # the autoupdate dispatcher.
+          docker compose exec -T -u www-data nextcloud ./occ app:update --all
+          docker compose pull nextcloud nextcloud-cron nextcloud-phpmyadmin
+          docker compose up -d nextcloud nextcloud-cron nextcloud-phpmyadmin
+
+          # Wait for the database upgrade of the entrypoint to finish.
+          g_upgrade_wait=0
+          until docker compose exec -T -u www-data nextcloud ./occ status 2>/dev/null | grep -q "needsDbUpgrade: false"
+          do
+            [[ $g_upgrade_wait -gt 60 ]] && break
+            g_echo_note "Waiting for the Nextcloud database upgrade"
+            sleep 10
+            ((g_upgrade_wait++))
+          done
+
+          docker compose exec -T -u www-data nextcloud ./occ app:update --all
+          bash /symbios/services/nextcloud/nextcloud.init.sh
+
+          # Nextcloud maintenance
           docker compose exec -T -u www-data nextcloud ./occ db:add-missing-columns
           docker compose exec -T -u www-data nextcloud ./occ db:add-missing-indices
           docker compose exec -T -u www-data nextcloud ./occ db:add-missing-primary-keys
-          docker compose exec -T -u www-data nextcloud ./occ app:update --all
           docker compose exec -T -u www-data nextcloud ./occ dav:sync-birthday-calendar
           docker compose exec -T -u www-data nextcloud ./occ trashbin:cleanup --all-users
           docker compose exec -T -u www-data nextcloud ./occ files:cleanup
