@@ -201,19 +201,24 @@
                 "options": {
                   {{ opencode_base_url_line }}
                   {{ opencode_api_key_line }}
-                  "timeout": 180000,
+                  "timeout": 3600000,
                   "chunkTimeout": 1800000
                 },
                 "models": {
                   "llamacpp-default": {
                     "name": "llamacpp-default",
                     "reasoning": true,
+                    "attachment": true,
+                    "modalities": {
+                      "input": ["text", "image", "video", "pdf"],
+                      "output": ["text"]
+                    },
                     "limit": {
-                      "context": 133120,
-                      "output": 32768
+                      "context": 262144,
+                      "output": 8192
                     },
                     "parameters": {
-                      "maxTokens": 32768,
+                      "maxTokens": 8192,
                       "temperature": 0.7,
                       "topP": 0.8
                     }
