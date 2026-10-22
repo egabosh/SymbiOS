@@ -789,40 +789,57 @@
 
 
           # LDAP-Backend (user_ldap)
-          if ! [ -s app.user_ldap.configured ]
-          then
-            LDAP_BASE_DN="{{ ldap_basedn }}"
-            LDAP_BIND_DN="cn=readuser,${LDAP_BASE_DN}"
+          # The values are re-asserted on every apply, same pattern as the
+          # OIDC provider above: ldap_basedn comes from the inventory and the
+          # readuser password is rotated, so a one-time setup keeps a stale
+          # base DN or host. The app then fails every request with "Lost
+          # connection to LDAP server" (HTTP 500) after the LDAP container
+          # was redeployed.
+          LDAP_BASE_DN="{{ ldap_basedn }}"
+          LDAP_BIND_DN="cn=readuser,${LDAP_BASE_DN}"
 
-            if [ -s /symbios/base-services/ldap/env.openldap ]
+          if [ -s /symbios/base-services/ldap/env.openldap ]
+          then
+            LDAP_PASSWORD=$(grep ^LDAP_READUSER_PASSWORD= /symbios/base-services/ldap/env.openldap | cut -d= -f2-)
+          fi
+
+          # A host that never had the backend keeps the local/OIDC-only
+          # login, a host that uses it gets the values below re-asserted.
+          if [ ! -s app.user_ldap.configured ] \
+            || docker compose exec -T -u www-data nextcloud ./occ config:app:get user_ldap s01ldap_host >/dev/null 2>&1
+          then
+            # The empty config is only created when it is missing - it would
+            # reset the settings below.
+            if ! docker compose exec -T -u www-data nextcloud ./occ config:app:get user_ldap s01ldap_host >/dev/null 2>&1
             then
-              LDAP_PASSWORD=$(grep ^LDAP_READUSER_PASSWORD= /symbios/base-services/ldap/env.openldap | cut -d= -f2-)
+              docker compose exec -T -u www-data nextcloud ./occ ldap:create-empty-config >>app.user_ldap.configured
             fi
 
-            docker compose exec -T -u www-data nextcloud ./occ ldap:create-empty-config >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapHost "openldap" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapPort "389" >>app.user_ldap.configured
-            #docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapTLS "1" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapBase "${LDAP_BASE_DN}" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapBaseUsers "ou=users,${LDAP_BASE_DN}" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapBaseGroups "ou=groups,${LDAP_BASE_DN}" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapAgentName "${LDAP_BIND_DN}" >>app.user_ldap.configured
+            # The compose service alias, not the public hostname: the LDAP
+            # port is only published on 127.0.0.1 on the host.
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapHost "openldap" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapPort "389" >/dev/null
+            #docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapTLS "1" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapBase "${LDAP_BASE_DN}" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapBaseUsers "ou=users,${LDAP_BASE_DN}" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapBaseGroups "ou=groups,${LDAP_BASE_DN}" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapAgentName "${LDAP_BIND_DN}" >/dev/null
             if [ -n "${LDAP_PASSWORD}" ]
             then
-              docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapAgentPassword "${LDAP_PASSWORD}" >>app.user_ldap.configured
+              docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapAgentPassword "${LDAP_PASSWORD}" >/dev/null
             fi
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapLoginFilter "(&(|(objectclass=posixAccount))(uid=%uid))" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserFilter "(objectClass=posixAccount)" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapGroupFilter "(objectClass=posixGroup)" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapGroupMemberAssocAttr "memberUid" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserDisplayName "cn" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapEmailAttribute "mail" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapConfigurationActive "1" >>app.user_ldap.configured
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserLoginName uid >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapLoginFilter "(&(|(objectclass=posixAccount))(uid=%uid))" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserFilter "(objectClass=posixAccount)" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapGroupFilter "(objectClass=posixGroup)" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapGroupMemberAssocAttr "memberUid" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserDisplayName "cn" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapEmailAttribute "mail" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapConfigurationActive "1" >/dev/null
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserLoginName uid >/dev/null
             # internal username = LDAP uid so LDAP and OIDC logins map to one account
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapExpertUsernameAttr uid >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapExpertUsernameAttr uid >/dev/null
             # members of the privileged LDAP group get Nextcloud admin rights
-            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapAdminGroup "nextcloud-admins" >>app.user_ldap.configured
+            docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapAdminGroup "nextcloud-admins" >/dev/null
             date >> app.user_ldap.configured
           fi
 
