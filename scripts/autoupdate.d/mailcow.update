@@ -1,0 +1,53 @@
+#!/bin/bash
+# SymbiOS - update the mailcow stack.
+#
+# The mailcow brings its own update script (update.sh in the service
+# directory). It resets the files that the upstream repository tracks -
+# among them the resolver configuration. SymbiOS manages that
+# configuration, so the update is done here and the playbook runs
+# afterwards: it puts the configuration back and starts the stack.
+#
+# The auto update of the mailcow watchdog is switched off (AUTO_UPDATE=n
+# in mailcow.conf), otherwise the update would run unsupervised and
+# leave the stack with a broken resolver.
+
+set -u
+
+f_mailcow_root="/symbios/services/mailcow"
+f_git_root="/symbios/git/SymbiOS"
+f_inventory="/symbios/base-services/symbios-ui/config/inventory.yml"
+
+if [[ ! -x "${f_mailcow_root}/update.sh" ]]
+then
+  echo "mailcow: no update script in ${f_mailcow_root} - skipped"
+  exit 0
+fi
+
+if [[ ! -f "${f_inventory}" ]]
+then
+  echo "mailcow: no inventory - skipped"
+  exit 0
+fi
+
+echo "mailcow: running the upstream update"
+cd "${f_mailcow_root}" || exit 1
+# --skip-start: the playbook starts the stack with the restored
+# configuration, --force: no questions in a non-interactive run.
+if ! ./update.sh --force --skip-start
+then
+  echo "mailcow: the upstream update failed - the stack stays as it is"
+  exit 1
+fi
+
+echo "mailcow: restoring the SymbiOS configuration"
+cd "${f_git_root}" || exit 1
+if ! ansible-playbook --connection=local --limit localhost \
+  --inventory "${f_inventory}" -e git_root="${f_git_root}" \
+  services/mailcow.yml
+then
+  echo "mailcow: the playbook failed after the update"
+  exit 1
+fi
+
+echo "mailcow: update done"
+exit 0

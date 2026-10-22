@@ -252,6 +252,12 @@
           SKIP_IP_CHECK=n
           SKIP_HTTP_VERIFICATION=n
           SKIP_UNBOUND_HEALTHCHECK=n
+          # The auto update of the mailcow watchdog is off: the update
+          # resets the files that SymbiOS manages (the resolver
+          # configuration), so it runs through the autoupdate module
+          # (scripts/autoupdate.d/mailcow.update), which restores the
+          # configuration right afterwards.
+          AUTO_UPDATE=n
           SKIP_CLAMD=y
           SKIP_OLEFY=n
           SKIP_SOGO=n

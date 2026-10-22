@@ -23,6 +23,13 @@ services:
     networks:
       - autoconfig--network
       - symbios_services
+  unbound-mailcow:
+    # The resolver needs a moment after the start (the root hints are
+    # loaded first). The health check of the image gives up after three
+    # tries, then the container is unhealthy - and the postfix, which
+    # depends on it, does not start. The start period covers the warm-up.
+    healthcheck:
+      start_period: 60s
 {% for f_service, f_mounts in mailcow_bind_mounts.items() %}
   {{ f_service }}:
 {% if f_service in mailcow_image_overrides %}
