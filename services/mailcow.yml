@@ -330,9 +330,11 @@
             local-data: "auth.{{ base_domain }}. A 172.22.1.1"
             local-data: "mail.{{ base_domain }}. A 172.22.1.1"
 
-          forward-zone:
-            name: "."
-            forward-addr: {{ mailcow_dns_forwarder | default('127.0.0.11') }}
+          # The resolver works with the root hints of the image. A forwarder
+          # to the resolver of the docker host (127.0.0.11) answers with
+          # SERVFAIL inside the container - the health check then fails and
+          # the postfix, which depends on it, does not start.
+          root-hints: "/etc/unbound/root.hints"
 
           remote-control:
             control-enable: yes
