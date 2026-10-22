@@ -25,6 +25,9 @@ services:
       - symbios_services
 {% for f_service, f_mounts in mailcow_bind_mounts.items() %}
   {{ f_service }}:
+{% if f_service in mailcow_image_overrides %}
+    image: {{ mailcow_image_overrides[f_service] }}
+{% endif %}
     volumes:
 {% for f_volume, f_target in f_mounts %}
       - type: bind

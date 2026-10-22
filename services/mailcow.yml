@@ -118,6 +118,9 @@
         - [rspamd-vol-1, /var/lib/rspamd]
         - [mysql-socket-vol-1, /var/run/mysqld]
         - [postfix-vol-1, /var/spool/postfix]
+    # Image overrides for single services of the upstream compose file
+    # (service -> image). Empty by default.
+    mailcow_image_overrides: {}
     # The directories that back the volumes (the names of the upstream
     # volumes, the data lives in them).
     mailcow_bind_volumes:
