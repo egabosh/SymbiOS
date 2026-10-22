@@ -506,7 +506,6 @@ texts opportunistically).
 | `symbios-seed-known-hosts.sh` | Pinned SSH known_hosts for the WebUI exec gateway (symbios-ui.yml) | `[config_dir]` |
 | `symbios-reactivate-swap.sh` | Reactivate encrypted swap without reboot (hardening.yml) | no args |
 | `symbios-home-assistant-http.sh` | HA .storage/http reverse-proxy settings (home-assistant.yml) | `<traefik_ip>` |
-| `symbios-mailcow-idp.sh` | Mailcow OIDC identity_provider rows (mailcow.yml) | `<mailcow_root> <base_domain> <service_domain>` |
 | `symbios-nextcloud-external-storage.sh` | Nextcloud external media mounts via occ (nextcloud.yml) | `[--no-previews]` |
 | `symbios-openwebui-db.sh` | OpenWebUI webui.db maintenance: api-key, workflows, backend syncs | `<api-key\|patch-comfyui\|workflows\|sync-openai\|sync-speech\|sync-image\|sync-retrieval>` |
 | `symbios-openwrt-cleanup.sh` | Remove OpenWrt host bridges + helper units (uninstall command) | no args |
