@@ -23,10 +23,10 @@
 #     - twofa_enabled
 #   name: OpenCode
 #   short_description: Deploy the OpenCode coding assistant
-#   description: Deploys OpenCode, a coding assistant web interface. Exposed via Traefik.
+#   description: Deploys OpenCode 2, a coding assistant web interface. Exposed via Traefik; a generated server password (stored at /symbios/services/opencode/.server-password) is injected by Traefik, so only the Authelia login is required.
 #   url: "https://opencode.{{ base_domain }}"
 #   author: Oliver Bohlen
-#   version: '1.0'
+#   version: '2.0'
 #   license: GPLv3
 #   copyright: Copyright (c) 2026, Oliver Bohlen
 #   min_ansible_version: '2.11'
@@ -80,6 +80,20 @@
         state: directory
         mode: '0550'
 
+    # Generate once and reuse for the container env and the Traefik header.
+    # Alphanumeric only, so neither Compose nor YAML needs escaping.
+    - name: Generate OpenCode server password
+      ansible.builtin.set_fact:
+        opencode_server_password: "{{ lookup('password', '/symbios/services/opencode/.server-password length=32 chars=ascii_letters,digits') }}"
+      no_log: true
+
+    - name: Secure the generated OpenCode server password file
+      ansible.builtin.file:
+        path: /symbios/services/opencode/.server-password
+        owner: root
+        group: root
+        mode: '0600'
+
     - name: /symbios/services/opencode/docker-compose.yml Container Configuration
       blockinfile:
         path: /symbios/services/opencode/docker-compose.yml
@@ -99,6 +113,9 @@
                 dockerfile: Dockerfile
               container_name: opencode
               restart: unless-stopped
+              environment:
+                - OPENCODE_SERVER_PASSWORD={{ opencode_server_password }}
+                - OPENCODE_LOG_LEVEL=warn
               volumes:
                 - /etc/localtime:/etc/localtime:ro
                 - ./projects:/projects:rw
@@ -108,7 +125,7 @@
               networks:
                 opencode: {}
                 symbios_services: null
-              entrypoint: ["tini", "-g", "--", "/root/.opencode/bin/opencode", "serve", "--hostname=0.0.0.0", "--port=80", "--print-logs", "--log-level", "WARN"]
+              entrypoint: ["tini", "-g", "--", "/root/.opencode/bin/opencode", "serve", "--hostname=0.0.0.0", "--port=80", "--print-logs"]
 
           networks:
             opencode:
@@ -118,12 +135,46 @@
             symbios_services:
               external: true
         backup: yes
+      no_log: true
       notify: Restart opencode
 
+    # Authelia guards the public route; the OpenCode server itself also requires
+    # basic auth in v2. Inject the same generated password here so the browser
+    # does not get a second login prompt. Username is the server default.
     - name: Traefik provider snippet for opencode
-      include_tasks: ../shared-tasks/traefik-provider.yml
-      vars:
-        traefik_backend_url: "http://opencode:80"
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/traefik/providers/opencode.yml
+        create: yes
+        mode: "0440"
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          http:
+            middlewares:
+              opencode-auth:
+                headers:
+                  customRequestHeaders:
+                    Authorization: "Basic {{ ('opencode:' ~ opencode_server_password) | b64encode }}"
+            routers:
+              opencode:
+                rule: "Host(`{{ service_domain }}`)"
+                service: opencode
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+                  - "authelia@file"
+                  - "opencode-auth@file"
+            services:
+              opencode:
+                loadBalancer:
+                  servers:
+                    - url: "http://opencode:80"
+        backup: yes
+      no_log: true
 
     - name: /symbios/services/opencode/Dockerfile
       blockinfile:
@@ -138,10 +189,10 @@
           ENV DEBIAN_FRONTEND=noninteractive
           # opencode and tools
           RUN apt-get update \
-           && apt-get install -y bash curl nodejs git vim htop tree tini \
+           && apt-get install -y bash curl nodejs git vim htop tree tini tar \
            && rm -rf /var/lib/apt/lists/* \
            && unset VERSION \
-           && curl -fsSL https://opencode.ai/install | bash
+           && curl -fsSL https://opencode.ai/v2/install | bash
           ENTRYPOINT ["/root/.opencode/bin/opencode"]
         backup: yes
       notify: Restart opencode
@@ -189,16 +240,19 @@
         opencode_base_url_line: "{{ '\"baseURL\": \"' + ai_server + '\",' if ai_server | default('', true) else '' }}"
         opencode_api_key_line: "{{ '\"apiKey\": \"' + ai_apikey + '\",' if (ai_server | default('', true)) and (ai_apikey | default('', true)) else '' }}"
 
+    # OpenCode 2 native config shape: providers (not provider), package (not
+    # npm), settings/body (not options/parameters), capabilities (not
+    # modalities/reasoning) and compaction.keep (not tail_turns).
     - name: /symbios/services/opencode/opencode-config/opencode.json
       copy:
         content: |
           {
             "$schema": "https://opencode.ai/config.json",
-            "provider": {
+            "providers": {
               "ai": {
-                "npm": "@ai-sdk/openai-compatible",
+                "package": "@opencode/ai/providers/openai-compatible",
                 "name": "local-llm",
-                "options": {
+                "settings": {
                   {{ opencode_base_url_line }}
                   {{ opencode_api_key_line }}
                   "timeout": 3600000,
@@ -207,20 +261,22 @@
                 "models": {
                   "llamacpp-default": {
                     "name": "llamacpp-default",
-                    "reasoning": true,
-                    "attachment": true,
-                    "modalities": {
+                    "capabilities": {
+                      "tools": true,
                       "input": ["text", "image", "video", "pdf"],
-                      "output": ["text"]
+                      "output": ["text"],
+                      "reasoning": {
+                        "supported": true
+                      }
                     },
                     "limit": {
                       "context": 262144,
                       "output": 8192
                     },
-                    "parameters": {
-                      "maxTokens": 8192,
+                    "body": {
+                      "max_tokens": 8192,
                       "temperature": 0.7,
-                      "topP": 0.8
+                      "top_p": 0.8
                     }
                   }
                 }
@@ -231,7 +287,12 @@
             "instructions": ["AGENTS.md"],
             "compaction": {
               "auto": true,
-              "tail_turns": 10
+              "keep": {
+                "tokens": 15000
+              }
+            },
+            "experimental": {
+              "todo": true
             }
           }
         dest: /symbios/services/opencode/opencode-config/opencode.json
