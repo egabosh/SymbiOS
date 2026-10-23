@@ -1,6 +1,20 @@
 access_control:
   default_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
   rules:
+{% if twofa_lan_bypass | default(false) | bool %}
+    # LAN clients skip the second factor (first match wins). Authelia v4
+    # requires a domain on every rule, so match all of them and let the
+    # networks list do the filtering.
+    - domain_regex: ".*"
+      networks:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - fc00::/7
+        - 127.0.0.1/32
+        - '::1/128'
+      policy: one_factor
+{% endif %}
     - domain: "{{ authelia_domain }}"
       policy: one_factor
     - domain: "{{ base_domain }}"

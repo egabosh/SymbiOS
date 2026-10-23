@@ -25,6 +25,7 @@
 #     - smtp_server
 #     - smtp_user
 #     - twofa_enabled
+#     - twofa_lan_bypass
 #   name: Authelia
 #   short_description: Deploy and configure the Authelia identity provider for Auth and SSO
 #   description: Installs Authelia as the central authentication/authorization server with SSO (signe-sign-on). Users and groups are backed by OpenLDAP; optional second-factor authentication (2FA) is supported.
@@ -174,7 +175,7 @@
       ansible.builtin.set_fact:
         # Extra domains Authelia may set session cookies for (e.g. protected
         # service sites on foreign domains like wp.olmusic.de)
-        authelia_extra_cookie_domains: "{{ ([ddns_host] if (ddns_host is defined and ddns_host) else []) + (authelia_cookie_domains | default([])) | unique | map('trim') | select() | reject('eq', base_domain) | list }}"
+        authelia_extra_cookie_domains: "{{ (([ddns_host] if (ddns_host is defined and ddns_host) else []) + (authelia_cookie_domains | default([]))) | unique | map('trim') | select() | reject('eq', base_domain) | list }}"
       changed_when: false
 
     - name: Render Authelia extra cookie lines

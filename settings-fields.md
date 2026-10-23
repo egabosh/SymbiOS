@@ -53,6 +53,7 @@ Slug: `auth`
 | Name | Type | Label | Required | Default | Secret |
 |------|------|-------|----------|---------|--------|
 | `twofa_enabled` | bool | Two-factor authentication | yes | false |  |
+| `twofa_lan_bypass` | bool | Skip second factor from the LAN | no | false |  |
 
 ## `symbios-settings-backup`
 Slug: `backup`

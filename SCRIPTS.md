@@ -171,15 +171,22 @@ SearXNG URL may carry the `<query>` placeholder.
 
 ### 3.7 `symbios-settings-auth.sh`
 
-Login/2FA toggle (`twofa_enabled`, stored as a real YAML boolean).
+Login/2FA settings (`twofa_enabled`, `twofa_lan_bypass`, stored as real YAML
+booleans).
 
 ```bash
 symbios-settings-auth.sh get [--json]
-symbios-settings-auth.sh set --twofa true|false [--check]
+symbios-settings-auth.sh set --twofa true|false [--lan-bypass true|false] [--check]
 ```
 
 Enabling requires `smtp_server` + `smtp_from` (Authelia mails the second
-factor) - enforced here, exit 2 otherwise.
+factor) - enforced here, exit 2 otherwise. At least one of `--twofa` /
+`--lan-bypass` must be given (or a partial object via `--json-stdin`); unset
+keys keep their current value in the single merge write.
+
+With `twofa_lan_bypass` enabled, an access control rule downgrades clients
+from the standard private ranges (RFC1918 + ULA + loopback) to one factor, so
+logins from the LAN skip the second factor while remote logins keep it.
 
 ### 3.8 `symbios-settings-acme.sh`
 

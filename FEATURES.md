@@ -54,8 +54,12 @@ matrix-client daemon for notifications.
 Authelia second factor enforcement for all web services. Can only be enabled
 when an SMTP sender is configured (codes must reach the user).
 - Playbook: `base-services/authelia.yml`
-- Vars: `twofa_enabled`
+- Vars: `twofa_enabled`, `twofa_lan_bypass`
 - Healthcheck: `twofa`
+
+With `twofa_lan_bypass` enabled, an access control rule downgrades clients
+from the standard private ranges (RFC1918 + ULA + loopback) to one factor, so
+logins from the LAN skip the second factor while remote logins keep it.
 
 ### Security (`/settings/security/`)
 Global password policy (`none`…`paranoid`) for admin/user passwords, plus the
