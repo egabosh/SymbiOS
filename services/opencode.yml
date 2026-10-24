@@ -261,13 +261,15 @@
                 "models": {
                   "llamacpp-default": {
                     "name": "llamacpp-default",
+                    "reasoning": true,
+                    "tool_call": true,
+                    "interleaved": {
+                      "field": "reasoning_content"
+                    },
                     "capabilities": {
                       "tools": true,
                       "input": ["text", "image", "video", "pdf"],
-                      "output": ["text"],
-                      "reasoning": {
-                        "supported": true
-                      }
+                      "output": ["text"]
                     },
                     "limit": {
                       "context": 262144,
