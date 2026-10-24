@@ -260,7 +260,9 @@
                 },
                 "models": {
                   "llamacpp-default": {
+                    "id": "llamacpp-default",
                     "name": "llamacpp-default",
+                    "family": "llama",
                     "reasoning": true,
                     "tool_call": true,
                     "interleaved": {
