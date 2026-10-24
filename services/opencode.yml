@@ -265,13 +265,14 @@
                     "family": "llama",
                     "reasoning": true,
                     "tool_call": true,
+                    "interleaved": {
+                      "field": "reasoning_content"
+                    },
                     "capabilities": {
                       "tools": true,
                       "input": ["text", "image", "video", "pdf"],
                       "output": ["text"],
-                      "reasoning": {
-                        "supported": true
-                      }
+                      "reasoning": true
                     },
                     "limit": {
                       "context": 262144,
