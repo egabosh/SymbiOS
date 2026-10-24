@@ -518,6 +518,7 @@ texts opportunistically).
 | `symbios-openwrt-cleanup.sh` | Remove OpenWrt host bridges + helper units (uninstall command) | no args |
 | `symbios-openwrt-image.sh` | Build OpenWrt image (patch) + define libvirt domain | `<patch\|define> --root ...` |
 | `symbios-ldap-offline-acl.sh` | LDAP offline sftp-reader ACL import + bind account | `<rewrite\|add-reader> --ldif/--basedn ...` |
+| `symbios-mailcow-autoconfig-sync.sh` | Autoconfig/autodiscover Traefik routes from the mailcow domains (mailcow.yml, daily cron) | `[--dry-run\|-v]` |
 
 ### 4.8 Power management (WoL / idle suspend)
 

@@ -287,6 +287,30 @@ def settings_mailserver_discover(request):
             result['user'] = vars_.get('smtp_user', '%EMAILADDRESS%')
             found = True
 
+    # Fallback: try MX record lookup (preferred over naked domain to avoid cert hostname mismatch)
+    if not found and domain:
+        try:
+            import dns.resolver
+            answers = dns.resolver.resolve(domain, 'MX', lifetime=5)
+            if answers:
+                mx_list = []
+                for r in answers:
+                    try:
+                        mx_list.append((int(r.preference), str(r.exchange).rstrip('.')))
+                    except Exception:
+                        continue
+                if mx_list:
+                    mx_list.sort()
+                    mx_host = mx_list[0][1]
+                    if mx_host:
+                        result['server'] = mx_host
+                        result['port'] = '587'
+                        result['tls'] = 'starttls'
+                        result['user'] = '%EMAILADDRESS%'
+                        found = True
+        except Exception:
+            pass
+
     if not found:
         port_guess = {'587': 'starttls', '465': 'tls', '25': ''}
         for p, t in port_guess.items():

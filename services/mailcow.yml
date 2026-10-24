@@ -453,36 +453,6 @@
                     - url: "http://{{ traefik_network_gateway }}:9080"
         backup: yes
 
-    # Traefik file-provider for autoconfig/autodiscover. SymbiOS Traefik uses
-    # the file provider (no Docker provider), so routing must live in the
-    # provider directory, not in container labels.
-    - name: "/symbios/base-services/traefik/providers/mailcow-autoconfig.yml Routing Configuration"
-      blockinfile:
-        path: /symbios/base-services/traefik/providers/mailcow-autoconfig.yml
-        create: yes
-        mode: '0444'
-        owner: root
-        group: docker
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          http:
-            routers:
-              autoconfig:
-                rule: "Host(`autoconfig.{{ base_domain }}`) || Host(`autodiscover.{{ base_domain }}`)"
-                service: autoconfig
-                entryPoints:
-                  - "https"
-                tls:
-                  certResolver: {{ acme_resolver }}
-                middlewares:
-                  - "secHeaders@file"
-            services:
-              autoconfig:
-                loadBalancer:
-                  servers:
-                    - url: "http://symbios-mailcow-autoconfig:80"
-        backup: yes
-
     # Trigger Traefik to request an ACME certificate for mail.{{ base_domain }}.
     # Traefik issues the certificate lazily on the first request, so we hit the
     # HTTPS entrypoint directly (127.0.0.1 bypasses the public routing/Hairpin).
@@ -713,6 +683,34 @@
               docker compose up -d --force-recreate
             fi
           fi
+
+    # The autoconfig/autodiscover provider is generated from the mailcow
+    # database instead of being written here: new domains must get their
+    # routes without a playbook edit. SymbiOS Traefik uses the file provider
+    # (no Docker provider), so the script writes into the provider directory.
+    - name: Ensure mailcow autoconfig sync script is executable
+      ansible.builtin.file:
+        path: "{{ git_root }}/scripts/symbios-mailcow-autoconfig-sync.sh"
+        mode: '0755'
+
+    - name: Deploy cron for mailcow autoconfig sync
+      ansible.builtin.copy:
+        dest: /etc/cron.d/symbios-mailcow-autoconfig
+        content: |
+          # SymbiOS: sync autoconfig/autodiscover routes from mailcow domains
+          0 3 * * * root {{ git_root }}/scripts/symbios-mailcow-autoconfig-sync.sh >/dev/null 2>&1
+        mode: '0644'
+        owner: root
+        group: root
+
+    - name: Sync autoconfig/autodiscover routes from mailcow domains (initial)
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-mailcow-autoconfig-sync.sh"
+      register: autoconf_sync
+      changed_when: "'updated' in autoconf_sync.stdout or 'created' in autoconf_sync.stdout"
+      failed_when: false
+      retries: 10
+      delay: 6
+      until: autoconf_sync.rc == 0
 
     # Docker-based healthcheck (non-HTTP; probes a core mailcow container)
     - name: Deploy healthcheck
