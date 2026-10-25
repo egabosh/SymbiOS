@@ -277,14 +277,6 @@
          notify:
          - Restart authelia
 
-       - name: create check file for default authorization_policy
-         ansible.builtin.copy:
-           dest: "{{ service_path }}/authorization_policy"
-           # Central 2FA switch for all OIDC clients: the client blocks
-           # rendered by the service playbooks read this file.
-           content: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
-           mode: "0644"
-
 
     - name: generate authelia notifier mail
       when: authelia_mail.stat.exists
@@ -317,14 +309,6 @@
 
            backup: yes
          notify: Restart authelia
-
-       - name: create check file for default authorization_policy
-         ansible.builtin.copy:
-           dest: "{{ service_path }}/authorization_policy"
-           # Central 2FA switch for all OIDC clients: the client blocks
-           # rendered by the service playbooks read this file.
-           content: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
-           mode: "0644"
 
 
     - name: "{{ service_path }}/authelia-data/configuration.yml default domain"
@@ -481,6 +465,7 @@
                   - "introspection"
                   - "userinfo"
                 allowed_origins_from_client_redirect_uris: true
+              {{ lookup('template', git_root + '/base-services/authelia-oidc-policy.j2') }}
               clients:
                 # dummy client because authelia forces at least one client to work
                 - client_id: 'dummy'

@@ -10,9 +10,10 @@
 # because Authelia sends the second factor by mail - this precondition used
 # to live in the WebUI view and now lives here, so CLI and WebUI agree.
 #
-# twofa_lan_bypass adds an access control rule that downgrades clients
-# from the standard private ranges (RFC1918 + ULA + loopback) to one factor,
-# so logins from the LAN skip the second factor while remote logins keep it.
+# twofa_lan_bypass downgrades clients from the standard private ranges
+# (RFC1918 + ULA + loopback) to one factor via an access control rule and a
+# networks rule in the named OIDC client authorization policy, so logins from
+# the LAN skip the second factor while remote logins keep it.
 
 function f_usage {
   cat << EOF

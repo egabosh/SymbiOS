@@ -184,9 +184,11 @@ factor) - enforced here, exit 2 otherwise. At least one of `--twofa` /
 `--lan-bypass` must be given (or a partial object via `--json-stdin`); unset
 keys keep their current value in the single merge write.
 
-With `twofa_lan_bypass` enabled, an access control rule downgrades clients
-from the standard private ranges (RFC1918 + ULA + loopback) to one factor, so
-logins from the LAN skip the second factor while remote logins keep it.
+With `twofa_lan_bypass` enabled, logins from the standard private ranges
+(RFC1918 + ULA + loopback) are downgraded to one factor, so logins from the LAN
+skip the second factor while remote logins keep it. This applies to both the
+access control rule (forward-auth services) and the named OIDC client
+authorization policy `default` (OIDC services such as Nextcloud or Open WebUI).
 
 ### 3.8 `symbios-settings-acme.sh`
 

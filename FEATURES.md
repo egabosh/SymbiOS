@@ -57,9 +57,11 @@ when an SMTP sender is configured (codes must reach the user).
 - Vars: `twofa_enabled`, `twofa_lan_bypass`
 - Healthcheck: `twofa`
 
-With `twofa_lan_bypass` enabled, an access control rule downgrades clients
-from the standard private ranges (RFC1918 + ULA + loopback) to one factor, so
-logins from the LAN skip the second factor while remote logins keep it.
+With `twofa_lan_bypass` enabled, logins from the standard private ranges
+(RFC1918 + ULA + loopback) are downgraded to one factor, so logins from the LAN
+skip the second factor while remote logins keep it. This applies to both the
+access control rule (forward-auth services) and the named OIDC client
+authorization policy `default` (OIDC services such as Nextcloud or Open WebUI).
 
 ### Security (`/settings/security/`)
 Global password policy (`none`…`paranoid`) for admin/user passwords, plus the

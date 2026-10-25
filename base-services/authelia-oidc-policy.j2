@@ -1,0 +1,25 @@
+authorization_policies:
+      # Named authorization policy referenced by every SymbiOS OIDC client
+      # (see shared-tasks/authelia-oidc.yml). Authelia evaluates its rules per
+      # request with the client IP, so the LAN rule can downgrade logins from
+      # private ranges to one factor while remote logins keep the second one.
+      # Every rule needs a subject or networks (Authelia validation), so the
+      # catch-all matching everyone uses 0.0.0.0/0 + ::/0 and carries the
+      # central 2FA level.
+      default:
+        default_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
+        rules:
+{% if twofa_enabled | default(false) | bool and twofa_lan_bypass | default(false) | bool %}
+          - policy: one_factor
+            networks:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - fc00::/7
+              - 127.0.0.1/32
+              - '::1/128'
+{% endif %}
+          - policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
+            networks:
+              - 0.0.0.0/0
+              - '::/0'
