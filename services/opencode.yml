@@ -260,19 +260,15 @@
                 },
                 "models": {
                   "llamacpp-default": {
-                    "id": "llamacpp-default",
                     "name": "llamacpp-default",
                     "family": "llama",
-                    "reasoning": true,
-                    "tool_call": true,
                     "interleaved": {
                       "field": "reasoning_content"
                     },
                     "capabilities": {
                       "tools": true,
                       "input": ["text", "image", "video", "pdf"],
-                      "output": ["text"],
-                      "reasoning": true
+                      "output": ["text"]
                     },
                     "limit": {
                       "context": 262144,
