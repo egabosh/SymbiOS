@@ -1,6 +1,13 @@
 access_control:
   default_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
   rules:
+    # Members of the no2fa group skip the second factor from anywhere
+    # (first match wins). Authelia v4 requires a domain on every rule, so
+    # match all of them and let the subject do the filtering.
+    - domain_regex: ".*"
+      subject:
+        - ["group:no2fa"]
+      policy: one_factor
 {% if twofa_lan_bypass | default(false) | bool %}
     # LAN clients skip the second factor (first match wins). Authelia v4
     # requires a domain on every rule, so match all of them and let the

@@ -63,6 +63,11 @@ skip the second factor while remote logins keep it. This applies to both the
 access control rule (forward-auth services) and the named OIDC client
 authorization policy `default` (OIDC services such as Nextcloud or Open WebUI).
 
+Per-user exemption: members of the LDAP group `no2fa` skip the second factor
+from anywhere (LAN and WAN alike). The playbook creates the group empty on
+every system; membership is managed in the WebUI under Users & Groups. The
+rules take effect from the next login, no Authelia restart needed.
+
 ### Security (`/settings/security/`)
 Global password policy (`none`…`paranoid`) for admin/user passwords, plus the
 WebUI public-access switch (Traefik re-apply only when the switch changes).

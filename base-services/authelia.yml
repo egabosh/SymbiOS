@@ -171,6 +171,16 @@
         admin_has_mail: "{{ admin_mail_check.rc == 0 }}"
       changed_when: false
 
+    - name: Ensure no2fa LDAP group exists
+      # Members of this group skip the second factor from anywhere (see
+      # the no2fa rules in authelia-access-control.j2 and
+      # authelia-oidc-policy.j2). The group is created empty on purpose -
+      # membership is managed in the WebUI under Users & Groups, so no
+      # user (especially admin) loses 2FA silently.
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name no2fa"
+      changed_when: false
+      failed_when: false
+
     - name: Compute extra session cookie domains
       ansible.builtin.set_fact:
         # Extra domains Authelia may set session cookies for (e.g. protected
