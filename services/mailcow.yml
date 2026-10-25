@@ -697,8 +697,10 @@
       ansible.builtin.copy:
         dest: /etc/cron.d/symbios-mailcow-autoconfig
         content: |
-          # SymbiOS: sync autoconfig/autodiscover routes from mailcow domains
-          0 3 * * * root {{ git_root }}/scripts/symbios-mailcow-autoconfig-sync.sh >/dev/null 2>&1
+          # SymbiOS: sync autoconfig/autodiscover routes from mailcow domains.
+          # The guard keeps the job quiet when /symbios is not mounted yet
+          # (LUKS unlock runs late in rc.local, an early tick can miss it).
+          0 3 * * * root [ -x "{{ git_root }}/scripts/symbios-mailcow-autoconfig-sync.sh" ] && "{{ git_root }}/scripts/symbios-mailcow-autoconfig-sync.sh" >/dev/null 2>&1
         mode: '0644'
         owner: root
         group: root
