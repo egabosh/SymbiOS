@@ -49,6 +49,7 @@
 #     program_paths:
 #       - /symbios/services/matrix/
 #       - /symbios/base-services/traefik/providers/matrix.yml
+#       - /symbios/ldap-groups.d/matrix-admin-sync.hook
 #       - /symbios/runchecks.d/symbios-healthcheck-matrix.check
 #       - /symbios/runchecks.d/matrix.check
 #     ldap_groups:
@@ -192,6 +193,14 @@
                 - profile
                 - email
                 - groups
+              # Reuse a pre-existing local account when the Authelia username
+              # matches its localpart (@heidi -> @heidi): without this flag
+              # Synapse refuses the login of migrated accounts or creates a
+              # duplicate (@heidi1, see scripts/symbios-matrix-oidc-merge.sh).
+              # Password login stays enabled on purpose - the notification
+              # sender (base-services/matrix-client.yml, matrix-commander)
+              # still logs in with m.login.password.
+              allow_existing_users: true
               user_mapping_provider:
                 config:
                   localpart_template: "{{ '{{' }} user.preferred_username {{ '}}' }}"
@@ -715,6 +724,29 @@
       args:
         chdir: /symbios/services/matrix
         creates: /symbios/services/matrix/matrix.init.log
+
+    - name: Deploy LDAP group-change hook (immediate Synapse admin sync)
+      ansible.builtin.copy:
+        dest: "{{ data_root }}/ldap-groups.d/matrix-admin-sync.hook"
+        content: |
+          #!/bin/bash
+          # SymbiOS hook - keep Synapse admin rights in sync with LDAP group
+          # matrix-admins. Executed by the shared LDAP group-change dispatcher
+          # (see symbios-lib.sh, called by symbios-ldap-groups.sh for CLI and
+          # WebUI changes) whenever a group or a membership changes.
+          # Args: $1=event $2=group $3=uid
+          # Only react to changes of the Matrix admin group (incl. group deletion).
+          [[ "${2:-}" == "matrix-admins" ]] || exit 0
+          exec "{{ git_root }}/scripts/symbios-matrix-admin-sync.sh"
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Reconcile Synapse admins on every apply (heals drift the hook never saw)
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-matrix-admin-sync.sh 2>&1"
+      register: matrix_admin_sync
+      changed_when: "'Promoting' in matrix_admin_sync.stdout or 'Demoting' in matrix_admin_sync.stdout"
+      failed_when: false
 
 #    - name: /symbios/autoupdate.d/matrix.update
 #      blockinfile:

@@ -503,6 +503,7 @@ texts opportunistically).
 | `symbios-paperless-admin-sync.sh` | Paperless superuser flags from LDAP `paperless-admins` | no args |
 | `symbios-navidrome-password-sync.sh` | Navidrome API passwords from LDAP changes (group hook) | `<event> <uid> [pwfile]` |
 | `symbios-s3-user-sync.sh` | rest-server S3 htpasswd users from LDAP `s3-users` | `<event> <uid> [pwfile]` |
+| `symbios-matrix-admin-sync.sh` | Synapse admin flags from LDAP `matrix-admins` (group hook) | no args |
 | `symbios-matrix-recreate-room.sh` | Recreate a broken Matrix room under the same alias (E2EE default) | `<ALIAS> [userid ...]` |
 | `symbios-synapse-purge.sh` | Synapse DB cleanup (vacuum/purge; destructive modes manual only) | `daily\|weekly\|monthly\|purge\|...\|vacuum*` |
 | `symbios-wordpress-db.sh` | Per-instance DBs/users on the shared MariaDB | `<instance> [...]` |
