@@ -189,6 +189,31 @@
         backup: yes
       notify: Restart forgejo
 
+    # Hide the username/password form on the sign-in page (Forgejo 8.0 has no
+    # app.ini switch for it; the password form only exists in Gitea >= 1.23 as
+    # ENABLE_PASSWORD_SIGNIN_FORM). The custom template below keeps the form in
+    # link-account mode, so that flow still works. Templates are loaded at
+    # startup, hence the recreate on change.
+    # GITEA_CUSTOM is /data/gitea inside the container, so custom templates
+    # live below data/gitea/templates (not directly under data/).
+    - name: Create /symbios/services/forgejo/data/gitea/templates/user/auth dir
+      ansible.builtin.file:
+        path: /symbios/services/forgejo/data/gitea/templates/user/auth
+        owner: 3000
+        group: 3000
+        state: directory
+        mode: '0750'
+
+    - name: Deploy custom sign-in template (OIDC only, no password form)
+      ansible.builtin.copy:
+        src: forgejo/templates/signin_inner.tmpl
+        dest: /symbios/services/forgejo/data/gitea/templates/user/auth/signin_inner.tmpl
+        owner: 3000
+        group: 3000
+        mode: '0640'
+        backup: yes
+      notify: Restart forgejo
+
     - name: "/symbios/base-services/traefik/providers/forgejo.yml Routing Configuration"
       include_tasks: ../shared-tasks/traefik-provider.yml
       vars:
