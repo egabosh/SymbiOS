@@ -189,7 +189,7 @@
           ENV DEBIAN_FRONTEND=noninteractive
           # opencode and tools
           RUN apt-get update \
-           && apt-get install -y bash curl nodejs git vim htop tree tini tar \
+           && apt-get install -y bash curl nodejs git vim htop tree tini tar bind9-host dnsutils \
            && rm -rf /var/lib/apt/lists/* \
            && unset VERSION \
            && curl -fsSL https://opencode.ai/v2/install | bash
