@@ -830,7 +830,9 @@
         content: |
           # Refresh the Host System + Network Devices dashboard snapshots so the
           # WebUI reads pre-computed files instead of blocking on live commands.
-          * * * * * root {{ git_root }}/scripts/symbios-dashboard-snapshot.sh >/dev/null 2>&1
+          # The guard keeps the job quiet when /symbios is not mounted yet
+          # (LUKS unlock runs late in rc.local, an early tick can miss it).
+          * * * * * root [ -x "{{ git_root }}/scripts/symbios-dashboard-snapshot.sh" ] && "{{ git_root }}/scripts/symbios-dashboard-snapshot.sh" >/dev/null 2>&1
 
 
     - name: Install arpwatch (passive LAN device discovery for the dashboard)
@@ -851,7 +853,9 @@
           # Keep one arpwatch instance per LAN interface running (dynamic NIC
           # discovery: added cards are picked up, removed ones are stopped).
           # symbios-network-scan.sh reads their data files - no active probing.
-          */5 * * * * root {{ git_root }}/scripts/symbios-arpwatch.sh >/dev/null 2>&1
+          # The guard keeps the job quiet when /symbios is not mounted yet
+          # (LUKS unlock runs late in rc.local, an early tick can miss it).
+          */5 * * * * root [ -x "{{ git_root }}/scripts/symbios-arpwatch.sh" ] && "{{ git_root }}/scripts/symbios-arpwatch.sh" >/dev/null 2>&1
       when: nocontainer.stat.exists == true
 
 
