@@ -45,6 +45,8 @@ services:
       WORDPRESS_CONFIG_EXTRA: |
         define('WP_HOME', 'https://{{ wp.domain }}');
         define('WP_SITEURL', 'https://{{ wp.domain }}');
+        define('WP_MEMORY_LIMIT', '512M');
+        define('WP_MAX_MEMORY_LIMIT', '1024M');
     volumes:
       - ./{{ wp.name }}-data:/var/www/html
       - /etc/localtime:/etc/localtime:ro
@@ -56,6 +58,8 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      # PHP overrides for large exports (WP2Static) etc.
+      - ./php.ini:/usr/local/etc/php/conf.d/zz-symbios.ini:ro
 {% if wp.static_export_site is defined %}
       # Static export target: the document root of the static web site is
       # mounted at the export path of the plugin, so the plugin writes the

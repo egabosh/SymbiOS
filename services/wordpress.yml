@@ -194,6 +194,19 @@
         mode: '0755'
       loop: "{{ wordpress_instances | default([]) }}"
 
+    - name: Deploy PHP overrides for WordPress instances (WP2Static / large exports)
+      ansible.builtin.copy:
+        dest: "/symbios/services/wordpress/php.ini"
+        content: |
+          memory_limit = 1024M
+          max_execution_time = 600
+          max_input_time = 600
+          upload_max_filesize = 512M
+          post_max_size = 512M
+        mode: '0644'
+        owner: root
+        group: docker
+
     # A static export (WP2Static and friends) writes into a share that a
     # static site serves. The share is mounted into the WordPress
     # container at the export path of the plugin, so the plugin needs no
