@@ -1,0 +1,242 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# docs:
+#   uses_vars:
+#     - acme_resolver
+#     - ai_apikey
+#     - ai_server
+#     - base_domain
+#     - twofa_enabled
+#   name: Hermes Agent
+#   short_description: Deploy the Nous Research Hermes Agent with web dashboard
+#   description: Deploys the Hermes Agent (gateway + web dashboard) in Docker. The dashboard login runs as a self-hosted OIDC public client against Authelia, and access is restricted to the hermes-agent-users/admins groups via forward-auth. The local LLM provider is read from Settings -> AI (ai_server/ai_apikey). Exposed via Traefik.
+#   url: "https://hermes-agent.{{ base_domain }}"
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   access:
+#     admin_group: hermes-agent-admins
+#     user_group: hermes-agent-users
+#   service_control:
+#     services:
+#     - name: hermes-agent
+#       type: docker
+#       compose_file: /symbios/services/hermes-agent/docker-compose.yml
+#       status: test -d /symbios/services/hermes-agent || exit 2; docker compose -f /symbios/services/hermes-agent/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: hermes-agent
+#       command: docker compose -f /symbios/services/hermes-agent/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/hermes-agent/docker-compose.yml down
+#     program_paths:
+#       - /symbios/services/hermes-agent/
+#       - /symbios/base-services/traefik/providers/hermes-agent.yml
+#       - /symbios/runchecks.d/symbios-healthcheck-hermes-agent.check
+#     ldap_groups:
+#       - hermes-agent-users
+#       - hermes-agent-admins
+#     authelia_blocks:
+#       - "OIDC hermes-agent"
+#       - "hermes-agent ACCESS CONTROL"
+#   actions:
+#     start: docker compose -f /symbios/services/hermes-agent/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/hermes-agent/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/hermes-agent/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/hermes-agent/docker-compose.yml up -d
+#
+---
+- name: hermes-agent
+  hosts: all
+  vars:
+    service_name: hermes-agent
+    service_domain: "{{ service_name }}.{{ base_domain }}"
+    authelia_domain: "auth.{{ base_domain }}"
+    hermes_agent_image: "nousresearch/hermes-agent:latest"
+    # Custom OpenAI-compatible provider written into the hermes config from
+    # Settings -> AI (ai_server/ai_apikey); overridable per host in inventory.
+    hermes_llm_provider: "local-llm"
+    hermes_llm_model: "llamacpp-default"
+  tasks:
+
+    - name: Create /symbios/services/hermes-agent dir
+      ansible.builtin.file:
+        path: /symbios/services/hermes-agent
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    # hermes home (/opt/data): the image runs as UID 10000 (HERMES_UID/HERMES_GID
+    # below pin it), and its stage2 hook chowns the volume to that user on boot.
+    - name: Create /symbios/services/hermes-agent/data dir (hermes home, UID 10000)
+      ansible.builtin.file:
+        path: /symbios/services/hermes-agent/data
+        owner: "10000"
+        group: docker
+        state: directory
+        mode: '0770'
+
+    # Gateway API key (port 8642, not exposed via Traefik): generated once and
+    # reused. Hex only, so Compose needs no escaping. The gateway api_server
+    # refuses to start without a strong key (>=16 chars).
+    - name: Generate hermes gateway API key
+      ansible.builtin.set_fact:
+        hermes_api_key: "{{ lookup('password', '/symbios/services/hermes-agent/.api-key length=64 chars=hexdigits') }}"
+      no_log: true
+
+    - name: Secure the generated hermes API key file
+      ansible.builtin.file:
+        path: /symbios/services/hermes-agent/.api-key
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: /symbios/services/hermes-agent/docker-compose.yml Container Configuration
+      ansible.builtin.blockinfile:
+        path: /symbios/services/hermes-agent/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          name: ""
+
+          services:
+
+            hermes-agent:
+              image: {{ hermes_agent_image }}
+              container_name: symbios-hermes-agent
+              restart: unless-stopped
+              # The gateway is the container's main program (long-running);
+              # without a command the image falls back to a bare `hermes`
+              # bootstrap that exits after ~1 min and takes the container down.
+              # The web dashboard runs as a supervised s6 service alongside it.
+              command: gateway run
+              deploy:
+                resources:
+                  limits:
+                    memory: 1536m
+                    cpus: "1.5"
+                    pids: 200
+              volumes:
+                - ./data:/opt/data
+                - /etc/localtime:/etc/localtime:ro
+              environment:
+                # Web dashboard (SPA + JSON-RPC/WS gateway) on port 9119. The
+                # non-loopback bind engages the auth gate, which fails closed
+                # without a provider - the OIDC env below provides it.
+                - HERMES_DASHBOARD=true
+                # Public URL behind Traefik: drives the OIDC callback
+                # construction and the Host/WebSocket-Origin guard.
+                - HERMES_DASHBOARD_PUBLIC_URL=https://{{ service_domain }}
+                # Dashboard login via self-hosted OIDC against Authelia as a
+                # public PKCE client (no secret; see the "OIDC hermes-agent"
+                # block in authelia). The callback is <public URL>/auth/callback.
+                - HERMES_DASHBOARD_OIDC_ISSUER=https://{{ authelia_domain }}
+                - HERMES_DASHBOARD_OIDC_CLIENT_ID={{ service_name }}
+                - HERMES_DASHBOARD_OIDC_SCOPES=openid profile email groups
+                # Gateway API key: stage2 skips its own generation when the env
+                # carries one, so this value is the effective key.
+                - API_SERVER_ENABLED=true
+                - API_SERVER_HOST=0.0.0.0
+                - API_SERVER_KEY={{ hermes_api_key }}
+                # Pin the runtime user to the data dir ownership (stage2 remap).
+                - HERMES_UID=10000
+                - HERMES_GID=10000
+              networks:
+                symbios_services: null
+
+          networks:
+            symbios_services:
+              external: true
+        backup: yes
+      no_log: true
+      notify: Restart hermes-agent
+
+    # Authelia guards the public route (group restriction via forward-auth);
+    # the dashboard additionally logs in via its own self-hosted OIDC provider
+    # against the same Authelia, so an SSO user passes both gates without a
+    # second password entry.
+    - name: Traefik provider snippet for hermes-agent
+      include_tasks: ../shared-tasks/traefik-provider.yml
+      vars:
+        traefik_backend_url: "http://symbios-hermes-agent:9119"
+
+    - name: Ensure LDAP groups for OIDC login (hermes-agent-users / hermes-agent-admins)
+      include_tasks: ../shared-tasks/oidc-groups.yml
+
+    # Public PKCE client: the hermes dashboard is a browser SPA and holds no
+    # secret. The redirect URI must match HERMES_DASHBOARD_PUBLIC_URL above.
+    # Since Authelia v4.39 the ID token only carries spec-required claims; the
+    # 'id_token' claims policy copies name/preferred_username/groups into it,
+    # which is what hermes reads for its session display name and org.
+    - name: Write OIDC config in authelias configuration.yml for hermes-agent
+      include_tasks: ../shared-tasks/authelia-oidc.yml
+      vars:
+        oidc_client_name: "Hermes Agent"
+        oidc_public_client: true
+        oidc_claims_policy: id_token
+        oidc_redirect_uris:
+          - "https://{{ service_domain }}/auth/callback"
+
+    - name: Write Authelia access_control for hermes-agent group restriction
+      include_tasks: ../shared-tasks/authelia-acl.yml
+      vars:
+        authelia_subjects:
+          - "group:hermes-agent-users"
+          - "group:hermes-agent-admins"
+
+    # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
+    - name: Deploy healthcheck
+      include_tasks: ../shared-tasks/runcheck.yml
+
+    - name: Ensure hermes-agent is running
+      include_tasks: ../shared-tasks/docker-start.yml
+
+    # Local LLM provider from Settings -> AI. The script compares the resolved
+    # values and only rewrites on drift, so a second run is a no-op; a real
+    # change recreates the container via the handler below.
+    - name: Configure local LLM provider in hermes (Settings -> AI)
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-hermes-agent-config.sh llm"
+      environment:
+        HERMES_LLM_BASE_URL: "{{ ai_server }}"
+        HERMES_LLM_API_KEY: "{{ ai_apikey | default('', true) }}"
+        HERMES_LLM_PROVIDER: "{{ hermes_llm_provider }}"
+        HERMES_LLM_MODEL: "{{ hermes_llm_model }}"
+      register: hermes_llm_result
+      changed_when: "'hermes-agent-llm-changed' in hermes_llm_result.stdout"
+      no_log: true
+      when: ai_server | default('', true) | length > 0
+
+    - name: Register playbook as installed
+      include_tasks: ../shared-tasks/state-register.yml
+
+  handlers:
+
+    - name: Restart hermes-agent
+      include_tasks: ../shared-tasks/compose-recreate.yml
+
+    - name: Restart authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml
