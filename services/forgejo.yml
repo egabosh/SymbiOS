@@ -1,0 +1,289 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
+#     - twofa_enabled
+#   name: Forgejo
+#   short_description: Deploy the Forgejo git server
+#   description: Deploys Forgejo (git forge) with OIDC login via Authelia and LDAP group access control, exposed via Traefik. Git over SSH on port 2222. The first OIDC login of a member of forgejo-admins creates that user as admin (group claim).
+#   url: "https://forgejo.{{ base_domain }}"
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   access:
+#     admin_group: forgejo-admins
+#     user_group: forgejo-users
+#   service_control:
+#     services:
+#     - name: forgejo
+#       type: docker
+#       compose_file: /symbios/services/forgejo/docker-compose.yml
+#       status: test -d /symbios/services/forgejo || exit 2; docker compose -f /symbios/services/forgejo/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: forgejo
+#       command: docker compose -f /symbios/services/forgejo/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/forgejo/docker-compose.yml down
+#     program_paths:
+#       - /symbios/services/forgejo/
+#       - /symbios/base-services/traefik/providers/forgejo.yml
+#       - /symbios/runchecks.d/symbios-healthcheck-forgejo.check
+#     commands:
+#       - ufw delete allow 2222/tcp
+#     ldap_groups:
+#       - forgejo-users
+#       - forgejo-admins
+#     authelia_blocks:
+#       - "OIDC forgejo"
+#   actions:
+#     start: docker compose -f /symbios/services/forgejo/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/forgejo/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/forgejo/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/forgejo/docker-compose.yml up -d
+#
+---
+- name: forgejo
+  hosts: all
+  vars:
+    service_name: forgejo
+    service_domain: "forgejo.{{ base_domain }}"
+
+  pre_tasks:
+    # Fail early if no public domain is configured yet.
+    - name: Fail if base_domain is not configured
+      include_tasks: ../shared-tasks/base-domain-guard.yml
+
+  tasks:
+
+    - name: Create /symbios/services/forgejo dir
+      ansible.builtin.file:
+        path: /symbios/services/forgejo
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    - name: Create /symbios/services/forgejo/data dir
+      ansible.builtin.file:
+        path: /symbios/services/forgejo/data
+        owner: 3000
+        group: 3000
+        state: directory
+        mode: '0750'
+
+    - name: /symbios/services/forgejo/genpw.sh (generate SECRET_KEY for Forgejo)
+      blockinfile:
+        path: /symbios/services/forgejo/genpw.sh
+        create: yes
+        mode: 0550
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          # Change to service directory
+          cd /symbios/services/forgejo
+
+          # Generate a random secret key for session/token signing
+          g_forgejosecretkey=$(pwgen -s 32 1)
+
+          # Create env file if it does not exist. The SECRET_KEY must stay
+          # stable across restarts: rotating it invalidates all sessions,
+          # API tokens and Webhook signatures.
+          [ -f env ] || echo "FORGEJO__security__SECRET_KEY=$g_forgejosecretkey" >env
+
+          chmod 440 env
+          chown root:docker env
+        backup: yes
+        validate: /bin/bash -n %s
+      notify: run genpw.sh
+
+    - name: /symbios/services/forgejo/genpw.sh shebang
+      lineinfile:
+        path: /symbios/services/forgejo/genpw.sh
+        insertbefore: BOF
+        line: "#!/bin/bash -e"
+
+    - name: Gen initial passwords if not exists
+      include_tasks: ../shared-tasks/genpw-run.yml
+      vars:
+        service_name: forgejo
+
+    - name: Create oidc client secret for Forgejo
+      ansible.builtin.shell: /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/forgejo
+      changed_when: false
+      failed_when: false
+
+    - name: /symbios/services/forgejo/docker-compose.yml Container Configuration
+      blockinfile:
+        path: /symbios/services/forgejo/docker-compose.yml
+        create: yes
+        mode: 0440
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+
+          name: ""
+
+          services:
+            forgejo:
+              image: codeberg.org/forgejo/forgejo:8.0
+              container_name: forgejo
+              restart: unless-stopped
+              volumes:
+                - ./data:/data
+                - /etc/localtime:/etc/localtime:ro
+              # Git over SSH (per-user keys from the Web UI). The Web UI
+              # builds its clone URLs from SSH_DOMAIN/SSH_PORT below.
+              ports:
+                - "2222:22"
+              environment:
+                # Run as a dedicated uid/gid; the host data dir matches it
+                USER_UID: "3000"
+                USER_GID: "3000"
+                # First-boot template values (rendered into app.ini exactly
+                # once by the image entrypoint)
+                DOMAIN: "{{ service_domain }}"
+                ROOT_URL: "https://{{ service_domain }}/"
+                INSTALL_LOCK: "true"
+                SSH_DOMAIN: "{{ service_domain }}"
+                # Applied to app.ini on every start (environment-to-ini), so
+                # these stay managed by this playbook even after manual edits.
+                # SSH_PORT only affects the clone URLs shown in the Web UI -
+                # the image's internal sshd must keep listening on 22 (the bare
+                # SSH_PORT env would also leak into its sshd_config template).
+                FORGEJO__server__SSH_PORT: "2222"
+                FORGEJO__server__SSH_LISTEN_PORT: "22"
+                FORGEJO__service__DISABLE_REGISTRATION: "true"
+                FORGEJO__service__ENABLE_AUTO_REGISTRATION: "true"
+                FORGEJO__oauth2_client__USERNAME: "preferred_username"
+              env_file: env
+              networks:
+                symbios_services: null
+
+          networks:
+            symbios_services:
+              external: true
+        backup: yes
+      notify: Restart forgejo
+
+    - name: "/symbios/base-services/traefik/providers/forgejo.yml Routing Configuration"
+      include_tasks: ../shared-tasks/traefik-provider.yml
+      vars:
+        traefik_backend_url: "http://forgejo:3000"
+
+    #######################
+    #### OIDC Authelia ####
+    #######################
+
+    - name: Ensure LDAP groups for OIDC login (forgejo-users / forgejo-admins)
+      include_tasks: ../shared-tasks/oidc-groups.yml
+
+    - name: Write OIDC config in authelias configuration.yml for forgejo
+      include_tasks: ../shared-tasks/authelia-oidc.yml
+      vars:
+        oidc_client_name: "Forgejo"
+        # Forgejo's OIDC client (goth) sends no PKCE, so the client must not
+        # require it (same pattern as the wordpress client).
+        oidc_require_pkce: false
+        oidc_pkce_challenge_method: ''
+        # The login source is registered with the name "authelia" (see the
+        # add-oauth task below); goth builds the callback from ROOT_URL.
+        oidc_redirect_uris:
+          - "https://forgejo.{{ base_domain }}/user/oauth2/authelia/callback"
+
+    - name: Write Authelia access_control for forgejo group restriction
+      include_tasks: ../shared-tasks/authelia-acl.yml
+      vars:
+        authelia_subjects:
+          - "group:forgejo-users"
+          - "group:forgejo-admins"
+
+    - name: Allow git over SSH on port 2222/tcp
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '2222'
+
+    - name: Ensure forgejo is running
+      include_tasks: ../shared-tasks/docker-start.yml
+
+    # The container renders app.ini on first boot and migrates the database
+    # on startup (INSTALL_LOCK=true); both must be done before the admin CLI
+    # below can talk to the instance.
+    - name: Wait for Forgejo app.ini to be rendered
+      ansible.builtin.wait_for:
+        path: /symbios/services/forgejo/data/gitea/conf/app.ini
+        timeout: 180
+
+    - name: Wait until Forgejo reports a healthy API
+      ansible.builtin.shell: docker exec forgejo wget -qO- --timeout=5 http://localhost:3000/api/healthz
+      register: forgejo_health
+      until: "'pass' in forgejo_health.stdout"
+      retries: 36
+      delay: 5
+      changed_when: false
+
+    # The admin CLI must run as the non-root git user (Forgejo refuses root)
+    - name: List registered auth sources
+      ansible.builtin.shell: docker exec -u git forgejo forgejo admin auth list
+      register: forgejo_auth_list
+      changed_when: false
+      failed_when: false
+
+    # One-time registration of Authelia as OIDC login source. The group claim
+    # makes members of forgejo-admins admins; Forgejo re-evaluates it on
+    # every OIDC login, so LDAP group changes apply without extra tooling.
+    - name: Register Authelia as OIDC login source
+      ansible.builtin.shell: |
+        docker exec -u git forgejo forgejo admin auth add-oauth \
+          --name authelia \
+          --provider openidConnect \
+          --key forgejo \
+          --secret "{{ lookup('file', '/symbios/services/forgejo/oidc_password') }}" \
+          --auto-discover-url "https://auth.{{ base_domain }}/.well-known/openid-configuration" \
+          --scopes openid --scopes profile --scopes email --scopes groups \
+          --group-claim-name groups \
+          --admin-group forgejo-admins
+      when: "'authelia' not in (forgejo_auth_list.stdout | default(''))"
+
+    # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
+    - name: Deploy healthcheck
+      include_tasks: ../shared-tasks/runcheck.yml
+
+    - name: Register playbook as installed
+      include_tasks: ../shared-tasks/state-register.yml
+
+  handlers:
+    - name: run genpw.sh
+      ansible.builtin.shell: ./genpw.sh
+      args:
+        chdir: /symbios/services/forgejo
+      notify: Restart forgejo
+
+    - name: Restart forgejo
+      include_tasks: ../shared-tasks/compose-recreate.yml
+
+    - name: Restart authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml
