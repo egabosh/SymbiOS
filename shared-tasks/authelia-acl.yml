@@ -10,6 +10,27 @@
 # Optional vars:  authelia_policy (default follows the central twofa_enabled
 #                  flag from inventory.yml; set explicitly only to exempt a
 #                  service, e.g. native app clients that cannot do 2FA)
+# Optional vars:  authelia_bypass_resources (list of regex patterns matched
+#                  against the request path). Matching paths skip Authelia
+#                  entirely and reach the backend unauthenticated; the
+#                  backend must enforce its own access control there (e.g.
+#                  git smart HTTP endpoints authenticated by app tokens,
+#                  which cannot do an interactive SSO login). The rule is
+#                  written at the top of the rules list because ACL rules
+#                  are first-match-wins and the central no2fa/LAN rules must
+#                  not shadow it.
+
+- name: "write Authelia bypass resources rule for {{ service_name }} (top of rules, first-match-wins)"
+  ansible.builtin.blockinfile:
+    path: /symbios/base-services/authelia/authelia-data/configuration.yml
+    marker: "# {mark} ANSIBLE MANAGED BLOCK {{ service_name }} BYPASS RESOURCES"
+    # YAML double-quote escapes produce the real newlines; the regex list is
+    # JSON-encoded so Authelia's YAML parser reads it back as plain strings.
+    block: "    - domain: \"{{ service_domain }}\"\n      resources: {{ authelia_bypass_resources | to_json }}\n      policy: bypass\n"
+    insertafter: "^  rules:"
+    backup: yes
+  when: (authelia_bypass_resources | default([]) | length > 0)
+  notify: Restart authelia
 
 - name: "write Authelia access_control for {{ service_name }} group restriction"
   ansible.builtin.blockinfile:

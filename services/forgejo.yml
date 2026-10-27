@@ -177,7 +177,12 @@
                 FORGEJO__server__SSH_PORT: "2222"
                 FORGEJO__server__SSH_LISTEN_PORT: "22"
                 FORGEJO__service__DISABLE_REGISTRATION: "true"
-                FORGEJO__service__ENABLE_AUTO_REGISTRATION: "true"
+                # The first OIDC login creates the Forgejo user from the
+                # claims (username = preferred_username, admin if member of
+                # forgejo-admins); a local user with the same name is linked
+                # automatically instead of showing the link-account page.
+                FORGEJO__oauth2_client__ENABLE_AUTO_REGISTRATION: "true"
+                FORGEJO__oauth2_client__ACCOUNT_LINKING: "auto"
                 FORGEJO__oauth2_client__USERNAME: "preferred_username"
               env_file: env
               networks:
@@ -230,6 +235,11 @@
       include_tasks: ../shared-tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Forgejo"
+        # Forgejo's OIDC client (goth) reads the user from the ID token, but
+        # Authelia >= 4.39 only puts spec-required claims into it; the shared
+        # policy restores preferred_username/email/groups - auto registration,
+        # the email check and the forgejo-admins group claim all need them.
+        oidc_claims_policy: "id_token"
         # Forgejo's OIDC client (goth) sends no PKCE, so the client must not
         # require it (same pattern as the wordpress client).
         oidc_require_pkce: false
@@ -245,6 +255,11 @@
         authelia_subjects:
           - "group:forgejo-users"
           - "group:forgejo-admins"
+        # Git smart HTTP endpoints (clone/fetch/push over HTTPS) cannot do an
+        # interactive SSO login; let them reach Forgejo unauthenticated and
+        # let Forgejo enforce access with its own tokens/passwords.
+        authelia_bypass_resources:
+          - '\.git(/|$)'
 
     - name: Allow git over SSH on port 2222/tcp
       include_tasks: ../shared-tasks/ufw-allow.yml
