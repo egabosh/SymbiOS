@@ -1,9 +1,12 @@
 {% extends "main/base.html" %}
+{% block sidebar %}
+    {% include "main/sidebar_settings.html" %}
+{% endblock %}
 {% block title %}{% if editing %}Edit{% else %}Add{% endif %} External System - SymbiOS{% endblock %}
 {% block content %}
 <nav aria-label="breadcrumb">
   <ol class="breadcrumb">
-    <li class="breadcrumb-item"><a href="/external-systems/">External Systems</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'settings_external_systems' %}">External Systems</a></li>
     <li class="breadcrumb-item active">{% if editing %}Edit {{ system.name }}{% else %}Add System{% endif %}</li>
   </ol>
 </nav>
@@ -45,7 +48,7 @@
       <option value="{{ t }}" {% if system.type == t %}selected{% endif %}>{{ t }}</option>
       {% endfor %}
     </select>
-    <div class="form-text">Must match the <code>docs.target.type</code> of the playbooks you want to run.</div>
+    <div class="form-text">Must match the <code>docs.type</code> of the playbooks you want to run.</div>
   </div>
 
   <div class="mb-3">
@@ -58,7 +61,7 @@
     <button type="submit" class="btn btn-success">
       <i class="bi bi-check-lg"></i> {% if editing %}Save Changes{% else %}Create System{% endif %}
     </button>
-    <a href="/external-systems/" class="btn btn-outline-secondary">Cancel</a>
+    <a href="{% url 'settings_external_systems' %}" class="btn btn-outline-secondary">Cancel</a>
   </div>
 </form>
 {% endblock %}

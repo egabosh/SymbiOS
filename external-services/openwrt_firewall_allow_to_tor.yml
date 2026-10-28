@@ -1,0 +1,108 @@
+# docs:
+#   name: "OpenWrt - Firewall allow to Tor"
+#   short_description: "OpenWrt - Firewall allow to Tor"
+#   description: "Allow rule from LAN to the Tor segment."
+#   category: "Security"
+#   type: OpenWrt
+#   icon: "bi-shield-check"
+#   params:
+#     - name: "rule_name"
+#       label: "Rule name"
+#       type: "text"
+#       required: true
+#     - name: "src"
+#       label: "Source zone"
+#       type: "text"
+#       default: "lan"
+#     - name: "src_ip"
+#       label: "Source IP/network"
+#       type: "text"
+#       default: "*"
+#     - name: "dest_ip"
+#       label: "Destination IP"
+#       type: "text"
+#       required: true
+#     - name: "dest_port"
+#       label: "Destination port"
+#       type: "text"
+#       required: true
+#     - name: "proto"
+#       label: "Protocol"
+#       type: "text"
+#       default: "tcp"
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "Firewall zones"
+#     - playbook: "openwrt_tor.yml"
+#       reason: "Tor segment"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: allow to tor
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_firewall_allow_to_tor.yml/{{ rule_name }}"
+    managed_playbook: "openwrt_firewall_allow_to_tor.yml"
+    managed_ref: "rule_name={{ rule_name }} src={{ src }} src_ip={{ src_ip }} dest_ip={{ dest_ip }} dest_port={{ dest_port }} proto={{ proto }}"
+    managed_resource_type: "firewall_allow_to_tor"
+    proto: "tcp"
+    src: "lan"
+    src_ip: "*"
+    uci_vars:
+      ## rules
+      - { key: "firewall.rule_forward_lan_{{ rule_name }}",           value: "rule" }
+      - { key: "firewall.rule_forward_lan_{{ rule_name }}.src",       value: "{{ src }}" }
+      - { key: "firewall.rule_forward_lan_{{ rule_name }}.dest",      value: "tor" }
+      - { key: "firewall.rule_forward_lan_{{ rule_name }}.target",    value: "ACCEPT" }
+      - { key: "firewall.rule_forward_lan_{{ rule_name }}.proto",     value: "{{ proto }}" }
+      - { key: "firewall.rule_forward_lan_{{ rule_name }}.name",      value: "ansible_forward_lan_{{ rule_name }}" }
+      - { key: "firewall.rule_forward_lan_{{ rule_name }}.dest_port", value: "{{ dest_port }}" }
+      - { key: "firewall.rule_forward_lan_{{ rule_name }}.src_ip",      value: "{{ src_ip }}" }
+      - { key: "firewall.rule_forward_lan_{{ rule_name }}.dest_ip",     value: "{{ dest_ip }}" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - dest_ip is defined
+          - dest_port is defined
+          - rule_name is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        [ -z "$desired"  ] && ( echo unchanged ; exit 0 )
+
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="$desired"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/firewall reload"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

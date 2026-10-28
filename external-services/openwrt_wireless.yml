@@ -1,0 +1,91 @@
+# docs:
+#   name: "OpenWrt - Wireless"
+#   short_description: "OpenWrt - Wireless"
+#   description: "WLAN radio and SSID for the LAN segment."
+#   category: "Network"
+#   type: OpenWrt
+#   icon: "bi-wifi"
+#   params:
+#     - name: "wlandev"
+#       label: "Radio device"
+#       type: "text"
+#       default: "radio0"
+#     - name: "wlan_ssid"
+#       label: "SSID"
+#       type: "text"
+#       required: true
+#     - name: "wlan_key"
+#       label: "WPA key"
+#       type: "password"
+#       required: true
+#     - name: "wlan_country"
+#       label: "Country code"
+#       type: "text"
+#       default: "DE"
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "Base system setup"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: basic OpenWRT config
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_wireless.yml"
+    managed_playbook: "openwrt_wireless.yml"
+    managed_ref: "wlandev={{ wlandev }} wlan_ssid={{ wlan_ssid }} wlan_country={{ wlan_country }}"
+    managed_resource_type: "wireless"
+    wlan_country: "DE"
+    wlandev: "radio0"
+    uci_vars:
+      - { key: "wireless.{{ wlandev }}.disabled", value: "0" }
+      - { key: "wireless.{{ wlandev }}.country", value: "{{ wlan_country }}" }
+      # default WLAN
+      - { key: "wireless.default_{{ wlandev }}.ssid", value: "{{ wlan_ssid }}" }
+      - { key: "wireless.default_{{ wlandev }}.encryption", value: "sae" }
+      - { key: "wireless.default_{{ wlandev }}.key", value: "{{ wlan_key }}" }
+      - { key: "wireless.default_{{ wlandev }}.mode", value: "ap" }
+      - { key: "wireless.default_{{ wlandev }}.network", value: "lan" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - wlan_key is defined
+          - wlan_ssid is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "wifi reload"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

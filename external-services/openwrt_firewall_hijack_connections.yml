@@ -1,0 +1,104 @@
+# docs:
+#   name: "OpenWrt - Firewall hijack connections"
+#   short_description: "OpenWrt - Firewall hijack connections"
+#   description: "Redirect/force traffic to a local service (e.g. DNS hijack)."
+#   category: "Security"
+#   type: OpenWrt
+#   icon: "bi-arrow-left-right"
+#   params:
+#     - name: "redirect_name"
+#       label: "Redirect name"
+#       type: "text"
+#       required: true
+#     - name: "src"
+#       label: "Source zone"
+#       type: "text"
+#       required: true
+#     - name: "proto"
+#       label: "Protocol"
+#       type: "text"
+#       default: "tcp"
+#     - name: "from_port"
+#       label: "From port"
+#       type: "text"
+#       required: true
+#     - name: "to_port"
+#       label: "To port"
+#       type: "text"
+#       required: true
+#     - name: "target"
+#       label: "Redirect target"
+#       type: "text"
+#       default: "DST"
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "Firewall zones"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: Hijack outgoing internet connections
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_firewall_hijack_connections.yml/{{ redirect_name }}"
+    managed_playbook: "openwrt_firewall_hijack_connections.yml"
+    managed_ref: "redirect_name={{ redirect_name }} src={{ src }} proto={{ proto }} from_port={{ from_port }} to_port={{ to_port }} target={{ target }}"
+    managed_resource_type: "firewall_hijack_connections"
+    proto: "tcp"
+    target: "DST"
+    uci_vars:
+      - { key: "firewall.redirect_hijack_{{ src }}_{{ redirect_name }}",           value: "redirect" }
+      - { key: "firewall.redirect_hijack_{{ src }}_{{ redirect_name }}.target",    value: "DNAT" }
+      - { key: "firewall.redirect_hijack_{{ src }}_{{ redirect_name }}.name",      value: "ansible_hijack_{{ src }}_{{ redirect_name }}" }
+      - { key: "firewall.redirect_hijack_{{ src }}_{{ redirect_name }}.proto",     value: "{{ proto }}" }
+      - { key: "firewall.redirect_hijack_{{ src }}_{{ redirect_name }}.src",       value: "{{ src }}" }
+      - { key: "firewall.redirect_hijack_{{ src }}_{{ redirect_name }}.dest",      value: "wan" }
+      - { key: "firewall.redirect_hijack_{{ src }}_{{ redirect_name }}.src_dport", value: "{{ from_port }}" }
+      - { key: "firewall.redirect_hijack_{{ src }}_{{ redirect_name }}.dest_ip",   value: "{{ target }}" }
+      - { key: "firewall.redirect_hijack_{{ src }}_{{ redirect_name }}.dest_port", value: "{{ to_port }}" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - from_port is defined
+          - redirect_name is defined
+          - src is defined
+          - to_port is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/firewall reload"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

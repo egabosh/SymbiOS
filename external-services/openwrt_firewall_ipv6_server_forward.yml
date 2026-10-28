@@ -1,0 +1,96 @@
+# docs:
+#   name: "OpenWrt - IPv6 server forwarding"
+#   short_description: "OpenWrt - IPv6 server forwarding"
+#   description: "Allow inbound IPv6 ports to a server identified by suffix."
+#   category: "Security"
+#   type: OpenWrt
+#   icon: "bi-signpost-split"
+#   params:
+#     - name: "redirect_name"
+#       label: "Rule name"
+#       type: "text"
+#       required: true
+#     - name: "proto"
+#       label: "Protocol"
+#       type: "text"
+#       default: "tcp"
+#     - name: "ports"
+#       label: "Ports (comma separated)"
+#       type: "text"
+#       required: true
+#     - name: "suffix"
+#       label: "Target address suffix"
+#       type: "text"
+#       required: true
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "Firewall zones"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: Allow acces to server via ipv6
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_firewall_ipv6_server_forward.yml/{{ redirect_name }}"
+    managed_playbook: "openwrt_firewall_ipv6_server_forward.yml"
+    managed_ref: "redirect_name={{ redirect_name }} proto={{ proto }} ports={{ ports }} suffix={{ suffix }}"
+    managed_resource_type: "firewall_ipv6_server_forward"
+    proto: "tcp"
+    uci_vars:
+
+      # ipv6 access from the internet forward
+      - { key: "firewall.rule_{{ redirect_name }}_ipv6_access",     value: "rule" }
+      - { key: "firewall.rule_{{ redirect_name }}_ipv6_access.family",   value: "ipv6" }
+      - { key: "firewall.rule_{{ redirect_name }}_ipv6_access.proto",    value: "{{ proto }}" }
+      - { key: "firewall.rule_{{ redirect_name }}_ipv6_access.src",      value: "wan" }
+      - { key: "firewall.rule_{{ redirect_name }}_ipv6_access.dest",     value: "lan" }
+      - { key: "firewall.rule_{{ redirect_name }}_ipv6_access.target",   value: "ACCEPT" }
+      - { key: "firewall.rule_{{ redirect_name }}_ipv6_access.dest_port",value: "{{ ports }}" }
+      - { key: "firewall.rule_{{ redirect_name }}_ipv6_access.name",     value: "ansible_{{ redirect_name }}_ipv6_access" }
+      - { key: "firewall.rule_{{ redirect_name }}_ipv6_access.dest_ip",  value: "{{ suffix }}" }
+
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - ports is defined
+          - redirect_name is defined
+          - suffix is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/firewall reload"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

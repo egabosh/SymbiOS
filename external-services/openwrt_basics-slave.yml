@@ -1,0 +1,106 @@
+# docs:
+#   name: "OpenWrt - Basics (slave)"
+#   short_description: "OpenWrt - Basics (slave)"
+#   description: "Minimal setup for a secondary (dumb) access point: static address and default gateway."
+#   category: "System"
+#   type: OpenWrt
+#   icon: "bi-diagram-3"
+#   params:
+#     - name: "ip"
+#       label: "LAN IP address"
+#       type: "text"
+#       required: true
+#     - name: "gw"
+#       label: "Default gateway"
+#       type: "text"
+#       required: true
+#     - name: "dns"
+#       label: "DNS server"
+#       type: "text"
+#       required: true
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "Base system setup"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: basic OpenWRT config for slave - no own internet - use master
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_basics-slave.yml"
+    managed_playbook: "openwrt_basics-slave.yml"
+    managed_ref: "ip={{ ip }} gw={{ gw }} dns={{ dns }}"
+    managed_resource_type: "basics_slave"
+
+    uci_delete_vars:
+      - 'network.wan'
+      - 'network.wan6'
+      - 'dhcp.wan'
+
+    uci_vars:
+      ## Basics
+      - { key: "network.lan.gateway", value: "{{ gw }}" }
+      - { key: "network.lan.dns", value: "{{ dns }}" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - dns is defined
+          - gw is defined
+          - ip is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+
+    - name: detele config defaults
+      raw: |
+        # detele default config indices
+        while uci show | grep -q "^{{ item }}="
+        do
+          echo "changed"
+          uci delete {{ item }}[0]
+          uci delete {{ item }}
+        done
+      loop: "{{ uci_delete_vars }}"
+      register: uci_delete_result
+      changed_when: "'changed' in uci_delete_result.stdout"
+
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/network reload"
+            - "/etc/init.d/dnsmasq stop"
+            - "/etc/init.d/dnsmasq disable"
+            - "/etc/init.d/odhcpd stop"
+            - "/etc/init.d/odhcpd disable"
+          when: uci_set_result.changed or uci_delete_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

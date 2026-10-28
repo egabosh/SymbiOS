@@ -1,0 +1,40 @@
+---
+# SymbiOS managed state (remote targets)
+#
+# Records the resources of the calling playbook in /etc/symbios/managed.json.
+# Included by every playbook under external-services/. Best effort: a missing
+# or read-only file, a missing /etc/symbios or a failing date never aborts the
+# playbook run. No Python required (raw shell only, works on minimal images).
+#
+# Expected variables (set as defaults in the calling playbook's vars:):
+#   managed_id             unique id of one resource (playbook[/key])
+#   managed_playbook       playbook file name
+#   managed_resource_type  kind of resource (e.g. dns_cname, dhcp_host)
+#   managed_ref            short human readable summary of the resource
+- name: Record managed state on the target
+  raw: |
+    d=/etc/symbios
+    f="$d/managed.json"
+    mkdir -p "$d" 2>/dev/null || exit 0
+    esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+    id=$(esc "{{ managed_id }}")
+    pb=$(esc "{{ managed_playbook }}")
+    rt=$(esc "{{ managed_resource_type }}")
+    rf=$(esc "{{ managed_ref }}")
+    ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    entry="{\"id\": \"$id\", \"playbook\": \"$pb\", \"resource_type\": \"$rt\", \"ref\": \"$rf\", \"applied_at\": \"$ts\"}"
+    keep="$d/.managed.keep"
+    if [ -f "$f" ]
+    then
+      grep '"id":' "$f" | grep -v "\"id\": \"$id\"" > "$keep" || :
+    else
+      : > "$keep"
+    fi
+    {
+      printf '{\n  "schema": 1,\n  "entries": [\n'
+      { cat "$keep"; printf '%s\n' "$entry"; } | grep -v '^$' | awk '{ sub(/^[ \t]+/, ""); if (NR > 1) print ","; printf "    %s", $0 } END { if (NR > 0) print "" }'
+      printf '  ]\n}\n'
+    } > "$d/.managed.json.tmp" 2>/dev/null && mv "$d/.managed.json.tmp" "$f" 2>/dev/null
+    rm -f "$keep" "$d/.managed.json.tmp"
+    exit 0
+  changed_when: false

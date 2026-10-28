@@ -1,0 +1,142 @@
+# docs:
+#   name: "OpenWrt - WireGuard Tor client"
+#   short_description: "OpenWrt - WireGuard Tor client"
+#   description: "WireGuard peer on the Tor server plus its DNS/DHCP record."
+#   category: "VPN"
+#   type: OpenWrt
+#   icon: "bi-vpn"
+#   params:
+#     - name: "client_name"
+#       label: "Client name"
+#       type: "text"
+#       required: true
+#     - name: "client_num"
+#       label: "Client number"
+#       type: "number"
+#       required: true
+#   requires:
+#     - playbook: "openwrt_wireguard-tor.yml"
+#       reason: "WireGuard Tor server"
+#     - playbook: "openwrt_tor.yml"
+#       reason: "Tor segment"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: wireguard client for br-tor
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_wireguard-tor-client.yml/{{ client_name }}"
+    managed_playbook: "openwrt_wireguard-tor-client.yml"
+    managed_ref: "client_name={{ client_name }} client_num={{ client_num }}"
+    managed_resource_type: "wireguard_tor_client"
+
+    uci_vars:
+      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}", value: "wireguard_wg_tor" }
+      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.allowed_ips", value: "fdaa:a192:b168:cd45::{{ client_num }}/128" }
+      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.allowed_ips", value: "192.168.45.{{ client_num }}/32" }
+      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.persistent_keepalive", value: "15" }
+      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.description", value: "wg_tor_{{ client_name | replace('_', '-') }}" }
+      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.route_allowed_ips", value: "1" }
+      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.endpoint_host", value: "$(uci get ddns.dedyn_ipv6_openwrt.domain)" }
+      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.endpoint_port", value: "59667" }
+      # dns record
+      - { key: "dhcp.host_{{ client_name | replace('-', '_') }}", value: "domain" }
+      - { key: "dhcp.host_{{ client_name | replace('-', '_') }}.ip",   value: "192.168.45.{{ client_num }}" }
+      - { key: "dhcp.host_{{ client_name | replace('-', '_') }}.ip6",  value: "fdaa:a192:b168:cd45::{{ client_num }}" }
+      - { key: "dhcp.host_{{ client_name | replace('-', '_') }}.name", value: "wgtor-{{ client_name | replace('_', '-') }}.tor" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - client_name is defined
+          - client_num is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+
+        # gen client keypair+psk if not exist
+        if [[ {{ item.value }} = wireguard_wg_tor ]]
+        then
+          if ! uci get {{ item.key }}.preshared_key
+          then
+            mkdir -p /etc/wg_tor
+            cd /etc/wg_tor
+            wg genkey | tee {{ client_name }}_privatekey | wg pubkey > {{ client_name }}_publickey
+            wg genpsk > {{ client_name }}_presharedkey
+            uci set {{ item.key }}.private_key=$(cat {{ client_name }}_privatekey)
+            uci set {{ item.key }}.public_key=$(cat {{ client_name }}_publickey)
+            uci set {{ item.key }}.preshared_key=$(cat {{ client_name }}_presharedkey)
+            uci commit
+          fi
+        fi
+
+        if ! echo "$current" | grep "$desired"
+        then
+          if echo "{{ item.key }}" | egrep -q "\.addresses|\.allowed_ips|firewall\..+\.network"
+          then
+            uci add_list {{ item.key }}="{{ item.value }}"
+          else
+            uci set {{ item.key }}="{{ item.value }}"
+          fi
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: set uci values if needed
+      raw: |
+        if ! uci get network.wg_tor_{{ client_name }}.private_key
+        then
+          mkdir -p /etc/wg_tor
+          cd /etc/wg_tor
+          wg genkey | tee {{ client_name }}_privatekey | wg pubkey > {{ client_name }}_publickey
+          wg genpsk > {{ client_name }}_presharedkey
+          uci set network.wg_tor_{{ client_name }}.private_key=$(cat {{ client_name }}_privatekey)
+          uci set network.wg_tor_{{ client_name }}.public_key=$(cat {{ client_name }}_publickey)
+          uci set network.wg_tor_{{ client_name }}.preshared_key=$(cat {{ client_name }}_presharedkey)
+          uci commit
+        fi
+
+        echo "[Interface]
+        PrivateKey = $(uci get network.wg_tor_{{ client_name }}.private_key)
+        Address = fdaa:a192:b168:cd45::{{ client_num }}/128, 192.168.45.{{ client_num }}/32
+        MTU = 1450
+
+        [Peer]
+        PublicKey = $(echo $(uci get network.wg_tor.private_key) | wg pubkey)
+        PresharedKey = $(uci get network.wg_tor_{{ client_name }}.preshared_key)
+        AllowedIPs = 192.168.45.0/24,172.23.0.0/16
+        Endpoint = openwrt.dedyn.io:59667
+        PersistentKeepAlive = 15
+        " >/etc/wg_tor/{{ client_name }}.conf
+      changed_when: false
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/network reload"
+            - "/etc/init.d/dnsmasq reload"
+            - "ifdown wg_tor"
+            - "ifup wg_tor"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

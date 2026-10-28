@@ -1,0 +1,109 @@
+# docs:
+#   name: "OpenWrt - Wireless Tor"
+#   short_description: "OpenWrt - Wireless Tor"
+#   description: "WLAN SSID attached to the Tor bridge."
+#   category: "Network"
+#   type: OpenWrt
+#   icon: "bi-wifi"
+#   params:
+#     - name: "tor_wlandev"
+#       label: "Radio device"
+#       type: "text"
+#       default: "radio0"
+#     - name: "tor_wlan_ssid"
+#       label: "SSID"
+#       type: "text"
+#       required: true
+#     - name: "tor_wlan_key"
+#       label: "WPA key"
+#       type: "password"
+#       required: true
+#   requires:
+#     - playbook: "openwrt_tor.yml"
+#       reason: "Tor segment"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: create WLAN over tor
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_wireless-tor.yml"
+    managed_playbook: "openwrt_wireless-tor.yml"
+    managed_ref: "tor_wlandev={{ tor_wlandev }} tor_wlan_ssid={{ tor_wlan_ssid }}"
+    managed_resource_type: "wireless_tor"
+    tor_wlandev: "radio0"
+    openwrt_packages:
+      - luci-app-openvpn
+      - luci-i18n-openvpn-de
+      - openvpn
+
+    uci_vars:
+
+      # Wireless AP  (joins br-tor via network=tor)
+      - { key: "wireless.wifinet0", value: "wifi-iface" }
+      - { key: "wireless.wifinet0.device", value: "{{ tor_wlandev }}" }
+      - { key: "wireless.wifinet0.mode", value: "ap" }
+      - { key: "wireless.wifinet0.key", value: "{{ tor_wlan_key }}" }
+      - { key: "wireless.wifinet0.isolate", value: "1" }
+      - { key: "wireless.wifinet0.ssid", value: "{{ tor_wlan_ssid }}" }
+      - { key: "wireless.wifinet0.network", value: "tor" }
+      - { key: "wireless.wifinet0.encryption", value: "sae-mixed" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - tor_wlan_key is defined
+          - tor_wlan_ssid is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+
+    - name: update opkg db
+      raw: opkg update
+      changed_when: false
+
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "wifi reload"
+            - "/etc/init.d/firewall restart"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

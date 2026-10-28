@@ -1,0 +1,329 @@
+# docs:
+#   name: "OpenWrt - OpenVPN IoT server"
+#   short_description: "OpenWrt - OpenVPN IoT server"
+#   description: "Bridged OpenVPN server for the IoT segment."
+#   category: "VPN"
+#   type: OpenWrt
+#   icon: "bi-vpn"
+#   params:
+#     - name: "iot_clients"
+#       label: "Client names (comma separated)"
+#       type: "text"
+#       required: true
+#     - name: "iot_bridge_port"
+#       label: "Bridge port"
+#       type: "text"
+#       default: "tap1"
+#   requires:
+#     - playbook: "openwrt_iot.yml"
+#       reason: "IoT segment"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: openvpn server for br-iot
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    iot_bridge_port: "tap1"
+    managed_id: "openwrt_openvpn-iot.yml"
+    managed_playbook: "openwrt_openvpn-iot.yml"
+    managed_ref: "iot_clients={{ iot_clients }} iot_bridge_port={{ iot_bridge_port }}"
+    managed_resource_type: "openvpn_iot"
+    openwrt_packages:
+      - openvpn
+      - luci-app-openvpn
+      - luci-i18n-openvpn-de
+      - openvpn-easy-rsa
+      - openssh-keygen
+
+    uci_vars:
+      # openvpn server
+      - { key: "openvpn.iotvpn", value: "openvpn" }
+      - { key: "openvpn.iotvpn.enabled", value: "1" }
+      - { key: "openvpn.iotvpn.port", value: "1195" }
+      - { key: "openvpn.iotvpn.local", value: "$(uci get network.lan.ipaddr)" }
+      - { key: "openvpn.iotvpn.proto", value: "udp" }
+      - { key: "openvpn.iotvpn.dev", value: "tap1" }
+      - { key: "openvpn.iotvpn.mode", value: "server" }
+      - { key: "openvpn.iotvpn.client_to_client", value: "1" }
+      - { key: "openvpn.iotvpn.ca", value: "/etc/openvpn/iot-easy-rsa/pki/ca.crt" }
+      - { key: "openvpn.iotvpn.cert", value: "/etc/openvpn/iot-easy-rsa/pki/issued/openvpn-server.crt" }
+      - { key: "openvpn.iotvpn.key", value: "/etc/openvpn/iot-easy-rsa/pki/private/openvpn-server.key" }
+      - { key: "openvpn.iotvpn.dh", value: "/etc/openvpn/dh.pem" }
+
+      - { key: "openvpn.iotvpn.keepalive", value: "10 120" }
+      - { key: "openvpn.iotvpn.cipher", value: "AES-256-CBC" }
+      - { key: "openvpn.iotvpn.auth", value: "SHA256" }
+      - { key: "openvpn.iotvpn.tls_server", value: "1" }
+
+      - { key: "openvpn.iotvpn.user", value: "nobody" }
+      - { key: "openvpn.iotvpn.group", value: "nogroup" }
+
+      - { key: "openvpn.iotvpn.persist_key", value: "1" }
+      - { key: "openvpn.iotvpn.persist_tun", value: "1" }
+
+      - { key: "openvpn.iotvpn.status", value: "/var/log/openvpn-iot-status.log" }
+      - { key: "openvpn.iotvpn.verb", value: "3" }
+      - { key: "openvpn.iotvpn.explicit_exit_notify", value: "1" }
+
+      - { key: "openvpn.iotvpn.script_security", value: "2" }
+      - { key: "openvpn.iotvpn.up", value: "/etc/openvpn/iot-dev2bridge.sh" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - iot_clients is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+    - name: update opkg db
+      raw: opkg update
+      changed_when: false
+  
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: hotplug skript if br-iot is restarted
+      raw: |
+        cat << 'EOF' >/etc/hotplug.d/iface/99-openvpn-br-iot
+        [ "$ACTION" = "ifup" -a "$INTERFACE" = "br-iot" ] && {
+          #echo 1 >/proc/sys/net/ipv6/conf/br-iot/disable_ipv6
+          /sbin/ip link set dev tap1 master br-iot
+        }
+        EOF
+        chmod 644 /etc/hotplug.d/iface/99-openvpn-br-iot
+      changed_when: false
+
+    - name: /etc/openvpn/iot-dev2bridge.sh
+      raw: |
+        cat << 'EOF' > /etc/openvpn/iot-dev2bridge.sh
+        #!/bin/bash
+        
+        # OpenVPN Up Script to add tap to bridge
+        # get dynamically added tap device
+        tap=$dev
+
+        # disable ipv6
+        echo 1 >/proc/sys/net/ipv6/conf/${dev}/disable_ipv6
+
+        # set tap interface up without IP
+        /sbin/ip link set dev $tap up
+        /sbin/ip addr flush dev $tap
+
+        # add tap interface to bridge br-iot
+        /sbin/ip link set dev $tap master br-iot
+
+        # set promisc mode for tap
+        /sbin/ip link set dev $tap promisc on
+        EOF
+        chmod 500 /etc/openvpn/iot-dev2bridge.sh
+      changed_when: false
+
+
+    - name: create script for easy-rsa pki and cronjob
+      raw: |
+        mkdir -p /etc/scripts
+        cat << 'EOF' > /etc/scripts/openvpn-iot-easyrsa.sh
+        #!/bin/bash
+
+        VPNNAME="iot"
+        EASYRSA_DIR="/etc/openvpn/${VPNNAME}-easy-rsa.tmp"
+        EASYRSA_DIR_FINAL="/etc/openvpn/${VPNNAME}-easy-rsa"
+        OPENVPN_DIR="/etc/openvpn"
+        CLIENT_NAME="${1}.${VPNNAME}"
+        CERT_DAYS=30
+
+        # cleanup/remove old cert chain
+        cd /tmp
+        rm -rf ${EASYRSA_DIR}
+        mkdir -p ${EASYRSA_DIR}
+        chmod 700 ${EASYRSA_DIR}
+        cd ${EASYRSA_DIR} || exit 1
+
+        # generate new cert chain
+        /usr/bin/easyrsa --batch init-pki || exit 2
+        /usr/bin/easyrsa --batch --days=${CERT_DAYS} build-ca nopass || exit 3
+        [ -s "${OPENVPN_DIR}/dh.pem" ] || openssl dhparam -out ${OPENVPN_DIR}/dh.pem 2048 || exit 4
+        /usr/bin/easyrsa --batch --days=${CERT_DAYS} build-server-full openvpn-server nopass || exit 5
+
+        # go through clients
+        for CLIENT_HOSTNAME in {{ iot_clients }}
+        do
+          CLIENT_NAME=${CLIENT_HOSTNAME}.${VPNNAME}
+
+          # generate client cert
+          /usr/bin/easyrsa --batch --days="$CERT_DAYS" build-client-full "$CLIENT_NAME" nopass || exit 6
+
+          # generate client .ovpn-file
+          CA_CRT="$EASYRSA_DIR/pki/ca.crt"
+          CLIENT_CRT="$EASYRSA_DIR/pki/issued/$CLIENT_NAME.crt"
+          CLIENT_KEY="$EASYRSA_DIR/pki/private/$CLIENT_NAME.key"
+
+          echo "client
+          dev tap1
+          proto udp
+          remote $(uci get network.lan.ipaddr) 1195
+          resolv-retry infinite
+          nobind
+          persist-key
+          persist-tun
+          ca [inline]
+          cert [inline]
+          key [inline]
+          cipher AES-256-CBC
+          auth SHA256
+          verb 3
+          remote-cert-tls server
+          script-security 2
+          up /etc/openvpn/${VPNNAME}-dev2bridge.sh
+          #log /var/log/openvpn-${VPNNAME}.log
+
+          <ca>
+          $(cat "$CA_CRT")
+          </ca>
+          <cert>
+          $(cat "$CLIENT_CRT")
+          </cert>
+          <key>
+          $(cat "$CLIENT_KEY")
+          </key>" >"${CLIENT_NAME}.ovpn"
+         
+          sed -i 's/^[[:space:]]*-----/-----/' "${CLIENT_NAME}.ovpn"
+
+          # stop here if homeassistant (server) client
+          [[ $CLIENT_HOSTNAME = homeassistant ]] && continue
+
+          CLIENT_HOSTNAME="$CLIENT_HOSTNAME.lan"
+          # push to client
+          ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes ${CLIENT_HOSTNAME} "echo OK" || continue
+          # copy openvpn client config
+          scp -B -O -q "${CLIENT_NAME}.ovpn" /etc/openvpn/iot-dev2bridge.sh ${CLIENT_HOSTNAME}:/etc/openvpn
+          scp -B -O -q /etc/hotplug.d/iface/99-openvpn-br-iot ${CLIENT_HOSTNAME}:/etc/hotplug.d/iface/99-openvpn-br-iot
+          # add vpn client
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set openvpn.iotvpn=openvpn"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set openvpn.iotvpn.config=/etc/openvpn/${CLIENT_NAME}.ovpn"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set openvpn.iotvpn.verb='3'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set openvpn.iotvpn.enabled='1'"
+          # add bridge br-iot
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.iot_dev='device'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.iot_dev.name='br-iot'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.iot_dev.type='bridge'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.iot_dev.bridge_empty='1'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.iot='interface'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.iot.device='br-iot'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.iot.proto='none'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.iot.defaultroute='0'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.iot.delegate='0'"
+          [[ -n "{{ iot_bridge_port }}" ]] && \
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.iot_dev.ports='{{ iot_bridge_port }}'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci commit"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "/etc/init.d/network reload"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "/etc/init.d/openvpn enable"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "/etc/init.d/openvpn restart"
+
+          ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes ${CLIENT_HOSTNAME} "mkdir -p /etc/scripts"
+          scp -B -O -p -q /etc/scripts/openvpn-iot-tap-in-bridge.sh ${CLIENT_HOSTNAME}:/etc/scripts/
+          cronjob="*/5 * * * *   /etc/scripts/openvpn-iot-tap-in-bridge.sh"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "grep -Fq \"$cronjob\" /etc/crontabs/root || echo \"$cronjob\" >>/etc/crontabs/root"
+
+        done
+
+        # use/activate new pki
+        rm -rf ${EASYRSA_DIR_FINAL}.old
+        [ -e "${EASYRSA_DIR_FINAL}" ] && mv ${EASYRSA_DIR_FINAL} ${EASYRSA_DIR_FINAL}.old
+        mv ${EASYRSA_DIR} ${EASYRSA_DIR_FINAL}
+        /etc/init.d/openvpn restart
+
+        EOF
+
+        chmod 500 /etc/scripts/openvpn-iot-easyrsa.sh
+        [ -s /etc/openvpn/iot-easy-rsa/pki/issued/openvpn-server.crt ] || /etc/scripts/openvpn-iot-easyrsa.sh
+
+        cronjob="15 10 * * *   /etc/scripts/openvpn-iot-easyrsa.sh"
+        grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+      changed_when: false
+
+    - name: create script for add tap in bridge if not in
+      raw: |
+        cat << 'EOF' > /etc/scripts/openvpn-iot-tap-in-bridge.sh
+        #!/bin/bash
+
+        DEV="tap1"
+        BR="br-iot"
+
+        # does dev exist?
+        if ! ip link show "$DEV" >/dev/null 2>&1
+        then
+          echo "Error: Device $DEV does not exist"
+          exit 1
+        fi
+
+        # does bridge exist?
+        if ! brctl show "$BR" 2>/dev/null | grep -q "^$BR"
+        then
+          echo "Error: Bridge $BR does not exist"
+          exit 2
+        fi
+
+        # add device to bridge if not in
+        if ! brctl show "$BR" | grep -q "$DEV"
+        then
+          brctl addif "$BR" "$DEV"
+        fi
+
+        # set promisc mode on device
+        ip link set dev "$DEV" promisc on
+
+        # up device
+        ip link set dev "$DEV" up
+
+        EOF
+
+        chmod 500 /etc/scripts/openvpn-iot-tap-in-bridge.sh
+
+        cronjob="*/5 * * * *   /etc/scripts/openvpn-iot-tap-in-bridge.sh"
+        grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+      changed_when: false
+
+
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/openvpn restart"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

@@ -1,0 +1,103 @@
+# docs:
+#   name: "OpenWrt - Telekom FTTH"
+#   short_description: "OpenWrt - Telekom FTTH"
+#   description: "PPPoE WAN configuration for a Telekom FTTH line."
+#   category: "Network"
+#   type: OpenWrt
+#   icon: "bi-ethernet"
+#   params:
+#     - name: "pppoe_user"
+#       label: "PPPoE user"
+#       type: "text"
+#       required: true
+#     - name: "pppoe_pw"
+#       label: "PPPoE password"
+#       type: "password"
+#       required: true
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "Base system setup"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: internetaccess for ftth pppoe with vlan7 needed for telekom
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_internet_telekom_ftth.yml"
+    managed_playbook: "openwrt_internet_telekom_ftth.yml"
+    managed_ref: "pppoe_user={{ pppoe_user }}"
+    managed_resource_type: "internet_telekom_ftth"
+
+    uci_vars:
+
+      # define VLAN 7 (Telekom) over FTTH-WAN-Port
+      - { key: "network.wan_7", value: "device" }
+      - { key: "network.wan_7.type", value: "8021q" }
+      - { key: "network.wan_7.ifname", value: "wan" }
+      - { key: "network.wan_7.vid", value: "7" }
+
+      # WAN: PPPoE auf VLAN 7 (Telekom)
+      - { key: "network.wan", value: "interface" }
+      - { key: "network.wan.proto", value: "pppoe" }
+      - { key: "network.wan.device", value: "wan.7" }
+      - { key: "network.wan.username", value: "{{ pppoe_user }}" }
+      - { key: "network.wan.password", value: "{{ pppoe_pw }}" }
+      - { key: "network.wan.ipv6", value: "auto" }
+      - { key: "network.wan.peerdns", value: "1" }
+
+      # Management for FTTH-Modem on 192.168.100.1
+      - { key: "network.wan_mgmt", value: "interface" }
+      - { key: "network.wan_mgmt.proto", value: "static" }
+      - { key: "network.wan_mgmt.device", value: "wan" }
+      - { key: "network.wan_mgmt.ipaddr", value: "192.168.100.220" }
+      - { key: "network.wan_mgmt.netmask", value: "255.255.255.0" }
+      - { key: "network.wan_mgmt.defaultroute", value: "0" }
+      - { key: "network.wan_mgmt.peerdns", value: "0" }
+
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - pppoe_pw is defined
+          - pppoe_user is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/network reload"
+            - "/etc/init.d/odhcpd restart"
+            - "/etc/init.d/odhcpd enable"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

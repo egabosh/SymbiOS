@@ -1,0 +1,86 @@
+# docs:
+#   name: "OpenWrt - Netboot"
+#   short_description: "OpenWrt - Netboot"
+#   description: "TFTP/DHCP netboot environment for PXE clients."
+#   category: "Services"
+#   type: OpenWrt
+#   icon: "bi-hdd-network"
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "DHCP/DNS configuration"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: netboot via ipxe and netboot.xyz
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_netboot.yml"
+    managed_playbook: "openwrt_netboot.yml"
+    managed_ref: ""
+    managed_resource_type: "netboot"
+    uci_vars:
+      - { key: "dhcp.lan_dnsmasq.tftp_root", value: "/srv/tftp" }
+      - { key: "dhcp.lan_dnsmasq.enable_tftp", value: "1" }
+      - { key: "dhcp.lan.dhcp_option", value: "66,$(uci get network.lan.ipaddr)" }
+      - { key: "dhcp.lan.dhcp_option", value: "67,netboot.xyz.efi" }
+      - { key: "dhcp.lan.dhcp_option", value: "67,netboot.xyz-arm64.efi" }
+      - { key: "dhcp.lan.dhcp_option", value: "67,netboot.xyz.kpxe" }
+
+  tasks:
+
+    - name: use local upstream dns
+      raw: |
+        cat << 'EOF' > /etc/scripts/netboot.sh
+        #!/bin/sh
+        mkdir -p /srv/tftp
+        cd /srv/tftp
+        wget -O netboot.xyz.efi  https://boot.netboot.xyz/ipxe/netboot.xyz.efi
+        wget -O netboot.xyz.kpxe https://boot.netboot.xyz/ipxe/netboot.xyz.kpxe
+        wget -O netboot.xyz-arm64.efi https://boot.netboot.xyz/ipxe/netboot.xyz-arm64.efi
+        EOF
+        chmod 700 /etc/scripts/netboot.sh
+        [ -s /srv/tftp/netboot.xyz-arm64.efi ] || /etc/scripts/netboot.sh
+        cronjob="15 4 * * *   /etc/scripts/netboot.sh"
+        grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+      changed_when: false
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+
+        #if [ "$current" != "$desired" ]
+        if ! echo "$current" | grep "$desired"
+        then
+          if echo "{{ item.key }}" | grep -q ".dhcp_option"
+          then
+            uci add_list {{ item.key }}="{{ item.value }}"
+          else
+            uci set {{ item.key }}="{{ item.value }}"
+          fi
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/dnsmasq restart"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

@@ -19,12 +19,13 @@ from django.http import JsonResponse
 import threading
 import uuid
 import os
+import json
 import yaml
 import shlex
 
 from django.contrib import messages as flash_messages
 from .decorators import login_required
-from .playbook_catalog import get_catalog, get_playbook
+from .playbook_catalog import get_catalog, get_playbook, docs_target_type
 from .plugin_catalog import has_plugin
 from .service_instances import (
     get_config_meta,
@@ -338,12 +339,29 @@ def services_detail(request, playbook):
     all_catalog = get_catalog()
     # Build access groups context from the playbook's docs.access config.
     access_ctx = _build_access_context(item)
-    # External systems: only show compatible systems for this playbook's target type.
-    playbook_target = (item.get('docs') or {}).get('target') or {}
-    playbook_target_type = playbook_target.get('type', '')
-    from .views_external import _load_systems
+    # External systems: show compatible systems for this playbook's type (remote if in external-services)
+    is_external = playbook.startswith('external-services/')
+    playbook_target_type = docs_target_type(item.get('docs'))
+    if is_external and not playbook_target_type:
+        # No explicit type in the docs block: derive a hint from the file name
+        # prefix (e.g. openwrt_*.yml -> OpenWrt) so the block still renders.
+        prefix = playbook.replace('external-services/', '').split('_')[0]
+        playbook_target_type = 'OpenWrt' if prefix.lower() == 'openwrt' else prefix.capitalize()
+    from .views_settings_external_systems import _load_systems, EXTERNAL_STATES_DIR
     all_systems = _load_systems()
     compatible_systems = [s for s in all_systems if s.get('type') == playbook_target_type] if playbook_target_type else []
+    # Load states for dependency checks
+    target_states = {}
+    try:
+        for s in compatible_systems:
+            try:
+                import json
+                with open(os.path.join(EXTERNAL_STATES_DIR, f"{s['id']}.json")) as fh:
+                    target_states[s['id']] = json.load(fh)
+            except Exception:
+                target_states[s['id']] = {'managed': []}
+    except Exception:
+        target_states = {}
     # Check if this service has a feature plugin (Features tab).
     svc_name = playbook.replace('.yml', '').split('/')[-1]
     has_feature_plugin = has_plugin(svc_name)
@@ -405,6 +423,7 @@ def services_detail(request, playbook):
         'all_ldap_users': access_ctx['users'],
         'compatible_systems': compatible_systems,
         'playbook_target_type': playbook_target_type,
+        'is_external': is_external,
         'has_feature_plugin': has_feature_plugin,
         'feature_service': svc_name,
         'feature_manifest_name': feature_manifest_name,
@@ -413,6 +432,7 @@ def services_detail(request, playbook):
         'config_meta': config_meta,
         'config_rows': config_rows,
         'config_service': svc_name,
+        'target_states': target_states,
         **_sidebar_context(all_catalog),
     })
     # Never cache: the inline JS/logic changes frequently during development
@@ -469,6 +489,39 @@ def services_action(request, playbook):
         target=_run_service_job, args=(job_id, playbook, action), daemon=True
     ).start()
     return JsonResponse({'job': job_id, 'action': action, 'command': display_cmd})
+
+
+@login_required
+def services_action_remote(request, playbook):
+    """Run an external-services playbook on a selected external system.
+
+    Parameter values travel as JSON on stdin (see symbios-run-remote-playbook.sh)
+    because they may contain secrets - the command line and the audit log only
+    ever see the target and the playbook name.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid action'}, status=400)
+    system_id = request.POST.get('system_id', '').strip()
+    if not system_id:
+        return JsonResponse({'error': 'No system selected'}, status=400)
+    item = get_playbook(playbook)
+    if item is None:
+        return JsonResponse({'error': 'Playbook not found'}, status=404)
+    playbook_name = playbook.split('/')[-1]
+    params_json = request.POST.get('params') or '{}'
+    try:
+        params = json.loads(params_json)
+    except ValueError:
+        return JsonResponse({'error': 'Invalid parameters'}, status=400)
+    if not isinstance(params, dict):
+        return JsonResponse({'error': 'Invalid parameters'}, status=400)
+    cmd = ('symbios-run-remote-playbook.sh %s %s --vars-stdin'
+           % (shlex.quote(system_id), shlex.quote(playbook_name)))
+    job_id = create_job(cmd, timeout=1800, stdin_data=json.dumps(params))
+    threading.Thread(
+        target=_run_service_job, args=(job_id, playbook, '__remote__'), daemon=True
+    ).start()
+    return JsonResponse({'job': job_id, 'action': '__remote__', 'command': cmd})
 
 
 def _run_service_job(job_id, playbook=None, action=None):

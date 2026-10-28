@@ -1,0 +1,115 @@
+# docs:
+#   name: "OpenWrt - WireGuard Tor server"
+#   short_description: "OpenWrt - WireGuard Tor server"
+#   description: "WireGuard server interface routed through Tor."
+#   category: "VPN"
+#   type: OpenWrt
+#   icon: "bi-vpn"
+#   requires:
+#     - playbook: "openwrt_tor.yml"
+#       reason: "Tor segment"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: wireguard server for br-tor
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_wireguard-tor.yml"
+    managed_playbook: "openwrt_wireguard-tor.yml"
+    managed_ref: ""
+    managed_resource_type: "wireguard_tor"
+    openwrt_packages:
+      - luci-proto-wireguard
+      - kmod-wireguard
+
+    uci_vars:
+      # Interface wg_tor
+      - { key: "network.wg_tor", value: "interface" }
+      - { key: "network.wg_tor.proto", value: "wireguard" }
+      - { key: "network.wg_tor.listen_port", value: "59667" }
+      - { key: "network.wg_tor.mtu", value: "1450" }
+      - { key: "network.wg_tor.addresses", value: "fdaa:a192:b168:cd45::1/64" }
+      - { key: "network.wg_tor.addresses", value: "192.168.45.1/24" }
+      - { key: "network.wg_tor.ip6assign", value: "64" }
+      - { key: "network.wg_tor.ipv6", value: "1" }
+
+      # allow connections from internet
+      - { key: "firewall.wireguard_allow_tor", value: "rule" }
+      - { key: "firewall.wireguard_allow_tor.name", value: "ansible_allow_wireguard_tor" }
+      - { key: "firewall.wireguard_allow_tor.src", value: "wan" }
+      - { key: "firewall.wireguard_allow_tor.proto", value: "udp" }
+      - { key: "firewall.wireguard_allow_tor.dest_port", value: "59667" }
+      - { key: "firewall.wireguard_allow_tor.target", value: "ACCEPT" }
+
+      # add to zone tor and allow intra zone forward
+      - { key: "firewall.zone_tor.network", value: "wg_tor" }
+      - { key: "firewall.zone_tor.forward", value: "ACCEPT" }
+
+  tasks:
+    - name: update opkg db
+      raw: opkg update
+      changed_when: false
+  
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+
+        # gen server keypair if not exist
+        if [[ {{ item.key }} = network.wg_tor.proto ]]
+        then
+          if ! uci get network.wg_tor.private_key >/dev/null
+          then
+            mkdir -p /etc/wg_tor
+            cd /etc/wg_tor
+            wg genkey | tee server_privatekey | wg pubkey > server_publickey
+            uci set network.wg_tor.private_key="$(cat server_privatekey)"
+          fi
+        fi
+
+        if ! echo "$current" | grep "$desired"
+        then
+          if echo "{{ item.key }}" | egrep -q "listen_address|\.addresses|\.allowed_ips|firewall\..+\.network"
+          then
+            uci add_list {{ item.key }}="{{ item.value }}"
+          else
+            uci set {{ item.key }}="{{ item.value }}"
+          fi
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/network reload"
+            - "/etc/init.d/firewall reload"
+#            - "/etc/init.d/dnsmasq restart"
+#            - "/etc/init.d/odhcpd restart"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

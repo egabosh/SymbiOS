@@ -14,33 +14,32 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""CRUD views for external systems management.
-
-External systems are remote hosts (Linux Mint, OpenWrt, etc.) that can be
-managed via SSH from the SymbiOS host. Playbooks in external-services/ are
-executed on these targets using ansible-playbook --connection=ssh.
-"""
+"""External systems management under Settings."""
 import os
 import yaml
 import shlex
 
 from django.shortcuts import render, redirect
 from django.contrib import messages as flash_messages
+from django.http import JsonResponse
 
 from .decorators import login_required
-from .playbook_catalog import get_catalog
+from .playbook_catalog import get_catalog, docs_target_type
 
 
-# Config file for external systems (alongside inventory.yml)
 EXTERNAL_SYSTEMS_CONFIG = os.environ.get(
     'EXTERNAL_SYSTEMS_CONFIG',
     os.path.join(os.path.dirname(os.environ.get('CONFIG_PATH', '/config/inventory.yml')),
                  'external-systems.yml'),
 )
+EXTERNAL_STATES_DIR = os.environ.get(
+    'EXTERNAL_STATES_DIR',
+    os.path.join(os.path.dirname(os.environ.get('CONFIG_PATH', '/config/inventory.yml')),
+                 'external-systems', 'states'),
+)
 
 
 def _load_systems():
-    """Load external systems from config file."""
     try:
         with open(EXTERNAL_SYSTEMS_CONFIG) as fh:
             data = yaml.safe_load(fh) or {}
@@ -50,14 +49,6 @@ def _load_systems():
 
 
 def _save_systems(systems):
-    """Save external systems via the config engine on the host.
-
-    Single atomic writer (tmp + fsync + replace, .bak). Raises
-    RuntimeError on failure (same contract as the direct write before).
-    Validation (required fields, duplicate IDs) stays in the calling view:
-    it re-renders the form with the entered data on errors, so the checks
-    are load-bearing there and intentionally not duplicated host-side.
-    """
     from .utils.ssh_exec import run_command
     import json as _json
     ok, _out, err = run_command(
@@ -68,7 +59,6 @@ def _save_systems(systems):
 
 
 def _get_system(system_id):
-    """Get a single system by ID."""
     for s in _load_systems():
         if s.get('id') == system_id:
             return s
@@ -76,8 +66,6 @@ def _get_system(system_id):
 
 
 def _get_public_key():
-    """Read the host's public SSH key."""
-    # Read from host via run_command to follow symbios-exec.sh gateway pattern
     from .utils.ssh_exec import run_command
     ok, stdout, stderr = run_command('cat /root/.ssh/id_ed25519.pub', timeout=5)
     if ok and stdout.strip():
@@ -86,23 +74,26 @@ def _get_public_key():
 
 
 def _get_target_types():
-    """Collect all unique target types from external-services/ catalog."""
+    """All distinct target types declared by any playbook (docs.type).
+
+    This is the dynamic source for the "System Type" dropdown: every type found
+    in a playbook's docs block is offered, so adding a new external-services
+    playbook with a new type makes it available automatically.
+    """
     types = set()
     for item in get_catalog():
-        target = (item.get('docs') or {}).get('target') or {}
-        t = target.get('type')
+        t = docs_target_type(item.get('docs'))
         if t:
             types.add(t)
     return sorted(types)
 
 
 @login_required
-def external_systems(request):
-    """List all external systems."""
+def settings_external_systems(request):
     systems = _load_systems()
     public_key = _get_public_key()
     target_types = _get_target_types()
-    return render(request, 'main/external_systems.html', {
+    return render(request, 'main/settings/external_systems.html', {
         'systems': systems,
         'public_key': public_key,
         'target_types': target_types,
@@ -110,8 +101,7 @@ def external_systems(request):
 
 
 @login_required
-def external_system_create(request):
-    """Create a new external system."""
+def settings_external_system_create(request):
     if request.method == 'POST':
         systems = _load_systems()
         system_id = request.POST.get('name', '').strip().lower().replace(' ', '-')
@@ -124,17 +114,16 @@ def external_system_create(request):
 
         if not name or not host or not system_type:
             flash_messages.error(request, 'Name, Host, and Type are required.')
-            return render(request, 'main/external_systems_form.html', {
+            return render(request, 'main/settings/external_systems_form.html', {
                 'system': request.POST,
                 'target_types': _get_target_types(),
                 'editing': False,
             })
 
-        # Check for duplicate ID
         for s in systems:
             if s.get('id') == system_id:
                 flash_messages.error(request, 'A system with this name already exists.')
-                return render(request, 'main/external_systems_form.html', {
+                return render(request, 'main/settings/external_systems_form.html', {
                     'system': request.POST,
                     'target_types': _get_target_types(),
                     'editing': False,
@@ -151,9 +140,9 @@ def external_system_create(request):
         })
         _save_systems(systems)
         flash_messages.success(request, 'External system "%s" created.' % name)
-        return redirect('external_systems')
+        return redirect('settings_external_systems')
 
-    return render(request, 'main/external_systems_form.html', {
+    return render(request, 'main/settings/external_systems_form.html', {
         'system': {},
         'target_types': _get_target_types(),
         'editing': False,
@@ -161,11 +150,10 @@ def external_system_create(request):
 
 
 @login_required
-def external_system_edit(request, system_id):
-    """Edit an external system."""
+def settings_external_system_edit(request, system_id):
     system = _get_system(system_id)
     if system is None:
-        return redirect('external_systems')
+        return redirect('settings_external_systems')
 
     if request.method == 'POST':
         systems = _load_systems()
@@ -180,9 +168,9 @@ def external_system_edit(request, system_id):
                 break
         _save_systems(systems)
         flash_messages.success(request, 'External system updated.')
-        return redirect('external_systems')
+        return redirect('settings_external_systems')
 
-    return render(request, 'main/external_systems_form.html', {
+    return render(request, 'main/settings/external_systems_form.html', {
         'system': system,
         'target_types': _get_target_types(),
         'editing': True,
@@ -190,20 +178,18 @@ def external_system_edit(request, system_id):
 
 
 @login_required
-def external_system_delete(request, system_id):
-    """Delete an external system."""
+def settings_external_system_delete(request, system_id):
     if request.method != 'POST':
-        return redirect('external_systems')
+        return redirect('settings_external_systems')
     systems = _load_systems()
     systems = [s for s in systems if s.get('id') != system_id]
     _save_systems(systems)
     flash_messages.success(request, 'External system deleted.')
-    return redirect('external_systems')
+    return redirect('settings_external_systems')
 
 
 @login_required
-def external_system_test(request, system_id):
-    """Test SSH connectivity to an external system."""
+def settings_external_system_test(request, system_id):
     if request.method != 'POST':
         return JsonResponse({'error': 'POST required'}, status=400)
     system = _get_system(system_id)
@@ -213,7 +199,6 @@ def external_system_test(request, system_id):
     host = system.get('host', '')
     port = system.get('port', 22)
     user = system.get('user', 'root')
-    # Test SSH via run_command (runs on SymbiOS host, which has the SSH key)
     ok, stdout, stderr = run_command(
         'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p %d %s@%s echo ok' % (port, shlex.quote(user), shlex.quote(host)),
         timeout=10,
@@ -224,13 +209,60 @@ def external_system_test(request, system_id):
 
 
 @login_required
-def external_system_public_key(request):
-    """Return the host's public SSH key as JSON."""
+def settings_external_system_install_key(request, system_id):
+    """Install the host's public key on the target so later logins are key-based.
+
+    The one-time password travels on stdin (never argv / audit log) and is only
+    used to open this first connection; afterwards the ed25519 key authenticates.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=400)
+    system = _get_system(system_id)
+    if system is None:
+        return JsonResponse({'error': 'System not found'}, status=404)
+    password = request.POST.get('password', '')
+    if not password:
+        return JsonResponse({'error': 'Password required'}, status=400)
+    from .utils.ssh_exec import run_command
+    ok, stdout, stderr = run_command(
+        'symbios-remote-install-key.sh %s' % shlex.quote(system_id),
+        timeout=30, stdin_data=password)
+    if ok:
+        return JsonResponse({'ok': True,
+                             'message': 'SSH key installed on %s.' % system.get('name', system_id)})
+    return JsonResponse({'ok': False, 'error': (stderr or stdout or 'Install failed.').strip()})
+
+
+@login_required
+def settings_external_system_sync(request, system_id):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=400)
+    from .utils.ssh_exec import run_command
+    ok, stdout, stderr = run_command(f'symbios-remote-sync.sh {shlex.quote(system_id)}', timeout=60)
+    if ok:
+        return JsonResponse({'ok': True, 'message': stdout or 'Synced'})
+    return JsonResponse({'ok': False, 'error': stderr or stdout or 'Sync failed.'})
+
+
+@login_required
+def settings_external_system_inventory(request, system_id):
+    import json
+    data = {'managed': []}
+    try:
+        path = os.path.join(EXTERNAL_STATES_DIR, f'{system_id}.json')
+        with open(path) as fh:
+            data = json.load(fh)
+    except Exception:
+        pass
+    return JsonResponse(data)
+
+
+@login_required
+def settings_external_system_public_key(request):
     key = _get_public_key()
     return JsonResponse({'public_key': key})
 
 
 @login_required
-def external_types_api(request):
-    """Return all available target types as JSON."""
+def settings_external_types_api(request):
     return JsonResponse({'types': _get_target_types()})

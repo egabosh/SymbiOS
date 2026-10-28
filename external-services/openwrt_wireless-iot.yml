@@ -1,0 +1,106 @@
+# docs:
+#   name: "OpenWrt - Wireless IoT"
+#   short_description: "OpenWrt - Wireless IoT"
+#   description: "WLAN SSID attached to the IoT bridge."
+#   category: "Network"
+#   type: OpenWrt
+#   icon: "bi-wifi"
+#   params:
+#     - name: "iot_wlandev"
+#       label: "Radio device"
+#       type: "text"
+#       default: "radio0"
+#     - name: "iot_wlan_ssid"
+#       label: "SSID"
+#       type: "text"
+#       required: true
+#     - name: "iot_wlan_key"
+#       label: "WPA key"
+#       type: "password"
+#       required: true
+#   requires:
+#     - playbook: "openwrt_iot.yml"
+#       reason: "IoT segment"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: create iot WLAN
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    iot_wlandev: "radio0"
+    managed_id: "openwrt_wireless-iot.yml"
+    managed_playbook: "openwrt_wireless-iot.yml"
+    managed_ref: "iot_wlandev={{ iot_wlandev }} iot_wlan_ssid={{ iot_wlan_ssid }}"
+    managed_resource_type: "wireless_iot"
+    openwrt_packages:
+      - luci-app-openvpn
+      - luci-i18n-openvpn-de
+      - openvpn
+
+    uci_vars:
+      - { key: "wireless.wifinet1", value: "wifi-iface" }
+      - { key: "wireless.wifinet1.device", value: "{{ iot_wlandev }}" }
+      - { key: "wireless.wifinet1.mode", value: "ap" }
+      - { key: "wireless.wifinet1.key", value: "{{ iot_wlan_key }}" }
+      - { key: "wireless.wifinet1.isolate", value: "1" }
+      - { key: "wireless.wifinet1.ssid", value: "{{ iot_wlan_ssid }}" }
+      - { key: "wireless.wifinet1.network", value: "iot" }
+      - { key: "wireless.wifinet1.encryption", value: "sae-mixed" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - iot_wlan_key is defined
+          - iot_wlan_ssid is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+
+    - name: update opkg db
+      raw: opkg update
+      changed_when: false
+
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "wifi reload"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

@@ -1,0 +1,106 @@
+# docs:
+#   name: "OpenWrt - Firewall allow from internet"
+#   short_description: "OpenWrt - Firewall allow from internet"
+#   description: "Inbound allow rule from the internet to one internal host/port."
+#   category: "Security"
+#   type: OpenWrt
+#   icon: "bi-shield-check"
+#   params:
+#     - name: "rule_name"
+#       label: "Rule name"
+#       type: "text"
+#       required: true
+#     - name: "src"
+#       label: "Source zone"
+#       type: "text"
+#       default: "wan"
+#     - name: "src_ip"
+#       label: "Source IP/network"
+#       type: "text"
+#       default: "*"
+#     - name: "dest_ip"
+#       label: "Destination IP"
+#       type: "text"
+#       required: true
+#     - name: "dest_port"
+#       label: "Destination port"
+#       type: "text"
+#       required: true
+#     - name: "proto"
+#       label: "Protocol"
+#       type: "text"
+#       default: "tcp"
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "Firewall zones"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: firewall-config Control outgoing traffic - forwarded to the internet (src=lan; dest=wan)
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_firewall_allow_internet.yml/{{ rule_name }}"
+    managed_playbook: "openwrt_firewall_allow_internet.yml"
+    managed_ref: "rule_name={{ rule_name }} src={{ src }} src_ip={{ src_ip }} dest_ip={{ dest_ip }} dest_port={{ dest_port }} proto={{ proto }}"
+    managed_resource_type: "firewall_allow_internet"
+    proto: "tcp"
+    src: "wan"
+    src_ip: "*"
+    uci_vars:
+      ## rules
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}",           value: "rule" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.src",       value: "{{ src }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest",      value: "wan" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.target",    value: "ACCEPT" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.proto",     value: "{{ proto }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.name",      value: "ansible_forward_internet_{{ rule_name }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest_port", value: "{{ dest_port }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.src_ip",      value: "{{ src_ip }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest_ip",     value: "{{ dest_ip }}" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - dest_ip is defined
+          - dest_port is defined
+          - rule_name is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        [ -z "$desired"  ] && ( echo unchanged ; exit 0 )
+
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="$desired"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/firewall reload"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

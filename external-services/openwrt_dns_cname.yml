@@ -1,0 +1,80 @@
+# docs:
+#   name: "OpenWrt - DNS CNAME"
+#   short_description: "OpenWrt - DNS CNAME"
+#   description: "Local CNAME record in dnsmasq."
+#   category: "Network"
+#   type: OpenWrt
+#   icon: "bi-globe2"
+#   params:
+#     - name: "cname"
+#       label: "CNAME name"
+#       type: "text"
+#       required: true
+#     - name: "target"
+#       label: "Target host"
+#       type: "text"
+#       required: true
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "DHCP/DNS configuration"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: dns-config
+  hosts: all
+  gather_facts: no
+ 
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_dns_cname.yml/{{ cname }}"
+    managed_playbook: "openwrt_dns_cname.yml"
+    managed_ref: "cname={{ cname }} target={{ target }}"
+    managed_resource_type: "dns_cname"
+
+    uci_vars:
+      - { key: "dhcp.cname_{{ cname | replace('.', '_') }}", value: "cname" }
+      - { key: "dhcp.cname_{{ cname | replace('.', '_') }}.cname", value: "{{ cname }}." }
+      - { key: "dhcp.cname_{{ cname | replace('.', '_') }}.target", value: "{{ target }}." }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - cname is defined
+          - target is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+
+    - name: set uci values if needed
+      raw: |
+        desired=$(echo "{{ item.value }}" | sed 's/_/-/g')
+        key=$(echo "{{ item.key }}" | sed 's/-/_/g' )
+        current=$(uci get $key 2>/dev/null || echo "NOT_SET")
+
+        if ! echo "$current" | grep "$desired"
+        then
+          uci set $key="$desired"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/dnsmasq reload"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

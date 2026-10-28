@@ -1,0 +1,324 @@
+# docs:
+#   name: "OpenWrt - OpenVPN Tor server"
+#   short_description: "OpenWrt - OpenVPN Tor server"
+#   description: "Bridged OpenVPN server for the Tor segment."
+#   category: "VPN"
+#   type: OpenWrt
+#   icon: "bi-vpn"
+#   params:
+#     - name: "tor_clients"
+#       label: "Client names (comma separated)"
+#       type: "text"
+#       required: true
+#     - name: "tor_bridge_port"
+#       label: "Bridge port"
+#       type: "text"
+#       default: "tap2"
+#   requires:
+#     - playbook: "openwrt_tor.yml"
+#       reason: "Tor segment"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: openvpn server for br-tor
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_openvpn-tor.yml"
+    managed_playbook: "openwrt_openvpn-tor.yml"
+    managed_ref: "tor_clients={{ tor_clients }} tor_bridge_port={{ tor_bridge_port }}"
+    managed_resource_type: "openvpn_tor"
+    tor_bridge_port: "tap2"
+    openwrt_packages:
+      - openvpn
+      - luci-app-openvpn
+      - luci-i18n-openvpn-de
+      - openvpn-easy-rsa
+      - openssh-keygen
+
+    uci_vars:
+      # openvpn server
+      - { key: "openvpn.torvpn", value: "openvpn" }
+      - { key: "openvpn.torvpn.enabled", value: "1" }
+      - { key: "openvpn.torvpn.port", value: "1194" }
+      - { key: "openvpn.torvpn.local", value: "$(uci get network.lan.ipaddr)" }
+      - { key: "openvpn.torvpn.proto", value: "udp" }
+      - { key: "openvpn.torvpn.dev", value: "tap2" }
+      - { key: "openvpn.torvpn.mode", value: "server" }
+      - { key: "openvpn.torvpn.client_to_client", value: "1" }
+      - { key: "openvpn.torvpn.ca", value: "/etc/openvpn/tor-easy-rsa/pki/ca.crt" }
+      - { key: "openvpn.torvpn.cert", value: "/etc/openvpn/tor-easy-rsa/pki/issued/openvpn-server.crt" }
+      - { key: "openvpn.torvpn.key", value: "/etc/openvpn/tor-easy-rsa/pki/private/openvpn-server.key" }
+      - { key: "openvpn.torvpn.dh", value: "/etc/openvpn/dh.pem" }
+
+      - { key: "openvpn.torvpn.keepalive", value: "10 120" }
+      - { key: "openvpn.torvpn.cipher", value: "AES-256-CBC" }
+      - { key: "openvpn.torvpn.auth", value: "SHA256" }
+      - { key: "openvpn.torvpn.tls_server", value: "1" }
+
+      - { key: "openvpn.torvpn.user", value: "nobody" }
+      - { key: "openvpn.torvpn.group", value: "nogroup" }
+
+      - { key: "openvpn.torvpn.persist_key", value: "1" }
+      - { key: "openvpn.torvpn.persist_tun", value: "1" }
+
+      - { key: "openvpn.torvpn.status", value: "/var/log/openvpn-tor-status.log" }
+      - { key: "openvpn.torvpn.verb", value: "3" }
+      - { key: "openvpn.torvpn.explicit_exit_notify", value: "1" }
+
+      - { key: "openvpn.torvpn.script_security", value: "2" }
+      - { key: "openvpn.torvpn.up", value: "/etc/openvpn/tor-dev2bridge.sh" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - tor_clients is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+    - name: update opkg db
+      raw: opkg update
+      changed_when: false
+  
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: hotplug skript if br-tor is restarted
+      raw: |
+        cat << 'EOF' >/etc/hotplug.d/iface/99-openvpn-br-tor
+        [ "$ACTION" = "ifup" -a "$INTERFACE" = "br-tor" ] && {
+          #echo 1 >/proc/sys/net/ipv6/conf/br-tor/disable_ipv6
+          /sbin/ip link set dev tap2 master br-tor
+        }
+        EOF
+        chmod 644 /etc/hotplug.d/iface/99-openvpn-br-tor
+      changed_when: false
+
+    - name: /etc/openvpn/tor-dev2bridge.sh
+      raw: |
+        cat << 'EOF' > /etc/openvpn/tor-dev2bridge.sh
+        #!/bin/bash
+        
+        # OpenVPN Up Script to add tap to bridge
+        # get dynamically added tap device
+        tap=$dev
+
+        # disable ipv6
+        echo 1 >/proc/sys/net/ipv6/conf/${dev}/disable_ipv6
+
+        # set tap interface up without IP
+        /sbin/ip link set dev $tap up
+        /sbin/ip addr flush dev $tap
+
+        # add tap interface to bridge br-tor
+        /sbin/ip link set dev $tap master br-tor
+
+        # set promisc mode for tap
+        /sbin/ip link set dev $tap promisc on
+        EOF
+        chmod 500 /etc/openvpn/tor-dev2bridge.sh
+      changed_when: false
+
+
+    - name: create script for easy-rsa pki and cronjob
+      raw: |
+        mkdir -p /etc/scripts
+        cat << 'EOF' > /etc/scripts/openvpn-tor-easyrsa.sh
+        #!/bin/bash
+
+        VPNNAME="tor"
+        EASYRSA_DIR="/etc/openvpn/${VPNNAME}-easy-rsa.tmp"
+        EASYRSA_DIR_FINAL="/etc/openvpn/${VPNNAME}-easy-rsa"
+        OPENVPN_DIR="/etc/openvpn"
+        CLIENT_NAME="${1}.${VPNNAME}"
+        CERT_DAYS=30
+
+        # cleanup/remove old cert chain
+        cd /tmp
+        rm -rf ${EASYRSA_DIR}
+        mkdir -p ${EASYRSA_DIR}
+        chmod 700 ${EASYRSA_DIR}
+        cd ${EASYRSA_DIR} || exit 1
+
+        # generate new cert chain
+        /usr/bin/easyrsa --batch init-pki || exit 2
+        /usr/bin/easyrsa --batch --days=${CERT_DAYS} build-ca nopass || exit 3
+        [ -s "${OPENVPN_DIR}/dh.pem" ] || openssl dhparam -out ${OPENVPN_DIR}/dh.pem 2048 || exit 4
+        /usr/bin/easyrsa --batch --days=${CERT_DAYS} build-server-full openvpn-server nopass || exit 5
+
+        # go through clients
+        for CLIENT_HOSTNAME in {{ tor_clients }}
+        do
+          CLIENT_NAME=${CLIENT_HOSTNAME}.${VPNNAME}
+
+          # generate client cert
+          /usr/bin/easyrsa --batch --days="$CERT_DAYS" build-client-full "$CLIENT_NAME" nopass || exit 6
+
+          # generate client .ovpn-file
+          CA_CRT="$EASYRSA_DIR/pki/ca.crt"
+          CLIENT_CRT="$EASYRSA_DIR/pki/issued/$CLIENT_NAME.crt"
+          CLIENT_KEY="$EASYRSA_DIR/pki/private/$CLIENT_NAME.key"
+
+          echo "client
+          dev tap2
+          proto udp
+          remote $(uci get network.lan.ipaddr) 1194
+          resolv-retry infinite
+          nobind
+          persist-key
+          persist-tun
+          ca [inline]
+          cert [inline]
+          key [inline]
+          cipher AES-256-CBC
+          auth SHA256
+          verb 3
+          remote-cert-tls server
+          script-security 2
+          up /etc/openvpn/${VPNNAME}-dev2bridge.sh
+          #log /var/log/openvpn-${VPNNAME}.log
+
+          <ca>
+          $(cat "$CA_CRT")
+          </ca>
+          <cert>
+          $(cat "$CLIENT_CRT")
+          </cert>
+          <key>
+          $(cat "$CLIENT_KEY")
+          </key>" >"${CLIENT_NAME}.ovpn"
+ 
+          sed -i 's/^[[:space:]]*-----/-----/' "${CLIENT_NAME}.ovpn"
+        
+          CLIENT_HOSTNAME="$CLIENT_HOSTNAME.lan"
+          # push to client
+          ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes ${CLIENT_HOSTNAME} "echo OK"
+          # copy openvpn client config
+          scp -B -O -q "${CLIENT_NAME}.ovpn" /etc/openvpn/tor-dev2bridge.sh ${CLIENT_HOSTNAME}:/etc/openvpn
+          scp -B -O -q /etc/hotplug.d/iface/99-openvpn-br-tor ${CLIENT_HOSTNAME}:/etc/hotplug.d/iface/99-openvpn-br-tor
+          # add vpn client
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set openvpn.torvpn=openvpn"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set openvpn.torvpn.config=/etc/openvpn/${CLIENT_NAME}.ovpn"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set openvpn.torvpn.verb='3'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set openvpn.torvpn.enabled='1'"
+          # add bridge br-tor
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.tor_dev='device'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.tor_dev.name='br-tor'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.tor_dev.type='bridge'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.tor_dev.bridge_empty='1'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.tor='interface'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.tor.device='br-tor'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.tor.proto='none'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.tor.defaultroute='0'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.tor.delegate='0'"
+          [[ -n "{{ tor_bridge_port }}" ]] && \
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci set network.tor_dev.ports='{{ tor_bridge_port }}'"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci commit"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "/etc/init.d/network reload"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "/etc/init.d/openvpn enable"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "/etc/init.d/openvpn restart"
+
+          ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes ${CLIENT_HOSTNAME} "mkdir -p /etc/scripts"
+          scp -B -O -p -q /etc/scripts/openvpn-tor-tap-in-bridge.sh ${CLIENT_HOSTNAME}:/etc/scripts/
+          cronjob="*/5 * * * *   /etc/scripts/openvpn-tor-tap-in-bridge.sh"
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "grep -Fq \"$cronjob\" /etc/crontabs/root || echo \"$cronjob\" >>/etc/crontabs/root"
+
+        done
+
+        # use/activate new pki
+        rm -rf ${EASYRSA_DIR_FINAL}.old
+        [ -e "${EASYRSA_DIR_FINAL}" ] && mv ${EASYRSA_DIR_FINAL} ${EASYRSA_DIR_FINAL}.old
+        mv ${EASYRSA_DIR} ${EASYRSA_DIR_FINAL}
+        /etc/init.d/openvpn restart
+        EOF
+
+        chmod 500 /etc/scripts/openvpn-tor-easyrsa.sh
+        [ -s /etc/openvpn/tor-easy-rsa/pki/issued/openvpn-server.crt ] || /etc/scripts/openvpn-tor-easyrsa.sh
+
+        cronjob="15 9 * * *   /etc/scripts/openvpn-tor-easyrsa.sh"
+        grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+      changed_when: false
+
+    - name: create script for add tap in bridge if not in
+      raw: |
+        cat << 'EOF' > /etc/scripts/openvpn-tor-tap-in-bridge.sh
+        #!/bin/bash
+
+        DEV="tap2"
+        BR="br-tor"
+
+        # does dev exist?
+        if ! ip link show "$DEV" >/dev/null 2>&1
+        then
+          echo "Error: Device $DEV does not exist"
+          exit 1
+        fi
+
+        # does bridge exist?
+        if ! brctl show "$BR" 2>/dev/null | grep -q "^$BR"
+        then
+          echo "Error: Bridge $BR does not exist"
+          exit 2
+        fi
+
+        # add device to bridge if not in
+        if ! brctl show "$BR" | grep -q "$DEV"
+        then
+          brctl addif "$BR" "$DEV"
+        fi
+
+        # set promisc mode on device
+        ip link set dev "$DEV" promisc on
+
+        # up device
+        ip link set dev "$DEV" up
+
+        EOF
+
+        chmod 500 /etc/scripts/openvpn-tor-tap-in-bridge.sh
+
+        cronjob="*/5 * * * *   /etc/scripts/openvpn-tor-tap-in-bridge.sh"
+        grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+      changed_when: false
+
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/openvpn restart"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

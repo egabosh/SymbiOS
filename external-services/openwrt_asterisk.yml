@@ -1,0 +1,516 @@
+# docs:
+#   name: "OpenWrt - Asterisk"
+#   short_description: "OpenWrt - Asterisk"
+#   description: "Asterisk SIP server with trunk and local extensions."
+#   category: "Services"
+#   type: OpenWrt
+#   icon: "bi-telephone"
+#   params:
+#     - name: "sip_provider_name"
+#       label: "SIP provider name"
+#       type: "text"
+#       required: true
+#     - name: "sip_server_hostname"
+#       label: "SIP server hostname"
+#       type: "text"
+#       required: true
+#     - name: "sip_server_realm"
+#       label: "SIP realm"
+#       type: "text"
+#       required: true
+#     - name: "from_mail"
+#       label: "From mail address"
+#       type: "text"
+#       required: true
+#     - name: "local_phone_pw"
+#       label: "Local phone password"
+#       type: "password"
+#       required: true
+#     - name: "accounts"
+#       label: "Accounts (comma separated)"
+#       type: "text"
+#       required: true
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "Base system setup"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: basic individual OpenWRT config
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_asterisk.yml"
+    managed_playbook: "openwrt_asterisk.yml"
+    managed_ref: "sip_provider_name={{ sip_provider_name }} sip_server_hostname={{ sip_server_hostname }} sip_server_realm={{ sip_server_realm }} from_mail={{ from_mail }} accounts={{ accounts }}"
+    managed_resource_type: "asterisk"
+    openwrt_packages:
+      - asterisk 
+      - asterisk-func-channel
+      - asterisk-util-astcanary
+      - asterisk-app-system
+      - asterisk-chan-rtp
+      - asterisk-res-rtp-asterisk
+      - asterisk-codec-alaw
+      - asterisk-codec-ulaw
+      - asterisk-pjsip
+      - asterisk-func-blacklist
+      - asterisk-codec-gsm
+      - asterisk-format-gsm
+      - asterisk-app-voicemail
+      - asterisk-bridge-simple
+      - asterisk-format-wav
+      - asterisk-res-srtp
+      - asterisk-codec-g722
+      - asterisk-app-mixmonitor
+      - asterisk-app-stack
+      - asterisk-sounds
+
+    uci_vars:
+      - { key: "asterisk.general.enabled", value: "1" }
+ 
+      # SIP incoming calls
+      - { key: "firewall.rule_{{ sip_provider_name }}_sip_incoming",    value: "rule" }
+      - { key: "firewall.rule_{{ sip_provider_name }}_sip_incoming.src",     value: "wan" }
+      - { key: "firewall.rule_{{ sip_provider_name }}_sip_incoming.target",  value: "ACCEPT" }
+      - { key: "firewall.rule_{{ sip_provider_name }}_sip_incoming.proto",   value: "udp" }
+      - { key: "firewall.rule_{{ sip_provider_name }}_sip_incoming.dest_port", value: "5060" }
+      - { key: "firewall.rule_{{ sip_provider_name }}_sip_incoming.name",    value: "ansible_{{ sip_provider_name }}_sip_incoming" }
+
+      # homephone
+      - { key: "firewall.rule_homephone_sip",    value: "rule" }
+      - { key: "firewall.rule_homephone_sip.src",     value: "tor" }
+      - { key: "firewall.rule_homephone_sip.target",  value: "ACCEPT" }
+      - { key: "firewall.rule_homephone_sip.proto",   value: "udp" }
+      - { key: "firewall.rule_homephone_sip.src_ip",  value: "192.168.142.10" }
+      - { key: "firewall.rule_homephone_sip.dest_ip", value: "192.168.142.1" }
+      - { key: "firewall.rule_homephone_sip.dest_port", value: "5060" }
+      - { key: "firewall.rule_homephone_sip.name",    value: "ansible_homephone_sip" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - accounts is defined
+          - from_mail is defined
+          - local_phone_pw is defined
+          - sip_provider_name is defined
+          - sip_server_hostname is defined
+          - sip_server_realm is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+
+    - name: update opkg db
+      raw: opkg update
+      changed_when: false
+
+    - name: check installed packages
+      raw: opkg list-installed
+      register: installed_packages
+      changed_when: false
+
+    - name: install packages if needed
+      raw: opkg install {{ item }}
+      loop: "{{ openwrt_packages }}"
+      when: item not in installed_packages.stdout
+
+    - name: stop asterisk
+      raw: |
+        /etc/init.d/asterisk stop
+      changed_when: false
+
+    - name: write /etc/asterisk/asterisk.conf
+      raw: |
+        mkdir -p /srv/asterisk
+        if ! [ -e /srv/asterisk/cache ]
+        then
+          mv /var/cache/asterisk /srv/asterisk/cache
+          ln -s /srv/asterisk/cache /var/cache/asterisk
+        fi
+        if ! [ -e /srv/asterisk/lib ]
+        then
+          mv /var/lib/asterisk /srv/asterisk/lib
+          ln -s /srv/asterisk/lib /var/lib/asterisk
+        fi
+        if ! [ -e /srv/asterisk/spool ]
+        then
+          mv /var/spool/asterisk /srv/asterisk/spool
+          ln -s /srv/asterisk/spool /var/spool/asterisk
+        fi
+        if ! [ -e /srv/asterisk/log ]
+        then
+          mv /var/log/asterisk /srv/asterisk/log
+          ln -s /srv/asterisk/log /var/log/asterisk
+        fi
+        if ! [ -e /srv/asterisk/sounds ]
+        then
+          mv /usr/share/asterisk/sounds /srv/asterisk/sounds
+          ln -s /srv/asterisk/sounds /usr/share/asterisk/sounds
+        fi
+        chown -R asterisk:asterisk /srv/asterisk
+        chmod -R 750 /srv/asterisk
+
+        cat << 'EOF' > /etc/asterisk/asterisk.conf
+        [directories](!)
+        astcachedir => /srv/asterisk/cache
+        astetcdir => /etc/asterisk
+        astmoddir => /usr/lib/asterisk/modules
+        astvarlibdir => /var/lib/asterisk
+        astdbdir => /var/lib/asterisk
+        astkeydir => /srv/asterisk/lib
+        astdatadir => /usr/share/asterisk
+        astagidir => /usr/share/asterisk/agi-bin
+        astspooldir => /srv/asterisk/lib
+        astrundir => /var/run/asterisk
+        astlogdir => /srv/asterisk/log
+        astsbindir => /usr/sbin
+
+        [options]
+        documentation_language = en_US
+        txgain=6.0
+        rxgain=6.0
+        EOF
+      changed_when: false
+
+    - name: write /etc/asterisk/extensions.conf
+      raw: |
+        cat << 'EOF' > /etc/asterisk/extensions.conf
+        [general]
+        static=yes
+        writeprotect=no
+        autofallthrough=yes
+
+        [local]
+        ; Internal calls 3X/4X
+        exten => _[34]X,1,NoOp(${CALLERID})
+        exten => _[34]X,n,Dial(PJSIP/${EXTEN},120)
+        exten => _[34]X,n,Hangup()
+
+        [gosub-record]
+        exten => s,1,System(mkdir -p "/srv/asterisk/calls")
+        exten => s,n,Set(FILENAME=${STRFTIME(${EPOCH},,%Y%m%d-%H%M%S)}-${EXTEN})
+        exten => s,n,MixMonitor(${FILENAME}.wav,b, mv "/var/spool/asterisk/monitor/${FILENAME}.wav" "/srv/asterisk/calls/")
+        exten => s,n,Return()
+
+        [gosub-log]
+        exten => s,1,System(logger "${CALLERID(all)} calls to ${DIALED_NUMBER}!")
+        exten => s,n,Return()
+
+        [gosub-setcaller]
+        exten => s,1,Set(CALLERID(all)=${ARG1} <${ARG1}>)
+        exten => s,n,Return()
+        EOF
+
+        for account in {{ accounts }}
+        do
+          account_name=$(echo $account | cut -d: -f4)
+          [[ -z "$account_name" ]] && account_name=$(echo $account | cut -d: -f1)
+          echo "
+        [${account_name}]
+        ; Outgoing local/international calls
+        exten => _X.,1,NoOp(\${CALLERID})
+        exten => _X.,n,Set(DIALED_NUMBER=\${EXTEN})
+        exten => _X.,n,Gosub(gosub-log,s,1)
+        exten => _X.,n,Gosub(gosub-record,s,1)
+        exten => _X.,n,Gosub(gosub-setcaller,s,1,${account_name})
+        exten => _X.,n,Dial(PJSIP/\${EXTEN}@${account_name},120)
+        exten => _X.,n,Hangup()
+        
+        ; Ausgehend, Nummern MIT + (z. B. +49175...)
+        exten => _+X.,1,NoOp(${CALLERID})
+        same => n,Set(DIALED_NUMBER=${EXTEN})
+        same => n,Gosub(gosub-log,s,1)
+        same => n,Gosub(gosub-record,s,1)
+        same => n,Gosub(gosub-setcaller,s,1,${account_name})
+        same => n,Dial(PJSIP/\${EXTEN}@${account_name},120)
+        same => n,Hangup()
+
+
+        [num${account_name}]
+        include => local
+        include => ${account_name}
+        " >> /etc/asterisk/extensions.conf
+        done
+
+        echo "[incoming]" >>/etc/asterisk/extensions.conf
+
+        account_id=2
+        for account in {{ accounts }}
+        do
+          account_name=$(echo $account | cut -d: -f4)
+          [[ -z "$account_name" ]] && account_name=$(echo $account | cut -d: -f1)
+          account_mail=$(echo $account | cut -d: -f3)
+          account_id=$((account_id + 1))
+          echo "
+        ; Incoming ${account_name} -> ring multiple extensions + voicemail
+        exten => ${account_name},1,NoOp(\${CALLERID})
+        exten => ${account_name},n,System(logger \"\${CALLERID(all)} calls.\")
+        exten => ${account_name},n,System(echo -e \"Subject: Call from \${CALLERID(all)}\\n\\nHi, \${CALLERID(all)} is calling\" | sendmail ${account_mail})
+        exten => ${account_name},n,GotoIf(\${BLACKLIST()}?blacklisted)
+        exten => ${account_name},n,Dial(PJSIP/40&PJSIP/${account_id}1&PJSIP/${account_id}2&PJSIP/${account_id}3&PJSIP/${account_id}4&PJSIP/${account_id}5&PJSIP/${account_id}6&PJSIP/${account_id}7&PJSIP/${account_id}8&PJSIP/${account_id}9,60)
+        exten => ${account_name},n,Set(CHANNEL(language)=de)
+        exten => ${account_name},n,Voicemail(${account_id}0@default,u)
+        exten => ${account_name},n,Playback(vm-goodbye)
+        exten => ${account_name},n(blacklisted),Hangup()
+        exten => ${account_name},n,Hangup()
+        " >>/etc/asterisk/extensions.conf
+        done 
+
+        echo "
+        [default]
+        include => incoming
+        " >>/etc/asterisk/extensions.conf
+        chmod 644 /etc/asterisk/extensions.conf
+      changed_when: false
+
+    - name: get IPs of sip server
+      raw: |
+        if host "{{ sip_server_hostname }}" >/etc/sip_server_ips.tmp
+        then
+          cat /etc/sip_server_ips.tmp | awk '/has address/ {print $4} /has IPv6 address/ {print $5}' >/etc/sip_server_ips
+        else
+          echo "No SIP IPs found provided by host {{ sip_server_hostname }}"
+          exit 1
+        fi
+      changed_when: false
+
+    - name: write /etc/asterisk/pjsip.conf
+      raw: |
+        mkdir -p /etc/asterisk
+
+        #cat << 'EOF' > /etc/asterisk/pjsip.conf
+        echo "
+        [global]
+        type = global
+        endpoint_identifier_order = ip,username
+
+        [acl]
+        type = acl
+        deny = 0.0.0.0/0.0.0.0
+        permit = 127.0.0.1/8
+        permit = 10.0.0.0/8
+        permit = 172.16.0.0/12
+        permit = 192.168.0.0/16
+
+        ; IPs provided by {{ sip_server_hostname }} - allow incoming port 5060
+        $(cat /etc/sip_server_ips | while read x; do echo "permit = $x"; done)
+
+        [transport-udp]
+        type = transport
+        protocol = udp
+        bind = 0.0.0.0:5060
+        local_net = 127.0.0.0/8
+        local_net = 10.0.0.0/8
+        local_net = 172.16.0.0/12
+        local_net = 192.168.0.0/16
+
+        " >/etc/asterisk/pjsip.conf
+        
+        for account in {{ accounts }}
+        do
+          account_name=$(echo $account | cut -d: -f4)
+          [[ -z "$account_name" ]] && account_name=$(echo $account | cut -d: -f1)
+          account_user=$(echo $account | cut -d: -f1)
+          account_pw=$(echo $account | cut -d: -f2)
+          echo "
+        ; SIP Account for $account_name
+        
+        [${account_name}]
+        type = registration
+        transport = transport-udp
+        contact_user = $account_name
+        client_uri = sip:${account_name}@{{ sip_server_hostname }}
+        server_uri = sip:{{ sip_server_hostname }}
+        outbound_auth = $account_name
+        retry_interval = 30
+        forbidden_retry_interval = 300
+        max_retries = 10
+        auth_rejection_permanent = false
+         
+        [${account_name}]
+        type = auth
+        auth_type = userpass
+        realm = {{ sip_server_realm }}
+        password = $account_pw
+        username = $account_user
+         
+        [${account_name}]
+        type = aor
+        contact = sip:{{ sip_server_hostname }}:5060
+        
+        [${account_name}]                    
+        type = endpoint                    
+        transport = transport-udp          
+        disallow = all                                                     
+        allow = alaw,ulaw                                                          
+        ;disable_direct_media_on_nat = yes                                            
+        callerid = ${account_name}
+        from_user = ${account_name}
+        from_domain = {{ sip_server_hostname }}
+        outbound_auth = ${account_name}
+        aors = ${account_name}
+        " >>/etc/asterisk/pjsip.conf
+        done
+        
+        
+        echo "
+
+        ; Incoming Calls from outside
+
+        [incoming]
+        type=endpoint
+        context=incoming
+        disallow=all
+        allow=ulaw,alaw
+
+        [{{ sip_server_hostname | replace('.', '_') }}]
+        type = identify
+        endpoint = incoming
+        $(cat /etc/sip_server_ips | while read x; do echo "match = $x"; done)
+        " >>/etc/asterisk/pjsip.conf
+
+
+        account_id=2
+        for account in {{ accounts }}
+        do
+          account_id=$((account_id + 1))
+          account_name=$(echo $account | cut -d: -f4)
+          [[ -z "$account_name" ]] && account_name=$(echo $account | cut -d: -f1)
+          for phone_id in 0 1 2 3 4 5 6 7 8 9
+          do
+            echo "
+        ; Local Phone ${account_id}${phone_id}
+
+        [${account_id}${phone_id}]
+        type = aor
+        max_contacts = 1
+
+        [${account_id}${phone_id}]
+        type = auth
+        username = ${account_id}${phone_id}
+        password = {{ local_phone_pw }}
+
+        [${account_id}${phone_id}]
+        type = endpoint
+        context = $account_name
+        disallow = all
+        allow = alaw
+        allow = ulaw
+        rtp_symmetric = yes
+        force_rport = yes
+        rewrite_contact = yes
+        rtp_timeout = 15
+        direct_media = no
+        callerid = phone_${account_id}${phone_id} <${account_id}${phone_id}>
+        trust_id_inbound = yes
+        send_rpid = yes
+        language = de
+        auth = ${account_id}${phone_id}
+        outbound_auth = ${account_id}${phone_id}
+        aors = ${account_id}${phone_id}
+
+        " >>/etc/asterisk/pjsip.conf
+          done
+        done
+        #EOF
+        chmod 644 /etc/asterisk/pjsip.conf
+      changed_when: false
+
+    - name: write /etc/asterisk/voicemail.conf
+      raw: |
+        mkdir -p /etc/asterisk
+        cat << 'EOF' > /etc/asterisk/voicemail.conf
+        [general]
+        format=wav49
+        gain=3.0
+        serveremail={{ from_mail }}
+        mailcmd=/usr/sbin/sendmail -t
+        attach=yes
+        delete=yes
+        maxsilence=10
+        maxsecs=240
+        silencethreshold=128
+        maxlogins=1
+        saycid=no  
+        fromstring=OpenWRT-PBX
+        emailsubject=New voicemail from ${VM_CALLERID} (voicemail)
+        emailbody=Hello ${VM_NAME},\\n\\nA new voicemail message (number ${VM_MSGNUM}) has arrived.\\n\\nDate:    ${VM_DATE}\\nCaller:  ${VM_CALLERID}\\nDuration: ${VM_DUR} minutes\\n\\nThe message is attached to this email!
+        emaildateformat=%d.%m.%Y %H:%M:%S
+
+        [default]
+        EOF
+        account_id=2
+        for account in {{ accounts }}
+        do
+          account_id=$((account_id + 1))
+          account_name=$(echo $account | cut -d: -f4)
+          [[ -z "$account_name" ]] && account_name=$(echo $account | cut -d: -f1)
+          account_email=$(echo $account | cut -d: -f3 | sed 's/,/|/g')
+          echo "${account_id}0 => ,OpenWRT-PBX,${account_email}" >>/etc/asterisk/voicemail.conf
+        done
+        EOF
+        chmod 644 /etc/asterisk/voicemail.conf
+      changed_when: false
+
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: add sip server IPs
+      raw: |
+        for ip in $(cat /etc/sip_server_ips)
+        do
+          if uci show "firewall.rule_{{ sip_provider_name }}_sip_incoming.src_ip" | grep -q "$ip"
+          then
+            echo "unchanged"
+          else
+            uci add_list firewall.rule_{{ sip_provider_name }}_sip_incoming.src_ip="$ip"
+            echo "changed"
+          fi
+        done
+      register: uci_set_result_ips
+      changed_when: "not 'unchanged' in uci_set_result_ips.stdout"
+
+    - name: restart asterisk on new ip
+      raw: |
+        cat << 'EOF' > /etc/hotplug.d/iface/99-asterisk
+        [ "$INTERFACE" = "wan" ] && [ "$ACTION" = "ifup" ] && /etc/init.d/asterisk restart
+        EOF
+        chmod 755 /etc/hotplug.d/iface/99-asterisk
+      changed_when: false
+
+    - name: start and enable asterisk
+      raw: |
+        /etc/init.d/asterisk start
+        /etc/init.d/asterisk enable
+      changed_when: false
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/firewall reload"
+          when: uci_set_result.changed or uci_set_result_ips.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

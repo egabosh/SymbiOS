@@ -1,0 +1,205 @@
+# docs:
+#   name: "OpenWrt - FRITZ!Box IPv6"
+#   short_description: "OpenWrt - FRITZ!Box IPv6"
+#   description: "IPv6 prefix delegation helpers for a FRITZ!Box uplink."
+#   category: "Network"
+#   type: OpenWrt
+#   icon: "bi-router"
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "Base system setup"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: FRITZ!Box IPv6 - ULA off, allow fritzbox LAN, prefix hotplug
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_fritzbox-ipv6.yml"
+    managed_playbook: "openwrt_fritzbox-ipv6.yml"
+    managed_ref: ""
+    managed_resource_type: "fritzbox_ipv6"
+    uci_vars:
+      ## network: do not auto-derive ULA subnets, explicit ip6addr lists are used
+      #- { key: "network.globals.ula_prefix", value: "" }
+
+      ## firewall: allow the delegated FRITZ!Box prefix into the LAN
+      # dest_ip is maintained by /etc/hotplug.d/iface/30-fritz-prefix
+      - { key: "firewall.fritzbox_ipv6",           value: "rule" }
+      - { key: "firewall.fritzbox_ipv6.name",      value: "Allow-IPv6-fritzbox-LAN" }
+      - { key: "firewall.fritzbox_ipv6.src",       value: "wan" }
+      - { key: "firewall.fritzbox_ipv6.dest",      value: "lan" }
+      - { key: "firewall.fritzbox_ipv6.family",    value: "ipv6" }
+      - { key: "firewall.fritzbox_ipv6.target",    value: "ACCEPT" }
+
+      ## firewall: bypass doh/tor ipset blocks for FRITZ/VM devices
+      # Enables the VM behind FRITZ to run its own dnscrypt+Tor stack
+      # (mirror of the router architecture) without being blocked by
+      # the doh_ipv4/tor_ipv4 REJECT rules in the main forward chain.
+      #
+      # MUST use src='*' (not src='lan') so fw4 places these rules
+      # in the main forward chain BEFORE the doh/tor REJECT blocks.
+      # src_ip restricts to FRITZ WAN IP only (172.23.0.228).
+      #
+      # TCP bypass
+      - { key: "firewall.fritz_lan_bypass_tcp",         value: "rule" }
+      - { key: "firewall.fritz_lan_bypass_tcp.name",    value: "ansible_fritz_lan_dns_bypass_tcp" }
+      - { key: "firewall.fritz_lan_bypass_tcp.src",     value: "*" }
+      - { key: "firewall.fritz_lan_bypass_tcp.src_ip",  value: "172.23.0.228" }
+      - { key: "firewall.fritz_lan_bypass_tcp.dest",    value: "wan" }
+      - { key: "firewall.fritz_lan_bypass_tcp.proto",   value: "tcp" }
+      - { key: "firewall.fritz_lan_bypass_tcp.target",  value: "ACCEPT" }
+      # UDP bypass
+      - { key: "firewall.fritz_lan_bypass_udp",         value: "rule" }
+      - { key: "firewall.fritz_lan_bypass_udp.name",    value: "ansible_fritz_lan_dns_bypass_udp" }
+      - { key: "firewall.fritz_lan_bypass_udp.src",     value: "*" }
+      - { key: "firewall.fritz_lan_bypass_udp.src_ip",  value: "172.23.0.228" }
+      - { key: "firewall.fritz_lan_bypass_udp.dest",    value: "wan" }
+      - { key: "firewall.fritz_lan_bypass_udp.proto",   value: "udp" }
+      - { key: "firewall.fritz_lan_bypass_udp.target",  value: "ACCEPT" }
+
+  tasks:
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: deploy hotplug script 30-fritz-prefix
+      raw: |
+        cat << 'EOF' > /etc/hotplug.d/iface/30-fritz-prefix
+        #!/bin/sh
+        # /etc/hotplug.d/iface/30-fritz-prefix
+        # On wan6/lan prefix change, set fw4 rule "fritzbox_ipv6" to the currently
+        # delegated prefix of the FRITZ!Box. Event-based, no cron.
+        #
+        # netifd runs this with ACTION/INTERFACE set. The box renews its DHCPv6-PD
+        # lease a few seconds after the new ISP prefix arrives, so a bounded background
+        # poll waits until the new via-route on br-lan is visible.
+
+
+        section=fritzbox_ipv6
+
+
+        [ "$INTERFACE" = "wan6" ] || [ "$INTERFACE" = "wan" ] || [ "$INTERFACE" = "lan" ] || exit 0
+        case "$ACTION" in
+          ifup|ifupdate|ifadd) ;;
+          *) exit 0 ;;
+        esac
+
+
+        # Returns 0 if the given route prefix lies within the current br-lan GUA prefix
+        f_prefix_in_lan() {
+          local lan60 len lanpre boxpre mask box4 lan4
+          lan60=$(ip -6 addr show dev br-lan | awk '$1=="inet6" && $2 ~ /^[23]/ {print $2; exit}')
+          [ -n "$lan60" ] || return 1
+          len=${lan60##*/}
+          case "$len" in
+            4[8-9]|5[0-9]|6[0-4]) ;;
+            *) return 1 ;;
+          esac
+          lanpre=${lan60%::*}
+          boxpre=${1%::*}
+          [ "${lanpre%:*}" = "${boxpre%:*}" ] || return 1
+          mask=$((0xFFFF << (16 - (len - 48)) & 0xFFFF))
+          box4=$((0x${boxpre##*:} & mask))
+          lan4=$((0x${lanpre##*:} & mask))
+          [ "$box4" = "$lan4" ]
+        }
+
+
+        # First via-route on br-lan that lies within the current br-lan GUA prefix
+        f_get_valid() {
+          local r
+          for r in $(ip -6 route show dev br-lan | awk '/ via / {print $1}'); do
+            f_prefix_in_lan "$r" && { echo "$r"; return 0; }
+          done
+          return 1
+        }
+
+
+        f_update() {
+          uci set firewall.$section.dest_ip="$1"
+          uci commit firewall
+          fw4 reload
+          logger -t fritz-prefix "dest_ip set to $1"
+        }
+
+
+        # Update the rule if the current delegated prefix differs; 0 if done
+        f_sync() {
+          local prefix
+          prefix=$(f_get_valid) || return 1
+          [ "$prefix" = "$(uci get firewall.$section.dest_ip 2>/dev/null)" ] && return 0
+          f_update "$prefix"
+        }
+
+
+        # Try immediately; the box may already have renewed
+        f_sync && exit 0
+
+
+        # Otherwise wait in the background for the new delegated route
+        [ -f /var/run/fritz-prefix.pid ] && kill -0 "$(cat /var/run/fritz-prefix.pid)" 2>/dev/null && exit 0
+        (
+          echo $$ > /var/run/fritz-prefix.pid
+          i=0
+          while [ "$i" -lt 90 ]; do
+            i=$((i+1))
+            sleep 2
+            f_sync && { rm -f /var/run/fritz-prefix.pid; exit 0; }
+          done
+          rm -f /var/run/fritz-prefix.pid
+          logger -t fritz-prefix "no new delegated prefix within 180s"
+        ) &
+        exit 0
+        EOF
+        chmod +x /etc/hotplug.d/iface/30-fritz-prefix
+      changed_when: false
+
+    - name: sync firewall dest_ip (current delegated prefix)
+      raw: INTERFACE=lan ACTION=ifup /etc/hotplug.d/iface/30-fritz-prefix
+      changed_when: false
+
+    - name: ensure bypass rules precede doh/tor blocks
+      raw: |
+        f=/etc/config/firewall
+        blk=$(grep -n "^config rule 'doh_ipv4_rule'" "$f" | head -1 | cut -d: -f1)
+        tcp=$(grep -n "^config rule 'fritz_lan_bypass_tcp'" "$f" | head -1 | cut -d: -f1)
+        if [ -n "$blk" ] && [ -n "$tcp" ] && [ "$tcp" -lt "$blk" ] 2>/dev/null; then
+          echo "unchanged"
+        else
+          doh_pos=$(head -n "$blk" "$f" | grep -c "^config ")
+          uci reorder firewall.fritz_lan_bypass_tcp=$doh_pos
+          uci reorder firewall.fritz_lan_bypass_udp=$((doh_pos+1))
+          echo "reorder"
+        fi
+      register: reorder_result
+      changed_when: "'reorder' in reorder_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit and reload
+          raw: "{{ item }}"
+          loop:
+            - "uci commit"
+            - "/etc/init.d/firewall reload"
+            - "/etc/init.d/network reload"
+          when: uci_set_result.changed or reorder_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

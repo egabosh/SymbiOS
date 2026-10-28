@@ -33,11 +33,11 @@ from . import views_port_forwarding
 from . import views_reverse_proxy
 from . import views_suspend
 from . import views_wol
-from . import views_external
 from . import views_plugins
 from . import views_network_bridges
 from . import views_openvpn
 from . import views_filemanager
+from . import views_settings_external_systems
 from .utils.log_utils import logs_stream
 
 urlpatterns = [
@@ -46,6 +46,7 @@ urlpatterns = [
     path('services/manage/', views_services.services_manage, name='services_manage'),
     re_path(r'^services/(?P<playbook>.+\.yml)/$', views_services.services_detail, name='services_detail'),
     re_path(r'^services/(?P<playbook>.+\.yml)/action/$', views_services.services_action, name='services_action'),
+    re_path(r'^services/(?P<playbook>.+\.yml)/action-remote/$', views_services.services_action_remote, name='services_action_remote'),
     re_path(r'^services/(?P<playbook>.+\.yml)/log-start/$', views_services.services_log_start, name='services_log_start'),
     re_path(r'^services/(?P<playbook>.+\.yml)/log-stop/$', views_services.services_log_stop, name='services_log_stop'),
     re_path(r'^services/(?P<playbook>.+\.yml)/log-tail/$', views_services.services_log_tail, name='services_log_tail'),
@@ -170,6 +171,16 @@ urlpatterns = [
     path('services/playbooks/', views_settings.settings_playbooks, name='services_playbooks'),
     path('settings/playbooks/upload/', views_settings.settings_playbooks_upload, name='settings_playbooks_upload'),
     path('settings/playbooks/delete/', views_settings.settings_playbooks_delete, name='settings_playbooks_delete'),
+    path('settings/external-systems/', views_settings_external_systems.settings_external_systems, name='settings_external_systems'),
+    path('settings/external-systems/create/', views_settings_external_systems.settings_external_system_create, name='settings_external_system_create'),
+    re_path(r'^settings/external-systems/(?P<system_id>[\w-]+)/edit/$', views_settings_external_systems.settings_external_system_edit, name='settings_external_system_edit'),
+    re_path(r'^settings/external-systems/(?P<system_id>[\w-]+)/delete/$', views_settings_external_systems.settings_external_system_delete, name='settings_external_system_delete'),
+    re_path(r'^settings/external-systems/(?P<system_id>[\w-]+)/test/$', views_settings_external_systems.settings_external_system_test, name='settings_external_system_test'),
+    re_path(r'^settings/external-systems/(?P<system_id>[\w-]+)/install-key/$', views_settings_external_systems.settings_external_system_install_key, name='settings_external_system_install_key'),
+    path('settings/external-systems/api/public-key/', views_settings_external_systems.settings_external_system_public_key, name='settings_external_system_public_key'),
+    path('settings/external-systems/api/types/', views_settings_external_systems.settings_external_types_api, name='settings_external_types_api'),
+    re_path(r'^settings/external-systems/(?P<system_id>[\w-]+)/sync/$', views_settings_external_systems.settings_external_system_sync, name='settings_external_system_sync'),
+    re_path(r'^settings/external-systems/(?P<system_id>[\w-]+)/inventory/$', views_settings_external_systems.settings_external_system_inventory, name='settings_external_system_inventory'),
     path('logs/', views_logs.logs, name='logs'),
     path('logs/stream/', logs_stream, name='logs_stream'),
     path('logs/containers/', views.container_list, name='logs_containers'),
@@ -193,13 +204,6 @@ urlpatterns = [
     path('authelia-logout/', views.authelia_logout, name='authelia_logout'),
     path('exec/start/', views_exec.exec_start, name='exec_start'),
     path('exec/output/', views_exec.exec_output, name='exec_output'),
-    path('external-systems/', views_external.external_systems, name='external_systems'),
-    path('external-systems/create/', views_external.external_system_create, name='external_system_create'),
-    re_path(r'^external-systems/(?P<system_id>[\w-]+)/edit/$', views_external.external_system_edit, name='external_system_edit'),
-    re_path(r'^external-systems/(?P<system_id>[\w-]+)/delete/$', views_external.external_system_delete, name='external_system_delete'),
-    re_path(r'^external-systems/(?P<system_id>[\w-]+)/test/$', views_external.external_system_test, name='external_system_test'),
-    path('external-systems/api/public-key/', views_external.external_system_public_key, name='external_system_public_key'),
-    path('external-systems/api/types/', views_external.external_types_api, name='external_types_api'),
     path('filemanager/', views_filemanager.filemanager, name='filemanager'),
     path('filemanager/api/', views_filemanager.filemanager_api, name='filemanager_api'),
     path('filemanager/download/', views_filemanager.filemanager_download, name='filemanager_download'),

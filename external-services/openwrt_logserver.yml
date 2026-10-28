@@ -1,0 +1,70 @@
+# docs:
+#   name: "OpenWrt - Remote syslog"
+#   short_description: "OpenWrt - Remote syslog"
+#   description: "Forward syslog to a remote log server."
+#   category: "Monitoring"
+#   type: OpenWrt
+#   icon: "bi-journal-text"
+#   params:
+#     - name: "logserver"
+#       label: "Log server address"
+#       type: "text"
+#       required: true
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "Base system setup"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: send log to logserver
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_logserver.yml"
+    managed_playbook: "openwrt_logserver.yml"
+    managed_ref: "logserver={{ logserver }}"
+    managed_resource_type: "logserver"
+    uci_vars:
+      - { key: "system.@system[0].log_ip", value: "{{ logserver }}" }
+      - { key: "system.@system[0].log_proto", value: "udp" }
+      - { key: "system.@system[0].cronloglevel", value: "5" }
+      - { key: "system.@system[0].log_size", value: "0" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - logserver is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+    - name: set uci values if needed
+      raw: |
+        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+        desired="{{ item.value }}"
+        if [ "$current" != "$desired" ]
+        then
+          uci set {{ item.key }}="{{ item.value }}"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: commit enable and restart
+      raw: "{{ item }}"
+      loop:
+        - "uci commit"
+        - "/etc/init.d/log restart"
+      when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

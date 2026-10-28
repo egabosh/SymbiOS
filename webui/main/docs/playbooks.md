@@ -80,6 +80,32 @@ to know: title, description, available actions, status checks, and log streams.
   | state entry | removed | removed | stays set |
   | playbook re-run | no | no | yes (fresh reprovisioning) |
 - **`actions`** - mapping of action name to shell command. Every key becomes a button in the WebUI. Common names: `start`, `stop`, `restart`, `reload`.
+- **`type`** - optional target/system type. Groups playbooks in the WebUI and selects which external systems they can run on (e.g. `OpenWrt`, `linux-mint`). The location decides local vs. remote: playbooks below `external-services/` are always executed on an external system, playbooks below `services/` and `base-services/` run locally on the SymbiOS host. Write it flat (`type:`); the legacy nested form (`target.type:`) is still accepted for backwards compatibility. The set of all distinct declared types feeds the "System Type" dropdown under Settings → External Systems, so a new type appears there automatically as soon as any playbook declares it.
+- **`params`** - optional input fields rendered before a remote run. Each entry is a mapping with `name` (variable name passed as Ansible extra var), `label`, `type` (`text`, `number`, `password`, `select`), optional `required`, `default` and `placeholder`:
+  ```yaml
+  #   params:
+  #     - name: cname
+  #       label: CNAME name
+  #       type: text
+  #       required: true
+  #     - name: proto
+  #       label: Protocol
+  #       type: text
+  #       default: tcp
+  ```
+  Standalone compatibility: parameters with a `default` are written into the
+  playbook's `vars:` (extra vars from the WebUI take precedence), parameters
+  without one are asserted in a `pre_tasks:` guard that names the missing
+  value. A direct `ansible-playbook` run therefore never fails with a bare
+  `undefined variable` message.
+- **`requires`** - optional list of playbooks this one depends on. Shown on the detail page and checked per selected external target against the target's synced state (`config/external-systems/states/<target>.json`, filled from `/etc/symbios/managed.json`):
+  ```yaml
+  #   requires:
+  #     - playbook: openwrt_tor.yml
+  #       reason: Needs the Tor instance
+  #     - playbook: openwrt_wireguard_tor.yml
+  # ```
+  Dependencies are never global: the same playbook may be applied on one target and missing on another.
 
 ### 3. The Ansible tasks
 
@@ -156,6 +182,83 @@ to know: title, description, available actions, status checks, and log streams.
 ```
 
 ---
+
+## External services (remote playbooks)
+
+Playbooks under `external-services/` target remote systems instead of the
+SymbiOS host. They are flat (no sub-directories), prefixed by target type
+(`openwrt_*.yml`) and run over SSH from the WebUI.
+
+| Rule | Detail |
+|------|--------|
+| Location | `external-services/<name>.yml`, no sub-directories |
+| Naming | `<type>_<topic>.yml` (e.g. `openwrt_dns_cname.yml`) |
+| Target type | `docs.type` (`OpenWrt`, `Linux`, ...) selects the matching external systems |
+| Execution | `scripts/symbios-run-remote-playbook.sh <target_id> <playbook> <extra_vars_json>` |
+| Inventory | Built on the fly from `config/external-systems.yml` (`host`, `port`, `user`) |
+| Facts | `gather_facts: no`; most targets are minimal images without Python |
+
+Standalone compatibility is mandatory: a playbook must keep working when run
+directly with `ansible-playbook -i <inventory> <playbook>.yml`, without the
+WebUI. Parameters with a default are baked into `vars:`, the rest is asserted
+by a `pre_tasks:` guard, so a missing value produces one clear message instead
+of an `undefined variable` error.
+
+Foundation pattern: each target type has one foundation playbook that bundles
+everything a fresh device needs to work (for OpenWrt: `openwrt_basics.yml` =
+packages, system, LAN addressing, SSH, DHCP/DNS, mDNS and the base firewall).
+It is run once per target; all other playbooks are granular resources or
+features that declare it via `docs.requires`. When merging source playbooks
+into a foundation, check the UCI keys (or equivalent settings) for conflicts
+first - the merged result must stay idempotent.
+
+Adding a new external playbook:
+
+1. Drop the playbook in `external-services/<type>_<topic>.yml`.
+2. Add a `# docs:` block with `type:` (and `params:`/`requires:` if needed).
+3. Give every parameter either a `default` in `vars:` or an entry in the
+   required list, so the guard and the WebUI form agree.
+4. Include `_managed-state.yml` at the end of the tasks and set
+   `managed_id`/`managed_playbook`/`managed_resource_type`/`managed_ref`.
+5. `ansible-playbook --syntax-check` with a throwaway inventory.
+
+### Managed state on the target (`/etc/symbios/managed.json`)
+
+Every playbook that creates or changes a resource on an external target
+records it in `/etc/symbios/managed.json` (generic, not OpenWrt-specific).
+One entry per resource - a playbook that creates two DNS records produces two
+entries with different ids:
+
+```json
+{
+  "schema": 1,
+  "entries": [
+    {
+      "id": "openwrt_dns_cname.yml/example.lan",
+      "playbook": "openwrt_dns_cname.yml",
+      "resource_type": "dns_cname",
+      "ref": "cname=example.lan target=server.lan",
+      "applied_at": "2026-10-27T12:34:56Z"
+    }
+  ]
+}
+```
+
+- `id` = `<playbook>/<key>` where `<key>` is the identity of the resource
+  (hostname, rule name, client name); playbooks that change one global setting
+  use the bare playbook name. Re-applying the same values updates the entry in
+  place instead of duplicating it.
+- `ref` is a short human readable summary of the applied values. Secret
+  parameters (`type: password`) are never written to the target.
+- The write happens in the shared snippet `external-services/_managed-state.yml`
+  (`raw` shell only, no Python on the target) and is best effort: a missing or
+  read-only `/etc/symbios` never aborts the playbook run.
+
+The WebUI pulls the file with `scripts/symbios-remote-sync.sh <target_id>` into
+`config/external-systems/states/<target_id>.json`; the External Systems page
+shows it per target ("Inventory") and `docs.requires` is checked against it.
+Entries that no playbook recorded are not listed at all - the file only ever
+contains what SymbiOS applied.
 
 ## Rules of thumb
 

@@ -78,6 +78,24 @@ def parse_docs(path):
     return doc.get("docs") if isinstance(doc, dict) else None
 
 
+def docs_target_type(docs):
+    """Return the external-system type a playbook targets, or '' for local.
+
+    Reads the canonical flat ``docs.type`` and falls back to the legacy nested
+    ``docs.target.type`` used by some pre-existing playbooks, so both forms
+    resolve to the same value (this is what feeds the "System Type" dropdown).
+    """
+    if not isinstance(docs, dict):
+        return ""
+    t = docs.get("type")
+    if t:
+        return t
+    target = docs.get("target")
+    if isinstance(target, dict) and target.get("type"):
+        return target["type"]
+    return ""
+
+
 def _scan_dir(group, base, d):
     """Scan a single directory for playbooks and return catalog entries."""
     results = []

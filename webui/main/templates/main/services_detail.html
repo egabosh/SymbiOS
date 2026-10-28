@@ -103,12 +103,43 @@
     <h4>Output</h4>
     <p class="text-muted small">Actions run in a live output overlay (click any action button above).</p>
 
-    {% if playbook_target_type %}
+    {% if is_external or playbook_target_type %}
     <hr>
     <h5><i class="bi bi-hdd-network"></i> Run on External System</h5>
     <div class="text-muted small mb-2">Target type: <span class="badge bg-info">{{ playbook_target_type }}</span></div>
     {% if compatible_systems %}
-    <div class="input-group mb-2" style="max-width:400px;">
+    {% if item.docs.requires %}
+    <div class="alert alert-warning py-2 small mb-2">
+      <strong>Requires:</strong>
+      <ul class="mb-0">
+        {% for r in item.docs.requires %}
+        <li>{{ r.playbook|default:r }}{% if r.reason %} - {{ r.reason }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+      <div class="text-muted">Checked per selected target (based on managed state/sync).</div>
+    </div>
+    {% endif %}
+    {% if item.docs.params %}
+    <div id="remote-params" class="mb-2" style="max-width:420px;">
+      {% for p in item.docs.params %}
+      <div class="mb-2">
+        <label class="form-label form-label-sm mb-0">{{ p.label }}{% if p.required %}<span class="text-danger">*</span>{% endif %}</label>
+        {% if p.type == 'select' %}
+        <select class="form-select form-select-sm remote-param" data-name="{{ p.name }}" {% if p.required %}required{% endif %}>
+          {% if p.default %}<option value="{{ p.default }}">{{ p.default }}</option>{% endif %}
+        </select>
+        {% elif p.type == 'password' %}
+        <input type="password" class="form-control form-control-sm remote-param" data-name="{{ p.name }}" {% if p.required %}required{% endif %}>
+        {% elif p.type == 'number' %}
+        <input type="number" class="form-control form-control-sm remote-param" data-name="{{ p.name }}" {% if p.required %}required{% endif %} value="{{ p.default|default:'' }}">
+        {% else %}
+        <input type="text" class="form-control form-control-sm remote-param" data-name="{{ p.name }}" {% if p.required %}required{% endif %} value="{{ p.default|default:'' }}" placeholder="{{ p.placeholder|default:'' }}">
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="input-group mb-2" style="max-width:420px;">
       <select class="form-select form-select-sm" id="external-target">
         {% for s in compatible_systems %}
         <option value="{{ s.id }}">{{ s.name }} ({{ s.host }})</option>
@@ -121,7 +152,7 @@
     {% else %}
     <div class="text-muted small">
       No external systems of type <code>{{ playbook_target_type }}</code> configured.
-      <a href="/external-systems/create/?type={{ playbook_target_type }}">Add one</a>
+      <a href="{% url 'settings_external_system_create' %}?type={{ playbook_target_type }}">Add one</a>
     </div>
     {% endif %}
     {% endif %}
@@ -676,8 +707,16 @@ function runRemote() {
   const select = document.getElementById('external-target');
   const systemId = select ? select.value : '';
   if (!systemId) { SymbiOS.exec.showAlert('No external system selected', 'danger'); return; }
+  const params = {};
+  document.querySelectorAll('.remote-param').forEach(el => {
+    const name = el.dataset.name;
+    if (!name) return;
+    if (el.type === 'checkbox') params[name] = el.checked;
+    else params[name] = el.value;
+  });
   const fd = new FormData();
   fd.append('system_id', systemId);
+  fd.append('params', JSON.stringify(params));
   fetch('/services/' + PLAYBOOK + '/action-remote/', {method: 'POST', body: fd, credentials: 'same-origin', headers: {'X-CSRFToken': getCsrfToken()}})
     .then(r => r.json())
     .then(d => {

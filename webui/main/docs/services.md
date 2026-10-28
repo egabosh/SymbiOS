@@ -17,12 +17,13 @@ buttons, live logs, and health status.
 
 ## Built-in services vs. custom services
 
-SymbiOS ships two types of playbooks:
+SymbiOS ships playbooks from these locations:
 
 | Type | Location | Description |
 |------|----------|-------------|
 | **Base services** | `base-services/` | Core platform components (Traefik, Authelia, LDAP, Docker, etc.) |
 | **Services** | `services/` | Additional applications you can deploy (Nextcloud, Home Assistant, etc.) |
+| **External services** | `external-services/` | Playbooks for remote/external systems (e.g. OpenWrt, Linux). Managed under Settings > External Systems. Uses `docs.type` for grouping and runs via SSH. |
 | **Custom playbooks** | User-uploaded | Your own playbooks, uploaded via the WebUI |
 
 Base services are built-in and cannot be uninstalled. Services can be installed,

@@ -95,6 +95,9 @@ g_* globals. Provides helper functions:
 
   f_symbios_var <key> <default>    read a scalar from inventory.yml
   f_symbios_var_set <key> <value>  set a scalar under all.vars (host only)
+  f_external_target <target_id>    resolve an external system from
+                                   external-systems.yml (g_ext_host/_port/
+                                   _user/_type)
   f_symbios_ssh_key_usable <key>  check a key is usable unattended (reason on failure)
   f_json_escape                    escape a string (stdin) for JSON
   f_json_error <msg>               print {"ok":false,"error":"<msg>"}
@@ -131,6 +134,32 @@ then
 else
   g_inventory="${g_data_root}/base-services/symbios-ui/config/inventory.yml"
 fi
+
+# Resolve one external system entry from external-systems.yml.
+# Usage: f_external_target <target_id>
+# Sets g_ext_host, g_ext_port, g_ext_user, g_ext_type (empty on failure).
+# Returns 1 when the file is unreadable or the id is unknown.
+function f_external_target {
+  local f_id="${1:-}"
+  local f_file="${g_config_dir}/external-systems.yml"
+  local f_line
+
+  g_ext_host=""
+  g_ext_port="22"
+  g_ext_user="root"
+  g_ext_type=""
+
+  [[ -n "${f_id}" && -r "${f_file}" ]] || return 1
+  command -v yq > /dev/null || return 1
+
+  # yq is the established YAML reader; the id comes from the WebUI (word
+  # characters and hyphens only), so it is safe to inline.
+  f_line=$(yq -r ".external_systems[] | select(.id == \"${f_id}\") | [.host, (.port // 22), (.user // \"root\"), (.type // \"\")] | @tsv" "${f_file}" 2> /dev/null | head -1)
+  [[ -n "${f_line}" ]] || return 1
+  IFS=$'\t' read -r g_ext_host g_ext_port g_ext_user g_ext_type <<< "${f_line}"
+
+  [[ -n "${g_ext_host}" ]]
+}
 
 # Read a scalar value from inventory.yml.
 # Usage: f_symbios_var <key> <default>

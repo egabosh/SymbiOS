@@ -1,0 +1,94 @@
+# docs:
+#   name: "OpenWrt - DHCP static host"
+#   short_description: "OpenWrt - DHCP static host"
+#   description: "Static DHCP lease (UCI host section) including DNS name and segment tagging."
+#   category: "Network"
+#   type: OpenWrt
+#   icon: "bi-pc-display"
+#   params:
+#     - name: "host"
+#       label: "Hostname"
+#       type: "text"
+#       required: true
+#     - name: "ip"
+#       label: "IPv4 address"
+#       type: "text"
+#       required: true
+#     - name: "mac"
+#       label: "MAC address"
+#       type: "text"
+#       required: true
+#       placeholder: "aa:bb:cc:dd:ee:ff"
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "DHCP/DNS configuration"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: dhcp hosts
+  hosts: all
+  gather_facts: no
+ 
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_dhcp-hosts.yml/{{ host }}"
+    managed_playbook: "openwrt_dhcp-hosts.yml"
+    managed_ref: "host={{ host }} ip={{ ip }} mac={{ mac }}"
+    managed_resource_type: "dhcp_hosts"
+    network: "{{ 'tor' if ip.startswith('192.168.142.') else ('iot' if ip.startswith('192.168.143.') else 'lan') }}"
+    uci_vars:
+      - { key: "dhcp.host_{{ host }}",  value: "host" }
+      - { key: "dhcp.host_{{ host }}.name",  value: "{{ host }}" }
+      - { key: "dhcp.host_{{ host }}.dns",   value: "1" }
+      - { key: "dhcp.host_{{ host }}.ip",    value: "{{ ip }}" }
+      - { key: "dhcp.host_{{ host }}.mac",   value: "{{ mac }}" }
+      - { key: "dhcp.host_{{ host }}.tag",   value: "ansible,{{ network }}" }
+      - { key: "dhcp.host_{{ host }}.hostid",  value: "{{ '%04d' | format(ip.split('.')[-1] | int) }}" }
+      - { key: "dhcp.host_{{ host }}.instance", value: "{{ network }}_dnsmasq" }
+      - { key: "dhcp.host_{{ host }}.leasetime", value: "1h" }
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - host is defined
+          - ip is defined
+          - mac is defined
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+        quiet: true
+
+  tasks:
+
+    - name: set uci values if needed
+      raw: |
+        desired=$(echo "{{ item.value }}")
+        echo "{{ item.key }}" | grep name && desired=$(echo "{{ item.value }}" | sed 's/_/-/g')
+        #desired=$(echo "{{ item.value }}" | sed 's/_/-/g')
+        key=$(echo "{{ item.key }}" | sed 's/-/_/g')
+        current=$(uci get $key 2>/dev/null || echo "NOT_SET")
+        
+        if ! echo "$current" | grep "$desired"
+        then
+          uci set $key="$desired"
+          echo "changed"
+        else
+          echo "unchanged"
+        fi
+      loop: "{{ uci_vars }}"
+      register: uci_set_result
+      changed_when: "not 'unchanged' in uci_set_result.stdout"
+
+    - name: apply changes
+      block:
+        - name: commit enable and restart
+          raw: "{{ item }}"
+          loop:
+            - "uci commit dhcp"
+            - "/etc/init.d/dnsmasq reload"
+          when: uci_set_result.changed
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml
