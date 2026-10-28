@@ -309,6 +309,9 @@
       - { key: "firewall.rule_allow_mdns_avahi_v6.dest_ip", value: "ff02::fb" }
       - { key: "firewall.rule_allow_mdns_avahi_v6.family", value: "ipv6" }
 
+      ## Attended sysupgrade: only check for upgrades when logged in
+      - { key: "attendedsysupgrade.client.login_check_for_upgrades", value: "1" }
+
   pre_tasks:
     - name: Check required parameters
       ansible.builtin.assert:
