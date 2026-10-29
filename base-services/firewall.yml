@@ -85,6 +85,17 @@
         - 192.168.0.0/16
         - fc00::/7
 
+    - name: Allow syslog port 514 from all IPv4/IPv6 private networks
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '514'
+        ufw_src: "{{ item }}"
+      loop:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - fc00::/7
+
     # Container DNS via host stub (pairs with docker_stub_dns in
     # docker.yml): default-bridge/build containers query the daemon DNS
     # directly, so the stub must be reachable from private/docker nets.
