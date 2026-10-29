@@ -17,10 +17,14 @@
 # symbios-restore.sh - Restore snapshots created by symbios-backup.sh.
 #
 # Usage:
-#   symbios-restore.sh plan <YYYY-MM-DD> [<service>|--full]
+#   symbios-restore.sh plan <YYYY-MM-DD> [<service>|--full|--file <path>]
 #       Show (as JSON) what a restore would do - no changes are made.
-#   symbios-restore.sh restore <YYYY-MM-DD> [<service>|--full] [--yes]
+#   symbios-restore.sh restore <YYYY-MM-DD> [<service>|--full|--file <path>] [--target <path>] [--to-original] [--yes]
 #       Perform the restore. Without --yes nothing is executed (safety).
+#   symbios-restore.sh find <YYYY-MM-DD> <pattern>
+#       Search for files in a snapshot.
+#   symbios-restore.sh ls <YYYY-MM-DD> [<path>]
+#       List files in a snapshot directory.
 #
 # Service restore: stops the affected docker compose stack(s), restores
 # their directories (services/<name> and/or base-services/<name>) from the
@@ -94,6 +98,42 @@ function f_die_json {
   exit 1
 }
 
+function f_restic_repo_url {
+  if f_bk_is_remote; then
+    echo "sftp://${g_bk_user}@${g_bk_host}:${g_bk_port}//${g_bk_path#/}/$(hostname)"
+  fi
+}
+
+function f_restic_sshargs {
+  local f_sshargs="-o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ServerAliveCountMax=240"
+  [[ -r "$g_bk_ssh_key" ]] && f_sshargs="-i $g_bk_ssh_key $f_sshargs"
+  echo "$f_sshargs"
+}
+
+function f_get_restic_snapshot_id_for_date {
+  local f_date="$1"
+  [[ -z "$f_date" ]] && return 1
+  if f_bk_is_remote && command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]; then
+    export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
+    export RESTIC_REPOSITORY="$(f_restic_repo_url)"
+    local f_sshargs="$(f_restic_sshargs)"
+    restic snapshots --json -o "sftp.args=${f_sshargs}" 2>/dev/null | python3 -c "
+import sys,json
+try:
+  data=json.load(sys.stdin)
+  for s in data:
+    t=s.get('time','')
+    if t[:10]=='$f_date':
+      print(s.get('short_id') or s.get('id'))
+      break
+except:
+  pass
+" 2>/dev/null
+    return 0
+  fi
+  return 1
+}
+
 # Emit a JSON string array from newline-separated values on stdin.
 function f_json_array_stdin {
   local f_first=1 f_item f_out="["
@@ -112,25 +152,45 @@ g_action="$1"; shift || true
 g_date="$1"; shift || true
 g_scope="--full"
 g_yes=""
-for g_arg in "$@"
-do
+g_file=""
+g_target=""
+g_to_original=""
+for ((i=1;i<=$#;i++)); do
+  g_arg="${!i}"
   case "$g_arg" in
     --yes) g_yes="1" ;;
-    *) g_scope="$g_arg" ;;
+    --file) ((i++)); g_file="${!i}"; g_scope="--file" ;;
+    --target) ((i++)); g_target="${!i}"; ;;
+    --to-original) g_to_original="1"; ;;
+    *) [[ -z "$g_scope" || "$g_scope" == "--full" ]] && [[ "$g_arg" != --* ]] && g_scope="$g_arg" || true ;;
   esac
 done
 
-[[ "$g_action" == "plan" || "$g_action" == "restore" ]] \
-  || f_die_json "Usage: symbios-restore.sh {plan|restore} <YYYY-MM-DD> [<service>|--full] [--yes]"
-[[ "$g_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || f_die_json "Invalid date '$g_date' - expected YYYY-MM-DD."
-[[ "$g_scope" == "--full" || "$g_scope" =~ ^[A-Za-z0-9._-]+$ ]] \
-  || f_die_json "Invalid service name '$g_scope'."
+[[ "$g_action" == "plan" || "$g_action" == "restore" || "$g_action" == "find" || "$g_action" == "ls" ]] \
+  || f_die_json "Usage: symbios-restore.sh {plan|restore|find|ls} <YYYY-MM-DD> [<service>|--full|--file <path>] [--target <path>] [--yes]"
+
+if [[ "$g_action" == "find" ]]; then
+  g_pattern="$g_scope"
+  [[ -n "$g_pattern" ]] || f_die_json "Missing search pattern"
+elif [[ "$g_action" == "ls" ]]; then
+  g_lspath="$g_scope"
+  [[ "$g_lspath" == "--full" || -z "$g_lspath" ]] && g_lspath="/"
+else
+  [[ "$g_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || f_die_json "Invalid date '$g_date' - expected YYYY-MM-DD."
+  [[ "$g_scope" == "--full" || "$g_scope" == "--file" || "$g_scope" =~ ^[A-Za-z0-9._-]+$ ]] \
+    || f_die_json "Invalid service name '$g_scope'."
+fi
 
 # Resolve which physical source the snapshot comes from (local disk,
 # remote rsync target or encrypted archive).
 if ! f_bk_resolve_source "$g_date"
 then
-  f_die_json "No snapshot found for $g_date."
+  if f_bk_is_remote && [[ "$g_action" == "find" || "$g_action" == "ls" || "$g_scope" == "--file" ]]; then
+    g_bk_src_kind="remote-restic"
+    g_src_desc="restic snapshot on ${g_bk_host}"
+  else
+    f_die_json "No snapshot found for $g_date."
+  fi
 fi
 
 # Human-readable source description for the plan output.
@@ -139,7 +199,53 @@ case "$g_bk_src_kind" in
   remote-rsync)   g_src_desc="snapshot on ${g_bk_host}" ;;
   local-archive)  g_src_desc="local encrypted archive" ;;
   remote-archive) g_src_desc="encrypted archive on ${g_bk_host}" ;;
+  remote-restic)  g_src_desc="restic snapshot on ${g_bk_host}" ;;
 esac
+
+if [[ "$g_action" == "find" ]]; then
+  if [[ "$g_bk_src_kind" == "remote-restic" ]] && command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]; then
+    export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
+    export RESTIC_REPOSITORY="$(f_restic_repo_url)"
+    local f_sshargs="$(f_restic_sshargs)"
+    local f_sid="$(f_get_restic_snapshot_id_for_date "$g_date")"
+    if [[ -n "$f_sid" ]]; then
+      restic find "$g_pattern" --host "$(hostname)" --json -o "sftp.args=${f_sshargs}" 2>/dev/null | python3 -c "
+import sys,json
+res=[]
+for line in sys.stdin:
+  try:
+    d=json.loads(line)
+    if d.get('message_type')=='match':
+      p=d.get('path') or d.get('file_name')
+      if p: res.append(p)
+  except: pass
+print(json.dumps({'ok':True,'matches':res}))
+" || restic find "$g_pattern" --host "$(hostname)" -o "sftp.args=${f_sshargs}" 2>&1 | head -100
+      exit 0
+    fi
+    restic find "$g_pattern" -o "sftp.args=${f_sshargs}" 2>&1 | head -100
+    exit 0
+  fi
+  printf '{"ok":false,"error":"restic not available or not configured"}\n'
+  exit 1
+fi
+
+if [[ "$g_action" == "ls" ]]; then
+  if [[ "$g_bk_src_kind" == "remote-restic" ]] && command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]; then
+    export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
+    export RESTIC_REPOSITORY="$(f_restic_repo_url)"
+    local f_sshargs="$(f_restic_sshargs)"
+    local f_sid="$(f_get_restic_snapshot_id_for_date "$g_date")"
+    if [[ -n "$f_sid" ]]; then
+      restic ls "$f_sid" "$g_lspath" -o "sftp.args=${f_sshargs}" 2>&1 | head -200
+      exit 0
+    fi
+    restic ls latest "$g_lspath" -o "sftp.args=${f_sshargs}" 2>&1 | head -200
+    exit 0
+  fi
+  printf '{"ok":false,"error":"restic not available or not configured"}\n'
+  exit 1
+fi
 
 ### Source access helpers ###
 
@@ -468,6 +574,38 @@ then
   done
   # Archives need their contents staged before anything is touched
   f_extract_archive_members
+  if [[ "$g_scope" == "--file" && -n "$g_file" ]]; then
+    if [[ "$g_bk_src_kind" == "remote-restic" ]] && command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]; then
+      export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
+      export RESTIC_REPOSITORY="$(f_restic_repo_url)"
+      local f_sshargs="$(f_restic_sshargs)"
+      local f_sid="$(f_get_restic_snapshot_id_for_date "$g_date")"
+      [[ -z "$f_sid" ]] && f_sid="latest"
+      local f_dest="${g_target}"
+      if [[ -z "$f_dest" ]]; then
+        if [[ -n "$g_to_original" ]]; then
+          f_dest="/"
+        else
+          f_dest="/symbios/restored-files/$(date +%Y%m%d-%H%M%S)"
+        fi
+      fi
+      mkdir -p "$f_dest"
+      g_echo "Restoring file(s) $g_file from snapshot $f_sid to $f_dest"
+      if [[ -n "$g_yes" || "$g_action" == "plan" ]]; then
+        if [[ "$g_action" == "plan" ]]; then
+          printf '{"ok":true,"steps":["restic restore %s --include %s --target %s"],"source":"%s"}\n' "$f_sid" "$g_file" "$f_dest" "$(printf '%s' "$g_src_desc" | sed 's/"/\\"/g')"
+          exit 0
+        fi
+        restic restore "$f_sid" --include "$g_file" --target "$f_dest" -o "sftp.args=${f_sshargs}"
+        g_echo_ok "File restore completed to $f_dest"
+        exit $?
+      else
+        printf '{"ok":true,"steps":["restic restore %s --include %s --target %s (needs --yes)"],"source":"%s"}\n' "$f_sid" "$g_file" "$f_dest" "$(printf '%s' "$g_src_desc" | sed 's/"/\\"/g')"
+        exit 0
+      fi
+    fi
+    f_die_json "Restic file restore not available"
+  fi
   f_write_restore_excludes
   f_stop_stacks "${g_abs_dirs[@]}"
   for g_d in ${g_rel_dirs[@]+"${g_rel_dirs[@]}"}

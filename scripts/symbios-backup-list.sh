@@ -16,7 +16,7 @@
 #
 # symbios-backup-list.sh - List available backup snapshots as JSON for the
 # WebUI (Settings -> Backup). Merges local snapshot dates and - if a backup
-# server is configured - remote dates / encrypted archive dates.
+# server is configured - restic snapshots.
 
 function f_usage {
   cat << EOF
@@ -95,17 +95,42 @@ g_warning=""
 # Local snapshots (rsync mode)
 f_bk_list_local_dates > "$g_local_dates"
 
-# Remote snapshots / encrypted archives
-if f_bk_is_remote
+# Remote snapshots - restic first (query every configured target),
+# fallback to the legacy rsync directory listing.
+if f_bk_has_targets
 then
-  if ! f_bk_rsh "ls -1 '${g_bk_path}/$(hostname)/' 2>/dev/null" > "${g_tmp}/remote-ls" 2>/dev/null
-  then
-    g_warning="Could not reach backup server ${g_bk_host} - showing local backups only."
-    : > "${g_tmp}/remote-ls"
+  if command -v restic >/dev/null 2>&1 && [[ -n "${g_bk_restic_pw_file:-}" ]] && [[ -s "${g_bk_restic_pw_file}" ]]; then
+    export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
+    while IFS=$'\t' read -r f_t_name f_t_host f_t_port f_t_user f_t_path f_t_kd f_t_kw f_t_km
+    do
+      [[ -n "$f_t_host" ]] || continue
+      RESTIC_REPOSITORY="sftp://${f_t_user}@${f_t_host}:${f_t_port}//${f_t_path#/}/$(hostname)"
+      f_sshargs="-o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ServerAliveCountMax=240"
+      [[ -r "$g_bk_ssh_key" ]] && f_sshargs="-i $g_bk_ssh_key $f_sshargs"
+      restic snapshots --json -o "sftp.args=${f_sshargs}" 2>/dev/null | python3 -c "
+import sys,json
+try:
+  data=json.load(sys.stdin)
+  for s in data:
+    t=s.get('time','')
+    if len(t)>=10:
+      print(t[:10])
+except Exception:
+  pass
+" >> "$g_remote_dates" || true
+    done < <(f_bk_targets_tsv)
+    sort -ru -o "$g_remote_dates" "$g_remote_dates"
   fi
-  grep -E '^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$' "${g_tmp}/remote-ls" \
-    | sed 's/^backup-//' | sort -ru > "$g_remote_dates" || true
-  f_bk_dates_from_archive_names < "${g_tmp}/remote-ls" > "$g_arch_dates" || true
+  if [[ ! -s "$g_remote_dates" ]]; then
+    if ! f_bk_rsh "ls -1 '${g_bk_path}/$(hostname)/' 2>/dev/null" > "${g_tmp}/remote-ls" 2>/dev/null
+    then
+      g_warning="Could not reach backup server ${g_bk_host} - showing local backups only."
+      : > "${g_tmp}/remote-ls"
+    fi
+    grep -E '^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$' "${g_tmp}/remote-ls" \
+      | sed 's/^backup-//' | sort -ru > "$g_remote_dates" || true
+    f_bk_dates_from_archive_names < "${g_tmp}/remote-ls" > "$g_arch_dates" || true
+  fi
 fi
 
 # Merge all dates (unique, newest first)
@@ -133,22 +158,32 @@ done < "${g_tmp}/all-dates"
 g_snap_json="$g_snap_json]"
 
 # Target mode description for the UI
-if ! f_bk_is_remote
+if ! f_bk_has_targets
 then
   g_mode="local"
-elif [[ "$g_bk_encrypt" == "true" ]]
-then
-  g_mode="remote-encrypted"
 else
-  g_mode="remote"
+  g_mode="remote-restic"
 fi
 
 # Public key the user needs to authorize on the backup server
 g_pubkey=""
 [[ -r "${g_bk_ssh_pubkey}" ]] && g_pubkey="$(cat "${g_bk_ssh_pubkey}")"
 
+# Names of all configured restic targets (for the UI)
+g_targets_json="["
+g_first=1
+while IFS=$'\t' read -r g_t_name _g_rest
+do
+  [[ -n "$g_t_name" ]] || continue
+  [[ $g_first -eq 1 ]] && g_first=0 || g_targets_json="$g_targets_json,"
+  # f_json_escape prints the value already quoted for JSON
+  g_targets_json="$g_targets_json$(printf '%s' "$g_t_name" | f_json_escape)"
+done < <(f_bk_targets_tsv)
+g_targets_json="$g_targets_json]"
+
 cat <<EOF
 {"ok":true,"mode":"$g_mode","host":"$g_bk_host","path":"$g_bk_path",
+"targets":$g_targets_json,
 "snapshots":$g_snap_json,
 "services":$(f_list_services | f_json_array),
 "warning":$(printf '%s' "$g_warning" | f_json_escape),

@@ -24,6 +24,7 @@ from .utils.ssh_exec import run_command
 from .utils.http import is_ajax_request
 from .utils.secret_file import f_write_secret
 from .setup_status import get_page_badge, PAGE_EXPLAIN
+from django.views.decorators.csrf import csrf_exempt
 
 import json
 import yaml
@@ -276,6 +277,27 @@ def settings_backup(request):
                       else 'false')
         enabled = ('true' if request.POST.get('backup_enabled') == 'on'
                    else 'false')
+        # Retention of the primary target (the form always submits a value;
+        # an empty one falls back to the restic defaults).
+        keep_daily = request.POST.get('backup_keep_daily', '').strip() or '7'
+        keep_weekly = request.POST.get('backup_keep_weekly', '').strip() or '4'
+        keep_monthly = (request.POST.get('backup_keep_monthly', '').strip()
+                        or '9999')
+        # Additional backup servers arrive as numbered field sets
+        # bk_srv_<idx>_<field>; only rows with host AND path count.
+        servers = []
+        idx = 0
+        while (f'bk_srv_{idx}_host' in request.POST
+               or f'bk_srv_{idx}_path' in request.POST):
+            srv = {}
+            for field in ('name', 'host', 'port', 'user', 'path',
+                          'keep_daily', 'keep_weekly', 'keep_monthly'):
+                value = (request.POST.get(f'bk_srv_{idx}_{field}') or '').strip()
+                if value:
+                    srv[field] = value
+            if srv.get('host') and srv.get('path'):
+                servers.append(srv)
+            idx += 1
         set_cmd = ('symbios-settings-backup.sh set'
                    f' --host {shlex.quote(request.POST.get("backup_server_host", "").strip())}'
                    f' --port {shlex.quote(request.POST.get("backup_server_port", "").strip())}'
@@ -283,6 +305,10 @@ def settings_backup(request):
                    f' --path {shlex.quote(request.POST.get("backup_server_path", "").strip())}'
                    f' --encryption {encryption}'
                    f' --enabled {enabled}'
+                   f' --keep-daily {shlex.quote(keep_daily)}'
+                   f' --keep-weekly {shlex.quote(keep_weekly)}'
+                   f' --keep-monthly {shlex.quote(keep_monthly)}'
+                   f" --servers {shlex.quote(json.dumps(servers))}"
                    ' --exclude-stdin')
         stdin_data = request.POST.get('backup_exclude', '')
         try:
@@ -462,6 +488,76 @@ def settings_backup_runnow(request):
         'job': job_id,
         'title': 'Running backup...',
         'message': 'Backup started.',
+        'command': cmd,
+    })
+
+
+def settings_backup_find_files(request):
+    """AJAX POST - search a restic snapshot for files matching a pattern."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=400)
+    date_str = (request.POST.get('date') or '').strip()
+    pattern = (request.POST.get('pattern') or '').strip()
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
+        return JsonResponse({'ok': False, 'error': 'Invalid date format'}, status=400)
+    if not pattern:
+        return JsonResponse({'ok': False, 'error': 'Pattern is required'}, status=400)
+    ok, stdout, stderr = run_command(
+        f'symbios-restore.sh find {shlex.quote(date_str)} {shlex.quote(pattern)}',
+        timeout=300)
+    if not ok:
+        return JsonResponse({'ok': False, 'error': (stderr or stdout).strip()[:500]})
+    # The script emits a JSON object on success; fall back to plain lines.
+    try:
+        parsed = json.loads(stdout)
+        if isinstance(parsed, dict):
+            return JsonResponse(parsed)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    matches = [line for line in stdout.splitlines() if line.strip()]
+    return JsonResponse({'ok': True, 'matches': matches})
+
+
+def settings_backup_list_snapshot(request):
+    """AJAX POST - list a directory inside a restic snapshot."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=400)
+    date_str = (request.POST.get('date') or '').strip()
+    path = (request.POST.get('path') or '/').strip() or '/'
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
+        return JsonResponse({'ok': False, 'error': 'Invalid date format'}, status=400)
+    ok, stdout, stderr = run_command(
+        f'symbios-restore.sh ls {shlex.quote(date_str)} {shlex.quote(path)}',
+        timeout=300)
+    return JsonResponse({'ok': ok, 'output': stdout, 'error': stderr})
+
+
+def settings_backup_restore_file(request):
+    """AJAX POST - restore a single file/directory from a restic snapshot."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=400)
+    date_str = (request.POST.get('date') or '').strip()
+    file_path = (request.POST.get('file') or '').strip()
+    target = (request.POST.get('target') or '').strip()
+    to_original = request.POST.get('to_original') == '1'
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
+        return JsonResponse({'ok': False, 'error': 'Invalid date format'}, status=400)
+    if not file_path:
+        return JsonResponse({'ok': False, 'error': 'File path is required'}, status=400)
+    cmd = (f'symbios-restore.sh restore {shlex.quote(date_str)} --file '
+           f'{shlex.quote(file_path)}')
+    if target:
+        cmd += f' --target {shlex.quote(target)}'
+    elif to_original:
+        cmd += ' --to-original'
+    cmd += ' --yes'
+    from .utils.jobs import create_job
+    job_id = create_job(cmd, timeout=3600)
+    return JsonResponse({
+        'ok': True,
+        'job': job_id,
+        'title': 'Restoring file...',
+        'message': f'Restoring {file_path} from {date_str}.',
         'command': cmd,
     })
 

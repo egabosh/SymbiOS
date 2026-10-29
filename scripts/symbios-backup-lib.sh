@@ -21,11 +21,14 @@
 #
 # Configuration source: inventory.yml (all.vars)
 #   backup_server_host / backup_server_port / backup_server_user /
-#   backup_server_path   remote target (empty host = local backups only)
-#   backup_encryption    true = encrypt remote archives (openssl aes-256-cbc)
+#   backup_server_path   primary restic target (empty host = local only)
+#   backup_servers       optional list of additional restic targets, each a
+#                        dict {name,host,port,user,path,keep_daily,
+#                        keep_weekly,keep_monthly} with per-target retention
 #   backup_exclude       list of extra rsync exclude patterns
 #   backup_keep_daily / backup_keep_weekly / backup_keep_monthly
-#                        local snapshot retention (grandfather-father-son)
+#                        restic retention for the primary target (also used
+#                        for local snapshot pruning in fallback mode)
 #   backup_min_free_gb / backup_min_free_percent
 #                        disk guard: abort before the disk fills up
 #
@@ -105,11 +108,13 @@ function f_bk_read_vars {
   g_bk_snap_base="${g_data_root}/backup/$(hostname)"
   # Passphrase file for encrypted archives (0600, root only).
   g_bk_pw_file="${g_config_dir}/.backup_passphrase"
-  # SSH client key: the host's own root key. The backup runs on the host as
-  # root, so /root/.ssh/id_ed25519 is directly readable and needs no copy.
-  # This is deliberately NOT the WebUI gateway key (id_symbios): that one has
-  # to stay group-readable for the container (uid 10000) and OpenSSH refuses
-  # such a key. Override with backup_ssh_key to use a different identity.
+  # Restic repository password file - MUST be stored under /symbios only
+  g_bk_restic_pw_file="${g_config_dir}/.backup_restic_password"
+  if [[ ! -s "$g_bk_restic_pw_file" ]]; then
+    g_bk_restic_pw_file="${g_data_root}/.backup_restic_password"
+  fi
+  export RESTIC_PASSWORD_FILE="$g_bk_restic_pw_file"
+  # SSH client key: the host's own root key.
   g_bk_ssh_key="$(f_symbios_var backup_ssh_key "/root/.ssh/id_ed25519")"
   g_bk_ssh_pubkey="${g_bk_ssh_key}.pub"
   # Optional overrides from inventory.yml (retention + disk guard).
@@ -118,18 +123,82 @@ function f_bk_read_vars {
   g_bk_keep_monthly="$(f_symbios_var backup_keep_monthly "$g_bk_keep_monthly")"
   g_bk_min_free_gb="$(f_symbios_var backup_min_free_gb "$g_bk_min_free_gb")"
   g_bk_min_free_percent="$(f_symbios_var backup_min_free_percent "$g_bk_min_free_percent")"
+  # Restic retention for the primary target: raw inventory values with the
+  # restic defaults (7/4/9999 = keep all months). The g_bk_keep_* above keep
+  # the legacy local snapshot defaults (7/4/6) for the fallback mode.
+  g_bk_rkeep_daily="$(f_symbios_var backup_keep_daily "")"
+  [[ -n "$g_bk_rkeep_daily" ]] || g_bk_rkeep_daily=7
+  g_bk_rkeep_weekly="$(f_symbios_var backup_keep_weekly "")"
+  [[ -n "$g_bk_rkeep_weekly" ]] || g_bk_rkeep_weekly=4
+  g_bk_rkeep_monthly="$(f_symbios_var backup_keep_monthly "")"
+  [[ -n "$g_bk_rkeep_monthly" ]] || g_bk_rkeep_monthly=9999
 }
 
-# True if a remote backup server is configured.
+# True if the primary remote backup server is configured.
 function f_bk_is_remote {
   [[ -n "$g_bk_host" && -n "$g_bk_path" ]]
+}
+
+# List all configured restic targets as TSV lines (tab separated):
+#   name  host  port  user  path  keep_daily  keep_weekly  keep_monthly
+# The primary target (backup_server_*) comes first, followed by the
+# backup_servers entries. Entries without a host or path are skipped,
+# relative paths are made absolute, missing retention values fall back to
+# the restic defaults (7/4/9999).
+function f_bk_targets_tsv {
+  local f_json
+  if [[ -n "$g_bk_host" && -n "$g_bk_path" ]]
+  then
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$(hostname)" "$g_bk_host" "${g_bk_port:-22}" "${g_bk_user:-root}" \
+      "$g_bk_path" "$g_bk_rkeep_daily" "$g_bk_rkeep_weekly" "$g_bk_rkeep_monthly"
+  fi
+  f_json="$("$g_symbios_dir/symbios-inventory.py" \
+    --inventory "${g_inventory}" get --json backup_servers 2>/dev/null)" || f_json="[]"
+  printf '%s' "$f_json" | python3 -c '
+import json, sys
+
+def num(value, default):
+    if value in (None, ""):
+        return str(default)
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return str(default)
+    return str(v if 0 <= v <= 99999 else default)
+
+try:
+    data = json.load(sys.stdin) or []
+except Exception:
+    data = []
+for srv in data:
+    if not isinstance(srv, dict):
+        continue
+    host = str(srv.get("host") or "").strip()
+    path = str(srv.get("path") or "").strip()
+    user = str(srv.get("user") or "").strip() or "root"
+    name = str(srv.get("name") or "").strip() or host
+    if not host or not path:
+        continue
+    if not path.startswith("/"):
+        path = "/" + path
+    print("\t".join([name, host, num(srv.get("port"), 22), user, path,
+                     num(srv.get("keep_daily"), 7),
+                     num(srv.get("keep_weekly"), 4),
+                     num(srv.get("keep_monthly"), 9999)]))
+'
+}
+
+# True if at least one restic target (primary or additional) is configured.
+function f_bk_has_targets {
+  [[ -n "$(f_bk_targets_tsv)" ]]
 }
 
 # Pre-flight for the SSH key. Without this the only symptom of a missing or
 # passphrase-protected key is a generic "Permission denied" on the remote, and
 # a key rotation on the host silently stops every backup.
 function f_bk_check_ssh_key {
-  f_bk_is_remote || return 0
+  f_bk_has_targets || return 0
 
   local f_why=""
   f_why="$(f_symbios_ssh_key_usable "$g_bk_ssh_key")" || {

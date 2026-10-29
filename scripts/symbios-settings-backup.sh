@@ -29,16 +29,27 @@ Commands:
                                   backup_exclude one pattern per line;
                                   or a JSON object with --json)
   set [--host H --port P --user U --path P --encryption true|false
-       --enabled true|false --exclude-stdin] [--check]
-                                  Validate and write to inventory.yml.
-                                  --enabled switches the nightly backup on
-                                  or off (off by default).
-                                  Options left out keep their current value;
-                                  an empty --port/--user falls back to 22 /
-                                  root (same as the WebUI). --exclude-stdin
-                                  reads rsync patterns from stdin (empty
-                                  lines and # comments skipped).
-                                  --check changes nothing.
+       --enabled true|false --exclude-stdin
+       --keep-daily N --keep-weekly N --keep-monthly N
+       --servers '<json>'] [--check]
+                                   Validate and write to inventory.yml.
+                                   --enabled switches the nightly backup on
+                                   or off (off by default).
+                                   Options left out keep their current value;
+                                   an empty --port/--user falls back to 22 /
+                                   root (same as the WebUI). --exclude-stdin
+                                   reads rsync patterns from stdin (empty
+                                   lines and # comments skipped).
+                                   --keep-* set the restic retention of the
+                                   primary target (non-negative integers,
+                                   0 = disabled, default 7/4/9999).
+                                   --servers replaces the list of additional
+                                   backup servers (JSON array of objects with
+                                   name,host,port,user,path,keep_daily,
+                                   keep_weekly,keep_monthly; host and path
+                                   required, everything else optional); '[]'
+                                   removes all of them.
+                                   --check changes nothing.
   schema                          Print the field description as JSON
                                   (for generic WebUI form rendering)
   apply [--dry-run]               Resolve consuming playbooks (or show them
@@ -108,6 +119,12 @@ then
   {"name": "backup_enabled", "type": "bool", "label": "Nightly backup",
    "required": true, "default": false, "secret": false,
    "note": "The backup job only runs when this is switched on."},
+  {"name": "backup_keep_daily", "type": "number", "label": "Keep daily snapshots",
+   "required": false, "default": "7", "secret": false},
+  {"name": "backup_keep_weekly", "type": "number", "label": "Keep weekly snapshots",
+   "required": false, "default": "4", "secret": false},
+  {"name": "backup_keep_monthly", "type": "number", "label": "Keep monthly snapshots",
+   "required": false, "default": "9999", "secret": false},
   {"name": "backup_exclude", "type": "multiline", "label": "Exclude patterns",
    "required": false, "default": [], "secret": false,
    "note": "One rsync pattern per line, # comments allowed"}
@@ -134,23 +151,32 @@ then
 else
   f_cur_enabled="false"
 fi
-# The exclude list is a YAML list - the grep-based f_symbios_var cannot
-# read it, so use the inventory CLI (JSON) instead.
+# The exclude list and the additional server list are YAML lists - the
+# grep-based f_symbios_var cannot read them, so use the inventory CLI (JSON).
 f_cur_excludes_json="$("$g_symbios_dir/symbios-inventory.py" \
   --inventory "${g_inventory}" get --json backup_exclude 2>/dev/null)" || f_cur_excludes_json="[]"
+f_cur_servers_json="$("$g_symbios_dir/symbios-inventory.py" \
+  --inventory "${g_inventory}" get --json backup_servers 2>/dev/null)" || f_cur_servers_json="[]"
+f_cur_keep_daily="$(f_symbios_var backup_keep_daily "7")"
+f_cur_keep_weekly="$(f_symbios_var backup_keep_weekly "4")"
+f_cur_keep_monthly="$(f_symbios_var backup_keep_monthly "9999")"
 
 if [[ "${f_command}" == "get" ]]
 then
   if [[ "${1:-}" == "--json" ]]
   then
-    printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_encryption": %s, "backup_enabled": %s, "backup_exclude": %s}\n' \
+    printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_encryption": %s, "backup_enabled": %s, "backup_exclude": %s, "backup_servers": %s, "backup_keep_daily": %s, "backup_keep_weekly": %s, "backup_keep_monthly": %s}\n' \
       "$(printf '%s' "${f_cur_host}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_port}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_user}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_path}" | f_json_escape)" \
       "${f_cur_enc}" \
       "${f_cur_enabled}" \
-      "${f_cur_excludes_json}"
+      "${f_cur_excludes_json}" \
+      "${f_cur_servers_json}" \
+      "$(printf '%s' "${f_cur_keep_daily}" | f_json_escape)" \
+      "$(printf '%s' "${f_cur_keep_weekly}" | f_json_escape)" \
+      "$(printf '%s' "${f_cur_keep_monthly}" | f_json_escape)"
     exit 0
   elif [[ $# -gt 0 ]]
   then
@@ -163,7 +189,11 @@ then
   echo "backup_server_path=${f_cur_path}"
   echo "backup_encryption=${f_cur_enc}"
   echo "backup_enabled=${f_cur_enabled}"
+  echo "backup_keep_daily=${f_cur_keep_daily}"
+  echo "backup_keep_weekly=${f_cur_keep_weekly}"
+  echo "backup_keep_monthly=${f_cur_keep_monthly}"
   echo "backup_exclude=${f_cur_excludes_json}"
+  echo "backup_servers=${f_cur_servers_json}"
   exit 0
 fi
 
@@ -175,13 +205,20 @@ f_new_user=""
 f_new_path=""
 f_new_enc=""
 f_new_enabled=""
+f_new_keep_daily=""
+f_new_keep_weekly=""
+f_new_keep_monthly=""
+f_new_servers=""
 f_given_host="no"
 f_given_port="no"
 f_given_user="no"
 f_given_path="no"
 f_given_enc="no"
 f_given_enabled="no"
-f_given_excludes="no"
+f_given_keep_daily="no"
+f_given_keep_weekly="no"
+f_given_keep_monthly="no"
+f_given_servers="no"
 f_excludes_json="[]"
 f_check="no"
 
@@ -222,6 +259,30 @@ do
       [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_enabled="$2"
       f_given_enabled="yes"
+      shift 2
+      ;;
+    --keep-daily)
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      f_new_keep_daily="$2"
+      f_given_keep_daily="yes"
+      shift 2
+      ;;
+    --keep-weekly)
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      f_new_keep_weekly="$2"
+      f_given_keep_weekly="yes"
+      shift 2
+      ;;
+    --keep-monthly)
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      f_new_keep_monthly="$2"
+      f_given_keep_monthly="yes"
+      shift 2
+      ;;
+    --servers)
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      f_new_servers="$2"
+      f_given_servers="yes"
       shift 2
       ;;
     --json-stdin)
@@ -338,7 +399,9 @@ done
 if [[ "${f_given_host}" == "no" && "${f_given_port}" == "no" \
    && "${f_given_user}" == "no" && "${f_given_path}" == "no" \
    && "${f_given_enc}" == "no" && "${f_given_enabled}" == "no" \
-   && "${f_given_excludes}" == "no" ]]
+   && "${f_given_excludes}" == "no" && "${f_given_keep_daily}" == "no" \
+   && "${f_given_keep_weekly}" == "no" && "${f_given_keep_monthly}" == "no" \
+   && "${f_given_servers}" == "no" ]]
 then
   f_ss_fail_validation "Nothing to set - pass at least one field option"
 fi
@@ -397,6 +460,71 @@ case "${f_new_enabled,,}" in
     ;;
 esac
 
+# Retention values: non-negative integers (0 disables that level).
+if [[ "${f_given_keep_daily}" == "yes" ]] \
+  && { ! [[ "${f_new_keep_daily}" =~ ^[0-9]+$ ]] || [[ "10#${f_new_keep_daily}" -gt 99999 ]]; }
+then
+  f_ss_fail_validation "Invalid --keep-daily: ${f_new_keep_daily} (expected 0-99999)"
+fi
+if [[ "${f_given_keep_weekly}" == "yes" ]] \
+  && { ! [[ "${f_new_keep_weekly}" =~ ^[0-9]+$ ]] || [[ "10#${f_new_keep_weekly}" -gt 99999 ]]; }
+then
+  f_ss_fail_validation "Invalid --keep-weekly: ${f_new_keep_weekly} (expected 0-99999)"
+fi
+if [[ "${f_given_keep_monthly}" == "yes" ]] \
+  && { ! [[ "${f_new_keep_monthly}" =~ ^[0-9]+$ ]] || [[ "10#${f_new_keep_monthly}" -gt 99999 ]]; }
+then
+  f_ss_fail_validation "Invalid --keep-monthly: ${f_new_keep_monthly} (expected 0-99999)"
+fi
+
+# Additional servers: validate and normalize the JSON list (python does the
+# JSON handling, bash only passes the normalized result into the merge).
+if [[ "${f_given_servers}" == "yes" ]]
+then
+  if ! f_servers_norm="$(printf '%s' "${f_new_servers}" | python3 -c '
+import json, sys
+
+def num(value, default):
+    if value in (None, ""):
+        return str(default)
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return str(default)
+    return str(v if 0 <= v <= 99999 else default)
+
+try:
+    data = json.load(sys.stdin) or []
+except Exception:
+    sys.exit(2)
+if not isinstance(data, list):
+    sys.exit(2)
+out = []
+for srv in data:
+    if not isinstance(srv, dict):
+        sys.exit(2)
+    host = str(srv.get("host") or "").strip()
+    path = str(srv.get("path") or "").strip()
+    user = str(srv.get("user") or "").strip() or "root"
+    name = str(srv.get("name") or "").strip() or host
+    if not host or not path:
+        sys.exit(2)
+    if any(ch.isspace() for ch in (host + user + name)):
+        sys.exit(2)
+    if not path.startswith("/"):
+        path = "/" + path
+    out.append({"name": name, "host": host, "port": num(srv.get("port"), 22),
+                "user": user, "path": path,
+                "keep_daily": int(num(srv.get("keep_daily"), 7)),
+                "keep_weekly": int(num(srv.get("keep_weekly"), 4)),
+                "keep_monthly": int(num(srv.get("keep_monthly"), 9999))})
+print(json.dumps(out))
+')"
+  then
+    f_ss_fail_validation "Invalid --servers JSON (expected an array of objects with host and path)"
+  fi
+fi
+
 # --- transactional write -------------------------------------------------------
 
 f_merge="$(printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_encryption": %s, "backup_enabled": %s' \
@@ -406,6 +534,23 @@ f_merge="$(printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_
   "$(printf '%s' "${f_new_path}" | f_json_escape)" \
   "${f_new_enc}" \
   "${f_new_enabled}")"
+# Optional fields are only written when given (current value stays otherwise)
+if [[ "${f_given_keep_daily}" == "yes" ]]
+then
+  f_merge="${f_merge}, \"backup_keep_daily\": ${f_new_keep_daily}"
+fi
+if [[ "${f_given_keep_weekly}" == "yes" ]]
+then
+  f_merge="${f_merge}, \"backup_keep_weekly\": ${f_new_keep_weekly}"
+fi
+if [[ "${f_given_keep_monthly}" == "yes" ]]
+then
+  f_merge="${f_merge}, \"backup_keep_monthly\": ${f_new_keep_monthly}"
+fi
+if [[ "${f_given_servers}" == "yes" ]]
+then
+  f_merge="${f_merge}, \"backup_servers\": ${f_servers_norm}"
+fi
 if [[ "${f_given_excludes}" == "yes" ]]
 then
   f_merge="${f_merge}, \"backup_exclude\": ${f_excludes_json}}"

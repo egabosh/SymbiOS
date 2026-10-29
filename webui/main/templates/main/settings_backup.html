@@ -99,6 +99,140 @@
             </div>
           </div>
 
+          <div class="row g-2 mt-3">
+            <div class="col-md-4">
+              <label class="form-label small mb-0">Keep daily</label>
+              <input type="number" class="form-control form-control-sm" name="backup_keep_daily" min="0"
+                     value="{{ vars.backup_keep_daily|default:'7' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small mb-0">Keep weekly</label>
+              <input type="number" class="form-control form-control-sm" name="backup_keep_weekly" min="0"
+                     value="{{ vars.backup_keep_weekly|default:'4' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small mb-0">Keep monthly</label>
+              <input type="number" class="form-control form-control-sm" name="backup_keep_monthly" min="0"
+                     value="{{ vars.backup_keep_monthly|default:'9999' }}">
+            </div>
+          </div>
+          <div class="form-text small">Retention of the restic snapshots on this server (applied after each run, older snapshots are pruned).</div>
+
+          <div class="mt-3">
+            <label class="form-label fw-semibold mb-1">Additional backup servers</label>
+            <div class="form-text small">
+              Every additional server gets its own restic repository and its own retention policy.
+              The same SSH key as above is used for all of them.
+            </div>
+            <div id="bk-servers-list" class="mt-2">
+              {% for srv in vars.backup_servers %}
+              <div class="card bg-light mb-2 bk-srv-row">
+                <div class="card-body py-2">
+                  <div class="row g-2 align-items-end">
+                    <div class="col-md-3">
+                      <label class="form-label small mb-0">Name</label>
+                      <input type="text" class="form-control form-control-sm" name="bk_srv_{{ forloop.counter0 }}_name"
+                             value="{{ srv.name|default:'' }}" placeholder="e.g. valiant">
+                    </div>
+                    <div class="col-md-3">
+                      <label class="form-label small mb-0">Server address</label>
+                      <input type="text" class="form-control form-control-sm" name="bk_srv_{{ forloop.counter0 }}_host"
+                             value="{{ srv.host|default:'' }}" placeholder="backup.example.com">
+                    </div>
+                    <div class="col-md-1">
+                      <label class="form-label small mb-0">Port</label>
+                      <input type="number" class="form-control form-control-sm" name="bk_srv_{{ forloop.counter0 }}_port" min="1" max="65535"
+                             value="{{ srv.port|default:'22' }}" placeholder="22">
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label small mb-0">User</label>
+                      <input type="text" class="form-control form-control-sm" name="bk_srv_{{ forloop.counter0 }}_user"
+                             value="{{ srv.user|default:'root' }}" placeholder="root">
+                    </div>
+                    <div class="col-md-3">
+                      <label class="form-label small mb-0">Directory there</label>
+                      <input type="text" class="form-control form-control-sm" name="bk_srv_{{ forloop.counter0 }}_path"
+                             value="{{ srv.path|default:'' }}" placeholder="/backups/symbios">
+                    </div>
+                  </div>
+                  <div class="row g-2 align-items-end mt-1">
+                    <div class="col-md-2">
+                      <label class="form-label small mb-0">Keep daily</label>
+                      <input type="number" class="form-control form-control-sm" name="bk_srv_{{ forloop.counter0 }}_keep_daily" min="0"
+                             value="{{ srv.keep_daily|default:'7' }}">
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label small mb-0">Keep weekly</label>
+                      <input type="number" class="form-control form-control-sm" name="bk_srv_{{ forloop.counter0 }}_keep_weekly" min="0"
+                             value="{{ srv.keep_weekly|default:'4' }}">
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label small mb-0">Keep monthly</label>
+                      <input type="number" class="form-control form-control-sm" name="bk_srv_{{ forloop.counter0 }}_keep_monthly" min="0"
+                             value="{{ srv.keep_monthly|default:'9999' }}">
+                    </div>
+                    <div class="col-md-2 ms-auto text-end">
+                      <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeBackupServer(this)">
+                        <i class="bi bi-trash"></i> Remove
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            <template id="bk-srv-template">
+              <div class="card bg-light mb-2 bk-srv-row">
+                <div class="card-body py-2">
+                  <div class="row g-2 align-items-end">
+                    <div class="col-md-3">
+                      <label class="form-label small mb-0">Name</label>
+                      <input type="text" class="form-control form-control-sm" name="bk_srv___IDX___name" placeholder="e.g. valiant">
+                    </div>
+                    <div class="col-md-3">
+                      <label class="form-label small mb-0">Server address</label>
+                      <input type="text" class="form-control form-control-sm" name="bk_srv___IDX___host" placeholder="backup.example.com">
+                    </div>
+                    <div class="col-md-1">
+                      <label class="form-label small mb-0">Port</label>
+                      <input type="number" class="form-control form-control-sm" name="bk_srv___IDX___port" min="1" max="65535" placeholder="22">
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label small mb-0">User</label>
+                      <input type="text" class="form-control form-control-sm" name="bk_srv___IDX___user" placeholder="root">
+                    </div>
+                    <div class="col-md-3">
+                      <label class="form-label small mb-0">Directory there</label>
+                      <input type="text" class="form-control form-control-sm" name="bk_srv___IDX___path" placeholder="/backups/symbios">
+                    </div>
+                  </div>
+                  <div class="row g-2 align-items-end mt-1">
+                    <div class="col-md-2">
+                      <label class="form-label small mb-0">Keep daily</label>
+                      <input type="number" class="form-control form-control-sm" name="bk_srv___IDX___keep_daily" min="0" value="7">
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label small mb-0">Keep weekly</label>
+                      <input type="number" class="form-control form-control-sm" name="bk_srv___IDX___keep_weekly" min="0" value="4">
+                    </div>
+                    <div class="col-md-2">
+                      <label class="form-label small mb-0">Keep monthly</label>
+                      <input type="number" class="form-control form-control-sm" name="bk_srv___IDX___keep_monthly" min="0" value="9999">
+                    </div>
+                    <div class="col-md-2 ms-auto text-end">
+                      <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeBackupServer(this)">
+                        <i class="bi bi-trash"></i> Remove
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-1" onclick="addBackupServer()">
+              <i class="bi bi-plus-lg"></i> Add server
+            </button>
+          </div>
+
           <div class="mt-3 form-check form-switch">
             <input class="form-check-input" type="checkbox" name="backup_encryption" id="backup_encryption"
                    role="switch" {% if vars.backup_encryption %}checked{% endif %}>
@@ -153,7 +287,7 @@
         <textarea class="form-control font-monospace small" name="backup_exclude" rows="4"
                   placeholder="/services/my-service/downloads&#10;/services/nextcloud/data/files_trashbin">{% if vars.backup_exclude %}{% for line in vars.backup_exclude %}{{ line }}
 {% endfor %}{% endif %}</textarea>
-        <div class="form-text small">Examples above. Patterns follow rsync syntax; lines starting with # are ignored. System internals (Docker images, temporary files, the backups themselves) are always excluded automatically.</div>
+        <div class="form-text small">Patterns are applied to the restic backup. System internals are excluded automatically.</div>
       </div>
     </div>
 
@@ -247,6 +381,57 @@
       A restore stops the affected service(s) briefly, puts the old files (and databases) back and starts everything again.
       Restoring the <em>whole system</em> restarts the server completely and removes everything created after the chosen day.
     </div>
+  </div>
+</div>
+
+<!-- Step 5: restore single file -->
+<div class="card mb-3 border-info">
+  <div class="card-header bg-info-subtle"><i class="bi bi-file-earmark-arrow-up"></i> <strong>Restore a single file or directory</strong></div>
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label">From which day?</label>
+        <select class="form-select" id="file-restore-date">
+          <option value="">- choose date -</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Search for file</label>
+        <input type="text" class="form-control" id="file-search-pattern" placeholder="e.g. config.php or *.log">
+      </div>
+      <div class="col-md-auto">
+        <button type="button" class="btn btn-outline-secondary" onclick="searchFiles()">
+          <i class="bi bi-search"></i> Search
+        </button>
+      </div>
+    </div>
+    <div class="mt-2">
+      <label class="form-label">Or list directory</label>
+      <div class="input-group">
+        <input type="text" class="form-control" id="file-list-path" value="/" placeholder="/">
+        <button class="btn btn-outline-secondary" type="button" onclick="listSnapshotDir()">List</button>
+      </div>
+    </div>
+    <div id="file-results" class="mt-3"></div>
+    <div class="row g-2 align-items-end mt-2">
+      <div class="col-md-6">
+        <label class="form-label">Restore to</label>
+        <input type="text" class="form-control" id="file-restore-target" placeholder="/symbios/restored-files/ or leave empty for default">
+      </div>
+      <div class="col-md-auto">
+        <div class="form-check mt-4">
+          <input class="form-check-input" type="checkbox" id="file-restore-original">
+          <label class="form-check-label" for="file-restore-original">Restore to original location</label>
+        </div>
+      </div>
+      <div class="col-md-auto">
+        <button type="button" class="btn btn-info" onclick="restoreSingleFile()">
+          <i class="bi bi-arrow-counterclockwise"></i> Restore selected file
+        </button>
+      </div>
+    </div>
+    <input type="hidden" id="selected-restore-file">
+    <div class="form-text small mt-2">You can search or browse snapshots to restore individual files or directories.</div>
   </div>
 </div>
 
@@ -454,8 +639,108 @@ function doRestore() {
     });
 }
 
+function searchFiles() {
+  var dateStr = document.getElementById('file-restore-date').value;
+  var pattern = document.getElementById('file-search-pattern').value;
+  if (!dateStr || !pattern) { alert('Please select a date and enter a pattern'); return; }
+  var fd = new FormData();
+  fd.append('date', dateStr);
+  fd.append('pattern', pattern);
+  fetch('{% url "settings_backup_find_files" %}', {
+    method: 'POST', body: fd, credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken() }
+  })
+    .then(r => r.json())
+    .then(d => {
+      var div = document.getElementById('file-results');
+      var matches = d.matches || [];
+      if (matches.length === 0) { div.innerHTML = '<div class="text-muted small">No matches found</div>'; return; }
+      var html = '<div class="list-group">';
+      matches.slice(0, 100).forEach(function(m) {
+        html += '<a href="#" class="list-group-item list-group-item-action py-1" onclick="selectRestoreFile(\'' + m.replace(/'/g, "\\'") + '\'); return false;">' + escapeHtml(m) + '</a>';
+      });
+      html += '</div>';
+      div.innerHTML = html;
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function listSnapshotDir() {
+  var dateStr = document.getElementById('file-restore-date').value;
+  var path = document.getElementById('file-list-path').value || '/';
+  if (!dateStr) { alert('Please select a date'); return; }
+  var fd = new FormData();
+  fd.append('date', dateStr);
+  fd.append('path', path);
+  fetch('{% url "settings_backup_list_snapshot" %}', {
+    method: 'POST', body: fd, credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken() }
+  })
+    .then(r => r.json())
+    .then(d => {
+      var div = document.getElementById('file-results');
+      div.innerHTML = '<pre class="bg-light p-2 small mb-0">' + escapeHtml(d.output || d.error || '') + '</pre>';
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function selectRestoreFile(path) {
+  document.getElementById('selected-restore-file').value = path;
+  document.getElementById('file-results').insertAdjacentHTML('afterbegin', '<div class="alert alert-info py-1 small">Selected: ' + escapeHtml(path) + '</div>');
+}
+
+function restoreSingleFile() {
+  var dateStr = document.getElementById('file-restore-date').value;
+  var filePath = document.getElementById('selected-restore-file').value || document.getElementById('file-search-pattern').value;
+  var target = document.getElementById('file-restore-target').value;
+  var toOriginal = document.getElementById('file-restore-original').checked;
+  if (!dateStr || !filePath) { alert('Please select a date and a file'); return; }
+  if (!window.confirm('Restore "' + filePath + '" from ' + dateStr + '?')) return;
+  var fd = new FormData();
+  fd.append('date', dateStr);
+  fd.append('file', filePath);
+  if (target) fd.append('target', target);
+  if (toOriginal) fd.append('to_original', '1');
+  fetch('{% url "settings_backup_restore_file" %}', {
+    method: 'POST', body: fd, credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken(), 'X-Requested-With': 'XMLHttpRequest' }
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.job) { SymbiOS.exec.start(d.job, d.title, d.command); }
+      else { alert(d.error || 'Could not start restore'); }
+    });
+}
+
+/* Additional backup servers: add/remove rows from the template. The index is
+   embedded into the field names (bk_srv_<idx>_<field>) so the view can group
+   them back into a JSON list. */
+var bkSrvIndex = document.querySelectorAll('#bk-servers-list .bk-srv-row').length;
+function addBackupServer() {
+  var tpl = document.getElementById('bk-srv-template');
+  if (!tpl) return;
+  var html = tpl.innerHTML.replace(/__IDX__/g, String(bkSrvIndex));
+  bkSrvIndex += 1;
+  document.getElementById('bk-servers-list').insertAdjacentHTML('beforeend', html);
+}
+function removeBackupServer(btn) {
+  var row = btn.closest('.bk-srv-row');
+  if (row) row.remove();
+}
+
 /* Initial state */
 toggleTarget();
 renderSnapshots({{ snapshots_json|safe }}, {{ services_json|safe }});
+/* Also populate file restore date selector */
+(function(){
+  var src = document.getElementById('restore-date');
+  var dst = document.getElementById('file-restore-date');
+  if (src && dst) {
+    for (var i = 0; i < src.options.length; i++) {
+      var o = src.options[i].cloneNode(true);
+      dst.appendChild(o);
+    }
+  }
+})();
 </script>
 {% endblock %}

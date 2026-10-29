@@ -53,8 +53,41 @@
         name:
           - rsync
           - openssl
+          - restic
         update_cache: no
         install_recommends: no
+
+    - name: Deploy gaboshlib restic functions
+      ansible.builtin.copy:
+        src: "{{ git_root }}/../gaboshlib/gaboshlib/{{ item }}"
+        dest: "/etc/bash/gaboshlib/{{ item }}"
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - g_backup_restic.bashfunc
+        - g_backup_restic_restore.bashfunc
+      ignore_errors: yes
+
+    - name: Ensure restic password file directory exists
+      ansible.builtin.file:
+        path: "{{ base_services_root | default('/symbios/base-services') }}/symbios-ui/config"
+        owner: root
+        group: root
+        state: directory
+        mode: '0750'
+
+    - name: Create restic password file if missing
+      ansible.builtin.shell: |
+        PWFILE="{{ base_services_root | default('/symbios/base-services') }}/symbios-ui/config/.backup_restic_password"
+        if [ ! -s "$PWFILE" ]; then
+          umask 077
+          tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64 > "$PWFILE"
+          chown root:root "$PWFILE"
+          chmod 600 "$PWFILE"
+        fi
+      args:
+        creates: "{{ base_services_root | default('/symbios/base-services') }}/symbios-ui/config/.backup_restic_password"
 
     - name: Remove legacy backups dir /usr/local/sbin/backup.d
       ansible.builtin.file:
