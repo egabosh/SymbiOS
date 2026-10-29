@@ -377,6 +377,24 @@
         EOF
       changed_when: false
 
+    - name: write /etc/sysupgrade.conf
+      raw: |
+        cat << 'EOF' > /etc/sysupgrade.conf
+        ## This file contains files and directories that should
+        ## be preserved during an upgrade.
+        /etc/wg_lan/
+        /etc/wg_tor/
+        /etc/openvpn/
+        /etc/scripts/
+        /etc/dnscrypt-proxy2/
+        /etc/asterisk/
+        /etc/ips-*
+        /etc/key.pem
+        /etc/tor_*
+        /etc/resolv*
+        EOF
+      changed_when: false
+
     - name: write firewall port-forward helper script
       raw: |
         mkdir -p /etc/scripts
