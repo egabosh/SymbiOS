@@ -90,6 +90,7 @@
       vars:
         ufw_port: '514'
         ufw_src: "{{ item }}"
+        ufw_proto: 'udp'
       loop:
         - 10.0.0.0/8
         - 172.16.0.0/12
