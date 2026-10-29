@@ -313,14 +313,15 @@
           file="/etc/ips-doh-${proto}.txt"
           [ -s "$file" ] || continue
           
-          # renew ipsets (lists)
+          # renew ipsets - fw4 reads the elements from the list file (option loadfile),
+          # no uci list entries needed (keeps /etc/config/firewall small)
           uci -q delete firewall.doh_${proto}
           uci set firewall.doh_${proto}=ipset
           uci set firewall.doh_${proto}.name="doh_${proto}"
           uci set firewall.doh_${proto}.match="dst_ip"  
           uci set firewall.doh_${proto}.family="${proto}"
-          awk '{printf "add_list firewall.'doh_${proto}'.entry=\047%s\047\n", $0}' "$file" >"${file}_uci_batch"
-          uci batch < "${file}_uci_batch"
+          uci set firewall.doh_${proto}.loadfile="$file"
+          rm -f "${file}_uci_batch"
           # renew block rules
           uci -q delete firewall.doh_${proto}_rule
           uci set firewall.doh_${proto}_rule=rule
@@ -339,7 +340,8 @@
         EOF
 
         chmod 700 /etc/scripts/dnscrypt-proxy-blocklist-update.sh
-        [ -s /etc/ips-doh-ipv6.txt ] || /etc/scripts/dnscrypt-proxy-blocklist-update.sh
+        # run once if the sets are not file based yet (also heals legacy configs with list entries)
+        [ "$(uci -q get firewall.doh_ipv4.loadfile)" = "/etc/ips-doh-ipv4.txt" ] || /etc/scripts/dnscrypt-proxy-blocklist-update.sh
 
         cronjob="15 6 * * *   /etc/scripts/dnscrypt-proxy-blocklist-update.sh"
         grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root

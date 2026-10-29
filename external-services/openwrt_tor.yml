@@ -348,14 +348,15 @@
           file="/etc/ips-tor-${proto}.txt"
           [ -s "$file" ] || continue
 
-          # renew ipsets (lists)
+          # renew ipsets - fw4 reads the elements from the list file (option loadfile),
+          # no uci list entries needed (keeps /etc/config/firewall small)
           uci -q delete firewall.tor_${proto}
           uci set firewall.tor_${proto}=ipset
           uci set firewall.tor_${proto}.name="tor_${proto}"
           uci set firewall.tor_${proto}.match="dst_ip"
           uci set firewall.tor_${proto}.family="${proto}"
-          awk '{printf "add_list firewall.'tor_${proto}'.entry=\047%s\047\n", $0}' "$file" >"${file}_uci_batch"
-          uci batch < "${file}_uci_batch"
+          uci set firewall.tor_${proto}.loadfile="$file"
+          rm -f "${file}_uci_batch"
           # renew block rules
           uci -q delete firewall.tor_${proto}_rule
           uci set firewall.tor_${proto}_rule=rule
@@ -373,7 +374,8 @@
         EOF
 
         chmod 700 /etc/scripts/tor-nodes-blocklist-update.sh
-        [ -s /etc/ips-tor-ipv6.txt ] || /etc/scripts/tor-nodes-blocklist-update.sh
+        # run once if the sets are not file based yet (also heals legacy configs with list entries)
+        [ "$(uci -q get firewall.tor_ipv4.loadfile)" = "/etc/ips-tor-ipv4.txt" ] || /etc/scripts/tor-nodes-blocklist-update.sh
 
         cronjob="15 5 * * *   /etc/scripts/tor-nodes-blocklist-update.sh"
         grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
@@ -396,14 +398,17 @@
         uci set firewall.tor_whitelist.name="tor_whitelist"
         uci set firewall.tor_whitelist.match="dst_ip"
         uci set firewall.tor_whitelist.family="ipv4"
-        awk '{printf "add_list firewall.'tor_whitelist'.entry=\047%s\047\n", $0}' "/etc/tor_whitelist_ips" >"/etc/tor_whitelist_ips_uci_batch"
-        uci batch < "/etc/tor_whitelist_ips_uci_batch"
+        # fw4 reads the elements from the list file (option loadfile),
+        # no uci list entries needed (keeps /etc/config/firewall small)
+        uci set firewall.tor_whitelist.loadfile="/etc/tor_whitelist_ips"
+        rm -f "/etc/tor_whitelist_ips_uci_batch"
         uci commit
         /etc/init.d/firewall reload
         EOF
 
         chmod 700 /etc/scripts/tor_whitelist.sh
-        [ -s /etc/tor_whitelist_ips ] && /etc/scripts/tor_whitelist.sh
+        # run once if the set is not file based yet (also heals legacy configs with list entries)
+        [ "$(uci -q get firewall.tor_whitelist.loadfile)" = "/etc/tor_whitelist_ips" ] || /etc/scripts/tor_whitelist.sh
 
         cronjob="*/15 * * * *   /etc/scripts/tor_whitelist.sh"
         grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
