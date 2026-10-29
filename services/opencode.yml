@@ -294,7 +294,8 @@
             },
             "experimental": {
               "todo": true
-            }
+            },
+            "model": "ai/llamacpp-default"
           }
         dest: /symbios/services/opencode/opencode-config/opencode.json
         mode: 0440
