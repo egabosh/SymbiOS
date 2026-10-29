@@ -1,7 +1,7 @@
 # docs:
 #   name: "OpenWrt - DHCP static host"
 #   short_description: "OpenWrt - DHCP static host"
-#   description: "Static DHCP lease (UCI host section) including DNS name and segment tagging."
+#   description: "Static DHCP lease (UCI host section) including DNS name"
 #   category: "Network"
 #   type: OpenWrt
 #   icon: "bi-pc-display"
@@ -44,7 +44,6 @@
       - { key: "dhcp.host_{{ host }}.dns",   value: "1" }
       - { key: "dhcp.host_{{ host }}.ip",    value: "{{ ip }}" }
       - { key: "dhcp.host_{{ host }}.mac",   value: "{{ mac }}" }
-      - { key: "dhcp.host_{{ host }}.tag",   value: "ansible,{{ network }}" }
       - { key: "dhcp.host_{{ host }}.hostid",  value: "{{ '%04d' | format(ip.split('.')[-1] | int) }}" }
       - { key: "dhcp.host_{{ host }}.instance", value: "{{ network }}_dnsmasq" }
       - { key: "dhcp.host_{{ host }}.leasetime", value: "1h" }
