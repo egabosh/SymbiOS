@@ -50,7 +50,9 @@
       - { key: "dhcp.iot.dhcpv4", value: "server" }
       - { key: "dhcp.iot.dhcpv6", value: "server" }
       - { key: "dhcp.iot.ra", value: "server" }
-      - { key: "dhcp.iot.ra_management", value: '1' }
+      # odhcpd RA flags (dnsmasq's legacy ra_management is ignored since 24.10):
+      # managed-config sets the M flag so clients use stateful DHCPv6
+      - { key: "dhcp.iot.ra_flags", value: "managed-config" }
       - { key: "dhcp.iot.ra_default", value: '1' }
       - { key: "dhcp.iot.ra_lifetime", value: '1800' }
       - { key: "dhcp.iot.force", value: "1" }
@@ -190,7 +192,7 @@
         #if [ "$current" != "$desired" ]
         if ! echo "$current" | grep "$desired"
         then
-          if echo "{{ item.key }}" | egrep -q "dhcp\...._dnsmasq.listen_address|dhcp\...._dnsmasq.server|dhcp\....\.dhcp_option"
+          if echo "{{ item.key }}" | egrep -q "dhcp\...._dnsmasq.listen_address|dhcp\...._dnsmasq.server|dhcp\....\.dhcp_option|dhcp\....\.ra_flags"
           then
             uci add_list {{ item.key }}="{{ item.value }}"
           else

@@ -121,7 +121,8 @@
       raw: |
         cat << 'EOF' > /etc/scripts/ddns_get_ipv6_{{ localhostname }}.sh
         #!/bin/sh
-        cat /tmp/hosts/odhcpd | grep {{ localhostname }} | head -n1 | sed 's/\t.*$//'
+        # odhcpd lease file columns: # <iface> <duid> <iaid> <name> <expiry> <hostid> <plen> <addr1> <addr2>
+        awk '$5 == "{{ localhostname }}" {print $9; exit}' /tmp/hosts/odhcpd | cut -d/ -f1
         EOF
         chmod 500 /etc/scripts/ddns_get_ipv6_{{ localhostname }}.sh
       changed_when: false

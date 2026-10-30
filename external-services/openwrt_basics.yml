@@ -19,10 +19,6 @@
 #       label: "LAN IPv6 address"
 #       type: "text"
 #       placeholder: "fd00:1::1"
-#     - name: "ipv6_ula_prefix"
-#       label: "IPv6 ULA prefix"
-#       type: "text"
-#       placeholder: "fd00:1::/64"
 #     - name: "timezone"
 #       label: "Timezone"
 #       type: "text"
@@ -137,7 +133,6 @@
       - { key: "network.lan.proto", value: "static" }
       - { key: "network.lan.ipaddr", value: "{{ ip }}" }
       - { key: "network.lan.netmask", value: "{{ mask }}" }
-      - { key: "network.lan.ula_prefix", value: "{{ ipv6_ula_prefix }}" }
       - { key: "network.lan.ip6addr", value: "{{ ip6 }}" }
       - { key: "network.lan.ip6assign", value: "64" }
 
@@ -180,7 +175,9 @@
       - { key: "dhcp.lan.dhcpv4", value: "server" }
       - { key: "dhcp.lan.dhcpv6", value: "server" }
       - { key: "dhcp.lan.ra", value: "server" }
-      - { key: "dhcp.lan.ra_management", value: "1" }
+      # odhcpd RA flags (dnsmasq's legacy ra_management is ignored since 24.10):
+      # managed-config sets the M flag so clients use stateful DHCPv6
+      - { key: "dhcp.lan.ra_flags", value: "managed-config" }
       - { key: "dhcp.lan.ra_default", value: "1" }
       - { key: "dhcp.lan.ra_lifetime", value: "1800" }
       - { key: "dhcp.lan.force", value: "1" }
@@ -331,7 +328,6 @@
         that:
           - ip is defined
           - ip6 is defined
-          - ipv6_ula_prefix is defined
           - upstream_dns is defined
         fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
         quiet: true
@@ -614,7 +610,7 @@
         # dhcp_option) must be appended, not overwritten.
         if ! echo "$current" | grep -qF -- "$desired"
         then
-          if echo "{{ item.key }}" | egrep -q "firewall\..+\.network|dhcp\.[a-z0-9_]+_dnsmasq\.(listen_address|server)|dhcp\.[a-z0-9_]+\.dhcp_option"
+          if echo "{{ item.key }}" | egrep -q "firewall\..+\.network|dhcp\.[a-z0-9_]+_dnsmasq\.(listen_address|server)|dhcp\.[a-z0-9_]+\.dhcp_option|dhcp\.[a-z0-9_]+\.ra_flags"
           then
             uci add_list {{ item.key }}="{{ item.value }}"
           else
