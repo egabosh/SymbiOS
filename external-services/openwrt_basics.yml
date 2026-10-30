@@ -69,6 +69,9 @@
     bridges: "br-lan"
     dhcp_ip_start: "100"
     dhcp_ip_limit: "150"
+    # UDP port of the netconsole receiver on the log server (1514 sits next
+    # to the syslog port 514). Must match the rsyslog input on SymbiOS.
+    netconsole_port: "1514"
     managed_id: "openwrt_basics.yml"
     managed_playbook: "openwrt_basics.yml"
     managed_resource_type: "basics"
@@ -113,6 +116,7 @@
       - luci-mod-rpc
       - avahi-dbus-daemon
       - avahi-utils
+      - kmod-netconsole
 
     # Default UCI sections that are replaced explicitly below.
     uci_default_vars:
@@ -534,6 +538,58 @@
         EOF
 
         chmod 700 /etc/scripts/firewall_port_forwards_from_wan_to_newzone.sh
+      changed_when: false
+
+    - name: write netconsole init script
+      raw: |
+        cat << 'EOF' > /etc/init.d/netconsole
+        #!/bin/sh /etc/rc.common
+        # Forward kernel printk (oops and panic included) to the SymbiOS log
+        # server. netconsole transmits via netpoll, so it still works after
+        # panic() has frozen userspace - unlike logd, which loses the tail of
+        # an oops report. Target is the log server configured by
+        # openwrt_logserver.yml, source is the LAN address of this router.
+
+        START=99
+
+        start() {
+          local ip target mac mod
+
+          # no LAN address or no log server configured -> nothing to do
+          ip=$(uci -q get network.lan.ipaddr)
+          target=$(uci -q get system.@system[0].log_ip)
+          [ -n "$ip" ] && [ -n "$target" ] || return 0
+
+          mod=$(find /lib/modules/$(uname -r) -name 'netconsole.ko*' | head -n 1)
+          [ -n "$mod" ] || return 0
+
+          # Always reload: the kmod package pulls the module in at boot via
+          # /etc/modules.d/netconsole without a target, and modprobe on
+          # OpenWrt (kmodloader) silently drops module parameters - so the
+          # configuration has to go through insmod.
+          rmmod netconsole 2>/dev/null
+
+          # unicast when the log server MAC is known, otherwise the MAC is
+          # left empty and netconsole falls back to broadcast
+          mac=$(ip -4 neigh show "$target" | grep -o 'lladdr [0-9a-f:]*' | cut -d' ' -f2)
+          insmod "$mod" "netconsole=@${ip}/br-lan,{{ netconsole_port }}@${target}/${mac}"
+        }
+
+        stop() {
+          rmmod netconsole 2>/dev/null
+        }
+        EOF
+        chmod 755 /etc/init.d/netconsole
+      changed_when: false
+
+    - name: enable netconsole
+      raw: |
+        [ -e /etc/rc.d/S99netconsole ] || { /etc/init.d/netconsole enable && echo changed; }
+      register: netconsole_enable_result
+      changed_when: "'changed' in netconsole_enable_result.stdout"
+
+    - name: start netconsole
+      raw: /etc/init.d/netconsole start
       changed_when: false
 
     # --- UCI ---------------------------------------------------------------

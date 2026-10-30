@@ -535,6 +535,17 @@
           
           if $hostname startswith 'openwrt-' then /var/log/openwrt.log
           if $hostname startswith 'openwrt-' then stop
+
+          # Kernel console of the OpenWrt routers via netconsole (UDP 1514,
+          # right next to the syslog port). The payload is plain kernel text
+          # without a syslog header, and this is the only channel that
+          # survives a panic, so it gets its own ruleset and file. The port
+          # must match netconsole_port in openwrt_basics.yml.
+          template(name="netconsole_raw" type="string" string="%timegenerated% %fromhost-ip% %rawmsg%\n")
+          ruleset(name="netconsole") {
+            action(type="omfile" file="/var/log/netconsole.log" template="netconsole_raw")
+          }
+          input(type="imudp" port="1514" ruleset="netconsole")
         backup: yes
       when: nocontainer.stat.exists == true
       notify:
