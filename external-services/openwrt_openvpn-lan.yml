@@ -29,7 +29,7 @@
     managed_ref: "lan_clients={{ lan_clients }}"
     managed_resource_type: "openvpn_lan"
     openwrt_packages:
-      - openvpn
+      - openvpn-mbedtls
       - luci-app-openvpn
       - luci-i18n-openvpn-de
       - openvpn-easy-rsa
@@ -89,17 +89,17 @@
         quiet: true
 
   tasks:
-    - name: update opkg db
-      raw: opkg update
+    - name: update apk db
+      raw: apk update
       changed_when: false
-  
+
     - name: check installed packages
-      raw: opkg list-installed
+      raw: apk info
       register: installed_packages
       changed_when: false
 
     - name: install packages if needed
-      raw: opkg install {{ item }}
+      raw: apk add {{ item }}
       loop: "{{ openwrt_packages }}"
       when: item not in installed_packages.stdout
 
@@ -165,7 +165,19 @@
         EASYRSA_DIR_FINAL="/etc/openvpn/${VPNNAME}-easy-rsa"
         OPENVPN_DIR="/etc/openvpn"
         CLIENT_NAME="${1}.${VPNNAME}"
-        CERT_DAYS=30
+        # Leaf certificates are renewed on every run, the CA is long lived
+        # and must stay the same, otherwise all pushed configs go stale.
+        CERT_DAYS=365
+        CA_DAYS=36500
+
+        # A CA is rebuilt only when its key material is gone (fresh install
+        # or a deliberate rotation, e.g. renaming the final directory).
+        if [ -s "${EASYRSA_DIR_FINAL}/pki/ca.crt" ] && [ -s "${EASYRSA_DIR_FINAL}/pki/private/ca.key" ]
+        then
+          REUSE_CA=1
+        else
+          REUSE_CA=0
+        fi
 
         # cleanup/remove old cert chain
         cd /tmp
@@ -175,8 +187,22 @@
         cd ${EASYRSA_DIR} || exit 1
 
         # generate new cert chain
-        /usr/bin/easyrsa --batch init-pki || exit 2
-        /usr/bin/easyrsa --batch --days=${CERT_DAYS} build-ca nopass || exit 3
+        if [ "$REUSE_CA" = "1" ]
+        then
+          # reuse the persistent CA: copy its pki and drop only the old leaves
+          cp -a "${EASYRSA_DIR_FINAL}/pki" pki || exit 2
+          rm -f pki/issued/* pki/reqs/* pki/inline/*
+          for old_key in pki/private/*.key
+          do
+            if [ "$(basename "$old_key")" != "ca.key" ]
+            then
+              rm -f "$old_key"
+            fi
+          done
+        else
+          /usr/bin/easyrsa --batch init-pki || exit 2
+          /usr/bin/easyrsa --batch --days=${CA_DAYS} build-ca nopass || exit 3
+        fi
         [ -s "${OPENVPN_DIR}/dh.pem" ] || openssl dhparam -out ${OPENVPN_DIR}/dh.pem 2048 || exit 4
         /usr/bin/easyrsa --batch --days=${CERT_DAYS} build-server-full openvpn-server nopass || exit 5
 

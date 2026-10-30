@@ -83,6 +83,9 @@
       - { key: "dhcp.tor_dnsmasq.server", value: "/.lan/$(uci get network.lan.ipaddr)" }
       - { key: "dhcp.tor_dnsmasq.readethers", value: "1" }
 
+      # the lan dnsmasq forwards .tor queries to this instance
+      - { key: "dhcp.lan_dnsmasq.server", value: "/tor/$(uci get network.tor.ipaddr)" }
+
       # tor zone
       - { key: "firewall.zone_tor", value: "zone" }
       - { key: "firewall.zone_tor.name", value: "tor" }
@@ -244,17 +247,17 @@
 
 
   tasks:
-    - name: update opkg db
-      raw: opkg update
+    - name: update apk db
+      raw: apk update
       changed_when: false
-  
+
     - name: check installed packages
-      raw: opkg list-installed
+      raw: apk info
       register: installed_packages
       changed_when: false
 
     - name: install packages if needed
-      raw: opkg install {{ item }}
+      raw: apk add {{ item }}
       loop: "{{ openwrt_packages }}"
       when: item not in installed_packages.stdout
 

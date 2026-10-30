@@ -36,6 +36,10 @@
 #       type: "text"
 #       required: true
 #       placeholder: "9.9.9.9 or 2a01:4f8:251:554::2"
+#     - name: "ssh_trust_master"
+#       label: "SSH key of this master (optional)"
+#       type: "text"
+#       placeholder: "172.23.0.220"
 #     - name: "bridges"
 #       label: "Avahi interfaces (comma separated)"
 #       type: "text"
@@ -69,6 +73,10 @@
     managed_playbook: "openwrt_basics.yml"
     managed_resource_type: "basics"
     managed_ref: ""
+
+    # Host (usually the OpenVPN master) whose SSH key may log in here. Empty
+    # means "do not touch /etc/dropbear/authorized_keys".
+    ssh_trust_master: ""
 
     # Union of the per-source package lists (basics + avahi).
     openwrt_packages:
@@ -175,6 +183,7 @@
       - { key: "dhcp.lan.dns", value: "$(uci get network.lan.ip6addr | cut -d/ -f1)" }
       - { key: "dhcp.lan_dnsmasq", value: "dnsmasq" }
       - { key: "dhcp.lan_dnsmasq.domain", value: "lan" }
+      - { key: "dhcp.lan_dnsmasq.listen_address", value: "127.0.0.1" }
       - { key: "dhcp.lan_dnsmasq.listen_address", value: "$(uci get network.lan.ipaddr)" }
       - { key: "dhcp.lan_dnsmasq.listen_address", value: "$(uci get network.lan.ip6addr | cut -d/ -f1)" }
       - { key: "dhcp.lan_dnsmasq.logqueries", value: "1" }
@@ -324,22 +333,36 @@
         quiet: true
 
   tasks:
+    # --- role detection ----------------------------------------------------
+    # A router with an enabled dnsmasq is the resolver of its segment (the
+    # master); a slave access point runs neither dnsmasq nor odhcpd.
+    - name: detect the resolver role
+      raw: |
+        if [ -n "$(ls /etc/rc.d/S*dnsmasq 2>/dev/null)" ]
+        then
+          echo resolver
+        else
+          echo plain
+        fi
+      register: resolver_role
+      changed_when: false
+
     # --- packages ----------------------------------------------------------
-    - name: update opkg db
-      raw: opkg update
+    - name: update apk db
+      raw: apk update
       changed_when: false
 
     - name: upgrade packages
-      raw: opkg list-upgradable | cut -f 1 -d ' ' | xargs -r opkg upgrade
+      raw: apk upgrade
       changed_when: false
 
     - name: check installed packages
-      raw: opkg list-installed
+      raw: apk info
       register: installed_packages
       changed_when: false
 
     - name: install packages if needed
-      raw: opkg install {{ item }}
+      raw: apk add {{ item }}
       loop: "{{ openwrt_packages }}"
       when: item not in installed_packages.stdout
 
@@ -348,8 +371,68 @@
       raw: |
         mkdir -p /root/.ssh
         chmod 700 /root/.ssh
-        [ -s /root/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N '' -q
+        [ -s /root/.ssh/id_ed25519 ] || ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N '' -q -C "root@$(uci get system.@system[0].hostname)"
+        chmod 600 /root/.ssh/id_ed25519
       changed_when: false
+
+    # The public key of the master is read on the ansible controller: the
+    # master can only push to this host once this key is trusted here.
+    - name: read the master ssh public key
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -o
+          - BatchMode=yes
+          - -o
+          - ConnectTimeout=5
+          - -o
+          - StrictHostKeyChecking=accept-new
+          - "root@{{ ssh_trust_master }}"
+          - cat
+          - /root/.ssh/id_ed25519.pub
+      delegate_to: localhost
+      register: master_ssh_pubkey
+      changed_when: false
+      failed_when: false
+      when: ssh_trust_master | length > 0
+
+    - name: check the master ssh public key
+      ansible.builtin.assert:
+        that:
+          - master_ssh_pubkey.rc == 0
+          - master_ssh_pubkey.stdout is match('ssh-')
+        fail_msg: "Cannot read /root/.ssh/id_ed25519.pub from {{ ssh_trust_master }} - run openwrt_basics.yml on the master first."
+        quiet: true
+      when: ssh_trust_master | length > 0
+
+    - name: trust the master ssh key
+      raw: |
+        keyline="{{ master_ssh_pubkey.stdout | trim }}"
+        mkdir -p /etc/dropbear
+        touch /etc/dropbear/authorized_keys
+        if grep -qxF "$keyline" /etc/dropbear/authorized_keys
+        then
+          echo unchanged
+        else
+          printf '%s\n' "$keyline" >> /etc/dropbear/authorized_keys
+          echo changed
+        fi
+        chmod 600 /etc/dropbear/authorized_keys
+      register: ssh_trust_result
+      changed_when: "ssh_trust_result.stdout | trim == 'changed'"
+      when: ssh_trust_master | length > 0
+
+    - name: verify the master ssh key
+      raw: |
+        blob=$(printf '%s\n' "{{ master_ssh_pubkey.stdout | trim }}" | cut -d' ' -f2)
+        if ! grep -qF "$blob" /etc/dropbear/authorized_keys
+        then
+          echo "master key missing in /etc/dropbear/authorized_keys"
+          exit 1
+        fi
+        echo ok
+      changed_when: false
+      when: ssh_trust_master | length > 0
 
     - name: write /root/.vimrc
       raw: |
@@ -392,6 +475,7 @@
         /etc/key.pem
         /etc/tor_*
         /etc/resolv*
+        /root/.ssh/
         EOF
       changed_when: false
 
@@ -499,18 +583,49 @@
             - "/etc/init.d/fstab enable"
             - "/etc/init.d/fstab restart"
             - "/etc/init.d/dropbear restart"
-            - "/etc/init.d/dnsmasq enable"
-            - "/etc/init.d/dnsmasq restart"
-            - "/etc/init.d/odhcpd enable"
-            - "/etc/init.d/odhcpd restart"
             - "/etc/init.d/avahi-daemon enable"
             - "/etc/init.d/avahi-daemon restart"
             - "/etc/init.d/firewall reload"
-            - "rm /etc/resolv.conf"
-            - "echo 'nameserver 127.0.0.1' >/etc/resolv.conf"
-            - "echo 'search lan iot tor wan' >>/etc/resolv.conf"
-            - "chmod 644 /etc/resolv.conf"
           when: uci_set_result.changed
+
+    # Only a router that already ran a resolver keeps one: a slave access
+    # point must not start a second DHCP/DNS server on the same segment.
+    - name: enable and restart the local resolver
+      raw: "{{ item }}"
+      loop:
+        - "/etc/init.d/dnsmasq enable"
+        - "/etc/init.d/dnsmasq restart"
+        - "/etc/init.d/odhcpd enable"
+        - "/etc/init.d/odhcpd restart"
+      when:
+        - uci_set_result.changed
+        - resolver_role.stdout | trim == 'resolver'
+
+    # /etc/resolv.conf is a symlink to /tmp/resolv.conf, which netifd replaces
+    # on every interface event (per-interface DNS, no search order). Write a
+    # static file instead: it is overlay backed and in /etc/sysupgrade.conf.
+    - name: write a static /etc/resolv.conf
+      raw: |
+        # only a resolver host points at itself, slaves ask the master
+        if [ "{{ resolver_role.stdout | trim }}" = "resolver" ]
+        then
+          ns=127.0.0.1
+        else
+          ns=$(uci -q get network.lan.dns)
+        fi
+        printf 'nameserver %s\nsearch lan iot tor\n' "$ns" > /tmp/resolv.conf.new
+        if cmp -s /tmp/resolv.conf.new /etc/resolv.conf
+        then
+          echo unchanged
+        else
+          rm -f /etc/resolv.conf
+          mv /tmp/resolv.conf.new /etc/resolv.conf
+          chmod 644 /etc/resolv.conf
+          echo changed
+        fi
+        rm -f /tmp/resolv.conf.new
+      register: resolv_result
+      changed_when: "resolv_result.stdout | trim == 'changed'"
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state

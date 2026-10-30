@@ -69,6 +69,9 @@
       - { key: "dhcp.iot_dnsmasq.readethers", value: "1" }
       - { key: "dhcp.iot_dnsmasq.server", value: "/.lan/$(uci get network.lan.ipaddr)" }
 
+      # the lan dnsmasq forwards .iot queries to this instance
+      - { key: "dhcp.lan_dnsmasq.server", value: "/iot/$(uci get network.iot.ipaddr)" }
+
       # iot zone
       - { key: "firewall.zone_iot", value: "zone" }
       - { key: "firewall.zone_iot.name", value: "iot" }
