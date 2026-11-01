@@ -85,13 +85,18 @@
       register: gbk_deploy
       changed_when: "gbk_deploy.stdout | default('') == 'changed'"
 
+    # The config dir is the WebUI container's /config mount: it must stay
+    # owned by the WebUI user (uid 10000), exactly as symbios-ui.yml creates
+    # it. A root:root mode here would make /config untraversable for the
+    # container, so every page redirects to /setup/ (inventory unreadable).
+    # The restic password file itself stays root-only via its own 0600 mode.
     - name: Ensure restic password file directory exists
       ansible.builtin.file:
         path: "{{ base_services_root | default('/symbios/base-services') }}/symbios-ui/config"
-        owner: root
-        group: root
+        owner: "10000"
+        group: "10000"
         state: directory
-        mode: '0750'
+        mode: '0770'
 
     - name: Create restic password file if missing
       ansible.builtin.shell: |
