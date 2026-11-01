@@ -91,6 +91,10 @@ g_local_dates="$(mktemp)"
 g_remote_dates="$(mktemp)"
 g_arch_dates="$(mktemp)"
 g_warning=""
+# One date file per restic target so the UI can show WHICH server holds a
+# snapshot (parallel arrays, index-aligned).
+g_target_files=()
+g_target_names=()
 
 # Local snapshots (rsync mode)
 f_bk_list_local_dates > "$g_local_dates"
@@ -101,9 +105,12 @@ if f_bk_has_targets
 then
   if command -v restic >/dev/null 2>&1 && [[ -n "${g_bk_restic_pw_file:-}" ]] && [[ -s "${g_bk_restic_pw_file}" ]]; then
     export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
+    g_idx=0
     while IFS=$'\t' read -r f_t_name f_t_host f_t_port f_t_user f_t_path f_t_kd f_t_kw f_t_km
     do
       [[ -n "$f_t_host" ]] || continue
+      g_target_files+=("${g_tmp}/bk-target-${g_idx}.dates")
+      g_target_names+=("$f_t_name")
       RESTIC_REPOSITORY="sftp://${f_t_user}@${f_t_host}:${f_t_port}//${f_t_path#/}/$(hostname)"
       f_sshargs="-o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ServerAliveCountMax=240"
       [[ -r "$g_bk_ssh_key" ]] && f_sshargs="-i $g_bk_ssh_key $f_sshargs"
@@ -117,7 +124,10 @@ try:
       print(t[:10])
 except Exception:
   pass
-" >> "$g_remote_dates" || true
+" > "${g_target_files[$g_idx]}" || : > "${g_target_files[$g_idx]}"
+      sort -ru -o "${g_target_files[$g_idx]}" "${g_target_files[$g_idx]}"
+      cat "${g_target_files[$g_idx]}" >> "$g_remote_dates"
+      g_idx=$(( g_idx + 1 ))
     done < <(f_bk_targets_tsv)
     sort -ru -o "$g_remote_dates" "$g_remote_dates"
   fi
@@ -136,7 +146,9 @@ fi
 # Merge all dates (unique, newest first)
 sort -u "$g_local_dates" "$g_remote_dates" "$g_arch_dates" | sort -ru > "${g_tmp}/all-dates"
 
-# Build the JSON snapshots array
+# Build the JSON snapshots array: per date which locations hold it.
+# "servers" lists the names of the remote targets that have this snapshot,
+# so with multiple backup servers the Location column stays unambiguous.
 g_snap_json="["
 g_first=1
 while IFS= read -r g_date
@@ -153,7 +165,22 @@ do
     g_has_remote=1
     g_encrypted=1
   fi
-  g_snap_json="$g_snap_json{\"date\":\"$g_date\",\"local\":$g_has_local,\"remote\":$g_has_remote,\"encrypted\":$g_encrypted}"
+  # Which restic targets hold this date (per-target date files)
+  g_srv_json=""
+  for i in "${!g_target_names[@]}"
+  do
+    if [[ -s "${g_target_files[$i]}" ]] && grep -qx "$g_date" "${g_target_files[$i]}"
+    then
+      g_has_remote=1
+      g_srv_json="${g_srv_json:+, }$(printf '%s' "${g_target_names[$i]}" | f_json_escape)"
+    fi
+  done
+  if [[ $g_encrypted -eq 1 && -z "$g_srv_json" ]]
+  then
+    # Legacy encrypted archive: it lives on the primary target
+    g_srv_json="$(printf '%s' "$(hostname)" | f_json_escape)"
+  fi
+  g_snap_json="$g_snap_json{\"date\":\"$g_date\",\"local\":$g_has_local,\"remote\":$g_has_remote,\"encrypted\":$g_encrypted,\"servers\":[$g_srv_json]}"
 done < "${g_tmp}/all-dates"
 g_snap_json="$g_snap_json]"
 
@@ -189,4 +216,5 @@ cat <<EOF
 "warning":$(printf '%s' "$g_warning" | f_json_escape),
 "pubkey":$(printf '%s' "$g_pubkey" | f_json_escape)}
 EOF
-rm -f "$g_local_dates" "$g_remote_dates" "$g_arch_dates"
+rm -f "$g_local_dates" "$g_remote_dates" "$g_arch_dates" \
+  ${g_target_files[@]+"${g_target_files[@]}"}

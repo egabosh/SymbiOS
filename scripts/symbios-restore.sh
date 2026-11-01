@@ -98,10 +98,23 @@ function f_die_json {
   exit 1
 }
 
+# The restic target selected for this run (one f_bk_targets_tsv line:
+# name|host|port|user|path|kd|kw|km). Set by f_find_restic_snapshot when a
+# date is found on one of the configured targets - primary first, then the
+# additional servers. All restic calls below use this target.
+g_restic_target=""
+
 function f_restic_repo_url {
-  if f_bk_is_remote; then
-    echo "sftp://${g_bk_user}@${g_bk_host}:${g_bk_port}//${g_bk_path#/}/$(hostname)"
-  fi
+  [[ -n "$g_restic_target" ]] || return 1
+  local f_name f_host f_port f_user f_path
+  IFS='|' read -r f_name f_host f_port f_user f_path _ <<< "$g_restic_target"
+  echo "sftp://${f_user}@${f_host}:${f_port}//${f_path#/}/$(hostname)"
+}
+
+function f_restic_target_name {
+  local f_name
+  IFS='|' read -r f_name _ <<< "${g_restic_target}"
+  echo "$f_name"
 }
 
 function f_restic_sshargs {
@@ -110,14 +123,22 @@ function f_restic_sshargs {
   echo "$f_sshargs"
 }
 
-function f_get_restic_snapshot_id_for_date {
+# Find a restic snapshot of <date> on ANY configured target (primary first,
+# then the additional servers). Sets g_restic_target to the matching one and
+# prints its short id; returns 1 when no target holds that date.
+function f_find_restic_snapshot {
   local f_date="$1"
-  [[ -z "$f_date" ]] && return 1
-  if f_bk_is_remote && command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]; then
-    export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
-    export RESTIC_REPOSITORY="$(f_restic_repo_url)"
-    local f_sshargs="$(f_restic_sshargs)"
-    restic snapshots --json -o "sftp.args=${f_sshargs}" 2>/dev/null | python3 -c "
+  [[ -n "$f_date" ]] || return 1
+  command -v restic >/dev/null 2>&1 || return 1
+  [[ -s "${g_bk_restic_pw_file:-}" ]] || return 1
+  export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
+  local f_line f_sid
+  while IFS= read -r f_line
+  do
+    [[ -n "$f_line" ]] || continue
+    g_restic_target="$f_line"
+    f_sid="$(RESTIC_REPOSITORY="$(f_restic_repo_url)" restic snapshots --json \
+      -o "sftp.args=$(f_restic_sshargs)" 2>/dev/null | python3 -c "
 import sys,json
 try:
   data=json.load(sys.stdin)
@@ -126,11 +147,15 @@ try:
     if t[:10]=='$f_date':
       print(s.get('short_id') or s.get('id'))
       break
-except:
+except Exception:
   pass
-" 2>/dev/null
-    return 0
-  fi
+")" || f_sid=""
+    if [[ -n "$f_sid" ]]; then
+      echo "$f_sid"
+      return 0
+    fi
+  done < <(f_bk_targets_tsv)
+  g_restic_target=""
   return 1
 }
 
@@ -181,16 +206,23 @@ else
     || f_die_json "Invalid service name '$g_scope'."
 fi
 
-# Resolve which physical source the snapshot comes from (local disk,
-# remote rsync target or encrypted archive).
+# Resolve which physical source the snapshot comes from: local disk first,
+# then the primary remote target (legacy rsync/archive). For restic the date
+# may live on ANY configured target, so probe them in order (primary + the
+# additional servers) - f_find_restic_snapshot remembers the matching one.
 if ! f_bk_resolve_source "$g_date"
 then
-  if f_bk_is_remote && [[ "$g_action" == "find" || "$g_action" == "ls" || "$g_scope" == "--file" ]]; then
-    g_bk_src_kind="remote-restic"
-    g_src_desc="restic snapshot on ${g_bk_host}"
-  else
-    f_die_json "No snapshot found for $g_date."
+  if [[ "$g_action" == "find" || "$g_action" == "ls" || "$g_scope" == "--file" ]]
+  then
+    g_restic_sid="$(f_find_restic_snapshot "$g_date")" || g_restic_sid=""
+    if [[ -n "$g_restic_sid" ]]; then
+      g_bk_src_kind="remote-restic"
+    fi
   fi
+fi
+if [[ -z "$g_bk_src_kind" ]]
+then
+  f_die_json "No snapshot found for $g_date."
 fi
 
 # Human-readable source description for the plan output.
@@ -199,15 +231,18 @@ case "$g_bk_src_kind" in
   remote-rsync)   g_src_desc="snapshot on ${g_bk_host}" ;;
   local-archive)  g_src_desc="local encrypted archive" ;;
   remote-archive) g_src_desc="encrypted archive on ${g_bk_host}" ;;
-  remote-restic)  g_src_desc="restic snapshot on ${g_bk_host}" ;;
+  remote-restic)  g_src_desc="restic snapshot on $(f_restic_target_name)" ;;
 esac
 
+# restic source: the matching target (g_restic_target) and its snapshot id
+# were already resolved above; plain assignments on purpose - "local" only
+# works inside functions and would silently leave these empty.
 if [[ "$g_action" == "find" ]]; then
   if [[ "$g_bk_src_kind" == "remote-restic" ]] && command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]; then
     export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
     export RESTIC_REPOSITORY="$(f_restic_repo_url)"
-    local f_sshargs="$(f_restic_sshargs)"
-    local f_sid="$(f_get_restic_snapshot_id_for_date "$g_date")"
+    f_sshargs="$(f_restic_sshargs)"
+    f_sid="$g_restic_sid"
     if [[ -n "$f_sid" ]]; then
       restic find "$g_pattern" --host "$(hostname)" --json -o "sftp.args=${f_sshargs}" 2>/dev/null | python3 -c "
 import sys,json
@@ -234,8 +269,8 @@ if [[ "$g_action" == "ls" ]]; then
   if [[ "$g_bk_src_kind" == "remote-restic" ]] && command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]; then
     export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
     export RESTIC_REPOSITORY="$(f_restic_repo_url)"
-    local f_sshargs="$(f_restic_sshargs)"
-    local f_sid="$(f_get_restic_snapshot_id_for_date "$g_date")"
+    f_sshargs="$(f_restic_sshargs)"
+    f_sid="$g_restic_sid"
     if [[ -n "$f_sid" ]]; then
       restic ls "$f_sid" "$g_lspath" -o "sftp.args=${f_sshargs}" 2>&1 | head -200
       exit 0
@@ -334,7 +369,8 @@ g_rel_dirs=()
 
 function f_collect_scope_dirs {
   local f_cand
-  if [[ "$g_scope" == "--full" ]]
+  # --file restores a single path, not service directories: no scope dirs.
+  if [[ "$g_scope" == "--full" || "$g_scope" == "--file" ]]
   then
     return 0
   fi
@@ -434,8 +470,9 @@ function f_build_plan {
 f_build_plan
 
 ### Output plan (also for restore without --yes) ###
+# --file is handled by its own branch below (it has a dedicated plan output).
 
-if [[ "$g_action" == "plan" || -z "$g_yes" ]]
+if { [[ "$g_action" == "plan" ]] || [[ -z "$g_yes" ]]; } && [[ "$g_scope" != "--file" ]]
 then
   cat <<EOF
 {"ok":true,"action":"plan","date":"$g_date","scope":"$g_scope",
@@ -578,8 +615,8 @@ then
     if [[ "$g_bk_src_kind" == "remote-restic" ]] && command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]; then
       export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
       export RESTIC_REPOSITORY="$(f_restic_repo_url)"
-      local f_sshargs="$(f_restic_sshargs)"
-      local f_sid="$(f_get_restic_snapshot_id_for_date "$g_date")"
+      f_sshargs="$(f_restic_sshargs)"
+      f_sid="$g_restic_sid"
       [[ -z "$f_sid" ]] && f_sid="latest"
       local f_dest="${g_target}"
       if [[ -z "$f_dest" ]]; then

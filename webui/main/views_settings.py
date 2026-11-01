@@ -356,37 +356,60 @@ def settings_backup(request):
 
 @login_required
 def settings_backup_test(request):
-    """AJAX POST - test SSH/SCP connectivity to the backup server."""
+    """AJAX POST - test SSH connectivity to ALL configured backup servers.
+
+    Expects `servers` as a JSON array of {name, host, port, user, path}.
+    Returns one result per server so the UI can show which target is broken.
+    """
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
-    host = request.POST.get('host', '').strip()
-    port = request.POST.get('port', '').strip() or '22'
-    user = request.POST.get('user', '').strip() or 'root'
-    path = request.POST.get('path', '').strip()
-
-    if not host:
-        return JsonResponse({'ok': False, 'error': 'Host is required'})
-
     try:
-        port_int = int(port)
-        if port_int < 1 or port_int > 65535:
-            return JsonResponse({'ok': False, 'error': 'Invalid port number'})
-    except ValueError:
-        return JsonResponse({'ok': False, 'error': 'Port must be a number'})
+        servers = json.loads(request.POST.get('servers') or '[]')
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({'ok': False, 'error': 'Invalid server list'})
+    if not isinstance(servers, list) or not servers:
+        return JsonResponse({'ok': False, 'error': 'No servers to test'})
 
-    # Delegate to symbios-test-ssh.sh via the exec gateway
-    cmd = f'symbios-test-ssh.sh {shlex.quote(host)} {shlex.quote(port)} {shlex.quote(user)}'
-    if path:
-        cmd += f' {shlex.quote(path)}'
-    try:
-        ok, stdout, stderr = run_command(cmd, timeout=20)
-        if ok and stdout:
-            return JsonResponse(json.loads(stdout))
-        else:
-            return JsonResponse({'ok': False, 'error': stderr or 'SSH test failed'})
-    except Exception as e:
-        return JsonResponse({'ok': False, 'error': str(e)})
+    results = []
+    for srv in servers[:10]:  # sanity cap, the form never sends more
+        if not isinstance(srv, dict):
+            continue
+        host = str(srv.get('host') or '').strip()
+        if not host:
+            continue
+        port = str(srv.get('port') or '').strip() or '22'
+        user = str(srv.get('user') or '').strip() or 'root'
+        path = str(srv.get('path') or '').strip()
+        name = str(srv.get('name') or '').strip() or host
+        try:
+            port_int = int(port)
+            if not 1 <= port_int <= 65535:
+                raise ValueError
+        except ValueError:
+            results.append({'name': name, 'ok': False,
+                            'error': 'Invalid port number'})
+            continue
+
+        # Delegate to symbios-test-ssh.sh via the exec gateway (it uses the
+        # same key as the backup run itself).
+        cmd = f'symbios-test-ssh.sh {shlex.quote(host)} {shlex.quote(port)} {shlex.quote(user)}'
+        if path:
+            cmd += f' {shlex.quote(path)}'
+        try:
+            ok, stdout, stderr = run_command(cmd, timeout=30)
+            if ok and stdout:
+                data = json.loads(stdout)
+                results.append({'name': name, 'ok': bool(data.get('ok')),
+                                'message': data.get('message', ''),
+                                'error': data.get('error', '')})
+            else:
+                results.append({'name': name, 'ok': False,
+                                'error': (stderr or 'SSH test failed').strip()[:300]})
+        except Exception as e:
+            results.append({'name': name, 'ok': False, 'error': str(e)})
+
+    return JsonResponse({'ok': all(r['ok'] for r in results), 'results': results})
 
 
 def _validate_backup_date_scope(date_str, scope):
