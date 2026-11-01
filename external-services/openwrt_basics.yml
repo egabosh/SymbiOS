@@ -181,7 +181,10 @@
       # odhcpd RA flags (dnsmasq's legacy ra_management is ignored since 24.10):
       # managed-config sets the M flag so clients use stateful DHCPv6
       - { key: "dhcp.lan.ra_flags", value: "managed-config" }
-      - { key: "dhcp.lan.ra_default", value: "1" }
+      # Only the resolver (master) advertises a v6 default route; a slave must
+      # not, otherwise every client builds a multipath default route into
+      # routers without an IPv6 upstream and loses most of its flows.
+      - { key: "dhcp.lan.ra_default", value: "{{ '1' if resolver_role.stdout | trim == 'resolver' else '0' }}" }
       - { key: "dhcp.lan.ra_lifetime", value: "1800" }
       - { key: "dhcp.lan.force", value: "1" }
       - { key: "dhcp.lan.dns", value: "$(uci get network.lan.ip6addr | cut -d/ -f1)" }
@@ -212,6 +215,12 @@
       - { key: "firewall.zone_lan.output", value: "ACCEPT" }
       - { key: "firewall.zone_lan.forward", value: "ACCEPT" }
       - { key: "firewall.zone_lan.log", value: "1" }
+      # The internet scans alone produce ~25 dropped packets per minute, plus
+      # ~18 forwarded IoT drops and ~17 rejected WAN outbound attempts. Without
+      # a limit that flood pushes everything else out of the 128 KB kernel ring
+      # buffer within about 10 minutes, which is why a crash has no history.
+      # fw4 keeps counting every packet, only the log lines are sampled.
+      - { key: "firewall.zone_lan.log_limit", value: "5/minute" }
       - { key: "firewall.zone_lan.masq", value: "0" }
       - { key: "firewall.zone_lan.mtu_fix", value: "0" }
 
@@ -223,6 +232,7 @@
       - { key: "firewall.zone_wan.output", value: "ACCEPT" }
       - { key: "firewall.zone_wan.forward", value: "DROP" }
       - { key: "firewall.zone_wan.log", value: "1" }
+      - { key: "firewall.zone_wan.log_limit", value: "5/minute" }
       - { key: "firewall.zone_wan.masq", value: "1" }
       - { key: "firewall.zone_wan.mtu_fix", value: "1" }
       - { key: "firewall.rule_dhcp_renew", value: "rule" }
@@ -570,7 +580,11 @@
           rmmod netconsole 2>/dev/null
 
           # unicast when the log server MAC is known, otherwise the MAC is
-          # left empty and netconsole falls back to broadcast
+          # left empty and netconsole falls back to broadcast. Right after an
+          # interface reload the neighbour entry is often gone, so wake it up
+          # with one ping first: broadcast would send every kernel line to
+          # every device in the LAN.
+          ping -c 1 -W 1 "$target" >/dev/null 2>&1
           mac=$(ip -4 neigh show "$target" | grep -o 'lladdr [0-9a-f:]*' | cut -d' ' -f2)
           insmod "$mod" "netconsole=@${ip}/br-lan,{{ netconsole_port }}@${target}/${mac}"
         }
@@ -590,6 +604,26 @@
 
     - name: start netconsole
       raw: /etc/init.d/netconsole start
+      changed_when: false
+
+    - name: re-arm netconsole when the LAN interface comes back
+      raw: |
+        mkdir -p /etc/hotplug.d/iface
+        cat << 'EOF' > /etc/hotplug.d/iface/90-netconsole
+        #!/bin/sh
+        # netconsole binds to br-lan. netifd recreates the bridge on every
+        # "network reload", and the kernel then stops the logging for good:
+        #   netconsole: network logging stopped on interface br-lan as it
+        #   unregistered
+        # From that moment on a panic is lost, which is exactly how the oops
+        # reports of 2026-10-31/11-01 disappeared on the slaves. Re-arm the
+        # console as soon as the LAN interface is up again.
+        [ "$ACTION" = "ifup" ] || exit 0
+        [ "$INTERFACE" = "lan" ] || exit 0
+        /etc/init.d/netconsole restart >/dev/null 2>&1
+        /usr/bin/logger -t netconsole "re-armed after ifup lan"
+        EOF
+        chmod 755 /etc/hotplug.d/iface/90-netconsole
       changed_when: false
 
     - name: write ipqess napi init script

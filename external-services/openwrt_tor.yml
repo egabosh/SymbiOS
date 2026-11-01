@@ -16,6 +16,20 @@
   hosts: all
   gather_facts: no
 
+  # Same role check as in openwrt_basics.yml: only a router that runs dnsmasq
+  # (the master) may advertise a v6 default route, slaves must not.
+  pre_tasks:
+    - name: detect the resolver role
+      raw: |
+        if [ -n "$(ls /etc/rc.d/S*dnsmasq 2>/dev/null)" ]
+        then
+          echo resolver
+        else
+          echo plain
+        fi
+      register: resolver_role
+      changed_when: false
+
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
@@ -66,7 +80,8 @@
       # odhcpd RA flags (dnsmasq's legacy ra_management is ignored since 24.10):
       # managed-config sets the M flag so clients use stateful DHCPv6
       - { key: "dhcp.tor.ra_flags", value: "managed-config" }
-      - { key: "dhcp.tor.ra_default", value: '1' }
+      # Only the resolver advertises a v6 default route, see openwrt_basics.yml.
+      - { key: "dhcp.tor.ra_default", value: "{{ '1' if resolver_role.stdout | trim == 'resolver' else '0' }}" }
       - { key: "dhcp.tor.ra_lifetime", value: '1800' }
       - { key: "dhcp.tor.force", value: "1" }
       - { key: "dhcp.tor.dhcp_option", value: "119,tor,lan" }
@@ -96,6 +111,9 @@
       - { key: "firewall.zone_tor.output", value: "ACCEPT" }
       - { key: "firewall.zone_tor.forward", value: "ACCEPT" }
       - { key: "firewall.zone_tor.log", value: "1" }
+      # Same reasoning as in openwrt_basics.yml: unbounded drop logging wipes
+      # the kernel ring buffer within minutes.
+      - { key: "firewall.zone_tor.log_limit", value: "5/minute" }
       - { key: "firewall.zone_tor.masq", value: "0" }
       - { key: "firewall.zone_tor.mtu_fix", value: "0" }
 
