@@ -1,7 +1,7 @@
 CHECK_CATEGORY="system"
 CHECK_TITLE="Stuck Processes"
 CHECK_DESC="Detects processes stuck for more than 30 minutes."
-CHECK_DETAIL="Monitors processes in D (uninterruptible sleep),|Z (zombie), or R (running) state.|Tracks each PID over time in a temp directory.|Alerts if a process stays stuck for more than 30 minutes.|Excludes known long-running operations (USB storage, RAID)."
+CHECK_DETAIL="Monitors processes in D (uninterruptible sleep),|Z (zombie), or R (running) state.|Tracks each PID over time in a temp directory.|Alerts if a process stays stuck for more than 30 minutes.|Excludes known long-running operations (USB storage, RAID, btrfs balance/replace/scrub)."
 
 # Monitor processes in D (uninterruptible), Z (zombie) or R (running) state
 mkdir -p ${g_tmp}/proc-check
@@ -28,7 +28,11 @@ do
       ps aufx | grep $g_dzpid | grep -v grep >${g_tmp}/proc-check-$g_dzpid.notify
       pstree $g_dzpid >>${g_tmp}/proc-check-$g_dzpid.notify
       cat ${g_tmp}/proc-check/$g_dzpid >>${g_tmp}/proc-check-$g_dzpid.notify
-      grep -E -q "usb-storage|md[0-9]*_" ${g_tmp}/proc-check-$g_dzpid.notify || g_echo_error "$(cat ${g_tmp}/proc-check-$g_dzpid.notify)"
+      # Known long-running operations legitimately sit in D state for hours:
+      # USB storage I/O, mdadm resync kernel threads, and btrfs
+      # balance/replace/scrub (a dev-replace rebuilds the whole mirror of a
+      # pulled disk - waiting on it is the process doing its job).
+      grep -E -q "usb-storage|md[0-9]*_|btrfs (balance|replace|scrub)" ${g_tmp}/proc-check-$g_dzpid.notify || g_echo_error "$(cat ${g_tmp}/proc-check-$g_dzpid.notify)"
     fi
   else
     date >${g_tmp}/proc-check/$g_dzpid
