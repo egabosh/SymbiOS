@@ -30,6 +30,15 @@
       register: resolver_role
       changed_when: false
 
+    # The segment (IPs, DHCP, firewall zones) is owned by the resolver. On a
+    # plain access point br-iot is only an L2 bridge into the OpenVPN tunnel -
+    # pushing the segment config there duplicates the master's addresses on
+    # the shared L2 segment and starts a second DHCP server.
+    - name: this playbook runs on the segment owner only
+      ansible.builtin.assert:
+        that: resolver_role.stdout | trim == 'resolver'
+        fail_msg: "{{ inventory_hostname }} is a plain access point; run openwrt_iot.yml on the master (resolver) only."
+
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
@@ -234,15 +243,25 @@
 
     - name: apply changes
       block:
-        - name: commit enable and restart
+        - name: commit and reload network and firewall
           raw: "{{ item }}"
           loop:
             - "uci commit"
             - "/etc/init.d/network reload"
             - "/etc/init.d/firewall reload"
+          when: uci_set_result.changed
+
+        # The resolver owns the segment's DHCP/RA service; on a plain access
+        # point restarting it is what answered DHCP for the whole shared L2
+        # bridge (own IP handed out as gateway/DNS).
+        - name: restart the local resolver on change
+          raw: "{{ item }}"
+          loop:
             - "/etc/init.d/dnsmasq restart"
             - "/etc/init.d/odhcpd restart"
-          when: uci_set_result.changed
+          when:
+            - uci_set_result.changed
+            - resolver_role.stdout | trim == 'resolver'
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state

@@ -90,16 +90,24 @@
 
     - name: apply changes
       block:
-        - name: commit enable and restart
+        - name: commit and reload network
           raw: "{{ item }}"
           loop:
             - "uci commit"
             - "/etc/init.d/network reload"
+          when: uci_set_result.changed or uci_delete_result.changed
+
+        # A slave access point runs no DHCP/RA server at all; run on every
+        # pass so the state is guaranteed even if something started the
+        # services in between.
+        - name: stop and disable dnsmasq and odhcpd
+          raw: "{{ item }}"
+          loop:
             - "/etc/init.d/dnsmasq stop"
             - "/etc/init.d/dnsmasq disable"
             - "/etc/init.d/odhcpd stop"
             - "/etc/init.d/odhcpd disable"
-          when: uci_set_result.changed or uci_delete_result.changed
+          changed_when: false
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state
