@@ -46,6 +46,9 @@ except ImportError:
 
 DEFAULT_INVENTORY = "/symbios/base-services/symbios-ui/config/inventory.yml"
 KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Subkeys of a stored dict are data, not variable names - they may carry
+# hyphens and dots (tunnel names, hostnames). Top-level keys stay strict.
+DICT_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 def e_usage(msg):
@@ -64,6 +67,12 @@ def check_key(key):
     """Validate an inventory variable name, exit 2 when invalid."""
     if not KEY_RE.match(key or ""):
         e_usage("invalid variable name: {!r} (must match {})".format(key, KEY_RE.pattern))
+
+
+def check_dict_key(key):
+    """Validate a dict subkey (data, not a variable name), exit 2 on error."""
+    if not DICT_KEY_RE.match(key or ""):
+        e_usage("invalid dict key: {!r} (must match {})".format(key, DICT_KEY_RE.pattern))
 
 
 def load_inventory(path):
@@ -269,7 +278,7 @@ def get_dict(vars_, name):
 def cmd_dict_get(args):
     """Print one dict entry as JSON (exit 1 when missing)."""
     check_key(args.dict_key)
-    check_key(args.key)
+    check_dict_key(args.key)
     cfg = load_inventory(args.inventory)
     vars_ = cfg.get("all", {}).get("vars", {}) or {}
     entry = get_dict(vars_, args.dict_key).get(args.key)
@@ -281,7 +290,7 @@ def cmd_dict_get(args):
 def cmd_dict_set(args):
     """Set one dict entry from a JSON value on stdin (creates the dict)."""
     check_key(args.dict_key)
-    check_key(args.key)
+    check_dict_key(args.key)
     try:
         raw = sys.stdin.read()
         value = json.loads(raw) if raw.strip() else None
@@ -310,7 +319,7 @@ def cmd_dict_set(args):
 def cmd_dict_merge(args):
     """Merge a JSON object from stdin into one dict entry (creates it)."""
     check_key(args.dict_key)
-    check_key(args.key)
+    check_dict_key(args.key)
     try:
         raw = sys.stdin.read()
         data = json.loads(raw) if raw.strip() else {}
@@ -448,7 +457,7 @@ def cmd_write(args):
 def cmd_dict_del(args):
     """Delete one dict entry (idempotent: missing entries report unchanged)."""
     check_key(args.dict_key)
-    check_key(args.key)
+    check_dict_key(args.key)
     with locked(args.inventory):
         cfg = load_inventory(args.inventory)
         vars_ = cfg.setdefault("all", {}).setdefault("vars", {})

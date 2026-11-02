@@ -22,7 +22,9 @@ Commands:
   enable <name>         Enable the tunnel at boot
   disable <name>        Disable the tunnel at boot
   delete <name>         Stop/disable the tunnel and remove its config
-  fetch <name>          Run /etc/openvpn/fetch-<name>.sh (fetch mode only)
+  fetch <name>          Refresh the config of a fetch-mode tunnel and
+                        restart it only when it changed (delegates to
+                        symbios-openvpn-fetch.sh, like the refresh cron)
   log <name> [lines]    Last journal lines of openvpn@<name> (default 50)
 
 Examples:
@@ -217,7 +219,7 @@ then
   exit 0
 fi
 
-# Re-fetch the config of a fetch-mode tunnel, then restart it when enabled.
+# Re-fetch the config of a fetch-mode tunnel and apply it when changed.
 if [[ "${g_cmd}" == "fetch" ]]
 then
   g_name="${2:-}"
@@ -225,25 +227,10 @@ then
   then
     f_json_error "Invalid tunnel name"
   fi
-  if [[ ! -x "${g_ovpn_dir}/fetch-${g_name}.sh" ]]
-  then
-    f_json_error "No fetch helper for tunnel: ${g_name}"
-  fi
-  if ! f_ensure_bind "${g_name}"
-  then
-    f_json_error "No config for tunnel ${g_name} (data volume mounted?)"
-  fi
-  if "${g_ovpn_dir}/fetch-${g_name}.sh" 2>/dev/null
-  then
-    if systemctl is-enabled "openvpn@${g_name}" >/dev/null 2>&1
-    then
-      systemctl restart "openvpn@${g_name}" 2>/dev/null || true
-    fi
-    printf '{"ok":true,"message":"Config for %s refreshed."}\n' "${g_name}"
-  else
-    f_json_error "Fetch helper failed for tunnel: ${g_name}"
-  fi
-  exit 0
+  # The refresh logic (change detection, restart only on change) lives in
+  # symbios-openvpn-fetch.sh - the exact code the refresh cron runs.
+  "${g_symbios_dir}/symbios-openvpn-fetch.sh" run "${g_name}"
+  exit $?
 fi
 
 # Delete a tunnel: stop/disable the unit, remove config, fetch helper and cron.
