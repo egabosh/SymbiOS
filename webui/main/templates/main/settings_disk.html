@@ -1,6 +1,9 @@
 {% extends "main/base.html" %}
+{% load static %}
 {% block content %}
 {% include "main/_page_header.html" %}
+
+<div id="rebuild-lock-alert" class="d-none"></div>
 
 <!-- Current status -->
 <div class="row mb-3">
@@ -62,7 +65,7 @@
     <div class="card">
       <div class="card-header">
         <i class="bi bi-disc"></i> Physical Disks
-        <span class="text-muted small">- whole disks only, never partitions</span>
+        <span class="text-muted small">- whole disks only, never partitions; a disk flagged by the health check is marked as defective</span>
       </div>
       <div class="card-body" id="disk-list">
         <span class="spinner-border spinner-border-sm"></span> Scanning...
@@ -105,9 +108,11 @@
           Destroys <strong>everything</strong> on the selected whole disk.
           Afterwards it shows up as
           <span class="badge bg-secondary">Available</span> (e.g. for Move Data).
-          Only unused disks are offered - nothing mounted, nothing in a
-          RAID array (break those up on the RAID pages first), never
-          single partitions, never the system disk.
+          Offered are whole disks that belong to no RAID array and are not the
+          system/data disk (break arrays up on the RAID pages first), never
+          single partitions. A disk that still carries the filesystems of an
+          earlier life is offered too - then tick
+          <em>Unmount it first</em> to release its mounts as part of the wipe.
         </div>
         <form id="wipe-form" data-exec="true" method="POST" action="{% url "settings_disk_wipe" %}">
           {% csrf_token %}
@@ -127,6 +132,10 @@
                 <label class="form-check-label" for="wipe-zero">Full zeros <span class="text-muted">(whole disk, slow on TB)</span></label></div>
               <div class="form-check"><input class="form-check-input" type="radio" name="mode" value="random" id="wipe-random">
                 <label class="form-check-label" for="wipe-random">Full random <span class="text-muted">(whole disk urandom, slowest)</span></label></div>
+              <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" name="unmount" value="yes" id="wipe-unmount" disabled>
+                <label class="form-check-label small" for="wipe-unmount">Unmount it first <span class="text-muted">(the disk is currently mounted)</span></label>
+              </div>
             </div>
             <div class="col-md-3 d-flex flex-column justify-content-end gap-2">
               <div class="form-check">
@@ -382,14 +391,54 @@
   </div>
 </div>
 
+<script src="{% static 'main/blockdev.js' %}?v=2"></script>
 <script>
 var diskData = [];
 var raidData = {btrfs: [], mdadm: [], active_swaps: [], luks_pairs: [], luks_singles: []};
 var activeVolume = 'data';
 
+/* While a btrfs rebuild (dev-replace) runs, every change form on this page
+   is locked - wiping or moving data could pull a disk from under the
+   rebuild. Checked on load and on every manual refresh; the RAID (btrfs)
+   page shows the live progress. */
+function checkRebuildLock() {
+  // Both RAID systems are checked: a btrfs rebuild (dev-replace) or an
+  // mdadm resync on either page must lock every change form here - wiping
+  // or moving data could pull a disk from under the running operation.
+  Promise.all([
+    fetch('{% url "settings_raid_btrfs_status" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; }),
+    fetch('{% url "settings_raid_md_status" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; })
+  ]).then(function(res) {
+      var fs = (res[0].ok && res[0].filesystems) || [];
+      var rebuilding = fs.filter(function(f) { return f.replace_running; });
+      var arrays = (res[1].ok && res[1].arrays) || [];
+      var syncing = arrays.filter(function(a) { return a.sync && a.sync.length; });
+      var locked = rebuilding.length > 0 || syncing.length > 0;
+      document.querySelectorAll('form[data-exec]').forEach(function(form) {
+        form.querySelectorAll('button, select, input').forEach(function(el) { el.disabled = locked; });
+      });
+      var el = document.getElementById('rebuild-lock-alert');
+      if (locked) {
+        var ops = [];
+        rebuilding.forEach(function(f) {
+          ops.push('btrfs rebuild on ' + (f.label || f.uuid.slice(0, 8)) + ' (' + ((f.replace_percent != null) ? f.replace_percent : '?') + ' %)');
+        });
+        syncing.forEach(function(a) {
+          ops.push('mdadm resync on ' + a.device + ' (' + a.sync + ')');
+        });
+        el.innerHTML = '<div class="alert alert-info py-2"><i class="bi bi-arrow-repeat"></i> ' + ops.join('; ') + ' - all actions on this page are locked until it is done. Live progress: <a href="{% url "settings_raid_btrfs" %}">RAID (btrfs)</a>.</div>';
+        el.classList.remove('d-none');
+      } else {
+        el.innerHTML = '';
+        el.classList.add('d-none');
+      }
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   setVolume('data');
   loadDisks();
+  checkRebuildLock();
 });
 
 function volumeTarget() {
@@ -413,6 +462,7 @@ function refreshAll() {
   loadStatus();
   loadLuks();
   loadDisks();
+  checkRebuildLock();
 }
 
 /* Find model name for a device path from the diskData cache */
@@ -647,6 +697,8 @@ function loadDisks() {
 
       diskData = data.devices;
       window._diskData = diskData;
+      // Index the lsblk tree so RAID members resolve to their physical disk.
+      SymbiOS.blockdev.index(diskData);
 
       if (diskData.length === 0) {
         el.innerHTML = '<div class="text-muted">No disks found</div>';
@@ -696,23 +748,35 @@ function renderPhysicalDisk(dev) {
   if (!isDiskLike(dev)) return '';
 
   var status = getStatus(dev);
+  var health = dev.health || null;
   var rowClass = '';
   if (status === 'system') rowClass = 'table-danger';
   else if (status === 'data') rowClass = 'table-success';
   else if (status === 'raid' || status === 'luks') rowClass = 'table-warning';
+  /* A disk the healthcheck flags overrides the use colour - a defective
+     data disk must not look green. */
+  if (health && health.severity === 'fail') rowClass = 'table-danger';
+  else if (health && !rowClass) rowClass = 'table-warning';
 
   /* Serial/by-id tell identical models apart (two WD80EFZX). */
   var ident = dev.serial || dev.byid || '';
   var diskLabel = (dev.model || dev.name) + '<div class="small text-muted"><code>' + dev.path + '</code>' +
     (ident ? '<br>' + ident : '') + '</div>';
   var content = childFstypes(dev) || '<span class="text-muted">empty</span>';
+  var alerts = health ? SymbiOS.blockdev.alertHtml(health) : '';
 
   var html = '<tr class="' + rowClass + '">';
   html += '<td>' + diskLabel + '</td>';
   html += '<td class="small">' + (dev.tran || (dev.rm ? 'USB' : '-')) + '</td>';
   html += '<td class="text-end text-nowrap">' + dev.size + '</td>';
-  html += '<td class="small">' + content + '</td>';
+  html += '<td class="small">' + content + alerts + '</td>';
   html += '<td>';
+  if (health) {
+    var hcls = health.severity === 'fail' ? 'text-danger' : 'text-warning-emphasis';
+    html += SymbiOS.blockdev.healthBadge(health);
+    if (health.snoozed) html += ' <span class="small ' + hcls + '">acknowledged</span>';
+    html += '<br>';
+  }
   if (status === 'system') html += '<span class="badge bg-danger">System disk</span>';
   else if (status === 'data') html += '<span class="badge bg-success">Data disk</span>';
   else if (status === 'raid') html += '<span class="badge bg-warning text-dark">RAID: ' + raidRole(dev) + '</span>';
@@ -723,12 +787,21 @@ function renderPhysicalDisk(dev) {
   return html;
 }
 
-/* Comma-separated fstypes of children, e.g. "crypto_LUKS, btrfs" */
+/* Children summary of the disk row, e.g.
+   "btrfs, swap, crypto_LUKS (symbios-media-1)" - the mapper name in
+   parentheses is the link between the disk and the device the RAID and
+   LUKS views show. */
 function childFstypes(dev) {
   var out = [];
   function walk(d) {
     (d.children || []).forEach(function(c) {
-      if (c.fstype && out.indexOf(c.fstype) === -1) out.push(c.fstype);
+      if (c.fstype) {
+        var txt = c.fstype;
+        var maps = (c.children || []).filter(function(x) { return x.type === 'crypt'; })
+          .map(function(x) { return x.name; });
+        if (maps.length) txt += ' (' + maps.join(', ') + ')';
+        if (out.indexOf(txt) === -1) out.push(txt);
+      }
       walk(c);
     });
   }
@@ -744,10 +817,7 @@ function renderArraysCard() {
   (raidData.btrfs || []).forEach(function(fs) {
     empty = false;
     var lvl = (fs.level && fs.level !== 'unknown') ? 'raid-' + fs.level : 'multi-device';
-    var members = (fs.members || []).map(function(m) {
-      var model = findModelForDevice(m);
-      return '<code>' + m + '</code>' + (model ? ' <span class="text-muted small">' + model + '</span>' : '');
-    }).join('<br>');
+    var members = (fs.members || []).map(SymbiOS.blockdev.memberHtml).join('<br>');
     html += '<tr class="table-info"><td>btrfs ' + (fs.label || fs.uuid || '') +
       '<div class="small text-muted"><code>' + (fs.uuid || '-') + '</code></div></td>' +
       '<td class="text-end text-nowrap">' + (fs.devices || (fs.members || []).length) + ' devices</td>' +
@@ -757,10 +827,7 @@ function renderArraysCard() {
   });
   (raidData.mdadm || []).forEach(function(arr) {
     empty = false;
-    var members = (arr.members || []).map(function(m) {
-      var model = findModelForDevice(m);
-      return '<code>' + m + '</code>' + (model ? ' <span class="text-muted small">' + model + '</span>' : '');
-    }).join('<br>');
+    var members = (arr.members || []).map(SymbiOS.blockdev.memberHtml).join('<br>');
     html += '<tr class="table-info"><td><code>' + arr.device + '</code>' +
       '<div class="small text-muted">mdadm ' + (arr.level || '') + '</div></td>' +
       '<td class="text-end text-muted">see RAID page</td>' +
@@ -770,10 +837,7 @@ function renderArraysCard() {
   });
   (raidData.luks_pairs || []).forEach(function(pair) {
     empty = false;
-    var members = (pair.members || []).map(function(m) {
-      var model = findModelForDevice(m);
-      return '<code>' + m + '</code>' + (model ? ' <span class="text-muted small">' + model + '</span>' : '');
-    }).join('<br>');
+    var members = (pair.members || []).map(SymbiOS.blockdev.memberHtml).join('<br>');
     html += '<tr class="table-warning"><td>Locked LUKS<div class="small text-muted">' + pair.size + ' each</div></td>' +
       '<td class="text-end text-nowrap">' + pair.size + ' (each)</td>' +
       '<td class="small">' + (members || '-') + '</td>' +
@@ -783,10 +847,9 @@ function renderArraysCard() {
   /* Single locked LUKS devices (no same-size partner - e.g. a lone disk). */
   (raidData.luks_singles || []).forEach(function(s) {
     empty = false;
-    var model = findModelForDevice(s.device);
     html += '<tr class="table-warning"><td>Locked LUKS<div class="small text-muted">single device</div></td>' +
       '<td class="text-end text-nowrap">' + s.size + '</td>' +
-      '<td class="small"><code>' + s.device + '</code>' + (model ? ' <span class="text-muted small">' + model + '</span>' : '') + '</td>' +
+      '<td class="small">' + SymbiOS.blockdev.memberHtml(s.device) + '</td>' +
       '<td class="small">-</td>' +
       '<td><span class="badge bg-warning text-dark">locked, unverified</span></td></tr>';
   });
@@ -1002,10 +1065,12 @@ function addLocateOption(dev) {
 }
 
 /* Wipe select: whole disks only (never single partitions - wiping one
-   partition of a shared disk is a footgun). Only plain unused disks:
-   no mounts, no RAID members/arrays (those are managed on the RAID
-   pages - break up arrays there first), no active swap, never the
-   system disk. LUKS singles without RAID involvement stay offered. */
+   partition of a shared disk is a footgun). Offered are disks with no
+   RAID involvement (those are managed on the RAID pages - break up
+   arrays there first), no active swap and never the system/data disk.
+   A disk that still carries the filesystems of an earlier life stays
+   offered even while mounted: the wipe then needs the explicit
+   "Unmount it first" consent (the script refuses mounted disks). */
 function wipeContentOf(dev) {
   var parts = [];
   function walk(d) {
@@ -1014,6 +1079,17 @@ function wipeContentOf(dev) {
   }
   walk(dev);
   return parts.join(', ') || 'unformatted';
+}
+
+/* All mountpoints below a disk (a mounted child keeps the disk busy). */
+function wipeMountsOf(dev) {
+  var mounts = [];
+  function walk(d) {
+    if (d.mountpoint) mounts.push(d.mountpoint);
+    (d.children || []).forEach(walk);
+  }
+  walk(dev);
+  return mounts;
 }
 
 function subtreeHasSwap(dev) {
@@ -1029,17 +1105,19 @@ function subtreeHasSwap(dev) {
 function addWipeOptions(dev, select) {
   if (!isDiskLike(dev)) return;
   if (getStatus(dev) === 'system' || getStatus(dev) === 'data') return;
-  if (dev.mountpoint || hasMountedChildren(dev)) return;
   if (hasRaidInTree(dev)) return;
   if (subtreeHasSwap(dev)) return;
+  var mounts = wipeMountsOf(dev);
   var opt = document.createElement('option');
   opt.value = dev.path;
   var t = dev.path + (dev.size ? ' (' + dev.size + ')' : '');
   var ident = dev.serial || dev.byid || dev.model || '';
   if (ident) t += ' ' + ident;
   t += ' - holds: ' + wipeContentOf(dev);
+  if (mounts.length) t += ' - mounted at ' + mounts.join(', ');
   opt.textContent = t;
   opt.dataset.content = wipeContentOf(dev);
+  opt.dataset.mounts = mounts.join(', ');
   select.appendChild(opt);
 }
 
@@ -1047,11 +1125,29 @@ function refreshWipeInfo() {
   var sel = document.getElementById('wipe-device');
   var info = document.getElementById('wipe-info');
   var opt = sel.options[sel.selectedIndex];
+  var mounts = (opt && opt.dataset.mounts) || '';
   if (opt && opt.dataset.content) {
-    info.innerHTML = 'Currently holds: <code>' + opt.dataset.content + '</code> - all of it will be destroyed.';
+    info.innerHTML = 'Currently holds: <code>' + opt.dataset.content + '</code> - all of it will be destroyed.' +
+      (mounts ? '<br><span class="text-danger">Mounted at <code>' + mounts + '</code> - tick "Unmount it first" to release the mount.</span>' : '');
   } else {
     info.textContent = '';
   }
+  syncWipeGate();
+}
+
+/* The wipe only runs on a mounted disk when the unmount consent is
+   ticked; the Wipe button mirrors that (second line of defense is the
+   submit validator, the third the script itself). */
+function syncWipeGate() {
+  var sel = document.getElementById('wipe-device');
+  var opt = sel.options[sel.selectedIndex];
+  var mounted = !!(opt && opt.dataset.mounts);
+  var unmountEl = document.getElementById('wipe-unmount');
+  unmountEl.disabled = !mounted;
+  if (!mounted) unmountEl.checked = false;
+  var ready = document.getElementById('wipe-confirm').checked &&
+    (!mounted || unmountEl.checked);
+  document.getElementById('wipe-btn').disabled = !ready;
 }
 
 function hasMountedChildren(dev) {
@@ -1227,12 +1323,12 @@ function blockSubmit(e) {
 }
 
 document.getElementById('wipe-device').addEventListener('change', refreshWipeInfo);
+document.getElementById('wipe-unmount').addEventListener('change', syncWipeGate);
 
-/* The Wipe button stays disabled until the checkbox is ticked - the
-   submit validator below is only the second line of defense. */
-document.getElementById('wipe-confirm').addEventListener('change', function() {
-  document.getElementById('wipe-btn').disabled = !this.checked;
-});
+/* The Wipe button stays disabled until the confirmation (and, on a
+   mounted disk, the unmount consent) is ticked - the submit validator
+   below is only the second line of defense. */
+document.getElementById('wipe-confirm').addEventListener('change', syncWipeGate);
 
 document.getElementById('wipe-form').addEventListener('submit', function(e) {
   var device = document.getElementById('wipe-device').value;
@@ -1246,12 +1342,19 @@ document.getElementById('wipe-form').addEventListener('submit', function(e) {
     blockSubmit(e);
     return;
   }
+  var opt = document.getElementById('wipe-device').selectedOptions[0];
+  var mounts = (opt && opt.dataset.mounts) || '';
+  if (mounts && !document.getElementById('wipe-unmount').checked) {
+    SymbiOS.exec.showAlert('The disk is mounted (' + mounts + ') - tick "Unmount it first".', 'danger');
+    blockSubmit(e);
+    return;
+  }
   var mode = 'quick';
   var checked = document.querySelector('#wipe-form input[name=mode]:checked');
   if (checked) mode = checked.value;
-  var opt = document.getElementById('wipe-device').selectedOptions[0];
   var holds = opt && opt.dataset.content ? ' (currently holds: ' + opt.dataset.content + ')' : '';
-  if (!confirm('ERASE ' + device + holds + ' with method "' + mode + '"?\n\nALL data on it will be DESTROYED. This cannot be undone.\n\nContinue?')) {
+  var extra = mounts ? '\n\nIt is mounted at ' + mounts + ' and will be unmounted first.' : '';
+  if (!confirm('ERASE ' + device + holds + ' with method "' + mode + '"?' + extra + '\n\nALL data on it will be DESTROYED. This cannot be undone.\n\nContinue?')) {
     blockSubmit(e);
   }
 });

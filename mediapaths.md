@@ -75,6 +75,52 @@ reachable via the compat bind `media_compat_bind` (default empty, e.g.
 legacy library names (e.g. `media_audio` pointing at `Musik/Uploaddatum`)
 stay ordinary inventory overrides.
 
+### Multi-device (RAID1) media volume and disk replacement
+
+A multi-device media volume is one LUKS container per disk, each opened as
+`symbios-media-N` and combined into one btrfs filesystem (data + metadata
+`raid1`). Per disk: `cryptsetup luksFormat --label
+CRYPT_LUKS_SYMBIOS_MEDIA --key-file /symbios/.keys/media-volume.key`, then
+`btrfs device add` + balance. Physically identical disks are told apart by
+serial on the RAID page - the WebUI resolves each member (mapper) down to
+its physical disk.
+
+Replacing a failing member is a `btrfs replace`, never a
+`btrfs device remove`: a `raid1` filesystem with two members refuses to
+shrink ("unable to go below two devices") because the profile needs a
+second copy at all times. `remove` is only for shrinking a volume that has
+three or more members and enough free space elsewhere.
+
+1. Clear leftovers of the replacement disk (a disk from an earlier life is
+   usually still formatted - and often auto-mounted by udisks):
+   `symbios-data-partition.sh wipe /dev/sdX quick --unmount`, or in the
+   WebUI on the Data Disk page, "Wipe a Disk": pick the disk, tick
+   "Unmount it first" (only offered when the disk is mounted). A quick
+   wipe is enough - it removes signatures and the partition table, so the
+   disk shows up as unused.
+2. Prepare the new disk (>= the size of the member it replaces):
+   `symbios-media-partition.sh prepare-member /dev/sdX --force` (WebUI: RAID
+   (btrfs) page, "Prepare a replacement disk"). It wipes the disk, creates
+   the LUKS container with the media label and the boot keyfile as its only
+   keyslot, and opens it as the next free `symbios-media-N`. It stays
+   empty, so it shows up as a replace target.
+3. Replace: `symbios-raid-btrfs.sh replace /symbios/media /dev/mapper/symbios-media-<old> /dev/mapper/symbios-media-<new>`.
+   If the old disk is already gone (pulled from the bay, one bay per disk),
+   the recorded member path or its devid is enough: the script uses
+   `btrfs replace start -r` and rebuilds the data from the surviving
+   mirror. Never both members absent. `btrfs filesystem show` reports a
+   pulled disk as `devid N ... path MISSING`; `status` passes that on as
+   `devices[].missing`, and the WebUI lists it as
+   `devid N (missing - disk already gone)` in "Failing device".
+4. Verify: `btrfs replace status /symbios/media` (script waits for it),
+   then `btrfs device stats /symbios/media` and `btrfs scrub start
+   /symbios/media`. Balance is not needed after a replace - btrfs moved
+   the extents itself.
+
+Do not scrub a volume whose member already reports read failures: the
+scrub reads that disk and turns unreadable sectors into load. Replace
+first, then scrub the result.
+
 ## Access model (implemented)
 
 Three tiers below `media_root`:

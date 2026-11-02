@@ -630,7 +630,9 @@ def settings_disk_list(request):
     """AJAX GET - list block devices via shell script.
 
     Merges /dev/disk/by-id names (unique even for identical models)
-    into every node by device path."""
+    into every node by device path, and the healthcheck verdict (failing or
+    warning disk) into the physical disk nodes. The RAID pages index the
+    same answer, so a flagged disk marks every member that lives on it."""
     ok, stdout, stderr = run_command(
         f'{_DATA_PART_SCRIPT} list', timeout=10)
     if not ok:
@@ -647,9 +649,60 @@ def settings_disk_list(request):
         data = json.loads(stdout)
         devices = data.get('blockdevices', [])
         filtered = [_describe_block(dev, byid) for dev in devices]
+        _attach_disk_health(filtered, _disk_health())
         return JsonResponse({'ok': True, 'devices': filtered})
     except json.JSONDecodeError as e:
         return JsonResponse({'ok': False, 'error': f'Failed to parse lsblk: {e}'})
+
+
+def _disk_health():
+    """Read the healthcheck verdict per disk (runchecks/disk-health.json).
+
+    Returns (by_serial, by_path). The disk check writes one entry per disk
+    with at least one alert, keyed by serial and by device path. An absent or
+    unreadable file means "no flagged disks" - the healthcheck has simply not
+    run yet."""
+    path = os.path.join(os.path.dirname(CONFIG_PATH), 'runchecks',
+                        'disk-health.json')
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}, {}
+    by_serial = {}
+    by_path = {}
+    for dev in data.get('devices') or []:
+        if not isinstance(dev, dict):
+            continue
+        entry = {
+            'severity': dev.get('severity') or 'warn',
+            'alerts': dev.get('alerts') or [],
+            'snoozed': bool(dev.get('snoozed')),
+        }
+        if dev.get('serial'):
+            by_serial[str(dev['serial'])] = entry
+        if dev.get('device'):
+            by_path[str(dev['device'])] = entry
+    return by_serial, by_path
+
+
+def _attach_disk_health(items, health):
+    """Attach the health entry to every disk node it belongs to (recursive).
+
+    A node with a serial is matched by serial only: the verdict belongs to
+    that physical disk, and the kernel name is reused after a swap, so a path
+    match would put the old disk's alerts on its replacement. The path is the
+    fallback for nodes whose serial is unreadable (some USB bridges)."""
+    by_serial, by_path = health
+    if not by_serial and not by_path:
+        return
+    for item in items:
+        serial = str(item.get('serial') or '')
+        entry = by_serial.get(serial) if serial else \
+            by_path.get(item.get('path') or '')
+        if entry:
+            item['health'] = entry
+        _attach_disk_health(item.get('children') or [], health)
 
 
 @login_required
@@ -668,12 +721,18 @@ def settings_disk_raid(request):
 def _describe_block(dev, byid=None):
     """Build a flat description dict for a block device (recursive for children)."""
     byid = byid or {}
-    path = '/dev/' + dev.get('name', '')
+    name = dev.get('name', '')
+    dtype = dev.get('type', '')
+    # Device-mapper nodes are reported by their mapper name (symbios-media-1),
+    # not by a kernel name - the real path is /dev/mapper/<name> and a /dev
+    # symlink does not exist. RAID member paths, lock targets and the adopt
+    # list match on this exact path.
+    path = '/dev/mapper/' + name if dtype in ('crypt', 'dm') else '/dev/' + name
     item = {
-        'name': dev.get('name', ''),
+        'name': name,
         'path': path,
         'size': dev.get('size', ''),
-        'type': dev.get('type', ''),
+        'type': dtype,
         'fstype': dev.get('fstype') or '',
         'mountpoint': dev.get('mountpoint') or '',
         'model': (dev.get('model') or '').strip(),
@@ -682,7 +741,7 @@ def _describe_block(dev, byid=None):
         'tran': dev.get('tran') or '',
         'rm': dev.get('rm', False),
         'serial': (dev.get('serial') or '').strip(),
-        'byid': byid.get(path, ''),
+        'byid': byid.get(path) or byid.get('/dev/' + name, ''),
         'children': [],
     }
     for child in dev.get('children', []) or []:
@@ -995,13 +1054,16 @@ def settings_disk_wipe(request):
 
     RAID members and LUKS holders are allowed on purpose; the running
     system, mounted filesystems and active swap are refused server-side.
-    Full modes take hours on TB disks (timeout 24h, dd status=progress
-    streams live output)."""
+    A mounted disk (leftovers of an earlier life, often auto-mounted by
+    udisks) only passes with the explicit `unmount` consent, which makes
+    the script release its mounts first. Full modes take hours on TB disks
+    (timeout 24h, dd status=progress streams live output)."""
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'})
 
     device = request.POST.get('device', '').strip()
     mode = request.POST.get('mode', '').strip()
+    unmount = request.POST.get('unmount', 'no') == 'yes'
 
     if not device or not device.startswith('/dev/'):
         return JsonResponse({'ok': False, 'error': 'Select a disk first'})
@@ -1009,6 +1071,8 @@ def settings_disk_wipe(request):
         return JsonResponse({'ok': False, 'error': 'Invalid wipe mode'})
 
     cmd = f'{_DATA_PART_SCRIPT} wipe {shlex.quote(device)} {shlex.quote(mode)}'
+    if unmount:
+        cmd += ' --unmount'
     is_ajax = is_ajax_request(request)
     if is_ajax:
         from .utils.jobs import create_job
@@ -1082,6 +1146,49 @@ def settings_disk_adopt(request):
         if ok:
             return JsonResponse({'ok': True, 'message': 'Adopt complete.'})
         return JsonResponse({'ok': False, 'error': f'Adopt failed:\n{output[-2000:]}'})
+
+
+@login_required
+def settings_disk_prepare_member(request):
+    """AJAX POST - prepare a whole disk as an encrypted media member.
+
+    The members of a multi-device media volume are one LUKS container each,
+    so a replacement disk needs the header and the boot keyfile before
+    btrfs can take it over. The new mapper holds no filesystem and appears
+    as a replace target on the btrfs page."""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'})
+
+    device = request.POST.get('device', '').strip()
+    force = request.POST.get('force', 'no') == 'yes'
+
+    if not device:
+        return JsonResponse({'ok': False, 'error': 'No device selected'})
+    if not device.startswith('/dev/'):
+        return JsonResponse({'ok': False, 'error': 'Invalid device path'})
+
+    cmd = f'{_MEDIA_PART_SCRIPT} prepare-member {shlex.quote(device)}'
+    if force:
+        cmd += ' --force'
+
+    is_ajax = is_ajax_request(request)
+    if is_ajax:
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=900)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': f'Preparing {device} as media member...',
+                             'message': f'Formatting {device} as LUKS and opening it '
+                                        f'as a new media member.',
+                             'command': cmd})
+
+    ok, stdout, stderr = run_command(cmd, timeout=900)
+    output = stdout + ('\n' + stderr if stderr else '')
+    try:
+        return JsonResponse(json.loads(output))
+    except json.JSONDecodeError:
+        if ok:
+            return JsonResponse({'ok': True, 'message': 'Member prepared.'})
+        return JsonResponse({'ok': False, 'error': f'Prepare failed:\n{output[-2000:]}'})
 
 
 _RAID_MD_SCRIPT = 'symbios-raid-md.sh'
@@ -1168,13 +1275,16 @@ def settings_raid_action(request, kind):
     for key in ('array', 'mountpoint', 'level', 'op',
                 'old', 'new', 'device', 'seconds'):
         val = request.POST.get(key, '').strip()
-        if val:
-            if key in ('array', 'mountpoint', 'old', 'new', 'device'):
-                if not val.startswith('/'):
-                    return JsonResponse({'ok': False, 'error': f'Invalid path: {val}'})
-                args.append(shlex.quote(val))
-            else:
-                args.append(shlex.quote(val))
+        if not val:
+            continue
+        if key in ('array', 'mountpoint', 'old', 'new', 'device'):
+            # `old` additionally accepts a bare devid: the source of a
+            # replace whose disk is already gone has no path left.
+            if not val.startswith('/') and not (key == 'old' and val.isdigit()):
+                return JsonResponse({'ok': False, 'error': f'Invalid path: {val}'})
+            args.append(shlex.quote(val))
+        else:
+            args.append(shlex.quote(val))
     args.extend(extra_devices)
     cmd = ' '.join([script, action] + args)
     is_ajax = is_ajax_request(request)

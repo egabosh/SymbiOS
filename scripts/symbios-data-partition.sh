@@ -33,7 +33,8 @@
 #   luks                          List LUKS devices + open state (JSON)
 #   locate <device> [seconds]     Identify a disk by sustained reads
 #   adopt <device> [--copy] [--check]   Use existing partition/mapper as /symbios
-#   wipe <device> <mode>          Erase a disk (quick|zero|random)
+#   wipe <device> <mode> [--unmount]   Erase a disk (quick|zero|random);
+#                                 --unmount releases leftover mounts first
 #   rollback                      Undo last migration, restore original /symbios
 #                           Unmount /symbios and close LUKS
 #   change-password <current-pw-file> <new-pw-file>   Change LUKS passphrase
@@ -69,11 +70,15 @@ Actions:
                                 mapper) as /symbios without formatting.
                                 --copy migrates current data onto it,
                                 --check only reports what would happen.
-  wipe <device> <quick|zero|random>
+  wipe <device> <quick|zero|random> [--unmount]
                                 Erase a disk for reuse (RAID members
                                 allowed on purpose, the running system
-                                is refused). No discard/TRIM mode: firmware
-                                secure-erase is unverifiable.
+                                is refused). --unmount releases mounts
+                                of an earlier life on that disk first
+                                (explicit consent only - without it a
+                                mounted disk is refused). No discard/TRIM
+                                mode: firmware secure-erase is
+                                unverifiable.
   rollback                      Undo the last migration, restore original
                                 /symbios (unmounts /symbios, closes LUKS)
   change-password <current-pw-file> <new-pw-file>
@@ -1349,8 +1354,11 @@ EOF
     # Data target): quick (signatures + first 10MiB), zero (whole disk
     # zeros) or random (whole disk urandom). RAID members and LUKS
     # holders are ALLOWED on purpose - clearing them is the job. Only
-    # the running system is untouchable.
-    local f_device="${1:-}" f_w_mode="${2:-}"
+    # the running system is untouchable. A mounted disk (e.g. leftovers
+    # of an earlier life, auto-mounted by udisks) needs --unmount, so
+    # the caller hands over an explicit consent instead of the script
+    # silently pulling mounts from under the user.
+    local f_device="${1:-}" f_w_mode="${2:-}" f_w_unmount="no" f_w_arg
     [[ -z "${f_device}" ]] && f_json_error "No device selected"
     [[ "${f_device}" == /dev/* ]] || f_json_error "Invalid device path"
     case "${f_w_mode}" in
@@ -1360,6 +1368,14 @@ EOF
         f_json_error "Mode must be quick, zero or random"
         ;;
     esac
+    shift 2 2>/dev/null || true
+    for f_w_arg in "$@"
+    do
+      case "${f_w_arg}" in
+        --unmount) f_w_unmount="yes" ;;
+        *) f_json_error "Unknown option for wipe: ${f_w_arg}" ;;
+      esac
+    done
     local f_w_type
     f_w_type=$(lsblk -n -l -o TYPE "${f_device}" 2>/dev/null | head -1) || \
       f_json_error "Unknown device: ${f_device}"
@@ -1384,6 +1400,24 @@ EOF
     if [[ -n "${f_w_root_disk}" ]] && [[ "${f_w_dev_disk}" == "${f_w_root_disk}" ]]
     then
       f_json_error "${f_device} lives on the system disk (${f_w_root_disk}) - wiping it would kill the running system."
+    fi
+    # Release leftover mounts on explicit consent (--unmount), deepest
+    # path first: a parent stays busy while a child is still mounted.
+    # The mounted check below stays as the safety net for a busy mount.
+    if [[ "${f_w_unmount}" == "yes" ]]
+    then
+      local f_w_mnt
+      while IFS= read -r f_w_mnt
+      do
+        [[ -z "${f_w_mnt}" ]] && continue
+        if umount "${f_w_mnt}" 2>/dev/null
+        then
+          f_log_ok "Unmounted ${f_w_mnt}"
+        else
+          f_log_error "Could not unmount ${f_w_mnt}"
+        fi
+      done < <(lsblk -n -l -o MOUNTPOINT "${f_device}" 2>/dev/null | \
+        grep -v '^$' | tac)
     fi
     # Refuse anything mounted (self or children) and active swap
     # (for whole disks: swap anywhere below counts too).

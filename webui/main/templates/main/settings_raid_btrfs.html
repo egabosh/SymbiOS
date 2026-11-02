@@ -1,4 +1,5 @@
 {% extends "main/base.html" %}
+{% load static %}
 {% block content %}
 {% include "main/_page_header.html" %}
 
@@ -11,13 +12,19 @@
           <i class="bi bi-arrow-clockwise"></i>
         </button>
       </div>
-      <div class="card-body" id="fs-list">
-        <span class="spinner-border spinner-border-sm"></span> Scanning...
+      <div class="card-body">
+        <div id="rebuild-alert" class="d-none"></div>
+        <div id="fs-list">
+          <span class="spinner-border spinner-border-sm"></span> Scanning...
+        </div>
       </div>
       <div class="card-body border-top small text-muted">
         Unmounted filesystems show profiles as <code>unknown</code> and no error counters -
         those need a mount. Locked-LUKS members stay invisible until unlocked on the
         <a href="{% url "settings_disk" %}">Data Disk</a> page.
+        Each member is shown with the physical disk that holds it (serial, model,
+        transport) - that is how two identical disks are told apart when one of them
+        has to be replaced.
         Any non-zero error counter (w/r/f/c/g) deserves attention.
         Scrub, balance, add, remove and replace are kernel operations and
         <strong>only work on mounted filesystems</strong> - that is a btrfs
@@ -32,15 +39,26 @@
     <div class="card">
       <div class="card-header"><i class="bi bi-arrow-repeat"></i> Replace a Disk</div>
       <div class="card-body">
-        <div class="alert alert-info small">Online replace - filesystem stays mounted. May take hours. Only unused disks are offered as replacement.</div>
+        <div class="alert alert-info small">Online replace - filesystem stays mounted. May take hours. Offered as replacement are unused disks and prepared LUKS members (see below). The member list shows the physical disk (serial, model) behind each mapper. A disk that is already gone is listed by its devid ("missing") - that is exactly the source a replace rebuilds from the surviving mirror.</div>
         <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="btrfs" %}" onsubmit="return needMount('rep-fs') && confirm('Replace device?');">
           {% csrf_token %}
           <input type="hidden" name="action" value="replace">
           <input type="hidden" name="mountpoint" id="rep-mnt" value="">
-          <div class="mb-2"><label class="form-label">Filesystem</label><select class="form-select fs-sel" id="rep-fs" data-mnt="rep-mnt" data-members="rep-old"></select></div>
-          <div class="mb-2"><label class="form-label">Failing device (member)</label><select class="form-select" name="old" id="rep-old" required></select></div>
-          <div class="mb-2"><label class="form-label">New device (unused)</label><select class="form-select" name="new" id="rep-new" required></select></div>
+          <div class="mb-2"><label class="form-label">Filesystem</label><select class="form-select fs-sel" id="rep-fs" data-mnt="rep-mnt" data-members="rep-old" data-missing="yes"></select></div>
+          <div class="mb-2"><label class="form-label">Failing device (member, or the devid of a missing one)</label><select class="form-select" name="old" id="rep-old" required></select></div>
+          <div class="mb-2"><label class="form-label">New device (unused or prepared member)</label><select class="form-select" name="new" id="rep-new" required></select></div>
           <button class="btn btn-warning" type="submit">Replace</button>
+        </form>
+        <hr>
+        <form data-exec="true" method="POST" action="{% url "settings_disk_prepare_member" %}" onsubmit="return confirm('Format the selected disk as an encrypted media member? All data on it is destroyed.');">
+          {% csrf_token %}
+          <div class="mb-2"><label class="form-label">Prepare a replacement disk (encrypted media volume)</label><select class="form-select" name="device" id="prep-dev" required></select></div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="force" value="yes" id="prep-force">
+            <label class="form-check-label small" for="prep-force">Overwrite existing data signatures (a disk that still carries a filesystem)</label>
+          </div>
+          <button class="btn btn-outline-danger" type="submit">Prepare member</button>
+          <div class="form-text">The members of an encrypted media volume are one LUKS container each. This formats the disk (<code>CRYPT_LUKS_SYMBIOS_MEDIA</code>) with the boot keyfile and opens it as the next free <code>symbios-media-N</code>. It then shows up above as a replace target. Order: prepare first, then Replace.</div>
         </form>
       </div>
     </div>
@@ -68,6 +86,7 @@
             <div class="col-5"><label class="form-label">Member</label><select class="form-select" name="device" id="rem-dev" required></select></div>
             <div class="col-2"><button class="btn btn-outline-danger" type="submit">Remove</button></div>
           </div>
+          <div class="form-text">Removal moves the data onto the remaining members - it fails when they have no free space. A RAID1 filesystem with two members cannot shrink to one at all: to swap a failing disk, prepare the new disk and use Replace a Disk.</div>
         </form>
         <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="btrfs" %}" onsubmit="return needMountSel(this);">
           {% csrf_token %}
@@ -108,9 +127,11 @@
   </div>
 </div>
 
+<script src="{% static 'main/blockdev.js' %}?v=2"></script>
 <script>
 var btrfsFs = [];
 var freeDevs = [];
+var prepDevs = [];
 var allDisks = [];
 
 function fsByUuid(uuid) {
@@ -158,6 +179,13 @@ function subtreeUsed(d, paths) {
   return false;
 }
 
+/* An opened LUKS mapper that holds no filesystem and belongs to no
+   filesystem is a prepared media member - the target of a replace. */
+function preparedMember(n, paths) {
+  if (n.type !== 'crypt' || n.fstype || n.mountpoint || paths[n.path]) return null;
+  return {path: n.path, label: n.path + ' (prepared member' + (n.size ? ', ' + n.size : '') + ')'};
+}
+
 function fillSelect(id, items, emptyLabel) {
   var sel = typeof id === 'string' ? document.getElementById(id) : id;
   sel.innerHTML = '';
@@ -197,11 +225,57 @@ function syncFs(sel) {
   var mntEl = document.getElementById(sel.dataset.mnt);
   if (mntEl) mntEl.value = (f && f.mountpoint) || '';
   if (sel.dataset.members) {
-    fillSelect(sel.dataset.members, ((f && f.members) || []).map(function(m) { return {value: m, label: m}; }), '-- no members --');
+    fillSelect(sel.dataset.members, memberItems(f, sel.dataset.missing === 'yes'), '-- no members --');
   }
+}
+
+/* Member options for a select. A disk that is gone keeps its devid but has
+   no path, so it is offered by devid when the caller wants missing members
+   (the replace source); removal only offers present devices. */
+function memberItems(f, withMissing) {
+  var items = [];
+  ((f && f.devices) || []).forEach(function(d) {
+    if (d.missing) {
+      if (withMissing) {
+        items.push({value: String(d.devid),
+                    label: 'devid ' + d.devid + ' (missing - disk already gone)'});
+      }
+      return;
+    }
+    items.push({value: d.path, label: SymbiOS.blockdev.memberLabel(d.path)});
+  });
+  if (!items.length) {
+    ((f && f.members) || []).forEach(function(m) {
+      items.push({value: m, label: SymbiOS.blockdev.memberLabel(m)});
+    });
+  }
+  return items;
+}
+
+/* Members cell: a missing member has no path left, so show its devid. */
+function membersCell(f) {
+  var list = (f.devices || []);
+  if (!list.length) {
+    return (f.members || []).map(SymbiOS.blockdev.memberHtml).join('<br>') || '-';
+  }
+  return list.map(function(d) {
+    if (d.missing) {
+      return '<span class="badge bg-danger">devid ' + d.devid + ' missing</span>';
+    }
+    return SymbiOS.blockdev.memberHtml(d.path);
+  }).join('<br>') || '-';
 }
 function syncAllFs() {
   document.querySelectorAll('.fs-sel').forEach(syncFs);
+}
+
+/* Disable (or re-enable) every change form on this page while a long kernel
+   operation runs: replace/balance/scrub would fight the rebuild for space
+   and metadata, prepare/remove could pull a disk from under it. */
+function lockExecForms(locked) {
+  document.querySelectorAll('form[data-exec]').forEach(function(form) {
+    form.querySelectorAll('button, select, input').forEach(function(el) { el.disabled = locked; });
+  });
 }
 
 function loadAll() {
@@ -210,27 +284,77 @@ function loadAll() {
   Promise.all([
     fetch('{% url "settings_raid_btrfs_status" %}').then(function(r) { return r.json(); }),
     fetch('{% url "settings_disk_list" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; }),
-    fetch('{% url "settings_disk_raid" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; })
+    fetch('{% url "settings_disk_raid" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; }),
+    fetch('{% url "settings_raid_md_status" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; })
   ]).then(function(res) {
     var data = res[0];
     btrfsFs = (data.ok && data.filesystems) || [];
     window._raidScan = (res[2] && res[2].ok) ? res[2] : {mdadm: [], btrfs: [], active_swaps: []};
+    // A running dev-replace (disk rebuild) is shown with live progress.
+    // While one runs, the page refreshes itself every 30 seconds so the
+    // percentage keeps moving without any user action.
+    var rebuilds = btrfsFs.filter(function(f) { return f.replace_running; });
+    // The mdadm status of this host is checked as well: an array resyncing
+    // on the other RAID page must lock this one too (both systems share
+    // the same physical disks).
+    var mdArrays = (res[3] && res[3].ok && res[3].arrays) || [];
+    var syncing = mdArrays.filter(function(a) { return a.sync && a.sync.length; });
+    // While any long operation runs, no other action on this page may
+    // start: they would fight it for space and metadata (balance/scrub) or
+    // pull a disk from under it (remove/prepare). Re-enabled automatically
+    // when the operation is done (the 30s refresh below re-evaluates this).
+    var busy = rebuilds.length > 0 || syncing.length > 0;
+    lockExecForms(busy);
+    var rbAlert = document.getElementById('rebuild-alert');
+    if (busy) {
+      var parts = [];
+      rebuilds.forEach(function(f) {
+        var pct = (f.replace_percent != null) ? f.replace_percent : 0;
+        parts.push('<div class="mb-1"><i class="bi bi-arrow-repeat"></i> Rebuild running on <strong>' + (f.label || f.uuid.slice(0, 8)) + '</strong> (' + f.mountpoint + '): <strong>' + pct + ' %</strong></div>' +
+          '<div class="progress mb-2" style="height: 6px;"><div class="progress-bar" role="progressbar" style="width: ' + pct + '%"></div></div>');
+      });
+      syncing.forEach(function(a) {
+        parts.push('<div class="mb-1"><i class="bi bi-arrow-repeat"></i> mdadm resync running on <code>' + a.device + '</code>: <strong>' + a.sync + '</strong></div>');
+      });
+      rbAlert.innerHTML = '<div class="alert alert-info py-2">' + parts.join('') + '<div class="form-text">This can take hours - the page refreshes automatically and all actions on this page stay locked until it is done. Do not unmount the filesystem or power off the server.</div></div>';
+      rbAlert.classList.remove('d-none');
+      if (!window._raidRebuildTimer) {
+        window._raidRebuildTimer = setTimeout(function() {
+          window._raidRebuildTimer = null;
+          loadAll();
+        }, 30000);
+      }
+    } else {
+      rbAlert.innerHTML = '';
+      rbAlert.classList.add('d-none');
+    }
     // Merge unmounted members from the disk-page raid scan (sees the same
     // `btrfs filesystem show`, keeps member lists complete).
     var paths = memberPaths();
     var devs = (res[1] && res[1].ok && res[1].devices) || [];
+    // Index the lsblk tree so members resolve to their physical disk.
+    SymbiOS.blockdev.index(devs);
     freeDevs = [];
+    prepDevs = [];
     devs.forEach(function(dev) {
       if (dev.type !== 'disk' && dev.type !== 'loop') return;
       if (!subtreeUsed(dev, paths)) {
         var ident = dev.serial || dev.byid || dev.model || '';
-        freeDevs.push({path: dev.path, label: dev.path + ' (whole disk' + (dev.size ? ', ' + dev.size : '') + (ident ? ', ' + ident : '') + ')'});
+        var whole = {path: dev.path, label: dev.path + ' (whole disk' + (dev.size ? ', ' + dev.size : '') + (ident ? ', ' + ident : '') + ')'};
+        freeDevs.push(whole);
+        prepDevs.push(whole);
         return;
       }
       (dev.children || []).forEach(function(c) {
+        var prep = preparedMember(c, paths);
+        if (prep) { freeDevs.push(prep); return; }
         if (!c.mountpoint && !c.fstype && !paths[c.path]) {
           freeDevs.push({path: c.path, label: c.path + ' (partition' + (c.size ? ', ' + c.size : '') + ')'});
         }
+        (c.children || []).forEach(function(g) {
+          var prepInner = preparedMember(g, paths);
+          if (prepInner) freeDevs.push(prepInner);
+        });
       });
     });
     allDisks = devs.filter(function(d) { return d.type === 'disk'; }).map(function(d) {
@@ -245,8 +369,8 @@ function loadAll() {
         html += '<tr class="' + (f.degraded ? 'table-danger' : (!f.mountpoint ? 'table-warning' : '')) + '"><td>' + (f.label || '(no label)') +
           '<div class="small text-muted"><code>' + f.uuid + '</code></div></td>' +
           '<td class="small">data:' + (f.data_profile || '?') + '<br>meta:' + (f.metadata_profile || '?') + '</td>' +
-          '<td class="small">' + ((f.members || []).join('<br>') || '-') + '</td>' +
-          '<td class="small">' + (f.mountpoint || '<span class="badge bg-warning text-dark">not mounted</span>') + (f.degraded ? '<br><span class="badge bg-danger">degraded</span>' : '') + '</td>' +
+          '<td class="small">' + membersCell(f) + '</td>' +
+          '<td class="small">' + (f.mountpoint || '<span class="badge bg-warning text-dark">not mounted</span>') + (f.degraded ? '<br><span class="badge bg-danger">degraded</span>' : '') + (f.replace_running ? '<br><span class="badge bg-info text-dark">rebuild ' + ((f.replace_percent != null) ? f.replace_percent : '?') + ' %</span>' : '') + '</td>' +
           '<td class="small"><code>' + (f.device_stats || '-') + '</code></td>' +
           '<td class="small text-muted">' + scrubCell(f) + '</td></tr>';
       });
@@ -266,6 +390,7 @@ function loadAll() {
     var freeItems = freeDevs.map(function(d) { return {value: d.path, label: d.label}; });
     fillSelect('rep-new', freeItems, '-- no unused devices --');
     fillSelect('add-dev', freeItems, '-- no unused devices --');
+    fillSelect('prep-dev', prepDevs.map(function(d) { return {value: d.path, label: d.label}; }), '-- no unused disk --');
   }).catch(function(err) { el.innerHTML = '<div class="text-danger">Failed: ' + err.message + '</div>'; });
 }
 document.querySelectorAll('.fs-sel').forEach(function(sel) {

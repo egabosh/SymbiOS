@@ -425,8 +425,8 @@ texts opportunistically).
 |--------|---------|-------|
 | `symbios-set-hostname.sh` | Hostname from `base_domain`, idempotent, `--check` mode (template model) | `[--check]` |
 | `symbios-power.sh` | Reboot / shutdown the host (WebUI, exec-modal notice) | `reboot\|shutdown` |
-| `symbios-data-partition.sh` | `/symbios` data partition incl. LUKS setup/mount/rollback. Label-based explicit mounts (no fstab), exact label match only | `list\|status\|setup\|rollback` |
-| `symbios-media-partition.sh` | Optional `SYMBIOS_MEDIA` volume (labels `SYMBIOS_MEDIA` / `CRYPT_LUKS_SYMBIOS_MEDIA`) incl. setup/adopt/rollback, no reboot | `status\|setup\|adopt\|rollback` |
+| `symbios-data-partition.sh` | `/symbios` data partition incl. LUKS setup/mount/rollback and `wipe` (erase a disk for reuse; `--unmount` releases leftover mounts). Label-based explicit mounts (no fstab), exact label match only | `list\|status\|setup\|wipe\|rollback` |
+| `symbios-media-partition.sh` | Optional `SYMBIOS_MEDIA` volume (labels `SYMBIOS_MEDIA` / `CRYPT_LUKS_SYMBIOS_MEDIA`) incl. setup/adopt/rollback, no reboot; `prepare-member` turns a replacement disk into an encrypted member (LUKS + boot keyfile, opened) for a btrfs replace (`--force` overwrites foreign signatures, `--unmount` releases leftover mounts) | `status\|setup\|adopt\|prepare-member\|rollback` |
 | `symbios-media-mount.sh` | Boot mount of the media volume (keyfile on `/symbios`, compat bind, never boot-blocking) | no args |
 | `symbios-after-mount.sh` | Post-mount dispatcher (rootfs): starts all `/symbios`-dependent units in order (boot policy, AGENTS.md) | `[-h\|--help]`, no args |
 | `symbios-detect-network-type.sh` | Connection type (`home`/`root`/`airgapped`) as JSON | no args |

@@ -31,13 +31,69 @@ fi
 function f_disk_alert
 {
   # Persistent (absolute) alert - suppressed for acknowledged devices.
+  # $1 is the severity ('fail' = replace the disk, 'warn' = watch it), the
+  # rest is the message. Every alert is recorded for the structured
+  # disk-health.json the WebUI reads (disk and RAID pages mark the disk),
+  # even when the device is snoozed - a known-bad disk stays visible.
+  local f_sev="$1"
+  shift
   local f_msg="$*"
+  g_dev_alerts+=("$f_msg")
+  if [[ "$f_sev" == "fail" ]]
+  then
+    g_dev_severity="fail"
+  elif [[ "$g_dev_severity" != "fail" ]]
+  then
+    g_dev_severity="warn"
+  fi
   if [[ "${g_dev_snoozed:-0}" -eq 1 ]]
   then
     return 0
   fi
   g_echo_error "$f_msg"
 }
+
+function f_disk_trend
+{
+  # Trend alert (a counter got worse). Ignores the snooze flag by design -
+  # a known-bad disk must keep alerting when it degrades - but still feeds
+  # the structured health record.
+  local f_msg="$*"
+  g_dev_alerts+=("$f_msg")
+  [[ "$g_dev_severity" != "fail" ]] && g_dev_severity="warn"
+  g_echo_error "$f_msg"
+}
+
+function f_disk_health_record
+{
+  # Append the current device to the structured health list (one entry per
+  # device that reported at least one alert). Called at the end of the
+  # device loop and before every `continue`, so no device is lost.
+  [[ ${#g_dev_alerts[@]} -gt 0 ]] || return 0
+  local f_alerts="" f_alert f_snoozed="false"
+  for f_alert in "${g_dev_alerts[@]}"
+  do
+    [[ -n "$f_alerts" ]] && f_alerts="${f_alerts}, "
+    f_alerts="${f_alerts}$(printf '%s' "$f_alert" | f_json_escape)"
+  done
+  [[ "${g_dev_snoozed:-0}" -eq 1 ]] && f_snoozed="true"
+  [[ -n "$g_disk_health" ]] && g_disk_health="${g_disk_health}, "
+  g_disk_health="${g_disk_health}{\"device\":$(printf '%s' "$g_dev" | f_json_escape)"
+  g_disk_health="${g_disk_health},\"serial\":$(printf '%s' "${g_dev_serial:-}" | f_json_escape)"
+  g_disk_health="${g_disk_health},\"model\":$(printf '%s' "${g_dev_model:-}" | f_json_escape)"
+  g_disk_health="${g_disk_health},\"transport\":$(printf '%s' "${g_dev_trans:-}" | f_json_escape)"
+  g_disk_health="${g_disk_health},\"severity\":$(printf '%s' "$g_dev_severity" | f_json_escape)"
+  g_disk_health="${g_disk_health},\"snoozed\":${f_snoozed}"
+  g_disk_health="${g_disk_health},\"alerts\":[${f_alerts}]}"
+}
+
+# Structured disk health for the WebUI: the disk and both RAID pages mark a
+# flagged disk (and therefore the btrfs/mdadm member that lives on it).
+# The file is rewritten completely on every run, so a replaced disk
+# disappears from the list instead of staying flagged forever.
+g_disk_health=""
+g_dev_alerts=()
+g_dev_severity="ok"
 
 # Kernel-reported disk and filesystem problems (dmesg). SMART cannot see
 # transient I/O errors, filesystem errors or controller failures - the kernel
@@ -127,6 +183,11 @@ do
   esac
   g_dev="/dev/${g_name}"
   [[ -e "$g_dev" ]] || continue
+
+  # Reset the per-device alert state (feeds disk-health.json for the WebUI)
+  g_dev_alerts=()
+  g_dev_severity="ok"
+  g_dev_serial=""
 
   # Remember devices that do not support SMART so they are not probed again
   [[ -e "${g_runcheck_state}/smart-unsupported-${g_name}" ]] && continue
@@ -236,7 +297,8 @@ do
   g_health=$(grep -E -i "SMART overall-health self-assessment test result:" "$g_smart" | head -1)
   if [[ -n "$g_health" ]] && ! echo "$g_health" | grep -E -q -i "PASSED|OK"
   then
-    f_disk_alert "SMART health of $g_dev_label failed: $g_health"
+    f_disk_alert fail "SMART health of $g_dev_label failed: $g_health"
+    f_disk_health_record
     continue
   fi
 
@@ -244,7 +306,7 @@ do
   g_shealth=$(grep -m1 "SMART Health Status:" "$g_smart")
   if [[ -n "$g_shealth" ]] && ! echo "$g_shealth" | grep -q "OK"
   then
-    f_disk_alert "SMART health of $g_dev_label failed: $g_shealth"
+    f_disk_alert fail "SMART health of $g_dev_label failed: $g_shealth"
   fi
 
   # 2) NVMe health info (different attribute model than ATA)
@@ -252,24 +314,25 @@ do
   then
     g_critwarn=$(grep -m1 "^Critical Warning:" "$g_smart" | awk '{print $3}')
     [[ -n "$g_critwarn" && "$g_critwarn" != "0x00" ]] && \
-      f_disk_alert "NVMe $g_dev_label reports critical warning: $g_critwarn"
+      f_disk_alert fail "NVMe $g_dev_label reports critical warning: $g_critwarn"
     g_nvmetemp=$(grep -m1 "^Temperature:" "$g_smart" | awk '{print $2}')
     [[ -n "$g_nvmetemp" && "$g_nvmetemp" =~ ^[0-9]+$ && "$g_nvmetemp" -gt 60 ]] && \
-      f_disk_alert "NVMe $g_dev_label temperature high: ${g_nvmetemp} Celsius"
+      f_disk_alert warn "NVMe $g_dev_label temperature high: ${g_nvmetemp} Celsius"
     g_nvspare=$(grep -m1 "^Available Spare:" "$g_smart" | awk '{print $3}')
     g_nvspare=${g_nvspare%\%}
     [[ -n "$g_nvspare" && "$g_nvspare" =~ ^[0-9]+$ && "$g_nvspare" -lt 10 ]] && \
-      f_disk_alert "NVMe $g_dev_label available spare low: ${g_nvspare}%"
+      f_disk_alert warn "NVMe $g_dev_label available spare low: ${g_nvspare}%"
     g_nvused=$(grep -m1 "^Percentage Used:" "$g_smart" | awk '{print $3}')
     g_nvused=${g_nvused%\%}
     [[ -n "$g_nvused" && "$g_nvused" =~ ^[0-9]+$ && "$g_nvused" -ge 100 ]] && \
-      f_disk_alert "NVMe $g_dev_label lifetime usage reached 100%"
+      f_disk_alert warn "NVMe $g_dev_label lifetime usage reached 100%"
     g_nvmedia=$(grep -m1 "^Media and Data Integrity Errors:" "$g_smart" | awk '{print $6}')
     [[ -n "$g_nvmedia" && "$g_nvmedia" =~ ^[0-9]+$ && "$g_nvmedia" -gt 0 ]] && \
-      f_disk_alert "NVMe $g_dev_label media and data integrity errors: $g_nvmedia"
+      f_disk_alert fail "NVMe $g_dev_label media and data integrity errors: $g_nvmedia"
     g_nverr=$(grep -m1 "^Error Information Log Entries:" "$g_smart" | awk '{print $5}')
     [[ -n "$g_nverr" && "$g_nverr" =~ ^[0-9]+$ && "$g_nverr" -gt 0 ]] && \
-      f_disk_alert "NVMe $g_dev_label error-log entries: $g_nverr"
+      f_disk_alert warn "NVMe $g_dev_label error-log entries: $g_nverr"
+    f_disk_health_record
     continue
   fi
 
@@ -293,7 +356,7 @@ do
   do
     if [[ "$g_rec" == "F" ]]
     then
-      f_disk_alert "SMART attribute $g_attr_name (id $g_attr_id) of $g_dev_label failing: $g_attr_val"
+      f_disk_alert fail "SMART attribute $g_attr_name (id $g_attr_id) of $g_dev_label failing: $g_attr_val"
       continue
     fi
     g_attr_names[$g_attr_id]="$g_attr_name"
@@ -310,7 +373,7 @@ do
       177|231|232|233|248)
         echo "life_${g_attr_id}=${g_attr_val}" >> "$g_attrs_now"
         [[ "$g_attr_val" =~ ^[0-9]+$ && "$g_attr_val" -le 10 ]] && \
-          f_disk_alert "SMART $g_attr_name (id $g_attr_id) of $g_dev_label low: value=$g_attr_val"
+          f_disk_alert warn "SMART $g_attr_name (id $g_attr_id) of $g_dev_label low: value=$g_attr_val"
         ;;
       194)
         g_temp="$g_attr_raw"
@@ -363,10 +426,10 @@ do
     if [[ "${g_raw_197:-0}" -gt 0 || "${g_raw_198:-0}" -gt 0 ]]
     then
       # Unreadable or lost sectors: the disk is failing, data is at risk.
-      f_disk_alert "SMART $g_dev_label reports media damage: ${g_defect_msg}${g_st_hint} - the disk is failing, replace it"
+      f_disk_alert fail "SMART $g_dev_label reports media damage: ${g_defect_msg}${g_st_hint} - the disk is failing, replace it"
     else
       # Only remapped sectors: the disk could repair itself so far.
-      f_disk_alert "SMART $g_dev_label reports media damage: ${g_defect_msg}${g_st_hint} - the disk is degrading, replace it soon"
+      f_disk_alert warn "SMART $g_dev_label reports media damage: ${g_defect_msg}${g_st_hint} - the disk is degrading, replace it soon"
     fi
   fi
 
@@ -430,19 +493,19 @@ do
             then
               continue
             fi
-            g_echo_error "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val - check cable/USB bridge"
+            g_disk_trend "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val - check cable/USB bridge"
           else
-            g_echo_error "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val"
+            g_disk_trend "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val"
           fi
         elif [[ "$g_key" == life_* && "$g_val" -lt "$g_prev" ]]
         then
-          g_echo_error "SMART life attribute ${g_attr_names[${g_key#life_}]:-} (id ${g_key#life_}) of $g_dev_label decreased from $g_prev to $g_val"
+          g_disk_trend "SMART life attribute ${g_attr_names[${g_key#life_}]:-} (id ${g_key#life_}) of $g_dev_label decreased from $g_prev to $g_val"
         elif [[ "$g_key" == "ataerr" && "$g_val" -gt "$g_prev" ]]
         then
-          g_echo_error "SMART $g_dev_label ATA error log grew from $g_prev to $g_val entries"
+          g_disk_trend "SMART $g_dev_label ATA error log grew from $g_prev to $g_val entries"
         elif [[ "$g_key" == "selftestfail" && "$g_val" -gt "$g_prev" ]]
         then
-          g_echo_error "SMART $g_dev_label self-test failures grew from $g_prev to $g_val"
+          g_disk_trend "SMART $g_dev_label self-test failures grew from $g_prev to $g_val"
         fi
       fi
     done < "$g_attrs_now"
@@ -464,7 +527,7 @@ do
   fi
   if [[ -n "$g_temp" && "$g_temp" =~ ^[0-9]+$ && "$g_temp" -gt 55 ]]
   then
-    f_disk_alert "SMART temperature of disk $g_dev_label high (${g_temp} Celsius)"
+    f_disk_alert warn "SMART temperature of disk $g_dev_label high (${g_temp} Celsius)"
   fi
 
   # 8) Excessive spin-up/load cycles relative to power-on time (spindown wear)
@@ -476,10 +539,22 @@ do
     g_spins=$((g_spin_sum / 2))
     if [[ $((g_spins * 24)) -gt $((g_poh * 6)) ]]
     then
-      f_disk_alert "Disk $g_dev_label has excessive spin-up/load cycles (~$((g_spins * 24 / g_poh)) per day in ${g_poh} hours)"
+      f_disk_alert warn "Disk $g_dev_label has excessive spin-up/load cycles (~$((g_spins * 24 / g_poh)) per day in ${g_poh} hours)"
     fi
   fi
+
+  f_disk_health_record
 done
+
+# Write the structured health list the WebUI reads (disk and RAID pages mark
+# disks that are reported as failing/warning by the healthcheck).
+if [[ -n "${g_config_dir:-}" && -d "${g_config_dir}" ]]
+then
+  g_disk_health_file="${g_config_dir}/runchecks/disk-health.json"
+  mkdir -p "$(dirname "$g_disk_health_file")"
+  printf '%s\n' "{\"updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"devices\":[${g_disk_health}]}" > "${g_disk_health_file}.tmp" && mv -f "${g_disk_health_file}.tmp" "$g_disk_health_file"
+fi
+
 
 # Remove legacy baselines (kernel-name keyed) of devices that are gone: they
 # come from the old naming scheme and can never be matched again. Baselines

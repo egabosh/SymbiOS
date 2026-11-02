@@ -1,4 +1,5 @@
 {% extends "main/base.html" %}
+{% load static %}
 {% block content %}
 {% include "main/_page_header.html" %}
 
@@ -11,8 +12,16 @@
           <i class="bi bi-arrow-clockwise"></i>
         </button>
       </div>
-      <div class="card-body" id="array-list">
-        <span class="spinner-border spinner-border-sm"></span> Scanning...
+      <div class="card-body">
+        <div id="sync-alert" class="d-none"></div>
+        <div id="array-list">
+          <span class="spinner-border spinner-border-sm"></span> Scanning...
+        </div>
+      </div>
+      <div class="card-body border-top small text-muted">
+        Each member is shown with the physical disk that holds it (serial, model,
+        transport) - that is how two identical disks are told apart when one of them
+        has to be replaced.
       </div>
     </div>
   </div>
@@ -87,6 +96,7 @@
   </div>
 </div>
 
+<script src="{% static 'main/blockdev.js' %}?v=2"></script>
 <script>
 var mdArrays = [];
 var freeDevs = [];
@@ -171,13 +181,22 @@ function refreshMemberSelects() {
     fillSelect(id, mdArrays.map(function(a) { return {value: a.device, label: a.device + ' (' + (a.level || '?') + ')'}; }), '-- no arrays --');
     if (cur) sel.value = cur;
   });
-  var repMembers = membersOf(document.getElementById('rep-array').value).map(function(m) { return {value: m, label: m}; });
+  var repMembers = membersOf(document.getElementById('rep-array').value).map(function(m) { return {value: m, label: SymbiOS.blockdev.memberLabel(m)}; });
   fillSelect('rep-old', repMembers, '-- select array first --');
-  var remMembers = membersOf(document.getElementById('rem-array').value).map(function(m) { return {value: m, label: m}; });
+  var remMembers = membersOf(document.getElementById('rem-array').value).map(function(m) { return {value: m, label: SymbiOS.blockdev.memberLabel(m)}; });
   fillSelect('rem-dev', remMembers, '-- select array first --');
   fillSelect('rep-new', freeDevs.map(function(d) { return {value: d.path, label: d.label}; }), '-- no unused devices --');
   fillSelect('add-dev', freeDevs.map(function(d) { return {value: d.path, label: d.label}; }), '-- no unused devices --');
   fillSelect('create-devs', freeDevs.map(function(d) { return {value: d.path, label: d.label}; }), '-- no unused devices --');
+}
+
+/* Disable (or re-enable) every change form on this page while an array is
+   resyncing: adding/removing disks or creating arrays would fight the
+   recovery for I/O and metadata. */
+function lockExecForms(locked) {
+  document.querySelectorAll('form[data-exec]').forEach(function(form) {
+    form.querySelectorAll('button, select, input').forEach(function(el) { el.disabled = locked; });
+  });
 }
 
 function loadAll() {
@@ -186,12 +205,50 @@ function loadAll() {
   Promise.all([
     fetch('{% url "settings_raid_md_status" %}').then(function(r) { return r.json(); }),
     fetch('{% url "settings_disk_list" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; }),
-    fetch('{% url "settings_disk_raid" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; })
+    fetch('{% url "settings_disk_raid" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; }),
+    fetch('{% url "settings_raid_btrfs_status" %}').then(function(r) { return r.json(); }).catch(function() { return {ok: false}; })
   ]).then(function(res) {
     var data = res[0];
     window._raidScan = (res[2] && res[2].ok) ? res[2] : {mdadm: [], btrfs: [], active_swaps: []};
     mdArrays = (data.ok && data.arrays) || [];
+    // An array with active resync/recovery/reshape locks every action on
+    // this page. A running btrfs rebuild (dev-replace) does as well: both
+    // systems share the same physical disks, so a "Create array" here must
+    // not be able to pull one of them from under the rebuild. Shown with
+    // live progress; while any operation runs the page refreshes itself
+    // every 30 seconds, so the lock re-evaluates and is released
+    // automatically when everything is done.
+    var btrfsFs = (res[3] && res[3].ok && res[3].filesystems) || [];
+    var rebuilds = btrfsFs.filter(function(f) { return f.replace_running; });
+    var syncing = mdArrays.filter(function(a) { return a.sync && a.sync.length; });
+    var busy = syncing.length > 0 || rebuilds.length > 0;
+    lockExecForms(busy);
+    var sa = document.getElementById('sync-alert');
+    if (busy) {
+      var parts = [];
+      syncing.forEach(function(a) {
+        parts.push('<div class="mb-1"><i class="bi bi-arrow-repeat"></i> mdadm resync running on <code>' + a.device + '</code>: <strong>' + a.sync + '</strong></div>');
+      });
+      rebuilds.forEach(function(f) {
+        var pct = (f.replace_percent != null) ? f.replace_percent : 0;
+        parts.push('<div class="mb-1"><i class="bi bi-arrow-repeat"></i> btrfs rebuild running on <strong>' + (f.label || f.uuid.slice(0, 8)) + '</strong> (' + f.mountpoint + '): <strong>' + pct + ' %</strong></div>' +
+          '<div class="progress mb-2" style="height: 6px;"><div class="progress-bar" role="progressbar" style="width: ' + pct + '%"></div></div>');
+      });
+      sa.innerHTML = '<div class="alert alert-info py-2">' + parts.join('') + '<div class="form-text">This can take hours - the page refreshes automatically and all actions on this page stay locked until it is done.</div></div>';
+      sa.classList.remove('d-none');
+      if (!window._mdSyncTimer) {
+        window._mdSyncTimer = setTimeout(function() {
+          window._mdSyncTimer = null;
+          loadAll();
+        }, 30000);
+      }
+    } else {
+      sa.innerHTML = '';
+      sa.classList.add('d-none');
+    }
     var devs = (res[1] && res[1].ok && res[1].devices) || [];
+    // Index the lsblk tree so members resolve to their physical disk.
+    SymbiOS.blockdev.index(devs);
     freeDevs = collectFree(devs, raidMemberPaths());
     allDisks = devs.filter(isDiskLike).map(function(d) {
       return {path: d.path, label: d.path + (d.size ? ' (' + d.size + ')' : '') + (d.model ? ' ' + d.model : '')};
@@ -205,7 +262,7 @@ function loadAll() {
         var bad = (a.state && a.state !== 'active') || (a.sync && a.sync.length);
         html += '<tr class="' + (bad ? 'table-warning' : '') + '"><td><code>' + a.device + '</code></td>' +
           '<td>' + (a.level || '-') + ' / ' + (a.state || '-') + '</td>' +
-          '<td class="small">' + ((a.members || []).join('<br>') || '-') + '</td>' +
+          '<td class="small">' + ((a.members || []).map(SymbiOS.blockdev.memberHtml).join('<br>') || '-') + '</td>' +
           '<td class="small">' + (a.mountpoint || '-') + '</td>' +
           '<td class="small">' + (a.sync || 'idle') + '</td>' +
           '<td class="small text-muted">' + (a.detail || '-') + '</td></tr>';

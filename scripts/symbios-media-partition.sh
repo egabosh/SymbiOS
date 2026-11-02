@@ -34,6 +34,11 @@
 #   unlock <device> <password-file>   Open a LUKS device for inspection
 #   lock <mapper|device>          Close an opened LUKS volume again
 #   luks                          List LUKS devices + open state (JSON)
+#   prepare-member <device> [--force] [--unmount]
+#                                 Make a disk an encrypted media member
+#                                 (LUKS + boot keyfile, opened) - the target
+#                                 for a btrfs replace/add; --unmount releases
+#                                 leftover mounts first
 #   rollback                      Undo last migration, restore previous media
 #   save-key <password-file>     Store the LUKS passphrase as boot keyfile
 #   change-password <current-pw-file> <new-pw-file>   Change LUKS passphrase
@@ -61,6 +66,19 @@ Actions:
                                 mount, no formatting)
   lock <mapper|device>          Close an opened LUKS volume again
   luks                          List LUKS devices + open state (JSON)
+  prepare-member <device> [--force] [--unmount]
+                                Turn a whole disk into an encrypted member
+                                of the media volume: LUKS with label
+                                CRYPT_LUKS_SYMBIOS_MEDIA, unlocked by the
+                                boot keyfile, opened as the next free
+                                symbios-media-N mapper. It holds no
+                                filesystem yet, so it is the target for
+                                'symbios-raid-btrfs.sh replace' (swap a
+                                failing disk of a multi-device volume).
+                                --force overwrites existing data
+                                signatures (a bare partition table needs
+                                no --force), --unmount releases mounts
+                                of an earlier life on that disk first.
   rollback                      Undo the last migration
   save-key <password-file>     Store the LUKS passphrase as boot keyfile
   change-password <current-pw-file> <new-pw-file>
@@ -93,6 +111,11 @@ g_data_label="SYMBIOS_MEDIA"
 g_mountpoint="/symbios/media"
 g_mapper_name="symbios-media-1"
 g_mapper_base="symbios-media"
+
+# Boot keyfile for the media LUKS members. It lives below /symbios itself
+# (encrypted at rest by the data volume) and is never mounted into
+# containers - symbios-media-mount.sh unlocks every member with it.
+g_keyfile="/symbios/.keys/media-volume.key"
 
 # The data volume labels: a media setup target must never carry those
 # (formatting one would destroy /symbios).
@@ -565,9 +588,9 @@ EOF
       # into containers).
       mkdir -p /symbios/.keys 2>/dev/null || f_setup_error "Cannot create /symbios/.keys"
       chmod 700 /symbios/.keys
-      printf '%s' "$f_password" > /symbios/.keys/media-volume.key || \
+      printf '%s' "$f_password" > "${g_keyfile}" || \
         f_setup_error "Cannot write boot keyfile"
-      chmod 600 /symbios/.keys/media-volume.key
+      chmod 600 "${g_keyfile}"
       f_password=""
       f_log_ok "Boot keyfile stored"
     else
@@ -848,6 +871,117 @@ EOF
     ;;
 
   # ------------------------------------------------------------------
+  prepare-member)
+    # Turn a whole disk into an encrypted member of the media volume: the
+    # disks of a multi-device (RAID1) media volume are one LUKS container
+    # each, so a replacement disk needs the same header and the same boot
+    # keyfile before btrfs may take it over. The mapper stays empty (no
+    # filesystem) - it is the target of a btrfs replace/add.
+    local f_device="${1:-}" f_force="no" f_unmount="no" f_arg
+    shift 2>/dev/null || true
+    for f_arg in "$@"
+    do
+      case "${f_arg}" in
+        --force) f_force="yes" ;;
+        --unmount) f_unmount="yes" ;;
+        *) f_json_error "Unknown option for prepare-member: ${f_arg}" ;;
+      esac
+    done
+    [[ -z "${f_device}" ]] && \
+      f_json_error "Usage: $0 prepare-member <device> [--force] [--unmount]"
+    [[ "${f_device}" == /dev/* ]] || f_json_error "Invalid device path"
+    [[ -b "${f_device}" ]] || f_json_error "${f_device} is not a block device"
+    [[ -s "${g_keyfile}" ]] || \
+      f_json_error "No boot keyfile at ${g_keyfile} - a new member could not be unlocked at boot."
+
+    # A replacement disk often still carries the filesystems of its
+    # earlier life (auto-mounted by udisks). --unmount releases them
+    # deepest first, so the caller's explicit consent is required; the
+    # guard below still refuses anything that stays busy.
+    if [[ "${f_unmount}" == "yes" ]]
+    then
+      local f_mnt
+      while IFS= read -r f_mnt
+      do
+        [[ -z "${f_mnt}" ]] && continue
+        if umount "${f_mnt}" 2>/dev/null
+        then
+          f_log "Unmounted ${f_mnt}"
+        else
+          f_log "Could not unmount ${f_mnt}"
+        fi
+      done < <(lsblk -n -l -o MOUNTPOINT "${f_device}" 2>/dev/null | \
+        grep -v '^$' | tac)
+    fi
+
+    # The shared guard refuses mounted disks, our own labels, md/LVM
+    # members, active swap and multi-device btrfs members. A whole disk is
+    # required: a partition of an existing member is never a target.
+    f_guard_target "${f_device}"
+    local f_top_type
+    f_top_type=$(lsblk -dno TYPE "${f_device}" 2>/dev/null || true)
+    [[ "${f_top_type}" == "disk" ]] || \
+      f_json_error "${f_device} is a ${f_top_type:-unknown} device - prepare-member needs a whole disk."
+
+    # A disk from an earlier life may carry filesystems, RAID or LUKS
+    # signatures. A bare partition table is harmless (it disappears with
+    # the format); real data signatures need an explicit --force.
+    local f_sigs f_sig f_needs_force="no"
+    f_sigs=$(wipefs -n -O TYPE "${f_device}" 2>/dev/null | tail -n +2 | \
+      tr -d '[:space:]' | paste -sd' ' - || true)
+    for f_sig in ${f_sigs}
+    do
+      case "${f_sig}" in
+        gpt|dos|PMBR|atari|sun|mac|bsd) ;;
+        *) f_needs_force="yes" ;;
+      esac
+    done
+    if [[ "${f_needs_force}" == "yes" ]] && [[ "${f_force}" != "yes" ]]
+    then
+      f_json_error "${f_device} still carries data signatures (${f_sigs}) - pass --force to overwrite them."
+    fi
+
+    # A replacement cannot be smaller than the member it replaces: btrfs
+    # has to move every chunk of the old device onto the new one.
+    local f_new_size f_biggest=0 f_m_name f_m_size f_m_label
+    f_new_size=$(blockdev --getsize64 "${f_device}" 2>/dev/null || echo 0)
+    [[ "${f_new_size}" -gt 0 ]] || f_json_error "Could not determine the size of ${f_device}"
+    while read -r f_m_name f_m_size
+    do
+      [[ -z "${f_m_name}" ]] && continue
+      [[ "/dev/${f_m_name}" == "${f_device}" ]] && continue
+      f_m_label=$(blkid -s LABEL -o value "/dev/${f_m_name}" 2>/dev/null || true)
+      [[ "${f_m_label}" == "${g_luks_label}" ]] || continue
+      [[ "${f_m_size}" -gt "${f_biggest}" ]] && f_biggest="${f_m_size}"
+    done < <(lsblk -n -l -b -o NAME,SIZE,FSTYPE 2>/dev/null | \
+      awk '$3 == "crypto_LUKS" {print $1, $2}' || true)
+    if [[ "${f_biggest}" -gt 0 ]] && [[ "${f_new_size}" -lt "${f_biggest}" ]]
+    then
+      f_json_error "${f_device} ($(numfmt --to=iec "${f_new_size}")) is smaller than the largest existing media member ($(numfmt --to=iec "${f_biggest}")) - btrfs replace cannot move the data onto it."
+    fi
+
+    # Drop every leftover signature first: a stale btrfs superblock would
+    # make the kernel treat the disk as part of a foreign filesystem.
+    wipefs --all --force "${f_device}" >/dev/null 2>&1 || true
+    f_log "Formatting ${f_device} as LUKS (label ${g_luks_label})"
+    cryptsetup luksFormat --batch-mode --type luks2 --label "${g_luks_label}" \
+      --key-file "${g_keyfile}" "${f_device}" >/dev/null 2>&1 || \
+      f_json_error "LUKS format on ${f_device} failed"
+    # The boot keyfile is the only keyslot (like the existing members); a
+    # passphrase can be added later with change-password.
+    local f_idx=1 f_mapper
+    while [[ -e "/dev/mapper/${g_mapper_base}-${f_idx}" ]]
+    do
+      f_idx=$((f_idx + 1))
+    done
+    f_mapper="${g_mapper_base}-${f_idx}"
+    cryptsetup open --key-file "${g_keyfile}" "${f_device}" "${f_mapper}" 2>&1 || \
+      f_json_error "Could not open ${f_device} as ${f_mapper}"
+    btrfs device scan >/dev/null 2>&1 || true
+    f_json_ok "\"message\":\"$(printf '%s' "${f_device} is ready as /dev/mapper/${f_mapper}" | f_json_escape),\"device\":$(printf '%s' "${f_device}" | f_json_escape),\"mapper\":$(printf '/dev/mapper/%s' "${f_mapper}" | f_json_escape),\"size_bytes\":${f_new_size}"
+    ;;
+
+  # ------------------------------------------------------------------
   rollback)
     f_do_rollback
     ;;
@@ -877,9 +1011,9 @@ EOF
     [[ -z "${f_password}" ]] && f_json_error "Passphrase is required"
     mkdir -p /symbios/.keys 2>/dev/null || f_json_error "Cannot create /symbios/.keys"
     chmod 700 /symbios/.keys
-    printf '%s' "${f_password}" > /symbios/.keys/media-volume.key || \
+    printf '%s' "${f_password}" > "${g_keyfile}" || \
       f_json_error "Cannot write keyfile"
-    chmod 600 /symbios/.keys/media-volume.key
+    chmod 600 "${g_keyfile}"
     f_password=""
     f_json_ok '"message":"Boot keyfile stored (0600, /symbios/.keys/media-volume.key)."'
     ;;
@@ -941,7 +1075,7 @@ EOF
     ;;
 
   *)
-    f_json_error "Usage: $0 {status|setup|adopt|unlock|lock|luks|rollback|umount|save-key|change-password}"
+    f_json_error "Usage: $0 {status|setup|adopt|unlock|lock|luks|prepare-member|rollback|umount|save-key|change-password}"
     ;;
   esac
 }

@@ -20,7 +20,8 @@
 #
 # Actions:
 #   status [--json]             Show filesystems + device stats + scrub state
-#   replace <mnt> <old> <new>   Replace a member device
+#   replace <mnt> <old> <new>   Replace a member device (old: device
+#                               path, absent member path or devid)
 #   add <mnt> <device>          Add a device + rebalance
 #   remove <mnt> <device>       Remove a device
 #   scrub <mnt> [start|cancel|status]  Control data scrubbing
@@ -39,7 +40,9 @@ progress; rebalance may take hours on large filesystems.
 
 Actions:
   status [--json]             Show filesystems + device stats + scrub state
-  replace <mnt> <old> <new>   Replace a member device
+  replace <mnt> <old> <new>   Replace a member device (old: device
+                              path, absent member path or devid - an
+                              absent source is rebuilt from the mirrors)
   add <mnt> <device>          Add a device and rebalance
   remove <mnt> <device>       Remove a device
   scrub <mnt> [start|cancel|status]
@@ -92,6 +95,21 @@ function f_need_btrfs {
   command -v btrfs >/dev/null 2>&1 || f_json_error "btrfs-progs is not installed"
 }
 
+# Newest complete line of `btrfs replace status <mnt>`. While a replace
+# runs, that command polls internally until it ends and rewrites its
+# progress with backspace (new progs) or carriage-return (old ones)
+# characters - normalize both into newlines. The erase length does not
+# always match the printed text, so a cut-off stream can end in a partial
+# fragment; keep only lines that are a complete progress update or a final
+# status line. The probe timeout cuts a running poll off; without an
+# active replace the command returns by itself right away.
+function f_replace_status_line {
+  local f_mnt="$1" f_to="${2:-5}"
+  timeout "${f_to}" btrfs replace status "${f_mnt}" 2>/dev/null | \
+    tr '\r\b' '\n\n' | grep -vE '^[[:space:]]*$' | \
+    grep -E '[0-9]+(\.[0-9]+)?% done|finished on|canceled on' | tail -1 || true
+}
+
 function f_main {
   g_action="${1:-}"
   shift 2>/dev/null || true
@@ -104,7 +122,7 @@ function f_main {
     # members stay invisible until unlocked via the Data Disk page.
     f_need_btrfs
     local f_out="" f_first="yes"
-    local f_b_label="" f_b_uuid="" f_b_missing="false" f_b_members=""
+    local f_b_label="" f_b_uuid="" f_b_missing="false" f_b_members="" f_b_devices=""
     f_btrfs_emit() {
       [[ -z "${f_b_uuid}" ]] && return 0
       local f_b_mount f_b_df f_b_data f_b_meta f_b_stats f_b_scrub
@@ -129,25 +147,54 @@ function f_main {
           /corruption_errs/ { g_c += $2 }
           /generation_errs/ { g_g += $2 }
           END { print "w=" g_w+0 " r=" g_r+0 " f=" g_f+0 " c=" g_c+0 " g=" g_g+0 }')
+        local f_b_replace_running="false" f_b_replace_pct=""
+        # A running dev-replace is reported by `btrfs replace status` -
+        # but while one runs that command polls internally until the
+        # replace ends, so the probe is wrapped in a short timeout: cut
+        # off mid-progress means the replace is alive and the newest line
+        # carries the current percentage. Without an active replace the
+        # command returns immediately (final or "no replace" line).
+        local f_b_rep_line
+        f_b_rep_line=$(f_replace_status_line "${f_b_mount}" 5)
+        if [[ "${f_b_rep_line}" == *"% done"* ]]
+        then
+          f_b_replace_running="true"
+          f_b_replace_pct=$(grep -oE '[0-9]+(\.[0-9]+)?% done' <<< "${f_b_rep_line}" | \
+            grep -oE '^[0-9]+(\.[0-9]+)?' || true)
+        fi
         local f_b_scrub_raw
         f_b_scrub_raw=$(btrfs scrub status "${f_b_mount}" 2>/dev/null || true)
-        f_b_scrub=$(echo "${f_b_scrub_raw}" | grep -E 'Status|Duration|Total' | tr '\n' ';' || true)
-        # Running scrub: report percent = data_bytes_scrubbed / FS bytes
-        # used (btrfs prints no percentage itself, only byte counters).
-        if echo "${f_b_scrub_raw}" | grep -qi "running"
+        # While a dev-replace runs, btrfs reports it here as a "running"
+        # scrub (the replace reuses the scrub machinery) - that state
+        # belongs to the replace and must not show up as a user scrub.
+        if [[ "${f_b_replace_running}" == "true" ]]
         then
-          f_b_scrub_running="true"
-          local f_b_done f_b_used_h f_b_used
-          f_b_done=$(echo "${f_b_scrub_raw}" | grep -oE 'data_bytes_scrubbed: [0-9]+' | awk '{print $2; exit}')
-          f_b_used_h=$(btrfs filesystem show "${f_b_uuid}" 2>/dev/null | \
-            grep -oE 'FS bytes used [0-9.]+[KMGTPE]?i?B' | awk '{print $4; exit}')
-          f_b_used=$(numfmt --from=iec "${f_b_used_h}" 2>/dev/null || echo 0)
-          if [[ "${f_b_done:-0}" -gt 0 ]] 2>/dev/null && [[ "${f_b_used:-0}" -gt 0 ]] 2>/dev/null
+          f_b_scrub="-"
+        else
+          f_b_scrub=$(echo "${f_b_scrub_raw}" | grep -E 'Status|Duration|Total' | tr '\n' ';' || true)
+          # Running scrub: modern progs print the percentage directly
+          # ("Bytes scrubbed: 37G (0.28%)"); older ones only give byte
+          # counters - fall back to dividing by the used filesystem size.
+          if echo "${f_b_scrub_raw}" | grep -qi "running"
           then
-            f_b_scrub_pct=$(( f_b_done * 100 / f_b_used ))
-            [[ "${f_b_scrub_pct}" -gt 100 ]] && f_b_scrub_pct=100
-          else
-            f_b_scrub_pct=0
+            f_b_scrub_running="true"
+            f_b_scrub_pct=$(echo "${f_b_scrub_raw}" | grep -oE '\([0-9]+(\.[0-9]+)?%\)' | head -1 | tr -d '()%' || true)
+            if ! [[ "${f_b_scrub_pct:-}" =~ ^[0-9]+(\.[0-9]+)?$ ]]
+            then
+              local f_b_done f_b_used_h f_b_used
+              f_b_done=$(echo "${f_b_scrub_raw}" | grep -oE 'data_bytes_scrubbed: [0-9]+' | awk '{print $2; exit}' || true)
+              f_b_used_h=$(btrfs filesystem show "${f_b_uuid}" 2>/dev/null | \
+                grep -oE 'FS bytes used [0-9.]+[KMGTPE]?i?B' | awk '{print $4; exit}' || true)
+              f_b_used=$(numfmt --from=iec "${f_b_used_h}" 2>/dev/null || echo 0)
+              if [[ "${f_b_done:-0}" =~ ^[0-9]+$ ]] && [[ "${f_b_used:-0}" =~ ^[0-9]+$ ]] \
+                && [[ "${f_b_done}" -gt 0 ]] && [[ "${f_b_used}" -gt 0 ]]
+              then
+                f_b_scrub_pct=$(( f_b_done * 100 / f_b_used ))
+                [[ "${f_b_scrub_pct}" -gt 100 ]] && f_b_scrub_pct=100
+              else
+                f_b_scrub_pct=0
+              fi
+            fi
           fi
         fi
       fi
@@ -163,9 +210,17 @@ function f_main {
       f_out="${f_out},\"scrub\":$(printf '%s' "${f_b_scrub}" | f_json_escape)"
       f_out="${f_out},\"scrub_running\":${f_b_scrub_running}"
       f_out="${f_out},\"scrub_percent\":${f_b_scrub_pct}"
+      f_out="${f_out},\"replace_running\":${f_b_replace_running}"
+      if [[ -n "${f_b_replace_pct}" ]]
+      then
+        f_out="${f_out},\"replace_percent\":${f_b_replace_pct}"
+      else
+        f_out="${f_out},\"replace_percent\":null"
+      fi
       f_out="${f_out},\"degraded\":${f_b_missing}"
+      f_out="${f_out},\"devices\":[${f_b_devices}]"
       f_out="${f_out},\"members\":[${f_b_members}]}"
-      f_b_label="" f_b_uuid="" f_b_missing="false" f_b_members=""
+      f_b_label="" f_b_uuid="" f_b_missing="false" f_b_members="" f_b_devices=""
     }
     while IFS= read -r f_line
     do
@@ -176,15 +231,29 @@ function f_main {
         f_b_label="${f_b_label%%  uuid:*}"
         f_b_label="${f_b_label//\'/}"
         f_b_uuid="${f_line##*uuid: }"
+      elif [[ "${f_line}" =~ ^[[:space:]]*devid[[:space:]]+([0-9]+).*[[:space:]]path[[:space:]]+(.*)$ ]]
+      then
+        # One line per member. A pulled disk keeps its devid but has no
+        # path any more ("path  MISSING") - that id is the only way to
+        # address it for a replace, so it has to reach the WebUI.
+        local f_b_id="${BASH_REMATCH[1]}" f_b_path="${BASH_REMATCH[2]}"
+        f_b_path="${f_b_path%"${f_b_path##*[![:space:]]}"}"
+        if [[ -z "${f_b_path}" || "${f_b_path}" == "MISSING" ]]
+        then
+          f_b_missing="true"
+          [[ -n "${f_b_devices}" ]] && f_b_devices="${f_b_devices}, "
+          f_b_devices="${f_b_devices}{\"devid\":${f_b_id},\"path\":\"\",\"missing\":true}"
+        else
+          [[ -n "${f_b_devices}" ]] && f_b_devices="${f_b_devices}, "
+          f_b_devices="${f_b_devices}{\"devid\":${f_b_id},\"path\":$(printf '%s' "${f_b_path}" | f_json_escape),\"missing\":false}"
+          [[ -n "${f_b_members}" ]] && f_b_members="${f_b_members}, "
+          f_b_members="${f_b_members}$(printf '%s' "${f_b_path}" | f_json_escape)"
+        fi
       elif [[ "${f_line}" == *"Some devices missing"* ]]
       then
+        # Older btrfs-progs report the missing members only in this summary
+        # line (no per-device MISSING row) - keep it as a fallback.
         f_b_missing="true"
-      elif [[ "${f_line}" == *"path /dev/"* ]]
-      then
-        local f_b_path="/dev/${f_line##*path /dev/}"
-        f_b_path="${f_b_path%% *}"
-        [[ -n "${f_b_members}" ]] && f_b_members="${f_b_members}, "
-        f_b_members="${f_b_members}$(printf '%s' "${f_b_path}" | f_json_escape)"
       fi
     done < <(btrfs filesystem show 2>/dev/null || true)
     f_btrfs_emit
@@ -193,20 +262,84 @@ function f_main {
 
   replace)
     f_need_btrfs
-    local f_mnt="${1:-}" f_old="${2:-}" f_new="${3:-}"
+    local f_mnt="${1:-}" f_old="${2:-}" f_new="${3:-}" f_source f_devid f_out
     [[ -z "${f_mnt}" || -z "${f_old}" || -z "${f_new}" ]] && \
-      f_json_error "Usage: $0 replace <mountpoint> <old-device> <new-device>"
-    [[ -e "${f_new}" ]] || f_json_error "New device ${f_new} does not exist"
-    f_log "Replacing ${f_old} with ${f_new} on ${f_mnt}"
-    btrfs replace start "${f_old}" "${f_new}" "${f_mnt}" 2>&1 || \
-      f_json_error "btrfs replace failed"
+      f_json_error "Usage: $0 replace <mountpoint> <old-device|devid> <new-device>"
+    [[ -b "${f_new}" ]] || f_json_error "New device ${f_new} does not exist"
+    # The source is a device path, a devid, or the recorded path of a disk
+    # that is already gone. btrfs needs the numeric devid plus -r for the
+    # last two cases: it then rebuilds the data from the surviving mirrors.
+    # That is the normal path when a failing disk was pulled and the
+    # replacement sits in its bay (a RAID1 volume with two members cannot
+    # shrink by "remove", so replace is the only way to swap a disk).
+    local f_opts=()
+    if [[ "${f_old}" =~ ^[0-9]+$ ]]
+    then
+      # Numeric devid: the source device is not addressable by path.
+      f_source="${f_old}"
+      f_opts=(-r)
+    elif [[ -b "${f_old}" ]]
+    then
+      f_source="${f_old}"
+    else
+      # Recorded member that is absent right now - resolve its devid.
+      f_devid=$(btrfs filesystem show --raw "${f_mnt}" 2>/dev/null | \
+        awk -v p="${f_old}" '$1 == "devid" && $NF == p {print $2; exit}')
+      [[ -n "${f_devid}" ]] || \
+        f_json_error "Source ${f_old} is no block device and no recorded member of ${f_mnt}. Pass the devid shown by 'btrfs filesystem show ${f_mnt}'."
+      f_source="${f_devid}"
+      f_opts=(-r)
+    fi
+    if [[ "${f_source}" == "${f_old}" ]]
+    then
+      f_log "Replacing ${f_old} with ${f_new} on ${f_mnt}"
+    else
+      f_log "Replacing missing member devid ${f_source} (recorded as ${f_old}) with ${f_new} on ${f_mnt}"
+    fi
+    if ! f_out=$(btrfs replace start "${f_opts[@]}" "${f_source}" "${f_new}" "${f_mnt}" 2>&1)
+    then
+      f_out="${f_out//$'\n'/ }"
+      f_json_error "btrfs replace failed: ${f_out}"
+    fi
     f_log "Waiting for replace to finish..."
-    while btrfs replace status "${f_mnt}" 2>/dev/null | grep -qi "in progress"
+    # While a replace runs, `btrfs replace status` polls internally and only
+    # returns when it ends - so every call is wrapped in `timeout`: while the
+    # replace is alive we get progress lines (backspace/carriage-return
+    # separated, normalized by f_replace_status_line), once it is done the
+    # command returns by itself with a final line that says "finished on"
+    # or "canceled on". A canceled replace (ENOSPC on a nearly full
+    # filesystem) must never be reported as success.
+    local f_status="" f_wait=0
+    while true
     do
-      btrfs replace status "${f_mnt}" 2>/dev/null | head -3 || true
+      f_status=$(f_replace_status_line "${f_mnt}" 25)
+      [[ "${f_status}" == *"finished on"* ]] && break
+      [[ "${f_status}" == *"canceled on"* ]] && break
+      if [[ "${f_status}" == *"% done"* ]]
+      then
+        f_log "${f_status}"
+      elif [[ "${f_wait}" -ge 120 ]]
+      then
+        f_json_error "btrfs replace did not start: ${f_status:-no status}"
+      fi
+      f_wait=$(( f_wait + 30 ))
       sleep 30
     done
-    f_json_ok '"message":"Device replaced."'
+    if [[ "${f_status}" == *"canceled on"* ]]
+    then
+      f_json_error "btrfs replace was canceled: ${f_status} (a nearly full filesystem fails with ENOSPC - check 'dmesg | grep -i btrfs', free space and start again)"
+    fi
+    # Error counters are part of the final status line; anything above zero
+    # means the target disk (write errs) or both mirrors (uncorr. reads)
+    # have a problem - never report that as a clean replace.
+    local f_werr f_rerr
+    f_werr=$(grep -oE '[0-9]+ write errs' <<< "${f_status}" | awk '{print $1}' || true)
+    f_rerr=$(grep -oE '[0-9]+ uncorr' <<< "${f_status}" | awk '{print $1}' || true)
+    if [[ "${f_werr:-0}" -gt 0 ]] || [[ "${f_rerr:-0}" -gt 0 ]]
+    then
+      f_json_error "btrfs replace finished with errors: ${f_status}"
+    fi
+    f_json_ok "\"message\":$(printf 'Device replaced: %s' "${f_status}" | f_json_escape)"
     ;;
 
   add)
@@ -225,11 +358,26 @@ function f_main {
     # No balance needed afterwards: btrfs relocates the removed
     # device's extents onto the remaining devices by itself.
     f_need_btrfs
-    local f_mnt="${1:-}" f_dev="${2:-}"
+    local f_mnt="${1:-}" f_dev="${2:-}" f_out
     [[ -z "${f_mnt}" || -z "${f_dev}" ]] && \
       f_json_error "Usage: $0 remove <mountpoint> <device>"
-    btrfs device remove "${f_dev}" "${f_mnt}" 2>&1 || \
-      f_json_error "btrfs device remove failed (not enough space elsewhere?)"
+    if ! f_out=$(btrfs device remove "${f_dev}" "${f_mnt}" 2>&1)
+    then
+      # Flatten btrfs' multi-line output: the JSON escape of this script
+      # only covers a single line.
+      f_out="${f_out//$'\n'/ }"
+      # A RAID1 filesystem with two members cannot shrink to one: btrfs
+      # refuses before it moves any data ("unable to go below two devices
+      # on raid1"). Swapping a disk is a replace, not a remove - the
+      # profile needs a second device at all times.
+      if grep -qi "unable to go below two devices" <<< "${f_out}"
+      then
+        f_json_error "btrfs refuses to shrink ${f_mnt} to a single device: a raid1 filesystem needs at least two. To swap a disk, prepare the new disk as a member and use Replace a Disk (btrfs replace). btrfs said: ${f_out}"
+      fi
+      # Relocation to the remaining devices fails when they have no room
+      # for the moved extents; keep btrfs' own wording.
+      f_json_error "btrfs device remove failed: ${f_out}"
+    fi
     f_json_ok '"message":"Device removed."'
     ;;
 
