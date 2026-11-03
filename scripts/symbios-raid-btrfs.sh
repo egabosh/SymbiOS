@@ -24,7 +24,8 @@
 #                               path, absent member path or devid)
 #   add <mnt> <device>          Add a device + rebalance
 #   remove <mnt> <device>       Remove a device
-#   scrub <mnt> [start|cancel|status]  Control data scrubbing
+#   scrub <mnt> [start|cancel|status]  Control data scrubbing (start also
+#                               records the result for the health check)
 #   balance <mnt>               Rebalance data across devices
 #   help                        Show this help
 #
@@ -46,7 +47,8 @@ Actions:
   add <mnt> <device>          Add a device and rebalance
   remove <mnt> <device>       Remove a device
   scrub <mnt> [start|cancel|status]
-                              Control data scrubbing
+                              Control data scrubbing (start records the
+                              result for the health check when it ends)
   balance <mnt>               Rebalance data across devices
   locate <device> [seconds]   Identify a disk by sustained reads
                               (dd, default 30s, max 120s)
@@ -64,6 +66,12 @@ then
 fi
 
 set -euo pipefail
+
+# Central path config (g_config_dir for the scrub state file). Resolved
+# relative to this script: the scrub recorder runs as a systemd transient
+# unit, where scripts/ is not on PATH.
+g_lib="$(dirname "$(readlink -f "$0")")/symbios-lib.sh"
+[[ -r "${g_lib}" ]] && source "${g_lib}"
 
 function f_json_escape {
   local f_s
@@ -110,6 +118,65 @@ function f_replace_status_line {
     grep -E '[0-9]+(\.[0-9]+)?% done|finished on|canceled on' | tail -1 || true
 }
 
+# State file of the last scrub per filesystem ("<uuid> <mnt> <started> <status>").
+# Shared with the monthly btrfs-scrub autoupdate module and read by the
+# raid-mdadm check for the freshness test.
+function f_scrub_state_file {
+  printf '%s/btrfs-scrub-state' "${g_config_dir:-/symbios/base-services/symbios-ui/config}"
+}
+
+# True while a scrub runs on <mnt>. A running dev-replace is reported the
+# same way (it reuses the scrub machinery).
+function f_scrub_running {
+  btrfs scrub status "$1" 2>/dev/null | \
+    grep -qiE '^[[:space:]]*status:[[:space:]]*running'
+}
+
+# Wait for the scrub on <mnt> to end and record its outcome. Runs detached
+# (see f_scrub_record_start): a full scrub of a large filesystem takes hours,
+# so the WebUI job returns at once - but the result still has to reach the
+# state file. Otherwise a manual scrub records nothing and the monthly check
+# keeps reporting the previous (aborted) run plus a stale scan.
+function f_scrub_record {
+  local f_mnt="$1" f_started="$2" f_wait=0 f_raw f_uuid f_val f_status f_state
+  while f_scrub_running "${f_mnt}"
+  do
+    # Give up after two days - a scrub that never ends is not recorded.
+    [[ "${f_wait}" -ge 172800 ]] && return 0
+    sleep 60
+    f_wait=$(( f_wait + 60 ))
+  done
+  f_raw=$(btrfs scrub status "${f_mnt}" 2>/dev/null || true)
+  f_uuid=$(btrfs filesystem show "${f_mnt}" 2>/dev/null | \
+    grep -m1 'uuid:' | sed 's/.*uuid:[[:space:]]*//')
+  [[ -n "${f_uuid}" ]] || return 0
+  # Same line format as the monthly module: "status: <value>", plus (ERROR)
+  # when the scan aborted - the check treats that as "did not complete".
+  f_val=$(grep -iE '^[[:space:]]*status:' <<< "${f_raw}" | head -1 | \
+    sed -E 's/^[[:space:]]*[Ss]tatus:[[:space:]]*//')
+  [[ -z "${f_val}" ]] && f_val="no status reported"
+  f_status="status: ${f_val}"
+  grep -qiE 'status:[[:space:]]*aborted' <<< "${f_raw}" && f_status="${f_status} (ERROR)"
+  f_state=$(f_scrub_state_file)
+  mkdir -p "$(dirname "${f_state}")" 2>/dev/null || return 0
+  grep -v "^${f_uuid} " "${f_state}" 2>/dev/null > "${f_state}.tmp" || true
+  echo "${f_uuid} ${f_mnt} ${f_started} ${f_status}" >> "${f_state}.tmp"
+  mv -f "${f_state}.tmp" "${f_state}"
+}
+
+# Start the recorder as a detached transient unit: the exec job that starts
+# the scrub must not wait for it (hours), and gaboshlib kills background jobs
+# at exit - systemd-run is the established way around both.
+function f_scrub_record_start {
+  local f_mnt="$1" f_started="$2" f_uuid8 f_self
+  f_uuid8=$(btrfs filesystem show "${f_mnt}" 2>/dev/null | \
+    grep -m1 -oE '[0-9a-f]{8}-[0-9a-f-]{27}' | cut -c1-8)
+  f_self=$(readlink -f "$0")
+  systemd-run --unit="symbios-btrfs-scrub-record-${f_uuid8:-manual}" \
+    --collect --no-block /bin/bash "${f_self}" \
+    scrub "${f_mnt}" record "${f_started}" >/dev/null 2>&1 || true
+}
+
 function f_main {
   g_action="${1:-}"
   shift 2>/dev/null || true
@@ -123,23 +190,39 @@ function f_main {
     f_need_btrfs
     local f_out="" f_first="yes"
     local f_b_label="" f_b_uuid="" f_b_missing="false" f_b_members="" f_b_devices=""
+    local f_b_raw_show=""
+    # Block group profiles of one type, joined with "+": a filesystem that
+    # was grown or converted can carry several at once (here: a leftover
+    # "single" chunk next to the "RAID1" ones). Taking the first match only
+    # would report full redundancy while a part of the data has no mirror.
+    f_btrfs_profiles() {
+      local f_df="$1" f_type="$2" f_p
+      f_p=$(awk -v t="${f_type}," '$1 == t { gsub(/:.*/, "", $2); print $2 }' <<< "${f_df}" | \
+        paste -sd+ -)
+      printf '%s' "${f_p:-unknown}"
+    }
     f_btrfs_emit() {
       [[ -z "${f_b_uuid}" ]] && return 0
-      local f_b_mount f_b_df f_b_data f_b_meta f_b_stats f_b_scrub
+      local f_b_mount f_b_df f_b_data f_b_meta f_b_sys f_b_stats f_b_scrub
       local f_b_scrub_running="false" f_b_scrub_pct="-1"
-      f_b_mount=$(findmnt -n -o TARGET "UUID=${f_b_uuid}" 2>/dev/null || true)
+      # Declared here, not inside the mounted branch: an unmounted filesystem
+      # has no replace to report, but the JSON fields are emitted anyway.
+      local f_b_replace_running="false" f_b_replace_pct=""
+      # A filesystem can be mounted at several paths (bind mounts): take the
+      # first one - every btrfs command needs a single path, not a list.
+      f_b_mount=$(findmnt -n -o TARGET "UUID=${f_b_uuid}" 2>/dev/null | head -1 || true)
       f_b_df=""
       f_b_data="unknown"
       f_b_meta="unknown"
+      f_b_sys="unknown"
       f_b_stats="-"
       f_b_scrub="-"
       if [[ -n "${f_b_mount}" ]]
       then
         f_b_df=$(btrfs filesystem df "${f_b_mount}" 2>/dev/null || true)
-        f_b_data=$(echo "${f_b_df}" | awk '/^Data, /{gsub(/:.*/,"",$2); print $2; exit}')
-        f_b_meta=$(echo "${f_b_df}" | awk '/^Metadata, /{gsub(/:.*/,"",$2); print $2; exit}')
-        [[ -z "${f_b_data}" ]] && f_b_data="unknown"
-        [[ -z "${f_b_meta}" ]] && f_b_meta="unknown"
+        f_b_data=$(f_btrfs_profiles "${f_b_df}" "Data")
+        f_b_meta=$(f_btrfs_profiles "${f_b_df}" "Metadata")
+        f_b_sys=$(f_btrfs_profiles "${f_b_df}" "System")
         f_b_stats=$(btrfs device stats "${f_b_mount}" 2>/dev/null | awk '
           /write_io_errs/   { g_w += $2 }
           /read_io_errs/    { g_r += $2 }
@@ -147,7 +230,6 @@ function f_main {
           /corruption_errs/ { g_c += $2 }
           /generation_errs/ { g_g += $2 }
           END { print "w=" g_w+0 " r=" g_r+0 " f=" g_f+0 " c=" g_c+0 " g=" g_g+0 }')
-        local f_b_replace_running="false" f_b_replace_pct=""
         # A running dev-replace is reported by `btrfs replace status` -
         # but while one runs that command polls internally until the
         # replace ends, so the probe is wrapped in a short timeout: cut
@@ -206,6 +288,16 @@ function f_main {
       f_out="${f_out},\"mounted\":$([[ -n "${f_b_mount}" ]] && echo true || echo false)"
       f_out="${f_out},\"data_profile\":$(printf '%s' "${f_b_data}" | f_json_escape)"
       f_out="${f_out},\"metadata_profile\":$(printf '%s' "${f_b_meta}" | f_json_escape)"
+      f_out="${f_out},\"system_profile\":$(printf '%s' "${f_b_sys}" | f_json_escape)"
+      # A "single" chunk next to the RAID1 ones means part of the data has
+      # no mirror - shown as a badge instead of silently calling the
+      # filesystem redundant.
+      if [[ "${f_b_data}${f_b_meta}${f_b_sys}" == *single* || "${f_b_data}${f_b_meta}${f_b_sys}" == *dup* ]]
+      then
+        f_out="${f_out},\"redundancy_incomplete\":true"
+      else
+        f_out="${f_out},\"redundancy_incomplete\":false"
+      fi
       f_out="${f_out},\"device_stats\":$(printf '%s' "${f_b_stats}" | f_json_escape)"
       f_out="${f_out},\"scrub\":$(printf '%s' "${f_b_scrub}" | f_json_escape)"
       f_out="${f_out},\"scrub_running\":${f_b_scrub_running}"
@@ -220,7 +312,7 @@ function f_main {
       f_out="${f_out},\"degraded\":${f_b_missing}"
       f_out="${f_out},\"devices\":[${f_b_devices}]"
       f_out="${f_out},\"members\":[${f_b_members}]}"
-      f_b_label="" f_b_uuid="" f_b_missing="false" f_b_members="" f_b_devices=""
+      f_b_label="" f_b_uuid="" f_b_missing="false" f_b_members="" f_b_devices="" f_b_raw_show=""
     }
     while IFS= read -r f_line
     do
@@ -238,14 +330,28 @@ function f_main {
         # address it for a replace, so it has to reach the WebUI.
         local f_b_id="${BASH_REMATCH[1]}" f_b_path="${BASH_REMATCH[2]}"
         f_b_path="${f_b_path%"${f_b_path##*[![:space:]]}"}"
+        # Per-device capacity. btrfs registers a device with the size it had
+        # when it joined the filesystem - a larger replacement disk keeps the
+        # old size registered, so the rest of it stays unused (that is why a
+        # replace does not raise the usable capacity). Both numbers travel to
+        # the WebUI so the unused remainder can be shown per member.
+        [[ -z "${f_b_raw_show}" ]] && \
+          f_b_raw_show=$(btrfs filesystem show --raw "${f_b_uuid}" 2>/dev/null || true)
+        local f_b_size
+        f_b_size=$(awk -v id="${f_b_id}" '$1 == "devid" && $2 == id { print $4; exit }' \
+          <<< "${f_b_raw_show}")
+        [[ "${f_b_size:-}" =~ ^[0-9]+$ ]] || f_b_size=0
+        local f_b_phys=0
+        [[ -b "${f_b_path}" ]] && f_b_phys=$(blockdev --getsize64 "${f_b_path}" 2>/dev/null || echo 0)
+        [[ "${f_b_phys:-}" =~ ^[0-9]+$ ]] || f_b_phys=0
         if [[ -z "${f_b_path}" || "${f_b_path}" == "MISSING" ]]
         then
           f_b_missing="true"
           [[ -n "${f_b_devices}" ]] && f_b_devices="${f_b_devices}, "
-          f_b_devices="${f_b_devices}{\"devid\":${f_b_id},\"path\":\"\",\"missing\":true}"
+          f_b_devices="${f_b_devices}{\"devid\":${f_b_id},\"path\":\"\",\"missing\":true,\"size\":${f_b_size},\"device_size\":${f_b_phys}}"
         else
           [[ -n "${f_b_devices}" ]] && f_b_devices="${f_b_devices}, "
-          f_b_devices="${f_b_devices}{\"devid\":${f_b_id},\"path\":$(printf '%s' "${f_b_path}" | f_json_escape),\"missing\":false}"
+          f_b_devices="${f_b_devices}{\"devid\":${f_b_id},\"path\":$(printf '%s' "${f_b_path}" | f_json_escape),\"missing\":false,\"size\":${f_b_size},\"device_size\":${f_b_phys}}"
           [[ -n "${f_b_members}" ]] && f_b_members="${f_b_members}, "
           f_b_members="${f_b_members}$(printf '%s' "${f_b_path}" | f_json_escape)"
         fi
@@ -344,13 +450,23 @@ function f_main {
 
   add)
     f_need_btrfs
-    local f_mnt="${1:-}" f_dev="${2:-}"
+    local f_mnt="${1:-}" f_dev="${2:-}" f_out
     [[ -z "${f_mnt}" || -z "${f_dev}" ]] && \
       f_json_error "Usage: $0 add <mountpoint> <device>"
-    btrfs device add "${f_dev}" "${f_mnt}" 2>&1 || \
-      f_json_error "btrfs device add failed"
+    if ! f_out=$(btrfs device add "${f_dev}" "${f_mnt}" 2>&1)
+    then
+      f_out="${f_out//$'\n'/ }"
+      f_json_error "btrfs device add failed: ${f_out}"
+    fi
     f_log "Rebalancing after add (may take a while)..."
-    btrfs balance start -dconvert=raid1 -mconvert=raid1 "${f_mnt}" 2>&1 || true
+    # -sconvert=raid1 matters: System chunks are created as "single" by
+    # some kernels and would otherwise stay without a mirror forever.
+    if ! f_out=$(btrfs balance start -dconvert=raid1 -mconvert=raid1 -sconvert=raid1 \
+      "${f_mnt}" 2>&1)
+    then
+      f_out="${f_out//$'\n'/ }"
+      f_json_error "Device added, but the rebalance to raid1 failed: ${f_out}"
+    fi
     f_json_ok '"message":"Device added and balanced to raid1."'
     ;;
 
@@ -387,12 +503,25 @@ function f_main {
     [[ -z "${f_mnt}" ]] && f_json_error "Usage: $0 scrub <mountpoint> [start|cancel|status]"
     case "${f_op}" in
       start)
-        btrfs scrub start "${f_mnt}" 2>&1 || f_json_error "scrub start failed"
-        f_json_ok '"message":"Scrub started."'
+        local f_started f_out
+        f_started=$(date -u +%FT%TZ)
+        if ! f_out=$(btrfs scrub start "${f_mnt}" 2>&1)
+        then
+          f_out="${f_out//$'\n'/ }"
+          f_json_error "scrub start failed: ${f_out}"
+        fi
+        # Record the result when the scrub ends, so a manual scrub counts for
+        # the monthly freshness check instead of leaving the old state behind.
+        f_scrub_record_start "${f_mnt}" "${f_started}"
+        f_json_ok '"message":"Scrub started - the result is recorded automatically when it finishes."'
         ;;
       cancel)
         btrfs scrub cancel "${f_mnt}" 2>&1 || f_json_error "scrub cancel failed"
         f_json_ok '"message":"Scrub cancelled."'
+        ;;
+      record)
+        # Internal: started detached by f_scrub_record_start.
+        f_scrub_record "${f_mnt}" "${3:-$(date -u +%FT%TZ)}"
         ;;
       *)
         btrfs scrub status "${f_mnt}" 2>&1 || f_json_error "scrub status failed"
@@ -402,10 +531,17 @@ function f_main {
 
   balance)
     f_need_btrfs
-    local f_mnt="${1:-}"
+    local f_mnt="${1:-}" f_out
     [[ -z "${f_mnt}" ]] && f_json_error "Usage: $0 balance <mountpoint>"
-    btrfs balance start -dconvert=raid1 -mconvert=raid1 "${f_mnt}" 2>&1 || \
-      f_json_error "balance failed"
+    # Convert every profile, System included: those chunks are created as
+    # "single" by some kernels and stay unmirrored until a balance names
+    # them explicitly.
+    if ! f_out=$(btrfs balance start -dconvert=raid1 -mconvert=raid1 -sconvert=raid1 \
+      "${f_mnt}" 2>&1)
+    then
+      f_out="${f_out//$'\n'/ }"
+      f_json_error "btrfs balance failed: ${f_out} (the conversion needs unallocated space on every member - on a nearly full filesystem free space first and start again)"
+    fi
     f_json_ok '"message":"Balance finished."'
     ;;
 

@@ -26,6 +26,10 @@
         transport) - that is how two identical disks are told apart when one of them
         has to be replaced.
         Any non-zero error counter (w/r/f/c/g) deserves attention.
+        Several profiles per type (e.g. <code>single+RAID1</code>) mean part of the data has
+        no mirror - Balance converts the rest to RAID1. A member that reports unused space is a
+        disk larger than the size btrfs registered when it joined; that surplus has no mirror
+        partner and therefore cannot raise the capacity of a two-disk RAID1.
         Scrub, balance, add, remove and replace are kernel operations and
         <strong>only work on mounted filesystems</strong> - that is a btrfs
         requirement, not a UI limitation.
@@ -95,6 +99,7 @@
             <div class="col-10"><label class="form-label">Mounted filesystem to balance (RAID1)</label><select class="form-select" name="mountpoint" id="bal-mnt" required></select></div>
             <div class="col-2"><button class="btn btn-outline-success" type="submit">Balance</button></div>
           </div>
+          <div class="form-text">Converts every data, metadata and system chunk to RAID1 - the fix when the profile list shows a <code>single</code> part next to the RAID1 one. May take hours. A nearly full filesystem fails with <code>ENOSPC</code>: btrfs needs unallocated space on both members to rewrite a chunk, so free space first and start again.</div>
         </form>
       </div>
     </div>
@@ -103,6 +108,7 @@
     <div class="card">
       <div class="card-header"><i class="bi bi-shield-check"></i> Scrub</div>
       <div class="card-body">
+        <div class="alert alert-info small">Starting a scrub records its result for the health check when it finishes - a successful run also clears an "aborted" entry, so the monthly scan resumes. A scrub only reads data and verifies it against the RAID1 mirror copy; it repairs nothing by itself, but it makes a silent bit rot visible (and fixes it when a good copy exists).</div>
         <form data-exec="true" method="POST" action="{% url "settings_raid_action" kind="btrfs" %}" class="mb-2">
           {% csrf_token %}
           <input type="hidden" name="action" value="scrub">
@@ -262,8 +268,28 @@ function membersCell(f) {
     if (d.missing) {
       return '<span class="badge bg-danger">devid ' + d.devid + ' missing</span>';
     }
-    return SymbiOS.blockdev.memberHtml(d.path);
+    var html = SymbiOS.blockdev.memberHtml(d.path);
+    /* btrfs registers a device with the size it had when it joined the
+       filesystem. A larger replacement disk therefore keeps part of itself
+       unused - that is why a replace does not raise the usable capacity.
+       Hint only: growing it would add space without a mirror partner (a
+       two-disk RAID1 is limited by the smaller member). */
+    if (d.size > 0 && d.device_size > d.size + (1024 * 1024 * 1024)) {
+      html += '<div class="small text-muted" title="btrfs registered ' + fmtBytes(d.size) +
+        ' of the physical ' + fmtBytes(d.device_size) + '"><i class="bi bi-info-circle"></i> ' +
+        fmtBytes(d.device_size - d.size) + ' of the disk unused</div>';
+    }
+    return html;
   }).join('<br>') || '-';
+}
+
+/* Human-readable size from a byte count (binary units). */
+function fmtBytes(n) {
+  var units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+  var i = 0;
+  var v = Number(n) || 0;
+  while (v >= 1024 && i < units.length - 1) { v = v / 1024; i++; }
+  return (v >= 10 ? Math.round(v) : Math.round(v * 10) / 10) + ' ' + units[i];
 }
 function syncAllFs() {
   document.querySelectorAll('.fs-sel').forEach(syncFs);
@@ -303,7 +329,11 @@ function loadAll() {
     // start: they would fight it for space and metadata (balance/scrub) or
     // pull a disk from under it (remove/prepare). Re-enabled automatically
     // when the operation is done (the 30s refresh below re-evaluates this).
-    var busy = rebuilds.length > 0 || syncing.length > 0;
+    // A running scrub means data is being read at full speed: starting a
+    // balance or a replace now would fight it for the device, canceling or
+    // unmounting would abort the scan. Locked until it is done.
+    var scrubs = btrfsFs.filter(function(f) { return f.scrub_running; });
+    var busy = rebuilds.length > 0 || syncing.length > 0 || scrubs.length > 0;
     lockExecForms(busy);
     var rbAlert = document.getElementById('rebuild-alert');
     if (busy) {
@@ -315,6 +345,11 @@ function loadAll() {
       });
       syncing.forEach(function(a) {
         parts.push('<div class="mb-1"><i class="bi bi-arrow-repeat"></i> mdadm resync running on <code>' + a.device + '</code>: <strong>' + a.sync + '</strong></div>');
+      });
+      scrubs.forEach(function(f) {
+        var pct = (f.scrub_percent != null && f.scrub_percent >= 0) ? f.scrub_percent : null;
+        parts.push('<div class="mb-1"><i class="bi bi-shield-check"></i> Scrub running on <strong>' + (f.label || f.uuid.slice(0, 8)) + '</strong> (' + f.mountpoint + ')' +
+          (pct !== null ? ': <strong>' + pct + ' %</strong>' : '') + '</div>');
       });
       rbAlert.innerHTML = '<div class="alert alert-info py-2">' + parts.join('') + '<div class="form-text">This can take hours - the page refreshes automatically and all actions on this page stay locked until it is done. Do not unmount the filesystem or power off the server.</div></div>';
       rbAlert.classList.remove('d-none');
@@ -368,7 +403,9 @@ function loadAll() {
       btrfsFs.forEach(function(f) {
         html += '<tr class="' + (f.degraded ? 'table-danger' : (!f.mountpoint ? 'table-warning' : '')) + '"><td>' + (f.label || '(no label)') +
           '<div class="small text-muted"><code>' + f.uuid + '</code></div></td>' +
-          '<td class="small">data:' + (f.data_profile || '?') + '<br>meta:' + (f.metadata_profile || '?') + '</td>' +
+          '<td class="small">data:' + (f.data_profile || '?') + '<br>meta:' + (f.metadata_profile || '?') +
+            (f.mounted ? '<br>system:' + (f.system_profile || '?') : '') +
+            (f.redundancy_incomplete ? '<br><span class="badge bg-warning text-dark" title="At least one block group profile is not mirrored (single/dup). Balance converts the rest to RAID1.">no full redundancy</span>' : '') + '</td>' +
           '<td class="small">' + membersCell(f) + '</td>' +
           '<td class="small">' + (f.mountpoint || '<span class="badge bg-warning text-dark">not mounted</span>') + (f.degraded ? '<br><span class="badge bg-danger">degraded</span>' : '') + (f.replace_running ? '<br><span class="badge bg-info text-dark">rebuild ' + ((f.replace_percent != null) ? f.replace_percent : '?') + ' %</span>' : '') + '</td>' +
           '<td class="small"><code>' + (f.device_stats || '-') + '</code></td>' +

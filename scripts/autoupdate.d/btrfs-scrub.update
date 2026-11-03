@@ -7,8 +7,10 @@
 #
 # A filesystem whose last scrub did not complete is skipped: the reported
 # problem (hardware or transport) is still there, and a second scan would
-# only repeat the failure. The skip is logged; a successful manual scrub
-# (BTRFS_SCRUB_NOW=1) clears the state and the monthly scan resumes.
+# only repeat the failure. The skip is logged. Any completed scrub clears the
+# state and the monthly scan resumes - a manual scrub from the WebUI records
+# its own result (symbios-raid-btrfs.sh scrub start), and a forced run does
+# so here.
 #
 # Forcing: BTRFS_SCRUB_NOW=1 autoupdate.sh btrfs-scrub
 
