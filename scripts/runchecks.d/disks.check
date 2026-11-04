@@ -55,14 +55,11 @@ function f_disk_alert
 
 function f_disk_hint
 {
-  # Wear hint - recorded for the structured disk-health.json (the WebUI
-  # marks the disk) and sent as a notification, but it never turns this
-  # check red: a disk with many load cycles or years of service still works,
-  # it is only a candidate for a planned replacement. A red check stays
+  # Wear hint - only reported via g_echo_warn so it appears in Health Checks
+  # as a warning; not recorded in disk-health.json so it does not create
+  # badges/warnings on the Disk/RAID settings pages. A red check stays
   # reserved for actual defects.
   local f_msg="$*"
-  g_dev_alerts+=("$f_msg")
-  [[ "$g_dev_severity" != "fail" ]] && g_dev_severity="warn"
   if [[ "${g_dev_snoozed:-0}" -eq 1 ]]
   then
     return 0

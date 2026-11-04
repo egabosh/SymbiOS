@@ -173,8 +173,8 @@ function f_scrub_record_start {
     grep -m1 -oE '[0-9a-f]{8}-[0-9a-f-]{27}' | cut -c1-8)
   f_self=$(readlink -f "$0")
   systemd-run --unit="symbios-btrfs-scrub-record-${f_uuid8:-manual}" \
-    --collect --no-block /bin/bash "${f_self}" \
-    scrub "${f_mnt}" record "${f_started}" >/dev/null 2>&1 || true
+    --collect --no-block </dev/null >/dev/null 2>&1 /bin/bash "${f_self}" \
+    scrub "${f_mnt}" record "${f_started}" || true
 }
 
 function f_main {
@@ -210,7 +210,12 @@ function f_main {
       local f_b_replace_running="false" f_b_replace_pct=""
       # A filesystem can be mounted at several paths (bind mounts): take the
       # first one - every btrfs command needs a single path, not a list.
-      f_b_mount=$(findmnt -n -o TARGET "UUID=${f_b_uuid}" 2>/dev/null | head -1 || true)
+      # findmnt's UUID= filter resolves the UUID via blkid to ONE device; on
+      # multi-device btrfs all members share the fs UUID and that one may not
+      # be the mount's source. Scan mounted btrfs filesystems by their actual
+      # fs UUID instead - it matches whichever member is the mount source.
+      f_b_mount=$(findmnt -n -o TARGET,FSTYPE,UUID -t btrfs 2>/dev/null | \
+        awk -v u="${f_b_uuid}" '$2 == "btrfs" && $3 == u { print $1; exit }' || true)
       f_b_df=""
       f_b_data="unknown"
       f_b_meta="unknown"
@@ -461,8 +466,7 @@ function f_main {
       f_rep_self=$(readlink -f "$0")
       f_log "Converting remaining single/dup chunks to RAID1 in background..."
       systemd-run --unit="symbios-btrfs-balance-auto-${f_rep_uuid8:-$$}" \
-        --collect --no-block /bin/bash -c "btrfs balance start -dconvert=raid1 -mconvert=raid1 -sconvert=raid1 '${f_mnt}'" \
-        >/dev/null 2>&1 || true
+        --collect --no-block </dev/null >/dev/null 2>&1 /bin/bash -c "btrfs balance start -dconvert=raid1 -mconvert=raid1 -sconvert=raid1 '${f_mnt}'" || true
       f_json_ok "\"message\":$(printf 'Device replaced: %s. Converting remaining single/dup chunks to RAID1 in the background (may take hours).' "${f_status}" | f_json_escape)"
     else
       f_json_ok "\"message\":$(printf 'Device replaced: %s' "${f_status}" | f_json_escape)"

@@ -221,7 +221,12 @@ function f_luks_flush {
 function f_btrfs_flush {
   [[ -z "${f_b_uuid}" ]] && return 0
   local f_b_level="unknown" f_b_mount="" f_b_df=""
-  f_b_mount=$(findmnt -n -o TARGET "UUID=${f_b_uuid}" 2>/dev/null || true)
+  # findmnt's UUID= filter resolves the UUID via blkid to ONE device; on
+  # multi-device btrfs all members share the fs UUID and that one may not be
+  # the mount's source. Scan mounted btrfs filesystems by their actual fs
+  # UUID instead - it matches whichever member is the mount source.
+  f_b_mount=$(findmnt -n -o TARGET,FSTYPE,UUID -t btrfs 2>/dev/null | \
+    awk -v u="${f_b_uuid}" '$2 == "btrfs" && $3 == u { print $1; exit }' || true)
   if [[ -n "${f_b_mount}" ]]
   then
     f_b_df=$(btrfs filesystem df "${f_b_mount}" 2>/dev/null | \

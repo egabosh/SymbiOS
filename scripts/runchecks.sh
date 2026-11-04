@@ -158,12 +158,16 @@ do
     g_check_name=$(basename "$g_check" .check | sed 's/^symbios-healthcheck-//')
     # JSON-escape: backslash first, then double quotes (ps output contains \_)
     g_check_msg=$(echo "$g_current_check_error" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+    g_check_warn_msg=$(echo "$g_current_check_warn" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
 
     # Build JSON entry with metadata
     g_meta="\"title\":\"${g_check_title}\",\"desc\":\"${g_check_desc}\",\"detail\":\"${g_check_detail}\",\"category\":\"${g_check_category}\""
     if [[ "$g_current_check_failed" -eq 1 ]]
     then
       g_entry="{\"name\":\"${g_check_name}\",\"status\":\"error\",\"message\":\"${g_check_msg}\",${g_meta},\"script\":\"${g_check}\",\"checked\":\"${g_json_ts}\"}"
+    elif [[ -n "$g_current_check_warn" ]]
+    then
+      g_entry="{\"name\":\"${g_check_name}\",\"status\":\"warn\",\"message\":\"${g_check_warn_msg}\",${g_meta},\"script\":\"${g_check}\",\"checked\":\"${g_json_ts}\"}"
     else
       g_entry="{\"name\":\"${g_check_name}\",\"status\":\"ok\",${g_meta},\"script\":\"${g_check}\",\"checked\":\"${g_json_ts}\"}"
     fi
