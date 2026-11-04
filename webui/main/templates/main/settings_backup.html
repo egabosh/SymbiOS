@@ -54,17 +54,17 @@
 
         <div class="row g-3 mb-2">
           <div class="col-md-6">
-            <label class="d-block h-100 border rounded p-3 mb-0 {% if not vars.backup_server_host and not vars.backup_servers %}border-primary bg-light{% endif %}" style="cursor:pointer">
+            <label class="d-block h-100 border rounded p-3 mb-0 {% if not backup_servers_view %}border-primary bg-light{% endif %}" style="cursor:pointer">
               <input type="radio" name="backup_target" value="local" class="me-2"
-                     {% if not vars.backup_server_host and not vars.backup_servers %}checked{% endif %} onchange="toggleTarget()">
+                     {% if not backup_servers_view %}checked{% endif %} onchange="toggleTarget()">
               <strong><i class="bi bi-hdd me-1"></i> Only on this server</strong>
               <div class="small text-muted mt-1">Backups are stored locally in <code>/symbios/backup</code>. Protects against deleted files and botched updates - but not against hardware failure.</div>
             </label>
           </div>
           <div class="col-md-6">
-            <label class="d-block h-100 border rounded p-3 mb-0 {% if vars.backup_server_host or vars.backup_servers %}border-primary bg-light{% endif %}" style="cursor:pointer">
+            <label class="d-block h-100 border rounded p-3 mb-0 {% if backup_servers_view %}border-primary bg-light{% endif %}" style="cursor:pointer">
               <input type="radio" name="backup_target" value="remote" class="me-2"
-                     {% if vars.backup_server_host or vars.backup_servers %}checked{% endif %} onchange="toggleTarget()">
+                     {% if backup_servers_view %}checked{% endif %} onchange="toggleTarget()">
               <strong><i class="bi bi-cloud-arrow-up me-1"></i> Remote backup server(s) (SFTP)</strong>
               <div class="small text-muted mt-1">Copies the backups to your own server(s) via SFTP. Recommended - this also protects against hardware failure or theft.</div>
             </label>
@@ -80,52 +80,57 @@
           </div>
 
           <div id="bk-servers-list" class="mt-2">
-            <!-- Primary target: always the first row, bound to backup_server_* /
-                 backup_keep_*. The rows below it are the additional servers. -->
+            <!-- Primary target is rendered the same as additional servers so the UI
+                 stays consistent. Its values come from backup_server_* / backup_keep_* -->
             <div class="card bg-light mb-2 bk-srv-row bk-srv-primary">
               <div class="card-body py-2">
                 <div class="row g-2 align-items-end">
-                  <div class="col-md-4">
-                    <label class="form-label small mb-0">Server address</label>
-                    <input type="text" class="form-control form-control-sm" name="backup_server_host" id="backup_host"
-                           value="{{ vars.backup_server_host|default:'' }}" placeholder="backup.example.com">
-                  </div>
-                  <div class="col-md-2">
-                    <label class="form-label small mb-0">Port</label>
-                    <input type="number" class="form-control form-control-sm" name="backup_server_port" id="backup_port" min="1" max="65535"
-                           value="{{ vars.backup_server_port|default:'' }}" placeholder="22">
+                  <div class="col-md-3">
+                    <label class="form-label small mb-0">Name</label>
+                    <input type="text" class="form-control form-control-sm" name="bk_srv_primary_name"
+                           value="{% if backup_servers_view %}{% if backup_servers_view.0.name %}{{ backup_servers_view.0.name }}{% elif vars.backup_server_name %}{{ vars.backup_server_name }}{% else %}primary{% endif %}{% elif vars.backup_server_name %}{{ vars.backup_server_name }}{% else %}primary{% endif %}" placeholder="e.g. primary">
                   </div>
                   <div class="col-md-3">
+                    <label class="form-label small mb-0">Server address</label>
+                    <input type="text" class="form-control form-control-sm" name="bk_srv_primary_host" id="backup_host"
+                           value="{% if backup_servers_view and backup_servers_view.0.host %}{{ backup_servers_view.0.host }}{% else %}{{ vars.backup_server_host|default:'' }}{% endif %}" placeholder="backup.example.com">
+                  </div>
+                  <div class="col-md-1">
+                    <label class="form-label small mb-0">Port</label>
+                    <input type="number" class="form-control form-control-sm" name="bk_srv_primary_port" id="backup_port" min="1" max="65535"
+                           value="{% if backup_servers_view and backup_servers_view.0.port %}{{ backup_servers_view.0.port }}{% else %}{{ vars.backup_server_port|default:'22' }}{% endif %}" placeholder="22">
+                  </div>
+                  <div class="col-md-2">
                     <label class="form-label small mb-0">User</label>
-                    <input type="text" class="form-control form-control-sm" name="backup_server_user" id="backup_user"
-                           value="{{ vars.backup_server_user|default:'' }}" placeholder="root">
+                    <input type="text" class="form-control form-control-sm" name="bk_srv_primary_user" id="backup_user"
+                           value="{% if backup_servers_view and backup_servers_view.0.user %}{{ backup_servers_view.0.user }}{% else %}{{ vars.backup_server_user|default:'root' }}{% endif %}" placeholder="root">
                   </div>
                   <div class="col-md-3">
                     <label class="form-label small mb-0">Directory there</label>
-                    <input type="text" class="form-control form-control-sm" name="backup_server_path" id="backup_path"
-                           value="{{ vars.backup_server_path|default:'' }}" placeholder="/backups/symbios">
+                    <input type="text" class="form-control form-control-sm" name="bk_srv_primary_path" id="backup_path"
+                           value="{% if backup_servers_view and backup_servers_view.0.path %}{{ backup_servers_view.0.path }}{% else %}{{ vars.backup_server_path|default:'' }}{% endif %}" placeholder="/backups/symbios">
                   </div>
                 </div>
                 <div class="row g-2 align-items-end mt-1">
-                  <div class="col-md-4">
+                  <div class="col-md-2">
                     <label class="form-label small mb-0">Keep daily</label>
-                    <input type="number" class="form-control form-control-sm" name="backup_keep_daily" min="0"
-                           value="{{ vars.backup_keep_daily|default:'7' }}">
+                    <input type="number" class="form-control form-control-sm" name="bk_srv_primary_keep_daily" min="0"
+                           value="{% if backup_servers_view and backup_servers_view.0.keep_daily != '' %}{{ backup_servers_view.0.keep_daily }}{% else %}{{ vars.backup_keep_daily|default:'7' }}{% endif %}">
                   </div>
-                  <div class="col-md-4">
+                  <div class="col-md-2">
                     <label class="form-label small mb-0">Keep weekly</label>
-                    <input type="number" class="form-control form-control-sm" name="backup_keep_weekly" min="0"
-                           value="{{ vars.backup_keep_weekly|default:'4' }}">
+                    <input type="number" class="form-control form-control-sm" name="bk_srv_primary_keep_weekly" min="0"
+                           value="{% if backup_servers_view and backup_servers_view.0.keep_weekly != '' %}{{ backup_servers_view.0.keep_weekly }}{% else %}{{ vars.backup_keep_weekly|default:'4' }}{% endif %}">
                   </div>
-                  <div class="col-md-4">
+                  <div class="col-md-2">
                     <label class="form-label small mb-0">Keep monthly</label>
-                    <input type="number" class="form-control form-control-sm" name="backup_keep_monthly" min="0"
-                           value="{{ vars.backup_keep_monthly|default:'9999' }}">
+                    <input type="number" class="form-control form-control-sm" name="bk_srv_primary_keep_monthly" min="0"
+                           value="{% if backup_servers_view and backup_servers_view.0.keep_monthly != '' %}{{ backup_servers_view.0.keep_monthly }}{% else %}{{ vars.backup_keep_monthly|default:'9999' }}{% endif %}">
                   </div>
                 </div>
               </div>
             </div>
-              {% for srv in vars.backup_servers %}
+              {% for srv in backup_servers_view %}{% if forloop.counter0 != 0 %}
               <div class="card bg-light mb-2 bk-srv-row">
                 <div class="card-body py-2">
                   <div class="row g-2 align-items-end">
@@ -179,7 +184,7 @@
                   </div>
                 </div>
               </div>
-              {% endfor %}
+{% endif %}{% endfor %}
             </div>
             <template id="bk-srv-template">
               <div class="card bg-light mb-2 bk-srv-row">
@@ -469,21 +474,11 @@ function copyToClipboard(id) {
   navigator.clipboard.writeText(el.value);
 }
 
-/* Collect every configured backup server from the form (the primary row
-   plus all additional rows that have a server address). */
+/* Collect every configured backup server from the form (all rows in the
+   list that have a server address). */
 function bkCollectServers() {
   var servers = [];
-  var host = document.getElementById('backup_host').value.trim();
-  if (host) {
-    servers.push({
-      name: 'primary',
-      host: host,
-      port: document.getElementById('backup_port').value.trim(),
-      user: document.getElementById('backup_user').value.trim(),
-      path: document.getElementById('backup_path').value.trim()
-    });
-  }
-  document.querySelectorAll('#bk-servers-list .bk-srv-row:not(.bk-srv-primary)').forEach(function (row) {
+  document.querySelectorAll('#bk-servers-list .bk-srv-row').forEach(function (row) {
     var hostEl = row.querySelector('[name$="_host"]');
     if (!hostEl || !hostEl.value.trim()) return;
     function val(suffix, def) {

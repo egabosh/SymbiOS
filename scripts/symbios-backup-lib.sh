@@ -141,22 +141,20 @@ function f_bk_is_remote {
 
 # List all configured restic targets as TSV lines (tab separated):
 #   name  host  port  user  path  keep_daily  keep_weekly  keep_monthly
-# The primary target (backup_server_*) comes first, followed by the
-# backup_servers entries. Entries without a host or path are skipped,
-# relative paths are made absolute, missing retention values fall back to
-# the restic defaults (7/4/9999).
+# All targets are stored in the unified backup_servers array. For backward
+# compatibility, a primary target that still lives only in the legacy
+# backup_server_* keys (pre-unification inventories) is synthesized as the
+# first row unless the array already contains the same host+path.
 function f_bk_targets_tsv {
-  local f_json
-  if [[ -n "$g_bk_host" && -n "$g_bk_path" ]]
-  then
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-      "$(hostname)" "$g_bk_host" "${g_bk_port:-22}" "${g_bk_user:-root}" \
-      "$g_bk_path" "$g_bk_rkeep_daily" "$g_bk_rkeep_weekly" "$g_bk_rkeep_monthly"
-  fi
+  local f_json f_name
+  f_name="$(f_symbios_var backup_server_name "")"
   f_json="$("$g_symbios_dir/symbios-inventory.py" \
     --inventory "${g_inventory}" get --json backup_servers 2>/dev/null)" || f_json="[]"
-  printf '%s' "$f_json" | python3 -c '
-import json, sys
+  BK_HOST="$g_bk_host" BK_PATH="$g_bk_path" BK_USER="$g_bk_user" BK_PORT="$g_bk_port" \
+  BK_NAME="$f_name" BK_KEEP_DAILY="$g_bk_rkeep_daily" BK_KEEP_WEEKLY="$g_bk_rkeep_weekly" \
+  BK_KEEP_MONTHLY="$g_bk_rkeep_monthly" \
+  python3 -c '
+import json, sys, os
 
 def num(value, default):
     if value in (None, ""):
@@ -171,6 +169,8 @@ try:
     data = json.load(sys.stdin) or []
 except Exception:
     data = []
+
+rows = []
 for srv in data:
     if not isinstance(srv, dict):
         continue
@@ -182,12 +182,32 @@ for srv in data:
         continue
     if not path.startswith("/"):
         path = "/" + path
-    print("\t".join([name, host, num(srv.get("port"), 22), user, path,
-                     num(srv.get("keep_daily"), 7),
-                     num(srv.get("keep_weekly"), 4),
-                     num(srv.get("keep_monthly"), 9999)]))
-'
+    rows.append((name, host, num(srv.get("port"), 22), user, path,
+                 num(srv.get("keep_daily"), 7),
+                 num(srv.get("keep_weekly"), 4),
+                 num(srv.get("keep_monthly"), 9999)))
+
+# Backward compatibility: legacy primary keys not covered by the array yet
+host = os.environ.get("BK_HOST", "").strip()
+path = os.environ.get("BK_PATH", "").strip()
+if host and path:
+    if not path.startswith("/"):
+        path = "/" + path
+    if not any(r[1] == host and r[4] == path for r in rows):
+        name = os.environ.get("BK_NAME", "").strip() or os.uname().nodename
+        user = os.environ.get("BK_USER", "").strip() or "root"
+        port = os.environ.get("BK_PORT", "").strip() or "22"
+        kd = os.environ.get("BK_KEEP_DAILY", "").strip() or "7"
+        kw = os.environ.get("BK_KEEP_WEEKLY", "").strip() or "4"
+        km = os.environ.get("BK_KEEP_MONTHLY", "").strip() or "9999"
+        rows.insert(0, (name, host, num(port, 22), user, path,
+                        num(kd, 7), num(kw, 4), num(km, 9999)))
+
+for row in rows:
+    print("\t".join(row))
+' <<< "$f_json"
 }
+
 
 # True if at least one restic target (primary or additional) is configured.
 function f_bk_has_targets {

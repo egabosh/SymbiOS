@@ -277,38 +277,42 @@ def settings_backup(request):
                       else 'false')
         enabled = ('true' if request.POST.get('backup_enabled') == 'on'
                    else 'false')
-        # Retention of the primary target (the form always submits a value;
-        # an empty one falls back to the restic defaults).
-        keep_daily = request.POST.get('backup_keep_daily', '').strip() or '7'
-        keep_weekly = request.POST.get('backup_keep_weekly', '').strip() or '4'
-        keep_monthly = (request.POST.get('backup_keep_monthly', '').strip()
-                        or '9999')
-        # Additional backup servers arrive as numbered field sets
-        # bk_srv_<idx>_<field>; only rows with host AND path count.
+        # Collect all backup servers from the unified rows (the primary row
+        # posts bk_srv_primary_*, the additional ones bk_srv_<n>_*). Rows are
+        # processed with the primary first; a row without host and path is
+        # ignored (e.g. "only on this server" leaves them empty).
         servers = []
-        idx = 0
-        while (f'bk_srv_{idx}_host' in request.POST
-               or f'bk_srv_{idx}_path' in request.POST):
+        found_indices = set()
+        for key in request.POST.keys():
+            m = re.match(r'^bk_srv_(.+?)_', key)
+            if m:
+                found_indices.add(m.group(1))
+        order = []
+        if 'primary' in found_indices:
+            order.append('primary')
+        for i in range(1000):
+            if str(i) in found_indices and str(i) not in order:
+                order.append(str(i))
+        for sidx in order:
             srv = {}
             for field in ('name', 'host', 'port', 'user', 'path',
                           'keep_daily', 'keep_weekly', 'keep_monthly'):
-                value = (request.POST.get(f'bk_srv_{idx}_{field}') or '').strip()
-                if value:
+                value = (request.POST.get(f'bk_srv_{sidx}_{field}') or '').strip()
+                if value != '':
                     srv[field] = value
-            if srv.get('host') and srv.get('path'):
-                servers.append(srv)
-            idx += 1
+            if not (srv.get('host') and srv.get('path')):
+                continue
+            # Fill in the restic defaults for empty optional fields.
+            srv.setdefault('port', '22')
+            srv.setdefault('user', 'root')
+            srv.setdefault('keep_daily', '7')
+            srv.setdefault('keep_weekly', '4')
+            srv.setdefault('keep_monthly', '9999')
+            servers.append(srv)
         set_cmd = ('symbios-settings-backup.sh set'
-                   f' --host {shlex.quote(request.POST.get("backup_server_host", "").strip())}'
-                   f' --port {shlex.quote(request.POST.get("backup_server_port", "").strip())}'
-                   f' --user {shlex.quote(request.POST.get("backup_server_user", "").strip())}'
-                   f' --path {shlex.quote(request.POST.get("backup_server_path", "").strip())}'
+                   f" --servers {shlex.quote(json.dumps(servers))}"
                    f' --encryption {encryption}'
                    f' --enabled {enabled}'
-                   f' --keep-daily {shlex.quote(keep_daily)}'
-                   f' --keep-weekly {shlex.quote(keep_weekly)}'
-                   f' --keep-monthly {shlex.quote(keep_monthly)}'
-                   f" --servers {shlex.quote(json.dumps(servers))}"
                    ' --exclude-stdin')
         stdin_data = request.POST.get('backup_exclude', '')
         try:
@@ -345,8 +349,32 @@ def settings_backup(request):
                 data.update(parsed)
     except Exception:
         pass
+    # Effective server list for rendering: the unified backup_servers array.
+    # In pre-unification inventories the primary target still lives only in
+    # the legacy backup_server_* keys - synthesize it as the first row so the
+    # form shows every configured server exactly once (and a save does not
+    # silently demote an additional server to the primary slot).
+    servers_view = [s for s in (vars_.get('backup_servers') or [])
+                    if isinstance(s, dict)]
+    legacy_host = str(vars_.get('backup_server_host') or '').strip()
+    legacy_path = str(vars_.get('backup_server_path') or '').strip()
+    if legacy_host and legacy_path:
+        if not any(s.get('host') == legacy_host and s.get('path') == legacy_path
+                   for s in servers_view):
+            servers_view.insert(0, {
+                'name': (str(vars_.get('backup_server_name') or '').strip()
+                         or legacy_host),
+                'host': legacy_host,
+                'port': str(vars_.get('backup_server_port') or '').strip() or '22',
+                'user': str(vars_.get('backup_server_user') or '').strip() or 'root',
+                'path': legacy_path,
+                'keep_daily': vars_.get('backup_keep_daily', 7),
+                'keep_weekly': vars_.get('backup_keep_weekly', 4),
+                'keep_monthly': vars_.get('backup_keep_monthly', 9999),
+            })
     return render(request, 'main/settings_backup.html', {
         'vars': vars_,
+        'backup_servers_view': servers_view,
         'status': _backup_status(),
         'data': data,
         'snapshots_json': json.dumps(data.get('snapshots') or []),

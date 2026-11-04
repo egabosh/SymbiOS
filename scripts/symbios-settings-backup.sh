@@ -165,11 +165,13 @@ if [[ "${f_command}" == "get" ]]
 then
   if [[ "${1:-}" == "--json" ]]
   then
-    printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_encryption": %s, "backup_enabled": %s, "backup_exclude": %s, "backup_servers": %s, "backup_keep_daily": %s, "backup_keep_weekly": %s, "backup_keep_monthly": %s}\n' \
+    f_cur_name="$(f_symbios_var backup_server_name "")"
+    printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_server_name": %s, "backup_encryption": %s, "backup_enabled": %s, "backup_exclude": %s, "backup_servers": %s, "backup_keep_daily": %s, "backup_keep_weekly": %s, "backup_keep_monthly": %s}\n' \
       "$(printf '%s' "${f_cur_host}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_port}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_user}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_path}" | f_json_escape)" \
+      "$(printf '%s' "${f_cur_name}" | f_json_escape)" \
       "${f_cur_enc}" \
       "${f_cur_enabled}" \
       "${f_cur_excludes_json}" \
@@ -203,6 +205,7 @@ f_new_host=""
 f_new_port=""
 f_new_user=""
 f_new_path=""
+f_new_name=""
 f_new_enc=""
 f_new_enabled=""
 f_new_keep_daily=""
@@ -213,6 +216,7 @@ f_given_host="no"
 f_given_port="no"
 f_given_user="no"
 f_given_path="no"
+f_given_name="no"
 f_given_enc="no"
 f_given_enabled="no"
 f_given_keep_daily="no"
@@ -247,6 +251,12 @@ do
       [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_path="$2"
       f_given_path="yes"
+      shift 2
+      ;;
+    --name)
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      f_new_name="$2"
+      f_given_name="yes"
       shift 2
       ;;
     --encryption)
@@ -527,30 +537,115 @@ fi
 
 # --- transactional write -------------------------------------------------------
 
-f_merge="$(printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_encryption": %s, "backup_enabled": %s' \
-  "$(printf '%s' "${f_new_host}" | f_json_escape)" \
-  "$(printf '%s' "${f_new_port}" | f_json_escape)" \
-  "$(printf '%s' "${f_new_user}" | f_json_escape)" \
-  "$(printf '%s' "${f_new_path}" | f_json_escape)" \
-  "${f_new_enc}" \
-  "${f_new_enabled}")"
-# Optional fields are only written when given (current value stays otherwise)
-if [[ "${f_given_keep_daily}" == "yes" ]]
-then
-  f_merge="${f_merge}, \"backup_keep_daily\": ${f_new_keep_daily}"
-fi
-if [[ "${f_given_keep_weekly}" == "yes" ]]
-then
-  f_merge="${f_merge}, \"backup_keep_weekly\": ${f_new_keep_weekly}"
-fi
-if [[ "${f_given_keep_monthly}" == "yes" ]]
-then
-  f_merge="${f_merge}, \"backup_keep_monthly\": ${f_new_keep_monthly}"
-fi
+# Build the unified backup_servers array: the primary target first, then the
+# additional servers. When --servers was given its entries are the base list
+# (the WebUI sends the primary as its first row); otherwise the currently
+# stored list is kept so a CLI update of single fields never drops other
+# servers. The primary is upserted by host+path, so re-saving is idempotent.
+f_base_servers="${f_cur_servers_json}"
 if [[ "${f_given_servers}" == "yes" ]]
 then
-  f_merge="${f_merge}, \"backup_servers\": ${f_servers_norm}"
+  f_base_servers="${f_servers_norm}"
 fi
+# The primary is only upserted when host and path were given explicitly. If
+# --servers was given instead, its list is authoritative (the WebUI sends the
+# primary as its first row) - the fallback to the stored legacy values must
+# not resurrect a stale primary in that case.
+if [[ -n "${f_new_host}" && -n "${f_new_path}" ]] \
+  && { [[ "${f_given_servers}" == "no" ]] \
+       || [[ "${f_given_host}" == "yes" || "${f_given_path}" == "yes" ]]; }
+then
+  f_primary_name="${f_new_name:-}"
+  [[ -z "${f_primary_name}" ]] && f_primary_name="$(f_symbios_var backup_server_name "$(hostname)")"
+  if ! f_unified_json="$(python3 -c '
+import json, sys
+name = sys.argv[1]
+host = sys.argv[2]
+port = sys.argv[3]
+user = sys.argv[4]
+path = sys.argv[5]
+kd = sys.argv[6]
+kw = sys.argv[7]
+km = sys.argv[8]
+base = json.loads(sys.argv[9])
+srv = {"name": name or host, "host": host, "port": port or "22",
+       "user": user or "root", "path": path,
+       "keep_daily": int(kd) if str(kd).isdigit() else 7,
+       "keep_weekly": int(kw) if str(kw).isdigit() else 4,
+       "keep_monthly": int(km) if str(km).isdigit() else 9999}
+servers = [srv]
+for a in base:
+    if not isinstance(a, dict):
+        continue
+    if not a.get("host") or not a.get("path"):
+        continue
+    # Skip duplicates of the primary (same host and path)
+    if any(s.get("host") == a.get("host") and s.get("path") == a.get("path")
+           for s in servers):
+        continue
+    servers.append(a)
+print(json.dumps(servers))
+' "${f_primary_name}" "${f_new_host}" "${f_new_port}" "${f_new_user}" \
+    "${f_new_path}" "${f_new_keep_daily:-7}" "${f_new_keep_weekly:-4}" \
+    "${f_new_keep_monthly:-9999}" "${f_base_servers}")"
+  then
+    f_ss_fail_validation "Failed to build the unified server list"
+  fi
+else
+  f_unified_json="${f_base_servers}"
+fi
+
+# Keep the legacy primary keys in sync with the first entry of the array, so
+# older readers (and the backward-compat fallback in symbios-backup-lib.sh)
+# never see a stale or ghost target. Explicitly given retention values and
+# names win over the derived ones. The result is a JSON fragment that is
+# spliced into the merge object below.
+if ! f_legacy_frag="$(python3 -c '
+import json, sys
+unified = json.loads(sys.argv[1]) or []
+given_kd, kd = sys.argv[2], sys.argv[3]
+given_kw, kw = sys.argv[4], sys.argv[5]
+given_km, km = sys.argv[6], sys.argv[7]
+given_name, name = sys.argv[8], sys.argv[9]
+if unified and isinstance(unified[0], dict):
+    s = unified[0]
+    out = {"backup_server_name": str(s.get("name") or ""),
+           "backup_server_host": str(s.get("host") or ""),
+           "backup_server_port": str(s.get("port") or "22"),
+           "backup_server_user": str(s.get("user") or "root"),
+           "backup_server_path": str(s.get("path") or ""),
+           "backup_keep_daily": int(s.get("keep_daily", 7)),
+           "backup_keep_weekly": int(s.get("keep_weekly", 4)),
+           "backup_keep_monthly": int(s.get("keep_monthly", 9999))}
+else:
+    out = {"backup_server_name": "", "backup_server_host": "",
+           "backup_server_port": "22", "backup_server_user": "root",
+           "backup_server_path": "", "backup_keep_daily": 7,
+           "backup_keep_weekly": 4, "backup_keep_monthly": 9999}
+if given_kd == "yes":
+    out["backup_keep_daily"] = int(kd)
+if given_kw == "yes":
+    out["backup_keep_weekly"] = int(kw)
+if given_km == "yes":
+    out["backup_keep_monthly"] = int(km)
+if given_name and name:
+    out["backup_server_name"] = name
+print(json.dumps(out, separators=(", ", ": "))[1:-1])
+' "${f_unified_json}" \
+    "${f_given_keep_daily}" "${f_new_keep_daily}" \
+    "${f_given_keep_weekly}" "${f_new_keep_weekly}" \
+    "${f_given_keep_monthly}" "${f_new_keep_monthly}" \
+    "${f_given_name}" "${f_new_name}")"
+then
+  f_ss_fail_validation "Failed to derive the legacy primary keys"
+fi
+
+f_merge="$(printf '{"backup_servers": %s, "backup_encryption": %s, "backup_enabled": %s, %s' \
+  "${f_unified_json}" \
+  "${f_new_enc}" \
+  "${f_new_enabled}" \
+  "${f_legacy_frag}")"
+
 if [[ "${f_given_excludes}" == "yes" ]]
 then
   f_merge="${f_merge}, \"backup_exclude\": ${f_excludes_json}}"
