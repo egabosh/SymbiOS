@@ -153,5 +153,17 @@ then
         fi
       fi
     fi
+
+    # Incomplete redundancy: leftover single/dup block groups next to RAID1.
+    # After a replace (or grow) the remaining chunks are not always converted
+    # automatically and have no mirror copy - if the disk holding them fails,
+    # those chunks are lost. Balance converts them to RAID1.
+    g_bdf_mixed=$(btrfs filesystem df "$g_mnt" 2>/dev/null || true)
+    if [[ -n "$g_bdf_mixed" ]] && \
+       echo "$g_bdf_mixed" | grep -qE '^(Data|Metadata|System),[[:space:]]*(single|dup)' && \
+       echo "$g_bdf_mixed" | grep -qE '^(Data|Metadata|System),[[:space:]]*RAID1'
+    then
+      g_echo_error "Btrfs filesystem $g_uuid ($g_mnt): incomplete redundancy - single/dup block group chunks present alongside RAID1 (run balance -dconvert=raid1 -mconvert=raid1 -sconvert=raid1)"
+    fi
   done
 fi

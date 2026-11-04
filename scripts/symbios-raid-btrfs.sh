@@ -445,7 +445,28 @@ function f_main {
     then
       f_json_error "btrfs replace finished with errors: ${f_status}"
     fi
-    f_json_ok "\"message\":$(printf 'Device replaced: %s' "${f_status}" | f_json_escape)"
+    # Leftover single/dup block groups are not converted by a dev-replace.
+    # Convert them to RAID1 in the background so the replace job can finish
+    # and the WebUI does not block for hours. The page locks/refreshes while
+    # the detached balance runs.
+    local f_bdf_rep
+    f_bdf_rep=$(btrfs filesystem df "${f_mnt}" 2>/dev/null || true)
+    if [[ -n "${f_bdf_rep}" ]] && \
+       echo "${f_bdf_rep}" | grep -qE '^(Data|Metadata|System),[[:space:]]*(single|dup)' && \
+       echo "${f_bdf_rep}" | grep -qE '^(Data|Metadata|System),[[:space:]]*RAID1'
+    then
+      local f_rep_uuid8 f_rep_self
+      f_rep_uuid8=$(btrfs filesystem show "${f_mnt}" 2>/dev/null | \
+        grep -m1 -oE '[0-9a-f]{8}' | head -1)
+      f_rep_self=$(readlink -f "$0")
+      f_log "Converting remaining single/dup chunks to RAID1 in background..."
+      systemd-run --unit="symbios-btrfs-balance-auto-${f_rep_uuid8:-$$}" \
+        --collect --no-block /bin/bash -c "btrfs balance start -dconvert=raid1 -mconvert=raid1 -sconvert=raid1 '${f_mnt}'" \
+        >/dev/null 2>&1 || true
+      f_json_ok "\"message\":$(printf 'Device replaced: %s. Converting remaining single/dup chunks to RAID1 in the background (may take hours).' "${f_status}" | f_json_escape)"
+    else
+      f_json_ok "\"message\":$(printf 'Device replaced: %s' "${f_status}" | f_json_escape)"
+    fi
     ;;
 
   add)
