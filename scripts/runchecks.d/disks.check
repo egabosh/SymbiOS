@@ -442,8 +442,12 @@ do
       # Unreadable or lost sectors: the disk is failing, data is at risk.
       f_disk_alert fail "SMART $g_dev_label reports media damage: ${g_defect_msg}${g_st_hint} - the disk is failing, replace it"
     else
-      # Only remapped sectors: the disk could repair itself so far.
-      f_disk_alert warn "SMART $g_dev_label reports media damage: ${g_defect_msg}${g_st_hint} - the disk is degrading, replace it soon"
+      # Only remapped sectors: the firmware already swapped them for spares
+      # transparently (no I/O error ever reached the filesystem), so this is
+      # wear like power-on hours - a warning to plan the replacement, not a
+      # defect. A disk that keeps remapping new sectors still alerts via the
+      # trend check below (counter increase).
+      f_disk_hint "SMART $g_dev_label remapped $(( ${g_raw_5:-0} + ${g_raw_196:-0} )) sector(s) - already replaced by spare sectors (no data loss), normal wear for an aging disk; plan a replacement when convenient${g_st_hint}"
     fi
   fi
 
