@@ -1,7 +1,7 @@
 CHECK_CATEGORY="services"
 CHECK_TITLE="Backup"
-CHECK_DESC="Checks that the nightly backup ran successfully."
-CHECK_DETAIL="Watches the success marker written by the nightly backup job.|Daily snapshots protect all data below /symbios (services, databases, configuration).|If this fails, no recent backup exists - check Settings -> Backup.|Also warns when the snapshot count or backup tree size grow past the configured retention (disk full prevention)."
+CHECK_DESC="Checks that backups exist, are recent and not stored locally only."
+CHECK_DETAIL="Watches the success marker written by the nightly backup job.|Daily snapshots protect all data below /symbios (services, databases, configuration).|If this fails, no recent backup exists - check Settings -> Backup.|Warns when no backup exists at all or the newest one is older than 7 days (limit configurable via backup_max_age_days in the inventory).|Also warns while only local snapshots exist: they share the fate of the machine (fire, lightning, theft) - a remote backup server provides off-site protection.|Also warns when the snapshot count or backup tree size grow past the configured retention (disk full prevention)."
 
 # Healthcheck for the nightly backup job
 f_check_cache "symbios-healthcheck-backup" || return 2>/dev/null || true
@@ -25,6 +25,52 @@ else
   then
     g_echo_error "Last successful backup is $g_backup_age_hours hours old."
   fi
+fi
+
+# Backup existence and freshness (warnings, not errors): the marker check
+# above already fails when the nightly job itself is broken, here we report
+# the protection gap. The newest backup anywhere is the max of the local
+# snapshot dates and the date of the last successful engine run - remote
+# runs create no local snapshots, so the marker (epoch seconds) is their
+# only trace on this host.
+g_bk_newest_local=""
+if [[ -r "${g_git_root}/scripts/symbios-backup-lib.sh" ]]
+then
+  source "${g_git_root}/scripts/symbios-backup-lib.sh"
+  f_bk_read_vars
+  g_bk_newest_local="$(f_bk_list_local_dates | head -1)"
+fi
+g_bk_newest="${g_bk_newest_local}"
+if [[ -f "$g_backup_marker" ]]
+then
+  # Last successful run date (local or remote mode) from the marker timestamp
+  g_bk_last_ok_date="$(date -d "@$(head -1 "$g_backup_marker" 2>/dev/null)" +%F 2>/dev/null || true)"
+  if [[ -n "$g_bk_last_ok_date" && ( -z "$g_bk_newest" || "$g_bk_last_ok_date" > "$g_bk_newest" ) ]]
+  then
+    g_bk_newest="$g_bk_last_ok_date"
+  fi
+fi
+# Staleness limit in days, configurable via the inventory (default 7)
+g_bk_max_age_days="$(f_symbios_var backup_max_age_days "7")"
+[[ "$g_bk_max_age_days" =~ ^[0-9]+$ && "$g_bk_max_age_days" -gt 0 ]] || g_bk_max_age_days=7
+if [[ -z "$g_bk_newest" ]]
+then
+  g_echo_warn "No backup exists yet (local or remote) - run one via Settings -> Backup."
+else
+  # Age of the newest backup in whole days (ISO dates compare lexicographically)
+  g_bk_age_days=$(( ( $(date +%s) - $(date -d "$g_bk_newest" +%s 2>/dev/null || echo 0) ) / 86400 ))
+  if [[ "$g_bk_age_days" -ge "$g_bk_max_age_days" ]]
+  then
+    g_echo_warn "Newest backup is ${g_bk_age_days} days old (${g_bk_newest}) - all backups are older than ${g_bk_max_age_days} days."
+  fi
+fi
+
+# Off-site coverage (warning): while no remote target is configured, every
+# backup lives on the same machine as the data it protects - fire, lightning
+# or theft destroy both at once. A remote backup server closes that gap.
+if [[ -r "${g_git_root}/scripts/symbios-backup-lib.sh" ]] && ! f_bk_has_targets
+then
+  g_echo_warn "Backups are stored locally only - they do not protect against hardware failure or fire. Configure a remote backup server in Settings -> Backup."
 fi
 
 # Cron entry must be active
