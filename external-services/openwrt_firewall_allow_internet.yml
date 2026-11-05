@@ -33,6 +33,40 @@
 #   requires:
 #     - playbook: "openwrt_basics.yml"
 #       reason: "Firewall zones"
+#   inventory:
+#     title: "Existing allow rules from the internet"
+#     description: "Read live from the target, so rules created outside SymbiOS are listed as well."
+#     command: |
+#       for n in $(uci -q show firewall | sed -n 's/^firewall\.rule_forward_internet_\([^.=]*\)=.*/\1/p')
+#       do
+#         s="rule_forward_internet_$n"
+#         printf '%s\t%s\t%s\t%s\t%s\n' "$n" \
+#           "$(uci -q get "firewall.$s.proto" 2>/dev/null)" \
+#           "$(uci -q get "firewall.$s.src" 2>/dev/null)" \
+#           "$(uci -q get "firewall.$s.dest_port" 2>/dev/null)" \
+#           "$(uci -q get "firewall.$s.dest_ip" 2>/dev/null)"
+#       done
+#     columns:
+#       - key: "name"
+#         label: "Rule"
+#       - key: "proto"
+#         label: "Proto"
+#       - key: "src"
+#         label: "Source zone"
+#       - key: "dest_port"
+#         label: "Dest port"
+#       - key: "dest_ip"
+#         label: "Dest IP"
+#     actions:
+#       - name: "remove"
+#         label: "Remove"
+#         class: "danger"
+#         confirm: "Delete this allow rule (from the internet) from the firewall?"
+#         playbook: "openwrt_firewall_allow_internet.yml"
+#         vars:
+#           rule_name: "name"
+#         extra:
+#           state: "absent"
 #   actions:
 #     __playbook__: Install/Update
 #
@@ -44,63 +78,106 @@
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
+    state: "present"
     managed_id: "openwrt_firewall_allow_internet.yml/{{ rule_name }}"
     managed_playbook: "openwrt_firewall_allow_internet.yml"
-    managed_ref: "rule_name={{ rule_name }} src={{ src }} src_ip={{ src_ip }} dest_ip={{ dest_ip }} dest_port={{ dest_port }} proto={{ proto }}"
+    managed_ref: "rule_name={{ rule_name }} src={{ src | default('') }} src_ip={{ src_ip | default('') }} dest_ip={{ dest_ip | default('') }} dest_port={{ dest_port | default('') }} proto={{ proto }}"
     managed_resource_type: "firewall_allow_internet"
+    managed_remove_ids: []
     proto: "tcp"
     src: "wan"
     src_ip: "*"
     uci_vars:
       ## rules
       - { key: "firewall.rule_forward_internet_{{ rule_name }}",           value: "rule" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.src",       value: "{{ src }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.src",       value: "{{ src | default('') }}" }
       - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest",      value: "wan" }
       - { key: "firewall.rule_forward_internet_{{ rule_name }}.target",    value: "ACCEPT" }
       - { key: "firewall.rule_forward_internet_{{ rule_name }}.proto",     value: "{{ proto }}" }
       - { key: "firewall.rule_forward_internet_{{ rule_name }}.name",      value: "ansible_forward_internet_{{ rule_name }}" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest_port", value: "{{ dest_port }}" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.src_ip",      value: "{{ src_ip }}" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest_ip",     value: "{{ dest_ip }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest_port", value: "{{ dest_port | default('') }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.src_ip",      value: "{{ src_ip | default('') }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest_ip",     value: "{{ dest_ip | default('') }}" }
 
   pre_tasks:
     - name: Check required parameters
       ansible.builtin.assert:
         that:
-          - dest_ip is defined
-          - dest_port is defined
-          - rule_name is defined
-        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+          - state in ['present', 'absent']
+          - rule_name is defined and (rule_name | string | length > 0)
+          - state == 'absent' or (dest_ip is defined and dest_port is defined)
+          # The name is embedded in shell commands on the target.
+          - rule_name is match('^[A-Za-z0-9._-]+$')
+        fail_msg: "state must be present or absent; rule_name is required, dest_ip/dest_port only for state=present."
+        quiet: true
         quiet: true
 
   tasks:
-
-    - name: set uci values if needed
-      raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired="{{ item.value }}"
-        [ -z "$desired"  ] && ( echo unchanged ; exit 0 )
-
-        if [ "$current" != "$desired" ]
-        then
-          uci set {{ item.key }}="$desired"
-          echo "changed"
-        else
-          echo "unchanged"
-        fi
-      loop: "{{ uci_vars }}"
-      register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
-
-    - name: apply changes
+    # --- absent: remove the rule ----------------------------------------
+    - name: Remove the allow rule
+      when: state == 'absent'
       block:
-        - name: commit enable and restart
-          raw: "{{ item }}"
+        - name: Delete the rule section
+          ansible.builtin.raw: |
+            if uci -q show "firewall.rule_forward_internet_{{ rule_name }}" > /dev/null 2>&1
+            then
+              uci delete "firewall.rule_forward_internet_{{ rule_name }}"
+              uci commit firewall
+              echo changed
+            else
+              echo unchanged
+            fi
+          register: delete_result
+          changed_when: "delete_result.stdout | trim == 'changed'"
+
+        - name: Reload the firewall
+          ansible.builtin.raw: /etc/init.d/firewall reload
+          when: delete_result is changed
+
+        # A removal must not leave a stale entry in managed.json.
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml
+          vars:
+            managed_id: ""
+            managed_remove_ids:
+              - "openwrt_firewall_allow_internet.yml/{{ rule_name }}"
+
+    # --- present: create or update the rule -----------------------------
+    - name: Configure the allow rule
+      when: state != 'absent'
+      block:
+        - name: Set the uci values if needed
+          ansible.builtin.raw: |
+            current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+            desired="{{ item.value }}"
+            [ -z "$desired"  ] && ( echo unchanged ; exit 0 )
+
+            # Single-valued options: compare exactly, a substring match would
+            # hide drift (e.g. a stored value with a doubled trailing dot).
+            if [ "$current" != "$desired" ]
+            then
+              uci set {{ item.key }}="$desired"
+              echo "changed"
+            else
+              echo "unchanged"
+            fi
+          loop: "{{ uci_vars }}"
+          register: uci_set_result
+          # A changed_when sees no register of its own loop, so the loop is
+          # neutral and the aggregate decides whether a reload is needed.
+          changed_when: false
+
+        - name: Remember whether any uci value changed
+          ansible.builtin.set_fact:
+            uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+
+        - name: Apply the changes
+          ansible.builtin.raw: "{{ item }}"
           loop:
             - "uci commit"
             - "/etc/init.d/firewall reload"
-          when: uci_set_result.changed
+          when: uci_changed | default(false) | bool
 
-    # Record this playbook's resources in /etc/symbios/managed.json.
-    - name: Record managed state
-      ansible.builtin.include_tasks: _managed-state.yml
+        # Record this playbook's resources in /etc/symbios/managed.json.
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml

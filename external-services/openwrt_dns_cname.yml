@@ -10,13 +10,40 @@
 #       label: "CNAME name"
 #       type: "text"
 #       required: true
+#       placeholder: "example.lan"
 #     - name: "target"
 #       label: "Target host"
 #       type: "text"
 #       required: true
+#       placeholder: "server.lan"
 #   requires:
 #     - playbook: "openwrt_basics.yml"
 #       reason: "DHCP/DNS configuration"
+#   inventory:
+#     title: "Existing DNS CNAME records"
+#     description: "Read live from the target, so records created outside SymbiOS are listed as well."
+#     command: |
+#       for s in $(uci -q show dhcp | sed -n 's/^dhcp\.\(cname_[^.=]*\)=.*/\1/p')
+#       do
+#         name=$(uci -q get "dhcp.$s.cname" 2>/dev/null)
+#         if [ -z "$name" ]; then name="${s#cname_}"; fi
+#         printf '%s\t%s\n' "${name%.}" "$(uci -q get "dhcp.$s.target" 2>/dev/null)"
+#       done
+#     columns:
+#       - key: "name"
+#         label: "CNAME"
+#       - key: "target"
+#         label: "Target"
+#     actions:
+#       - name: "remove"
+#         label: "Remove"
+#         class: "danger"
+#         confirm: "Delete this CNAME record from dnsmasq?"
+#         playbook: "openwrt_dns_cname.yml"
+#         vars:
+#           cname: "name"
+#         extra:
+#           state: "absent"
 #   actions:
 #     __playbook__: Install/Update
 #
@@ -24,57 +51,118 @@
 - name: dns-config
   hosts: all
   gather_facts: no
- 
+
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
-    managed_id: "openwrt_dns_cname.yml/{{ cname }}"
+    state: "present"
+    # A name may arrive with a trailing dot (e.g. copied from the inventory
+    # listing); normalize it so the section name and the stored values agree.
+    cname_norm: "{{ cname | regex_replace('\\.+$', '') }}"
+    target_norm: "{{ target | default('') | regex_replace('\\.+$', '') }}"
+    managed_id: "openwrt_dns_cname.yml/{{ cname_norm }}"
     managed_playbook: "openwrt_dns_cname.yml"
-    managed_ref: "cname={{ cname }} target={{ target }}"
+    managed_ref: "cname={{ cname_norm }} target={{ target_norm }}"
     managed_resource_type: "dns_cname"
+    managed_remove_ids: []
 
     uci_vars:
-      - { key: "dhcp.cname_{{ cname | replace('.', '_') }}", value: "cname" }
-      - { key: "dhcp.cname_{{ cname | replace('.', '_') }}.cname", value: "{{ cname }}." }
-      - { key: "dhcp.cname_{{ cname | replace('.', '_') }}.target", value: "{{ target }}." }
+      - { key: "dhcp.cname_{{ cname_norm | replace('.', '_') }}", value: "cname" }
+      - { key: "dhcp.cname_{{ cname_norm | replace('.', '_') }}.cname", value: "{{ cname_norm }}." }
+      - { key: "dhcp.cname_{{ cname_norm | replace('.', '_') }}.target", value: "{{ target_norm }}." }
 
   pre_tasks:
     - name: Check required parameters
       ansible.builtin.assert:
         that:
-          - cname is defined
-          - target is defined
-        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+          - state in ['present', 'absent']
+          - cname is defined and (cname | string | length > 0)
+          - state == 'absent' or (target is defined and (target | string | length > 0))
+          # The names are embedded in shell commands on the target.
+          - cname is match('^[A-Za-z0-9._-]+$')
+          - state == 'absent' or target is match('^[A-Za-z0-9._-]+$')
+        fail_msg: "state must be present or absent; cname (and target for state=present) need letters, digits, dot, dash or underscore."
         quiet: true
 
   tasks:
-
-    - name: set uci values if needed
-      raw: |
-        desired=$(echo "{{ item.value }}" | sed 's/_/-/g')
-        key=$(echo "{{ item.key }}" | sed 's/-/_/g' )
-        current=$(uci get $key 2>/dev/null || echo "NOT_SET")
-
-        if ! echo "$current" | grep "$desired"
-        then
-          uci set $key="$desired"
-          echo "changed"
-        else
-          echo "unchanged"
-        fi
-      loop: "{{ uci_vars }}"
-      register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
-
-    - name: apply changes
+    # --- absent: remove the record ------------------------------------------
+    - name: Remove the DNS CNAME record
+      when: state == 'absent'
       block:
-        - name: commit enable and restart
-          raw: "{{ item }}"
+        - name: Delete the record section
+          ansible.builtin.raw: |
+            # The section name derives from the original name, but a legacy
+            # record may store a different spelling in .cname (underscores are
+            # rewritten to dashes on create): look it up by value first and
+            # fall back to the computed section name.
+            sec=""
+            for s in $(uci -q show dhcp | sed -n 's/^dhcp\.\(cname_[^.=]*\)=.*/\1/p')
+            do
+              if [ "$(uci -q get "dhcp.$s.cname" 2>/dev/null)" = "{{ cname_norm }}." ]
+              then sec="$s"; break; fi
+            done
+            if [ -z "$sec" ]; then sec="cname_{{ cname_norm | replace('.', '_') }}"; fi
+            if uci -q show "dhcp.$sec" > /dev/null 2>&1
+            then
+              uci delete "dhcp.$sec"
+              uci commit dhcp
+              echo changed
+            else
+              echo unchanged
+            fi
+          register: delete_result
+          changed_when: "delete_result.stdout | trim == 'changed'"
+
+        - name: Reload DNS
+          ansible.builtin.raw: /etc/init.d/dnsmasq reload
+          when: delete_result is changed
+
+        # A removal must not leave a stale entry in managed.json. The id was
+        # recorded under the original spelling, while create rewrites
+        # underscores to dashes in the stored name - drop every spelling the
+        # row may carry (the list is deduplicated).
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml
+          vars:
+            managed_id: ""
+            managed_remove_ids: "{{ ['openwrt_dns_cname.yml/' ~ cname_norm, 'openwrt_dns_cname.yml/' ~ (cname_norm | replace('_', '-')), 'openwrt_dns_cname.yml/' ~ (cname_norm | replace('-', '_'))] | unique }}"
+
+    # --- present: create or update the record -------------------------------
+    - name: Configure the DNS CNAME record
+      when: state != 'absent'
+      block:
+        - name: Set the uci values if needed
+          ansible.builtin.raw: |
+            desired=$(echo "{{ item.value }}" | sed 's/_/-/g')
+            key=$(echo "{{ item.key }}" | sed 's/-/_/g' )
+            current=$(uci get $key 2>/dev/null || echo "NOT_SET")
+
+            # Single-valued options: compare exactly, a substring match would
+            # hide drift (e.g. a stored value with a doubled trailing dot).
+            if [ "$current" != "$desired" ]
+            then
+              uci set $key="$desired"
+              echo "changed"
+            else
+              echo "unchanged"
+            fi
+          loop: "{{ uci_vars }}"
+          register: uci_set_result
+          # A changed_when sees no register of its own loop, so the loop is
+          # neutral and the aggregate decides whether a reload is needed.
+          changed_when: false
+
+        - name: Remember whether any uci value changed
+          ansible.builtin.set_fact:
+            uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+
+        - name: Apply the changes
+          ansible.builtin.raw: "{{ item }}"
           loop:
             - "uci commit"
             - "/etc/init.d/dnsmasq reload"
-          when: uci_set_result.changed
+          when: uci_changed | default(false) | bool
 
-    # Record this playbook's resources in /etc/symbios/managed.json.
-    - name: Record managed state
-      ansible.builtin.include_tasks: _managed-state.yml
+        # Record this playbook's resources in /etc/symbios/managed.json.
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml

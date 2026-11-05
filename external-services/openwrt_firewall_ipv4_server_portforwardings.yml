@@ -10,6 +10,7 @@
 #       label: "Redirect name"
 #       type: "text"
 #       required: true
+#       placeholder: "ssh_defiant"
 #     - name: "proto"
 #       label: "Protocol"
 #       type: "text"
@@ -18,32 +19,70 @@
 #       label: "External port"
 #       type: "text"
 #       required: true
+#       placeholder: "2222"
 #     - name: "to_port"
 #       label: "Internal port"
 #       type: "text"
 #       required: true
+#       placeholder: "22"
 #     - name: "target"
 #       label: "Internal host"
 #       type: "text"
 #       required: true
+#       placeholder: "192.168.45.10"
 #   requires:
 #     - playbook: "openwrt_basics.yml"
 #       reason: "Firewall zones"
+#   inventory:
+#     title: "Existing IPv4 port forwardings"
+#     description: "Read live from the target, so redirects created outside SymbiOS are listed as well."
+#     command: |
+#       for s in $(uci -q show firewall | sed -n 's/^firewall\.\(redirect_[^.=]*\)=.*/\1/p')
+#       do
+#         printf '%s\t%s\t%s\t%s\t%s\n' "${s#redirect_}" \
+#           "$(uci -q get "firewall.$s.proto" 2>/dev/null)" \
+#           "$(uci -q get "firewall.$s.src_dport" 2>/dev/null)" \
+#           "$(uci -q get "firewall.$s.dest_port" 2>/dev/null)" \
+#           "$(uci -q get "firewall.$s.dest_ip" 2>/dev/null)"
+#       done
+#     columns:
+#       - key: "name"
+#         label: "Redirect"
+#       - key: "proto"
+#         label: "Proto"
+#       - key: "from_port"
+#         label: "From port"
+#       - key: "to_port"
+#         label: "To port"
+#       - key: "target"
+#         label: "Target"
+#     actions:
+#       - name: "remove"
+#         label: "Remove"
+#         class: "danger"
+#         confirm: "Delete this port forwarding from the firewall?"
+#         playbook: "openwrt_firewall_ipv4_server_portforwardings.yml"
+#         vars:
+#           redirect_name: "name"
+#         extra:
+#           state: "absent"
 #   actions:
 #     __playbook__: Install/Update
 #
 ---
-- name: 
+- name: ipv4 port forwardings
   hosts: all
   gather_facts: no
 
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
+    state: "present"
     managed_id: "openwrt_firewall_ipv4_server_portforwardings.yml/{{ redirect_name }}"
     managed_playbook: "openwrt_firewall_ipv4_server_portforwardings.yml"
-    managed_ref: "redirect_name={{ redirect_name }} proto={{ proto }} from_port={{ from_port }} to_port={{ to_port }} target={{ target }}"
+    managed_ref: "redirect_name={{ redirect_name }} proto={{ proto | default('tcp') }} from_port={{ from_port | default('') }} to_port={{ to_port | default('') }} target={{ target | default('') }}"
     managed_resource_type: "firewall_ipv4_server_portforwardings"
+    managed_remove_ids: []
     proto: "tcp"
     uci_vars:
       ## redirects / portforwarding
@@ -62,40 +101,79 @@
     - name: Check required parameters
       ansible.builtin.assert:
         that:
-          - from_port is defined
-          - redirect_name is defined
-          - target is defined
-          - to_port is defined
-        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+          - state in ['present', 'absent']
+          - redirect_name is defined and (redirect_name | string | length > 0)
+          - state == 'absent' or (from_port is defined and to_port is defined and target is defined)
+          # The name is embedded in shell commands on the target.
+          - redirect_name is match('^[A-Za-z0-9._-]+$')
+        fail_msg: "state must be present or absent; redirect_name is required, from_port/to_port/target only for state=present."
         quiet: true
 
   tasks:
-
-    - name: set uci values if needed
-      raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired="{{ item.value }}"
-        
-        if [ "$current" != "$desired" ]
-        then
-          uci set {{ item.key }}="{{ item.value }}"
-          echo "changed"
-        else
-          echo "unchanged"
-        fi
-      loop: "{{ uci_vars }}"
-      register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
-
-    - name: apply changes
+    # --- absent: remove the redirect ----------------------------------------
+    - name: Remove the IPv4 port forwarding
+      when: state == 'absent'
       block:
-        - name: commit enable and restart
-          raw: "{{ item }}"
+        - name: Delete the redirect section
+          ansible.builtin.raw: |
+            if uci -q show "firewall.redirect_{{ redirect_name }}" > /dev/null 2>&1
+            then
+              uci delete "firewall.redirect_{{ redirect_name }}"
+              uci commit firewall
+              echo changed
+            else
+              echo unchanged
+            fi
+          register: delete_result
+          changed_when: "delete_result.stdout | trim == 'changed'"
+
+        - name: Reload the firewall
+          ansible.builtin.raw: /etc/init.d/firewall reload
+          when: delete_result is changed
+
+        # A removal must not leave a stale entry in managed.json.
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml
+          vars:
+            managed_id: ""
+            managed_remove_ids:
+              - "openwrt_firewall_ipv4_server_portforwardings.yml/{{ redirect_name }}"
+
+    # --- present: create or update the redirect -----------------------------
+    - name: Configure the IPv4 port forwarding
+      when: state != 'absent'
+      block:
+        - name: Set the uci values if needed
+          ansible.builtin.raw: |
+            current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+            desired="{{ item.value }}"
+
+            # Single-valued options: compare exactly, a substring match would
+            # hide drift (e.g. a stored value with a doubled trailing dot).
+            if [ "$current" != "$desired" ]
+            then
+              uci set {{ item.key }}="{{ item.value }}"
+              echo "changed"
+            else
+              echo "unchanged"
+            fi
+          loop: "{{ uci_vars }}"
+          register: uci_set_result
+          # A changed_when sees no register of its own loop, so the loop is
+          # neutral and the aggregate decides whether a reload is needed.
+          changed_when: false
+
+        - name: Remember whether any uci value changed
+          ansible.builtin.set_fact:
+            uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+
+        - name: Apply the changes
+          ansible.builtin.raw: "{{ item }}"
           loop:
             - "uci commit"
             - "/etc/init.d/firewall reload"
-          when: uci_set_result.changed
+          when: uci_changed | default(false) | bool
 
-    # Record this playbook's resources in /etc/symbios/managed.json.
-    - name: Record managed state
-      ansible.builtin.include_tasks: _managed-state.yml
+        # Record this playbook's resources in /etc/symbios/managed.json.
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml

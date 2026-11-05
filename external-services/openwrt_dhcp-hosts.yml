@@ -10,10 +10,12 @@
 #       label: "Hostname"
 #       type: "text"
 #       required: true
+#       placeholder: "printer_office"
 #     - name: "ip"
 #       label: "IPv4 address"
 #       type: "text"
 #       required: true
+#       placeholder: "192.168.45.10"
 #     - name: "mac"
 #       label: "MAC address"
 #       type: "text"
@@ -22,6 +24,35 @@
 #   requires:
 #     - playbook: "openwrt_basics.yml"
 #       reason: "DHCP/DNS configuration"
+#   inventory:
+#     title: "Existing DHCP static hosts"
+#     description: "Read live from the target, so leases created outside SymbiOS are listed as well."
+#     command: |
+#       for s in $(uci -q show dhcp | sed -n 's/^dhcp\.\(host_[^.=]*\)=.*/\1/p')
+#       do
+#         if [ "$(uci -q get "dhcp.$s" 2>/dev/null)" != "host" ]; then continue; fi
+#         printf '%s\t%s\t%s\n' \
+#           "$(uci -q get "dhcp.$s.name" 2>/dev/null)" \
+#           "$(uci -q get "dhcp.$s.ip" 2>/dev/null)" \
+#           "$(uci -q get "dhcp.$s.mac" 2>/dev/null)"
+#       done
+#     columns:
+#       - key: "name"
+#         label: "Host"
+#       - key: "ip"
+#         label: "IPv4"
+#       - key: "mac"
+#         label: "MAC"
+#     actions:
+#       - name: "remove"
+#         label: "Remove"
+#         class: "danger"
+#         confirm: "Delete this static DHCP lease from dnsmasq?"
+#         playbook: "openwrt_dhcp-hosts.yml"
+#         vars:
+#           host: "name"
+#         extra:
+#           state: "absent"
 #   actions:
 #     __playbook__: Install/Update
 #
@@ -29,65 +60,124 @@
 - name: dhcp hosts
   hosts: all
   gather_facts: no
- 
+
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
-    managed_id: "openwrt_dhcp-hosts.yml/{{ host }}"
+    state: "present"
+    # A name may arrive with a trailing dot or dashes from the inventory
+    # listing; normalize it so the section name and the stored values agree.
+    host_norm: "{{ host | regex_replace('\\.+$', '') }}"
+    managed_id: "openwrt_dhcp-hosts.yml/{{ host_norm }}"
     managed_playbook: "openwrt_dhcp-hosts.yml"
-    managed_ref: "host={{ host }} ip={{ ip }} mac={{ mac }}"
+    managed_ref: "host={{ host_norm }} ip={{ ip | default('') }} mac={{ mac | default('') }}"
     managed_resource_type: "dhcp_hosts"
-    network: "{{ 'tor' if ip.startswith('192.168.142.') else ('iot' if ip.startswith('192.168.143.') else 'lan') }}"
+    managed_remove_ids: []
+    network: "{{ 'tor' if (ip | default('')).startswith('192.168.142.') else ('iot' if (ip | default('')).startswith('192.168.143.') else 'lan') }}"
     uci_vars:
-      - { key: "dhcp.host_{{ host }}",  value: "host" }
-      - { key: "dhcp.host_{{ host }}.name",  value: "{{ host }}" }
-      - { key: "dhcp.host_{{ host }}.dns",   value: "1" }
-      - { key: "dhcp.host_{{ host }}.ip",    value: "{{ ip }}" }
-      - { key: "dhcp.host_{{ host }}.mac",   value: "{{ mac }}" }
-      - { key: "dhcp.host_{{ host }}.hostid",  value: "{{ '%04d' | format(ip.split('.')[-1] | int) }}" }
-      - { key: "dhcp.host_{{ host }}.instance", value: "{{ network }}_dnsmasq" }
-      - { key: "dhcp.host_{{ host }}.leasetime", value: "1h" }
+      - { key: "dhcp.host_{{ host_norm }}",  value: "host" }
+      - { key: "dhcp.host_{{ host_norm }}.name",  value: "{{ host_norm }}" }
+      - { key: "dhcp.host_{{ host_norm }}.dns",   value: "1" }
+      - { key: "dhcp.host_{{ host_norm }}.ip",    value: "{{ ip }}" }
+      - { key: "dhcp.host_{{ host_norm }}.mac",   value: "{{ mac }}" }
+      - { key: "dhcp.host_{{ host_norm }}.hostid",  value: "{{ '%04d' | format(ip.split('.')[-1] | int) }}" }
+      - { key: "dhcp.host_{{ host_norm }}.instance", value: "{{ network }}_dnsmasq" }
+      - { key: "dhcp.host_{{ host_norm }}.leasetime", value: "1h" }
 
   pre_tasks:
     - name: Check required parameters
       ansible.builtin.assert:
         that:
-          - host is defined
-          - ip is defined
-          - mac is defined
-        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+          - state in ['present', 'absent']
+          - host is defined and (host | string | length > 0)
+          - state == 'absent' or (ip is defined and mac is defined)
+          # The names are embedded in shell commands on the target.
+          - host is match('^[A-Za-z0-9._-]+$')
+          - state == 'absent' or ip is match('^[0-9.]+$')
+          - state == 'absent' or mac is match('^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$')
+        fail_msg: "state must be present or absent; host is required, ip and mac only for state=present."
         quiet: true
 
   tasks:
-
-    - name: set uci values if needed
-      raw: |
-        desired=$(echo "{{ item.value }}")
-        echo "{{ item.key }}" | grep name && desired=$(echo "{{ item.value }}" | sed 's/_/-/g')
-        #desired=$(echo "{{ item.value }}" | sed 's/_/-/g')
-        key=$(echo "{{ item.key }}" | sed 's/-/_/g')
-        current=$(uci get $key 2>/dev/null || echo "NOT_SET")
-        
-        if ! echo "$current" | grep "$desired"
-        then
-          uci set $key="$desired"
-          echo "changed"
-        else
-          echo "unchanged"
-        fi
-      loop: "{{ uci_vars }}"
-      register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
-
-    - name: apply changes
+    # --- absent: remove the lease -------------------------------------------
+    - name: Remove the DHCP static host
+      when: state == 'absent'
       block:
-        - name: commit enable and restart
-          raw: "{{ item }}"
+        - name: Delete the host section
+          ansible.builtin.raw: |
+            # The section name derives from the original name, but a legacy
+            # record may store a different spelling in .name (underscores are
+            # rewritten to dashes on create): look it up by value first and
+            # fall back to the computed section name.
+            sec=""
+            for s in $(uci -q show dhcp | sed -n 's/^dhcp\.\(host_[^.=]*\)=.*/\1/p')
+            do
+              if [ "$(uci -q get "dhcp.$s.name" 2>/dev/null)" = "{{ host_norm }}" ]
+              then sec="$s"; break; fi
+            done
+            if [ -z "$sec" ]; then sec="host_{{ host_norm | replace('-', '_') }}"; fi
+            if uci -q show "dhcp.$sec" > /dev/null 2>&1
+            then
+              uci delete "dhcp.$sec"
+              uci commit dhcp
+              echo changed
+            else
+              echo unchanged
+            fi
+          register: delete_result
+          changed_when: "delete_result.stdout | trim == 'changed'"
+
+        - name: Reload DNS
+          ansible.builtin.raw: /etc/init.d/dnsmasq reload
+          when: delete_result is changed
+
+        # A removal must not leave a stale entry in managed.json. The id was
+        # recorded under the original spelling, while create rewrites
+        # underscores to dashes in the stored name - drop every spelling the
+        # row may carry (the list is deduplicated).
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml
+          vars:
+            managed_id: ""
+            managed_remove_ids: "{{ ['openwrt_dhcp-hosts.yml/' ~ host_norm, 'openwrt_dhcp-hosts.yml/' ~ (host_norm | replace('_', '-')), 'openwrt_dhcp-hosts.yml/' ~ (host_norm | replace('-', '_'))] | unique }}"
+
+    # --- present: create or update the lease --------------------------------
+    - name: Configure the DHCP static host
+      when: state != 'absent'
+      block:
+        - name: Set the uci values if needed
+          ansible.builtin.raw: |
+            desired=$(echo "{{ item.value }}")
+            echo "{{ item.key }}" | grep name && desired=$(echo "{{ item.value }}" | sed 's/_/-/g')
+            key=$(echo "{{ item.key }}" | sed 's/-/_/g')
+            current=$(uci get $key 2>/dev/null || echo "NOT_SET")
+
+            # Single-valued options: compare exactly, a substring match would
+            # hide drift (e.g. a stored value with a doubled trailing dot).
+            if [ "$current" != "$desired" ]
+            then
+              uci set $key="$desired"
+              echo "changed"
+            else
+              echo "unchanged"
+            fi
+          loop: "{{ uci_vars }}"
+          register: uci_set_result
+          # A changed_when sees no register of its own loop, so the loop is
+          # neutral and the aggregate decides whether a reload is needed.
+          changed_when: false
+
+        - name: Remember whether any uci value changed
+          ansible.builtin.set_fact:
+            uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+
+        - name: Apply the changes
+          ansible.builtin.raw: "{{ item }}"
           loop:
             - "uci commit dhcp"
             - "/etc/init.d/dnsmasq reload"
-          when: uci_set_result.changed
+          when: uci_changed | default(false) | bool
 
-    # Record this playbook's resources in /etc/symbios/managed.json.
-    - name: Record managed state
-      ansible.builtin.include_tasks: _managed-state.yml
+        # Record this playbook's resources in /etc/symbios/managed.json.
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml

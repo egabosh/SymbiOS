@@ -115,7 +115,13 @@
         fi
       loop: "{{ uci_vars }}"
       register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
+      # A changed_when sees no register of its own loop, so the loop is
+      # neutral and the aggregate decides whether a restart is needed.
+      changed_when: false
+
+    - name: Remember whether any uci value changed
+      ansible.builtin.set_fact:
+        uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
 
     - name: /etc/scripts/ddns_get_ipv6_{{ localhostname }}.sh
       raw: |
@@ -134,7 +140,7 @@
           loop:
             - "uci commit"
             - "/etc/init.d/ddns restart"
-          when: uci_set_result.changed
+          when: uci_changed | default(false) | bool
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state

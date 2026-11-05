@@ -10,13 +10,42 @@
 #       label: "Hostname"
 #       type: "text"
 #       required: true
+#       placeholder: "server.lan"
 #     - name: "ip6"
 #       label: "IPv6 address"
 #       type: "text"
 #       required: true
+#       placeholder: "fdaa:a192:b168:cd45::10"
 #   requires:
 #     - playbook: "openwrt_basics.yml"
 #       reason: "DHCP/DNS configuration"
+#   inventory:
+#     title: "Existing DNS AAAA records"
+#     description: "Read live from the target, so records created outside SymbiOS are listed as well."
+#     command: |
+#       for s in $(uci -q show dhcp | sed -n 's/^dhcp\.\(host_[^.=]*\)=.*/\1/p')
+#       do
+#         ip6=$(uci -q get "dhcp.$s.ip6" 2>/dev/null)
+#         if [ -z "$ip6" ]; then continue; fi
+#         name=$(uci -q get "dhcp.$s.name" 2>/dev/null)
+#         if [ -z "$name" ]; then name="${s#host_}"; fi
+#         printf '%s\t%s\n' "$name" "$ip6"
+#       done
+#     columns:
+#       - key: "name"
+#         label: "Host"
+#       - key: "ip6"
+#         label: "IPv6"
+#     actions:
+#       - name: "remove"
+#         label: "Remove"
+#         class: "danger"
+#         confirm: "Delete the IPv6 address of this host from dnsmasq? An A record of the same host is kept."
+#         playbook: "openwrt_dns_aaaa.yml"
+#         vars:
+#           host: "name"
+#         extra:
+#           state: "absent"
 #   actions:
 #     __playbook__: Install/Update
 #
@@ -24,58 +53,129 @@
 - name: dns-config ipv6
   hosts: all
   gather_facts: no
- 
+
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
-    managed_id: "openwrt_dns_aaaa.yml/{{ host }}"
+    state: "present"
+    # A name may arrive with a trailing dot (e.g. copied from the inventory
+    # listing); normalize it so the section name and the stored values agree.
+    host_norm: "{{ host | regex_replace('\\.+$', '') }}"
+    managed_id: "openwrt_dns_aaaa.yml/{{ host_norm }}"
     managed_playbook: "openwrt_dns_aaaa.yml"
-    managed_ref: "host={{ host }} ip6={{ ip6 }}"
+    managed_ref: "host={{ host_norm }} ip6={{ ip6 | default('') }}"
     managed_resource_type: "dns_aaaa"
+    managed_remove_ids: []
 
     uci_vars:
-      - { key: "dhcp.host_{{ host | replace('.', '_') }}", value: "domain" }
-      - { key: "dhcp.host_{{ host | replace('.', '_') }}.ip6",   value: "{{ ip6 }}" }
-      - { key: "dhcp.host_{{ host | replace('.', '_') }}.name", value: "{{ host }}" }
+      - { key: "dhcp.host_{{ host_norm | replace('.', '_') }}", value: "domain" }
+      - { key: "dhcp.host_{{ host_norm | replace('.', '_') }}.ip6",   value: "{{ ip6 }}" }
+      - { key: "dhcp.host_{{ host_norm | replace('.', '_') }}.name", value: "{{ host_norm }}" }
 
   pre_tasks:
     - name: Check required parameters
       ansible.builtin.assert:
         that:
-          - host is defined
-          - ip6 is defined
-        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+          - state in ['present', 'absent']
+          - host is defined and (host | string | length > 0)
+          - state == 'absent' or (ip6 is defined and (ip6 | string | length > 0))
+          # The names are embedded in shell commands on the target.
+          - host is match('^[A-Za-z0-9._-]+$')
+          - state == 'absent' or ip6 is match('^[0-9a-fA-F:.]+$')
+        fail_msg: "state must be present or absent; host is required, ip6 only for state=present."
         quiet: true
 
   tasks:
-
-    - name: set uci values if needed
-      raw: |
-        desired=$(echo "{{ item.value }}" | sed 's/_/-/g')
-        key=$(echo "{{ item.key }}" | sed 's/-/_/g' )
-        current=$(uci get $key 2>/dev/null || echo "NOT_SET")
-
-        if ! echo "$current" | grep "$desired"
-        then
-          uci set $key="$desired"
-          echo "changed"
-        else
-          echo "unchanged"
-        fi
-
-      loop: "{{ uci_vars }}"
-      register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
-
-    - name: apply changes
+    # --- absent: remove the AAAA record -------------------------------------
+    - name: Remove the DNS AAAA record
+      when: state == 'absent'
       block:
-        - name: commit enable and restart
-          raw: "{{ item }}"
+        - name: Delete the IPv6 address of the host section
+          ansible.builtin.raw: |
+            # The section name derives from the original name, but a legacy
+            # record may store a different spelling in .name (underscores are
+            # rewritten to dashes on create): look it up by value first and
+            # fall back to the computed section name.
+            sec=""
+            for s in $(uci -q show dhcp | sed -n 's/^dhcp\.\(host_[^.=]*\)=.*/\1/p')
+            do
+              if [ "$(uci -q get "dhcp.$s.name" 2>/dev/null)" = "{{ host_norm }}" ]
+              then sec="$s"; break; fi
+            done
+            if [ -z "$sec" ]; then sec="host_{{ host_norm | replace('.', '_') | replace('-', '_') }}"; fi
+            changed=0
+            if uci -q show "dhcp.$sec.ip6" > /dev/null 2>&1
+            then
+              uci delete "dhcp.$sec.ip6"
+              changed=1
+            fi
+            # The A and AAAA records share one section: drop it only when no
+            # address is left, keep .name/.type for the other family.
+            if [ "$changed" = 1 ] && ! uci -q show "dhcp.$sec.ip" > /dev/null 2>&1 \
+              && ! uci -q show "dhcp.$sec.ip6" > /dev/null 2>&1
+            then
+              uci delete "dhcp.$sec"
+            fi
+            if [ "$changed" = 1 ]
+            then
+              uci commit dhcp
+              echo changed
+            else
+              echo unchanged
+            fi
+          register: delete_result
+          changed_when: "delete_result.stdout | trim == 'changed'"
+
+        - name: Reload DNS
+          ansible.builtin.raw: /etc/init.d/dnsmasq reload
+          when: delete_result is changed
+
+        # A removal must not leave a stale entry in managed.json. The id was
+        # recorded under the original spelling, while create rewrites
+        # underscores to dashes in the stored name - drop every spelling the
+        # row may carry (the list is deduplicated).
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml
+          vars:
+            managed_id: ""
+            managed_remove_ids: "{{ ['openwrt_dns_aaaa.yml/' ~ host_norm, 'openwrt_dns_aaaa.yml/' ~ (host_norm | replace('_', '-')), 'openwrt_dns_aaaa.yml/' ~ (host_norm | replace('-', '_'))] | unique }}"
+
+    # --- present: create or update the record -------------------------------
+    - name: Configure the DNS AAAA record
+      when: state != 'absent'
+      block:
+        - name: Set the uci values if needed
+          ansible.builtin.raw: |
+            desired=$(echo "{{ item.value }}" | sed 's/_/-/g')
+            key=$(echo "{{ item.key }}" | sed 's/-/_/g' )
+            current=$(uci get $key 2>/dev/null || echo "NOT_SET")
+
+            # Single-valued options: compare exactly, a substring match would
+            # hide drift (e.g. a stored value with a doubled trailing dot).
+            if [ "$current" != "$desired" ]
+            then
+              uci set $key="$desired"
+              echo "changed"
+            else
+              echo "unchanged"
+            fi
+          loop: "{{ uci_vars }}"
+          register: uci_set_result
+          # A changed_when sees no register of its own loop, so the loop is
+          # neutral and the aggregate decides whether a reload is needed.
+          changed_when: false
+
+        - name: Remember whether any uci value changed
+          ansible.builtin.set_fact:
+            uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+
+        - name: Apply the changes
+          ansible.builtin.raw: "{{ item }}"
           loop:
             - "uci commit"
             - "/etc/init.d/dnsmasq reload"
-          when: uci_set_result.changed
+          when: uci_changed | default(false) | bool
 
-    # Record this playbook's resources in /etc/symbios/managed.json.
-    - name: Record managed state
-      ansible.builtin.include_tasks: _managed-state.yml
+        # Record this playbook's resources in /etc/symbios/managed.json.
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml
