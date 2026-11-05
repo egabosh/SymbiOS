@@ -15,10 +15,11 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from django.shortcuts import render, Http404, redirect
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 import threading
 import uuid
 import os
+import re
 import json
 import yaml
 import shlex
@@ -368,6 +369,11 @@ def services_detail(request, playbook):
     # Generic per-service instances config (docs.config block in the playbook).
     config_meta = get_config_meta(item)
     config_rows = load_instances(config_meta) if config_meta else []
+    # Generic remote inventory (docs.inventory block): command, columns and row
+    # actions are declared by the playbook - the WebUI only renders them.
+    inventory_meta = (item.get('docs') or {}).get('inventory') if is_external else None
+    if not isinstance(inventory_meta, dict):
+        inventory_meta = None
     feature_groups = []
     feature_manifest_name = svc_name
     if has_feature_plugin:
@@ -432,6 +438,7 @@ def services_detail(request, playbook):
         'config_meta': config_meta,
         'config_rows': config_rows,
         'config_service': svc_name,
+        'inventory_meta': inventory_meta,
         'target_states': target_states,
         **_sidebar_context(all_catalog),
     })
@@ -522,6 +529,150 @@ def services_action_remote(request, playbook):
         target=_run_service_job, args=(job_id, playbook, '__remote__'), daemon=True
     ).start()
     return JsonResponse({'job': job_id, 'action': '__remote__', 'command': cmd})
+
+
+@login_required
+def services_inventory_remote(request, playbook):
+    """List the resources an external playbook manages on a target.
+
+    The listing command, the columns and the row actions all come from the
+    playbook's docs.inventory block. This view only runs the generic helper
+    script and hands its JSON back to the page, so it holds no knowledge
+    about the target's operating system.
+    """
+    if not playbook.startswith('external-services/'):
+        return JsonResponse({'ok': False, 'error': 'Not an external playbook'}, status=400)
+    item = get_playbook(playbook)
+    if item is None:
+        return JsonResponse({'ok': False, 'error': 'Playbook not found'}, status=404)
+    inventory = (item.get('docs') or {}).get('inventory') or {}
+    if not inventory:
+        return JsonResponse({'ok': False, 'error': 'No inventory declared'}, status=400)
+    system_id = (request.POST.get('system_id') or request.GET.get('system_id') or '').strip()
+    if not system_id:
+        return JsonResponse({'ok': False, 'error': 'No system selected'}, status=400)
+    cmd = 'symbios-remote-inventory.sh list %s %s' % (
+        shlex.quote(system_id), shlex.quote(playbook.split('/')[-1]))
+    ok, stdout, stderr = run_command(cmd, timeout=120)
+    try:
+        data = json.loads(stdout)
+    except ValueError:
+        data = {'ok': False, 'error': (stderr or stdout or 'Invalid answer').strip()[:500]}
+    if ok and not isinstance(data, dict):
+        data = {'ok': False, 'error': 'Invalid answer'}
+    if not ok and data.get('ok'):
+        data = {'ok': False, 'error': (stderr or 'Listing failed').strip()[:500]}
+    return JsonResponse(data)
+
+
+@login_required
+def services_inventory_action(request, playbook):
+    """Run one row action of docs.inventory as a background job.
+
+    The row (column key -> value) travels as JSON on stdin: an action can map
+    a password column onto a playbook variable, so values must not show up in
+    the process list or in the exec audit log.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid action'}, status=400)
+    if not playbook.startswith('external-services/'):
+        return JsonResponse({'error': 'Not an external playbook'}, status=400)
+    item = get_playbook(playbook)
+    if item is None:
+        return JsonResponse({'error': 'Playbook not found'}, status=404)
+    actions = ((item.get('docs') or {}).get('inventory') or {}).get('actions') or []
+    action = (request.POST.get('action') or '').strip()
+    if not any(a.get('name') == action for a in actions):
+        return JsonResponse({'error': 'Unknown action: ' + action}, status=400)
+    system_id = (request.POST.get('system_id') or '').strip()
+    if not system_id:
+        return JsonResponse({'error': 'No system selected'}, status=400)
+    try:
+        row = json.loads(request.POST.get('row') or '{}')
+    except ValueError:
+        return JsonResponse({'error': 'Invalid row data'}, status=400)
+    if not isinstance(row, dict):
+        return JsonResponse({'error': 'Invalid row data'}, status=400)
+    cmd = 'symbios-remote-inventory.sh action %s %s %s' % (
+        shlex.quote(system_id), shlex.quote(playbook.split('/')[-1]),
+        shlex.quote(action))
+    job_id = create_job(cmd, timeout=1800, stdin_data=json.dumps(row))
+    threading.Thread(
+        target=_run_service_job, args=(job_id, playbook, '__inventory__'), daemon=True
+    ).start()
+    return JsonResponse({'job': job_id, 'action': action, 'command': cmd})
+
+
+def _inventory_action_values(action, row):
+    """Map one row onto the action's declared values (vars + extra)."""
+    values = {}
+    for var, column in (action.get('vars') or {}).items():
+        values[str(var)] = str(row.get(str(column), ''))
+    for var, value in (action.get('extra') or {}).items():
+        values[str(var)] = value
+    return values
+
+
+def _inventory_download_filename(download, values, fallback):
+    """Resolve docs download.filename for one row, kept header safe.
+
+    Only the file name survives: a row value must never reach a path or a
+    header unfiltered, so everything outside ``[A-Za-z0-9._-]`` is replaced.
+    """
+    name = str(download.get('filename') or fallback or 'download')
+    for var, value in values.items():
+        name = name.replace('{{ %s }}' % var, value).replace('{{%s}}' % var, value)
+    name = os.path.basename(name.replace('\\', '/').strip())
+    name = re.sub(r'[^A-Za-z0-9._-]+', '_', name).lstrip('.')
+    return name or 'download'
+
+
+@login_required
+def services_inventory_download(request, playbook):
+    """Fetch the file a docs.inventory row action declares (download block).
+
+    Like the action view the row travels in the POST body - values may be
+    secrets - and the command itself comes from the playbook, so this view
+    holds no knowledge about the target or the resource.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid action'}, status=400)
+    if not playbook.startswith('external-services/'):
+        return JsonResponse({'error': 'Not an external playbook'}, status=400)
+    item = get_playbook(playbook)
+    if item is None:
+        return JsonResponse({'error': 'Playbook not found'}, status=404)
+    actions = ((item.get('docs') or {}).get('inventory') or {}).get('actions') or []
+    action_name = (request.POST.get('action') or '').strip()
+    action = next((a for a in actions if a.get('name') == action_name), None)
+    if action is None:
+        return JsonResponse({'error': 'Unknown action: ' + action_name}, status=400)
+    download = action.get('download')
+    if not isinstance(download, dict):
+        return JsonResponse({'error': 'Action declares no download'}, status=400)
+    system_id = (request.POST.get('system_id') or '').strip()
+    if not system_id:
+        return JsonResponse({'error': 'No system selected'}, status=400)
+    try:
+        row = json.loads(request.POST.get('row') or '{}')
+    except ValueError:
+        return JsonResponse({'error': 'Invalid row data'}, status=400)
+    if not isinstance(row, dict):
+        return JsonResponse({'error': 'Invalid row data'}, status=400)
+    cmd = 'symbios-remote-inventory.sh download %s %s %s' % (
+        shlex.quote(system_id), shlex.quote(playbook.split('/')[-1]),
+        shlex.quote(action_name))
+    ok, stdout, stderr = run_command(cmd, timeout=120, stdin_data=json.dumps(row))
+    if not ok:
+        return HttpResponse((stderr or stdout or 'Download failed').strip()[:2000],
+                            status=502, content_type='text/plain')
+    values = _inventory_action_values(action, row)
+    response = HttpResponse(
+        stdout, content_type=download.get('mime') or 'text/plain; charset=utf-8')
+    response['Content-Disposition'] = 'attachment; filename="%s"' % (
+        _inventory_download_filename(download, values, action_name))
+    response['Cache-Control'] = 'no-store'
+    return response
 
 
 def _run_service_job(job_id, playbook=None, action=None):

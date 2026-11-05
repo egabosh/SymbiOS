@@ -7,34 +7,59 @@
 # playbook run. No Python required (raw shell only, works on minimal images).
 #
 # Expected variables (set as defaults in the calling playbook's vars:):
-#   managed_id             unique id of one resource (playbook[/key])
+#   managed_id             unique id of one resource (playbook[/key]);
+#                          empty = do not add or update an entry
 #   managed_playbook       playbook file name
 #   managed_resource_type  kind of resource (e.g. dns_cname, dhcp_host)
 #   managed_ref            short human readable summary of the resource
+#   managed_remove_ids     ids of resources this run deleted (default: none)
 - name: Record managed state on the target
   raw: |
     d=/etc/symbios
     f="$d/managed.json"
     mkdir -p "$d" 2>/dev/null || exit 0
+    # esc quotes a value for a JSON string (backslash and double quote)
     esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
-    id=$(esc "{{ managed_id }}")
+    ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    id=$(esc "{{ managed_id | default('') }}")
     pb=$(esc "{{ managed_playbook }}")
     rt=$(esc "{{ managed_resource_type }}")
     rf=$(esc "{{ managed_ref }}")
-    ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    entry="{\"id\": \"$id\", \"playbook\": \"$pb\", \"resource_type\": \"$rt\", \"ref\": \"$rf\", \"applied_at\": \"$ts\"}"
     keep="$d/.managed.keep"
+    drop="$d/.managed.drop"
+    # Existing entries, one per line. The file itself stores them comma
+    # separated, so the trailing comma is stripped here - otherwise every run
+    # appends one more comma and the JSON breaks.
     if [ -f "$f" ]
     then
-      grep '"id":' "$f" | grep -v "\"id\": \"$id\"" > "$keep" || :
+      grep '"id":' "$f" | sed 's/[[:space:]]*,\{1,\}[[:space:]]*$//' > "$keep" || :
     else
       : > "$keep"
     fi
+    # Resources removed by this run: drop their entries from the file.
+    : > "$drop"
+    {% for r in managed_remove_ids | default([]) %}
+    printf '"id": "%s"\n' "$(esc "{{ r }}")" >> "$drop"
+    {% endfor %}
+    if [ -s "$drop" ]
+    then
+      grep -F -v -f "$drop" "$keep" > "$keep.new" || :
+      mv "$keep.new" "$keep"
+    fi
+    # The updated resource replaces a previous entry with the same id.
+    if [ -n "$id" ]
+    then
+      {
+        grep -F -v "\"id\": \"$id\"" "$keep" || :
+        printf '{"id": "%s", "playbook": "%s", "resource_type": "%s", "ref": "%s", "applied_at": "%s"}\n' "$id" "$pb" "$rt" "$rf" "$ts"
+      } > "$keep.new"
+      mv "$keep.new" "$keep"
+    fi
     {
       printf '{\n  "schema": 1,\n  "entries": [\n'
-      { cat "$keep"; printf '%s\n' "$entry"; } | grep -v '^$' | awk '{ sub(/^[ \t]+/, ""); if (NR > 1) print ","; printf "    %s", $0 } END { if (NR > 0) print "" }'
+      awk '{ sub(/^[ \t]+/, ""); if (NR > 1) print ","; printf "    %s", $0 } END { if (NR > 0) print "" }' "$keep"
       printf '  ]\n}\n'
     } > "$d/.managed.json.tmp" 2>/dev/null && mv "$d/.managed.json.tmp" "$f" 2>/dev/null
-    rm -f "$keep" "$d/.managed.json.tmp"
+    rm -f "$keep" "$drop" "$keep.new" "$d/.managed.json.tmp"
     exit 0
   changed_when: false

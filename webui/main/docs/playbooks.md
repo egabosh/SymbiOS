@@ -81,7 +81,7 @@ to know: title, description, available actions, status checks, and log streams.
   | playbook re-run | no | no | yes (fresh reprovisioning) |
 - **`actions`** - mapping of action name to shell command. Every key becomes a button in the WebUI. Common names: `start`, `stop`, `restart`, `reload`.
 - **`type`** - optional target/system type. Groups playbooks in the WebUI and selects which external systems they can run on (e.g. `OpenWrt`, `linux-mint`). The location decides local vs. remote: playbooks below `external-services/` are always executed on an external system, playbooks below `services/` and `base-services/` run locally on the SymbiOS host. Write it flat (`type:`); the legacy nested form (`target.type:`) is still accepted for backwards compatibility. The set of all distinct declared types feeds the "System Type" dropdown under Settings → External Systems, so a new type appears there automatically as soon as any playbook declares it.
-- **`params`** - optional input fields rendered before a remote run. Each entry is a mapping with `name` (variable name passed as Ansible extra var), `label`, `type` (`text`, `number`, `password`, `select`), optional `required`, `default` and `placeholder`:
+- **`params`** - optional input fields rendered before a remote run. Each entry is a mapping with `name` (variable name passed as Ansible extra var), `label`, `type` (`text`, `number`, `password`, `select`), optional `required`, `default`, `placeholder` and `help` (a short explanation rendered below the field):
   ```yaml
   #   params:
   #     - name: cname
@@ -92,7 +92,17 @@ to know: title, description, available actions, status checks, and log streams.
   #       label: Protocol
   #       type: text
   #       default: tcp
+  #     - name: client_num
+  #       label: Client number
+  #       type: number
+  #       required: false
+  #       placeholder: next free
+  #       help: Empty = next free number between 2 and 254.
   ```
+  A parameter that is left empty arrives as an empty string. A playbook derives
+  the effective value on the target and keeps it in a **separate variable**
+  (`client_num_resolved` in the WireGuard playbooks): `set_fact` can never
+  override an extra var, so the input variable itself stays empty.
   Standalone compatibility: parameters with a `default` are written into the
   playbook's `vars:` (extra vars from the WebUI take precedence), parameters
   without one are asserted in a `pre_tasks:` guard that names the missing
@@ -253,12 +263,95 @@ entries with different ids:
 - The write happens in the shared snippet `external-services/_managed-state.yml`
   (`raw` shell only, no Python on the target) and is best effort: a missing or
   read-only `/etc/symbios` never aborts the playbook run.
+- A playbook that deletes resources sets `managed_remove_ids` (list of ids) and
+  an empty `managed_id` for that run. The snippet then drops those entries
+  instead of adding one:
+
+  ```yaml
+  - name: Record managed state
+    ansible.builtin.include_tasks: _managed-state.yml
+    vars:
+      managed_id: ""
+      managed_remove_ids:
+        - "openwrt_wireguard-tor-client.yml/{{ client_name }}"
+  ```
 
 The WebUI pulls the file with `scripts/symbios-remote-sync.sh <target_id>` into
 `config/external-systems/states/<target_id>.json`; the External Systems page
 shows it per target ("Inventory") and `docs.requires` is checked against it.
 Entries that no playbook recorded are not listed at all - the file only ever
 contains what SymbiOS applied.
+
+### Inventory and row actions (`docs.inventory`)
+
+`/etc/symbios/managed.json` only knows what SymbiOS applied. Resources that
+already existed (created by hand or by another tool) are therefore listed
+**live from the target**: the playbook declares how, and the WebUI renders the
+result. Columns and row actions come from the same block, so a new target type
+needs no WebUI change.
+
+```yaml
+# docs:
+#   inventory:
+#     title: "Existing WireGuard Tor clients"
+#     description: "Read live from the target."
+#     command: |
+#       ... shell snippet, run on the target, one record per line ...
+#       ... fields separated by tabs, in the order of the columns ...
+#     columns:
+#       - key: "name"
+#         label: "Client"
+#     actions:
+#       - name: "remove"
+#         label: "Remove"
+#         class: "danger"            # bootstrap color suffix
+#         confirm: "Delete this client?"
+#         playbook: "openwrt_wireguard-tor-client.yml"
+#         vars:
+#           client_name: "name"      # variable name -> column key
+#         extra:
+#           state: "absent"          # fixed values, always added
+#       - name: "download"
+#         label: "Download"
+#         download:                  # fetches a file instead of running a playbook
+#           filename: "{{ client_name }}.conf"
+#           mime: "text/plain"
+#           command: |
+#             cat "/etc/wg_tor/{{ client_name }}.conf"
+#         vars:
+#           client_name: "name"
+```
+
+| Element | Meaning |
+|---------|---------|
+| `command` | Shell snippet piped to `sh -s` on the target over SSH. Prints one record per line, fields tab separated, in column order. Use plain POSIX shell (targets often have no Python). |
+| `columns` | `key` is the JSON field name, `label` the table header. |
+| `actions` | One button per row. `playbook` is the playbook to run (defaults to none, so it must be set), `vars` maps variable names onto column keys, `extra` adds fixed values. |
+| `download` | Instead of a playbook run the action fetches a file: `command` (shell snippet, printed to stdout on the target), `filename` and `mime` for the browser. The command and the file name may use `{{ <var> }}` placeholders, which are filled from the action's `vars`. Meant for small text files such as a client `.conf`. |
+| `class` | Bootstrap button color (`secondary` when omitted). |
+
+One action runs through the generic helper, which executes exactly what the
+block declares:
+
+```
+scripts/symbios-remote-inventory.sh list <target_id> <playbook>
+scripts/symbios-remote-inventory.sh action <target_id> <playbook> <action>   # row JSON on stdin
+scripts/symbios-remote-inventory.sh download <target_id> <playbook> <action> # row JSON on stdin, file on stdout
+```
+
+The row travels as JSON on stdin (a mapped column may hold a secret), and the
+helper calls `symbios-run-remote-playbook.sh` with the mapped values. For a
+download the helper substitutes every declared variable shell-quoted into the
+download command (an unknown placeholder is an error) and streams the file
+content. The WebUI view holds no knowledge about the target's operating
+system, the command language or the resource itself.
+
+Removal is therefore a normal playbook run with `state: absent`: the playbook
+itself deletes the resource (`uci delete` for OpenWrt) and records the removal
+in `managed.json` via `managed_remove_ids`. A playbook that supports this
+declares the parameter in its `vars:` (`state: "present"`) and asserts the
+allowed values.
+
 
 ## Rules of thumb
 

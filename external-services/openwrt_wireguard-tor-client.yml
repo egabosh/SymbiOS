@@ -10,15 +10,64 @@
 #       label: "Client name"
 #       type: "text"
 #       required: true
+#       placeholder: "client_computer_1"
+#       help: "Letters, digits and underscore only. Becomes the uci section wg_tor_<name> and the DNS name wgtor-<name>.tor."
 #     - name: "client_num"
 #       label: "Client number"
 #       type: "number"
-#       required: true
+#       required: false
+#       placeholder: "next free"
+#       help: "Segment address 192.168.45.<n> and fdaa:a192:b168:cd45::<n>. Empty = next free number between 2 and 254."
 #   requires:
 #     - playbook: "openwrt_wireguard-tor.yml"
 #       reason: "WireGuard Tor server"
 #     - playbook: "openwrt_tor.yml"
 #       reason: "Tor segment"
+#   inventory:
+#     title: "Existing WireGuard Tor clients"
+#     description: "Read live from the target, so peers created outside SymbiOS are listed as well."
+#     command: |
+#       for s in $(uci -q show network | sed -n 's/^network\.\(wg_tor_[^.=]*\)=.*/\1/p')
+#       do
+#         ips=$(uci -q get "network.$s.allowed_ips" 2>/dev/null)
+#         ipv4=$(printf '%s\n' $ips | grep -E '^192\.168\.45\.[0-9]+/32$' | head -1)
+#         ipv6=$(printf '%s\n' $ips | grep -E '^fdaa:a192:b168:cd45::[0-9]+/128$' | head -1)
+#         printf '%s\t%s\t%s\n' "${s#wg_tor_}" "${ipv4:-}" "${ipv6:-}"
+#       done
+#     columns:
+#       - key: "name"
+#         label: "Client"
+#       - key: "ipv4"
+#         label: "IPv4"
+#       - key: "ipv6"
+#         label: "IPv6"
+#     actions:
+#       - name: "remove"
+#         label: "Remove"
+#         class: "danger"
+#         confirm: "Delete the WireGuard peer and its DNS/DHCP record for this client? The key files in /etc/wg_tor are kept."
+#         playbook: "openwrt_wireguard-tor-client.yml"
+#         vars:
+#           client_name: "name"
+#         extra:
+#           state: "absent"
+#       - name: "download"
+#         label: "Download"
+#         class: "secondary"
+#         # The .conf is written by this playbook; the keys stay on the target.
+#         download:
+#           filename: "{{ client_name }}.conf"
+#           mime: "text/plain"
+#           command: |
+#             conf="/etc/wg_tor/{{ client_name }}.conf"
+#             if [ ! -f "$conf" ]
+#             then
+#               echo "No $conf on the target - run Install/Update for this client first." >&2
+#               exit 1
+#             fi
+#             cat "$conf"
+#         vars:
+#           client_name: "name"
 #   actions:
 #     __playbook__: Install/Update
 #
@@ -30,113 +79,266 @@
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
+    state: "present"
+    client_num: ""
+    # client_num is an extra var (highest precedence), so the resolved number
+    # needs its own variable - a set_fact can never override extra vars.
+    client_num_resolved: ""
     managed_id: "openwrt_wireguard-tor-client.yml/{{ client_name }}"
     managed_playbook: "openwrt_wireguard-tor-client.yml"
-    managed_ref: "client_name={{ client_name }} client_num={{ client_num }}"
+    managed_ref: "client_name={{ client_name }} client_num={{ client_num_resolved }}"
     managed_resource_type: "wireguard_tor_client"
+    managed_remove_ids: []
 
     uci_vars:
-      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}", value: "wireguard_wg_tor" }
-      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.allowed_ips", value: "fdaa:a192:b168:cd45::{{ client_num }}/128" }
-      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.allowed_ips", value: "192.168.45.{{ client_num }}/32" }
-      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.persistent_keepalive", value: "15" }
-      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.description", value: "wg_tor_{{ client_name | replace('_', '-') }}" }
-      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.route_allowed_ips", value: "1" }
-      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.endpoint_host", value: "$(uci get ddns.dedyn_ipv6_openwrt.domain)" }
-      - { key: "network.wg_tor_{{ client_name | replace('-', '_') }}.endpoint_port", value: "59667" }
+      - { key: "network.wg_tor_{{ client_name }}", value: "wireguard_wg_tor" }
+      - { key: "network.wg_tor_{{ client_name }}.allowed_ips", value: "fdaa:a192:b168:cd45::{{ client_num_resolved }}/128" }
+      - { key: "network.wg_tor_{{ client_name }}.allowed_ips", value: "192.168.45.{{ client_num_resolved }}/32" }
+      - { key: "network.wg_tor_{{ client_name }}.persistent_keepalive", value: "15" }
+      - { key: "network.wg_tor_{{ client_name }}.description", value: "wg_tor_{{ client_name | replace('_', '-') }}" }
+      - { key: "network.wg_tor_{{ client_name }}.route_allowed_ips", value: "1" }
+      - { key: "network.wg_tor_{{ client_name }}.endpoint_host", value: "{{ ddns_domain.stdout | trim }}" }
+      - { key: "network.wg_tor_{{ client_name }}.endpoint_port", value: "59667" }
       # dns record
-      - { key: "dhcp.host_{{ client_name | replace('-', '_') }}", value: "domain" }
-      - { key: "dhcp.host_{{ client_name | replace('-', '_') }}.ip",   value: "192.168.45.{{ client_num }}" }
-      - { key: "dhcp.host_{{ client_name | replace('-', '_') }}.ip6",  value: "fdaa:a192:b168:cd45::{{ client_num }}" }
-      - { key: "dhcp.host_{{ client_name | replace('-', '_') }}.name", value: "wgtor-{{ client_name | replace('_', '-') }}.tor" }
+      - { key: "dhcp.host_{{ client_name }}", value: "domain" }
+      - { key: "dhcp.host_{{ client_name }}.ip",   value: "192.168.45.{{ client_num_resolved }}" }
+      - { key: "dhcp.host_{{ client_name }}.ip6",  value: "fdaa:a192:b168:cd45::{{ client_num_resolved }}" }
+      - { key: "dhcp.host_{{ client_name }}.name", value: "wgtor-{{ client_name | replace('_', '-') }}.tor" }
 
   pre_tasks:
     - name: Check required parameters
       ansible.builtin.assert:
         that:
           - client_name is defined
-          - client_num is defined
-        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+          - client_name is match('^[A-Za-z0-9_]+$')
+          - state in ['present', 'absent']
+        fail_msg: "client_name is required and must match ^[A-Za-z0-9_]+$ (letters, digits, underscore)."
         quiet: true
 
-  tasks:
-    - name: set uci values if needed
-      raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired="{{ item.value }}"
-
-        # gen client keypair+psk if not exist
-        if [[ {{ item.value }} = wireguard_wg_tor ]]
+    # The section name goes into shell commands unquoted, so a name with
+    # other characters must never reach the target.
+    - name: Read the segment addresses already in use
+      ansible.builtin.raw: |
+        name="{{ client_name }}"
+        want="{{ client_num }}"
+        used=$( {
+          uci -q show network 2>/dev/null | grep -E '^network\.wg_tor_[^.=]+\.allowed_ips=' | grep -oE '192\.168\.45\.[0-9]+/32'
+          uci -q show dhcp 2>/dev/null | grep -E '^dhcp\.host_[^.=]+\.ip=' | grep -oE '192\.168\.45\.[0-9]+'
+        } | sed -E 's#^192\.168\.45\.##; s#/32$##' | sort -n -u )
+        # A client that already exists keeps its address: a re-run with an
+        # empty number must not move it to the next free one.
+        own=$(uci -q get "network.wg_tor_$name.allowed_ips" 2>/dev/null \
+          | tr ' ' '\n' | grep -oE '^192\.168\.45\.[0-9]+/32$' | head -1 \
+          | sed -E 's#^192\.168\.45\.##; s#/32$##')
+        last=$(printf '%s\n' "$used" | grep -E '^[0-9]+$' | tail -1)
+        if [ -n "$want" ]
         then
-          if ! uci get {{ item.key }}.preshared_key
-          then
-            mkdir -p /etc/wg_tor
-            cd /etc/wg_tor
-            wg genkey | tee {{ client_name }}_privatekey | wg pubkey > {{ client_name }}_publickey
-            wg genpsk > {{ client_name }}_presharedkey
-            uci set {{ item.key }}.private_key=$(cat {{ client_name }}_privatekey)
-            uci set {{ item.key }}.public_key=$(cat {{ client_name }}_publickey)
-            uci set {{ item.key }}.preshared_key=$(cat {{ client_name }}_presharedkey)
-            uci commit
-          fi
-        fi
-
-        if ! echo "$current" | grep "$desired"
+          num=$want
+        elif [ -n "$own" ]
         then
-          if echo "{{ item.key }}" | egrep -q "\.addresses|\.allowed_ips|firewall\..+\.network"
-          then
-            uci add_list {{ item.key }}="{{ item.value }}"
-          else
-            uci set {{ item.key }}="{{ item.value }}"
-          fi
-          echo "changed"
+          num=$own
         else
-          echo "unchanged"
+          num=$(( ${last:-1} + 1 ))
         fi
-      loop: "{{ uci_vars }}"
-      register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
-
-    - name: set uci values if needed
-      raw: |
-        if ! uci get network.wg_tor_{{ client_name }}.private_key
+        if [ "$num" -lt 2 ] || [ "$num" -gt 254 ]
         then
-          mkdir -p /etc/wg_tor
-          cd /etc/wg_tor
-          wg genkey | tee {{ client_name }}_privatekey | wg pubkey > {{ client_name }}_publickey
-          wg genpsk > {{ client_name }}_presharedkey
-          uci set network.wg_tor_{{ client_name }}.private_key=$(cat {{ client_name }}_privatekey)
-          uci set network.wg_tor_{{ client_name }}.public_key=$(cat {{ client_name }}_publickey)
-          uci set network.wg_tor_{{ client_name }}.preshared_key=$(cat {{ client_name }}_presharedkey)
-          uci commit
+          echo "ERROR: client number $num is outside the range 2-254 (used: $(printf '%s ' $used))" >&2
+          exit 3
         fi
-
-        echo "[Interface]
-        PrivateKey = $(uci get network.wg_tor_{{ client_name }}.private_key)
-        Address = fdaa:a192:b168:cd45::{{ client_num }}/128, 192.168.45.{{ client_num }}/32
-        MTU = 1450
-
-        [Peer]
-        PublicKey = $(echo $(uci get network.wg_tor.private_key) | wg pubkey)
-        PresharedKey = $(uci get network.wg_tor_{{ client_name }}.preshared_key)
-        AllowedIPs = 192.168.45.0/24,172.23.0.0/16
-        Endpoint = openwrt.dedyn.io:59667
-        PersistentKeepAlive = 15
-        " >/etc/wg_tor/{{ client_name }}.conf
+        # An explicitly given number must not belong to another peer or host;
+        # the same client may of course be re-run with its own number.
+        if [ -n "$want" ] && printf '%s\n' "$used" | grep -qx "$want"
+        then
+          if ! uci -q get "network.wg_tor_$name.allowed_ips" 2>/dev/null | grep -q "192\.168\.45\.$want/32"
+          then
+            echo "ERROR: 192.168.45.$want/32 is already assigned (used: $(printf '%s ' $used))" >&2
+            exit 3
+          fi
+        fi
+        echo "$num"
+      register: client_num_result
       changed_when: false
+      when: state != 'absent'
 
-    - name: apply changes
+    - name: Read the public WireGuard endpoint domain
+      ansible.builtin.raw: uci -q get ddns.dedyn_ipv6_openwrt.domain
+      register: ddns_domain
+      changed_when: false
+      failed_when: false
+      when: state != 'absent'
+
+    - name: Require a configured public endpoint domain
+      ansible.builtin.assert:
+        that:
+          - ddns_domain.stdout | trim | length > 0
+        fail_msg: "No DDNS domain configured (ddns.dedyn_ipv6_openwrt.domain) - the WireGuard client needs a reachable endpoint."
+        quiet: true
+      when: state != 'absent'
+
+    - name: Use the given or the next free client number
+      ansible.builtin.set_fact:
+        client_num_resolved: "{{ client_num_result.stdout | trim }}"
+      when: state != 'absent'
+
+    - name: Validate the client number
+      ansible.builtin.assert:
+        that:
+          - client_num_resolved is match('^[0-9]+$')
+          - client_num_resolved | int >= 2
+          - client_num_resolved | int <= 254
+        fail_msg: "client_num must be a number between 2 and 254 (leave empty for the next free number)."
+        quiet: true
+      when: state != 'absent'
+
+  tasks:
+    # --- absent: remove peer and DNS/DHCP record ----------------------------
+    - name: Remove the WireGuard Tor client
+      when: state == 'absent'
       block:
-        - name: commit enable and restart
-          raw: "{{ item }}"
+        - name: Delete the client sections
+          ansible.builtin.raw: |
+            changed=0
+            for s in network.wg_tor_{{ client_name }} dhcp.host_{{ client_name }}
+            do
+              if uci -q show "$s" > /dev/null 2>&1
+              then
+                uci -q delete "$s"
+                changed=1
+              fi
+            done
+            if [ "$changed" = 1 ]
+            then
+              uci commit network
+              uci commit dhcp
+              echo changed
+            else
+              echo unchanged
+            fi
+          register: delete_result
+          changed_when: "delete_result.stdout | trim == 'changed'"
+
+        - name: Reload network and DNS
+          ansible.builtin.raw: "{{ item }}"
+          loop:
+            - "/etc/init.d/network reload"
+            - "/etc/init.d/dnsmasq reload"
+            - "ifdown wg_tor 2>/dev/null || true"
+            - "ifup wg_tor"
+          when: delete_result is changed
+
+        - name: Keep key material of the removed client
+          ansible.builtin.debug:
+            msg: "Removed client {{ client_name }}. The key files in /etc/wg_tor/{{ client_name }}_* are kept - delete them manually if the peer must not come back with the same identity."
+
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml
+          vars:
+            managed_id: ""
+            managed_remove_ids:
+              - "openwrt_wireguard-tor-client.yml/{{ client_name }}"
+
+    # --- present: create or update the peer ---------------------------------
+    - name: Configure the WireGuard Tor client
+      when: state != 'absent'
+      block:
+        - name: Set the uci values if needed
+          ansible.builtin.raw: |
+            current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+            desired="{{ item.value }}"
+            if ! echo "$current" | grep -q "$desired"
+            then
+              if echo "{{ item.key }}" | egrep -q "\.addresses|\.allowed_ips|firewall\..+\.network"
+              then
+                uci add_list {{ item.key }}="{{ item.value }}"
+              else
+                uci set {{ item.key }}="{{ item.value }}"
+              fi
+              echo "changed"
+            else
+              echo "unchanged"
+            fi
+          loop: "{{ uci_vars }}"
+          register: uci_set_result
+          # A changed_when sees no register of its own loop, so the loop is
+          # neutral and the aggregate decides whether a reload is needed.
+          changed_when: false
+
+        - name: Remember whether any uci value changed
+          ansible.builtin.set_fact:
+            uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+
+        - name: Generate the client keys if missing
+          ansible.builtin.raw: |
+            if ! uci -q get network.wg_tor_{{ client_name }}.private_key > /dev/null
+            then
+              umask 077
+              mkdir -p /etc/wg_tor
+              cd /etc/wg_tor || exit 1
+              wg genkey | tee {{ client_name }}_privatekey | wg pubkey > {{ client_name }}_publickey
+              wg genpsk > {{ client_name }}_presharedkey
+              uci set network.wg_tor_{{ client_name }}.private_key="$(cat {{ client_name }}_privatekey)"
+              uci set network.wg_tor_{{ client_name }}.public_key="$(cat {{ client_name }}_publickey)"
+              uci set network.wg_tor_{{ client_name }}.preshared_key="$(cat {{ client_name }}_presharedkey)"
+              uci commit network
+              echo changed
+            else
+              echo unchanged
+            fi
+          register: key_result
+          changed_when: "key_result.stdout | trim == 'changed'"
+
+        - name: Write the client configuration file
+          ansible.builtin.raw: |
+            umask 077
+            mkdir -p /etc/wg_tor
+            server_key=$(uci -q get network.wg_tor.private_key)
+            client_key=$(uci -q get network.wg_tor_{{ client_name }}.private_key)
+            if [ -z "$client_key" ]
+            then
+              echo "ERROR: no private key for {{ client_name }} - cannot write the .conf" >&2
+              exit 1
+            fi
+            # A .conf with the server key would hand the server identity to the
+            # client: refuse instead of writing (or keeping) a broken file.
+            if [ "$client_key" = "$server_key" ]
+            then
+              echo "ERROR: the key of {{ client_name }} equals the server key - refusing to write /etc/wg_tor/{{ client_name }}.conf (regenerate /etc/wg_tor/{{ client_name }}_privatekey and re-run)" >&2
+              exit 1
+            fi
+            conf=/etc/wg_tor/{{ client_name }}.conf
+            {
+              printf '%s\n' '[Interface]'
+              printf 'PrivateKey = %s\n' "$client_key"
+              printf 'Address = fdaa:a192:b168:cd45::{{ client_num_resolved }}/128, 192.168.45.{{ client_num_resolved }}/32\n'
+              printf 'MTU = 1450\n'
+              printf '\n'
+              printf '%s\n' '[Peer]'
+              printf 'PublicKey = %s\n' "$(printf '%s\n' "$server_key" | wg pubkey)"
+              printf 'PresharedKey = %s\n' "$(uci -q get network.wg_tor_{{ client_name }}.preshared_key)"
+              printf 'AllowedIPs = 192.168.45.0/24,172.23.0.0/16\n'
+              printf 'Endpoint = {{ ddns_domain.stdout | trim }}:59667\n'
+              printf 'PersistentKeepAlive = 15\n'
+            } > "$conf.tmp"
+            if [ -f "$conf" ] && cmp -s "$conf.tmp" "$conf"
+            then
+              rm -f "$conf.tmp"
+              echo unchanged
+            else
+              mv "$conf.tmp" "$conf"
+              echo changed
+            fi
+          register: conf_result
+          changed_when: "conf_result.stdout | trim == 'changed'"
+
+        - name: Apply the changes
+          ansible.builtin.raw: "{{ item }}"
           loop:
             - "uci commit"
             - "/etc/init.d/network reload"
             - "/etc/init.d/dnsmasq reload"
-            - "ifdown wg_tor"
+            - "ifdown wg_tor 2>/dev/null || true"
             - "ifup wg_tor"
-          when: uci_set_result.changed
+          when: key_result is changed or (uci_changed | default(false) | bool)
 
-    # Record this playbook's resources in /etc/symbios/managed.json.
-    - name: Record managed state
-      ansible.builtin.include_tasks: _managed-state.yml
+        - name: Record managed state
+          ansible.builtin.include_tasks: _managed-state.yml

@@ -72,6 +72,11 @@
     <button class="nav-link" id="tab-instances" data-bs-toggle="tab" data-bs-target="#pane-instances" type="button" role="tab">{{ config_meta.title }}</button>
   </li>
   {% endif %}
+  {% if inventory_meta %}
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-inventory" data-bs-toggle="tab" data-bs-target="#pane-inventory" type="button" role="tab">{{ inventory_meta.title|default:"Existing" }}</button>
+  </li>
+  {% endif %}
 </ul>
 <div class="tab-content">
   <div class="tab-pane fade show active" id="pane-output" role="tabpanel">
@@ -131,10 +136,11 @@
         {% elif p.type == 'password' %}
         <input type="password" class="form-control form-control-sm remote-param" data-name="{{ p.name }}" {% if p.required %}required{% endif %}>
         {% elif p.type == 'number' %}
-        <input type="number" class="form-control form-control-sm remote-param" data-name="{{ p.name }}" {% if p.required %}required{% endif %} value="{{ p.default|default:'' }}">
+        <input type="number" class="form-control form-control-sm remote-param" data-name="{{ p.name }}" {% if p.required %}required{% endif %} value="{{ p.default|default:'' }}" placeholder="{{ p.placeholder|default:'' }}">
         {% else %}
         <input type="text" class="form-control form-control-sm remote-param" data-name="{{ p.name }}" {% if p.required %}required{% endif %} value="{{ p.default|default:'' }}" placeholder="{{ p.placeholder|default:'' }}">
         {% endif %}
+        {% if p.help %}<div class="form-text small">{{ p.help }}</div>{% endif %}
       </div>
       {% endfor %}
     </div>
@@ -157,6 +163,44 @@
     {% endif %}
     {% endif %}
   </div>
+  {% if inventory_meta %}
+  <div class="tab-pane fade" id="pane-inventory" role="tabpanel">
+    <h4>{{ inventory_meta.title|default:"Existing records" }}</h4>
+    {% if inventory_meta.description %}<p class="text-muted small mb-2">{{ inventory_meta.description }}</p>{% endif %}
+    {% if compatible_systems %}
+    {{ inventory_meta|json_script:"inventory-meta" }}
+    <div class="d-flex align-items-end gap-2 mb-3 flex-wrap" style="max-width:620px;">
+      <div class="flex-grow-1">
+        <label class="form-label form-label-sm mb-0" for="inventory-target">Target</label>
+        <select class="form-select form-select-sm" id="inventory-target">
+          {% for s in compatible_systems %}
+          <option value="{{ s.id }}">{{ s.name }} ({{ s.host }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn btn-outline-secondary btn-sm" onclick="loadInventory()">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+    </div>
+    <div id="inventory-status" class="text-muted small mb-2">Open this tab to load the records from the target.</div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle">
+        <thead>
+          <tr>
+            {% for c in inventory_meta.columns %}<th>{{ c.label|default:c.key }}</th>{% endfor %}
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="inventory-rows"></tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-muted small">
+      No external systems of type <code>{{ playbook_target_type }}</code> configured.
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
   <div class="tab-pane fade" id="pane-logs" role="tabpanel">
     <h4>Logs</h4>
     <div class="text-muted small mb-2">Live following each unit (tail -f style). Streams run once and update in real time; switching tabs stops them.</div>
@@ -726,6 +770,128 @@ function runRemote() {
     })
     .catch(e => { SymbiOS.exec.showAlert('Request failed: ' + e, 'danger'); });
 }
+
+/* --- Generic inventory (docs.inventory) ---------------------------------
+   Columns and row actions come from the playbook definition; this code only
+   renders what the target returned and posts one row back. */
+function inventoryMeta() {
+  const el = document.getElementById('inventory-meta');
+  if (!el) return null;
+  try { return JSON.parse(el.textContent); } catch (e) { return null; }
+}
+
+function inventoryTarget() {
+  const el = document.getElementById('inventory-target');
+  return el ? el.value : '';
+}
+
+function loadInventory() {
+  const meta = inventoryMeta();
+  const status = document.getElementById('inventory-status');
+  const tbody = document.getElementById('inventory-rows');
+  if (!meta || !tbody) return;
+  const systemId = inventoryTarget();
+  if (!systemId) { if (status) status.textContent = 'No target selected.'; return; }
+  status.textContent = 'Loading...';
+  tbody.innerHTML = '';
+  const columns = (meta.columns || []).map(c => c.key);
+  const actions = meta.actions || [];
+  const fd = new FormData();
+  fd.append('system_id', systemId);
+  fetch('/services/' + PLAYBOOK + '/inventory-remote/', {method: 'POST', body: fd, credentials: 'same-origin', headers: {'X-CSRFToken': getCsrfToken()}})
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) { status.textContent = d.error || 'Failed to load'; return; }
+      status.textContent = d.count + ' record' + (d.count === 1 ? '' : 's');
+      if (!d.count) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = columns.length + 1;
+        td.className = 'text-muted small';
+        td.textContent = 'No records found.';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+      d.rows.forEach(row => {
+        const tr = document.createElement('tr');
+        columns.forEach(key => {
+          const td = document.createElement('td');
+          const value = row[key];
+          /* Show "--" for empty optional values instead of an empty cell. */
+          td.textContent = (value === undefined || value === '') ? '--' : value;
+          tr.appendChild(td);
+        });
+        const actionsCell = document.createElement('td');
+        actionsCell.className = 'text-end';
+        actions.forEach(a => {
+          const btn = document.createElement('button');
+          btn.className = 'btn btn-sm btn-outline-' + (a.class || 'secondary');
+          btn.textContent = a.label || a.name;
+          btn.addEventListener('click', () => {
+            if (a.confirm && !window.confirm(a.confirm)) return;
+            /* A download action fetches a file, every other action runs a playbook. */
+            if (a.download) downloadInventoryFile(a.name, row);
+            else runInventoryAction(a.name, row);
+          });
+          actionsCell.appendChild(btn);
+        });
+        tr.appendChild(actionsCell);
+        tbody.appendChild(tr);
+      });
+    })
+    .catch(e => { status.textContent = 'Request failed: ' + e; });
+}
+
+function runInventoryAction(action, row) {
+  const fd = new FormData();
+  fd.append('system_id', inventoryTarget());
+  fd.append('action', action);
+  fd.append('row', JSON.stringify(row));
+  fetch('/services/' + PLAYBOOK + '/inventory-action/', {method: 'POST', body: fd, credentials: 'same-origin', headers: {'X-CSRFToken': getCsrfToken()}})
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { SymbiOS.exec.showAlert(d.error, 'danger'); return; }
+      if (!d.job) { SymbiOS.exec.showAlert('No job returned', 'danger'); return; }
+      SymbiOS.exec.start(d.job, action + ' - ' + PLAYBOOK, d.command);
+    })
+    .catch(e => { SymbiOS.exec.showAlert('Request failed: ' + e, 'danger'); });
+}
+
+/* Fetch the file a docs.inventory download action declares. The row travels
+   in the POST body (values may be secrets), the file name comes back in the
+   Content-Disposition header. */
+function downloadInventoryFile(action, row) {
+  const fd = new FormData();
+  fd.append('system_id', inventoryTarget());
+  fd.append('action', action);
+  fd.append('row', JSON.stringify(row));
+  fetch('/services/' + PLAYBOOK + '/inventory-download/', {method: 'POST', body: fd, credentials: 'same-origin', headers: {'X-CSRFToken': getCsrfToken()}})
+    .then(r => {
+      const cd = r.headers.get('Content-Disposition') || '';
+      const match = /filename="([^"]+)"/.exec(cd);
+      if (!r.ok) {
+        return r.text().then(t => { throw new Error(t || ('HTTP ' + r.status)); });
+      }
+      return r.blob().then(blob => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = match ? match[1] : action;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      });
+    })
+    .catch(e => { SymbiOS.exec.showAlert('Download failed: ' + e.message, 'danger'); });
+}
+
+/* Load once when the tab is opened; the Refresh button repeats it. */
+(function() {
+  const tab = document.getElementById('tab-inventory');
+  if (tab) tab.addEventListener('shown.bs.tab', loadInventory);
+})();
 
 document.querySelectorAll('[data-action]').forEach(btn => {
   btn.addEventListener('click', () => {
