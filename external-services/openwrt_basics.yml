@@ -459,6 +459,72 @@
         EOF
       changed_when: false
 
+    # The 25.12 avahi-dbus-daemon package (apk) no longer ships the D-Bus
+    # system-bus policy; without it the daemon (running as user "avahi")
+    # cannot own org.freedesktop.Avahi and exits at startup. Manage it here
+    # so every router ends up with the same content. Only replace the file
+    # when it actually differs, because a running dbus-daemon must be
+    # restarted afterwards for the new policy to take effect.
+    - name: write /etc/dbus-1/system.d/avahi-dbus.conf
+      raw: |
+        mkdir -p /etc/dbus-1/system.d
+        cat << 'EOF' > /tmp/avahi-dbus.conf.new
+        <!DOCTYPE busconfig PUBLIC
+                  "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+                  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+        <busconfig>
+
+          <!-- Only root or user avahi can own the Avahi service -->
+          <policy user="avahi">
+            <allow own="org.freedesktop.Avahi"/>
+          </policy>
+          <policy user="root">
+            <allow own="org.freedesktop.Avahi"/>
+          </policy>
+
+          <!-- Allow anyone to invoke methods on Avahi server, except SetHostName -->
+          <policy context="default">
+            <allow send_destination="org.freedesktop.Avahi"/>
+            <allow receive_sender="org.freedesktop.Avahi"/>
+
+            <deny send_destination="org.freedesktop.Avahi"
+                  send_interface="org.freedesktop.Avahi.Server" send_member="SetHostName"/>
+            <deny send_destination="org.freedesktop.Avahi"
+                  send_interface="org.freedesktop.Avahi.Server2" send_member="SetHostName"/>
+          </policy>
+
+          <!-- Allow everything, including access to SetHostName to users of the group "avahi" -->
+          <policy group="avahi">
+            <allow send_destination="org.freedesktop.Avahi"/>
+            <allow receive_sender="org.freedesktop.Avahi"/>
+          </policy>
+          <policy user="root">
+            <allow send_destination="org.freedesktop.Avahi"/>
+            <allow receive_sender="org.freedesktop.Avahi"/>
+          </policy>
+        </busconfig>
+        EOF
+        if [ -f /etc/dbus-1/system.d/avahi-dbus.conf ] && cmp -s /tmp/avahi-dbus.conf.new /etc/dbus-1/system.d/avahi-dbus.conf
+        then
+          echo unchanged
+        else
+          mv /tmp/avahi-dbus.conf.new /etc/dbus-1/system.d/avahi-dbus.conf
+          echo changed
+        fi
+      register: avahi_dbus_policy_result
+      # exact match on the trimmed output: a substring test would also hit
+      # "unchanged"
+      changed_when: "avahi_dbus_policy_result.stdout | default('') | trim == 'changed'"
+
+    - name: restart dbus and avahi-daemon when the policy file changed
+      raw: |
+        # dbus only reads its policy files at startup, so a running instance
+        # must be restarted for the new avahi policy to take effect
+        /etc/init.d/dbus restart
+        /etc/init.d/avahi-daemon enable
+        /etc/init.d/avahi-daemon restart
+      when: avahi_dbus_policy_result.changed
+
     - name: write /etc/avahi/avahi-daemon.conf
       raw: |
         cat << 'EOF' > /etc/avahi/avahi-daemon.conf
