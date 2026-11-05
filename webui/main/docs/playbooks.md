@@ -486,6 +486,12 @@ without a playbook:
   out` case of the macb driver on the Raspberry Pi 5), it bounces the
   interface and reports the recovery. A dead peer (router down) is never
   bounced.
+- `reboot-required.check` - reports an error while a reboot is pending. It
+  reads the Debian marker `/run/reboot-required` (with the package list that
+  asked for the reboot) and, because Debian trixie dropped
+  `update-notifier-common`, additionally compares the running kernel
+  (`uname -r`) with the installed `linux-image-*` packages of the same
+  flavour. The reboot is never triggered automatically.
 
 ## Shared tasks
 

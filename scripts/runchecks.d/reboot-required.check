@@ -1,0 +1,72 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="Reboot Required"
+CHECK_DESC="Reports a pending system reboot, e.g. after a kernel update."
+CHECK_DETAIL="Reads the Debian reboot marker /run/reboot-required and its package list.|Compares the running kernel (uname -r) with the installed kernel image packages.|Reports an error while a reboot is pending; the reboot itself is never triggered."
+
+# Debian reboot marker: written by the postinst of kernel/libc/systemd packages
+# (via update-notifier-common, which trixie dropped - the package list below
+# names whatever asked for the reboot).
+if [[ -f "/run/reboot-required" ]]
+then
+  g_reboot_pkgs=""
+  if [[ -s "/run/reboot-required.pkgs" ]]
+  then
+    g_reboot_pkgs="$(sort -u "/run/reboot-required.pkgs" | tr '\n' ' ')"
+    g_reboot_pkgs="${g_reboot_pkgs% }"
+  fi
+  g_echo_error "Reboot required${g_reboot_pkgs:+: pending update of ${g_reboot_pkgs}}"
+fi
+
+# Kernel check, independent of the marker package (trixie hosts have no
+# /run/reboot-required at all): a host running an older kernel than the newest
+# installed one needs a reboot.
+#
+# uname -r is split into version and flavour ("6.18.50+rpt-rpi-2712" ->
+# 6.18.50 + "+rpt-rpi-2712", "6.1.0-13-amd64" -> 6.1.0-13 + "-amd64"). The
+# flavour filter matters: a Pi 4/5 has kernels of two flavours installed
+# (rpt-rpi-v8 and rpt-rpi-2712) and only the running one is relevant.
+g_kernel_release="$(uname -r)"
+if [[ "$g_kernel_release" == *"+"* ]]
+then
+  g_kernel_flavour="+${g_kernel_release#*+}"
+elif [[ "$g_kernel_release" == *"-"* ]]
+then
+  g_kernel_flavour="-${g_kernel_release##*-}"
+else
+  g_kernel_flavour=""
+fi
+g_kernel_version="${g_kernel_release%"${g_kernel_flavour}"}"
+
+g_kernel_pkgs=0
+g_kernel_running_installed=0
+g_kernel_newer=""
+
+# Process substitution keeps the loop in the current shell, so the counters and
+# the error flag set by g_echo_error survive (a plain pipe would lose them)
+while read -r g_pkg
+do
+  g_kernel_pkgs=$((g_kernel_pkgs + 1))
+  g_cand="${g_pkg#linux-image-}"
+  [[ "$g_cand" == "$g_kernel_release" ]] && g_kernel_running_installed=1
+  [[ -n "$g_kernel_flavour" && "$g_cand" != *"$g_kernel_flavour" ]] && continue
+
+  # dpkg compares Debian versions correctly (6.1.0-14 > 6.1.0-13), which plain
+  # string or version sort gets wrong for the -13/-14 ABI revision
+  g_cand_version="${g_cand%"${g_kernel_flavour}"}"
+  if dpkg --compare-versions "$g_cand_version" gt "$g_kernel_version" 2>/dev/null
+  then
+    g_kernel_newer="${g_kernel_newer} ${g_cand}"
+  fi
+done < <(dpkg-query -W -f='${Package} ${Status}\n' 'linux-image-[0-9]*' 2>/dev/null | awk '$NF == "installed" {print $1}')
+
+# Only judge when the host actually has versioned kernel image packages
+if [[ "$g_kernel_pkgs" -gt 0 ]]
+then
+  if [[ -n "$g_kernel_newer" ]]
+  then
+    g_echo_error "Kernel update pending: installed${g_kernel_newer}, running ${g_kernel_release}"
+  elif [[ "$g_kernel_running_installed" -eq 0 ]]
+  then
+    g_echo_error "Kernel update pending: running kernel ${g_kernel_release} is no longer installed"
+  fi
+fi
