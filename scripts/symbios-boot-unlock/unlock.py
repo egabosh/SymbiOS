@@ -27,6 +27,7 @@ import json
 import os
 import signal
 import socket
+import socketserver
 import ssl
 import subprocess
 import sys
@@ -43,6 +44,17 @@ CERT_FILE = os.path.join(CERT_DIR, "cert.pem")
 KEY_FILE = os.path.join(CERT_DIR, "key.pem")
 LUKS_SCRIPT = os.path.join(CERT_DIR, "symbios-boot-unlock-luks.sh")
 
+# Timeouts (seconds). A client that connects and stalls mid-handshake or
+# mid-request must never block the unlock server: while /symbios is locked,
+# the only way to unlock this host is this server (or the console).
+HANDSHAKE_TIMEOUT = 10
+REQUEST_TIMEOUT = 30
+
+# Seconds between two logged handshake failures. A locked host on a public
+# address is scanned continuously, so one line per failure would let the
+# log grow without bound on the unencrypted rootfs.
+LOG_WINDOW = 60
+
 
 def log(msg):
     import datetime
@@ -54,6 +66,27 @@ def log(msg):
             f.flush()
     except Exception:
         pass
+
+
+# Rate limiter for handshake failure lines (counts what a window swallows).
+_log_lock = threading.Lock()
+_log_window_start = 0.0
+_log_suppressed = 0
+
+
+def log_handshake_failure(address, error):
+    """Log a failed TLS handshake, aggregated to one line per LOG_WINDOW."""
+    global _log_window_start, _log_suppressed
+    f_now = time.monotonic()
+    with _log_lock:
+        if f_now - _log_window_start < LOG_WINDOW:
+            _log_suppressed += 1
+            return
+        f_suppressed = _log_suppressed
+        _log_window_start = f_now
+        _log_suppressed = 0
+    f_extra = f" (+{f_suppressed} more)" if f_suppressed else ""
+    log(f"TLS handshake failed from {address[0]}: {error}{f_extra}")
 
 
 def call_luks(action, passphrase=""):
@@ -72,6 +105,11 @@ def call_luks(action, passphrase=""):
 # Shared state: set when unlock succeeds so both web and console threads
 # know to exit and release ports for Traefik.
 _unlock_done = threading.Event()
+
+# Serializes unlock attempts: the web server runs one thread per request, so
+# a reloading browser or a second client must not start a second cryptsetup
+# run on the same device (the loser would report a misleading error).
+_unlock_lock = threading.Lock()
 
 HTML_UNLOCK = """<!DOCTYPE html>
 <html lang="en">
@@ -320,13 +358,14 @@ def needs_unlock():
 
 def do_unlock(passphrase):
     """Unlock via bash helper. Returns (ok, message)."""
-    if _unlock_done.is_set():
-        return True, "Already unlocked"
-    result = call_luks("unlock", passphrase)
-    if result.get("ok"):
-        _unlock_done.set()
-        return True, result.get("message", "/symbios unlocked")
-    return False, result.get("error", "Unlock failed")
+    with _unlock_lock:
+        if _unlock_done.is_set():
+            return True, "Already unlocked"
+        result = call_luks("unlock", passphrase)
+        if result.get("ok"):
+            _unlock_done.set()
+            return True, result.get("message", "/symbios unlocked")
+        return False, result.get("error", "Unlock failed")
 
 
 def getpass_getpass(f_stream):
@@ -482,12 +521,52 @@ class _DualStackServer(http.server.HTTPServer):
         super().server_bind()
 
 
+class _ThreadedServer(socketserver.ThreadingMixIn, _DualStackServer):
+    """Dual-stack server with one worker thread per connection.
+
+    A slow or stalled client must never block the accept loop, otherwise
+    the unlock page becomes unreachable exactly when it is needed.
+    """
+
+    daemon_threads = True
+    request_queue_size = 64
+    allow_reuse_address = True
+
+
+class _TLSServer(_ThreadedServer):
+    """Dual-stack HTTPS server that runs the TLS handshake per connection.
+
+    The listening socket stays a plain socket on purpose: wrapping it in
+    SSL (ctx.wrap_socket(server.socket)) makes SSLSocket.accept() execute
+    the handshake inline in the accept loop with no timeout, so a single
+    client that connects and stops mid-handshake blocks the whole unlock
+    server forever - the listen backlog fills up and every later client
+    hangs silently. Here the handshake happens in the worker thread that
+    handles the connection, with an explicit timeout, so a stalled client
+    only costs one thread for HANDSHAKE_TIMEOUT seconds.
+    """
+
+    def __init__(self, address, handler, ssl_ctx):
+        self.ssl_ctx = ssl_ctx
+        super().__init__(address, handler)
+
+    def finish_request(self, request, client_address):
+        try:
+            request.settimeout(HANDSHAKE_TIMEOUT)
+            tls_sock = self.ssl_ctx.wrap_socket(request, server_side=True)
+        except OSError as f_err:
+            # SSLError and socket.timeout both derive from OSError
+            log_handshake_failure(client_address, f_err)
+            request.close()
+            return
+        tls_sock.settimeout(REQUEST_TIMEOUT)
+        super().finish_request(tls_sock, client_address)
+
+
 def create_https_server(port, handler):
-    server = _DualStackServer(("::", port), handler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(CERT_FILE, KEY_FILE)
-    server.socket = ctx.wrap_socket(server.socket, server_side=True)
-    return server
+    return _TLSServer(("::", port), handler, ctx)
 
 
 def main():
@@ -547,7 +626,7 @@ def main():
         def log_message(self, fmt, *args):
             pass
 
-    http_server = _DualStackServer(("::", HTTP_PORT), HTTPHelpHandler)
+    http_server = _ThreadedServer(("::", HTTP_PORT), HTTPHelpHandler)
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     http_thread.start()
 
