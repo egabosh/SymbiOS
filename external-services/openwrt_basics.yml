@@ -62,10 +62,10 @@
     # the same names as extra vars (which take precedence). Required
     # parameters (ip, ip6, mask, upstream_dns) have no default on
     # purpose: a playbook var would silently shadow an inventory group
-    # var of the same name and misconfigure the target.
+    # var of the same name and misconfigure the target. bridges has the
+    # same problem, so its fallback lives in the avahi task instead.
     timezone: "CET-1CEST,M3.5.0,M10.5.0/3"
     ntp_server: "0.openwrt.pool.ntp.org"
-    bridges: "br-lan"
     dhcp_ip_start: "100"
     dhcp_ip_limit: "150"
     managed_id: "openwrt_basics.yml"
@@ -525,16 +525,36 @@
         /etc/init.d/avahi-daemon restart
       when: avahi_dbus_policy_result.changed
 
+    # The reflector is the only way mDNS crosses the routed bridge
+    # boundaries, so allow-interfaces must list every bridge whose services
+    # should be visible on the others (br-lan, br-tor, br-iot). Only touch
+    # the file when the content differs and restart avahi afterwards,
+    # because avahi reads the interface list only at startup.
     - name: write /etc/avahi/avahi-daemon.conf
       raw: |
-        cat << 'EOF' > /etc/avahi/avahi-daemon.conf
+        mkdir -p /etc/avahi
+        cat << 'EOF' > /tmp/avahi-daemon.conf.new
         [server]
-        allow-interfaces={{ bridges }}
+        allow-interfaces={{ bridges | default('br-lan') }}
 
         [reflector]
         enable-reflector=yes
         EOF
-      changed_when: false
+        if [ -f /etc/avahi/avahi-daemon.conf ] && cmp -s /tmp/avahi-daemon.conf.new /etc/avahi/avahi-daemon.conf
+        then
+          echo unchanged
+        else
+          mv /tmp/avahi-daemon.conf.new /etc/avahi/avahi-daemon.conf
+          echo changed
+        fi
+      register: avahi_conf_result
+      changed_when: "avahi_conf_result.stdout | default('') | trim == 'changed'"
+
+    - name: restart avahi-daemon when the config changed
+      raw: |
+        /etc/init.d/avahi-daemon enable
+        /etc/init.d/avahi-daemon restart
+      when: avahi_conf_result.changed
 
     - name: write /etc/sysupgrade.conf
       raw: |
