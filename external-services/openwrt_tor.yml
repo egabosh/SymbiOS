@@ -135,6 +135,18 @@
       - { key: "firewall.forwarding_lan_tor.src", value: "lan" }
       - { key: "firewall.forwarding_lan_tor.dest", value: "tor" }
 
+      # Guests in the tor segment may use the IoT printer (IPP + SNMP).
+      # Discovery works through the avahi reflector, the data path needs this
+      # narrow rule because there is no generic tor -> iot forwarding.
+      - { key: "firewall.rule_forward_iot_print_from_tor", value: "rule" }
+      - { key: "firewall.rule_forward_iot_print_from_tor.name", value: "ansible_forward_iot_print_from_tor" }
+      - { key: "firewall.rule_forward_iot_print_from_tor.src", value: "tor" }
+      - { key: "firewall.rule_forward_iot_print_from_tor.dest", value: "iot" }
+      - { key: "firewall.rule_forward_iot_print_from_tor.proto", value: "tcp udp" }
+      - { key: "firewall.rule_forward_iot_print_from_tor.dest_ip", value: "192.168.143.10" }
+      - { key: "firewall.rule_forward_iot_print_from_tor.dest_port", value: "161 631" }
+      - { key: "firewall.rule_forward_iot_print_from_tor.target", value: "ACCEPT" }
+
       # Allow-DHCP-TORLAN
       - { key: "firewall.rule_allow_dhcp_tor",      value: "rule" }
       - { key: "firewall.rule_allow_dhcp_tor.name",      value: "ansible_allow_dhcp_tor" }
