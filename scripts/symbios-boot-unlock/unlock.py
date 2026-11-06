@@ -21,10 +21,12 @@ LUKS operations are delegated to symbios-boot-unlock-luks.sh.
 This script only handles the web server (HTTPS) and console prompt.
 """
 
+import errno
 import http.server
 import io
 import json
 import os
+import resource
 import signal
 import socket
 import socketserver
@@ -68,14 +70,15 @@ def log(msg):
         pass
 
 
-# Rate limiter for handshake failure lines (counts what a window swallows).
+# Rate limiter for the lines a connection flood would otherwise produce
+# (counts how many a window swallowed).
 _log_lock = threading.Lock()
 _log_window_start = 0.0
 _log_suppressed = 0
 
 
-def log_handshake_failure(address, error):
-    """Log a failed TLS handshake, aggregated to one line per LOG_WINDOW."""
+def log_throttled(msg):
+    """Log msg, aggregated to one line per LOG_WINDOW."""
     global _log_window_start, _log_suppressed
     f_now = time.monotonic()
     with _log_lock:
@@ -86,7 +89,7 @@ def log_handshake_failure(address, error):
         _log_window_start = f_now
         _log_suppressed = 0
     f_extra = f" (+{f_suppressed} more)" if f_suppressed else ""
-    log(f"TLS handshake failed from {address[0]}: {error}{f_extra}")
+    log(f"{msg}{f_extra}")
 
 
 def call_luks(action, passphrase=""):
@@ -351,9 +354,16 @@ def generate_self_signed_cert():
 
 
 def needs_unlock():
-    """Check via bash helper whether /symbios LUKS needs unlocking."""
+    """Check via bash helper whether /symbios LUKS needs unlocking.
+
+    Returns (needs_unlock, result). needs_unlock is None when the check
+    itself failed: that must never be read as "already unlocked", it
+    would take the only page that can unlock this host down.
+    """
     result = call_luks("check")
-    return result.get("needs_unlock", False), result
+    if "needs_unlock" not in result:
+        return None, result
+    return result["needs_unlock"], result
 
 
 def do_unlock(passphrase):
@@ -366,6 +376,25 @@ def do_unlock(passphrase):
             _unlock_done.set()
             return True, result.get("message", "/symbios unlocked")
         return False, result.get("error", "Unlock failed")
+
+
+def raise_fd_limit():
+    """Raise the fd limit so a connection flood cannot exhaust the process.
+
+    accept() fails with EMFILE once the last descriptor is in use, and the
+    unlock page is dead until fds come back. The soft limit of a systemd
+    default unit (1024) is a single flood away, so lift it towards the hard
+    limit.
+    """
+    f_target = 65536
+    try:
+        f_soft, f_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if f_hard != resource.RLIM_INFINITY:
+            f_target = min(f_target, f_hard)
+        if f_soft < f_target:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (f_target, f_hard))
+    except (ValueError, OSError) as f_err:
+        log(f"could not raise the fd limit: {f_err}")
 
 
 def getpass_getpass(f_stream):
@@ -471,7 +500,7 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
 
         hostname = get_hostname()
         must_unlock, result = needs_unlock()
-        page = HTML_UNLOCK if must_unlock else HTML_DONE
+        page = HTML_DONE if must_unlock is False else HTML_UNLOCK
         page = page.replace("__HOSTNAME__", hostname)
 
         self._send_body(page.encode())
@@ -532,6 +561,22 @@ class _ThreadedServer(socketserver.ThreadingMixIn, _DualStackServer):
     request_queue_size = 64
     allow_reuse_address = True
 
+    def get_request(self):
+        """Accept a connection without spinning when no fd is left.
+
+        serve_forever() polls a listener that stays readable while the
+        pending connection sits in the backlog, so an EMFILE from accept()
+        would be retried immediately and burn a core. Pause briefly
+        instead: as soon as a worker times out, the next accept succeeds.
+        """
+        try:
+            return super().get_request()
+        except OSError as f_err:
+            if f_err.errno == errno.EMFILE:
+                log_throttled(f"out of file descriptors, waiting: {f_err}")
+                time.sleep(0.2)
+            raise
+
 
 class _TLSServer(_ThreadedServer):
     """Dual-stack HTTPS server that runs the TLS handshake per connection.
@@ -556,7 +601,7 @@ class _TLSServer(_ThreadedServer):
             tls_sock = self.ssl_ctx.wrap_socket(request, server_side=True)
         except OSError as f_err:
             # SSLError and socket.timeout both derive from OSError
-            log_handshake_failure(client_address, f_err)
+            log_throttled(f"TLS handshake failed from {client_address[0]}: {f_err}")
             request.close()
             return
         tls_sock.settimeout(REQUEST_TIMEOUT)
@@ -573,13 +618,17 @@ def main():
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
 
+    raise_fd_limit()
+
     must_unlock, result = needs_unlock()
-    if not must_unlock:
+    if must_unlock is False:
         if result.get("device"):
             log("/symbios already unlocked, nothing to do")
         else:
             log("/symbios is not encrypted, nothing to do")
         return
+    if must_unlock is None:
+        log(f"LUKS status check failed ({result.get('error')}), serving anyway")
 
     if not generate_self_signed_cert():
         print("Failed to generate SSL cert, aborting", file=sys.stderr)
@@ -588,13 +637,18 @@ def main():
     def watchdog():
         time.sleep(10)
         while True:
-            must_unlock, _ = needs_unlock()
-            if not must_unlock:
+            must_unlock, result = needs_unlock()
+            if must_unlock is False:
                 if _unlock_done.is_set():
                     log("watchdog: /symbios mounted (our unlock), skipping exit")
                 else:
                     log("watchdog: /symbios mounted externally, shutting down")
                     os._exit(0)
+            elif must_unlock is None:
+                # Never treat a failed check as "unlocked": the page is the
+                # only way to unlock this host without the console.
+                log_throttled(f"watchdog: LUKS status check failed "
+                              f"({result.get('error')}), staying up")
             time.sleep(30)
 
     threading.Thread(target=watchdog, daemon=True).start()
