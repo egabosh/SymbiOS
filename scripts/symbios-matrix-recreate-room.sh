@@ -24,7 +24,6 @@ g_lockfile
 
 DOMAIN="matrix.${g_base_domain}"
 SYNAPSE_URL="https://${DOMAIN}"
-ADMIN="@mx-admin:${DOMAIN}"
 POSTGRES_DB="synapse"
 ALIAS="${1:-}"
 shift || true
@@ -40,7 +39,7 @@ cd "${g_services_root}/matrix" || exit 1
 source ./env
 
 get_admin_token() {
-  TOKEN=$(docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -t -A --dbname=$POSTGRES_DB --user=$POSTGRES_USER --command="select token from access_tokens where user_id='$ADMIN' order by id desc limit 1;" 2>/dev/null)
+  TOKEN=$(f_matrix_admin_token)
   if [[ -z "$TOKEN" ]]
   then
     g_echo_error "Failed to retrieve admin token"

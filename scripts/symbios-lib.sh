@@ -456,5 +456,25 @@ function f_media_quota {
   setquota -P "${f_projid}" "${f_kb}" "${f_kb}" 0 0 "${g_media_root}" 2>/dev/null || true
 }
 
+# Ask MAS for a Synapse admin access token of mx-admin (compatibility token).
+# Usage: f_matrix_admin_token [service_dir]   (prints the token, empty on error)
+# Since Synapse delegates authentication to the Matrix Authentication Service,
+# the access_tokens table holds no interactive logins any more; the maintenance
+# scripts therefore fetch a short-lived compatibility token right before use.
+# The fixed device id keeps MAS from adding a new device on every cron run.
+function f_matrix_admin_token {
+  local f_dir="${1:-${g_services_root}/matrix}"
+  local f_out
+
+  f_out=$(cd "${f_dir}" && docker compose exec -T -e NO_COLOR=1 matrix-auth \
+    mas-cli -c /config/mas-config.yaml manage issue-compatibility-token \
+    mx-admin symbios-maintenance --yes-i-want-to-grant-synapse-admin-privileges 2>&1)
+  # Strip ANSI escapes, then take the token from the "Compatibility token
+  # issued: <token> k=v ..." log line (mas-cli prints it via its log formatter
+  # and appends the session metadata on the same line)
+  f_out=$(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' <<<"${f_out}")
+  sed -n 's/.*Compatibility token issued: \(mct_[A-Za-z0-9_-]*\).*/\1/p' <<<"${f_out}" | tail -n1
+}
+
 # Load layout immediately so sourcing the library is sufficient.
 f_symbios_load_layout

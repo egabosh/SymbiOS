@@ -20,7 +20,7 @@
 #     - twofa_enabled
 #   name: Matrix
 #   short_description: Deploy the Matrix communication server
-#   description: Deploys Matrix (Synapse) with Nginx reverse proxy, PostgreSQL, Redis, Element Web, Matrix Commander, and Admin UI. Exposed via Traefik.
+#   description: Deploys Matrix (Synapse) with the Matrix Authentication Service (MAS), Nginx reverse proxy, PostgreSQL, Redis, Element Web, Matrix Commander, and Admin UI. Users authenticate against Authelia via OIDC (delegated auth, MSC3861). Technical accounts (bots, scripts) cannot run a browser login, so members of the LDAP group matrix-bots keep a local password that follows the LDAP password via a password hook - everyone else has no Matrix password at all. Exposed via Traefik.
 #   url: "https://matrix.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
@@ -50,11 +50,13 @@
 #       - /symbios/services/matrix/
 #       - /symbios/base-services/traefik/providers/matrix.yml
 #       - /symbios/ldap-groups.d/matrix-admin-sync.hook
+#       - /symbios/ldap-groups.d/matrix-password-sync.hook
 #       - /symbios/runchecks.d/symbios-healthcheck-matrix.check
 #       - /symbios/runchecks.d/matrix.check
 #     ldap_groups:
 #       - matrix-users
 #       - matrix-admins
+#       - matrix-bots
 #     authelia_blocks:
 #       - "OIDC matrix"
 #       - "matrix-admin ACCESS CONTROL"
@@ -71,6 +73,11 @@
   vars:
     service_name: matrix
     service_domain: "matrix.{{ base_domain }}"
+    # Stable identifier of the Authelia provider in MAS (must be a valid
+    # ULID). It is part of the OAuth redirect URI that Authelia has to
+    # register (https://matrix-auth.<domain>/upstream/callback/<id>), so it
+    # must never change once deployed.
+    matrix_mas_provider_id: "01JQZ8X5N7K4M2P6R9T3V0W1YB"
   tasks:
 
     - name: Create /symbios/services/matrix dir
@@ -105,6 +112,164 @@
         /symbios/base-services/authelia/gen-oidc-client-secret.sh /symbios/services/matrix
       changed_when: false
       failed_when: false
+
+    ###################################
+    #### Matrix Authentication Service ####
+    ###################################
+
+    - name: Create /symbios/services/matrix/mas dir (MAS secrets)
+      ansible.builtin.file:
+        path: /symbios/services/matrix/mas
+        owner: 65532
+        group: 65532
+        state: directory
+        mode: '0500'
+
+    - name: Generate MAS encryption key
+      ansible.builtin.shell: openssl rand -hex 32 > encryption.key
+      args:
+        chdir: /symbios/services/matrix/mas
+        creates: /symbios/services/matrix/mas/encryption.key
+
+    - name: Generate MAS shared secret and database password
+      ansible.builtin.shell: pwgen -s 32 1 > {{ item }}
+      args:
+        chdir: /symbios/services/matrix/mas
+        creates: /symbios/services/matrix/mas/{{ item }}
+      loop:
+        - matrix-secret
+        - db-password
+
+    - name: Generate MAS signing key
+      community.crypto.openssl_privatekey:
+        path: /symbios/services/matrix/mas/rsa.pem
+        type: RSA
+        size: 2048
+        owner: 65532
+        group: 65532
+        mode: '0400'
+
+    # MAS runs as uid/gid 65532 (distroless) and reads the bind-mounted files
+    # directly, so they belong to that user and carry no group/other bits.
+    - name: Restrict MAS secret permissions
+      ansible.builtin.file:
+        path: "/symbios/services/matrix/mas/{{ item }}"
+        owner: 65532
+        group: 65532
+        mode: '0400'
+      loop:
+        - encryption.key
+        - matrix-secret
+        - db-password
+        - rsa.pem
+
+    - name: /symbios/services/matrix/mas-config.yaml (Matrix Authentication Service)
+      ansible.builtin.copy:
+        dest: /symbios/services/matrix/mas-config.yaml
+        owner: 65532
+        group: 65532
+        mode: '0400'
+        content: |
+          # Rendered by services/matrix.yml - manual edits are overwritten.
+          http:
+            public_base: "https://matrix-auth.{{ base_domain }}/"
+            listeners:
+              # Everything a browser or client talks to goes through Traefik.
+              - name: web
+                resources:
+                  - name: discovery
+                  - name: human
+                  - name: oauth
+                  - name: compat
+                  - name: graphql
+                  - name: assets
+                binds:
+                  - address: '[::]:8080'
+              - name: internal
+                resources:
+                  - name: health
+                binds:
+                  - address: '[::]:8081'
+          database:
+            uri: "postgresql://mas_user:{{ lookup('file', '/symbios/services/matrix/mas/db-password') }}@matrix-db/mas"
+          email:
+            # No mail transport on this host: MAS never needs to send one
+            # (password recovery is off, email addresses are imported).
+            transport: blackhole
+          secrets:
+            encryption: "{{ lookup('file', '/symbios/services/matrix/mas/encryption.key') }}"
+            keys:
+              - key_file: /config/mas/rsa.pem
+          passwords:
+            # Password login stays enabled for the machine accounts the
+            # playbook creates (mx-admin, the server-notices sender used by
+            # base-services/matrix-client.yml): they log in through the
+            # compat layer with m.login.password. Humans use Authelia.
+            enabled: true
+            # syn2mas imports Synapse's bcrypt hashes, and Synapse applies an
+            # NFKC normalization before hashing - without the same
+            # normalization here those imported passwords would stop working.
+            # New passwords (register-user, set-password) use argon2id.
+            schemes:
+              - version: 1
+                algorithm: bcrypt
+                unicode_normalization: true
+              - version: 2
+                algorithm: argon2id
+          account:
+            # Letting users set their own password would bypass the Authelia
+            # login (and with it 2FA and the matrix-users group policy), so
+            # every self-service credential path stays closed.
+            password_change_allowed: false
+            password_registration_enabled: false
+            password_recovery_enabled: false
+            # Email and display name are imported from LDAP/Authelia.
+            email_change_allowed: false
+            account_deactivation_allowed: false
+          matrix:
+            kind: synapse
+            homeserver: "matrix.{{ base_domain }}"
+            endpoint: "http://matrix-synapse:8008/"
+            secret: "{{ lookup('file', '/symbios/services/matrix/mas/matrix-secret') }}"
+          branding:
+            service_name: SymbiOS
+          upstream_oauth2:
+            providers:
+              - id: "{{ matrix_mas_provider_id }}"
+                human_name: Authelia
+                # Only read by "mas-cli syn2mas" when an existing Synapse
+                # installation is migrated by hand (it maps the old
+                # oidc_providers entry "authelia" to this provider, so known
+                # OIDC links survive); inert on a fresh installation.
+                synapse_idp_id: "oidc-authelia"
+                issuer: "https://auth.{{ base_domain }}"
+                client_id: "matrix"
+                client_secret: "{{ lookup('file', '/symbios/services/matrix/oidc_password') }}"
+                token_endpoint_auth_method: client_secret_post
+                scope: "openid profile email groups"
+                claims_imports:
+                  # The Authelia username (the LDAP uid) is the localpart, the
+                  # same mapping Synapse used before, so migrated accounts keep
+                  # their MXID. 'require' (not 'force') is mandated by
+                  # skip_confirmation below: without the confirmation screen a
+                  # missing localpart must fail the login instead of producing
+                  # an unusable account.
+                  localpart:
+                    action: require
+                    # Link the upstream identity to an existing account with
+                    # that localpart (imported by syn2mas, or mx-admin) instead
+                    # of failing the login.
+                    on_conflict: set
+                  displayname:
+                    action: force
+                  email:
+                    action: force
+                  # No "confirm your attributes" screen: the values come from
+                  # LDAP and are not editable in Matrix anyway.
+                  skip_confirmation: true
+        backup: yes
+      # The rendered file contains the secrets read by the lookups above
+      no_log: true
 
     - name: Edit Matrix/Synapse config
       blockinfile:
@@ -170,41 +335,24 @@
           turn_shared_secret: "{{turnsecret.stdout}}"
           turn_user_lifetime: 86400000
           turn_allow_guests: True
-          oidc_providers:
-            - idp_id: authelia
-              idp_name: Authelia
-              issuer: "https://auth.{{ base_domain }}"
-              client_id: "matrix"
-              client_secret: "{{ lookup('file', '/symbios/services/matrix/oidc_password') }}"
-              # The Authelia client for matrix uses token_endpoint_auth_method
-              # client_secret_post; Synapse would default to
-              # client_secret_basic and the token exchange would fail with
-              # invalid_client.
-              client_auth_method: client_secret_post
-              authorization_endpoint: "https://auth.{{ base_domain }}/api/oidc/authorization"
-              token_endpoint: "https://auth.{{ base_domain }}/api/oidc/token"
-              userinfo_endpoint: "https://auth.{{ base_domain }}/api/oidc/userinfo"
-              # Authelia serves its OIDC JWKS at /jwks.json (see the issuer's
-              # /.well-known/openid-configuration); /api/oidc/jwks is a 404 and
-              # makes synapse crash-loop on startup.
-              jwks_uri: "https://auth.{{ base_domain }}/jwks.json"
-              scopes:
-                - openid
-                - profile
-                - email
-                - groups
-              # Reuse a pre-existing local account when the Authelia username
-              # matches its localpart (@heidi -> @heidi): without this flag
-              # Synapse refuses the login of migrated accounts or creates a
-              # duplicate (@heidi1, see scripts/symbios-matrix-oidc-merge.sh).
-              # Password login stays enabled on purpose - the notification
-              # sender (base-services/matrix-client.yml, matrix-commander)
-              # still logs in with m.login.password.
-              allow_existing_users: true
-              user_mapping_provider:
-                config:
-                  localpart_template: "{{ '{{' }} user.preferred_username {{ '}}' }}"
-                  display_name_template: "{{ '{{' }} user.name {{ '}}' }}"
+          # Authentication is delegated to the Matrix Authentication Service
+          # (MAS, MSC3861): Synapse keeps no passwords and no OIDC provider of
+          # its own any more, it only introspects the tokens MAS issues over
+          # this shared secret. This is what OIDC-native clients (Element X)
+          # need and the prerequisite for QR-code login.
+          matrix_authentication_service:
+            enabled: true
+            endpoint: "http://matrix-auth:8080/"
+            secret: "{{ lookup('file', '/symbios/services/matrix/mas/matrix-secret') }}"
+          experimental_features:
+            # QR-code login (MSC4108 rendezvous, MSC4388 secure channel).
+            # Synapse refuses to start with these enabled unless the
+            # authentication service above is on, so they cannot leak into a
+            # legacy-auth deployment.
+            msc4108_enabled: true
+            # 'open' lets a new device create the rendezvous channel before it
+            # is authenticated - 'authenticated' would block exactly that step.
+            msc4388_mode: open
           allow_public_rooms_without_auth: False
           allow_public_rooms_over_federation: False
           allow_guest_access: False
@@ -351,6 +499,33 @@
             # synapse recreate (new container IP) 502s until nginx restarts.
             resolver 127.0.0.11 valid=10s ipv6=off;
             set $synapse_upstream matrix-synapse;
+            set $mas_upstream matrix-auth;
+
+            # Delegated authentication: the login/logout/refresh endpoints are
+            # served by MAS (compat layer), everything else by Synapse. Without
+            # this block the OIDC-native login of Element X (and the password
+            # login of the machine accounts) would hit Synapse, which no longer
+            # owns any credential.
+            location ~ ^/_matrix/client/(.*)/(login|logout|refresh)$ {
+              proxy_pass http://$mas_upstream:8080;
+              proxy_set_header X-Forwarded-For $remote_addr;
+              proxy_set_header Host $http_host;
+              proxy_set_header X-Forwarded-Host $http_host;
+              proxy_set_header X-Forwarded-Proto https;
+              client_max_body_size 2048m;
+            }
+
+            # Legacy SSO flow (classic Element, Element Web): the client opens
+            # /login/sso/redirect on the homeserver, but with delegated auth
+            # that endpoint belongs to the MAS compat layer. Redirect to the
+            # MAS host instead of proxying so the whole flow - login page,
+            # Authelia upstream, completion - happens there, exactly like
+            # Element X does via well-known discovery. The optional path
+            # segment is the identity provider id, the trailing slash covers
+            # Element iOS.
+            location ~ ^/_matrix/client/(.*)/login/sso/redirect(/[^/]*)?$ {
+              return 302 https://matrix-auth.{{ base_domain }}$request_uri;
+            }
 
             location / {
               proxy_pass http://$synapse_upstream:8008;
@@ -395,6 +570,10 @@
           {
             "m.homeserver": {
               "base_url": "https://matrix.{{ base_domain }}"
+             },
+            "org.matrix.msc2965.authentication": {
+              "issuer": "https://matrix-auth.{{ base_domain }}/",
+              "account": "https://matrix-auth.{{ base_domain }}/account"
              }
           }
         backup: yes
@@ -520,6 +699,22 @@
                 SYNAPSE_SERVER_NAME: "matrix.{{ base_domain }}"
                 SYNAPSE_REPORT_STATS: "no"
 
+            matrix-auth:
+              image: ghcr.io/element-hq/matrix-authentication-service:latest
+              container_name: matrix-auth
+              restart: unless-stopped
+              command: ["server", "--config", "/config/mas-config.yaml"]
+              volumes:
+                - ./mas-config.yaml:/config/mas-config.yaml:ro
+                - ./mas:/config/mas:ro
+                - /etc/localtime:/etc/localtime:ro
+              depends_on:
+                - matrix-db
+                - matrix-synapse
+              networks:
+                matrix: {}
+                symbios_services: null
+
             matrix-db:
               image: docker.io/postgres:15
               container_name: matrix-db
@@ -609,6 +804,18 @@
                 middlewares:
                   - "secHeaders@file"
 
+              # Matrix Authentication Service: the login/account pages. Must
+              # stay open - it is the authentication entry point itself.
+              matrix-auth:
+                rule: "Host(`matrix-auth.{{ base_domain }}`)"
+                service: matrix-auth-http
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+
               matrix-admin:
                 rule: "Host(`matrix-admin.{{ base_domain }}`)"
                 service: matrix-admin-http
@@ -640,6 +847,10 @@
                 loadBalancer:
                   servers:
                     - url: "http://matrix-synapse:8008"
+              matrix-auth-http:
+                loadBalancer:
+                  servers:
+                    - url: "http://matrix-auth:8080"
               matrix-admin-http:
                 loadBalancer:
                   servers:
@@ -657,16 +868,27 @@
     - name: Ensure LDAP groups for OIDC login (matrix-users / matrix-admins)
       include_tasks: ../shared-tasks/oidc-groups.yml
 
+    # Technical accounts (bots, scripts, monitoring) cannot complete the
+    # Authelia browser login, so they are the one exception to the SSO rule:
+    # they carry a local MAS password that follows the LDAP password (password
+    # hook below). Deliberately not shared-tasks/ldap-single-group.yml - that
+    # task seeds the human admin account, which must never get a password.
+    - name: Create LDAP group matrix-bots (technical accounts with a Matrix password)
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-ldap-groups.sh --create --name matrix-bots"
+      changed_when: false
+      failed_when: false
+
     - name: Write OIDC config in authelias configuration.yml for matrix
       include_tasks: ../shared-tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Matrix"
-        # Synapse maps the user from the ID token (it does not query the
-        # userinfo endpoint). Since Authelia v4.39 the ID token only carries
-        # the spec claims, so the profile claims must be copied into it.
+        # The ID token must carry the profile claims: MAS maps the localpart
+        # and the display name from them (it does not query userinfo).
         oidc_claims_policy: "id_token"
+        # MAS is the OIDC client now (Synapse no longer speaks OIDC itself).
+        # The callback path contains the provider id from mas-config.yaml.
         oidc_redirect_uris:
-          - "https://matrix.{{ base_domain }}/_synapse/client/oidc/callback"
+          - "https://matrix-auth.{{ base_domain }}/upstream/callback/{{ matrix_mas_provider_id }}"
 
     # Access control for Matrix web UIs (Element + admin panel)
     # Note: matrix and matrix-synapse routers stay unprotected for federation + OIDC callback
@@ -685,15 +907,49 @@
           - "group:matrix-users"
           - "group:matrix-admins"
 
+    # The database comes up first: MAS runs its schema migrations on start and
+    # needs its database and role to exist by then.
+    - name: Start matrix database
+      ansible.builtin.shell: docker compose up -d matrix-db
+      args:
+        chdir: /symbios/services/matrix
+      changed_when: false
+
+    - name: Wait until matrix install is finished
+      wait_for:
+        path: /symbios/services/matrix/matrixdb-data/base
+
+    - name: Create MAS database role and database
+      ansible.builtin.shell: |
+        set -e
+        . ./env.db
+        export PGPASSWORD="${POSTGRES_PASSWORD}"
+        f_psql() {
+          docker compose exec -T matrix-db psql -U "${POSTGRES_USER}" -d "${1}" -tAc "${2}"
+        }
+        f_has_role=$(f_psql postgres "SELECT 1 FROM pg_roles WHERE rolname = 'mas_user';")
+        if [[ "${f_has_role}" != "1" ]]
+        then
+          printf "CREATE ROLE mas_user LOGIN PASSWORD '%s';\n" "$(cat mas/db-password)" \
+            | docker compose exec -T matrix-db psql -U "${POSTGRES_USER}" -d postgres -v ON_ERROR_STOP=1
+        fi
+        f_has_db=$(f_psql postgres "SELECT 1 FROM pg_database WHERE datname = 'mas';")
+        if [[ "${f_has_db}" != "1" ]]
+        then
+          f_psql postgres "CREATE DATABASE mas OWNER mas_user;" >/dev/null
+        fi
+      args:
+        chdir: /symbios/services/matrix
+        # The script relies on bash syntax ([[ ]])
+        executable: /bin/bash
+      changed_when: false
+      no_log: true
+
     - name: Start matrix
       ansible.builtin.shell: docker compose up -d
       args:
         chdir: /symbios/services/matrix
         creates: /symbios/services/matrix/matrixdb-data/postmaster.pid
-
-    - name: Wait until matrix install is finished
-      wait_for:
-        path: /symbios/services/matrix/matrixdb-data/base
 
     - name: /symbios/services/matrix/matrix.init.sh
       blockinfile:
@@ -705,15 +961,35 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           # matrix
-          sleep 120
           cd /symbios/services/matrix || exit 1
           . ./env
           . ./env.user
           date >>matrix.init.log
-          docker compose exec -T matrix-synapse register_new_matrix_user -c /data/homeserver.yaml -a -u mx-admin         -p $MATRIX_ADMIN_PASSWORD    http://localhost:8008 >>matrix.init.log 2>&1
 
-          # Create System User for Server-Notifications
-          docker compose exec -T matrix-synapse register_new_matrix_user -c /data/homeserver.yaml --no-admin -u $MATRIX_SRV_USER -p $MATRIX_SRV_USER_PASSWORD http://localhost:8008 >>matrix.init.log 2>&1
+          f_mas() {
+            docker compose exec -T matrix-auth mas-cli -c /config/mas-config.yaml "$@"
+          }
+
+          # MAS runs its schema migrations on first start - give it up to ten
+          # minutes before the accounts are created.
+          for _ in $(seq 1 60)
+          do
+            if f_mas manage list-admin-users >>matrix.init.log 2>&1
+            then
+              break
+            fi
+            sleep 10
+          done
+
+          # Break-glass admin account: password login through the compat layer
+          # and the token source of the Synapse maintenance scripts.
+          f_mas manage register-user --yes mx-admin --admin \
+            --password "$MATRIX_ADMIN_PASSWORD" --ignore-password-complexity >>matrix.init.log 2>&1
+
+          # System user for server notifications (matrix-commander in
+          # base-services/matrix-client.yml logs in with its password).
+          f_mas manage register-user --yes "$MATRIX_SRV_USER" --no-admin \
+            --password "$MATRIX_SRV_USER_PASSWORD" --ignore-password-complexity >>matrix.init.log 2>&1
 
         backup: yes
         validate: /bin/bash -n %s
@@ -747,6 +1023,26 @@
       register: matrix_admin_sync
       changed_when: "'Promoting' in matrix_admin_sync.stdout or 'Demoting' in matrix_admin_sync.stdout"
       failed_when: false
+
+    # MAS has no per-user password switch: an account has either a local
+    # password (and can therefore bypass Authelia) or none. This hook keeps the
+    # local password of the matrix-bots accounts on the LDAP password, so one
+    # secret covers both, and leaves every other account without one.
+    - name: Deploy LDAP password hook (MAS password sync for matrix-bots)
+      ansible.builtin.copy:
+        dest: "{{ data_root }}/ldap-groups.d/matrix-password-sync.hook"
+        content: |
+          #!/bin/bash
+          # SymbiOS hook - sync LDAP password changes into the local MAS
+          # password of technical Matrix accounts (group matrix-bots).
+          # Fired by symbios-ldap-user.sh after every successful password set.
+          # Args: $1=event $2=uid $3=pwfile (0600 plaintext file, shredded by
+          # the caller - never log it).
+          [[ "${1:-}" == "password-set" ]] || exit 0
+          exec "{{ git_root }}/scripts/symbios-matrix-password-sync.sh" "${1:-}" "${2:-}" "${3:-}"
+        mode: '0755'
+        owner: root
+        group: root
 
 #    - name: /symbios/autoupdate.d/matrix.update
 #      blockinfile:

@@ -1,27 +1,30 @@
 #!/bin/bash
-# SymbiOS - Sync Synapse admin rights from the LDAP group matrix-admins.
+# SymbiOS - Sync Matrix admin rights from the LDAP group matrix-admins.
 #
-# Synapse keeps the admin flag per account in its own database and knows
-# nothing about LDAP groups: matrix-admins only gates the WebUI/Authelia
-# access to matrix-web and matrix-admin. This script reconciles users.admin
-# with the group membership, so the LDAP group is the single source of truth:
-#   - members with an existing Synapse account get the admin flag
+# Synapse delegates authentication to the Matrix Authentication Service (MAS)
+# and no longer decides admin rights itself: a token carries them as the scope
+# urn:synapse:admin:*, which MAS only grants to users with the admin flag
+# (users.can_request_admin in the MAS database). matrix-admins only gates the
+# WebUI/Authelia access to matrix-web and matrix-admin, so this script
+# reconciles the MAS admin flag with the group membership - the LDAP group is
+# the single source of truth:
+#   - members with an existing MAS account get the admin flag
 #   - admins that left the group lose it
 #   - accounts without an LDAP counterpart (mx-admin, the server notices
 #     account) keep their rights: mx-admin is the break-glass login and the
 #     token source of symbios-synapse-purge.sh and
 #     symbios-matrix-recreate-room.sh, so it is never demoted - not even when
 #     it exists as LDAP user and is missing in the group
-#   - members without a Synapse account yet are skipped (the account is
-#     created on the first OIDC login)
+#   - members without a MAS account yet are skipped (the account is created
+#     on the first login through Authelia)
 #
-# The account name is derived the way Synapse maps it: the Authelia username
+# The account name is derived the way MAS maps it: the Authelia username
 # (preferred_username = LDAP uid) becomes the localpart, so
 # @<uid>:matrix.<base_domain>.
 #
-# Synapse caches the admin flag per user and per access token, and a direct
-# SQL write does not invalidate those caches. A change therefore restarts
-# matrix-synapse; no change means no restart.
+# No service restarts: MAS evaluates the flag when a client requests its
+# scopes, so a change reaches the next admin login (running sessions keep the
+# scopes they were granted).
 #
 # Runs from the ldap-groups.d hook deployed by services/matrix.yml
 # (matrix-admin-sync.hook) and from services/matrix.yml on every apply, which
@@ -31,11 +34,10 @@ function f_usage {
   cat << EOF
 Usage: $(basename "$0")
 
-Sync Synapse admin rights from the LDAP group matrix-admins.
-Members of the group with an existing Synapse account get the admin flag,
+Sync Matrix admin rights from the LDAP group matrix-admins.
+Members of the group with an existing MAS account get the admin flag,
 admins that left it lose it. Accounts without an LDAP counterpart (mx-admin,
-server notices) are never touched. A changed flag restarts matrix-synapse,
-because Synapse caches it. No arguments.
+server notices) are never touched. No arguments.
 
 Options:
   -h, --help          Show this help and exit
@@ -59,7 +61,7 @@ source "${g_script_dir}/symbios-lib.sh"
 function f_matrix_admin_sync {
   local f_mx_dir="${g_services_root}/matrix"
   local f_env_db f_db_user f_db_pass f_pw f_domain
-  local f_ldap_out f_ldap_rc f_desired f_current f_uid f_user f_local f_in_ldap
+  local f_ldap_out f_ldap_rc f_desired f_current f_uid f_local f_in_ldap
   local f_changed=0 f_rc=0
 
   # Skip silently when Matrix is not installed
@@ -70,6 +72,13 @@ function f_matrix_admin_sync {
 
   # A stopped stack has no database to reconcile
   if [[ "$(docker inspect -f '{{.State.Running}}' matrix-db 2>/dev/null)" != "true" ]]
+  then
+    return 0
+  fi
+
+  # The admin flag lives in the authentication service; without it there is
+  # nothing to reconcile (and every mas-cli call would fail)
+  if [[ "$(docker inspect -f '{{.State.Running}}' matrix-auth 2>/dev/null)" != "true" ]]
   then
     return 0
   fi
@@ -94,10 +103,18 @@ function f_matrix_admin_sync {
 
   f_domain="matrix.${g_base_domain}"
 
-  # psql inside the database container; -t -A prints one bare value per line
-  f_psql() {
+  # psql inside the database container against the MAS database; -t -A prints
+  # one bare value per line
+  f_psql_mas() {
     docker exec -e PGPASSWORD="${f_db_pass}" matrix-db \
-      psql -h 127.0.0.1 -U "${f_db_user}" -d synapse -t -A -c "$1" 2>/dev/null
+      psql -h 127.0.0.1 -U "${f_db_user}" -d mas -t -A -c "$1" 2>/dev/null
+  }
+
+  # mas-cli inside the MAS container (distroless image, so the CLI is the only
+  # entry point)
+  f_mas() {
+    ( cd "${f_mx_dir}" && docker compose exec -T matrix-auth \
+        mas-cli -c /config/mas-config.yaml "$@" )
   }
 
   # Desired admins: members of LDAP group matrix-admins. A missing group
@@ -120,34 +137,32 @@ function f_matrix_admin_sync {
       ;;
   esac
 
-  # Current admins from the Synapse database (deactivated accounts carry no
-  # rights; admin/deactivated are smallint columns in the Postgres schema)
-  if ! f_current=$(f_psql "SELECT name FROM users WHERE admin = 1 AND deactivated = 0;")
+  # Current admins from the MAS database (localparts, no server part)
+  if ! f_current=$(f_psql_mas "SELECT username FROM users WHERE can_request_admin AND username IS NOT NULL;")
   then
-    g_echo_error "Could not read the Synapse admin list"
+    g_echo_error "Could not read the MAS admin list"
     return 1
   fi
 
-  # Promote members of matrix-admins that exist as Synapse account
+  # Promote members of matrix-admins that exist as MAS account
   for f_uid in ${f_desired}
   do
     [[ "${f_uid}" =~ ^[a-z0-9._-]+$ ]] || continue
-    f_user="@${f_uid}:${f_domain}"
-    if grep -qxF "${f_user}" <<<"${f_current}"
+    if grep -qxF "${f_uid}" <<<"${f_current}"
     then
       continue
     fi
-    if [[ -z "$(f_psql "SELECT name FROM users WHERE name = '${f_user}';")" ]]
+    if [[ -z "$(f_psql_mas "SELECT username FROM users WHERE username = '${f_uid}';")" ]]
     then
-      g_echo_note "Skipping ${f_uid}: no Synapse account yet (created on first OIDC login)"
+      g_echo_note "Skipping ${f_uid}: no MAS account yet (created on first login)"
       continue
     fi
-    g_echo_note "Promoting ${f_user} to Synapse admin"
-    if f_psql "UPDATE users SET admin = 1 WHERE name = '${f_user}';" >/dev/null
+    g_echo_note "Promoting @${f_uid}:${f_domain} to Synapse admin"
+    if f_mas manage promote-admin "${f_uid}" >/dev/null 2>&1
     then
       f_changed=1
     else
-      g_echo_error "Could not promote ${f_user}"
+      g_echo_error "Could not promote ${f_uid}"
       f_rc=1
     fi
   done
@@ -156,10 +171,8 @@ function f_matrix_admin_sync {
   # so system accounts keep their rights. mx-admin is created by the playbook
   # itself and supplies the admin token of symbios-synapse-purge.sh and
   # symbios-matrix-recreate-room.sh, so it never depends on group membership.
-  for f_user in ${f_current}
+  for f_local in ${f_current}
   do
-    f_local="${f_user#@}"
-    f_local="${f_local%%:*}"
     [[ "${f_local}" =~ ^[a-z0-9._-]+$ ]] || continue
     if [[ "${f_local}" == "mx-admin" ]]
     then
@@ -175,30 +188,26 @@ function f_matrix_admin_sync {
       | grep -c "^dn: uid=")
     if [[ "${f_in_ldap:-0}" -gt 0 ]]
     then
-      g_echo_note "Demoting ${f_user} from Synapse admin"
-      if f_psql "UPDATE users SET admin = 0 WHERE name = '${f_user}';" >/dev/null
+      g_echo_note "Demoting @${f_local}:${f_domain} from Synapse admin"
+      if f_mas manage demote-admin "${f_local}" >/dev/null 2>&1
       then
         f_changed=1
       else
-        g_echo_error "Could not demote ${f_user}"
+        g_echo_error "Could not demote ${f_local}"
         f_rc=1
       fi
     else
-      g_echo_note "Keeping ${f_user}: no LDAP account (system account)"
+      g_echo_note "Keeping @${f_local}:${f_domain}: no LDAP account (system account)"
     fi
   done
 
-  # Synapse caches the flag until the next restart - publish it on real changes
+  # MAS applies the flag when a client requests its scopes, so no service has
+  # to be restarted - running sessions keep the scopes they were granted.
   if [[ "${f_changed}" -eq 1 ]]
   then
-    g_echo_note "Restarting matrix-synapse so the admin flag takes effect"
-    if ! docker restart matrix-synapse >/dev/null
-    then
-      g_echo_error "Restart of matrix-synapse failed"
-      f_rc=1
-    fi
+    g_echo_note "Admin changes take effect on the next admin login (token scope)"
   else
-    g_echo_note "Synapse admins already in sync"
+    g_echo_note "Matrix admins already in sync"
   fi
 
   return $f_rc
