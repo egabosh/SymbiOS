@@ -121,7 +121,7 @@
                 - ./projects:/projects:rw
                 - ./opencode-config:/root/.config/opencode:rw
                 - ./opencode-data:/root/.local/share/opencode:rw
-                - ./ssh/:/root/.ssh:ro
+                - ./ssh/:/root/.ssh:rw
               networks:
                 opencode: {}
                 symbios_services: null
