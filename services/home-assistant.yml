@@ -161,10 +161,13 @@
           tts:
           stream:
           media_source:
-            media_dirs:
-              audio: /media/audio
-              videos: /media/videos
-              images: /media/images
+          # Media libraries for the Media Browser. media_dirs is a core
+          # config key; media_source itself no longer accepts YAML
+          # parameters (raises a config error since 2026.x).
+          media_dirs:
+            audio: /media/audio
+            videos: /media/videos
+            images: /media/images
                     
           # Load frontend themes from the themes folder
           frontend:
