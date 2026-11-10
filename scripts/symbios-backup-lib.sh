@@ -17,24 +17,28 @@
 # symbios-backup-lib.sh - Shared helpers for the SymbiOS backup/restore
 # scripts (symbios-backup.sh, symbios-backup-list.sh, symbios-restore.sh).
 #
-# Requires symbios-lib.sh to be sourced first (provides g_* layout globals).
+# Requires symbios-lib.sh to be sourced first (provides g_* layout globals,
+# f_json_escape and g_tmp).
+#
+# The backup model is restic only. Every repository (remote or local) is
+# created on first use and encrypted with the repository password file:
+#
+#   - Remote targets: the backup_servers list (plus a legacy primary that
+#     still lives in the backup_server_* keys). Each target gets its own
+#     repository below PATH/$(hostname)/ over SFTP with its own retention.
+#   - Local repository: <data_root>/backup/restic (used when no remote
+#     target is configured).
 #
 # Configuration source: inventory.yml (all.vars)
-#   backup_server_host / backup_server_port / backup_server_user /
-#   backup_server_path   primary restic target (empty host = local only)
-#   backup_servers       optional list of additional restic targets, each a
-#                        dict {name,host,port,user,path,keep_daily,
-#                        keep_weekly,keep_monthly} with per-target retention
-#   backup_exclude       list of extra rsync exclude patterns
+#   backup_servers       list of restic targets, each a dict {name,host,
+#                        port,user,path,keep_daily,keep_weekly,keep_monthly}
+#   backup_exclude       list of extra exclude patterns (paths below the
+#                        data root, converted to restic patterns)
 #   backup_keep_daily / backup_keep_weekly / backup_keep_monthly
-#                        restic retention for the primary target (also used
-#                        for local snapshot pruning in fallback mode)
+#                        restic retention for the primary target and the
+#                        local repository
 #   backup_min_free_gb / backup_min_free_percent
 #                        disk guard: abort before the disk fills up
-#
-# Snapshot layouts produced/consumed:
-#   rsync mode (g_backup):  <dest>/<hostname>/backup-YYYY-MM-DD/symbios/...
-#   archive mode:           <dest>/<hostname>/symbios-YYYY-MM-DD.tar.gz.enc
 
 # ---------------------------------------------------------------------------
 # Direct invocation (not sourced): this is a library, so running it directly
@@ -55,18 +59,16 @@ This is a library and must be sourced after symbios-lib.sh:
 
 Used by symbios-backup.sh, symbios-backup-list.sh and symbios-restore.sh.
 Reads all backup settings from inventory.yml into g_bk_* globals and
-provides the helper functions f_bk_read_vars, f_bk_is_remote,
-f_bk_ssh_opts, f_bk_rsh, f_bk_write_excludes, f_bk_excludes_for_tar,
-f_bk_list_local_dates, f_bk_dates_from_archive_names, f_bk_resolve_source,
-f_bk_remove_local_entry and f_bk_is_monthly_alias (among others).
+provides the restic plumbing shared by the engine, the listing and the
+restore (repository URLs, the restic runner with error capture, exclude
+building, snapshot lookup, free-space guard).
 
 Configuration (inventory.yml, all.vars):
-  backup_server_host / backup_server_port / backup_server_user /
-  backup_server_path   remote target (empty host = local backups only)
-  backup_encryption    true = encrypt remote archives (openssl aes-256-cbc)
-  backup_exclude       list of extra rsync exclude patterns
+  backup_servers       list of restic targets ({name,host,port,user,path,
+                       keep_daily,keep_weekly,keep_monthly})
+  backup_exclude       list of extra exclude patterns
   backup_keep_daily / backup_keep_weekly / backup_keep_monthly
-                       local snapshot retention (grandfather-father-son)
+                       restic retention (primary target + local repository)
   backup_min_free_gb / backup_min_free_percent
                        disk guard: abort before the disk fills up
 
@@ -79,22 +81,17 @@ EOF
   exit 1
 fi
 
-# Retention policy for remote encrypted archives AND local snapshots
-# (grandfather-father-son): keep the last N dailies, N Monday-weeklies and
-# N month-starts, prune everything older.
+# Restic retention defaults (primary target + local repository):
+# 7 dailies, 4 weeklies, all monthlies. 0 disables a level.
 g_bk_keep_daily=7
 g_bk_keep_weekly=4
-g_bk_keep_monthly=6
+g_bk_keep_monthly=9999
 
-# Local disk guard: the nightly backup aborts (or prunes old snapshots)
-# when free space on the data root drops below these limits. Reaching them
-# would otherwise break the running services while rsync fills the disk.
+# Local disk guard: the nightly backup aborts when free space on the data
+# root drops below these limits. Filling the disk would break the running
+# services; restic retention bounds the repository size on every run.
 g_bk_min_free_gb=3
 g_bk_min_free_percent=15
-
-# Encryption parameters (openssl, no extra packages needed).
-g_bk_cipher="aes-256-cbc"
-g_bk_kdf_iter="200000"
 
 # Read all backup-related settings from inventory.yml into g_bk_* globals.
 function f_bk_read_vars {
@@ -102,13 +99,9 @@ function f_bk_read_vars {
   g_bk_port="$(f_symbios_var backup_server_port "22")"
   g_bk_user="$(f_symbios_var backup_server_user "root")"
   g_bk_path="$(f_symbios_var backup_server_path "")"
-  g_bk_encrypt="$(f_symbios_var backup_encryption "false")"
-  [[ "$g_bk_encrypt" == "true" ]] || g_bk_encrypt=""
-  # Local snapshot base: <data_root>/backup/<hostname>
-  g_bk_snap_base="${g_data_root}/backup/$(hostname)"
-  # Passphrase file for encrypted archives (0600, root only).
-  g_bk_pw_file="${g_config_dir}/.backup_passphrase"
-  # Restic repository password file - MUST be stored under /symbios only
+  # Local restic repository (fallback target when no server is configured).
+  g_bk_local_repo="${g_data_root}/backup/restic"
+  # Restic repository password file - MUST be stored under /symbios only.
   g_bk_restic_pw_file="${g_config_dir}/.backup_restic_password"
   if [[ ! -s "$g_bk_restic_pw_file" ]]; then
     g_bk_restic_pw_file="${g_data_root}/.backup_restic_password"
@@ -117,26 +110,15 @@ function f_bk_read_vars {
   # SSH client key: the host's own root key.
   g_bk_ssh_key="$(f_symbios_var backup_ssh_key "/root/.ssh/id_ed25519")"
   g_bk_ssh_pubkey="${g_bk_ssh_key}.pub"
-  # Optional overrides from inventory.yml (retention + disk guard).
-  g_bk_keep_daily="$(f_symbios_var backup_keep_daily "$g_bk_keep_daily")"
-  g_bk_keep_weekly="$(f_symbios_var backup_keep_weekly "$g_bk_keep_weekly")"
-  g_bk_keep_monthly="$(f_symbios_var backup_keep_monthly "$g_bk_keep_monthly")"
+  # Captured restic stderr (error details for the status JSON / WebUI).
+  g_bk_err_file="${g_tmp}/restic.err"
+  touch "$g_bk_err_file" 2>/dev/null || true
+  # Retention and disk guard overrides from inventory.yml.
+  g_bk_rkeep_daily="$(f_symbios_var backup_keep_daily "$g_bk_keep_daily")"
+  g_bk_rkeep_weekly="$(f_symbios_var backup_keep_weekly "$g_bk_keep_weekly")"
+  g_bk_rkeep_monthly="$(f_symbios_var backup_keep_monthly "$g_bk_keep_monthly")"
   g_bk_min_free_gb="$(f_symbios_var backup_min_free_gb "$g_bk_min_free_gb")"
   g_bk_min_free_percent="$(f_symbios_var backup_min_free_percent "$g_bk_min_free_percent")"
-  # Restic retention for the primary target: raw inventory values with the
-  # restic defaults (7/4/9999 = keep all months). The g_bk_keep_* above keep
-  # the legacy local snapshot defaults (7/4/6) for the fallback mode.
-  g_bk_rkeep_daily="$(f_symbios_var backup_keep_daily "")"
-  [[ -n "$g_bk_rkeep_daily" ]] || g_bk_rkeep_daily=7
-  g_bk_rkeep_weekly="$(f_symbios_var backup_keep_weekly "")"
-  [[ -n "$g_bk_rkeep_weekly" ]] || g_bk_rkeep_weekly=4
-  g_bk_rkeep_monthly="$(f_symbios_var backup_keep_monthly "")"
-  [[ -n "$g_bk_rkeep_monthly" ]] || g_bk_rkeep_monthly=9999
-}
-
-# True if the primary remote backup server is configured.
-function f_bk_is_remote {
-  [[ -n "$g_bk_host" && -n "$g_bk_path" ]]
 }
 
 # List all configured restic targets as TSV lines (tab separated):
@@ -208,8 +190,7 @@ for row in rows:
 ' <<< "$f_json"
 }
 
-
-# True if at least one restic target (primary or additional) is configured.
+# True if at least one remote restic target is configured.
 function f_bk_has_targets {
   [[ -n "$(f_bk_targets_tsv)" ]]
 }
@@ -230,44 +211,131 @@ function f_bk_check_ssh_key {
   return 0
 }
 
-# Build the ssh option string used for every remote call.
-function f_bk_ssh_opts {
-  local f_opts="-o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new"
-  [[ -r "$g_bk_ssh_key" ]] && f_opts="$f_opts -i $g_bk_ssh_key"
-  f_opts="$f_opts -p ${g_bk_port:-22}"
-  echo "$f_opts"
+# Repository URL of a TSV target line ("local" -> the local repository path).
+# The double slash in the sftp URL is restic's syntax for an absolute path;
+# every client gets its own repository below PATH/$(hostname).
+function f_bk_repo_url {
+  if [[ "${1:-}" == "local" ]]
+  then
+    echo "$g_bk_local_repo"
+    return 0
+  fi
+  local f_name f_host f_port f_user f_path
+  IFS='|' read -r f_name f_host f_port f_user f_path _ <<< "$1"
+  echo "sftp://${f_user}@${f_host}:${f_port}//${f_path#/}/$(hostname)"
 }
 
-# Run a command on the remote backup server.
-# Usage: f_bk_rsh <command> [args...]
-function f_bk_rsh {
-  ssh $(f_bk_ssh_opts) "${g_bk_user}@${g_bk_host}" "$@"
+# ssh options for restic's sftp backend. ServerAlive* keeps the connection
+# alive while restic processes a lot of unchanged data; the key is passed
+# explicitly because the target may limit the authentication tries.
+function f_bk_sshargs {
+  local f_args="-o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ServerAliveCountMax=240"
+  [[ -r "$g_bk_ssh_key" ]] && f_args="-i $g_bk_ssh_key $f_args"
+  echo "$f_args"
 }
 
-# Write the merged exclude file for rsync (patterns anchored at /symbios).
+# Run one restic command. All stderr is captured in g_bk_err_file (error
+# details for syslog summaries and the status JSON / WebUI); callers log
+# a summary via the g_echo family after the run.
+# Usage: f_bk_restic <repo> <sshargs|''> <restic-args...>
+function f_bk_restic {
+  local f_repo="$1" f_ssh="$2"
+  shift 2
+  local f_rc=0
+  if [[ -n "$f_ssh" ]]
+  then
+    RESTIC_REPOSITORY="$f_repo" restic "$@" -o "sftp.args=$f_ssh" 2>>"$g_bk_err_file" || f_rc=$?
+  else
+    RESTIC_REPOSITORY="$f_repo" restic "$@" 2>>"$g_bk_err_file" || f_rc=$?
+  fi
+  return $f_rc
+}
+
+# Meaningful tail of the captured restic stderr: carriage returns from
+# progress output are split, empty lines dropped. Usage: f_bk_err_tail [file]
+function f_bk_err_tail {
+  local f_file="${1:-$g_bk_err_file}"
+  [[ -r "$f_file" ]] || return 0
+  tr '\r' '\n' < "$f_file" | sed 's/[[:space:]]*$//' | grep -v '^$' | tail -n 25
+}
+
+# A newline list as a JSON array fragment (["...", ...]).
+# Usage: f_bk_lines_json <line> [line ...]
+function f_bk_lines_json {
+  local f_first=1 f_line f_out="["
+  local f_arr=("$@")
+  for f_line in ${f_arr[@]+"${f_arr[@]}"}
+  do
+    [[ $f_first -eq 1 ]] && f_first=0 || f_out="$f_out,"
+    f_out="$f_out$(printf '%s' "$f_line" | f_json_escape)"
+  done
+  echo "${f_out}]"
+}
+
+# The captured error tail as a JSON array fragment (for the status JSON).
+function f_bk_err_tail_json {
+  local f_line
+  local f_arr=()
+  while IFS= read -r f_line
+  do
+    f_arr+=("$f_line")
+  done < <(f_bk_err_tail)
+  f_bk_lines_json ${f_arr[@]+"${f_arr[@]}"}
+}
+
+# Make sure the repository exists and opens with the configured password. A
+# missing repository is initialized on first use; every other error (wrong
+# password, no permission, host down) fails the target.
+# Usage: f_bk_restic_ensure_repo <repo> <sshargs|''>
+function f_bk_restic_ensure_repo {
+  local f_repo="$1" f_ssh="$2"
+  : > "$g_bk_err_file"
+  if f_bk_restic "$f_repo" "$f_ssh" snapshots >/dev/null
+  then
+    return 0
+  fi
+  if f_bk_err_tail | grep -qiE "no such file or directory|does not exist|unable to open config file"
+  then
+    g_echo_note "Creating restic repository $f_repo"
+    : > "$g_bk_err_file"
+    if f_bk_restic "$f_repo" "$f_ssh" init
+    then
+      return 0
+    fi
+    g_echo_error "Repository $f_repo could not be created - check the write permission of the backup target."
+    return 1
+  fi
+  g_echo_error "Repository $f_repo is not usable: $(f_bk_err_tail | tail -n 1)"
+  return 1
+}
+
+# Write the restic exclude file for the backup and the full restore.
+# Patterns are unanchored ("**/" prefix) so they match below every backup
+# source root (/symbios and /root/.ssh); this mirrors the rsync-era
+# semantics of the inventory patterns (paths relative to the data root).
 # Usage: f_bk_write_excludes <outfile>
 function f_bk_write_excludes {
   local f_out="$1"
+  local f_dir
   {
-    # Built-in defaults: never back up our own snapshots, skip docker/
-    # containerd internals (images/layers are re-pullable), keep volumes
-    # and all other data. Runtime noise that must not be copied:
-    echo "/backup/"
-    echo "/docker/overlay2/"
-    echo "/docker/overlay/"
-    echo "/docker/containers/"
-    echo "/docker/image/"
-    echo "/docker/buildkit/"
-    echo "/docker/network/"
-    echo "/docker/plugins/"
-    echo "/docker/runtimes/"
-    echo "/docker/swarm/"
-    echo "/docker/containerd/"
-    echo "/docker/rootfs/"
-    echo "/docker/tmp/"
-    echo "/containerd/"
+    # Built-in defaults: never back up the local repository itself, skip
+    # docker/containerd internals (images/layers are re-pullable), keep
+    # volumes and all other data. Runtime noise that must not be copied:
+    for f_dir in backup docker/overlay2 docker/overlay docker/containers \
+                docker/image docker/buildkit docker/network docker/plugins \
+                docker/runtimes docker/swarm docker/containerd docker/rootfs \
+                docker/tmp containerd
+    do
+      echo "**/$f_dir"
+    done
     echo "**/__pycache__/"
-    # User-defined excludes from inventory.yml (one rsync pattern per line)
+    # Never back up the backup credentials themselves (.backup_restic_password
+    # in the config dir): a repository password inside its own encrypted
+    # repository is useless (chicken and egg) - it lives in the WebUI /
+    # off-site instead.
+    echo "**/.backup*"
+    # User-defined excludes from inventory.yml (one path per line, relative
+    # to the data root; # comments are skipped)
     if [[ -r "${g_inventory}" ]]
     then
       python3 - "${g_inventory}" <<'PYEOF'
@@ -278,258 +346,119 @@ try:
 except Exception:
     sys.exit(0)
 for line in (cfg.get('all', {}).get('vars', {}).get('backup_exclude') or []):
-    line = str(line).strip()
+    line = str(line).strip().lstrip('/')
     if line and not line.startswith('#'):
-        print(line)
+        print('**/' + line)
 PYEOF
     fi
   } > "$f_out"
 }
 
-# Convert an rsync-style exclude file (anchored at /symbios) into tar
-# syntax (paths relative to /). Usage: f_bk_excludes_for_tar <rsyncfile> <tarfile>
-function f_bk_excludes_for_tar {
-  local f_in="$1" f_out="$2"
-  > "$f_out"
-  local f_line
-  while IFS= read -r f_line
-  do
-    [[ -z "$f_line" ]] && continue
-    case "$f_line" in
-      /*) echo "${f_line#/}" ;;
-      *)  echo "$f_line" ;;
-    esac
-  done < "$f_in" >> "$f_out"
+# Print the short id of the newest snapshot of <date> in <repo> (empty
+# when the repository holds none). Usage: f_bk_restic_find_sid <repo> <sshargs|''> <YYYY-MM-DD>
+function f_bk_restic_find_sid {
+  local f_repo="$1" f_ssh="$2" f_date="$3"
+  f_bk_restic "$f_repo" "$f_ssh" snapshots --json | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for s in data:
+    t = s.get('time', '')
+    if t[:10] == '$f_date':
+        print(s.get('short_id') or s.get('id'))
+        break
+"
+  return 0
 }
 
-# Name of the encrypted archive file for a given date.
-function f_bk_archive_name {
-  echo "symbios-${1}.tar.gz.enc"
-}
-
-# List local rsync snapshot dates (newest first). Monthly symlinks are
-# resolved by name; incomplete/old/temp dirs are ignored.
-function f_bk_list_local_dates {
-  local f_d f_base="$g_bk_snap_base"
-  [[ -d "$f_base" ]] || return 0
-  for f_d in $(ls -1 "$f_base" 2>/dev/null | grep -E '^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$' | sort -r)
-  do
-    echo "${f_d#backup-}"
-  done
-}
-
-# List dates available on the remote rsync target (newest first).
-function f_bk_list_remote_dates {
-  f_bk_rsh "ls -1 ${g_bk_path}/$(hostname)/ 2>/dev/null" 2>/dev/null \
-    | grep -E '^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$' | sort -r | sed 's/^backup-//'
-}
-
-# List local monthly snapshot dirs (newest first). g_backup anchors the first
-# daily of every month into backup-YYYY-MM-monthly and replaces the daily with
-# a symlink, so monthlies must be handled separately from plain dailies.
-function f_bk_list_local_monthly {
-  local f_base="$g_bk_snap_base"
-  [[ -d "$f_base" ]] || return 0
-  ls -d1 "$f_base"/backup-[0-9][0-9][0-9][0-9]-[0-9][0-9]-monthly 2>/dev/null \
-    | sed 's#^.*/backup-##; s/-monthly$//' | sort -r
-}
-
-# Snapshot stats as a JSON fragment for the backup status extra-arg:
-# "snapshot_count":N,"snapshot_size_mb":M (no leading comma; f_write_status
-# prepends one). Empty when no snapshot tree exists.
-function f_bk_stats_json {
-  local f_base="$g_bk_snap_base"
-  local f_count=0 f_size_mb=0
-  if [[ -d "$f_base" ]]
+# Print the snapshot dates of a repository (YYYY-MM-DD, unique, newest
+# first). Returns the restic exit code so callers can warn about an
+# unreachable repository. Usage: f_bk_restic_dates <repo> <sshargs|''>
+function f_bk_restic_dates {
+  local f_repo="$1" f_ssh="$2"
+  local f_json f_rc=0
+  f_json="$(f_bk_restic "$f_repo" "$f_ssh" snapshots --json)" || f_rc=$?
+  if [[ $f_rc -ne 0 ]]
   then
-    f_count=$(f_bk_list_local_dates | wc -l)
-    f_count=$(( f_count + $(f_bk_list_local_monthly | wc -l) ))
-    # du -sx counts hardlinked files once (-x: stay on the snapshot fs).
-    f_size_mb=$(du -sx -B1M "$f_base" 2>/dev/null | awk '{print $1}')
-    [[ "$f_size_mb" =~ ^[0-9]+$ ]] || f_size_mb=0
+    return $f_rc
   fi
-  printf '"snapshot_count":%s,"snapshot_size_mb":%s' "$f_count" "$f_size_mb"
-}
-
-# List archive dates found below a base path (local dir or remote prefix
-# command output is passed via stdin as plain filenames).
-function f_bk_dates_from_archive_names {
-  grep -E '^symbios-[0-9]{4}-[0-9]{2}-[0-9]{2}\.tar\.gz\.enc$' \
-    | sed -E 's/^symbios-([0-9-]{10})\.tar\.gz\.enc$/\1/' | sort -ru
+  printf '%s' "$f_json" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+dates = set()
+for s in data:
+    t = s.get('time', '')
+    if len(t) >= 10:
+        dates.add(t[:10])
+for d in sorted(dates, reverse=True):
+    print(d)
+"
+  return 0
 }
 
 # Resolve how a given date can be restored. Sets g_bk_src_kind to
-# "local-rsync", "remote-rsync", "local-archive", "remote-archive" or "".
+# "local-restic" or "remote-restic", g_restic_target to the TSV line (or
+# "local") and g_restic_sid to the short snapshot id. Returns 1 when no
+# repository holds that date. Usage: f_bk_resolve_source <YYYY-MM-DD>
 function f_bk_resolve_source {
   local f_date="$1"
   g_bk_src_kind=""
-  # 1. Local rsync snapshot directory (also matches monthly symlinks)
-  if [[ -e "$g_bk_snap_base/backup-$f_date" ]]
+  g_restic_target=""
+  g_restic_sid=""
+  command -v restic >/dev/null 2>&1 || return 1
+  [[ -s "${g_bk_restic_pw_file:-}" ]] || return 1
+  export RESTIC_PASSWORD_FILE="$g_bk_restic_pw_file"
+  # Local repository first (cheapest, no network round trip).
+  if [[ -d "$g_bk_local_repo" ]]
   then
-    g_bk_src_kind="local-rsync"
-    return 0
-  fi
-  # 2. Local archive (unusual but possible)
-  if [[ -f "$g_bk_snap_base/$(f_bk_archive_name "$f_date")" ]]
-  then
-    g_bk_src_kind="local-archive"
-    return 0
-  fi
-  # 3./4. Remote variants (only if a server is configured)
-  if f_bk_is_remote
-  then
-    if f_bk_rsh "test -e ${g_bk_path}/$(hostname)/backup-$f_date" >/dev/null 2>&1
+    g_restic_sid="$(f_bk_restic_find_sid "$g_bk_local_repo" "" "$f_date")"
+    if [[ -n "$g_restic_sid" ]]
     then
-      g_bk_src_kind="remote-rsync"
-      return 0
-    fi
-    if f_bk_rsh "test -e ${g_bk_path}/$(hostname)/$(f_bk_archive_name "$f_date")" >/dev/null 2>&1
-    then
-      g_bk_src_kind="remote-archive"
+      g_bk_src_kind="local-restic"
+      g_restic_target="local"
       return 0
     fi
   fi
+  # Remote targets in configured order (primary first).
+  local f_line
+  while IFS= read -r f_line
+  do
+    [[ -n "$f_line" ]] || continue
+    g_restic_sid="$(f_bk_restic_find_sid "$(f_bk_repo_url "$f_line")" "$(f_bk_sshargs)" "$f_date")"
+    if [[ -n "$g_restic_sid" ]]
+    then
+      g_bk_src_kind="remote-restic"
+      g_restic_target="$f_line"
+      return 0
+    fi
+  done < <(f_bk_targets_tsv)
   return 1
 }
 
-# Prune old encrypted archives on the remote target according to
-# g_bk_keep_{daily,weekly,monthly} (grandfather-father-son).
-function f_bk_prune_archives {
-  local f_list f_name f_date f_dow f_week f_month
-  local -A f_seen_week=() f_seen_month=()
-  local f_days=0 f_weeks=0 f_months=0
-  # Newest-first list of archive names on the remote host
-  f_list=$(f_bk_rsh "ls -1 ${g_bk_path}/$(hostname)/ 2>/dev/null" 2>/dev/null \
-    | f_bk_dates_from_archive_names) || return 0
-  for f_name in $f_list
-  do
-    f_date="$f_name"
-    f_dow=$(date -d "$f_date" +%u 2>/dev/null) || continue
-    f_week=$(date -d "$f_date" +%G-W%V 2>/dev/null) || continue
-    f_month="${f_date:0:7}"
-    if [[ $f_days -lt $g_bk_keep_daily ]]
-    then
-      ((f_days++))
-      continue
-    fi
-    if [[ $f_weeks -lt $g_bk_keep_weekly && "$f_dow" == "1" && -z "${f_seen_week[$f_week]:-}" ]]
-    then
-      f_seen_week[$f_week]=1
-      ((f_weeks++))
-      continue
-    fi
-    if [[ $f_months -lt $g_bk_keep_monthly && "${f_date:8:2}" == "01" && -z "${f_seen_month[$f_month]:-}" ]]
-    then
-      f_seen_month[$f_month]=1
-      ((f_months++))
-      continue
-    fi
-    g_echo_warn "Removing old backup archive $f_name (retention)"
-    f_bk_rsh "rm -f ${g_bk_path}/$(hostname)/$(f_bk_archive_name "$f_date")" >/dev/null 2>&1
-  done
-}
-
-# Force-delete a local snapshot dir by name (handles the -monthly symlink
-# aliases: removing the monthly dir after the daily symlink is gone).
-# Usage: f_bk_remove_local_entry <basename-e.g.-backup-YYYY-MM-DD>
-function f_bk_remove_local_entry {
-  local f_base="$g_bk_snap_base"
-  local f_entry="$1"
-  [[ -e "$f_base/$f_entry" || -L "$f_base/$f_entry" ]] || return 0
-  if [[ -L "$f_base/$f_entry" ]]
+# Local repository stats as a JSON fragment for the backup status extra:
+# "snapshot_count":N,"snapshot_size_mb":M (no leading comma; f_write_status
+# prepends one). Empty values when no local repository exists.
+function f_bk_stats_json {
+  local f_count=0 f_size_mb=0
+  if [[ -d "$g_bk_local_repo" ]]
   then
-    # g_backup symlinks a month's first daily into backup-YYYY-MM-monthly.
-    # Resolve the (relative or absolute) target and remove the monthly dir
-    # too, otherwise the alias dead-ends and the space stays occupied.
-    local f_target
-    f_target=$(readlink "$f_base/$f_entry")
-    case "$f_target" in
-      /*) f_target="$f_target" ;;
-      *)  f_target="$f_base/$(dirname "$f_entry")/$f_target" ;;
-    esac
-    local f_real
-    f_real=$(cd "$(dirname "$f_target")" 2>/dev/null && pwd)/$(basename "$f_target")
-    if [[ -d "$f_real" && "$(basename "$f_real")" == *-monthly ]]
-    then
-      g_echo_warn "Removing monthly snapshot $f_real (retention)"
-      chmod -R +w "$f_real" 2>/dev/null
-      rm -rf "$f_real"
-    fi
-    rm -f "$f_base/$f_entry"
-  else
-    g_echo_warn "Removing old local snapshot $f_entry (retention)"
-    chmod -R +w "$f_base/$f_entry" 2>/dev/null
-    rm -rf "$f_base/$f_entry"
+    f_count=$(f_bk_restic "$g_bk_local_repo" "" snapshots --json | python3 -c "
+import sys, json
+try:
+    print(len(json.load(sys.stdin)))
+except Exception:
+    print(0)
+")
+    # du -sx counts hardlinked files once (-x: stay on the repository fs).
+    f_size_mb=$(du -sx -B1M "$g_bk_local_repo" 2>/dev/null | awk '{print $1}')
+    [[ "$f_size_mb" =~ ^[0-9]+$ ]] || f_size_mb=0
   fi
-}
-
-# True if local snapshot <date> is a monthly alias (its symbios/ entry is a
-# symlink into backup-YYYY-MM-monthly, created by g_backup's monthly anchor).
-# Usage: f_bk_is_monthly_alias <date>
-function f_bk_is_monthly_alias {
-  local f_date="$1" f_base="$g_bk_snap_base"
-  if [[ -L "$f_base/backup-$f_date/symbios" ]]
-  then
-    case "$(readlink "$f_base/backup-$f_date/symbios")" in
-      *"backup-${f_date:0:7}-monthly"*) return 0 ;;
-    esac
-  fi
-  return 1
-}
-
-# Prune local hardlink snapshots according to g_bk_keep_{daily,weekly,monthly}
-# (grandfather-father-son). The monthly dirs back the month-long retention;
-# dailies keep the newest N plus N Monday dailies. Monthly-alias dailies are
-# kept only for months whose monthly dir is still retained (they are the
-# restore entry point for those blocks). Runs after every snapshot so the
-# disk can never grow unbounded.
-function f_bk_prune_local {
-  local f_base="$g_bk_snap_base"
-  [[ -d "$f_base" ]] || return 0
-  local f_date f_dow f_week f_month f_ym
-  local -A f_seen_week=()
-  local f_days=0 f_weeks=0 f_keep_monthly="" f_m f_list
-  # Newest-first list of daily dates
-  f_list=$(f_bk_list_local_dates)
-  # Keep the newest g_bk_keep_monthly monthly dirs (by YYYY-MM)
-  f_keep_monthly=$(f_bk_list_local_monthly | head -n "$g_bk_keep_monthly")
-  # Pass 1: decide which dailies stay
-  for f_date in $f_list
-  do
-    f_month="${f_date:0:7}"
-    f_dow=$(date -d "$f_date" +%u 2>/dev/null) || continue
-    f_week=$(date -d "$f_date" +%G-W%V 2>/dev/null) || continue
-    if f_bk_is_monthly_alias "$f_date"
-    then
-      # Alias of a STILL-KEPT month: preserve as restore entry point.
-      # Alias of a dropped month: remove it (its monthly dir falls in pass 2).
-      if echo "$f_keep_monthly" | grep -q "^${f_month}$"
-      then
-        continue
-      fi
-      f_bk_remove_local_entry "backup-$f_date"
-      continue
-    fi
-    if [[ $f_days -lt $g_bk_keep_daily ]]
-    then
-      ((f_days++))
-      continue
-    fi
-    if [[ $f_weeks -lt $g_bk_keep_weekly && "$f_dow" == "1" && -z "${f_seen_week[$f_week]:-}" ]]
-    then
-      f_seen_week[$f_week]=1
-      ((f_weeks++))
-      continue
-    fi
-    # Daily is neither new enough for daily/weekly nor an alias of a kept
-    # monthly -> remove it
-    f_bk_remove_local_entry "backup-$f_date"
-  done
-  # Pass 2: drop monthly dirs beyond the retention window
-  for f_m in $(f_bk_list_local_monthly | tail -n +$(( $g_bk_keep_monthly + 1 )))
-  do
-    f_bk_remove_local_entry "backup-$f_m-monthly"
-  done
+  printf '"snapshot_count":%s,"snapshot_size_mb":%s' "$f_count" "$f_size_mb"
 }
 
 # Free space on the data root in MB (df on the mount that holds g_data_root).
@@ -556,36 +485,14 @@ function f_bk_disk_low {
   return 1
 }
 
-# Free-space guard: if the disk is low, prune the OLDEST local snapshots
-# (dailies first, then monthlies) until the guard is satisfied. Returns 1
-# when nothing more can be pruned and the backup must NOT run (disk full).
+# Free-space guard: abort the run when the data root is below the limits.
+# restic retention (forget --prune) already bounds the repository size on
+# every run - filling the disk anyway would break the running services.
 function f_bk_guard_free_space {
-  f_bk_disk_low || return 0
-  g_echo_warn "Data root below free-space guard (min ${g_bk_min_free_gb}GB/${g_bk_min_free_percent}%) - pruning oldest snapshots first"
-  while f_bk_disk_low
-  do
-    local f_oldest f_oldest_monthly
-    f_oldest=$(f_bk_list_local_dates | tail -n 1)
-    if [[ -n "$f_oldest" ]]
-    then
-      # Prune the oldest daily first
-      f_bk_remove_local_entry "backup-$f_oldest"
-      continue
-    fi
-    # All dailies gone - fall back to the oldest monthly dirs
-    f_oldest_monthly=$(f_bk_list_local_monthly | tail -n 1)
-    if [[ -n "$f_oldest_monthly" ]]
-    then
-      f_bk_remove_local_entry "backup-$f_oldest_monthly-monthly"
-      continue
-    fi
-    break
-  done
   if f_bk_disk_low
   then
-    g_echo_error "Disk still below ${g_bk_min_free_gb}GB/${g_bk_min_free_percent}% even after pruning all snapshots - aborting backup"
+    g_echo_error "Data root below free-space guard (min ${g_bk_min_free_gb}GB/${g_bk_min_free_percent}% free) - aborting before the disk fills up."
     return 1
   fi
-  g_echo_ok "Free space guard satisfied after pruning snapshots"
   return 0
 }

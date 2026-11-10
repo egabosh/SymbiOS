@@ -219,15 +219,17 @@ Groups; only empty shares can be deleted.
 - Views: `webui/main/views_shares.py`
 
 ### Backup (`/settings/backup/`)
-Nightly snapshots of all data - local only or additionally on your own
-backup server over SSH (optionally encrypted), with per-service scopes,
-excludes, snapshot browser, passphrase handling, restore planner and a
-run-now button. Untested backups are none: restore is a first-class flow.
+Nightly restic snapshots of all data - always encrypted, in the local
+repository and/or on your own backup servers over SSH, with per-service
+scopes, excludes, snapshot browser, repository password handling, restore
+planner and a run-now button. Untested backups are none: restore is a
+first-class flow.
 - Playbook: `base-services/backup.yml`
 - Scripts: `scripts/symbios-backup.sh` + `backup.d/`,
   `scripts/symbios-backup-list.sh`, `scripts/symbios-restore.sh`
-- Vars: `backup_server_host/port/user/path`, `backup_encryption`,
-  `backup_exclude`
+- Vars: `backup_servers` (unified target list, plus the legacy
+  `backup_server_host/port/user/path` primary keys), `backup_exclude`,
+  `backup_keep_daily/weekly/monthly`
 - Healthcheck: `backup`
 
 ---

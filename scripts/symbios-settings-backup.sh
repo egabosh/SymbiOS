@@ -1,34 +1,34 @@
 #!/bin/bash
-# SymbiOS - Manage backup target settings (server, encryption, excludes).
+# SymbiOS - Manage backup target settings (servers, retention, excludes).
 #
 # Settings CLI-first architecture: the WebUI page /settings/backup/ (main
 # form) is a thin wrapper around this script, which owns validation and
 # the inventory.yml write. The inventory write goes through
 # symbios-inventory.py (merge, one transaction).
 #
-# Only the target configuration lives here. Snapshot listing, passphrase
-# handling, restore planning/execution and manual runs stay with their
-# dedicated scripts (symbios-backup-list.sh, symbios-backup.sh,
+# Only the target configuration lives here. Snapshot listing, repository
+# password handling, restore planning/execution and manual runs stay with
+# their dedicated scripts (symbios-backup-list.sh, symbios-backup.sh,
 # symbios-restore.sh, backup.sh) and the thin WebUI endpoints calling them.
 #
-# Secrets note: the backup encryption passphrase is NOT an inventory var -
+# Secrets note: the restic repository password is NOT an inventory var -
 # it lives in the config dir, generated and shown via
-# "symbios-backup.sh gen-passphrase|get-passphrase", so it never appears
-# in argv, JSON answers or audit logs. This script therefore needs no
-# --json-stdin.
+# "symbios-backup.sh gen-restic-password|get-restic-password", so it never
+# appears in argv, JSON answers or audit logs. This script therefore needs
+# no --json-stdin. Backups are always encrypted (restic repository format).
 
 function f_usage {
   cat << EOF
 Usage: $(basename "$0") <command> [options]
 
-Manage SymbiOS backup target settings (backup server, encryption flag,
-rsync exclude patterns).
+Manage SymbiOS backup target settings (backup servers, restic retention,
+exclude patterns).
 
 Commands:
   get [--json]                    Print current values (key=value lines;
                                   backup_exclude one pattern per line;
                                   or a JSON object with --json)
-  set [--host H --port P --user U --path P --encryption true|false
+  set [--host H --port P --user U --path P
        --enabled true|false --exclude-stdin
        --keep-daily N --keep-weekly N --keep-monthly N
        --servers '<json>'] [--check]
@@ -38,8 +38,8 @@ Commands:
                                    Options left out keep their current value;
                                    an empty --port/--user falls back to 22 /
                                    root (same as the WebUI). --exclude-stdin
-                                   reads rsync patterns from stdin (empty
-                                   lines and # comments skipped).
+                                   reads restic exclude patterns from stdin
+                                   (empty lines and # comments skipped).
                                    --keep-* set the restic retention of the
                                    primary target (non-negative integers,
                                    0 = disabled, default 7/4/9999).
@@ -61,7 +61,7 @@ state token (backup-changed / backup-unchanged).
 
 Examples:
   $(basename "$0") get
-  $(basename "$0") set --host backup.example.com --user root --path /backups/symbios --encryption true
+  $(basename "$0") set --host backup.example.com --user root --path /backups/symbios
   printf '%s\n' '*.tmp' 'cache/' | $(basename "$0") set --exclude-stdin
 
 Exit codes:
@@ -114,8 +114,6 @@ then
   {"name": "backup_server_path", "type": "text", "label": "Target path",
    "required": false, "default": "", "secret": false,
    "placeholder": "/backups/symbios"},
-  {"name": "backup_encryption", "type": "bool", "label": "Encrypt backups",
-   "required": true, "default": false, "secret": false},
   {"name": "backup_enabled", "type": "bool", "label": "Nightly backup",
    "required": true, "default": false, "secret": false,
    "note": "The backup job only runs when this is switched on."},
@@ -127,7 +125,7 @@ then
    "required": false, "default": "9999", "secret": false},
   {"name": "backup_exclude", "type": "multiline", "label": "Exclude patterns",
    "required": false, "default": [], "secret": false,
-   "note": "One rsync pattern per line, # comments allowed"}
+   "note": "One restic exclude pattern per line, # comments allowed"}
 ]
 EOF
   exit 0
@@ -137,13 +135,6 @@ f_cur_host="$(f_symbios_var backup_server_host "")"
 f_cur_port="$(f_symbios_var backup_server_port "22")"
 f_cur_user="$(f_symbios_var backup_server_user "root")"
 f_cur_path="$(f_symbios_var backup_server_path "")"
-f_cur_enc="$(f_symbios_var backup_encryption "")"
-if [[ "${f_cur_enc}" == "True" || "${f_cur_enc}" == "true" ]]
-then
-  f_cur_enc="true"
-else
-  f_cur_enc="false"
-fi
 f_cur_enabled="$(f_symbios_var backup_enabled "false")"
 if [[ "${f_cur_enabled}" == "True" || "${f_cur_enabled}" == "true" ]]
 then
@@ -166,13 +157,12 @@ then
   if [[ "${1:-}" == "--json" ]]
   then
     f_cur_name="$(f_symbios_var backup_server_name "")"
-    printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_server_name": %s, "backup_encryption": %s, "backup_enabled": %s, "backup_exclude": %s, "backup_servers": %s, "backup_keep_daily": %s, "backup_keep_weekly": %s, "backup_keep_monthly": %s}\n' \
+    printf '{"backup_server_host": %s, "backup_server_port": %s, "backup_server_user": %s, "backup_server_path": %s, "backup_server_name": %s, "backup_enabled": %s, "backup_exclude": %s, "backup_servers": %s, "backup_keep_daily": %s, "backup_keep_weekly": %s, "backup_keep_monthly": %s}\n' \
       "$(printf '%s' "${f_cur_host}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_port}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_user}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_path}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_name}" | f_json_escape)" \
-      "${f_cur_enc}" \
       "${f_cur_enabled}" \
       "${f_cur_excludes_json}" \
       "${f_cur_servers_json}" \
@@ -189,7 +179,6 @@ then
   echo "backup_server_port=${f_cur_port}"
   echo "backup_server_user=${f_cur_user}"
   echo "backup_server_path=${f_cur_path}"
-  echo "backup_encryption=${f_cur_enc}"
   echo "backup_enabled=${f_cur_enabled}"
   echo "backup_keep_daily=${f_cur_keep_daily}"
   echo "backup_keep_weekly=${f_cur_keep_weekly}"
@@ -206,7 +195,6 @@ f_new_port=""
 f_new_user=""
 f_new_path=""
 f_new_name=""
-f_new_enc=""
 f_new_enabled=""
 f_new_keep_daily=""
 f_new_keep_weekly=""
@@ -217,7 +205,6 @@ f_given_port="no"
 f_given_user="no"
 f_given_path="no"
 f_given_name="no"
-f_given_enc="no"
 f_given_enabled="no"
 f_given_keep_daily="no"
 f_given_keep_weekly="no"
@@ -259,12 +246,6 @@ do
       f_given_name="yes"
       shift 2
       ;;
-    --encryption)
-      [[ $# -ge 2 ]] || f_ss_fail_usage
-      f_new_enc="$2"
-      f_given_enc="yes"
-      shift 2
-      ;;
     --enabled)
       [[ $# -ge 2 ]] || f_ss_fail_usage
       f_new_enabled="$2"
@@ -300,7 +281,7 @@ do
       # backup_exclude arrives as a newline string, split like the
       # --exclude-stdin textarea lines.
       f_json="$(cat)"
-      for f_field in backup_server_host backup_server_port backup_server_user backup_server_path backup_encryption backup_enabled backup_exclude
+      for f_field in backup_server_host backup_server_port backup_server_user backup_server_path backup_enabled backup_exclude
       do
         [[ "${f_json}" == *'"'"${f_field}"'"'* ]] || continue
         if [[ "${f_field}" == "backup_exclude" ]]
@@ -331,7 +312,7 @@ do
         fi
         f_val="$(f_json_get "${f_json}" "${f_field}")" || f_val=""
         # Booleans arrive unquoted - match generously.
-        if [[ "${f_field}" == "backup_encryption" || "${f_field}" == "backup_enabled" ]]
+        if [[ "${f_field}" == "backup_enabled" ]]
         then
           f_onoff="$(grep -o "\"${f_field}\"[[:space:]]*:[[:space:]]*[^,}]*" <<< "${f_json}" | head -1)"
           f_onoff="${f_onoff##*:}"
@@ -339,14 +320,8 @@ do
           f_onoff="${f_onoff%"${f_onoff##*[![:space:]]}"}"
           f_onoff="${f_onoff%\"}"
           f_onoff="${f_onoff#\"}"
-          if [[ "${f_field}" == "backup_enabled" ]]
-          then
-            f_new_enabled="${f_onoff}"
-            f_given_enabled="yes"
-          else
-            f_new_enc="${f_onoff}"
-            f_given_enc="yes"
-          fi
+          f_new_enabled="${f_onoff}"
+          f_given_enabled="yes"
           continue
         fi
         case "${f_field}" in
@@ -408,7 +383,7 @@ done
 
 if [[ "${f_given_host}" == "no" && "${f_given_port}" == "no" \
    && "${f_given_user}" == "no" && "${f_given_path}" == "no" \
-   && "${f_given_enc}" == "no" && "${f_given_enabled}" == "no" \
+   && "${f_given_enabled}" == "no" \
    && "${f_given_excludes}" == "no" && "${f_given_keep_daily}" == "no" \
    && "${f_given_keep_weekly}" == "no" && "${f_given_keep_monthly}" == "no" \
    && "${f_given_servers}" == "no" ]]
@@ -422,8 +397,13 @@ fi
 [[ "${f_given_port}" == "no" ]] && f_new_port="${f_cur_port}"
 [[ "${f_given_user}" == "no" ]] && f_new_user="${f_cur_user}"
 [[ "${f_given_path}" == "no" ]] && f_new_path="${f_cur_path}"
-[[ "${f_given_enc}" == "no" ]] && f_new_enc="${f_cur_enc}"
 [[ "${f_given_enabled}" == "no" ]] && f_new_enabled="${f_cur_enabled}"
+# Without these the omitted retention would fall back to the defaults in the
+# unified-list builder (7/4/9999) and a single-field set would silently reset
+# the stored retention.
+[[ "${f_given_keep_daily}" == "no" ]] && f_new_keep_daily="${f_cur_keep_daily}"
+[[ "${f_given_keep_weekly}" == "no" ]] && f_new_keep_weekly="${f_cur_keep_weekly}"
+[[ "${f_given_keep_monthly}" == "no" ]] && f_new_keep_monthly="${f_cur_keep_monthly}"
 [[ -z "${f_new_port}" ]] && f_new_port="22"
 [[ -z "${f_new_user}" ]] && f_new_user="root"
 
@@ -447,17 +427,6 @@ if [[ -n "${f_new_path}" && "${f_new_path}" == *$'\n'* ]]
 then
   f_ss_fail_validation "Invalid --path: must be a single line"
 fi
-case "${f_new_enc,,}" in
-  true|1|yes|on)
-    f_new_enc="true"
-    ;;
-  false|0|no|off)
-    f_new_enc="false"
-    ;;
-  *)
-    f_ss_fail_validation "Invalid --encryption value: ${f_new_enc} (expected true|false)"
-    ;;
-esac
 case "${f_new_enabled,,}" in
   true|1|yes|on)
     f_new_enabled="true"
@@ -640,9 +609,10 @@ then
   f_ss_fail_validation "Failed to derive the legacy primary keys"
 fi
 
-f_merge="$(printf '{"backup_servers": %s, "backup_encryption": %s, "backup_enabled": %s, %s' \
+# "backup_encryption": null removes the retired key from inventories that
+# still carry it (rsync-era toggle; restic repositories are always encrypted).
+f_merge="$(printf '{"backup_servers": %s, "backup_enabled": %s, "backup_encryption": null, %s' \
   "${f_unified_json}" \
-  "${f_new_enc}" \
   "${f_new_enabled}" \
   "${f_legacy_frag}")"
 

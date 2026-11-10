@@ -19,9 +19,9 @@
 #     - backup_enabled
 #   name: Backup
 #   short_description: Configure automated backups
-#   description: Installs a nightly backup job (cron) that dumps databases/LDAP and snapshots the whole /symbios data root - locally, to an SSH/SFTP server or as encrypted archive. The job is only installed while backup_enabled is true (default off). Restores are possible per service or for the whole system via the WebUI (Settings -> Backup).
+#   description: Installs a nightly backup job (cron) that dumps databases/LDAP and snapshots the whole /symbios data root into restic repositories - a local one and/or remote SSH/SFTP targets. Restic encrypts every repository, so no extra encryption option exists. The job is only installed while backup_enabled is true (default off). Restores are possible per service or for the whole system via the WebUI (Settings -> Backup).
 #   author: Oliver Bohlen
-#   version: '2.0'
+#   version: '3.0'
 #   license: GPLv3
 #   copyright: Copyright (c) 2026, Oliver Bohlen
 #   min_ansible_version: '2.11'
@@ -51,39 +51,15 @@
     - name: Install Packages
       apt:
         name:
-          - rsync
-          - openssl
           - restic
+          - openssl
         update_cache: no
         install_recommends: no
 
-    # The restic functions ship with gaboshlib. Deploy them into the host's
-    # /etc/bash/gaboshlib (basics.yml keeps that dir as a git checkout of
-    # gaboshlib): prefer a local checkout next to this repo when it exists
-    # (development workflow), otherwise keep the installed copy - which is
-    # updated by re-running basics.yml.
-    - name: Deploy gaboshlib restic functions
-      ansible.builtin.shell: |
-        f_changed=0
-        for f in g_backup_restic.bashfunc g_backup_restic_restore.bashfunc; do
-          src="{{ git_root }}/../gaboshlib/gaboshlib/$f"
-          dest="/etc/bash/gaboshlib/$f"
-          if [[ ! -r "$src" ]]; then
-            if [[ ! -r "$dest" ]]; then
-              echo "ERROR: $f is missing in both the local gaboshlib checkout and /etc/bash/gaboshlib - re-run base-services/basics.yml to update the gaboshlib checkout" >&2
-              exit 1
-            fi
-            continue
-          fi
-          if [[ -r "$dest" ]] && cmp -s "$src" "$dest"; then
-            continue
-          fi
-          install -m 0755 -o root -g root "$src" "$dest"
-          f_changed=1
-        done
-        if [[ $f_changed -eq 1 ]]; then echo changed; else echo unchanged; fi
-      register: gbk_deploy
-      changed_when: "gbk_deploy.stdout | default('') == 'changed'"
+    # The backup engine is restic-only (scripts/symbios-backup.sh); rsync is
+    # installed by basics.yml for unrelated host usage. openssl stays in the
+    # list because host scripts outside the backup (SSL checks, key
+    # generation) use the CLI and no other playbook guarantees it.
 
     # The config dir is the WebUI container's /config mount: it must stay
     # owned by the WebUI user (uid 10000), exactly as symbios-ui.yml creates
@@ -123,11 +99,12 @@
         state: directory
         mode: '0700'
 
-    # Local snapshot destination for the main backup engine
-    # (scripts/symbios-backup.sh) when no backup server is configured.
-    - name: Create local snapshot dir {{ data_root }}/backup
+    # Local restic repository for the backup engine
+    # (scripts/symbios-backup.sh) when no backup server is configured. The
+    # engine initializes the repository on first use.
+    - name: Create local restic repository dir {{ data_root }}/backup/restic
       ansible.builtin.file:
-        path: "{{ data_root }}/backup"
+        path: "{{ data_root }}/backup/restic"
         owner: root
         group: root
         state: directory

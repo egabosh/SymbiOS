@@ -139,11 +139,12 @@ all:
     backup_server_port: ''
     backup_server_path: ''
     backup_server_user: ''
-    # main backup (scripts/symbios-backup.sh): encrypt archives on the
-    # remote target and extra exclude patterns (rsync syntax, one per item).
-    # The OpenWrt VM image is a large sparse ISO that would be materialized
-    # by the hardlink snapshot - exclude the VM images from the backup.
-    backup_encryption: false
+    # main backup (scripts/symbios-backup.sh): every repository (local and
+    # remote) is a restic repository - always encrypted with the repository
+    # password file. Extra exclude patterns: one path per item, relative to
+    # the data root (matched at any depth).
+    # The OpenWrt VM image is a large sparse ISO that would waste backup
+    # space - exclude the VM images from the backup.
     # Master switch for the nightly backup job (Settings -> Backup). The
     # job is only installed while this is true; the default is off, because
     # a snapshot of the data root needs a lot of space.
@@ -151,11 +152,12 @@ all:
     backup_exclude:
       - "/services/*-vm/iso/*.img"
       - "/.keys/"
-    # Local snapshot retention (grandfather-father-son). The data root is a
-    # small SD card, so keep the tree bounded; defaults in symbios-backup-lib.sh.
+    # Restic retention for the primary target and the local repository.
+    # Defaults in symbios-backup-lib.sh (7 dailies, 4 weeklies, all
+    # monthlies - a bounded tree is enforced by the disk guard instead).
     #backup_keep_daily: 7
     #backup_keep_weekly: 4
-    #backup_keep_monthly: 6
+    #backup_keep_monthly: 9999
     # Free-space guard: abort before the disk fills up. Defaults 3GB/15%.
     #backup_min_free_gb: 3
     #backup_min_free_percent: 15

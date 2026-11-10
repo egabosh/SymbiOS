@@ -3,7 +3,7 @@
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
+# Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
 # This program is distributed in the hope that it will be useful,
@@ -15,19 +15,22 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # symbios-backup-list.sh - List available backup snapshots as JSON for the
-# WebUI (Settings -> Backup). Merges local snapshot dates and - if a backup
-# server is configured - restic snapshots.
+# WebUI (Settings -> Backup). Queries the local restic repository and, for
+# every configured backup server, its remote restic repository.
 
 function f_usage {
   cat << EOF
 Usage: $(basename "$0")
 
 List available backup snapshots as JSON for the WebUI (Settings -> Backup).
-Merges local snapshot dates and, if a backup server is configured, remote
-dates / encrypted archive dates. No arguments.
+Queries the local restic repository and, for every configured backup server,
+its remote restic repository. No arguments.
 
-Output JSON: {"ok":true,"mode":"local|remote|remote-encrypted","host":...,
-"path":...,"snapshots":[...],"services":[...],"warning":...,"pubkey":...}
+Output JSON: {"ok":true,"mode":"local|remote-restic","targets":[...],
+"snapshots":[...],"services":[...],"warning":...,"pubkey":...}
+Every snapshot entry: {"date":"YYYY-MM-DD","local":0|1,
+"servers":["<target name>", ...]} - restic repositories are always
+encrypted, so there is no separate encrypted flag.
 
 Options:
   -h, --help          Show this help and exit
@@ -87,68 +90,58 @@ function f_json_array {
 
 ### Main ###
 
-g_local_dates="$(mktemp)"
-g_remote_dates="$(mktemp)"
-g_arch_dates="$(mktemp)"
+g_all_dates="$(mktemp)"
 g_warning=""
 # One date file per restic target so the UI can show WHICH server holds a
 # snapshot (parallel arrays, index-aligned).
 g_target_files=()
 g_target_names=()
 
-# Local snapshots (rsync mode)
-f_bk_list_local_dates > "$g_local_dates"
+# The local repository first (cheapest, no network round trip).
+if command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]] \
+  && [[ -d "$g_bk_local_repo" ]]
+then
+  g_target_files+=("${g_tmp}/bk-local.dates")
+  g_target_names+=("local")
+  f_bk_restic_dates "$g_bk_local_repo" "" > "${g_target_files[0]}" || : > "${g_target_files[0]}"
+  cat "${g_target_files[0]}" >> "$g_all_dates"
+fi
 
-# Remote snapshots - restic first (query every configured target),
-# fallback to the legacy rsync directory listing.
+# Remote targets: query every configured repository.
 if f_bk_has_targets
 then
-  if command -v restic >/dev/null 2>&1 && [[ -n "${g_bk_restic_pw_file:-}" ]] && [[ -s "${g_bk_restic_pw_file}" ]]; then
-    export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
-    g_idx=0
+  if command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]
+  then
+    g_idx=${#g_target_files[@]}
+    g_failed=""
     while IFS=$'\t' read -r f_t_name f_t_host f_t_port f_t_user f_t_path f_t_kd f_t_kw f_t_km
     do
       [[ -n "$f_t_host" ]] || continue
       g_target_files+=("${g_tmp}/bk-target-${g_idx}.dates")
       g_target_names+=("$f_t_name")
-      RESTIC_REPOSITORY="sftp://${f_t_user}@${f_t_host}:${f_t_port}//${f_t_path#/}/$(hostname)"
-      f_sshargs="-o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ServerAliveCountMax=240"
-      [[ -r "$g_bk_ssh_key" ]] && f_sshargs="-i $g_bk_ssh_key $f_sshargs"
-      restic snapshots --json -o "sftp.args=${f_sshargs}" 2>/dev/null | python3 -c "
-import sys,json
-try:
-  data=json.load(sys.stdin)
-  for s in data:
-    t=s.get('time','')
-    if len(t)>=10:
-      print(t[:10])
-except Exception:
-  pass
-" > "${g_target_files[$g_idx]}" || : > "${g_target_files[$g_idx]}"
-      sort -ru -o "${g_target_files[$g_idx]}" "${g_target_files[$g_idx]}"
-      cat "${g_target_files[$g_idx]}" >> "$g_remote_dates"
+      # A restic query can fail (server down, key revoked) - the listing
+      # stays useful with the remaining targets and names the broken one.
+      if f_bk_restic_dates "$(f_bk_repo_url "$f_t_name|$f_t_host|$f_t_port|$f_t_user|$f_t_path|$f_t_kd|$f_t_kw|$f_t_km")" "$(f_bk_sshargs)" > "${g_target_files[$g_idx]}"
+      then
+        cat "${g_target_files[$g_idx]}" >> "$g_all_dates"
+      else
+        : > "${g_target_files[$g_idx]}"
+        g_failed="${g_failed}${g_failed:+, }${f_t_name}"
+      fi
       g_idx=$(( g_idx + 1 ))
     done < <(f_bk_targets_tsv)
-    sort -ru -o "$g_remote_dates" "$g_remote_dates"
-  fi
-  if [[ ! -s "$g_remote_dates" ]]; then
-    if ! f_bk_rsh "ls -1 '${g_bk_path}/$(hostname)/' 2>/dev/null" > "${g_tmp}/remote-ls" 2>/dev/null
-    then
-      g_warning="Could not reach backup server ${g_bk_host} - showing local backups only."
-      : > "${g_tmp}/remote-ls"
-    fi
-    grep -E '^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}$' "${g_tmp}/remote-ls" \
-      | sed 's/^backup-//' | sort -ru > "$g_remote_dates" || true
-    f_bk_dates_from_archive_names < "${g_tmp}/remote-ls" > "$g_arch_dates" || true
+    [[ -n "$g_failed" ]] && g_warning="Could not read the restic repository on: ${g_failed}."
+  else
+    g_warning="restic is not installed or the repository password is missing - cannot list remote snapshots."
   fi
 fi
 
 # Merge all dates (unique, newest first)
-sort -u "$g_local_dates" "$g_remote_dates" "$g_arch_dates" | sort -ru > "${g_tmp}/all-dates"
+sort -u "$g_all_dates" | sort -ru > "${g_tmp}/all-dates"
 
 # Build the JSON snapshots array: per date which locations hold it.
-# "servers" lists the names of the remote targets that have this snapshot,
-# so with multiple backup servers the Location column stays unambiguous.
+# "servers" lists the names of the targets that have this snapshot, so with
+# multiple backup servers the Location column stays unambiguous.
 g_snap_json="["
 g_first=1
 while IFS= read -r g_date
@@ -156,31 +149,20 @@ do
   [[ "$g_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || continue
   [[ $g_first -eq 1 ]] && g_first=0 || g_snap_json="$g_snap_json,"
   g_has_local=0
-  g_has_remote=0
-  g_encrypted=0
-  grep -qx "$g_date" "$g_local_dates" && g_has_local=1
-  grep -qx "$g_date" "$g_remote_dates" && g_has_remote=1
-  if grep -qx "$g_date" "$g_arch_dates"
-  then
-    g_has_remote=1
-    g_encrypted=1
-  fi
-  # Which restic targets hold this date (per-target date files)
   g_srv_json=""
   for i in "${!g_target_names[@]}"
   do
     if [[ -s "${g_target_files[$i]}" ]] && grep -qx "$g_date" "${g_target_files[$i]}"
     then
-      g_has_remote=1
-      g_srv_json="${g_srv_json:+, }$(printf '%s' "${g_target_names[$i]}" | f_json_escape)"
+      if [[ "${g_target_names[$i]}" == "local" ]]
+      then
+        g_has_local=1
+      else
+        g_srv_json="${g_srv_json:+, }$(printf '%s' "${g_target_names[$i]}" | f_json_escape)"
+      fi
     fi
   done
-  if [[ $g_encrypted -eq 1 && -z "$g_srv_json" ]]
-  then
-    # Legacy encrypted archive: it lives on the primary target
-    g_srv_json="$(printf '%s' "$(hostname)" | f_json_escape)"
-  fi
-  g_snap_json="$g_snap_json{\"date\":\"$g_date\",\"local\":$g_has_local,\"remote\":$g_has_remote,\"encrypted\":$g_encrypted,\"servers\":[$g_srv_json]}"
+  g_snap_json="$g_snap_json{\"date\":\"$g_date\",\"local\":$g_has_local,\"servers\":[$g_srv_json]}"
 done < "${g_tmp}/all-dates"
 g_snap_json="$g_snap_json]"
 
@@ -216,5 +198,4 @@ cat <<EOF
 "warning":$(printf '%s' "$g_warning" | f_json_escape),
 "pubkey":$(printf '%s' "$g_pubkey" | f_json_escape)}
 EOF
-rm -f "$g_local_dates" "$g_remote_dates" "$g_arch_dates" \
-  ${g_target_files[@]+"${g_target_files[@]}"}
+rm -f "$g_all_dates" ${g_target_files[@]+"${g_target_files[@]}"}

@@ -273,8 +273,6 @@ def settings_backup(request):
         # Validation and the inventory write live in the settings CLI
         # (single source of truth). The exclude textarea goes via stdin;
         # no secrets are involved in this domain.
-        encryption = ('true' if request.POST.get('backup_encryption') == 'on'
-                      else 'false')
         enabled = ('true' if request.POST.get('backup_enabled') == 'on'
                    else 'false')
         # Collect all backup servers from the unified rows (the primary row
@@ -311,7 +309,6 @@ def settings_backup(request):
             servers.append(srv)
         set_cmd = ('symbios-settings-backup.sh set'
                    f" --servers {shlex.quote(json.dumps(servers))}"
-                   f' --encryption {encryption}'
                    f' --enabled {enabled}'
                    ' --exclude-stdin')
         stdin_data = request.POST.get('backup_exclude', '')
@@ -462,17 +459,18 @@ def settings_backup_snapshots(request):
 
 
 @login_required
-def settings_backup_passphrase(request):
-    """AJAX POST - show or generate the backup encryption passphrase.
+def settings_backup_password(request):
+    """AJAX POST - show or generate the restic repository password.
 
-    The passphrase is generated on the host and stored in the config dir;
-    it never appears in a shell command line or audit log.
+    The password is generated on the host and stored in the config dir;
+    it never appears in a shell command line or audit log. Every restic
+    repository (local or remote) is encrypted with it.
     """
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'POST required'}, status=400)
     action = request.POST.get('action', 'show')
-    cmd = ('symbios-backup.sh gen-passphrase' if action == 'generate'
-           else 'symbios-backup.sh get-passphrase')
+    cmd = ('symbios-backup.sh gen-restic-password' if action == 'generate'
+           else 'symbios-backup.sh get-restic-password')
     try:
         ok, stdout, stderr = run_command(cmd, timeout=20)
         if ok and stdout:

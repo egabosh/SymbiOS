@@ -11,9 +11,9 @@ SymbiOS backup dispatcher. No arguments - this is the nightly cron entry point.
   1. Runs all *.backup modules from backup.d/ (pre-run dumps: LDAP export,
      MySQL/MariaDB/PostgreSQL dumps). The dumps land in \${backup_root}
      (= /symbios/backups) and are therefore part of every snapshot.
-  2. Runs symbios-backup.sh which creates the daily main snapshot of the
-     whole data root (/symbios): locally below /symbios/backup or on a
-     remote SSH/SFTP server (optionally encrypted).
+  2. Runs symbios-backup.sh which creates the daily snapshot of the whole
+     data root (/symbios) in restic repositories: the local one below
+     /symbios/backup/restic and/or remote SSH/SFTP targets (encrypted).
 
 Options:
   -h, --help          Show this help and exit
@@ -39,10 +39,11 @@ set -o pipefail
 #
 # It has to live inside the data root, because symbios-backup.sh snapshots all
 # of it and the dumps are the reason these modules run before the snapshot.
-# It must not be below ${data_root}/backup: that path holds the snapshots
-# themselves and is excluded from the rsync (see f_bk_write_excludes), so
-# dumps stored there would never reach the backup server. backup_root
-# (<data_root>/backups) is included in the snapshot and not excluded.
+# It must not be below ${data_root}/backup: that path holds the local restic
+# repository itself and is excluded from the snapshot (see
+# f_bk_write_excludes), so dumps stored there would never reach the backup
+# server. backup_root (<data_root>/backups) is included in the snapshot and
+# not excluded.
 #
 # g_backupdir was a gaboshlib global that no longer exists; with it unset the
 # modules redirected their dumps to "/<name>" and silently backed up nothing.
@@ -62,7 +63,7 @@ do
   fi
 done
 
-# Main snapshot of the whole data root (local/remote, optional encryption)
+# Main snapshot of the whole data root into the restic repositories
 if [[ -x "${g_git_root}/scripts/symbios-backup.sh" ]]
 then
   "${g_git_root}/scripts/symbios-backup.sh"

@@ -235,20 +235,23 @@ printf '%s\n' "ssh-ed25519 AAAA... user@host" | symbios-settings-ssh-keys.sh set
 
 ### 3.11 `symbios-settings-backup.sh`
 
-Backup target: server host/port/user/path, encryption flag (real YAML
-boolean), rsync exclude patterns (YAML list; needs `merge` list support
-in `symbios-inventory.py` plus `get --json` for reading the list back).
+Backup targets: server host/port/user/path plus the additional servers
+list, restic retention (keep daily/weekly/monthly), exclude patterns
+(YAML list; needs `merge` list support in `symbios-inventory.py` plus
+`get --json` for reading the list back). The merge removes the retired
+`backup_encryption` key (null-delete) - restic repositories are always
+encrypted, there is no toggle anymore.
 
 ```bash
 symbios-settings-backup.sh get [--json]
-symbios-settings-backup.sh set --host backup.example.com --port 22 --user root --path /backups/symbios --encryption true [--check]
+symbios-settings-backup.sh set --host backup.example.com --port 22 --user root --path /backups/symbios [--check]
 printf '%s\n' '*.tmp' 'cache/' | symbios-settings-backup.sh set --exclude-stdin [--check]
 ```
 
-Snapshot listing, passphrase handling (`symbios-backup.sh
-gen-passphrase|get-passphrase` - the passphrase is NOT an inventory var),
-restore and manual runs stay with their dedicated scripts and thin
-endpoints.
+Snapshot listing, repository password handling (`symbios-backup.sh
+gen-restic-password|get-restic-password` - the password is NOT an
+inventory var), restore and manual runs stay with their dedicated scripts
+and thin endpoints.
 
 ### 3.12 `symbios-settings-dns.sh`
 

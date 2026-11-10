@@ -14,7 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-# symbios-restore.sh - Restore snapshots created by symbios-backup.sh.
+# symbios-restore.sh - Restore snapshots created by symbios-backup.sh
+# (restic repositories: local and/or remote SFTP targets).
 #
 # Usage:
 #   symbios-restore.sh plan <YYYY-MM-DD> [<service>|--full|--file <path>]
@@ -22,41 +23,67 @@
 #   symbios-restore.sh restore <YYYY-MM-DD> [<service>|--full|--file <path>] [--target <path>] [--to-original] [--yes]
 #       Perform the restore. Without --yes nothing is executed (safety).
 #   symbios-restore.sh find <YYYY-MM-DD> <pattern>
-#       Search for files in a snapshot.
+#       Search for files in a snapshot (JSON).
 #   symbios-restore.sh ls <YYYY-MM-DD> [<path>]
-#       List files in a snapshot directory.
+#       List files in a snapshot directory (raw restic output).
 #
 # Service restore: stops the affected docker compose stack(s), restores
 # their directories (services/<name> and/or base-services/<name>) from the
-# snapshot, re-imports matching database dumps found in the snapshot and
-# starts the stack(s) again.
+# restic snapshot, re-imports matching database dumps found in the snapshot
+# and starts the stack(s) again.
 #
-# Full restore: stops Docker, restores the whole /symbios data root from
-# the snapshot (protected excludes keep docker internals and the local
-# backup store intact), restarts Docker and reapplies all playbooks.
+# Full restore: stops Docker, restores the whole data root plus /root/.ssh
+# from the snapshot, restarts Docker and reapplies all playbooks.
+#
+# restic restore semantics relied on here (verified with restic 0.18):
+#   - The snapshot tree stores the ORIGINAL ABSOLUTE paths; restoring with
+#     "--target /" writes every file back to its exact original location.
+#   - "--delete" is only ever combined with "--include" patterns: in include
+#     mode the delete walker removes exactly the entries below an include
+#     pattern that are not part of the snapshot. Everything outside the
+#     include patterns is never touched.
+#   - NEVER combine "--delete" with exclude-only filtering: in exclude mode
+#     the delete walker would remove EVERY entry of a visited target
+#     directory that is not in the snapshot (up to and including the whole
+#     filesystem root when restoring with "--target /").
+#   - Negated include patterns ("!pattern") keep paths out of the restore
+#     AND out of the delete walk (protection for the local backup
+#     repository, docker internals and the repository password file).
 
 function f_usage {
   cat << EOF
-Usage: $(basename "$0") <plan|restore> <YYYY-MM-DD> [<service>|--full] [--yes]
+Usage: $(basename "$0") <plan|restore> <YYYY-MM-DD> [<service>|--full|--file <path>] [--target <path>] [--to-original] [--yes]
 
-Restore snapshots created by symbios-backup.sh.
+Restore snapshots created by symbios-backup.sh (restic repositories).
 
-  plan <YYYY-MM-DD> [<service>|--full]
+  plan <YYYY-MM-DD> [<service>|--full|--file <path>]
       Show (as JSON) what a restore would do - no changes are made.
-  restore <YYYY-MM-DD> [<service>|--full] [--yes]
+  restore <YYYY-MM-DD> [<service>|--full|--file <path>] [--target <path>] [--to-original] [--yes]
       Perform the restore. Without --yes nothing is executed (safety).
+  find <YYYY-MM-DD> <pattern>
+      Search for files in a snapshot (JSON).
+  ls <YYYY-MM-DD> [<path>]
+      List files in a snapshot directory (raw restic output).
 
-Service restore: stops the affected docker compose stack(s), restores their
-directories (services/<name> and/or base-services/<name>) from the snapshot,
-re-imports matching database dumps found in the snapshot and starts the
-stack(s) again.
-
-Full restore: stops Docker, restores the whole /symbios data root from the
-snapshot (protected excludes keep docker internals and the local backup
-store intact), restarts Docker and reapplies all playbooks.
+Scopes:
+  <service>     Stop the service's docker compose stack(s), restore its
+                directories (services/<name> and/or base-services/<name>)
+                from the snapshot, re-import its database dumps and start
+                the stack(s) again.
+  --full        Stop Docker, restore the whole data root plus /root/.ssh
+                from the snapshot, restart Docker and reapply all
+                playbooks.
+  --file <path> Restore a single file (absolute snapshot path) into a
+                staging directory (--target/--to-original optional).
 
 Options:
+  --target <path>     Restore --file into this directory instead of the
+                     staging directory.
+  --to-original       Restore --file back to its original location.
+  --yes               Actually execute the restore.
   -h, --help          Show this help and exit
+
+Exit codes: 0 = ok, 1 = error (JSON error message on stdout).
 EOF
 }
 
@@ -66,17 +93,17 @@ then
   exit 0
 fi
 
-# Load gaboshlib and the SymbIOS libs.
-# The plan action prints JSON on stdout: skip the gaboshlib stdout/stderr FIFO
-# redirection (g_all-to-syslog) so the output stays machine-parseable. The
-# actual restore run keeps full logging (it streams into the WebUI job modal).
-[[ "${1:-}" == "plan" ]] && g_alltosyslog=1
+# Query actions (plan/find/ls) print JSON/raw output on stdout: skip the
+# gaboshlib stdout/stderr FIFO redirection (g_all-to-syslog) so the output
+# stays machine-parseable. The actual restore run keeps full logging (it
+# streams into the WebUI job modal).
+[[ "${1:-}" == "plan" || "${1:-}" == "find" || "${1:-}" == "ls" ]] && g_alltosyslog=1
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
 source "$g_symbios_dir/symbios-backup-lib.sh"
 
-# Share the backup lockfile: never restore while a backup runs (or vice
+# Share the backup lockfiles: never restore while a backup runs (or vice
 # versa). Two locks cover both entry points (dispatcher and engine).
 # g_lockfile is a function AND its own guard variable - clear only the
 # variable (plain assignment) so the function stays callable for lock #2.
@@ -89,86 +116,13 @@ g_nice
 g_all-to-syslog
 set -o pipefail
 
-# Read backup settings (remote target, encryption, snapshot paths).
+# Read backup settings (targets, repository password, ssh key).
 f_bk_read_vars
 
 # Print {"ok":false,...} and exit - used for every validation error.
 function f_die_json {
   printf '{"ok":false,"error":%s}\n' "$(printf '%s' "$1" | f_json_escape)"
   exit 1
-}
-
-# The restic target selected for this run (one f_bk_targets_tsv line:
-# name|host|port|user|path|kd|kw|km). Set by f_find_restic_snapshot when a
-# date is found on one of the configured targets - primary first, then the
-# additional servers. All restic calls below use this target.
-g_restic_target=""
-
-function f_restic_repo_url {
-  [[ -n "$g_restic_target" ]] || return 1
-  local f_name f_host f_port f_user f_path
-  IFS='|' read -r f_name f_host f_port f_user f_path _ <<< "$g_restic_target"
-  echo "sftp://${f_user}@${f_host}:${f_port}//${f_path#/}/$(hostname)"
-}
-
-function f_restic_target_name {
-  local f_name
-  IFS='|' read -r f_name _ <<< "${g_restic_target}"
-  echo "$f_name"
-}
-
-function f_restic_sshargs {
-  local f_sshargs="-o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ServerAliveCountMax=240"
-  [[ -r "$g_bk_ssh_key" ]] && f_sshargs="-i $g_bk_ssh_key $f_sshargs"
-  echo "$f_sshargs"
-}
-
-# Find a restic snapshot of <date> on ANY configured target (primary first,
-# then the additional servers). Sets g_restic_target to the matching one and
-# prints its short id; returns 1 when no target holds that date.
-function f_find_restic_snapshot {
-  local f_date="$1"
-  [[ -n "$f_date" ]] || return 1
-  command -v restic >/dev/null 2>&1 || return 1
-  [[ -s "${g_bk_restic_pw_file:-}" ]] || return 1
-  export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
-  local f_line f_sid
-  while IFS= read -r f_line
-  do
-    [[ -n "$f_line" ]] || continue
-    g_restic_target="$f_line"
-    f_sid="$(RESTIC_REPOSITORY="$(f_restic_repo_url)" restic snapshots --json \
-      -o "sftp.args=$(f_restic_sshargs)" 2>/dev/null | python3 -c "
-import sys,json
-try:
-  data=json.load(sys.stdin)
-  for s in data:
-    t=s.get('time','')
-    if t[:10]=='$f_date':
-      print(s.get('short_id') or s.get('id'))
-      break
-except Exception:
-  pass
-")" || f_sid=""
-    if [[ -n "$f_sid" ]]; then
-      echo "$f_sid"
-      return 0
-    fi
-  done < <(f_bk_targets_tsv)
-  g_restic_target=""
-  return 1
-}
-
-# Emit a JSON string array from newline-separated values on stdin.
-function f_json_array_stdin {
-  local f_first=1 f_item f_out="["
-  while IFS= read -r f_item
-  do
-    [[ -z "$f_item" ]] && continue
-    [[ $f_first -eq 1 ]] && f_first=0 || f_out="$f_out,"
-    f_out="$f_out$(printf '%s' "$f_item" | f_json_escape)"
-  done
-  echo "$f_out]"
 }
 
 ### Argument handling ###
@@ -180,187 +134,143 @@ g_yes=""
 g_file=""
 g_target=""
 g_to_original=""
-for ((i=1;i<=$#;i++)); do
-  g_arg="${!i}"
-  case "$g_arg" in
+while [[ $# -gt 0 ]]
+do
+  case "$1" in
     --yes) g_yes="1" ;;
-    --file) ((i++)); g_file="${!i}"; g_scope="--file" ;;
-    --target) ((i++)); g_target="${!i}"; ;;
-    --to-original) g_to_original="1"; ;;
-    *) [[ -z "$g_scope" || "$g_scope" == "--full" ]] && [[ "$g_arg" != --* ]] && g_scope="$g_arg" || true ;;
+    --to-original) g_to_original="1" ;;
+    --file) shift; g_file="${1:-}"; g_scope="--file" ;;
+    --target) shift; g_target="${1:-}" ;;
+    --*) f_die_json "Unknown option '$1'." ;;
+    *) [[ "$g_scope" == "--full" ]] && g_scope="$1" ;;
   esac
+  shift
 done
 
 [[ "$g_action" == "plan" || "$g_action" == "restore" || "$g_action" == "find" || "$g_action" == "ls" ]] \
   || f_die_json "Usage: symbios-restore.sh {plan|restore|find|ls} <YYYY-MM-DD> [<service>|--full|--file <path>] [--target <path>] [--yes]"
 
-if [[ "$g_action" == "find" ]]; then
+if [[ "$g_action" == "find" ]]
+then
   g_pattern="$g_scope"
-  [[ -n "$g_pattern" ]] || f_die_json "Missing search pattern"
-elif [[ "$g_action" == "ls" ]]; then
+  [[ "$g_pattern" != "--full" && -n "$g_pattern" ]] || f_die_json "Missing search pattern"
+elif [[ "$g_action" == "ls" ]]
+then
   g_lspath="$g_scope"
   [[ "$g_lspath" == "--full" || -z "$g_lspath" ]] && g_lspath="/"
 else
   [[ "$g_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || f_die_json "Invalid date '$g_date' - expected YYYY-MM-DD."
   [[ "$g_scope" == "--full" || "$g_scope" == "--file" || "$g_scope" =~ ^[A-Za-z0-9._-]+$ ]] \
     || f_die_json "Invalid service name '$g_scope'."
+  [[ "$g_scope" != "--file" || -n "$g_file" ]] || f_die_json "Missing file path for --file."
 fi
 
-# Resolve which physical source the snapshot comes from: local disk first,
-# then the primary remote target (legacy rsync/archive). For restic the date
-# may live on ANY configured target, so probe them in order (primary + the
-# additional servers) - f_find_restic_snapshot remembers the matching one.
+### Source resolution ###
+
+# Resolve which repository holds the requested date: the local repository
+# first (cheapest), then every configured remote target in order. Sets
+# g_bk_src_kind, g_restic_target (TSV line or "local") and g_restic_sid.
 if ! f_bk_resolve_source "$g_date"
-then
-  if [[ "$g_action" == "find" || "$g_action" == "ls" || "$g_scope" == "--file" ]]
-  then
-    g_restic_sid="$(f_find_restic_snapshot "$g_date")" || g_restic_sid=""
-    if [[ -n "$g_restic_sid" ]]; then
-      g_bk_src_kind="remote-restic"
-    fi
-  fi
-fi
-if [[ -z "$g_bk_src_kind" ]]
 then
   f_die_json "No snapshot found for $g_date."
 fi
 
+# Repository and ssh context of the resolved target - all restic calls
+# below use these.
+g_repo="$(f_bk_repo_url "$g_restic_target")"
+g_sshargs=""
+if [[ "$g_restic_target" != "local" ]]
+then
+  g_sshargs="$(f_bk_sshargs)"
+fi
+export RESTIC_REPOSITORY="$g_repo"
+
 # Human-readable source description for the plan output.
 case "$g_bk_src_kind" in
-  local-rsync)    g_src_desc="local snapshot (${g_data_root}/backup)" ;;
-  remote-rsync)   g_src_desc="snapshot on ${g_bk_host}" ;;
-  local-archive)  g_src_desc="local encrypted archive" ;;
-  remote-archive) g_src_desc="encrypted archive on ${g_bk_host}" ;;
-  remote-restic)  g_src_desc="restic snapshot on $(f_restic_target_name)" ;;
+  local-restic)  g_src_desc="local restic repository (${g_bk_local_repo})" ;;
+  remote-restic)
+    f_tname=""
+    IFS='|' read -r f_tname _ <<< "$g_restic_target"
+    g_src_desc="restic snapshot on ${f_tname}"
+    ;;
 esac
 
-# restic source: the matching target (g_restic_target) and its snapshot id
-# were already resolved above; plain assignments on purpose - "local" only
-# works inside functions and would silently leave these empty.
-if [[ "$g_action" == "find" ]]; then
-  if [[ "$g_bk_src_kind" == "remote-restic" ]] && command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]; then
-    export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
-    export RESTIC_REPOSITORY="$(f_restic_repo_url)"
-    f_sshargs="$(f_restic_sshargs)"
-    f_sid="$g_restic_sid"
-    if [[ -n "$f_sid" ]]; then
-      restic find "$g_pattern" --host "$(hostname)" --json -o "sftp.args=${f_sshargs}" 2>/dev/null | python3 -c "
-import sys,json
-res=[]
+# Run restic against the resolved repository with LIVE progress output
+# (restic's progress goes to stderr, which the WebUI job modal streams).
+# Used for the restore/find/ls actions; parsing helpers below use the
+# quiet f_bk_restic runner from symbios-backup-lib.sh instead.
+function f_r_restic {
+  if [[ -n "$g_sshargs" ]]
+  then
+    restic "$@" -o "sftp.args=$g_sshargs"
+  else
+    restic "$@"
+  fi
+}
+
+### Snapshot index ###
+
+# Index of all paths in the resolved snapshot (one absolute path per line,
+# from a single "restic ls --json" call - cheaper than probing per path).
+function f_snap_index {
+  f_bk_restic "$g_repo" "$g_sshargs" ls "$g_restic_sid" --json | python3 -c "
+import sys, json
 for line in sys.stdin:
-  try:
-    d=json.loads(line)
-    if d.get('message_type')=='match':
-      p=d.get('path') or d.get('file_name')
-      if p: res.append(p)
-  except: pass
-print(json.dumps({'ok':True,'matches':res}))
-" || restic find "$g_pattern" --host "$(hostname)" -o "sftp.args=${f_sshargs}" 2>&1 | head -100
-      exit 0
-    fi
-    restic find "$g_pattern" -o "sftp.args=${f_sshargs}" 2>&1 | head -100
-    exit 0
-  fi
-  printf '{"ok":false,"error":"restic not available or not configured"}\n'
-  exit 1
-fi
-
-if [[ "$g_action" == "ls" ]]; then
-  if [[ "$g_bk_src_kind" == "remote-restic" ]] && command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]; then
-    export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
-    export RESTIC_REPOSITORY="$(f_restic_repo_url)"
-    f_sshargs="$(f_restic_sshargs)"
-    f_sid="$g_restic_sid"
-    if [[ -n "$f_sid" ]]; then
-      restic ls "$f_sid" "$g_lspath" -o "sftp.args=${f_sshargs}" 2>&1 | head -200
-      exit 0
-    fi
-    restic ls latest "$g_lspath" -o "sftp.args=${f_sshargs}" 2>&1 | head -200
-    exit 0
-  fi
-  printf '{"ok":false,"error":"restic not available or not configured"}\n'
-  exit 1
-fi
-
-### Source access helpers ###
-
-# Print the path/URL under which <relpath> (below the snapshot's symbios/)
-# can be read.
-function f_snap_path {
-  local f_rel="$1"
-  case "$g_bk_src_kind" in
-    local-rsync)  echo "${g_bk_snap_base}/backup-${g_date}/symbios/${f_rel}" ;;
-    remote-rsync) echo "${g_bk_user}@${g_bk_host}:${g_bk_path}/$(hostname)/backup-${g_date}/symbios/${f_rel}" ;;
-    *)            echo "${g_tmp}/archive-root/symbios/${f_rel}" ;;
-  esac
+    try:
+        d = json.loads(line)
+    except Exception:
+        continue
+    if d.get('message_type') == 'node' or d.get('struct_type') == 'node':
+        p = d.get('path')
+        if p:
+            print(p)
+" > "${g_tmp}/snap-paths"
 }
 
-# Print the remote shell path of a relative snapshot path (for ssh cmds).
-function f_snap_remote_path {
-  echo "${g_bk_path}/$(hostname)/backup-${g_date}/symbios/$1"
-}
-
-# True if the given relative directory exists in the snapshot source.
+# True if the given absolute directory exists in the snapshot.
 function f_snap_has_dir {
-  local f_rel="$1"
-  case "$g_bk_src_kind" in
-    local-rsync|*-archive)
-      [[ -d "$(f_snap_path "$f_rel")" ]] && return 0 ;;
-    remote-rsync)
-      f_bk_rsh "test -d '$(f_snap_remote_path "$f_rel")'" >/dev/null 2>&1 && return 0 ;;
-  esac
-  return 1
+  [[ -s "${g_tmp}/snap-paths" ]] || f_snap_index
+  grep -qxF "$1" "${g_tmp}/snap-paths"
 }
 
 # List the *.sql.gz dump basenames available in the snapshot's backups dir.
 function f_list_snap_dumps {
-  case "$g_bk_src_kind" in
-    local-rsync|*-archive)
-      ls -1 "$(f_snap_path "backups")"/*.sql.gz 2>/dev/null | xargs -n1 basename 2>/dev/null ;;
-    remote-rsync)
-      f_bk_rsh "ls -1 '$(f_snap_remote_path "backups")'/*.sql.gz 2>/dev/null" 2>/dev/null \
-        | sed 's#.*/##' ;;
-  esac
+  [[ -s "${g_tmp}/snap-paths" ]] || f_snap_index
+  grep "^${g_data_root}/backups/[^/]*\.sql\.gz$" "${g_tmp}/snap-paths" | sed 's#.*/##'
 }
 
 # Stream one dump (by basename) from the snapshot, already decompressed,
 # so it can be piped into a database container.
 function f_cat_dump {
-  local f_name="$1"
-  local f_full="$(f_snap_path "backups")/${f_name}"
-  case "$g_bk_src_kind" in
-    local-rsync|*-archive)
-      zcat "$f_full" ;;
-    remote-rsync)
-      f_bk_rsh "cat '$(f_snap_remote_path "backups")/${f_name}'" 2>/dev/null | zcat ;;
-  esac
+  f_r_restic dump "$g_restic_sid" "${g_data_root}/backups/$1" | zcat
 }
 
-# For archive sources: extract the needed members once into a staging dir.
-function f_extract_archive_members {
-  local f_members=()
-  [[ "$g_bk_src_kind" == *-archive && "$g_scope" != "--full" ]] || return 0
-  mkdir -p "${g_tmp}/archive-root"
-  local f_d
-  for f_d in ${g_rel_dirs[@]+"${g_rel_dirs[@]}"}
-  do
-    f_members+=("symbios/${f_d}")
-  done
-  f_members+=("symbios/backups")
-  g_echo "Reading encrypted archive (${g_src_desc}) ..."
-  case "$g_bk_src_kind" in
-    local-archive)
-      openssl enc -d "-$g_bk_cipher" -pbkdf2 -iter "$g_bk_kdf_iter" \
-          -pass file:"$g_bk_pw_file" \
-        -in "${g_bk_snap_base}/$(f_bk_archive_name "$g_date")" \
-        | tar -xzf - -C "${g_tmp}/archive-root" --wildcards "${f_members[@]}" ;;
-    remote-archive)
-      f_bk_rsh "cat '${g_bk_path}/$(hostname)/$(f_bk_archive_name "$g_date")'" \
-        | openssl enc -d "-$g_bk_cipher" -pbkdf2 -iter "$g_bk_kdf_iter" \
-            -pass file:"$g_bk_pw_file" \
-        | tar -xzf - -C "${g_tmp}/archive-root" --wildcards "${f_members[@]}" ;;
-  esac
-}
+### find / ls actions (read-only, no scope resolution needed) ###
+
+if [[ "$g_action" == "find" ]]
+then
+  f_r_restic find "$g_pattern" "$g_restic_sid" --json 2>/dev/null | python3 -c "
+import sys, json
+res = []
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    data = []
+for snap in data:
+    for m in snap.get('matches') or []:
+        p = m.get('path')
+        if p:
+            res.append(p)
+print(json.dumps({'ok': True, 'matches': res}))
+"
+  exit 0
+fi
+
+if [[ "$g_action" == "ls" ]]
+then
+  f_r_restic ls "$g_restic_sid" "$g_lspath" 2>/dev/null | head -200
+  exit 0
+fi
 
 ### Scope resolution ###
 
@@ -377,7 +287,7 @@ function f_collect_scope_dirs {
   for f_cand in "services/$g_scope" "base-services/$g_scope"
   do
     # Include a directory if it exists in the snapshot OR on this system
-    if f_snap_has_dir "$f_cand" || [[ -e "${g_data_root}/${f_cand}" ]]
+    if f_snap_has_dir "${g_data_root}/${f_cand}" || [[ -e "${g_data_root}/${f_cand}" ]]
     then
       g_rel_dirs+=("$f_cand")
     fi
@@ -408,14 +318,12 @@ function f_build_plan {
     echo "Reapply all SymbiOS configuration (playbooks)" >> "$g_steps_file"
     echo "Everything that changed AFTER $g_date will be lost (services created later are removed)." >> "$g_warns_file"
     echo "The server will be unreachable for several minutes." >> "$g_warns_file"
-    [[ "$g_bk_src_kind" == *-archive ]] && \
-      echo "Archive restore cannot delete files created after $g_date; newer files stay in place." >> "$g_warns_file"
     return 0
   fi
 
   for f_dir in ${g_rel_dirs[@]+"${g_rel_dirs[@]}"}
   do
-    if ! f_snap_has_dir "$f_dir"
+    if ! f_snap_has_dir "${g_data_root}/${f_dir}"
     then
       echo "Directory ${g_data_root}/${f_dir} does not exist in snapshot $g_date." >> "$g_warns_file"
     fi
@@ -468,6 +376,18 @@ function f_build_plan {
 }
 
 f_build_plan
+
+# Emit a JSON string array from newline-separated values on stdin.
+function f_json_array_stdin {
+  local f_first=1 f_item f_out="["
+  while IFS= read -r f_item
+  do
+    [[ -z "$f_item" ]] && continue
+    [[ $f_first -eq 1 ]] && f_first=0 || f_out="$f_out,"
+    f_out="$f_out$(printf '%s' "$f_item" | f_json_escape)"
+  done
+  echo "$f_out]"
+}
 
 ### Output plan (also for restore without --yes) ###
 # --file is handled by its own branch below (it has a dedicated plan output).
@@ -523,21 +443,27 @@ function f_start_stacks {
   done
 }
 
-# Copy one directory tree from the snapshot back onto the live system.
-function f_restore_dir {
-  local f_rel="$1"
-  local f_src f_dst="${g_data_root}/${f_rel}"
-  mkdir -p "$f_dst"
-  case "$g_bk_src_kind" in
-    local-rsync)
-      rsync -aXAH --delete --exclude-from="${g_tmp}/restore-excludes" \
-        "$(f_snap_path "$f_rel")/" "$f_dst/" ;;
-    remote-rsync)
-      rsync -aXAH --delete --exclude-from="${g_tmp}/restore-excludes" \
-        -e "ssh $(f_bk_ssh_opts)" "$(f_snap_path "$f_rel")/" "$f_dst/" ;;
-    local-archive|remote-archive)
-      rsync -aXAH "$(f_snap_path "$f_rel")/" "$f_dst/" ;;
-  esac
+# Restore the scope directories from the snapshot back onto the live system.
+# The --include patterns (original absolute snapshot paths) restrict BOTH
+# the restore and the --delete walk to the service directories: files that
+# appeared there after the snapshot are removed, everything else on the
+# system is never touched.
+function f_restore_scope_dirs {
+  local f_args=()
+  local f_dir
+  for f_dir in ${g_rel_dirs[@]+"${g_rel_dirs[@]}"}
+  do
+    f_snap_has_dir "${g_data_root}/${f_dir}" || continue
+    g_echo "Restoring ${g_data_root}/${f_dir}"
+    f_args+=(--include "${g_data_root}/${f_dir}")
+  done
+  [[ ${#f_args[@]} -gt 0 ]] || return 0
+  if ! f_r_restic restore "$g_restic_sid" --target / --delete "${f_args[@]}"
+  then
+    g_echo_error "Restic restore failed for $g_scope - see the output above."
+    return 1
+  fi
+  return 0
 }
 
 # Import database dumps of the restored service into their containers.
@@ -589,17 +515,96 @@ function f_import_db_dumps {
   done < "${g_tmp}/tokens"
 }
 
-# Write the rsync exclude file used by f_restore_dir. Full restores reuse the
-# backup exclude list (keeps docker internals and the snapshot store intact);
-# service restores start with an empty list (the service dir is restored as-is).
-function f_write_restore_excludes {
-  if [[ "$g_scope" == "--full" ]]
-  then
-    f_bk_write_excludes > "${g_tmp}/restore-excludes"
-  else
-    : > "${g_tmp}/restore-excludes"
-  fi
+# Write the include patterns for the full restore: the restore scopes as
+# plain includes, the backup excludes as NEGATED includes. A negated
+# pattern keeps a path out of the restore AND out of the --delete walk
+# (local backup repository, docker internals, repository password file).
+function f_write_restore_includes {
+  f_bk_write_excludes "${g_tmp}/backup-excludes"
+  {
+    # Restore scopes: the whole data root plus the host's root SSH dir
+    # (both are the backup sources).
+    echo "$g_data_root"
+    echo "${g_data_root}/**"
+    if grep -qx "/root/.ssh" "${g_tmp}/snap-paths" 2>/dev/null
+    then
+      echo "/root/.ssh"
+      echo "/root/.ssh/**"
+    fi
+    # Protected paths derived from the backup exclude list: "**/x" (a
+    # directory anywhere in the tree) becomes "!**/x/**", a pattern that
+    # already ends in a glob is negated as-is.
+    local f_line
+    while IFS= read -r f_line
+    do
+      [[ -n "$f_line" ]] || continue
+      f_line="${f_line%/}"
+      [[ -z "$f_line" ]] && continue
+      case "$f_line" in
+        *\*) echo "!$f_line" ;;
+        *)   echo "!${f_line}/**" ;;
+      esac
+    done < "${g_tmp}/backup-excludes"
+  } > "${g_tmp}/restore-includes"
+  # Note: include patterns that end without a glob get "/**" appended so
+  # the whole subtree is protected, matching the rsync-era semantics.
 }
+
+# Build the --include argument array from the include pattern file.
+# Usage: f_include_args <file> (appends to the g_inc_args array).
+function f_include_args {
+  local f_line
+  while IFS= read -r f_line
+  do
+    [[ -n "$f_line" ]] && g_inc_args+=(--include "$f_line")
+  done < "$1"
+}
+
+### Single file restore ###
+
+if [[ "$g_scope" == "--file" ]]
+then
+  # Destination: explicit --target, original location (--to-original)
+  # or a staging directory below the data root.
+  g_dest="$g_target"
+  if [[ -z "$g_dest" ]]
+  then
+    if [[ -n "$g_to_original" ]]
+    then
+      g_dest="/"
+    else
+      g_dest="${g_data_root}/restored-files/$(date +%Y%m%d-%H%M%S)"
+    fi
+  fi
+  g_steps="restic restore $g_restic_sid --include $g_file --target $g_dest"
+  if [[ "$g_action" == "plan" || -z "$g_yes" ]]
+  then
+    printf '{"ok":true,"action":"plan","date":"%s","scope":"--file","file":%s,"source":%s,"steps":[%s]}\n' \
+      "$g_date" "$(printf '%s' "$g_file" | f_json_escape)" \
+      "$(printf '%s' "$g_src_desc" | f_json_escape)" \
+      "$(printf '%s' "$g_steps" | f_json_escape)"
+    exit 0
+  fi
+  # The include pattern is the original absolute snapshot path; with
+  # --target / the file returns to its exact original location, with a
+  # staging target it lands below <target>/<original path>.
+  if ! f_snap_index 2>/dev/null || ! grep -qx "$g_file" "${g_tmp}/snap-paths"
+  then
+    g_echo_warn "$g_file is not part of snapshot $g_date - restic will fail if it does not exist"
+  fi
+  mkdir -p "$g_dest"
+  g_echo "Restoring file(s) $g_file from snapshot $g_restic_sid to $g_dest"
+  if f_r_restic restore "$g_restic_sid" --include "$g_file" --target "$g_dest"
+  then
+    g_echo_ok "File restore completed to $g_dest"
+  else
+    g_echo_error "File restore failed - see the output above."
+    exit 1
+  fi
+  exit 0
+fi
+
+### Service / full restore ###
 
 if [[ "$g_scope" != "--full" ]]
 then
@@ -609,81 +614,35 @@ then
   do
     g_abs_dirs+=("${g_data_root}/${g_d}")
   done
-  # Archives need their contents staged before anything is touched
-  f_extract_archive_members
-  if [[ "$g_scope" == "--file" && -n "$g_file" ]]; then
-    if [[ "$g_bk_src_kind" == "remote-restic" ]] && command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]]; then
-      export RESTIC_PASSWORD_FILE="${g_bk_restic_pw_file}"
-      export RESTIC_REPOSITORY="$(f_restic_repo_url)"
-      f_sshargs="$(f_restic_sshargs)"
-      f_sid="$g_restic_sid"
-      [[ -z "$f_sid" ]] && f_sid="latest"
-      local f_dest="${g_target}"
-      if [[ -z "$f_dest" ]]; then
-        if [[ -n "$g_to_original" ]]; then
-          f_dest="/"
-        else
-          f_dest="/symbios/restored-files/$(date +%Y%m%d-%H%M%S)"
-        fi
-      fi
-      mkdir -p "$f_dest"
-      g_echo "Restoring file(s) $g_file from snapshot $f_sid to $f_dest"
-      if [[ -n "$g_yes" || "$g_action" == "plan" ]]; then
-        if [[ "$g_action" == "plan" ]]; then
-          printf '{"ok":true,"steps":["restic restore %s --include %s --target %s"],"source":"%s"}\n' "$f_sid" "$g_file" "$f_dest" "$(printf '%s' "$g_src_desc" | sed 's/"/\\"/g')"
-          exit 0
-        fi
-        restic restore "$f_sid" --include "$g_file" --target "$f_dest" -o "sftp.args=${f_sshargs}"
-        g_echo_ok "File restore completed to $f_dest"
-        exit $?
-      else
-        printf '{"ok":true,"steps":["restic restore %s --include %s --target %s (needs --yes)"],"source":"%s"}\n' "$f_sid" "$g_file" "$f_dest" "$(printf '%s' "$g_src_desc" | sed 's/"/\\"/g')"
-        exit 0
-      fi
-    fi
-    f_die_json "Restic file restore not available"
-  fi
-  f_write_restore_excludes
   f_stop_stacks "${g_abs_dirs[@]}"
-  for g_d in ${g_rel_dirs[@]+"${g_rel_dirs[@]}"}
-  do
-    if f_snap_has_dir "$g_d"
-    then
-      g_echo "Restoring ${g_data_root}/${g_d}"
-      f_restore_dir "$g_d" || g_echo_error "Restore of ${g_d} failed"
-    fi
-  done
+  if ! f_restore_scope_dirs
+  then
+    f_start_stacks "${g_abs_dirs[@]}"
+    exit 1
+  fi
   f_start_stacks "${g_abs_dirs[@]}"
   sleep 5
   f_import_db_dumps
-  rm -rf "${g_tmp}/archive-root"
 else
   # --- Full system restore ---
-  f_write_restore_excludes
+  f_snap_index
+  f_write_restore_includes
   g_echo_warn "FULL SYSTEM RESTORE from $g_date starting in 10 seconds"
   sleep 10
   g_echo "Stopping Docker"
   systemctl stop docker.socket docker.service containerd.service 2>/dev/null || true
   sleep 3
-  if [[ "$g_bk_src_kind" == *-archive ]]
+  g_echo "Restoring ${g_data_root} from $g_date (${g_src_desc})"
+  # --delete only in include mode (see header): removes files that
+  # appeared below the data root after the snapshot; the negated includes
+  # protect the local backup repository, docker internals and the
+  # repository password file.
+  g_inc_args=()
+  f_include_args "${g_tmp}/restore-includes"
+  if ! f_r_restic restore "$g_restic_sid" --target / --delete "${g_inc_args[@]}"
   then
-    # Archives are extracted directly onto the live filesystem
-    g_echo "Extracting full snapshot archive (${g_src_desc})"
-    case "$g_bk_src_kind" in
-      local-archive)
-        openssl enc -d "-$g_bk_cipher" -pbkdf2 -iter "$g_bk_kdf_iter" \
-            -pass file:"$g_bk_pw_file" \
-          -in "${g_bk_snap_base}/$(f_bk_archive_name "$g_date")" \
-          | tar -xzf - -C "/" ;;
-      remote-archive)
-        f_bk_rsh "cat '${g_bk_path}/$(hostname)/$(f_bk_archive_name "$g_date")'" \
-          | openssl enc -d "-$g_bk_cipher" -pbkdf2 -iter "$g_bk_kdf_iter" \
-              -pass file:"$g_bk_pw_file" \
-          | tar -xzf - -C "/" ;;
-    esac
-  else
-    g_echo "Restoring ${g_data_root} from snapshot"
-    f_restore_dir ""
+    g_echo_error "Restic restore failed - the system may be in an inconsistent state!"
+    g_echo "Starting Docker anyway"
   fi
   g_echo "Starting Docker"
   systemctl start containerd.service docker.socket docker.service 2>/dev/null || true

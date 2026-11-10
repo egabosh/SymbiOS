@@ -14,9 +14,17 @@
       <div>A backup is currently running...</div>
     </div>
   {% else %}
-    <div class="alert alert-danger d-flex align-items-center gap-2">
-      <i class="bi bi-x-circle-fill"></i>
-      <div>The last backup failed: {{ status.message }}</div>
+    <div class="alert alert-danger d-flex align-items-start gap-2">
+      <i class="bi bi-x-circle-fill mt-1"></i>
+      <div>
+        <div>The last backup failed: {{ status.message }}</div>
+        {% if status.errors %}
+          <hr class="my-2">
+          <ul class="small mb-0 ps-3">
+            {% for e in status.errors %}<li><code>{{ e }}</code></li>{% endfor %}
+          </ul>
+        {% endif %}
+      </div>
     </div>
   {% endif %}
 {% else %}
@@ -58,7 +66,7 @@
               <input type="radio" name="backup_target" value="local" class="me-2"
                      {% if not backup_servers_view %}checked{% endif %} onchange="toggleTarget()">
               <strong><i class="bi bi-hdd me-1"></i> Only on this server</strong>
-              <div class="small text-muted mt-1">Backups are stored locally in <code>/symbios/backup</code>. Protects against deleted files and botched updates - but not against hardware failure.</div>
+              <div class="small text-muted mt-1">Backups are stored locally in <code>/symbios/backup/restic</code>. Protects against deleted files and botched updates - but not against hardware failure.</div>
             </label>
           </div>
           <div class="col-md-6">
@@ -237,34 +245,6 @@
               <i class="bi bi-plus-lg"></i> Add server
             </button>
 
-          <div class="mt-3 form-check form-switch">
-            <input class="form-check-input" type="checkbox" name="backup_encryption" id="backup_encryption"
-                   role="switch" {% if vars.backup_encryption %}checked{% endif %}>
-            <label class="form-check-label" for="backup_encryption">
-              <strong>Encrypt backups on the server</strong>
-              <span class="text-muted small">- recommended when you do not fully control the server (e.g. rented root server, cloud storage). The nightly backups are then stored there encrypted; nobody can read them without the passphrase below.</span>
-            </label>
-          </div>
-
-          <div id="encryption-panel" class="ms-4 mt-2 border-start ps-3">
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="passphraseAction('generate')" id="pw-gen-btn">
-              <i class="bi bi-magic"></i> Generate passphrase
-            </button>
-            <button type="button" class="btn btn-sm btn-outline-secondary ms-1" onclick="passphraseAction('show')">
-              <i class="bi bi-eye"></i> Show passphrase
-            </button>
-            <div class="input-group input-group-sm mt-2 {% if not vars.backup_encryption %}d-none{% endif %}" id="pw-display-group">
-              <input type="text" class="form-control font-monospace bg-white" id="pw-display" readonly
-                     placeholder="(not shown yet)">
-              <button class="btn btn-outline-secondary" type="button" id="copy-pw-btn"
-                      onclick="copyToClipboard('pw-display')"><i class="bi bi-clipboard"></i></button>
-            </div>
-            <div class="small text-muted mt-1">
-              Write this passphrase down somewhere safe (e.g. printed in a drawer). Without it,
-              encrypted backups can never be opened again - not even by SymbiOS.
-            </div>
-          </div>
-
           <div class="mt-3">
             <button type="button" class="btn btn-outline-secondary" id="test-btn" onclick="testConnection()">
               <i class="bi bi-plug"></i> Test connection
@@ -275,6 +255,34 @@
               <code>~/.ssh/authorized_keys</code> of the backup user on each target server:
             </div>
             <textarea class="form-control font-monospace small mt-1" rows="2" readonly id="pubkey-box">{{ data.pubkey|default:'' }}</textarea>
+          </div>
+        </div>
+
+        <!-- Repository password: every restic repository (local and remote)
+             is encrypted with this single password. -->
+        <div class="mt-3 border-top pt-3">
+          <div class="fw-semibold"><i class="bi bi-key me-1"></i>Repository password</div>
+          <div class="small text-muted">
+            Every backup is always encrypted (restic) with this one password - the local
+            repository and all remote servers alike.
+          </div>
+          <div class="mt-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="passwordAction('generate')" id="pw-gen-btn">
+              <i class="bi bi-magic"></i> Generate password
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary ms-1" onclick="passwordAction('show')">
+              <i class="bi bi-eye"></i> Show password
+            </button>
+            <div class="input-group input-group-sm mt-2 d-none" id="pw-display-group">
+              <input type="text" class="form-control font-monospace bg-white" id="pw-display" readonly
+                     placeholder="(not shown yet)">
+              <button class="btn btn-outline-secondary" type="button" id="copy-pw-btn"
+                      onclick="copyToClipboard('pw-display')"><i class="bi bi-clipboard"></i></button>
+            </div>
+            <div class="small text-muted mt-1">
+              Write this password down somewhere safe (e.g. printed in a drawer). Without it,
+              the backups can never be opened again - not even by SymbiOS.
+            </div>
           </div>
         </div>
       </div>
@@ -309,10 +317,10 @@
       <div class="card-header"><i class="bi bi-info-circle"></i> How it works</div>
       <div class="card-body small">
         <ul class="mb-2 ps-3">
-          <li>Every night at 00:05 a complete snapshot of your data (<code>/symbios</code>) is created.</li>
+          <li>Every night at 00:05 a snapshot of your data (<code>/symbios</code>) is created.</li>
           <li>Databases (Nextcloud etc.) and the user directory are exported first, so snapshots are always consistent.</li>
-          <li>Unchanged files are stored only once (hard links), so snapshots need far less space than a full copy every day.</li>
-          <li>With a backup server, everything is mirrored there; with encryption enabled as an unreadable archive.</li>
+          <li>Backups are made with <strong>restic</strong>: always encrypted, and unchanged data is stored only once (deduplication), so snapshots need far less space than a full copy every day.</li>
+          <li>With backup servers, everything is mirrored there - each server keeps its own history.</li>
         </ul>
         <hr>
         <strong><i class="bi bi-life-preserver me-1"></i>Restoring</strong>
@@ -446,11 +454,11 @@ function toggleTarget() {
   document.getElementById('remote-panel').style.display = remote ? '' : 'none';
 }
 
-/* Fetch or reveal the encryption passphrase */
-function passphraseAction(action) {
+/* Fetch or reveal the restic repository password */
+function passwordAction(action) {
   var fd = new FormData();
   fd.append('action', action);
-  fetch('{% url "settings_backup_passphrase" %}', {
+  fetch('{% url "settings_backup_password" %}', {
     method: 'POST', body: fd, credentials: 'same-origin',
     headers: { 'X-CSRFToken': getCsrfToken(), 'X-Requested-With': 'XMLHttpRequest' }
   })
@@ -459,10 +467,10 @@ function passphraseAction(action) {
       if (!data.ok) { alert(data.error || 'Error'); return; }
       var group = document.getElementById('pw-display-group');
       group.classList.remove('d-none');
-      document.getElementById('pw-display').value = data.passphrase || '';
+      document.getElementById('pw-display').value = data.password || '';
       if (data.generated) {
         group.insertAdjacentHTML('afterend',
-          '<div class="alert alert-success py-2 small mt-2">Passphrase created. Please store it safely now!</div>');
+          '<div class="alert alert-success py-2 small mt-2">Password created. Please store it safely now!</div>');
       }
     })
     .catch(err => alert('Error: ' + err.message));
@@ -551,7 +559,7 @@ function renderSnapshots(snapshots, services) {
     if (s.local) where.push('<i class="bi bi-hdd" title="On this server"></i> this server');
     /* s.servers: names of the remote servers that hold this snapshot */
     (s.servers || []).forEach(function (n) {
-      where.push((s.encrypted ? '<i class="bi bi-lock-fill" title="Encrypted"></i> ' : '<i class="bi bi-cloud-check" title=""></i> ') + escapeHtml(n));
+      where.push('<i class="bi bi-cloud-check" title="Remote repository (encrypted)"></i> ' + escapeHtml(n));
     });
     if (!where.length) where.push('<span class="text-muted">-</span>');
     tbody.insertAdjacentHTML('beforeend',

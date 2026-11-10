@@ -64,7 +64,6 @@ Slug: `backup`
 | `backup_server_port` | number | SSH port |  | 22 |  |
 | `backup_server_user` | text | SSH user |  | root |  |
 | `backup_server_path` | text | Target path |  |  |  |
-| `backup_encryption` | bool | Encrypt backups | yes | false |  |
 | `backup_exclude` | multiline | Exclude patterns |  | `[]` |  |
 
 ## `symbios-settings-dns`
