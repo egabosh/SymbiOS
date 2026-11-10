@@ -186,7 +186,12 @@
                 # PAPERLESS_OIDC_* settings - the previous vars with that
                 # prefix were silently ignored, so SSO never worked.
                 - PAPERLESS_APPS=allauth.socialaccount.providers.openid_connect
-                - 'PAPERLESS_SOCIALACCOUNT_PROVIDERS={"openid_connect": {"SCOPE": ["openid", "profile", "email", "groups"], "OAUTH_PKCE_ENABLED": true, "APPS": [{"provider_id": "authelia", "name": "Authelia", "client_id": "paperless", "secret": "{{ lookup('file', '/symbios/services/paperless/oidc_password') | trim }}", "settings": {"server_url": "https://auth.{{ base_domain }}", "token_auth_method": "client_secret_basic"}}]}}'
+                # email_authentication links an OIDC login to the existing
+                # user row carrying the same verified e-mail (allauth
+                # SocialLogin._lookup_by_email) - required so pre-existing
+                # accounts keep ownership and flags instead of duplicated
+                # rows being created on first SSO login.
+                - 'PAPERLESS_SOCIALACCOUNT_PROVIDERS={"openid_connect": {"SCOPE": ["openid", "profile", "email", "groups"], "OAUTH_PKCE_ENABLED": true, "APPS": [{"provider_id": "authelia", "name": "Authelia", "client_id": "paperless", "secret": "{{ lookup('file', '/symbios/services/paperless/oidc_password') | trim }}", "settings": {"server_url": "https://auth.{{ base_domain }}", "token_auth_method": "client_secret_basic", "email_authentication": true}}]}}'
                 - PAPERLESS_SOCIAL_AUTO_SIGNUP=true
                 - PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS=true
                 # Skip the local login form: /accounts/login/ forwards
@@ -266,10 +271,14 @@
     # /oidc/callback/ value was never used by paperless and would fail
     # with a redirect_uri mismatch. token_endpoint_auth_method must match
     # settings.token_auth_method above (see the Authelia paperless doc).
+    # Since Authelia v4.39 the ID token only carries spec-required claims;
+    # allauth reads the user from it, so the id_token policy restores
+    # email/preferred_username/name (same as matrix/forgejo).
     - name: Write OIDC config in authelias configuration.yml for paperless
       include_tasks: ../shared-tasks/authelia-oidc.yml
       vars:
         oidc_client_name: "Paperless"
+        oidc_claims_policy: id_token
         oidc_redirect_uris:
           - "https://paperless.{{ base_domain }}/accounts/oidc/authelia/login/callback/"
         oidc_token_endpoint_auth_method: "client_secret_basic"
