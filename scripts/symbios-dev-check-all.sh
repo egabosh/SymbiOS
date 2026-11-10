@@ -17,6 +17,14 @@
 # hostname argument is optional; base_domain defaults to the value from
 # /symbios/base-services/symbios-ui/config/inventory.yml.
 #
+# DESTRUCTIVE - DEV SYSTEM ONLY (see the host guard below and AGENTS.md):
+# phases 4-8 uninstall every service under test. "reset" wipes the service
+# dir including userdata, "full" additionally removes the service dir, the
+# Traefik provider, the healthcheck, the LDAP groups and the Authelia
+# blocks. The suite therefore refuses to run on any host that is not the
+# throwaway test system (base_domain symbios-dev.*). Only --list-services
+# and --help work everywhere.
+#
 # Usage:
 #   symbios-dev-check-all.sh [--service <name>] [--list-services]
 #
@@ -38,6 +46,11 @@ f_reset='\033[0m'
 # --- Global state ---
 g_hostname=""
 g_base_domain=""
+g_inventory_file="/symbios/base-services/symbios-ui/config/inventory.yml"
+# Hosts allowed to run the destructive test phases (prefix match on the
+# deployed base_domain and on the short hostname, so a renamed test box
+# still passes as long as it keeps the symbios-dev domain).
+g_allowed_hosts=("symbios-dev")
 g_insecure=(-k -s)
 g_log_dir="/tmp/symbios-check-$$"
 g_total=0
@@ -111,6 +124,13 @@ function f_usage {
   echo "denied). The test user and its group memberships are cleaned up."
   echo ""
   echo "Runs DIRECTLY ON the SymbiOS host (no SSH involved)."
+  echo ""
+  echo "DESTRUCTIVE: the suite uninstalls every service under test ('reset'"
+  echo "wipes the service dir including userdata, 'full' also removes the dir,"
+  echo "Traefik provider, healthcheck, LDAP groups and Authelia blocks). It"
+  echo "therefore refuses to run anywhere but the test system"
+  echo "(base_domain symbios-dev.*). Only --list-services and --help work"
+  echo "on other hosts."
   echo ""
   echo "Arguments:"
   echo "  --service X       Only test service X (can be repeated)"
@@ -418,6 +438,52 @@ function f_oidc_flow_check {
   echo "$f_code"
 }
 
+# --- Host guard: destructive phases only on the dev system ---
+#
+# The suite uninstalls every service it touches: "reset" wipes the service
+# dir including userdata, "full" additionally removes the dir, the Traefik
+# provider, the healthcheck, the LDAP groups and the Authelia blocks. One
+# run against a production host therefore destroys all installed services
+# and their data, so every host outside g_allowed_hosts aborts before the
+# first destructive step. The check reads the DEPLOYED inventory, not the
+# positional CLI arguments (those only steer URLs and prove nothing).
+
+function f_host_allowed {
+  local f_candidate
+  local f_allowed
+  f_candidate="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')"
+  f_candidate="${f_candidate%.}"
+  [[ -z "$f_candidate" ]] && return 1
+  for f_allowed in "${g_allowed_hosts[@]}"
+  do
+    if [[ "$f_candidate" == "$f_allowed" || "$f_candidate" == "$f_allowed".* ]]
+    then
+      return 0
+    fi
+  done
+  return 1
+}
+
+function f_guard_host {
+  local f_real_domain
+  local f_real_host
+  f_real_domain="$(yq -r '.all.vars.base_domain // ""' "$g_inventory_file" 2>/dev/null || true)"
+  f_real_host="$(hostname 2>/dev/null || true)"
+  if f_host_allowed "$f_real_domain" || f_host_allowed "$f_real_host"
+  then
+    return 0
+  fi
+  echo -e "${f_red}ABORT: this test suite may only run on ${g_allowed_hosts[*]}.${f_reset}"
+  echo "Host: ${f_real_host:-unknown}  base_domain: ${f_real_domain:-unknown} (${g_inventory_file})"
+  echo ""
+  echo "The suite uninstalls every service under test: 'reset' wipes the"
+  echo "service dir including userdata, 'full' removes the dir, the Traefik"
+  echo "provider, the healthcheck, the LDAP groups and the Authelia blocks."
+  echo "That is only acceptable on the throwaway test system."
+  echo "Read-only on any host: --list-services, --help."
+  exit 1
+}
+
 # --- Parse arguments ---
 
 g_list_services=0
@@ -461,11 +527,11 @@ fi
 if [[ -z "$g_base_domain" ]]
 then
   # Read base_domain from the local inventory (script runs on the host)
-  g_base_domain="$(yq -r '.all.vars.base_domain' /symbios/base-services/symbios-ui/config/inventory.yml 2>/dev/null || echo "")"
+  g_base_domain="$(yq -r '.all.vars.base_domain' "$g_inventory_file" 2>/dev/null || echo "")"
 fi
 
 # data_root is where the runchecks.d healthchecks live (host layout)
-g_data_root="$(yq -r '.all.vars.data_root // "/symbios"' /symbios/base-services/symbios-ui/config/inventory.yml 2>/dev/null || echo "/symbios")"
+g_data_root="$(yq -r '.all.vars.data_root // "/symbios"' "$g_inventory_file" 2>/dev/null || echo "/symbios")"
 g_data_root="${g_data_root%/}"
 
 # --- Handle --list-services ---
@@ -508,6 +574,9 @@ then
 
   exit 0
 fi
+
+# Destructive from here on - refuse to run anywhere but the test system.
+f_guard_host
 
 mkdir -p "$g_log_dir"
 
