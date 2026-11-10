@@ -1,0 +1,5 @@
+<mediasources>
+    <network>
+        <location id="0">sftp://{{ kodi_options.sftp_user | default('kodi') }}@{{ kodi_options.sftp_server }}:{{ kodi_options.sftp_port | default(28) }}/</location>
+    </network>
+</mediasources>

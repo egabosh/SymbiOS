@@ -1,0 +1,685 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
+#     - traefik_network_gateway
+#   name: Kodi
+#   short_description: Deploy the Kodi media center on the host
+#   description: >-
+#     Installs Kodi 21 "Omega" (Debian Trixie) as a host service for direct TV
+#     playback. It runs standalone on tty7 under the dedicated kodi user and is
+#     switched against the SymbiOS desktop by switch-kodi-desk (Kodi starts
+#     automatically after boot, media-center mode). The JSON-RPC web server
+#     (Kodi Remote) listens on port 8081 with a generated Basic-auth password;
+#     direct access is LAN-only, global access runs through Authelia/Traefik at
+#     kodi.<base_domain> (group kodi). Optional: MariaDB media database backend
+#     (see services/kodidb.yml), SFTP media sources and automatic addon
+#     installation from mirrors.kodi.tv.
+#   url: "https://kodi.{{ base_domain }}"
+#   config:
+#     title: Kodi Options
+#     file: services/kodi/instances.yml
+#     fields:
+#       db_host:
+#         label: DB-Host
+#         type: text
+#         placeholder: 127.0.0.1
+#       db_port:
+#         label: DB-Port
+#         type: number
+#         default: '3307'
+#       db_user:
+#         label: DB-User
+#         type: text
+#         default: kodidb
+#       db_password:
+#         label: DB-Passwort
+#         type: password
+#       sftp_server:
+#         label: SFTP-Server
+#         type: text
+#         placeholder: 192.168.0.10
+#       sftp_port:
+#         label: SFTP-Port
+#         type: number
+#         default: '28'
+#       sftp_user:
+#         label: SFTP-User
+#         type: text
+#         default: kodi
+#       path_music:
+#         label: Musik-Pfad
+#         type: text
+#         placeholder: /media/music
+#       path_movies:
+#         label: Film-Pfad
+#         type: text
+#         placeholder: /media/movies
+#       path_series:
+#         label: Serien-Pfad
+#         type: text
+#         placeholder: /media/series
+#       path_music_videos:
+#         label: Musikvideo-Pfad
+#         type: text
+#         placeholder: /media/musicvideos
+#   service_control:
+#     services:
+#     - name: kodi-standalone
+#       type: systemd
+#       unit: kodi-standalone.service
+#       status: systemctl is-active kodi-standalone
+#     - name: switch-kodi-desk
+#       type: systemd
+#       unit: switch-kodi-desk.service
+#       status: systemctl is-active switch-kodi-desk
+#     logs:
+#     - name: kodi-standalone
+#       command: journalctl -u kodi-standalone --no-pager -n 100
+#   uninstall:
+#     stop: systemctl stop switch-kodi-desk kodi-standalone; rm -f /etc/systemd/system/kodi-standalone.service /etc/systemd/system/switch-kodi-desk.service
+#     program_paths:
+#       - /home/kodi/
+#       - /usr/local/sbin/switch-kodi-desk.sh
+#       - /symbios/base-services/traefik/providers/kodi.yml
+#       - /symbios/runchecks.d/symbios-healthcheck-kodi.check
+#     ldap_groups:
+#       - kodi
+#     authelia_blocks:
+#       - "kodi ACCESS CONTROL"
+#   actions:
+#     start: systemctl start switch-kodi-desk
+#     stop: systemctl stop switch-kodi-desk kodi-standalone
+#     restart: systemctl restart switch-kodi-desk
+#     reload: systemctl restart switch-kodi-desk
+#
+---
+
+- name: kodi
+  hosts: all
+  vars:
+    service_name: kodi
+    service_domain: "kodi.{{ base_domain }}"
+    # Options are managed by the WebUI (Kodi Options tab) and stored in the
+    # writable config dir, not in inventory.yml. Only one options row makes
+    # sense for a single media center; the first row of the list is used.
+    kodi_options_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/kodi/instances.yml"
+    # Addons installed automatically on first run (latest version fetched from
+    # mirrors.kodi.tv/addons/omega), plus one pinned repository addon.
+    kodi_addons_omega:
+      - resource.language.de_de
+      - plugin.video.invidious
+      - plugin.audio.podcasts
+      - plugin.video.ctuplinkrss
+      - plugin.video.vimeo
+      - plugin.video.fosdem
+    kodi_addon_mediathekview_url: "https://kodirepo.mediathekview.de/repo-mv/repository.mediathekview/repository.mediathekview-1.0.0.zip"
+  tasks:
+
+    # Load the options from the WebUI-managed config file. When the file does
+    # not exist yet (service not configured), kodi_options stays an empty dict
+    # and the optional features (DB, SFTP) simply stay off.
+    - name: Read options config file
+      ansible.builtin.slurp:
+        src: "{{ kodi_options_file }}"
+      register: kodi_options_slurp
+      failed_when: false
+
+    - name: Set kodi_options from config file (first row)
+      ansible.builtin.set_fact:
+        kodi_options: "{{ (kodi_options_slurp.content | default('') | b64decode) | from_yaml | default([]) | first | default({}) }}"
+      when: kodi_options_slurp.content | default('') | length > 0
+
+    # Kodi and its VFS/game/pvr addons; unzip for the addon installs below.
+    # The font packages provide the targets of the Estuary skin's font symlinks
+    # (without them the UI falls back to arial.ttf with LoadTTF errors in the
+    # log).
+    - name: Install Kodi packages
+      ansible.builtin.apt:
+        name:
+          - kodi
+          - kodi-pvr-iptvsimple
+          - kodi-vfs-sftp
+          - kodi-game-libretro
+          - kodi-peripheral-joystick
+          - lirc
+          - ir-keytable
+          - unzip
+          - acl
+          - fonts-noto-core
+          - fonts-roboto-unhinted
+        update_cache: no
+        install_recommends: no
+
+    # Dedicated user for the Kodi session (media-center mode). The home dir
+    # lives below /symbios/home, so the profile survives reboots on the LUKS
+    # volume. No shell: Kodi is not a login target. Group memberships grant
+    # access to the devices Kodi needs standalone: render/video for the DRM
+    # nodes (/dev/dri/renderD128 + card0, EGL/KMS output), input for the
+    # keyboard/mouse event nodes and audio for the sound cards
+    # (/dev/input/* are root:input 660, /dev/snd/* are root:audio 660).
+    - name: Ensure the local kodi service user exists
+      ansible.builtin.user:
+        name: kodi
+        comment: Kodi media center
+        home: /home/kodi
+        shell: /bin/false
+        groups: render,video,input,audio
+        append: true
+
+    # The home dir lives below data_root, which is 0750 root:root - grant the
+    # kodi user traverse access with a named ACL entry (it survives the chmod
+    # of basics.yml, which only touches the mask bits).
+    - name: Grant kodi traverse access on {{ data_root }}
+      ansible.builtin.shell: setfacl -m u:kodi:x "{{ data_root }}"
+      changed_when: false
+
+    - name: Create ~/.kodi directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: kodi
+        group: kodi
+        state: directory
+        mode: '0750'
+      loop:
+        - /home/kodi/.kodi
+        - /home/kodi/.kodi/userdata
+        - /home/kodi/.kodi/addons
+        - /home/kodi/.ssh
+
+    # Service dir for generated secrets (web server password).
+    - name: Create /symbios/services/kodi dir
+      ansible.builtin.file:
+        path: /symbios/services/kodi
+        owner: root
+        group: root
+        state: directory
+        mode: '0750'
+
+    # Basic-auth password of the Kodi JSON-RPC web server (Kodi Remote).
+    # Generated once and kept in the service dir; the seed below bakes it into
+    # guisettings.xml, the healthcheck reads it back.
+    - name: Generate Kodi web server password (first run only)
+      ansible.builtin.shell: pwgen -s 24 1 > /symbios/services/kodi/.kodi_web_pw && chmod 0600 /symbios/services/kodi/.kodi_web_pw
+      args:
+        creates: /symbios/services/kodi/.kodi_web_pw
+
+    # Seed the Kodi profile settings on the very first run only (force: false).
+    # After the first start Kodi owns guisettings.xml and keeps it updated.
+    # The web server (Kodi Remote / JSON-RPC) runs on 8081 with Basic auth;
+    # the language addon is preselected so the UI starts in German.
+    - name: Seed ~/.kodi/userdata/guisettings.xml (first start only)
+      ansible.builtin.copy:
+        dest: /home/kodi/.kodi/userdata/guisettings.xml
+        owner: kodi
+        group: kodi
+        mode: '0600'
+        force: false
+        content: |
+          <settings version="2">
+              <setting id="locale.language" default="true">resource.language.de_de</setting>
+              <setting id="services.webserver">true</setting>
+              <setting id="services.webserverport" default="true">8081</setting>
+              <setting id="services.webserverauthentication" default="true">true</setting>
+              <setting id="services.webserverusername" default="true">kodi</setting>
+              <setting id="services.webserverpassword">{{ lookup('file', '/symbios/services/kodi/.kodi_web_pw') | trim }}</setting>
+          </settings>
+
+    # Personal Kodi presets (addon_data for pvr.iptvsimple/podcasts/mediathekview,
+    # keymaps, peripheral_data) from the linux-setups repo. --ignore-existing so
+    # the managed files above (guisettings.xml with port 8081 + generated
+    # password) always win; runs once, marked by the preset addon_data dir.
+    - name: Deploy Kodi presets from linux-setups (first start only)
+      ansible.builtin.shell: |
+        f_dir=$(mktemp -d)
+        git clone --depth 1 https://github.com/egabosh/linux-setups.git "$f_dir/linux-setups"
+        rsync -a --ignore-existing "$f_dir/linux-setups/debian/kodi/kodi-settings/" /home/kodi/.kodi/
+        chown -R kodi:kodi /home/kodi/.kodi
+        rm -rf "$f_dir"
+      args:
+        creates: /home/kodi/.kodi/userdata/addon_data
+
+    # Estuary requests its fonts by lowercase-hyphenated names (notosans-regular.ttf,
+    # roboto-thin.ttf, notomono-regular.ttf). The skin's own symlinks only resolve when
+    # the font packages are installed, and Debian's Roboto packaging places
+    # Roboto-Thin.ttf one level deeper than the skin expects. As a fallback layer we
+    # provide all three names in special://home/media/Fonts - Kodi's LoadTTF looks there
+    # after the skin dir and matches file names case-insensitively.
+    - name: Create user font fallback dir
+      ansible.builtin.file:
+        path: /home/kodi/.kodi/media/Fonts
+        owner: kodi
+        group: kodi
+        state: directory
+        mode: '0750'
+
+    - name: Provide Estuary font fallbacks (notosans, notomono)
+      ansible.builtin.file:
+        path: "/home/kodi/.kodi/media/Fonts/{{ item.name }}"
+        owner: kodi
+        group: kodi
+        state: link
+        src: "{{ item.src }}"
+      loop:
+        - { name: notosans-regular.ttf, src: /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf }
+        - { name: notomono-regular.ttf, src: /usr/share/fonts/truetype/noto/NotoMono-Regular.ttf }
+
+    # Real file copy (not a link): the skin symlink of Roboto-Thin is dangling on
+    # Debian, so this path is the one Kodi actually loads for the clock font.
+    - name: Provide Estuary font fallback (roboto-thin)
+      ansible.builtin.copy:
+        src: /usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Thin.ttf
+        dest: /home/kodi/.kodi/media/Fonts/roboto-thin.ttf
+        owner: kodi
+        group: kodi
+        mode: '0640'
+
+    # Media database backend (KodiDB/MariaDB): written only while a DB host is
+    # configured, removed otherwise so Kodi falls back to its SQLite library.
+    - name: Write ~/.kodi/userdata/advancedsettings.xml (MySQL backend)
+      ansible.builtin.copy:
+        dest: /home/kodi/.kodi/userdata/advancedsettings.xml
+        owner: kodi
+        group: kodi
+        mode: '0600'
+        content: |
+          <advancedsettings>
+            <videodatabase>
+              <type>mysql</type>
+              <host>{{ kodi_options.db_host }}</host>
+              <port>{{ kodi_options.db_port | default(3307) }}</port>
+              <user>{{ kodi_options.db_user | default('kodidb') }}</user>
+              <pass>{{ kodi_options.db_password | default('') }}</pass>
+              <name>myKodiVideo</name>
+            </videodatabase>
+            <musicdatabase>
+              <type>mysql</type>
+              <host>{{ kodi_options.db_host }}</host>
+              <port>{{ kodi_options.db_port | default(3307) }}</port>
+              <user>{{ kodi_options.db_user | default('kodidb') }}</user>
+              <pass>{{ kodi_options.db_password | default('') }}</pass>
+              <name>myKodiMusic</name>
+            </musicdatabase>
+            <videolibrary>
+              <importwatchedstate>true</importwatchedstate>
+              <importresumepoint>true</importresumepoint>
+            </videolibrary>
+          </advancedsettings>
+      when: (kodi_options | default({})).db_host | default('') | length > 0
+
+    - name: Remove ~/.kodi/userdata/advancedsettings.xml (no DB configured)
+      ansible.builtin.file:
+        path: /home/kodi/.kodi/userdata/advancedsettings.xml
+        state: absent
+      when: (kodi_options | default({})).db_host | default('') | length == 0
+
+    # SFTP media sources (vfs.sftp): written only while a server is configured,
+    # removed otherwise. Only categories with a set path get a source entry.
+    # The source URLs stay user-less; the credentials live in userdata/
+    # passwords.xml (Kodi's password store maps the plain URL to the one
+    # carrying user@host), so vfs.sftp authenticates non-interactively without
+    # baking the user into every source path.
+    - name: Write ~/.kodi/userdata/sources.xml (SFTP sources)
+      ansible.builtin.template:
+        src: kodi/templates/sources.xml.j2
+        dest: /home/kodi/.kodi/userdata/sources.xml
+        owner: kodi
+        group: kodi
+        mode: '0600'
+      when: (kodi_options | default({})).sftp_server | default('') | length > 0
+
+    - name: Write ~/.kodi/userdata/mediasources.xml (SFTP media source)
+      ansible.builtin.template:
+        src: kodi/templates/mediasources.xml.j2
+        dest: /home/kodi/.kodi/userdata/mediasources.xml
+        owner: kodi
+        group: kodi
+        mode: '0600'
+      when: (kodi_options | default({})).sftp_server | default('') | length > 0
+
+    - name: Write ~/.kodi/userdata/passwords.xml (SFTP credentials)
+      ansible.builtin.template:
+        src: kodi/templates/passwords.xml.j2
+        dest: /home/kodi/.kodi/userdata/passwords.xml
+        owner: kodi
+        group: kodi
+        mode: '0600'
+      when: (kodi_options | default({})).sftp_server | default('') | length > 0
+
+    - name: Remove SFTP profile files (no SFTP configured)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /home/kodi/.kodi/userdata/sources.xml
+        - /home/kodi/.kodi/userdata/mediasources.xml
+        - /home/kodi/.kodi/userdata/passwords.xml
+      when: (kodi_options | default({})).sftp_server | default('') | length == 0
+
+    # SSH keypair for the kodi user: vfs.sftp authenticates non-interactively
+    # with it (the SFTP server side carries the public key, e.g. via the LDAP
+    # sshPublicKey of the SFTP user). Generated once.
+    - name: Generate SSH keypair for kodi (SFTP access)
+      ansible.builtin.shell: ssh-keygen -t ed25519 -f /home/kodi/.ssh/id_ed25519 -N "" -C "kodi@symbios" -q && chown -R kodi:kodi /home/kodi/.ssh
+      args:
+        creates: /home/kodi/.ssh/id_ed25519
+
+    - name: Show kodi SFTP public key (register it on the SFTP server)
+      ansible.builtin.debug:
+        msg: "Kodi SFTP public key (add it to the SFTP user, e.g. LDAP sshPublicKey): {{ lookup('file', '/home/kodi/.ssh/id_ed25519.pub') | trim }}"
+      when: (kodi_options | default({})).sftp_server | default('') | length > 0
+
+    # Record the SFTP server host keys so vfs.sftp never prompts. The file
+    # converges to the sorted unique set of known + scanned keys.
+    - name: Record SFTP server host keys for kodi (non-interactive VFS)
+      ansible.builtin.shell: |
+        { cat /home/kodi/.ssh/known_hosts 2>/dev/null; ssh-keyscan -p {{ kodi_options.sftp_port | default(28) }} {{ kodi_options.sftp_server }} 2>/dev/null; } | sort -u > /home/kodi/.ssh/known_hosts
+        chown kodi:kodi /home/kodi/.ssh/known_hosts
+      changed_when: false
+      when: (kodi_options | default({})).sftp_server | default('') | length > 0
+
+    # Automatic addon installation on first run: fetch the latest version from
+    # the mirrors.kodi.tv omega repository index (the last listed zip is the
+    # newest) and unzip it into ~/.kodi/addons/. An existing addon dir skips.
+    - name: Install Kodi addons from mirrors.kodi.tv (omega)
+      ansible.builtin.shell: |
+        cd /home/kodi/.kodi/addons
+        addonvers=$(wget -q https://mirrors.kodi.tv/addons/omega/{{ item }}/ -O - | egrep "{{ item }}-.+\.zip" | tail -n1 | cut -d\" -f2)
+        wget -q "https://mirrors.kodi.tv/addons/omega/{{ item }}/${addonvers}"
+        unzip -o "${addonvers}"
+      loop: "{{ kodi_addons_omega }}"
+      args:
+        creates: /home/kodi/.kodi/addons/{{ item }}
+
+    # The mediathekview repository is not in the official Kodi repository; pin
+    # the zip from the project's own kodirepo.
+    - name: Install repository.mediathekview addon (pinned)
+      ansible.builtin.shell: |
+        cd /home/kodi/.kodi/addons
+        wget -q {{ kodi_addon_mediathekview_url }}
+        unzip -o repository.mediathekview-1.0.0.zip
+      args:
+        creates: /home/kodi/.kodi/addons/repository.mediathekview
+
+    # The zips unpack root-owned entries; hand the whole profile back to kodi.
+    - name: Fix ownership of ~/.kodi
+      ansible.builtin.shell: chown -R kodi:kodi /home/kodi/.kodi
+      changed_when: false
+
+    # Kodi standalone session on tty7, running as the kodi user. Conflicts with
+    # lightdm so only one graphical session is active at a time. Not boot-
+    # enabled (boot policy: the profile lives below /symbios) - switch-kodi-desk
+    # starts it after the mount via rc.local.
+    - name: /etc/systemd/system/kodi-standalone.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/kodi-standalone.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Kodi Media Center Standalone
+          After=systemd-user-sessions.service
+          Conflicts=lightdm.service
+
+          [Service]
+          User=kodi
+          Group=kodi
+          Type=exec
+          TTYPath=/dev/tty7
+          StandardInput=tty
+          StandardOutput=journal
+          ExecStart=/usr/bin/kodi --standalone -fs
+
+          [Install]
+          WantedBy=multi-user.target
+
+    # The switcher daemon: watches which graphical session is active and
+    # replaces it with the other one when it exits. At boot (after the /symbios
+    # mount) it starts Kodi, so the host boots into media-center mode; leaving
+    # Kodi drops to the SymbiOS desktop and vice versa. It also waits for a
+    # configured MariaDB backend before starting Kodi and force-kills Kodi if
+    # its shutdown hangs.
+    - name: /usr/local/sbin/switch-kodi-desk.sh
+      ansible.builtin.copy:
+        dest: /usr/local/sbin/switch-kodi-desk.sh
+        owner: root
+        group: root
+        mode: '0755'
+        content: |
+          #!/bin/bash
+
+          # Enable all installed addons via the JSON-RPC web server. Kodi
+          # registers manually installed addons (vfs.sftp, plugins, ...) as
+          # disabled; they must be active for their protocols and services to
+          # work. The pass is cheap and idempotent: it asks Kodi which
+          # installed addons are currently disabled (JSON-RPC v13 takes the
+          # filter as booleans, "enabled": false) and only sends
+          # SetAddonEnabled for those, so it converges shortly after Kodi
+          # starts and stays quiet afterwards. Enabling a VFS addon at
+          # runtime registers its protocol immediately (VFSEntry subscribes
+          # to AddonEvents::Enabled), no restart needed.
+          f_enable_addons() {
+            local f_pw
+            f_pw=$(cat /symbios/services/kodi/.kodi_web_pw 2>/dev/null) || return 0
+            [[ -n "$f_pw" ]] || return 0
+            python3 - "$f_pw" <<'PYEOF' 2>/dev/null || true
+          import base64, json, sys, urllib.request
+
+          pw = sys.argv[1]
+          auth = "Basic " + base64.b64encode(("kodi:" + pw).encode()).decode()
+          url = "http://localhost:8081/jsonrpc"
+
+          def rpc(method, params):
+              body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
+                                 "params": params}).encode()
+              req = urllib.request.Request(url, data=body, headers={
+                  "Authorization": auth, "Content-Type": "application/json"})
+              with urllib.request.urlopen(req, timeout=3) as resp:
+                  return json.loads(resp.read())
+
+          # "enabled" is a boolean filter in JSON-RPC v13: this returns the
+          # installed addons that are currently disabled (empty when none)
+          res = rpc("Addons.GetAddons", {"enabled": False})
+          for addon in res.get("result", {}).get("addons", []):
+              rpc("Addons.SetAddonEnabled",
+                  {"addonid": addon["addonid"], "enabled": True})
+          PYEOF
+          }
+
+          deskorkodi="kodi"
+          while true
+          do
+
+            # wait for the kodi media database (mysql) if configured
+            if grep -q mysql /home/kodi/.kodi/userdata/advancedsettings.xml 2>/dev/null
+            then
+              dbhost=$(grep "<host>" /home/kodi/.kodi/userdata/advancedsettings.xml | head -n1 | cut -d"<" -f2 | cut -d">" -f2)
+              dbport=$(grep "<port>" /home/kodi/.kodi/userdata/advancedsettings.xml | head -n1 | cut -d"<" -f2 | cut -d">" -f2)
+              while ! (exec 3<>"/dev/tcp/${dbhost}/${dbport}") 2>/dev/null
+              do
+                sleep 1
+              done
+              exec 3>&-
+            fi
+
+            ps axu >/tmp/deskorkodi-$$
+            if egrep "/usr/bin/kodi |kodi\.bin " /tmp/deskorkodi-$$
+            then
+              deskorkodi="desk"
+              # keep all installed addons enabled (converges after Kodi start)
+              f_enable_addons
+              # Kodi shutdown hang detection
+              egrep -iq "info <general>: Stopping the application..." /home/kodi/.kodi/temp/kodi.log && grep -q "info <general>: Stopping all" /home/kodi/.kodi/temp/kodi.log && killall -9 kodi kodi.bin
+              # Restart kodi if the remote database connection fails
+              egrep -iq " Unable to open database: .*t connect to server" /home/kodi/.kodi/temp/kodi.log && systemctl restart kodi-standalone.service
+            elif grep "cinnamon" /tmp/deskorkodi-$$
+            then
+              deskorkodi="kodi"
+            else
+              if [[ $deskorkodi = kodi ]]
+              then
+                systemctl stop lightdm
+                systemctl start kodi-standalone
+                deskorkodi="desk"
+              elif [[ $deskorkodi = desk ]]
+              then
+                systemctl stop kodi-standalone
+                systemctl start lightdm
+                deskorkodi="kodi"
+                sleep 10
+              else
+                systemctl stop lightdm
+                systemctl start kodi-standalone
+                deskorkodi="desk"
+              fi
+            fi
+            echo VAR=$deskorkodi
+            sleep 10
+          done
+
+    - name: /etc/systemd/system/switch-kodi-desk.service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/switch-kodi-desk.service
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Switch between Kodi and Desktop
+          After=network.target
+          Wants=network.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/sbin/switch-kodi-desk.sh
+          Restart=always
+          RestartSec=5
+          User=root
+          Group=root
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd unit files
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    # Boot policy (AGENTS.md): both units need the profile below /symbios, so
+    # they are never boot-enabled. rc.local starts the switcher once the LUKS
+    # volume is mounted; it then brings up Kodi (media-center mode).
+    - name: Insert Kodi switcher into rc.local boot sequence
+      ansible.builtin.blockinfile:
+        path: /etc/rc.local
+        create: true
+        mode: '0755'
+        insertbefore: 'exit 0'
+        marker: "# {mark} SymbiOS Kodi"
+        block: |
+          # Start the Kodi/desktop switcher once /symbios is mounted (LUKS
+          # boot-unlock). It starts Kodi standalone (media-center mode); both
+          # units stay disabled at boot (boot policy, AGENTS.md).
+          systemctl start switch-kodi-desk 2>/dev/null || true
+
+    # Kodi Remote (JSON-RPC web server) on 8081: direct access LAN-only, the
+    # global route runs through Authelia/Traefik below.
+    - name: Allow Kodi remote port 8081 from all IPv4/IPv6 private networks
+      include_tasks: ../shared-tasks/ufw-allow.yml
+      vars:
+        ufw_port: '8081'
+        ufw_src: "{{ item }}"
+      loop:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - fc00::/7
+
+    # Global access: kodi.<base_domain> -> host port 8081 (the backend is a
+    # host service, so the traefik network gateway reaches it; containers on
+    # this host cannot resolve host.containers.internal). Traefik watches the
+    # providers directory, so no reload is required.
+    - name: /symbios/base-services/traefik/providers/kodi.yml Routing Configuration
+      include_tasks: ../shared-tasks/traefik-provider.yml
+      vars:
+        traefik_backend_url: "http://{{ traefik_network_gateway }}:8081"
+
+    # Create LDAP group for kodi access control (forward-auth)
+    - name: Create LDAP group for kodi access control
+      include_tasks: ../shared-tasks/ldap-single-group.yml
+
+    # Write Authelia access_control for the kodi group restriction
+    - name: Write Authelia access_control for kodi group restriction
+      include_tasks: ../shared-tasks/authelia-acl.yml
+      vars:
+        authelia_subjects:
+          - "group:kodi"
+
+    # Healthcheck: package present + JSON-RPC web server answers on 8081
+    # (Basic auth with the generated password). Skips silently when Kodi is
+    # not installed.
+    - name: "{{ data_root }}/runchecks.d/symbios-healthcheck-kodi.check"
+      ansible.builtin.blockinfile:
+        path: "{{ data_root }}/runchecks.d/symbios-healthcheck-kodi.check"
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          CHECK_CATEGORY="services"
+          CHECK_TITLE="Kodi"
+          CHECK_DESC="Checks if the Kodi media center is installed and its web server responds."
+          CHECK_DETAIL="Skipped if Kodi is not installed (dpkg).|Queries the JSON-RPC web server on port 8081|with the generated Basic-auth password.|A missing answer marks the service down."
+
+          # Healthcheck for the Kodi host service
+          f_check_cache "symbios-healthcheck-kodi" || return 2>/dev/null || true
+
+          # Skip if Kodi is not installed
+          if ! dpkg -s kodi &>/dev/null
+          then
+            return 0
+          fi
+
+          # The web server answers JSON-RPC requests (Basic auth required,
+          # Content-Type: application/json). Player.GetActivePlayers is a
+          # lightweight method that always resolves to "result".
+          f_pw=$(cat /symbios/services/kodi/.kodi_web_pw 2>/dev/null)
+          if [ -z "$f_pw" ]
+          then
+            g_echo_error "Healthcheck failed for Kodi: web server password file missing"
+            return 1
+          fi
+          f_resp=$(wget -qO- --timeout=5 \
+            --header="Authorization: Basic $(printf 'kodi:%s' "$f_pw" | base64 -w0)" \
+            --header="Content-Type: application/json" \
+            --post-data='{"jsonrpc":"2.0","id":1,"method":"Player.GetActivePlayers"}' \
+            http://localhost:8081/jsonrpc 2>/dev/null)
+          if ! printf '%s' "$f_resp" | grep -q '"result"'
+          then
+            g_echo_error "Healthcheck failed for Kodi: web server not responding on port 8081"
+          fi
+
+    # Register playbook as installed in the state file
+    - name: Register playbook as installed
+      include_tasks: ../shared-tasks/state-register.yml
+
+  handlers:
+
+    # Restart Authelia when the access_control block changes
+    - name: Restart authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml

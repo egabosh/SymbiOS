@@ -1,0 +1,38 @@
+<sources>
+    <programs>
+        <default pathversion="1"></default>
+    </programs>
+    <video>
+        <default pathversion="1"></default>
+{% if (kodi_options | default({})).path_movies | default('') %}
+        <source>
+            <name>Filme SFTP</name>
+            <path pathversion="1">sftp://{{ kodi_options.sftp_server }}:{{ kodi_options.sftp_port | default(28) }}/{{ kodi_options.path_movies }}/</path>
+            <allowsharing>true</allowsharing>
+        </source>
+{% endif %}
+{% if (kodi_options | default({})).path_series | default('') %}
+        <source>
+            <name>Serien SFTP</name>
+            <path pathversion="1">sftp://{{ kodi_options.sftp_server }}:{{ kodi_options.sftp_port | default(28) }}/{{ kodi_options.path_series }}/</path>
+            <allowsharing>true</allowsharing>
+        </source>
+{% endif %}
+{% if (kodi_options | default({})).path_music_videos | default('') %}
+        <source>
+            <name>Musikvideos SFTP</name>
+            <path pathversion="1">sftp://{{ kodi_options.sftp_server }}:{{ kodi_options.sftp_port | default(28) }}/{{ kodi_options.path_music_videos }}/</path>
+            <allowsharing>true</allowsharing>
+        </source>
+{% endif %}
+    </video>
+    <music>
+        <default pathversion="1"></default>
+{% if (kodi_options | default({})).path_music | default('') %}
+        <source>
+            <name>Musik SFTP</name>
+            <path pathversion="1">sftp://{{ kodi_options.sftp_server }}:{{ kodi_options.sftp_port | default(28) }}/{{ kodi_options.path_music }}/</path>
+        </source>
+{% endif %}
+    </music>
+</sources>
