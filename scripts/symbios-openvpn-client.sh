@@ -19,8 +19,8 @@ Commands:
   status <name>         JSON with a single tunnel
   up <name>             Start the tunnel (systemctl start openvpn@<name>)
   down <name>           Stop the tunnel (systemctl stop openvpn@<name>)
-  enable <name>         Enable the tunnel at boot
-  disable <name>        Disable the tunnel at boot
+  enable <name>         Mark the tunnel enabled (inventory) and start it
+  disable <name>        Mark the tunnel disabled (inventory) and stop it
   delete <name>         Stop/disable the tunnel and remove its config
   fetch <name>          Refresh the config of a fetch-mode tunnel and
                         restart it only when it changed (delegates to
@@ -68,6 +68,17 @@ function f_dev_iface {
   fi
 }
 
+# Read one boolean field of the tunnel entry from the inventory (default off).
+# The unit itself is never systemd-enabled (boot policy: rc.local starts it
+# after the mount), so "enabled" can only come from the inventory.
+function f_inv_flag {
+  local f_tunnel="$1" f_flag="$2" f_entry=""
+  f_entry="$("${g_symbios_dir}/symbios-inventory.py" --inventory "${g_inventory}" \
+    dict-get openvpn_clients "${f_tunnel}" 2>/dev/null || true)"
+  f_entry="${f_entry//[[:space:]]/}"
+  [[ "${f_entry}" == *"\"${f_flag}\":true"* ]]
+}
+
 # Bind-mount the encrypted config into /etc/openvpn (no-op when done).
 # Returns 1 when no config exists (e.g. data volume not mounted).
 function f_ensure_bind {
@@ -100,7 +111,9 @@ function f_tunnel_json {
   then
     f_active="true"
   fi
-  if systemctl is-enabled "openvpn@${f_name}" >/dev/null 2>&1
+  # Enablement is inventory state: the unit is deliberately never
+  # systemd-enabled (boot policy, started from rc.local after the mount).
+  if f_inv_flag "${f_name}" "enabled"
   then
     f_enabled="true"
   fi
@@ -177,8 +190,46 @@ then
   exit 0
 fi
 
-# Start/stop/enable/disable map directly to systemctl on the template unit.
-if [[ "${g_cmd}" == "up" || "${g_cmd}" == "down" || "${g_cmd}" == "enable" || "${g_cmd}" == "disable" ]]
+# Enable/disable persist the inventory flag (rc.local starts enabled tunnels
+# after the mount) and apply the state right away. The unit is deliberately
+# never systemd-enabled (boot policy), so the flag is the only source of
+# truth - `systemctl is-enabled` always answers "disabled" by design.
+if [[ "${g_cmd}" == "enable" || "${g_cmd}" == "disable" ]]
+then
+  g_name="${2:-}"
+  if ! f_valid_name "${g_name}"
+  then
+    f_json_error "Invalid tunnel name"
+  fi
+  if [[ ! -s "/etc/openvpn/${g_name}.conf" && ! -s "${g_ovpn_dir}/${g_name}.conf" ]]
+  then
+    f_json_error "Tunnel not found: ${g_name}"
+  fi
+  if [[ "${g_cmd}" == "enable" ]]
+  then
+    g_flag="true"
+    g_action="start"
+  else
+    g_flag="false"
+    g_action="stop"
+  fi
+  if ! "${g_symbios_dir}/symbios-settings-openvpn.sh" save \
+    --name "${g_name}" --enabled "${g_flag}" >/dev/null 2>&1
+  then
+    f_json_error "Failed to update the inventory entry of ${g_name}"
+  fi
+  # A tunnel that is enabled but has no config yet stays down (no config).
+  if [[ "${g_action}" == "start" ]]
+  then
+    f_ensure_bind "${g_name}" >/dev/null 2>&1 || true
+  fi
+  systemctl "${g_action}" "openvpn@${g_name}" 2>/dev/null || true
+  printf '{"ok":true,"message":"Tunnel %s: %s done."}\n' "${g_name}" "${g_action}"
+  exit 0
+fi
+
+# Start/stop map directly to systemctl on the template unit.
+if [[ "${g_cmd}" == "up" || "${g_cmd}" == "down" ]]
 then
   g_name="${2:-}"
   if ! f_valid_name "${g_name}"
@@ -202,12 +253,6 @@ then
       ;;
     down)
       g_action="stop"
-      ;;
-    enable)
-      g_action="enable"
-      ;;
-    disable)
-      g_action="disable"
       ;;
   esac
   if systemctl "${g_action}" "openvpn@${g_name}" 2>/dev/null
@@ -233,13 +278,20 @@ then
   exit $?
 fi
 
-# Delete a tunnel: stop/disable the unit, remove config, fetch helper and cron.
+# Delete a tunnel: inventory entry, unit, bind mount, config, fetch helper
+# and cron. The inventory entry goes first so a failure there cannot leave a
+# half-deleted tunnel that the playbook would re-create.
 if [[ "${g_cmd}" == "delete" ]]
 then
   g_name="${2:-}"
   if ! f_valid_name "${g_name}"
   then
     f_json_error "Invalid tunnel name"
+  fi
+  if ! "${g_symbios_dir}/symbios-settings-openvpn.sh" remove \
+    --name "${g_name}" >/dev/null 2>&1
+  then
+    f_json_error "Failed to remove the inventory entry of ${g_name}"
   fi
   # Stop and disable first - failures are fine (unit may not exist).
   systemctl stop "openvpn@${g_name}" 2>/dev/null || true

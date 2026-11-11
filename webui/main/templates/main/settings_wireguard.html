@@ -1,0 +1,309 @@
+{% extends "main/base.html" %}
+{% load static %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<!-- Live tunnel states -->
+<div class="card mt-3">
+  <div class="card-header d-flex align-items-center justify-content-between">
+    <span><i class="bi bi-shield-lock"></i> Tunnels</span>
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshWireguardStatus()">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+  </div>
+  <div class="card-body p-0">
+    {% if not wireguard_installed %}
+    <div class="alert alert-warning m-3 mb-0">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      The <code>wireguard-tools</code> package is not installed on the host yet.
+      Upload a tunnel below to install it and apply the configuration.
+    </div>
+    {% endif %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Interface / IP</th>
+            <th>Peer</th>
+            <th>Handshake</th>
+            <th>Traffic</th>
+            <th>State</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="wireguard_rows">
+          {% for t in tunnels %}
+          <tr data-tunnel="{{ t.name }}">
+            <td><code>{{ t.name }}</code></td>
+            <td data-cell="ip">
+              {% if t.ip4 %}<code>{{ t.ip4 }}</code>{% else %}<span class="text-muted">-</span>{% endif %}
+              {% if t.ip6 %}<br><code class="small">{{ t.ip6 }}</code>{% endif %}
+            </td>
+            <td data-cell="peer">
+              {% if t.endpoint %}<code class="small">{{ t.endpoint }}</code>{% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td data-cell="handshake">
+              {% if t.handshake_age >= 0 %}{{ t.handshake_age }}s ago{% else %}<span class="text-muted">never</span>{% endif %}
+            </td>
+            <td data-cell="traffic">
+              <span class="small">&#8595; {{ t.rx_bytes }} B / &#8593; {{ t.tx_bytes }} B</span>
+            </td>
+            <td data-cell="state">
+              {% if t.active %}
+              <span class="badge bg-success">active</span>
+              {% else %}
+              <span class="badge bg-secondary">down</span>
+              {% endif %}
+              {% if t.enabled %}
+              <span class="badge bg-info">enabled</span>
+              {% endif %}
+            </td>
+            <td class="text-end text-nowrap">
+              <form method="post" class="d-inline" data-exec="true">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="tunnel">
+                <input type="hidden" name="op" value="up">
+                <input type="hidden" name="name" value="{{ t.name }}">
+                <button type="submit" class="btn btn-sm btn-outline-success" title="Start"><i class="bi bi-play-fill"></i></button>
+              </form>
+              <form method="post" class="d-inline" data-exec="true">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="tunnel">
+                <input type="hidden" name="op" value="down">
+                <input type="hidden" name="name" value="{{ t.name }}">
+                <button type="submit" class="btn btn-sm btn-outline-warning" title="Stop"><i class="bi bi-stop-fill"></i></button>
+              </form>
+              <form method="post" class="d-inline" data-exec="true">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="tunnel">
+                <input type="hidden" name="op" value="{% if t.enabled %}disable{% else %}enable{% endif %}">
+                <input type="hidden" name="name" value="{{ t.name }}">
+                <button type="submit" class="btn btn-sm btn-outline-primary"
+                        title="{% if t.enabled %}Disable at boot{% else %}Enable at boot{% endif %}">
+                  <i class="bi bi-{% if t.enabled %}pause{% else %}power{% endif %}"></i>
+                </button>
+              </form>
+              <button type="button" class="btn btn-sm btn-outline-secondary" title="Show log"
+                      onclick="showWireguardLog('{{ t.name }}')"><i class="bi bi-journal-text"></i></button>
+              <form method="post" class="d-inline" data-exec="true"
+                    data-exec-confirm="Really delete tunnel &quot;{{ t.name }}&quot;? Its config on the host will be removed.">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="name" value="{{ t.name }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"><i class="bi bi-trash"></i></button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="7" class="text-muted small px-3 py-3">
+              No tunnels on the host yet. Add one below - upload a
+              <code>.conf</code> file or paste its content.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <pre id="wireguard_log" class="small bg-dark text-light p-3 mb-0 d-none" style="max-height:300px;overflow:auto"></pre>
+  </div>
+</div>
+
+<div class="row mt-3">
+  <!-- Tunnel settings -->
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-gear"></i> Tunnel settings</div>
+      <div class="card-body">
+        <form method="post" data-exec="true">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="save">
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Tunnel name</label>
+            <input type="text" class="form-control" name="name"
+                   placeholder="e.g. iot" pattern="[a-zA-Z0-9_-]{1,15}" required>
+            <div class="form-text">Also the interface name (max. 15 characters), used for
+              <code>/etc/wireguard/&lt;name&gt;.conf</code> and <code>wg-quick@&lt;name&gt;</code>.</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Allowed ports on the tunnel interface (optional)</label>
+            <input type="text" class="form-control font-monospace" name="ufw_ports"
+                   placeholder="e.g. 8123/tcp, 8889/tcp">
+            <div class="form-text">Opened in the host firewall (UFW) on the tunnel interface.</div>
+          </div>
+
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="enabled" id="wg_enabled" checked>
+            <label class="form-check-label" for="wg_enabled">Enable tunnel (start now and at boot)</label>
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="dns" id="wg_dns">
+            <label class="form-check-label" for="wg_dns">Apply DNS servers from the config</label>
+            <div class="form-text">Off by default: the <code>DNS</code> lines of the config are
+              dropped, so the tunnel never changes the resolver of the host.</div>
+          </div>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="hooks" id="wg_hooks">
+            <label class="form-check-label" for="wg_hooks">Allow config hooks</label>
+            <div class="form-text">Off by default: <code>PreUp</code>/<code>PostUp</code>/<code>PreDown</code>/<code>PostDown</code>
+              run as root and are dropped from the applied config.</div>
+          </div>
+
+          <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save &amp; apply</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config upload -->
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-upload"></i> Upload tunnel config</div>
+      <div class="card-body">
+        <form method="post" data-exec="true">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="upload">
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Tunnel name</label>
+            <input type="text" class="form-control" name="name"
+                   placeholder="e.g. iot" pattern="[a-zA-Z0-9_-]{1,15}" required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Config file (.conf)</label>
+            <input type="file" class="form-control" id="wg_file"
+                   accept=".conf,text/plain" onchange="loadWireguardFile(this)">
+            <div class="form-text">Selecting a file fills the text area below.</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Config content</label>
+            <textarea class="form-control font-monospace" name="config" id="wg_config"
+                      rows="10" required
+                      placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = 10.0.0.2/32&#10;&#10;[Peer]&#10;PublicKey = ...&#10;AllowedIPs = 10.0.0.0/24&#10;Endpoint = vpn.example.org:51820"></textarea>
+            <div class="form-text">Stored encrypted on the data volume (0600); only a sanitized
+              copy is applied. Private keys never appear in logs.</div>
+          </div>
+
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="enabled" id="wg_upload_enabled" checked>
+            <label class="form-check-label" for="wg_upload_enabled">Enable tunnel (start now and at boot)</label>
+          </div>
+
+          <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> Upload &amp; apply</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Format a byte counter (raw numbers from `wg show dump`).
+  function wgBytes(value) {
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let v = Number(value) || 0;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+      v = v / 1024;
+      i++;
+    }
+    return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
+  }
+
+  // Format a handshake age in seconds ("never" for -1).
+  function wgAge(seconds) {
+    if (seconds === null || seconds === undefined || seconds < 0) {
+      return 'never';
+    }
+    if (seconds < 120) {
+      return seconds + 's ago';
+    }
+    if (seconds < 7200) {
+      return Math.round(seconds / 60) + 'm ago';
+    }
+    if (seconds < 172800) {
+      return Math.round(seconds / 3600) + 'h ago';
+    }
+    return Math.round(seconds / 86400) + 'd ago';
+  }
+
+  // Fill the text area from a selected .conf file (no server round-trip).
+  function loadWireguardFile(input) {
+    const file = input.files && input.files[0];
+    if (!file) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      document.getElementById('wg_config').value = reader.result;
+    };
+    reader.readAsText(file);
+  }
+
+  // Live status refresh: update the cells of existing rows only (the action
+  // buttons stay untouched, new tunnels need a page reload).
+  function refreshWireguardStatus() {
+    fetch('{% url "settings_wireguard_status" %}', {credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(resp => {
+        (resp.tunnels || []).forEach(t => {
+          const row = document.querySelector('tr[data-tunnel="' + CSS.escape(t.name) + '"]');
+          if (!row) {
+            return;
+          }
+          const ip = row.querySelector('[data-cell="ip"]');
+          if (ip) {
+            ip.innerHTML = t.ip4 ? '<code>' + t.ip4 + '</code>' : '<span class="text-muted">-</span>';
+            if (t.ip6) {
+              const line = document.createElement('div');
+              line.innerHTML = '<code class="small">' + t.ip6 + '</code>';
+              ip.appendChild(line);
+            }
+          }
+          const peer = row.querySelector('[data-cell="peer"]');
+          if (peer) {
+            peer.innerHTML = t.endpoint
+              ? '<code class="small">' + t.endpoint + '</code>'
+              : '<span class="text-muted">-</span>';
+          }
+          const handshake = row.querySelector('[data-cell="handshake"]');
+          if (handshake) {
+            handshake.textContent = wgAge(t.handshake_age);
+          }
+          const traffic = row.querySelector('[data-cell="traffic"]');
+          if (traffic) {
+            traffic.innerHTML = '<span class="small">&#8595; ' + wgBytes(t.rx_bytes)
+              + ' / &#8593; ' + wgBytes(t.tx_bytes) + '</span>';
+          }
+          const state = row.querySelector('[data-cell="state"]');
+          if (state) {
+            state.innerHTML = (t.active
+              ? '<span class="badge bg-success">active</span>'
+              : '<span class="badge bg-secondary">down</span>')
+              + (t.enabled ? ' <span class="badge bg-info">enabled</span>' : '');
+          }
+        });
+      })
+      .catch(() => {});
+  }
+
+  // Fetch the last journal lines of one tunnel into the log box.
+  function showWireguardLog(name) {
+    const box = document.getElementById('wireguard_log');
+    box.classList.remove('d-none');
+    box.textContent = 'Loading log for ' + name + ' ...';
+    fetch('{% url "settings_wireguard_log" %}?name=' + encodeURIComponent(name), {credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(resp => {
+        box.textContent = resp.ok ? resp.log : ('Error: ' + resp.error);
+      })
+      .catch(() => {
+        box.textContent = 'Request failed.';
+      });
+  }
+</script>
+{% endblock %}

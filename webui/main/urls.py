@@ -36,6 +36,7 @@ from . import views_wol
 from . import views_plugins
 from . import views_network_bridges
 from . import views_openvpn
+from . import views_wireguard
 from . import views_filemanager
 from . import views_settings_external_systems
 from .utils.log_utils import logs_stream
@@ -64,6 +65,9 @@ urlpatterns = [
     path('settings/openvpn/', views_openvpn.settings_openvpn, name='settings_openvpn'),
     path('settings/openvpn/status/', views_openvpn.settings_openvpn_status, name='settings_openvpn_status'),
     path('settings/openvpn/log/', views_openvpn.settings_openvpn_log, name='settings_openvpn_log'),
+    path('settings/wireguard/', views_wireguard.settings_wireguard, name='settings_wireguard'),
+    path('settings/wireguard/status/', views_wireguard.settings_wireguard_status, name='settings_wireguard_status'),
+    path('settings/wireguard/log/', views_wireguard.settings_wireguard_log, name='settings_wireguard_log'),
     path('health/data/', views.health_data, name='health_data'),
     path('health/recheck/<str:check_name>/', views.health_recheck, name='health_recheck'),
     path('dashboard/stats/', views_home.dashboard_stats, name='dashboard_stats'),

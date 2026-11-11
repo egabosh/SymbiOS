@@ -1,7 +1,7 @@
 # docs:
 #   name: "OpenWrt - WireGuard Tor client"
 #   short_description: "OpenWrt - WireGuard Tor client"
-#   description: "WireGuard peer on the Tor server plus its DNS/DHCP record."
+#   description: "WireGuard peer on the Tor server plus its DNS/DHCP record. AllowedIPs come from the tunnel's access policy (openwrt_wireguard-tor.yml)."
 #   category: "VPN"
 #   type: OpenWrt
 #   icon: "bi-vpn"
@@ -29,10 +29,13 @@
 #     command: |
 #       for s in $(uci -q show network | sed -n 's/^network\.\(wg_tor_[^.=]*\)=.*/\1/p')
 #       do
+#         name=${s#wg_tor_}
 #         ips=$(uci -q get "network.$s.allowed_ips" 2>/dev/null)
 #         ipv4=$(printf '%s\n' $ips | grep -E '^192\.168\.45\.[0-9]+/32$' | head -1)
 #         ipv6=$(printf '%s\n' $ips | grep -E '^fdaa:a192:b168:cd45::[0-9]+/128$' | head -1)
-#         printf '%s\t%s\t%s\n' "${s#wg_tor_}" "${ipv4:-}" "${ipv6:-}"
+#         # The .conf is what the client really uses, so it is the source here.
+#         allowed=$(sed -n 's/^AllowedIPs = //p' "/etc/wg_tor/$name.conf" 2>/dev/null)
+#         printf '%s\t%s\t%s\t%s\n' "$name" "${ipv4:-}" "${ipv6:-}" "${allowed:-}"
 #       done
 #     columns:
 #       - key: "name"
@@ -41,6 +44,8 @@
 #         label: "IPv4"
 #       - key: "ipv6"
 #         label: "IPv6"
+#       - key: "allowed_ips"
+#         label: "AllowedIPs"
 #     actions:
 #       - name: "remove"
 #         label: "Remove"
@@ -190,6 +195,57 @@
         quiet: true
       when: state != 'absent'
 
+    - name: Read the access policy of the tunnel
+      ansible.builtin.raw: cat /etc/wg_tor/access.conf 2>/dev/null || true
+      register: access_conf
+      changed_when: false
+      when: state != 'absent'
+
+    # Without a stored policy the clients reach the LAN the router serves.
+    - name: Read the LAN network of the router
+      ansible.builtin.raw: |
+        eval "$(ipcalc.sh "$(uci -q get network.lan.ipaddr)" "$(uci -q get network.lan.netmask)")"
+        echo "$NETWORK/$PREFIX"
+      register: lan_network
+      changed_when: false
+      when: state != 'absent'
+
+    - name: Resolve the access policy of the tunnel
+      ansible.builtin.set_fact:
+        client_access_networks: >-
+          {{ (access_conf.stdout | regex_findall('(?m)^allowed_networks=(.*)$') | first | default('') | replace(' ', '') | trim)
+             or (lan_network.stdout | trim) }}
+        client_access_internet: >-
+          {{ ((access_conf.stdout | regex_findall('(?m)^internet=(.*)$') | first | default('')) | lower | trim) == 'yes' }}
+      when: state != 'absent'
+
+    - name: Build the client configuration values
+      ansible.builtin.set_fact:
+        # A bare IP becomes a /32; the tunnel segment itself is always routed.
+        # The pattern uses [.] and the replacement a single-backslash \1:
+        # Ansible hands the quoted strings to the regex engine verbatim, so
+        # any further escaping (\\.) would look for a literal backslash.
+        client_allowed_ips: >-
+          {{ '0.0.0.0/0' if (client_access_internet | bool)
+             else (['192.168.45.0/24']
+                   + (client_access_networks
+                      | regex_findall('[0-9]{1,3}(?:[.][0-9]{1,3}){3}(?:/[0-9]{1,2})?')
+                      | map('regex_replace', '^([0-9.]+)$', '\1/32') | list))
+             | join(',') }}
+        # The DNS of the tor segment is only reachable with internet mode on,
+        # everything else would need its own route.
+        client_dns: "{{ '192.168.142.1' if (client_access_internet | bool) else '' }}"
+      when: state != 'absent'
+
+    - name: Validate the resolved client routing
+      ansible.builtin.assert:
+        that:
+          - client_allowed_ips | length > 0
+          - "'' not in (client_allowed_ips | split(','))"
+        fail_msg: "No usable AllowedIPs - set the allowed networks in openwrt_wireguard-tor.yml or give the router a static LAN address."
+        quiet: true
+      when: state != 'absent'
+
   tasks:
     # --- absent: remove peer and DNS/DHCP record ----------------------------
     - name: Remove the WireGuard Tor client
@@ -306,18 +362,29 @@
               exit 1
             fi
             conf=/etc/wg_tor/{{ client_name }}.conf
+            dns="{{ client_dns }}"
             {
               printf '%s\n' '[Interface]'
               printf 'PrivateKey = %s\n' "$client_key"
               printf 'Address = fdaa:a192:b168:cd45::{{ client_num_resolved }}/128, 192.168.45.{{ client_num_resolved }}/32\n'
+              if [ -n "$dns" ]
+              then
+                printf 'DNS = %s\n' "$dns"
+              fi
               printf 'MTU = 1450\n'
               printf '\n'
               printf '%s\n' '[Peer]'
               printf 'PublicKey = %s\n' "$(printf '%s\n' "$server_key" | wg pubkey)"
               printf 'PresharedKey = %s\n' "$(uci -q get network.wg_tor_{{ client_name }}.preshared_key)"
-              printf 'AllowedIPs = 192.168.45.0/24,172.23.0.0/16\n'
+              printf 'AllowedIPs = %s\n' "{{ client_allowed_ips }}"
               printf 'Endpoint = {{ ddns_domain.stdout | trim }}:59667\n'
               printf 'PersistentKeepAlive = 15\n'
+              # The endpoint itself must stay outside the tunnel: a configured
+              # network may contain the address the endpoint resolves to, and
+              # then the tunnel would route into itself. wg-quick adds the
+              # routes before the hook runs, so the host route wins.
+              printf 'PostUp = %s\n' 'if command -v ip >/dev/null 2>&1; then gw=$(ip route show default | head -1 | cut -d" " -f2-); if [ -n "$gw" ]; then for a in $(wg show %i endpoints | grep -oE "[0-9.]+:[0-9]+$" | cut -d: -f1); do ip route replace $a/32 $gw; done; fi; fi'
+              printf 'PreDown = %s\n' 'if command -v ip >/dev/null 2>&1; then for a in $(wg show %i endpoints | grep -oE "[0-9.]+:[0-9]+$" | cut -d: -f1); do ip route del $a/32 2>/dev/null || true; done; fi'
             } > "$conf.tmp"
             if [ -f "$conf" ] && cmp -s "$conf.tmp" "$conf"
             then

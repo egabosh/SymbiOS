@@ -141,6 +141,31 @@ enable/disable, re-fetch, delete and a journal viewer per tunnel.
   `rc.local` binds and starts the enabled tunnels after the LUKS unlock,
   so dependents (e.g. Home Assistant) always find the interface ready.
 
+### WireGuard Client (`/settings/wireguard/`)
+Client tunnels into remote networks (e.g. an IoT network behind another
+router, or a VPN provider). Multiple named tunnels; the config of a peer
+is **uploaded** (file picker or paste). Start/stop, enable/disable, delete
+and a journal viewer per tunnel. The tunnel name is the interface name.
+- Playbook: `base-services/wireguard-client.yml`
+- Vars: `wireguard_clients` (`{<name>: {enabled, dns, hooks,
+  ufw_allow: [{port, proto}]}}`), `wireguard_configured`
+- Scripts: `scripts/symbios-wireguard-client.sh` (`list|status|up|down|
+  enable|disable|delete|log|boot-start`),
+  `scripts/symbios-write-wireguard-config.sh` (stdin upload + runtime render)
+- Healthcheck: `symbios-healthcheck-wireguard.check`
+- Security model: the raw config holds the private key and lives **only**
+  encrypted on the data volume (`<base-services>/wireguard/`, 0700). Only a
+  sanitized runtime copy (`<name>.runtime.conf`) is bind-mounted into
+  `/etc/wireguard` after the mount, so no plaintext ever lands on the SD
+  card. The sanitizer always drops `SaveConfig`; the `DNS` lines and the
+  `PreUp`/`PostUp`/`PreDown`/`PostDown` hooks of the config only reach the
+  applied copy when the tunnel enables them (`dns` / `hooks`, both default
+  off - hooks run as root, DNS lines rewrite the host resolver). The units
+  have no systemd autostart: after the LUKS unlock `rc.local` calls
+  `boot-start`, which binds the runtime configs and starts the enabled
+  tunnels (the enable flag lives in the inventory, so a disabled tunnel
+  never comes back after a reboot).
+
 ### Reverse Proxy (`/settings/reverse-proxy/`)
 Publishes external targets (other hosts, appliances, AI boxes) under public
 hostnames through Traefik. One entry maps one hostname to one backend

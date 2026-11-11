@@ -145,6 +145,12 @@ PAGE_EXPLAIN = {
         'either uploaded once or refreshed from a fetch command on a '
         'schedule.'
     ),
+    'wireguard': (
+        'WireGuard client tunnels connect the server to remote networks '
+        '(e.g. an IoT network behind another router) or to a VPN provider. '
+        'Upload the config of the peer, the server applies a sanitized '
+        'copy and starts the tunnel.'
+    ),
 }
 
 # Map settings page -> runchecks check name (for the status badge).
@@ -239,6 +245,13 @@ def get_page_badge(page_key, inventory_vars):
                     'At least one OpenVPN client tunnel is configured.')
         return ('missing', 'Not configured',
                 'No OpenVPN client tunnel is configured yet.')
+
+    if page_key == 'wireguard':
+        if inventory_vars.get('wireguard_clients'):
+            return ('ok', 'Configured',
+                    'At least one WireGuard client tunnel is configured.')
+        return ('missing', 'Not configured',
+                'No WireGuard client tunnel is configured yet.')
 
     if page_key == 'media':
         if inventory_vars.get('media_root'):

@@ -485,44 +485,59 @@
         # clean chain
         nft flush chain inet fw4 dstnat_tor
  
+        # Interfaces whose traffic is sent through Tor: the tor bridge itself
+        # plus every interface named in /etc/nftables.d/tor_routing_ifaces/*.list
+        # (one name per file). The WireGuard Tor server registers wg_tor there,
+        # so its clients reach the internet through the transparent proxy.
+        tor_ifaces='{ "br-tor"'
+        for f in /etc/nftables.d/tor_routing_ifaces/*.list
+        do
+          [ -f "$f" ] || continue
+          while read -r iface
+          do
+            [ -n "$iface" ] && tor_ifaces="$tor_ifaces, \"$iface\""
+          done < "$f"
+        done
+        tor_ifaces="$tor_ifaces }"
+
         # log
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" log prefix \"TOR_ROUTING_DROP: \" 
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces log prefix \"TOR_ROUTING_DROP: \"
 
         # allow DHCP
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol udp udp sport 68 udp dport 67 accept
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr udp udp dport {546,547,548} accept
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol udp udp sport 68 udp dport 67 accept
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr udp udp dport {546,547,548} accept
 
         # allow mDNS service discovery for example for printers or chromecast
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip daddr 224.0.0.251 udp dport 5353 accept
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 daddr ff02::fb udp dport 5353 accept
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip daddr 224.0.0.251 udp dport 5353 accept
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 daddr ff02::fb udp dport 5353 accept
 
         # hijack DNS and NTP / redirect to router
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol udp udp dport {123} dnat to 192.168.142.1:123
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr udp udp dport {123} dnat to [fd12:3456:142::1]:123
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol udp udp dport {53} dnat to 192.168.142.1:53
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr udp udp dport {53} dnat to [fd12:3456:142::1]:53
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol udp udp dport {123} dnat to 192.168.142.1:123
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr udp udp dport {123} dnat to [fd12:3456:142::1]:123
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol udp udp dport {53} dnat to 192.168.142.1:53
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr udp udp dport {53} dnat to [fd12:3456:142::1]:53
 
         # allow local traffic
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } accept
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 daddr { fc00::/7, fd00::/8 } accept
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } accept
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 daddr { fc00::/7, fd00::/8 } accept
 
         # redirect ping
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol icmp icmp type echo-request dnat to 192.168.142.1
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr icmpv6 icmpv6 type echo-request dnat to "[::1]"
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol icmp icmp type echo-request dnat to 192.168.142.1
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr icmpv6 icmpv6 type echo-request dnat to "[::1]"
 
         # do not allow tor in tor
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol tcp ip daddr @tor_ipv4 log prefix \"TOR_ROUTING_IPV4_DROP: \" drop
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr tcp ip6 daddr @tor_ipv6 log prefix \"TOR_ROUTING_IPV6_DROP: \" drop
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol tcp ip daddr @tor_ipv4 log prefix \"TOR_ROUTING_IPV4_DROP: \" drop
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr tcp ip6 daddr @tor_ipv6 log prefix \"TOR_ROUTING_IPV6_DROP: \" drop
 
         # exceptions
-        nft list set inet fw4 tor_whitelist >/dev/null 2>&1 && nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol tcp ip daddr @tor_whitelist tcp dport 443 accept
+        nft list set inet fw4 tor_whitelist >/dev/null 2>&1 && nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol tcp ip daddr @tor_whitelist tcp dport 443 accept
 
         # send all tcp traffic but local IPs through tor
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip protocol tcp ip daddr != {127.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 0.0.0.0/8, 240.0.0.0/4} dnat to 192.168.142.1:9040
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" ip6 nexthdr tcp ip6 daddr != { fd00::/8, fc00::/7, ::1/128, fe80::/10, ff00::/8, 2001::/23, 2001:db8::/32, 2001:10::/28, 2002::/16 } dnat to [fd12:3456:142::1]:9040
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol tcp ip daddr != {127.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 0.0.0.0/8, 240.0.0.0/4} dnat to 192.168.142.1:9040
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr tcp ip6 daddr != { fd00::/8, fc00::/7, ::1/128, fe80::/10, ff00::/8, 2001::/23, 2001:db8::/32, 2001:10::/28, 2002::/16 } dnat to [fd12:3456:142::1]:9040
 
         # all the rest of network traffic will be dropped by policy drop 
-        nft add rule inet fw4 dstnat_tor iifname "br-tor" log prefix "TOR_ROUTING_DROP" drop
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces log prefix "TOR_ROUTING_DROP" drop
 
         EOF
         chmod +x /etc/nftables.d/10-tor_routing.sh

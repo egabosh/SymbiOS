@@ -53,7 +53,7 @@ Slug: `auth`
 | Name | Type | Label | Required | Default | Secret |
 |------|------|-------|----------|---------|--------|
 | `twofa_enabled` | bool | Two-factor authentication | yes | false |  |
-| `twofa_lan_bypass` | bool | Skip second factor from the LAN | no | false |  |
+| `twofa_lan_bypass` | bool | Skip second factor from the LAN |  | false |  |
 
 ## `symbios-settings-backup`
 Slug: `backup`
@@ -64,6 +64,10 @@ Slug: `backup`
 | `backup_server_port` | number | SSH port |  | 22 |  |
 | `backup_server_user` | text | SSH user |  | root |  |
 | `backup_server_path` | text | Target path |  |  |  |
+| `backup_enabled` | bool | Nightly backup | yes | false |  |
+| `backup_keep_daily` | number | Keep daily snapshots |  | 7 |  |
+| `backup_keep_weekly` | number | Keep weekly snapshots |  | 4 |  |
+| `backup_keep_monthly` | number | Keep monthly snapshots |  | 9999 |  |
 | `backup_exclude` | multiline | Exclude patterns |  | `[]` |  |
 
 ## `symbios-settings-dns`
@@ -129,7 +133,6 @@ Slug: `media`
 | `media_documents` | path | Documents archive | yes | /symbios/media/documents |  |
 | `media_inbox` | path | Inbox | yes | /symbios/media/inbox |  |
 | `media_shared` | path | Shares base | yes | /symbios/media/shared |  |
-| `media_compat_bind` | path | Legacy compat bind target (empty = none) |  |  |  |
 
 ## `symbios-settings-network-bridges`
 Slug: `network-bridges`
@@ -191,6 +194,17 @@ Slug: `ssh-keys`
 | Name | Type | Label | Required | Default | Secret |
 |------|------|-------|----------|---------|--------|
 | `keys` | multiline | SSH public keys |  |  |  |
+
+## `symbios-settings-wireguard`
+Slug: `wireguard`
+
+| Name | Type | Label | Required | Default | Secret |
+|------|------|-------|----------|---------|--------|
+| `name` | text | Tunnel name | yes |  |  |
+| `enabled` | bool | Enabled |  | false |  |
+| `dns` | bool | Apply DNS from the config |  | false |  |
+| `hooks` | bool | Allow config hooks |  | false |  |
+| `ufw_ports` | text | Allowed ports |  |  |  |
 
 ## `symbios-settings-wlan-ap`
 Slug: `wlan-ap`

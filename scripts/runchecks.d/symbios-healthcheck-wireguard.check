@@ -1,0 +1,84 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="WireGuard Client"
+CHECK_DESC="Checks that all enabled WireGuard client tunnels are up."
+CHECK_DETAIL="Verifies wg-quick@<name>.service is active and the tunnel interface carries an IP.|Warns when an enabled tunnel has no peer handshake yet.|If down, all hosts behind the tunnel are unreachable."
+
+# Healthcheck for WireGuard client tunnels (enabled flag in inventory).
+f_check_cache "symbios-healthcheck-wireguard" || return 2>/dev/null || true
+
+# Read wireguard_clients from the inventory and verify each enabled tunnel is
+# active and its interface carries an IP. A missing handshake is only a
+# warning (a fresh tunnel has not talked to its peer yet). Done in python3
+# (robust for flow/block YAML); an empty dict means the feature is unused.
+f_bad="$(python3 - "${g_inventory}" <<'PYEOF' 2>/dev/null
+import subprocess
+import sys
+import yaml
+
+path = sys.argv[1]
+try:
+    with open(path) as f:
+        cfg = yaml.safe_load(f) or {}
+except Exception:
+    sys.exit(0)
+clients = (cfg.get('all', {}).get('vars', {})
+           .get('wireguard_clients') or {})
+if not clients:
+    sys.exit(0)  # feature unused
+bad = []
+warn = []
+for name, entry in clients.items():
+    if not isinstance(entry, dict) or not entry.get('enabled'):
+        continue
+    try:
+        subprocess.check_output(
+            ['systemctl', 'is-active', 'wg-quick@{}'.format(name)],
+            stderr=subprocess.DEVNULL)
+    except Exception:
+        bad.append('{} (service down)'.format(name))
+        continue
+    try:
+        out = subprocess.check_output(
+            ['ip', '-o', '-4', 'addr', 'show', 'dev', str(name)],
+            stderr=subprocess.DEVNULL).decode()
+    except Exception:
+        out = ''
+    if 'inet ' not in out:
+        bad.append('{} (no IP on {})'.format(name, name))
+        continue
+    # latest-handshakes prints "<pubkey>\t<epoch>", 0 = never.
+    try:
+        out = subprocess.check_output(
+            ['wg', 'show', str(name), 'latest-handshakes'],
+            stderr=subprocess.DEVNULL).decode()
+    except Exception:
+        out = ''
+    stamps = [line.split('\t')[-1] for line in out.strip().splitlines() if line]
+    if not stamps or all(s.strip() in ('0', '') for s in stamps):
+        warn.append('{} (no handshake yet)'.format(name))
+for entry in bad:
+    print('BAD ' + entry)
+for entry in warn:
+    print('WARN ' + entry)
+PYEOF
+)"
+
+# Split the verdict lines: BAD -> error (check fails), WARN -> warning.
+f_errors=""
+f_warns=""
+while IFS= read -r f_line
+do
+  case "${f_line}" in
+    "BAD "*) f_errors="${f_errors}${f_errors:+, }${f_line#BAD }" ;;
+    "WARN "*) f_warns="${f_warns}${f_warns:+, }${f_line#WARN }" ;;
+  esac
+done <<< "${f_bad}"
+
+if [[ -n "${f_errors}" ]]
+then
+  g_echo_error "WireGuard tunnels down: ${f_errors}"
+fi
+if [[ -n "${f_warns}" ]]
+then
+  g_echo_warn "WireGuard tunnels without handshake: ${f_warns}"
+fi

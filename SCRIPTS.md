@@ -313,7 +313,18 @@ Config upload, tunnel control and applying stay with
 `symbios-write-openvpn-config.sh` / `symbios-openvpn-client.sh` /
 `base-services/openvpn-client.yml`.
 
-### 3.18 `symbios-settings-network-bridges.sh` / `symbios-settings-wlan-ap.sh`
+### 3.18 `symbios-settings-wireguard.sh`
+
+Tunnel metadata dict (`wireguard_clients`) via `dict-merge` (only given
+fields update, stored fields are kept - so enable/disable is
+`save --name N --enabled ...`), plus the `wireguard_configured` flag. The
+tunnel name is the interface name, so it is validated against
+`^[a-zA-Z0-9_-]{1,15}$` (IFNAMSIZ); the ufw port list is validated here.
+Config upload, the runtime sanitizer and tunnel control stay with
+`symbios-write-wireguard-config.sh` / `symbios-wireguard-client.sh` /
+`base-services/wireguard-client.yml`.
+
+### 3.19 `symbios-settings-network-bridges.sh` / `symbios-settings-wlan-ap.sh`
 
 Bridge assignments (whole-dict replace from stdin JSON; names must match
 the assign script's `[A-Za-z0-9_.@-]` charset since they reach
@@ -321,7 +332,7 @@ the assign script's `[A-Za-z0-9_.@-]` charset since they reach
 country uppercased to 2 letters). Discovery scans and playbooks stay
 where they are.
 
-### 3.19 `symbios-settings-port-forwarding.sh`
+### 3.20 `symbios-settings-port-forwarding.sh`
 
 Port-forwarding inventory state (router control stays with
 `symbios-router-upnp.sh`): `set --method auto|manual|""` (manual marks
@@ -329,7 +340,7 @@ both configured flags done), `set --configured/--static-ip-configured`,
 and `ufw-add/ufw-remove --port --proto` (canonicalized entries via
 `list-add`/`list-del`; leading-zero ports compare decimally with `10#`).
 
-### 3.20 `symbios-settings-filemanager.sh` / `symbios-settings-setup.sh`
+### 3.21 `symbios-settings-filemanager.sh` / `symbios-settings-setup.sh`
 
 Companion CLIs for non-`/settings/` endpoints that still own inventory
 state: file manager custom scripts (validated name/command list) and the
@@ -398,6 +409,7 @@ texts opportunistically).
 | `symbios-settings-matrix.sh` | `/settings/matrix/` |
 | `symbios-settings-notifications.sh` | `/settings/notifications/` |
 | `symbios-settings-openvpn.sh` | `/settings/openvpn/` |
+| `symbios-settings-wireguard.sh` | `/settings/wireguard/` |
 | `symbios-settings-network-bridges.sh` | `/settings/network-bridges/` |
 | `symbios-settings-wlan-ap.sh` | `/settings/wlan-accesspoint/` |
 | `symbios-settings-port-forwarding.sh` | `/settings/port-forwarding/` |
@@ -461,8 +473,10 @@ texts opportunistically).
 | `symbios-router-detect.sh` | Router detection via UPnP IGD (`fritzbox`/`generic_upnp`) | no args |
 | `symbios-router-upnp.sh` | Port-forwarding dispatcher (FRITZ!Box vs generic UPnP) | `config\|add\|delete\|list\|...` |
 | `symbios-router-fritz.py` | FRITZ!Box `data.lua` API backend (env credentials) | called via router-upnp |
-| `symbios-openvpn-client.sh` | OpenVPN client tunnels | `list\|status\|up\|down\|enable\|disable\|delete\|fetch\|log` |
+| `symbios-openvpn-client.sh` | OpenVPN client tunnels (status + lifecycle; `enable`/`disable` and `delete` also own the inventory entry) | `list\|status\|up\|down\|enable\|disable\|delete\|fetch\|log` |
 | `symbios-write-openvpn-config.sh` | OpenVPN client config from stdin to the data volume | `<name>`, stdin |
+| `symbios-wireguard-client.sh` | WireGuard client tunnels (status + lifecycle incl. inventory flag and host artifacts; `boot-start` from rc.local) | `list\|status\|up\|down\|enable\|disable\|delete\|log\|boot-start` |
+| `symbios-write-wireguard-config.sh` | WireGuard client config from stdin to the data volume, sanitized runtime copy for `/etc/wireguard` | `<name>`, stdin; `--render <name>` |
 | `symbios-bridge-list.sh` | Linux bridges + physical interfaces as JSON | no args |
 | `symbios-bridge-assign.sh` | Interface-to-bridge assignments (JSON dict via stdin, persisted) | stdin JSON |
 | `symbios-ow-bridge-dhcp.sh` | DHCP lease maintenance on OpenWrt host bridges (timer) | no args |

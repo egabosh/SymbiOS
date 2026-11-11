@@ -218,21 +218,9 @@ def settings_openvpn(request):
                         return JsonResponse({'ok': False, 'error': msg}, status=400)
                     messages.error(request, msg)
                     return redirect('settings_openvpn')
-                if op in ('enable', 'disable'):
-                    # Inventory flag via the settings CLI - only for known
-                    # tunnels (same as before); the daemon control below
-                    # runs regardless.
-                    if name in _get_clients(vars_):
-                        flag_cmd = ('symbios-settings-openvpn.sh save'
-                                    f' --name {shlex.quote(name)}'
-                                    ' --enabled {}'.format('true' if op == 'enable' else 'false'))
-                        ok, stdout, stderr = run_command(flag_cmd, timeout=30)
-                        if not ok:
-                            err = (stderr or stdout or 'Failed to update tunnel.')
-                            if is_ajax:
-                                return JsonResponse({'ok': False, 'error': err}, status=400)
-                            messages.error(request, f'Error: {err}')
-                            return redirect('settings_openvpn')
+                # enable/disable persist the inventory flag inside the host
+                # script (single owner, same as the CLI) and apply the state
+                # right away - the view only passes the operation through.
                 cmd = f'{SCRIPT} {op} {shlex.quote(name)}'
                 if is_ajax:
                     from .utils.jobs import create_job
@@ -250,17 +238,8 @@ def settings_openvpn(request):
 
             elif action == 'delete':
                 name = request.POST.get('name', '').strip()
-                # Inventory entry via the settings CLI (name validation
-                # included); the host-side tunnel is removed right after.
-                meta_cmd = ('symbios-settings-openvpn.sh remove'
-                            f' --name {shlex.quote(name)}')
-                ok, stdout, stderr = run_command(meta_cmd, timeout=30)
-                if not ok:
-                    err = (stderr or stdout or 'Failed to delete tunnel.')
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': err}, status=400)
-                    messages.error(request, f'Error: {err}')
-                    return redirect('settings_openvpn')
+                # The host script owns the whole lifecycle: inventory entry,
+                # unit, bind mount, config, fetch helper and cron.
                 cmd = f'{SCRIPT} delete {shlex.quote(name)}'
                 if is_ajax:
                     from .utils.jobs import create_job
@@ -269,8 +248,11 @@ def settings_openvpn(request):
                                          'title': f'Deleting tunnel {name}...',
                                          'message': f'Tunnel {name} deleted.',
                                          'command': cmd})
-                run_command(cmd, timeout=60)
-                messages.success(request, f'Tunnel {name} deleted.')
+                ok, stdout, stderr = run_command(cmd, timeout=60)
+                if ok:
+                    messages.success(request, f'Tunnel {name} deleted.')
+                else:
+                    messages.error(request, f'Failed: {(stderr or stdout)[:500]}')
                 return redirect('settings_openvpn')
 
             else:

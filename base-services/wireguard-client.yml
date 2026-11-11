@@ -1,0 +1,310 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   uses_vars:
+#     - wireguard_clients
+#   name: WireGuard Client
+#   short_description: Manage WireGuard client tunnels to remote peers
+#   description: Installs wireguard-tools and manages client tunnels from inventory (wireguard_clients). A tunnel config is uploaded once through the WebUI (Settings -> WireGuard Client). The raw config holds the private key and lives encrypted on the data volume (base-services/wireguard/); a sanitized runtime copy is bind-mounted into /etc/wireguard and the tunnels are started from rc.local (never via systemd autostart, which would run before the LUKS unlock). DNS entries and Pre/Post hooks of the config only reach the runtime copy when the tunnel enables them (dns / hooks), SaveConfig is always dropped.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Network
+#   service_control:
+#     services:
+#     - name: wireguard-client tunnels
+#       type: systemd
+#       status: symbios-wireguard-client.sh list
+#     logs:
+#     - name: wireguard
+#       command: journalctl -u 'wg-quick@*' -f --tail=100
+#   actions:
+#     start: for t in /etc/wireguard/*.conf; do systemctl start wg-quick@$(basename $t .conf); done
+#     stop: for t in /etc/wireguard/*.conf; do systemctl stop wg-quick@$(basename $t .conf); done
+#     restart: for t in /etc/wireguard/*.conf; do systemctl restart wg-quick@$(basename $t .conf); done
+---
+- name: Configure WireGuard client tunnels
+  hosts: all
+  vars:
+    # Raw configs hold private keys - they live encrypted on the data volume
+    # (0700) and only a sanitized runtime copy is bind-mounted into
+    # /etc/wireguard, so no plaintext ever lands on the unencrypted SD card.
+    wireguard_conf_dir: "{{ base_services_root }}/wireguard"
+  tasks:
+    # WireGuard is in-kernel since 5.6; an old kernel (or a missing kmod
+    # package) would install wireguard-tools against nothing.
+    - name: Guard - Check for kernel WireGuard support
+      ansible.builtin.shell: |
+        if [[ -d /sys/module/wireguard ]] || modinfo wireguard >/dev/null 2>&1
+        then
+          echo yes
+        else
+          echo no
+        fi
+      args:
+        executable: /bin/bash
+      register: _wireguard_kernel
+      changed_when: false
+      failed_when: false
+
+    - name: Guard - Abort without kernel WireGuard support
+      ansible.builtin.fail:
+        msg: >-
+          The running kernel provides no WireGuard module. WireGuard needs a
+          kernel >= 5.6 (in-kernel) or the wireguard-dkms package.
+      when: _wireguard_kernel.stdout | trim != 'yes'
+
+    # Every tunnel entry as {key: name, value: settings} - dict2items keeps
+    # the name accessible (a plain .items() pair list cannot be traversed by
+    # the subelements lookup used for the UFW rules below).
+    - name: Normalize wireguard_clients to a list
+      ansible.builtin.set_fact:
+        _wireguard_tunnels: "{{ wireguard_clients | default({}) | dict2items }}"
+
+    - name: Install wireguard-tools
+      ansible.builtin.apt:
+        name:
+          - wireguard-tools
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # wg-quick shells out to resolvconf only when the runtime config carries
+    # DNS entries, which only happens for tunnels with dns enabled.
+    - name: Check whether any tunnel applies DNS from its config
+      ansible.builtin.set_fact:
+        _wireguard_dns_needed: "{{ _wireguard_tunnels | selectattr('value.dns', 'defined') | selectattr('value.dns', 'truthy') | list | length > 0 }}"
+
+    - name: Check for an existing resolvconf implementation
+      ansible.builtin.stat:
+        path: /sbin/resolvconf
+      register: _wireguard_resolvconf
+      when: _wireguard_dns_needed | bool
+
+    # Debian trixie no longer ships systemd-resolvconf; openresolv is the
+    # generic provider of /sbin/resolvconf. A host whose resolver already
+    # ships the shim (systemd-resolved does) keeps it - replacing it would
+    # hand the resolver over to openresolv.
+    - name: Install openresolv for tunnels that apply DNS
+      ansible.builtin.apt:
+        name: openresolv
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when:
+        - _wireguard_dns_needed | bool
+        - not _wireguard_resolvconf.stat.exists
+
+    - name: Ensure /etc/wireguard exists (0700, configs hold private keys)
+      ansible.builtin.file:
+        path: /etc/wireguard
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Create encrypted tunnel config directory (0700, on LUKS volume)
+      ansible.builtin.file:
+        path: "{{ wireguard_conf_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    # The runtime copy applies the dns/hooks decision and drops SaveConfig.
+    # One shell task instead of a loop: changed/failed are derived from the
+    # aggregate output (a registered loop result cannot be inspected from
+    # changed_when/failed_when). Tunnels without an uploaded config are
+    # skipped, their render would fail by design.
+    - name: Render runtime configs from the stored tunnel configs
+      ansible.builtin.shell: |
+        g_rc=0
+        g_tunnels="{{ _wireguard_tunnels | map(attribute='key') | join(' ') }}"
+        for f_tunnel in ${g_tunnels}
+        do
+          [[ -f "{{ wireguard_conf_dir }}/${f_tunnel}.conf" ]] || continue
+          if ! f_out="$("{{ git_root }}/scripts/symbios-write-wireguard-config.sh" --render "${f_tunnel}" 2>&1)"
+          then
+            echo "render failed: ${f_tunnel}: ${f_out}"
+            g_rc=1
+            continue
+          fi
+          [[ "${f_out}" == *'"state":"changed"'* ]] || continue
+          echo "rendered ${f_tunnel}"
+          # A running tunnel keeps the config it was started with, so a changed
+          # runtime copy only takes effect on a restart. Only restart tunnels
+          # whose bind mount is already live; a fresh tunnel is started by the
+          # start task below.
+          if systemctl is-active --quiet "wg-quick@${f_tunnel}" && mountpoint -q "/etc/wireguard/${f_tunnel}.conf"
+          then
+            systemctl restart "wg-quick@${f_tunnel}" && echo "restarted ${f_tunnel}"
+          fi
+        done
+        exit "${g_rc}"
+      args:
+        executable: /bin/bash
+      register: _wireguard_render
+      changed_when: '"rendered " in _wireguard_render.stdout'
+
+    - name: Touch bind placeholders for known tunnels (empty, 0600)
+      ansible.builtin.file:
+        path: "/etc/wireguard/{{ item.key }}.conf"
+        state: touch
+        owner: root
+        group: root
+        mode: '0600'
+        modification_time: preserve
+        access_time: preserve
+      loop: "{{ _wireguard_tunnels }}"
+      changed_when: false
+
+    - name: Remove stale placeholders (empty, unmounted, unknown tunnel)
+      ansible.builtin.shell: |
+        g_known=" {{ (wireguard_clients | default({})).keys() | list | join(' ') }} "
+        for f_conf in /etc/wireguard/*.conf
+        do
+          [[ -e "${f_conf}" ]] || continue
+          [[ -s "${f_conf}" ]] && continue
+          mountpoint -q "${f_conf}" 2>/dev/null && continue
+          f_base="$(basename "${f_conf}" .conf)"
+          [[ "${g_known}" == *" ${f_base} "* ]] && continue
+          rm -f "${f_conf}" && echo "removed ${f_base}"
+        done
+      args:
+        executable: /bin/bash
+      register: _wireguard_stale
+      changed_when: '"removed " in _wireguard_stale.stdout'
+      failed_when: false
+
+    # One shell loop (not a loop over tunnels): a registered loop result cannot
+    # be inspected from changed_when, so the bind verdict comes from the
+    # aggregate output - same pattern as the render task above.
+    - name: Bind runtime configs from the encrypted volume (no fstab entry)
+      ansible.builtin.shell: |
+        g_tunnels="{{ _wireguard_tunnels | map(attribute='key') | join(' ') }}"
+        for f_tunnel in ${g_tunnels}
+        do
+          f_dst="/etc/wireguard/${f_tunnel}.conf"
+          if mountpoint -q "${f_dst}" 2>/dev/null
+          then
+            continue
+          fi
+          if [[ -f "{{ wireguard_conf_dir }}/${f_tunnel}.runtime.conf" ]]
+          then
+            mount --bind "{{ wireguard_conf_dir }}/${f_tunnel}.runtime.conf" "${f_dst}" && echo "bound ${f_tunnel}"
+          fi
+        done
+      args:
+        executable: /bin/bash
+      register: _wireguard_binds
+      changed_when: '"bound " in _wireguard_binds.stdout'
+      failed_when: false
+
+    # Each rule goes through the general shared-tasks/ufw-allow.yml, bound to
+    # the tunnel interface (the tunnel name is the interface name).
+    - name: Allow tunnel ports on the tunnel interface
+      ansible.builtin.include_tasks: ../shared-tasks/ufw-allow.yml
+      loop: "{{ _wireguard_tunnels | subelements('value.ufw_allow', skip_missing=True) }}"
+      loop_control:
+        loop_var: ufw_entry
+      vars:
+        ufw_port: "{{ ufw_entry.1.port | string }}"
+        ufw_proto: "{{ ufw_entry.1.proto | default('tcp') }}"
+        ufw_interface: "{{ ufw_entry.0.key }}"
+
+    # Tunnels must never autostart via systemd: at boot the data volume is
+    # still locked (fstab noauto, mount happens in rc.local after unlock) and
+    # an enabled unit would fail against the empty placeholder. Start happens
+    # here (apply time) and from rc.local (every boot after mount).
+    - name: Disable boot autostart for all tunnels (started via rc.local)
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ item.key }}"
+        enabled: false
+        daemon_reload: true
+      loop: "{{ _wireguard_tunnels }}"
+      changed_when: false
+      failed_when: false
+
+    # Boot policy (AGENTS.md): a tunnel removed from the inventory must not
+    # stay boot-enabled. Enumerated via the wants-dir symlinks:
+    # list-unit-files does not list enabled template instances on this
+    # systemd version.
+    - name: Disable autostart of orphan tunnels (removed from inventory)
+      ansible.builtin.shell: |
+        shopt -s nullglob
+        g_known=" {{ (wireguard_clients | default({})).keys() | list | join(' ') }} "
+        for f_link in /etc/systemd/system/multi-user.target.wants/wg-quick@*.service /run/systemd/system/multi-user.target.wants/wg-quick@*.service
+        do
+          f_base="$(basename "${f_link}" .service)"
+          f_base="${f_base#wg-quick@}"
+          [[ "${g_known}" == *" ${f_base} "* ]] && continue
+          systemctl disable "wg-quick@${f_base}" 2>/dev/null && echo "disabled ${f_base}"
+        done
+        shopt -u nullglob
+      args:
+        executable: /bin/bash
+      register: _wireguard_orphan_disable
+      changed_when: '"disabled " in _wireguard_orphan_disable.stdout'
+      failed_when: false
+
+    - name: Start enabled tunnels now
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ item.key }}"
+        state: started
+      loop: "{{ _wireguard_tunnels }}"
+      when: item.value.enabled | default(false) | bool
+      failed_when: false
+
+    - name: Stop disabled tunnels now
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ item.key }}"
+        state: stopped
+      loop: "{{ _wireguard_tunnels }}"
+      when: not (item.value.enabled | default(false) | bool)
+      failed_when: false
+
+    # Static boot block: the script binds the runtime configs and starts the
+    # tunnels whose inventory flag says enabled. Keeping the block free of
+    # per-tunnel lines means enable/disable never has to regenerate rc.local
+    # (a stale start line would resurrect a disabled tunnel after a reboot).
+    - name: Start tunnels from rc.local after the data volume is mounted
+      ansible.builtin.blockinfile:
+        path: /etc/rc.local
+        create: true
+        mode: '0755'
+        insertbefore: 'exit 0'
+        marker: "# {mark} SymbiOS WireGuard Client start"
+        block: |
+          # Bind the sanitized runtime configs from the encrypted volume and
+          # start the enabled tunnels. Regenerated by
+          # base-services/wireguard-client.yml.
+          if [[ -x {{ git_root }}/scripts/symbios-wireguard-client.sh ]]
+          then
+            {{ git_root }}/scripts/symbios-wireguard-client.sh boot-start || true
+          fi
+
+    - name: Register playbook as installed
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "wireguard-client"
+        state_playbook: "base-services/wireguard-client.yml"

@@ -1,13 +1,38 @@
 # docs:
 #   name: "OpenWrt - WireGuard Tor server"
 #   short_description: "OpenWrt - WireGuard Tor server"
-#   description: "WireGuard server interface routed through Tor."
+#   description: "WireGuard server interface routed through Tor. Owns the access policy of the tunnel: reachable networks and optional internet mode."
 #   category: "VPN"
 #   type: OpenWrt
 #   icon: "bi-vpn"
+#   params:
+#     - name: "allowed_networks"
+#       label: "Allowed networks"
+#       type: "text"
+#       required: false
+#       placeholder: "172.23.0.222,10.0.0.0/8"
+#       help: "IPv4 addresses/networks the clients reach through the tunnel, comma separated. Empty = keep the stored value (first run: the LAN network)."
+#     - name: "internet"
+#       label: "Internet via Tor"
+#       type: "text"
+#       required: false
+#       placeholder: "no"
+#       help: "yes = all client IPv4 traffic including DNS goes through the Tor proxy. Empty = keep the stored value."
 #   requires:
 #     - playbook: "openwrt_tor.yml"
-#       reason: "Tor segment"
+#       reason: "Tor segment and transparent proxy"
+#   inventory:
+#     title: "Access policy of the tunnel"
+#     description: "Read live from the target. Clients pick the policy up when their own playbook runs again."
+#     command: |
+#       allowed=$(sed -n 's/^allowed_networks=//p' /etc/wg_tor/access.conf 2>/dev/null)
+#       internet=$(sed -n 's/^internet=//p' /etc/wg_tor/access.conf 2>/dev/null)
+#       printf '%s\t%s\n' "${allowed:-not set}" "${internet:-no}"
+#     columns:
+#       - key: "allowed_networks"
+#         label: "Allowed networks"
+#       - key: "internet"
+#         label: "Internet via Tor"
 #   actions:
 #     __playbook__: Install/Update
 #
@@ -26,6 +51,15 @@
     openwrt_packages:
       - luci-proto-wireguard
       - kmod-wireguard
+
+    # Access policy of the tunnel (WebUI params). Empty = keep the value
+    # stored on the target in /etc/wg_tor/access.conf; the client playbooks
+    # read that file when they generate their .conf.
+    allowed_networks: ""
+    internet: ""
+    # Resolved policy, see the tasks below.
+    access_networks_resolved: ""
+    access_internet_resolved: ""
 
     uci_vars:
       # Interface wg_tor
@@ -50,20 +84,185 @@
       - { key: "firewall.zone_tor.network", value: "wg_tor" }
       - { key: "firewall.zone_tor.forward", value: "ACCEPT" }
 
+    # Only applied while the tunnel has internet mode on: the transparent
+    # proxy, DNS and NTP of the tor segment are reached on the router, and
+    # zone_tor.input is REJECT, so every port needs its own accept rule.
+    internet_uci_vars:
+      - { key: "firewall.wg_tor_internet_dns", value: "rule" }
+      - { key: "firewall.wg_tor_internet_dns.name", value: "ansible_wg_tor_internet_dns" }
+      - { key: "firewall.wg_tor_internet_dns.src", value: "tor" }
+      - { key: "firewall.wg_tor_internet_dns.src_ip", value: "192.168.45.0/24" }
+      - { key: "firewall.wg_tor_internet_dns.dest_ip", value: "192.168.142.1" }
+      - { key: "firewall.wg_tor_internet_dns.proto", value: "tcp udp" }
+      - { key: "firewall.wg_tor_internet_dns.dest_port", value: "53" }
+      - { key: "firewall.wg_tor_internet_dns.target", value: "ACCEPT" }
+      - { key: "firewall.wg_tor_internet_ntp", value: "rule" }
+      - { key: "firewall.wg_tor_internet_ntp.name", value: "ansible_wg_tor_internet_ntp" }
+      - { key: "firewall.wg_tor_internet_ntp.src", value: "tor" }
+      - { key: "firewall.wg_tor_internet_ntp.src_ip", value: "192.168.45.0/24" }
+      - { key: "firewall.wg_tor_internet_ntp.dest_ip", value: "192.168.142.1" }
+      - { key: "firewall.wg_tor_internet_ntp.proto", value: "udp" }
+      - { key: "firewall.wg_tor_internet_ntp.dest_port", value: "123" }
+      - { key: "firewall.wg_tor_internet_ntp.target", value: "ACCEPT" }
+      - { key: "firewall.wg_tor_internet_proxy", value: "rule" }
+      - { key: "firewall.wg_tor_internet_proxy.name", value: "ansible_wg_tor_internet_proxy" }
+      - { key: "firewall.wg_tor_internet_proxy.src", value: "tor" }
+      - { key: "firewall.wg_tor_internet_proxy.src_ip", value: "192.168.45.0/24" }
+      - { key: "firewall.wg_tor_internet_proxy.dest_ip", value: "192.168.142.1" }
+      - { key: "firewall.wg_tor_internet_proxy.proto", value: "tcp" }
+      - { key: "firewall.wg_tor_internet_proxy.dest_port", value: "9040" }
+      - { key: "firewall.wg_tor_internet_proxy.target", value: "ACCEPT" }
+      - { key: "firewall.wg_tor_internet_icmp", value: "rule" }
+      - { key: "firewall.wg_tor_internet_icmp.name", value: "ansible_wg_tor_internet_icmp" }
+      - { key: "firewall.wg_tor_internet_icmp.src", value: "tor" }
+      - { key: "firewall.wg_tor_internet_icmp.src_ip", value: "192.168.45.0/24" }
+      - { key: "firewall.wg_tor_internet_icmp.dest_ip", value: "192.168.142.1" }
+      - { key: "firewall.wg_tor_internet_icmp.proto", value: "icmp" }
+      - { key: "firewall.wg_tor_internet_icmp.icmp_type", value: "echo-request" }
+      - { key: "firewall.wg_tor_internet_icmp.target", value: "ACCEPT" }
+
   tasks:
-    - name: update opkg db
-      raw: opkg update
+    - name: update apk db
+      raw: apk update
       changed_when: false
-  
+
     - name: check installed packages
-      raw: opkg list-installed
+      raw: apk info
       register: installed_packages
       changed_when: false
 
     - name: install packages if needed
-      raw: opkg install {{ item }}
+      raw: apk add {{ item }}
       loop: "{{ openwrt_packages }}"
       when: item not in installed_packages.stdout
+
+    # --- access policy of the tunnel ----------------------------------------
+    - name: Read the stored access policy
+      ansible.builtin.raw: cat /etc/wg_tor/access.conf 2>/dev/null || true
+      register: access_conf
+      changed_when: false
+
+    - name: Validate the given access policy
+      ansible.builtin.assert:
+        that:
+          - allowed_networks is match('^[0-9./, ]*$')
+          - internet | lower in ['', 'yes', 'no']
+        fail_msg: "allowed_networks takes IPv4 addresses/networks separated by commas; internet takes yes or no (empty keeps the stored value)."
+        quiet: true
+
+    # Fallback for the first run: by default the clients reach the LAN that
+    # this router serves, which keeps an existing setup working unchanged.
+    - name: Read the LAN network of the router
+      ansible.builtin.raw: |
+        eval "$(ipcalc.sh "$(uci -q get network.lan.ipaddr)" "$(uci -q get network.lan.netmask)")"
+        echo "$NETWORK/$PREFIX"
+      register: lan_network
+      changed_when: false
+
+    - name: Resolve the access policy
+      ansible.builtin.set_fact:
+        access_networks_resolved: >-
+          {{ (allowed_networks | replace(' ', '') | trim)
+             or (access_conf.stdout | regex_findall('(?m)^allowed_networks=(.*)$') | first | default('') | replace(' ', '') | trim)
+             or (lan_network.stdout | trim) }}
+        access_internet_resolved: >-
+          {{ (internet | lower | trim)
+             or ((access_conf.stdout | regex_findall('(?m)^internet=(.*)$') | first | default('')) | lower | trim)
+             or 'no' }}
+
+    - name: Validate the resolved access policy
+      ansible.builtin.assert:
+        that:
+          - access_networks_resolved is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?(,[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?)*$')
+          - access_internet_resolved in ['yes', 'no']
+        fail_msg: "The access policy is invalid: allowed_networks must be a comma separated list of IPv4 addresses/networks, internet must be yes or no."
+        quiet: true
+
+    - name: Write the access policy
+      ansible.builtin.raw: |
+        f=/etc/wg_tor/access.conf
+        mkdir -p /etc/wg_tor
+        {
+          printf '%s\n' '# SymbiOS access policy of this WireGuard tunnel.'
+          printf '%s\n' '# Clients route these IPv4 networks through the tunnel (comma separated).'
+          printf 'allowed_networks=%s\n' "{{ access_networks_resolved }}"
+          printf '%s\n' '# yes = all client IPv4 traffic (including DNS) goes through the tunnel.'
+          printf 'internet=%s\n' "{{ access_internet_resolved }}"
+        } > "$f.tmp"
+        if [ -f "$f" ] && cmp -s "$f.tmp" "$f"
+        then
+          rm -f "$f.tmp"
+          echo unchanged
+        else
+          mv "$f.tmp" "$f"
+          echo changed
+        fi
+      register: access_policy_result
+      changed_when: "access_policy_result.stdout | trim == 'changed'"
+
+    # The tor zone only forwards to the internet, so every allowed network
+    # needs its own rule. dest '*' keeps a rule valid for networks that live
+    # outside the lan zone as well.
+    - name: Grant the tunnel clients access to the allowed networks
+      ansible.builtin.raw: |
+        changed=0
+        i=0
+        for net in {{ access_networks_resolved | replace(',', ' ') }}
+        do
+          i=$((i + 1))
+          case "$net" in
+            */*) ;;
+            *) net="$net/32" ;;
+          esac
+          s="firewall.wg_tor_access_$i"
+          if [ "$(uci -q get "$s.dest_ip")" != "$net" ]
+          then
+            uci -q set "$s=rule"
+            uci -q set "$s.name=ansible_wg_tor_access_$i"
+            uci -q set "$s.src=tor"
+            uci -q set "$s.src_ip=192.168.45.0/24"
+            uci -q set "$s.dest=*"
+            uci -q set "$s.dest_ip=$net"
+            uci -q set "$s.proto=all"
+            uci -q set "$s.target=ACCEPT"
+            changed=1
+          fi
+        done
+        # Drop the rules left over from a previously longer list.
+        for s in $(uci -q show firewall | sed -n 's/^firewall\.\(wg_tor_access_[0-9][0-9]*\)=rule$/\1/p')
+        do
+          if [ "${s#wg_tor_access_}" -gt "$i" ]
+          then
+            uci -q delete "firewall.$s"
+            changed=1
+          fi
+        done
+        if [ "$changed" = 1 ]
+        then
+          echo changed
+        else
+          echo unchanged
+        fi
+      register: access_rules_result
+      changed_when: "access_rules_result.stdout | trim == 'changed'"
+
+    # The transparent proxy of openwrt_tor.yml has to know the tunnel
+    # interface, otherwise the client traffic is dropped instead of sent
+    # through Tor.
+    - name: Check that the transparent proxy accepts extra interfaces
+      ansible.builtin.raw: grep -q tor_routing_ifaces /etc/nftables.d/10-tor_routing.sh
+      register: proxy_check
+      changed_when: false
+      failed_when: false
+      when: access_internet_resolved == 'yes'
+
+    - name: Require the updated tor segment playbook
+      ansible.builtin.assert:
+        that:
+          - proxy_check.rc | default(0) == 0
+        fail_msg: "Internet mode needs the transparent proxy from openwrt_tor.yml that reads /etc/nftables.d/tor_routing_ifaces/ - run openwrt_tor.yml again."
+        quiet: true
+      when: access_internet_resolved == 'yes'
 
     - name: set uci values if needed
       raw: |
@@ -94,9 +293,56 @@
         else
           echo "unchanged"
         fi
-      loop: "{{ uci_vars }}"
+      loop: "{{ uci_vars + (internet_uci_vars if access_internet_resolved == 'yes' else []) }}"
       register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
+      # A changed_when sees no register of its own loop, so the loop is
+      # neutral and the aggregate decides whether a reload is needed.
+      changed_when: false
+
+    - name: Remember whether any uci value changed
+      ansible.builtin.set_fact:
+        uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+
+    - name: Enable the Tor proxy for the tunnel
+      ansible.builtin.raw: |
+        f=/etc/nftables.d/tor_routing_ifaces/wg_tor.list
+        mkdir -p /etc/nftables.d/tor_routing_ifaces
+        if [ "$(cat "$f" 2>/dev/null)" = "wg_tor" ]
+        then
+          echo unchanged
+        else
+          echo wg_tor > "$f"
+          echo changed
+        fi
+      register: proxy_iface_result
+      changed_when: "proxy_iface_result.stdout | trim == 'changed'"
+      when: access_internet_resolved == 'yes'
+
+    - name: Remove the internet access rules
+      ansible.builtin.raw: |
+        changed=0
+        for s in firewall.wg_tor_internet_dns firewall.wg_tor_internet_ntp firewall.wg_tor_internet_proxy firewall.wg_tor_internet_icmp
+        do
+          if uci -q show "$s" > /dev/null 2>&1
+          then
+            uci -q delete "$s"
+            changed=1
+          fi
+        done
+        if [ -f /etc/nftables.d/tor_routing_ifaces/wg_tor.list ]
+        then
+          rm -f /etc/nftables.d/tor_routing_ifaces/wg_tor.list
+          changed=1
+        fi
+        if [ "$changed" = 1 ]
+        then
+          echo changed
+        else
+          echo unchanged
+        fi
+      register: internet_remove_result
+      changed_when: "internet_remove_result.stdout | trim == 'changed'"
+      when: access_internet_resolved != 'yes'
 
     - name: apply changes
       block:
@@ -108,7 +354,11 @@
             - "/etc/init.d/firewall reload"
 #            - "/etc/init.d/dnsmasq restart"
 #            - "/etc/init.d/odhcpd restart"
-          when: uci_set_result.changed
+          when: >-
+            (uci_changed | default(false) | bool)
+            or (access_rules_result is changed)
+            or (internet_remove_result is changed)
+            or (proxy_iface_result is changed)
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state
