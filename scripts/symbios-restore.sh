@@ -141,6 +141,9 @@ do
     --to-original) g_to_original="1" ;;
     --file) shift; g_file="${1:-}"; g_scope="--file" ;;
     --target) shift; g_target="${1:-}" ;;
+    # The whole-system scope is an explicit option too (the WebUI always
+    # sends it), so it must be matched before the catch-all below.
+    --full) g_scope="--full" ;;
     --*) f_die_json "Unknown option '$1'." ;;
     *) [[ "$g_scope" == "--full" ]] && g_scope="$1" ;;
   esac

@@ -98,6 +98,7 @@ g_target_files=()
 g_target_names=()
 
 # The local repository first (cheapest, no network round trip).
+g_local_hint=""
 if command -v restic >/dev/null 2>&1 && [[ -s "${g_bk_restic_pw_file:-}" ]] \
   && [[ -d "$g_bk_local_repo" ]]
 then
@@ -105,6 +106,18 @@ then
   g_target_names+=("local")
   f_bk_restic_dates "$g_bk_local_repo" "" > "${g_target_files[0]}" || : > "${g_target_files[0]}"
   cat "${g_target_files[0]}" >> "$g_all_dates"
+else
+  # Remember why the local repository is not usable: in a local-only setup
+  # an empty list would otherwise look like a lost backup.
+  if ! command -v restic >/dev/null 2>&1
+  then
+    g_local_hint="restic is not installed"
+  elif [[ ! -s "${g_bk_restic_pw_file:-}" ]]
+  then
+    g_local_hint="the restic repository password file is missing"
+  else
+    g_local_hint="no local restic repository exists yet at ${g_bk_local_repo}"
+  fi
 fi
 
 # Remote targets: query every configured repository.
@@ -138,6 +151,12 @@ fi
 
 # Merge all dates (unique, newest first)
 sort -u "$g_all_dates" | sort -ru > "${g_tmp}/all-dates"
+
+# Local-only setups: explain an empty list instead of showing nothing.
+if [[ -z "$g_warning" ]] && ! f_bk_has_targets && [[ -n "$g_local_hint" ]]
+then
+  g_warning="No snapshots to list: ${g_local_hint}."
+fi
 
 # Build the JSON snapshots array: per date which locations hold it.
 # "servers" lists the names of the targets that have this snapshot, so with

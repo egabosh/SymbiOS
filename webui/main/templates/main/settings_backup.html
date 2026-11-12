@@ -347,18 +347,17 @@
   </div>
   <div class="card-body">
     {% if data.warning %}<div class="alert alert-warning py-2 small">{{ data.warning }}</div>{% endif %}
-    {% if data.snapshots %}
-      <div class="table-responsive">
-        <table class="table table-sm table-hover align-middle mb-0" id="snapshot-table">
-          <thead><tr><th>Date</th><th>Location</th><th class="text-end"></th></tr></thead>
-          <tbody>
-          </tbody>
-        </table>
-      </div>
-      <div class="form-text small mt-2">Snapshots are kept automatically: recent days plus monthly long-term copies.</div>
-    {% else %}
-      <p class="text-muted mb-0">No backups found yet. They will appear here after the first run (tonight, or via <em>"Run backup now"</em>).</p>
-    {% endif %}
+    <!-- The table stays in the DOM even without snapshots: the JS refresher
+         needs it to add the first snapshot after a successful run. -->
+    <div class="table-responsive" id="snapshot-table-wrap"{% if not data.snapshots %} style="display:none"{% endif %}>
+      <table class="table table-sm table-hover align-middle mb-0" id="snapshot-table">
+        <thead><tr><th>Date</th><th>Location</th><th class="text-end"></th></tr></thead>
+        <tbody>
+        </tbody>
+      </table>
+    </div>
+    <div class="form-text small mt-2" id="snapshot-note"{% if not data.snapshots %} style="display:none"{% endif %}>Snapshots are kept automatically: recent days plus monthly long-term copies.</div>
+    <p class="text-muted mb-0" id="snapshot-empty"{% if data.snapshots %} style="display:none"{% endif %}>No backups found yet. They will appear here after the first run (tonight, or via <em>"Run backup now"</em>).</p>
   </div>
 </div>
 
@@ -550,6 +549,8 @@ function renderSnapshots(snapshots, services) {
   var tbody = document.querySelector('#snapshot-table tbody');
   var dateSel = document.getElementById('restore-date');
   var scopeSel = document.getElementById('restore-scope');
+  snapshots = snapshots || [];
+  services = services || [];
   tbody.innerHTML = '';
   dateSel.innerHTML = '<option value="">- choose date -</option>';
   /* keep only the "whole system" option, then re-add services */
@@ -570,6 +571,11 @@ function renderSnapshots(snapshots, services) {
   (services || []).forEach(function (svc) {
     scopeSel.insertAdjacentHTML('beforeend', '<option value="' + svc + '">Only "' + svc + '"</option>');
   });
+  /* Switch between table and empty-state text */
+  var hasSnaps = snapshots.length > 0;
+  document.getElementById('snapshot-table-wrap').style.display = hasSnaps ? '' : 'none';
+  document.getElementById('snapshot-note').style.display = hasSnaps ? '' : 'none';
+  document.getElementById('snapshot-empty').style.display = hasSnaps ? 'none' : '';
   updateRestoreButtons();
 }
 

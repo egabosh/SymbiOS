@@ -344,8 +344,13 @@ def settings_backup(request):
             parsed = json.loads(stdout)
             if isinstance(parsed, dict):
                 data.update(parsed)
-    except Exception:
-        pass
+        else:
+            # Never present a failed listing as "no backups": an empty list
+            # without an explanation looks like a lost backup.
+            data['warning'] = ('Could not read the snapshot list: '
+                               + (stderr or 'listing failed').strip()[:300])
+    except Exception as e:
+        data['warning'] = f'Could not read the snapshot list: {e}'
     # Effective server list for rendering: the unified backup_servers array.
     # In pre-unification inventories the primary target still lives only in
     # the legacy backup_server_* keys - synthesize it as the first row so the
