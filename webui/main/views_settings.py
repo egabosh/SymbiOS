@@ -422,12 +422,22 @@ def settings_backup_test(request):
         if path:
             cmd += f' {shlex.quote(path)}'
         try:
-            ok, stdout, stderr = run_command(cmd, timeout=30)
-            if ok and stdout:
-                data = json.loads(stdout)
-                results.append({'name': name, 'ok': bool(data.get('ok')),
-                                'message': data.get('message', ''),
-                                'error': data.get('error', '')})
+            # The script answers with JSON on stdout in both cases (ok and
+            # failure) and only exits non-zero on failure, so the payload is
+            # parsed regardless of the exit code - otherwise the specific
+            # reason ("directory does not exist", "Permission denied", ...)
+            # would be replaced by the generic fallback text.
+            _, stdout, stderr = run_command(cmd, timeout=45)
+            payload = None
+            if stdout.strip():
+                try:
+                    payload = json.loads(stdout)
+                except (json.JSONDecodeError, ValueError):
+                    payload = None
+            if isinstance(payload, dict):
+                results.append({'name': name, 'ok': bool(payload.get('ok')),
+                                'message': payload.get('message', ''),
+                                'error': payload.get('error', '')})
             else:
                 results.append({'name': name, 'ok': False,
                                 'error': (stderr or 'SSH test failed').strip()[:300]})
