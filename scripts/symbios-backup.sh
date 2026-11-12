@@ -168,17 +168,24 @@ function f_collect_errors {
   done < <(f_bk_err_tail)
 }
 
-# The run-wide error list as a JSON array for the status extra:
-# ["target: error line", ...]
+# The run-wide error list as an object member for the status extra:
+# "errors":["target: error line", ...]
+# The key is part of the fragment (like f_bk_stats_json) - f_write_status
+# joins extras with a comma, a bare array would produce invalid JSON and the
+# WebUI would fall back to "No backup has yet run".
 function f_errors_json {
   local f_target f_line
   local f_arr=()
-  [[ -r "${g_tmp}/run-errors" ]] || { echo '[]'; return 0; }
+  if [[ ! -r "${g_tmp}/run-errors" ]]
+  then
+    printf '"errors":[]'
+    return 0
+  fi
   while IFS=$'\t' read -r f_target f_line
   do
     f_arr+=("${f_target}: ${f_line}")
   done < "${g_tmp}/run-errors"
-  f_bk_lines_json ${f_arr[@]+"${f_arr[@]}"}
+  printf '"errors":%s' "$(f_bk_lines_json ${f_arr[@]+"${f_arr[@]}"})"
 }
 
 # Snapshot one restic target (remote TSV line or "local" for the local
