@@ -1,7 +1,7 @@
 # docs:
 #   name: "OpenWrt - WireGuard LAN client"
 #   short_description: "OpenWrt - WireGuard LAN client"
-#   description: "WireGuard peer on the LAN server plus its DNS/DHCP record. AllowedIPs come from the tunnel's access policy (openwrt_wireguard-lan.yml)."
+#   description: "WireGuard peer on the LAN server plus its DNS/DHCP record. AllowedIPs come from the tunnel's access policy (openwrt_wireguard-lan.yml); the per-client internet parameter decides whether this client also routes all traffic through the router."
 #   category: "VPN"
 #   type: OpenWrt
 #   icon: "bi-vpn"
@@ -18,6 +18,11 @@
 #       required: false
 #       placeholder: "next free"
 #       help: "Segment address 192.168.44.<n> and fdaa:a192:b168:cd44::<n>. Empty = next free number between 2 and 254."
+#     - name: "internet"
+#       label: "Internet access"
+#       type: "bool"
+#       required: false
+#       help: "yes = the client routes all IPv4 traffic through the tunnel to the internet. no/empty = only the networks allowed by the tunnel policy. The tunnel itself needs internet=yes."
 #   requires:
 #     - playbook: "openwrt_wireguard-lan.yml"
 #       reason: "WireGuard LAN server"
@@ -87,9 +92,15 @@
     # client_num is an extra var (highest precedence), so the resolved number
     # needs its own variable - a set_fact can never override extra vars.
     client_num_resolved: ""
+    # Per-client internet mode of this client's .conf (see pre_tasks). The
+    # variable name matches the docs parameter, so the WebUI extra var
+    # overrides this default. The tunnel's own policy stays in
+    # openwrt_wireguard-lan.yml.
+    internet: ""
+    client_internet_resolved: false
     managed_id: "openwrt_wireguard-lan-client.yml/{{ client_name }}"
     managed_playbook: "openwrt_wireguard-lan-client.yml"
-    managed_ref: "client_name={{ client_name }} client_num={{ client_num_resolved }}"
+    managed_ref: "client_name={{ client_name }} client_num={{ client_num_resolved }} internet={{ 'yes' if (client_internet_resolved | default(false) | bool) else 'no' }}"
     managed_resource_type: "wireguard_lan_client"
     managed_remove_ids: []
 
@@ -233,6 +244,22 @@
           {{ ((access_conf.stdout | regex_findall('(?m)^internet=(.*)$') | first | default('')) | lower | trim) == 'yes' }}
       when: state != 'absent'
 
+    - name: Resolve the internet mode of this client
+      ansible.builtin.set_fact:
+        # The WebUI sends a real boolean, a standalone run may pass yes/no as
+        # text. Empty or no = local-only (default, least privilege): the
+        # client then only routes the tunnel's allowed networks.
+        client_internet_resolved: "{{ (internet | string | trim | lower) in ('yes', 'true') }}"
+      when: state != 'absent'
+
+    - name: Require internet mode of the tunnel for internet clients
+      ansible.builtin.assert:
+        that:
+          - not client_internet_resolved or client_access_internet
+        fail_msg: "This client wants internet access, but the tunnel policy has internet=no - set internet=yes in openwrt_wireguard-lan.yml first."
+        quiet: true
+      when: state != 'absent'
+
     - name: Build the client configuration values
       ansible.builtin.set_fact:
         # A bare IP becomes a /32. The tunnel segment and the LAN address of
@@ -241,7 +268,7 @@
         # Ansible hands the quoted strings to the regex engine verbatim, so
         # any further escaping (\\.) would look for a literal backslash.
         client_allowed_ips: >-
-          {{ '0.0.0.0/0' if (client_access_internet | bool)
+          {{ '0.0.0.0/0' if (client_internet_resolved | bool)
              else (['192.168.44.0/24', (lan_ipaddr.stdout | trim) ~ '/32']
                    + (client_access_networks
                       | regex_findall('[0-9]{1,3}(?:[.][0-9]{1,3}){3}(?:/[0-9]{1,2})?')

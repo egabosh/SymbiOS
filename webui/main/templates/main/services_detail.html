@@ -137,6 +137,8 @@
         <input type="password" class="form-control form-control-sm remote-param" data-name="{{ p.name }}" {% if p.required %}required{% endif %}>
         {% elif p.type == 'number' %}
         <input type="number" class="form-control form-control-sm remote-param" data-name="{{ p.name }}" {% if p.required %}required{% endif %} value="{{ p.default|default:'' }}" placeholder="{{ p.placeholder|default:'' }}">
+        {% elif p.type == 'bool' %}
+        <input type="checkbox" class="form-check-input mt-0 remote-param" data-name="{{ p.name }}" {% if p.default %}checked{% endif %}>
         {% else %}
         <input type="text" class="form-control form-control-sm remote-param" data-name="{{ p.name }}" {% if p.required %}required{% endif %} value="{{ p.default|default:'' }}" placeholder="{{ p.placeholder|default:'' }}">
         {% endif %}
