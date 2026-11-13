@@ -31,7 +31,11 @@
     uci_vars:
       - { key: "system.@system[0].log_ip", value: "{{ logserver }}" }
       - { key: "system.@system[0].log_proto", value: "udp" }
-      - { key: "system.@system[0].cronloglevel", value: "5" }
+      # BusyBox crond levels: 0 = most verbose, 8 = its default. Level 5 logs
+      # every wakeup, every crontab parse line and every child start - about
+      # 7 lines per minute per router. Level 8 keeps the job start lines and
+      # drops the rest.
+      - { key: "system.@system[0].cronloglevel", value: "8" }
       - { key: "system.@system[0].log_size", value: "0" }
 
   pre_tasks:
@@ -62,6 +66,9 @@
       raw: "{{ item }}"
       loop:
         - "uci commit"
+        # cronloglevel is passed to crond by its init script, so the setting
+        # only takes effect after a cron restart
+        - "/etc/init.d/cron restart"
         - "/etc/init.d/log restart"
       when: uci_set_result.changed
 
