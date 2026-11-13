@@ -530,6 +530,22 @@
     # should be visible on the others (br-lan, br-tor, br-iot). Only touch
     # the file when the content differs and restart avahi afterwards,
     # because avahi reads the interface list only at startup.
+    #
+    # reflect-filters restricts the reflection to the service types that are
+    # actually needed across the bridges (printer discovery: IPP printing,
+    # raw printing, eSCL scanning). Without it every daemon reflects every
+    # record it sees, and because all five routers share one L2 segment per
+    # bridge they re-reflect each other in a loop: measured on the master,
+    # 98.5 % of all mDNS packets on br-iot were re-announcements of a single
+    # laptop hostname, ~350 pps, ~23 % of one core in avahi plus the same
+    # amount again in the OpenVPN processes that carry it, and ~935k
+    # "No slot available for legacy unicast reflection" syslog lines per day.
+    # The filter drops PTR records whose target and SRV/TXT records whose key
+    # do not carry one of these service types, so host announcements (the
+    # "ThinkPad..." PTR records that caused the loop) stay local. A/AAAA
+    # records are not filtered by avahi and still cross the bridges, which is
+    # what keeps the reflected answers resolvable. disable-publishing stops
+    # the routers from announcing their own names; DNS resolves those.
     - name: write /etc/avahi/avahi-daemon.conf
       raw: |
         mkdir -p /etc/avahi
@@ -537,8 +553,12 @@
         [server]
         allow-interfaces={{ bridges | default('br-lan') }}
 
+        [publish]
+        disable-publishing=yes
+
         [reflector]
         enable-reflector=yes
+        reflect-filters=_ipp._tcp,_ipps._tcp,_printer._tcp,_pdl-datastream._tcp,_uscan._tcp,_uscans._tcp
         EOF
         if [ -f /etc/avahi/avahi-daemon.conf ] && cmp -s /tmp/avahi-daemon.conf.new /etc/avahi/avahi-daemon.conf
         then
