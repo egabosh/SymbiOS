@@ -165,10 +165,24 @@
         EASYRSA_DIR_FINAL="/etc/openvpn/${VPNNAME}-easy-rsa"
         OPENVPN_DIR="/etc/openvpn"
         CLIENT_NAME="${1}.${VPNNAME}"
-        # Leaf certificates are renewed on every run, the CA is long lived
-        # and must stay the same, otherwise all pushed configs go stale.
+        # The CA is long lived and must stay the same, otherwise all pushed
+        # configs go stale.
         CERT_DAYS=365
         CA_DAYS=36500
+        # A renewal rebuilds every leaf certificate, pushes a new .ovpn to
+        # every client and restarts the tunnel on both sides. Running that
+        # daily turned each cron run into an outage window, so only renew
+        # when the active server certificate expires within this window.
+        RENEW_BEFORE_DAYS=30
+        SERVER_CRT="${EASYRSA_DIR_FINAL}/pki/issued/openvpn-server.crt"
+
+        # Nothing to do while the active server certificate has more than
+        # RENEW_BEFORE_DAYS left (true for all but the last month).
+        if [ -s "${SERVER_CRT}" ] && openssl x509 -checkend $((RENEW_BEFORE_DAYS * 86400)) -noout -in "${SERVER_CRT}" >/dev/null 2>&1
+        then
+          echo "${SERVER_CRT} still valid for more than ${RENEW_BEFORE_DAYS} days, nothing to do"
+          exit 0
+        fi
 
         # A CA is rebuilt only when its key material is gone (fresh install
         # or a deliberate rotation, e.g. renaming the final directory).
@@ -278,7 +292,9 @@
           ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "uci commit"
           ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "/etc/init.d/network reload"
           ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "/etc/init.d/openvpn enable"
-          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "/etc/init.d/openvpn restart"
+          # restart only this tunnel: a plain restart would also tear down
+          # the other VPN instance running on the client
+          ssh -o BatchMode=yes ${CLIENT_HOSTNAME} "/etc/init.d/openvpn restart ${VPNNAME}vpn"
 
           ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes ${CLIENT_HOSTNAME} "mkdir -p /etc/scripts"
           scp -B -O -p -q /etc/scripts/openvpn-lan-tap-in-bridge.sh ${CLIENT_HOSTNAME}:/etc/scripts/
@@ -290,7 +306,9 @@
         rm -rf ${EASYRSA_DIR_FINAL}.old
         [ -e "${EASYRSA_DIR_FINAL}" ] && mv ${EASYRSA_DIR_FINAL} ${EASYRSA_DIR_FINAL}.old
         mv ${EASYRSA_DIR} ${EASYRSA_DIR_FINAL}
-        /etc/init.d/openvpn restart
+        # restart only this instance: a full service restart also drops the
+        # other VPN tunnels running on this host
+        /etc/init.d/openvpn restart ${VPNNAME}vpn
 
         EOF
 
@@ -364,7 +382,9 @@
           raw: "{{ item }}"
           loop:
             - "uci commit"
-            - "/etc/init.d/openvpn restart"
+            # restart only the managed instance, a full restart drops the
+            # other VPN tunnels on this host as well
+            - "/etc/init.d/openvpn restart lanvpn"
             - "/etc/init.d/firewall reload"
           when: uci_set_result.changed
 
