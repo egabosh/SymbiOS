@@ -305,6 +305,14 @@ function f_bk_restic_ensure_repo {
     g_echo_error "Repository $f_repo could not be created - check the write permission of the backup target."
     return 1
   fi
+  # A lock file that the repository user cannot read (e.g. created by a
+  # "restic mount" running as root on the backup server) makes every restic
+  # call fail with a bare "permission denied" - name the real cause.
+  if f_bk_err_tail | grep -qi "locks/" && f_bk_err_tail | grep -qi "permission denied"
+  then
+    g_echo_error "Repository $f_repo is locked by a process running as another user (e.g. 'restic mount' on the backup server) - stop it and retry."
+    return 1
+  fi
   g_echo_error "Repository $f_repo is not usable: $(f_bk_err_tail | tail -n 1)"
   return 1
 }
@@ -319,15 +327,17 @@ function f_bk_write_excludes {
   local f_dir
   {
     # Built-in defaults: never back up the local repository itself, skip
-    # docker/containerd internals (images/layers are re-pullable), keep
-    # volumes and all other data. Runtime noise that must not be copied:
-    for f_dir in backup docker/overlay2 docker/overlay docker/containers \
-                docker/image docker/buildkit docker/network docker/plugins \
-                docker/runtimes docker/swarm docker/containerd docker/rootfs \
-                docker/tmp containerd
+    # the whole docker/containerd state (images and layers are re-pullable,
+    # named volumes live below services/), keep all other data. Runtime
+    # noise that must not be copied:
+    for f_dir in backup docker containerd
     do
       echo "**/$f_dir"
     done
+    # Nextcloud file previews are regenerated on demand - skip them. The
+    # pattern must repeat the full path below the source root (restic
+    # matches it against the complete path of every entry).
+    echo "**/services/nextcloud/nextcloud-data/data/appdata_*/preview/"
     echo "**/__pycache__/"
     # Never back up the backup credentials themselves (.backup_restic_password
     # in the config dir): a repository password inside its own encrypted

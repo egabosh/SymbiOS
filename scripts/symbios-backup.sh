@@ -16,8 +16,9 @@
 #
 # symbios-backup.sh - SymbiOS main backup engine (restic only).
 #
-# Backs up the whole data root (/symbios - configuration, services, docker
-# volumes and the pre-run database dumps from backup.d/) plus /root/.ssh:
+# Backs up the whole data root (/symbios - configuration, services and the
+# pre-run database dumps from backup.d/, including mounts below it such as
+# the media volume) plus /root/.ssh:
 #
 #   - Restic target(s) configured : restic snapshot over SFTP to every
 #                                   configured server (repository below
@@ -36,8 +37,9 @@ function f_usage {
   echo "Usage: $(basename "$0") [command]"
   echo ""
   echo "SymbiOS main backup engine (restic only). Backs up the whole data"
-  echo "root (/symbios - configuration, services, docker volumes and the"
-  echo "pre-run database dumps from backup.d/) plus /root/.ssh:"
+  echo "root (/symbios - configuration, services and the pre-run database"
+  echo "dumps from backup.d/, including mounts below it such as the media"
+  echo "volume) plus /root/.ssh:"
   echo "  - Restic target(s) configured : restic snapshot over SFTP"
   echo "                                   (repository in PATH/$(hostname)/)"
   echo "  - No target configured        : local restic repository in"
@@ -224,14 +226,14 @@ function f_run_restic_backup {
   fi
 
   # Snapshot: data root plus the host's root SSH dir (which holds the key
-  # for the next push). --one-file-system keeps a stray mount below /symbios
-  # out of the snapshot.
+  # for the next push). Mounts below the data root (e.g. the media volume)
+  # are included on purpose - they hold user data that belongs in the backup.
   local f_srcs=("$g_data_root")
   [[ -d /root/.ssh ]] && f_srcs+=(/root/.ssh)
   f_bk_write_excludes "${g_tmp}/restic-excludes"
   g_echo "Creating restic snapshot in $f_repo"
   if ! f_bk_restic "$f_repo" "$f_ssh" backup \
-      "${f_srcs[@]}" --one-file-system --exclude-file "${g_tmp}/restic-excludes"
+      "${f_srcs[@]}" --exclude-file "${g_tmp}/restic-excludes"
   then
     g_echo_error "Restic snapshot on $f_name failed"
     f_collect_errors "$f_name"
