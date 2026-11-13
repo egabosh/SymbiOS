@@ -27,6 +27,18 @@
       ## network: do not auto-derive ULA subnets, explicit ip6addr lists are used
       #- { key: "network.globals.ula_prefix", value: "" }
 
+      ## network: static route to the FRITZ!Box internal LAN (IPv4). The v6
+      # side is covered dynamically by 30-fritz-prefix; without this route,
+      # LAN traffic for 192.168.188.x falls through to the WAN default.
+      # target/netmask (not ipaddr/CIDR): netifd 2026.x parses only that
+      # form into a usable route on this router.
+      - { key: "network.fritzbox_lan",        value: "route" }
+      - { key: "network.fritzbox_lan.name",   value: "fritzbox-lan" }
+      - { key: "network.fritzbox_lan.interface", value: "lan" }
+      - { key: "network.fritzbox_lan.target", value: "192.168.188.0" }
+      - { key: "network.fritzbox_lan.netmask", value: "255.255.255.0" }
+      - { key: "network.fritzbox_lan.gateway", value: "172.23.0.228" }
+
       ## firewall: allow the delegated FRITZ!Box prefix into the LAN
       # dest_ip is maintained by /etc/hotplug.d/iface/30-fritz-prefix
       - { key: "firewall.fritzbox_ipv6",           value: "rule" }
