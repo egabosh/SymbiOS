@@ -25,9 +25,9 @@
 #       type: "text"
 #       default: "CET-1CEST,M3.5.0,M10.5.0/3"
 #     - name: "ntp_server"
-#       label: "NTP server"
+#       label: "NTP server (IP address)"
 #       type: "text"
-#       default: "0.openwrt.pool.ntp.org"
+#       default: "192.53.103.108"
 #     - name: "upstream_dns"
 #       label: "Upstream DNS server"
 #       type: "text"
@@ -65,7 +65,14 @@
     # var of the same name and misconfigure the target. bridges has the
     # same problem, so its fallback lives in the avahi task instead.
     timezone: "CET-1CEST,M3.5.0,M10.5.0/3"
-    ntp_server: "0.openwrt.pool.ntp.org"
+    # A literal IP, not a pool name: the router has no RTC, so after a boot
+    # its clock is minutes behind and busybox ntpd only steps it once the
+    # name resolves - which waits for the resolver chain (dnsmasq, upstream
+    # forwarder). Every late step of several minutes tears down all OpenVPN
+    # sessions because the TLS handshake no longer fits. 192.53.103.108 is
+    # ptbtime1.ptb.de (Physikalisch-Technische Bundesanstalt, public time
+    # service, no tracking); override it per host or in the WebUI.
+    ntp_server: "192.53.103.108"
     dhcp_ip_start: "100"
     dhcp_ip_limit: "150"
     managed_id: "openwrt_basics.yml"
@@ -756,6 +763,9 @@
           raw: "{{ item }}"
           loop:
             - "uci commit"
+            # busybox ntpd reads its peers only at startup, so a changed
+            # system.ntp.server needs a restart of the service
+            - "/etc/init.d/sysntpd restart"
             - "/etc/init.d/irqbalance start"
             - "/etc/init.d/irqbalance enable"
             - "/etc/init.d/fstab enable"
