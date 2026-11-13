@@ -561,12 +561,16 @@
         cat << 'EOF' > /etc/sysupgrade.conf
         ## This file contains files and directories that should
         ## be preserved during an upgrade.
+        ## It is also the keep list of the daily configuration backup
+        ## (sysupgrade -b), so every file SymbiOS writes below /etc has to
+        ## be listed here - otherwise it is missing from the backup.
         /etc/wg_lan/
         /etc/wg_tor/
         /etc/openvpn/
         /etc/scripts/
         /etc/dnscrypt-proxy2/
         /etc/asterisk/
+        /etc/symbios/
         /etc/ips-*
         /etc/key.pem
         /etc/tor_*

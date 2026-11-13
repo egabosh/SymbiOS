@@ -1,0 +1,15 @@
+### OpenWrt configuration backup ###
+# Every system registered as type OpenWrt delivers its sysupgrade archive
+# into ${backup_root}/openwrt/, so the restic snapshot below picks it up.
+# A router that is offline must not stop the remaining modules or the
+# snapshot: the script reports the failure and this module only logs it.
+
+g_echo_ok "Start OpenWrt configuration backup"
+
+if [[ -x "${g_git_root}/scripts/symbios-openwrt-backup.sh" ]]
+then
+  "${g_git_root}/scripts/symbios-openwrt-backup.sh" backup \
+    || g_echo_error "OpenWrt configuration backup reported errors (see above)"
+else
+  g_echo_error "symbios-openwrt-backup.sh not found - no router backups created"
+fi

@@ -282,6 +282,18 @@ shows it per target ("Inventory") and `docs.requires` is checked against it.
 Entries that no playbook recorded are not listed at all - the file only ever
 contains what SymbiOS applied.
 
+### Configuration backup of the target
+
+`scripts/backup.d/openwrt.backup` (nightly, before the restic snapshot) calls
+`scripts/symbios-openwrt-backup.sh`, which archives every system registered as
+`type: OpenWrt` with the target's own `sysupgrade -b` into
+`${data_root}/backups/openwrt/<id>/`. That archive contains exactly the keep
+list of the device: `/etc/sysupgrade.conf` plus `/lib/upgrade/keep.d/*`.
+
+Consequence for new playbooks: a file SymbiOS writes below `/etc` that is not
+listed in `/etc/sysupgrade.conf` (written by `external-services/openwrt_basics.yml`)
+is missing from the firmware upgrade **and** from the backup. Add it there.
+
 ### Inventory and row actions (`docs.inventory`)
 
 `/etc/symbios/managed.json` only knows what SymbiOS applied. Resources that

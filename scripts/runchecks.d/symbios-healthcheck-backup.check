@@ -1,7 +1,7 @@
 CHECK_CATEGORY="services"
 CHECK_TITLE="Backup"
 CHECK_DESC="Checks that backups ran recently and are not stored locally only."
-CHECK_DETAIL="Watches the success marker written by the nightly backup job.|Daily snapshots protect all data below /symbios (services, databases, configuration).|If this fails, no recent backup exists - check Settings -> Backup (it shows the restic error log of the last run).|Warns when no backup exists at all or the newest one is older than 7 days (limit configurable via backup_max_age_days in the inventory).|Also warns while only the local restic repository is configured: it shares the fate of the machine (fire, lightning, theft) - a remote backup server provides off-site protection.|Also warns when the local snapshot count or repository size grow past the configured retention (disk full prevention)."
+CHECK_DETAIL="Watches the success marker written by the nightly backup job.|Daily snapshots protect all data below /symbios (services, databases, configuration).|If this fails, no recent backup exists - check Settings -> Backup (it shows the restic error log of the last run).|Warns when no backup exists at all or the newest one is older than 7 days (limit configurable via backup_max_age_days in the inventory).|Also warns while only the local restic repository is configured: it shares the fate of the machine (fire, lightning, theft) - a remote backup server provides off-site protection.|Also warns when the local snapshot count or repository size grow past the configured retention (disk full prevention).|Also warns when the configuration backup of a registered OpenWrt system is missing or older than 2 days - an offline router fails silently otherwise."
 
 # Healthcheck for the nightly backup job
 f_check_cache "symbios-healthcheck-backup" || return 2>/dev/null || true
@@ -112,4 +112,28 @@ then
       fi
     fi
   fi
+fi
+
+# Configuration backups of the registered OpenWrt systems (warning): the
+# nightly module logs an unreachable router and keeps going, so without this
+# check a router that is offline for weeks would simply have no backup.
+# Reads the registry only - the module writes the archives.
+g_ow_registry="${g_config_dir}/external-systems.yml"
+if [[ -r "${g_ow_registry}" ]] && command -v yq > /dev/null
+then
+  while IFS= read -r g_ow_id
+  do
+    [[ -n "${g_ow_id}" ]] || continue
+    g_ow_newest=$(ls -1t "${g_backup_root}/openwrt/${g_ow_id}/${g_ow_id}"-*.tar.gz 2> /dev/null | head -1)
+    if [[ -z "${g_ow_newest}" ]]
+    then
+      g_echo_warn "OpenWrt ${g_ow_id}: no configuration backup yet."
+      continue
+    fi
+    g_ow_age_days=$(( ( $(date +%s) - $(date -r "${g_ow_newest}" +%s) ) / 86400 ))
+    if [[ "${g_ow_age_days}" -ge 2 ]]
+    then
+      g_echo_warn "OpenWrt ${g_ow_id}: last configuration backup is ${g_ow_age_days} days old (${g_ow_newest##*/})."
+    fi
+  done <<< "$(yq -r '.external_systems[] | select(.type == "OpenWrt") | .id' "${g_ow_registry}" 2> /dev/null)"
 fi
