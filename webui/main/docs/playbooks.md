@@ -294,6 +294,21 @@ Consequence for new playbooks: a file SymbiOS writes below `/etc` that is not
 listed in `/etc/sysupgrade.conf` (written by `external-services/openwrt_basics.yml`)
 is missing from the firmware upgrade **and** from the backup. Add it there.
 
+### Package updates on the target
+
+`external-services/openwrt_autoupdate.yml` installs
+`/etc/scripts/package-upgrade.sh` plus a daily cron job (03:30 on the device).
+The script upgrades the userspace packages with `apk` and reports a pending
+release upgrade with `owut check`: one summary line per run goes to syslog
+(and therefore to the log server), the full output to
+`/var/log/package-upgrade.log` on the device.
+
+The kernel is never touched by that job. The kmods feed path carries the
+running kernel version, so a kernel change only arrives with a complete
+release image - and that stays a manual `owut upgrade`/sysupgrade. An
+unattended A/B flash of a router that serves DNS, DHCP and the VPN
+concentrator is not worth the risk.
+
 ### Inventory and row actions (`docs.inventory`)
 
 `/etc/symbios/managed.json` only knows what SymbiOS applied. Resources that

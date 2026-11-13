@@ -1,0 +1,141 @@
+# docs:
+#   name: "OpenWrt - Package updates"
+#   short_description: "OpenWrt - Package updates"
+#   description: "Daily unattended upgrade of the userspace packages (apk) plus a release check via owut. The kernel and the release image are never touched here: the kmods feed is pinned to the running kernel, so a kernel change only arrives with a complete sysupgrade image (manual owut upgrade). Removes the dead hand-made /etc/scripts/autoupdate.sh."
+#   category: "System"
+#   type: OpenWrt
+#   icon: "bi-arrow-repeat"
+#   requires:
+#     - playbook: "openwrt_basics.yml"
+#       reason: "Base system setup (/etc/scripts, apk, owut)"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: OpenWrt - daily userspace package updates
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; the WebUI passes
+    # the same names as extra vars (which take precedence).
+    managed_id: "openwrt_autoupdate.yml"
+    managed_playbook: "openwrt_autoupdate.yml"
+    managed_ref: "cron=30 3 * * *"
+    managed_resource_type: "autoupdate"
+
+    # 03:30 is the only free slot: netboot 04:15, tor blocklist 05:15,
+    # dnscrypt blocklist 06:15, the openvpn easyrsa renewals 05:45/09:15/
+    # 10:15 and the port-forward duplicates 04:01/05:01.
+    autoupdate_cron: "30 3 * * *"
+
+  tasks:
+    # A hand-made leftover from a manual experiment: mode 644, referenced by
+    # no crontab, rc.local or hotplug script, and only present on the master.
+    # Its uci setting (login_check_for_upgrades) is already part of
+    # openwrt_basics.yml, so nothing is lost by removing the file.
+    - name: remove the legacy autoupdate script
+      raw: |
+        if [ -f /etc/scripts/autoupdate.sh ]
+        then
+          rm -f /etc/scripts/autoupdate.sh
+          echo changed
+        else
+          echo unchanged
+        fi
+      register: legacy_autoupdate_result
+      changed_when: "legacy_autoupdate_result.stdout | trim == 'changed'"
+
+    - name: write the daily package-upgrade script
+      raw: |
+        mkdir -p /etc/scripts
+        cat << 'EOF' > /tmp/package-upgrade.sh.new
+        #!/bin/sh
+        # Daily package maintenance, started by cron.
+        #
+        # Upgrades only the userspace packages inside the running release. The
+        # kernel and its kmods cannot move here: the kmods feed path contains
+        # the running kernel version, so a new kernel only arrives with a
+        # complete release image via sysupgrade/owut. The owut check below only
+        # reports a pending release upgrade, it never downloads or flashes.
+        #
+        # Log: /var/log/package-upgrade.log (tmpfs, so it survives until the
+        # next reboot) plus one summary line per run to syslog, which this
+        # router forwards to the log server.
+
+        LOG=/var/log/package-upgrade.log
+        OWUT=/usr/bin/owut
+
+        echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) start" >> "$LOG"
+
+        # refresh the index, then upgrade the userspace packages; -q drops the
+        # repo URL list, which would otherwise fill the log with 8 lines a day
+        apk update -q >> "$LOG" 2>&1
+        before=$(apk list -u 2>/dev/null | wc -l | tr -d ' ')
+        apk upgrade >> "$LOG" 2>&1
+        after=$(apk list -u 2>/dev/null | wc -l | tr -d ' ')
+
+        # report a pending release upgrade (report only, no download)
+        vfrom=""
+        vto=""
+        if [ -x "$OWUT" ]
+        then
+          owut_out=$("$OWUT" check 2>&1)
+          printf '%s\n' "$owut_out" | grep -E '^(Version-from|Version-to|All packages|There )' >> "$LOG"
+          vfrom=$(printf '%s\n' "$owut_out" | sed -n 's/^Version-from[[:space:]]*//p')
+          vto=$(printf '%s\n' "$owut_out" | sed -n 's/^Version-to[[:space:]]*//p')
+        fi
+
+        # one line per run for the log server; the counts tell whether apk
+        # actually had work to do
+        logger -t package-upgrade "upgradable before: $before, still upgradable: $after"
+        if [ -n "$vto" ] && [ "$vfrom" != "$vto" ]
+        then
+          logger -t package-upgrade "WARNING: release upgrade available: $vfrom -> $vto (manual: owut upgrade)"
+        fi
+
+        # the log lives on tmpfs, keep it small for long uptimes
+        tail -n 400 "$LOG" > "$LOG.new" && mv "$LOG.new" "$LOG"
+        EOF
+        chmod 700 /tmp/package-upgrade.sh.new
+        if [ -f /etc/scripts/package-upgrade.sh ] && cmp -s /tmp/package-upgrade.sh.new /etc/scripts/package-upgrade.sh
+        then
+          rm -f /tmp/package-upgrade.sh.new
+          echo unchanged
+        else
+          mv /tmp/package-upgrade.sh.new /etc/scripts/package-upgrade.sh
+          echo changed
+        fi
+      register: package_upgrade_script_result
+      changed_when: "package_upgrade_script_result.stdout | trim == 'changed'"
+
+    - name: install the cron job
+      raw: |
+        cronjob="{{ autoupdate_cron }}   /etc/scripts/package-upgrade.sh"
+        if grep -Fq "$cronjob" /etc/crontabs/root 2>/dev/null
+        then
+          echo unchanged
+        else
+          echo "$cronjob" >> /etc/crontabs/root
+          echo changed
+        fi
+      register: package_upgrade_cron_result
+      changed_when: "package_upgrade_cron_result.stdout | trim == 'changed'"
+
+    - name: restart cron to pick up the new job
+      raw: /etc/init.d/cron restart
+      changed_when: false
+      when: package_upgrade_cron_result.changed
+
+    # Prove the job can run: the script must be executable and the crontab
+    # must carry the line, otherwise the daily run silently never happens.
+    - name: verify script and cron entry
+      raw: |
+        [ -x /etc/scripts/package-upgrade.sh ] || { echo "package-upgrade.sh missing or not executable"; exit 1; }
+        grep -Fq "{{ autoupdate_cron }}   /etc/scripts/package-upgrade.sh" /etc/crontabs/root || { echo "cron entry missing"; exit 1; }
+        echo ok
+      changed_when: false
+
+    # Record this playbook's resources in /etc/symbios/managed.json.
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml
