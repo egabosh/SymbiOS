@@ -37,14 +37,37 @@ do
   fi
   if [ -f Dockerfile ]
   then
-    if docker -l warn compose --ansi never build --progress=plain --pull --no-cache --force-rm >$g_tmp/build 2>&1
+    # A "build --no-cache" produces new layers on every run (file timestamps
+    # inside the image, a wiped build cache), so the resulting image ID can
+    # not tell whether anything really changed. A forced recreate is not
+    # harmless: it kills running sessions of the container (an upload over
+    # sftp-share, for example). Rebuild only when the recipe changed: the
+    # Dockerfile, the compose file or the digest of the base image. Changes
+    # to the files themselves are deployed by the owning playbook, which
+    # rebuilds them on its own.
+    f_base_image="$(awk 'toupper($1) == "FROM" {print $2; exit}' Dockerfile)"
+    f_base_id=""
+    if [[ -n "$f_base_image" ]]
     then
-      if ! docker -l warn compose --ansi never up -d --force-recreate --remove-orphans >$g_tmp/up 2>&1
-      then
-        g_echo_error "$g_docker_dir: docker compose up failed: $(cat $g_tmp/up)"
-      fi
+      docker -l warn pull "$f_base_image" >/dev/null 2>&1
+      f_base_id="$(docker image inspect --format '{{.Id}}' "$f_base_image" 2>/dev/null)"
+    fi
+    f_recipe="$( { cat Dockerfile docker-compose.yml; echo "$f_base_id"; } | sha256sum | cut -d' ' -f1 )"
+    if [[ -f .autoupdate-recipe && "$(cat .autoupdate-recipe)" == "$f_recipe" ]]
+    then
+      g_echo_note "$g_docker_dir: recipe unchanged - keeping the running containers"
     else
-      g_echo_error "$g_docker_dir: docker compose build failed: $(cat $g_tmp/build)"
+      if docker -l warn compose --ansi never build --progress=plain --pull --no-cache --force-rm >$g_tmp/build 2>&1
+      then
+        if ! docker -l warn compose --ansi never up -d --force-recreate --remove-orphans >$g_tmp/up 2>&1
+        then
+          g_echo_error "$g_docker_dir: docker compose up failed: $(cat $g_tmp/up)"
+        else
+          echo "$f_recipe" >.autoupdate-recipe
+        fi
+      else
+        g_echo_error "$g_docker_dir: docker compose build failed: $(cat $g_tmp/build)"
+      fi
     fi
   fi
 done
