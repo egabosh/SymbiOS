@@ -24,7 +24,9 @@
 #     Installs Kodi 21 "Omega" (Debian Trixie) as a host service for direct TV
 #     playback. It runs standalone on tty7 under the dedicated kodi user and is
 #     switched against the SymbiOS desktop by switch-kodi-desk (Kodi starts
-#     automatically after boot, media-center mode). The JSON-RPC web server
+#     automatically after boot, media-center mode). While a configured remote
+#     media database is unreachable the switcher starts Kodi with the local
+#     library instead of leaving the TV black. The JSON-RPC web server
 #     (Kodi Remote) listens on port 8081 with a generated Basic-auth password;
 #     direct access is LAN-only, global access runs through Authelia/Traefik at
 #     kodi.<base_domain> (group kodi). Optional: MariaDB media database backend
@@ -328,6 +330,15 @@
         state: absent
       when: (kodi_options | default({})).db_host | default('') | length == 0
 
+    # The switcher parks advancedsettings.xml as advancedsettings.xml.db-off
+    # while the database is unreachable (local library fallback). A playbook
+    # run restores the configured state, so the stale copy goes away; the
+    # switcher recreates it on the next start if the database is still down.
+    - name: Remove the local-library fallback copy of advancedsettings.xml
+      ansible.builtin.file:
+        path: /home/kodi/.kodi/userdata/advancedsettings.xml.db-off
+        state: absent
+
     # SFTP media sources (vfs.sftp): written only while a server is configured,
     # removed otherwise. Only categories with a set path get a source entry.
     # The source URLs stay user-less; the credentials live in userdata/
@@ -452,9 +463,10 @@
     # The switcher daemon: watches which graphical session is active and
     # replaces it with the other one when it exits. At boot (after the /symbios
     # mount) it starts Kodi, so the host boots into media-center mode; leaving
-    # Kodi drops to the SymbiOS desktop and vice versa. It also waits for a
-    # configured MariaDB backend before starting Kodi and force-kills Kodi if
-    # its shutdown hangs.
+    # Kodi drops to the SymbiOS desktop and vice versa. It waits a bounded time
+    # for a configured MariaDB backend and falls back to the local library when
+    # it stays unreachable (Kodi paints no frame while it retries the database),
+    # and force-kills Kodi if its shutdown hangs.
     - name: /usr/local/sbin/switch-kodi-desk.sh
       ansible.builtin.copy:
         dest: /usr/local/sbin/switch-kodi-desk.sh
@@ -502,21 +514,95 @@
           PYEOF
           }
 
+          # The media database (MariaDB) is a remote host: while it does not
+          # answer - remote site down, name resolving to an address without a
+          # database route - Kodi blocks in the database open and never paints
+          # its first frame, so the TV stays black. Waiting for the database
+          # therefore never blocks the session: after a grace period the
+          # profile falls back to the local SQLite library (empty media
+          # library, but a usable menu and the SFTP sources) and returns to
+          # the shared database as soon as it answers again.
+          g_userdata=/home/kodi/.kodi/userdata
+          g_advancedsettings=${g_userdata}/advancedsettings.xml
+          # Kodi only reads the exact file name, so the "database off" state
+          # is a rename next to it.
+          g_advancedsettings_off=${g_advancedsettings}.db-off
+
+          # Print "<host> <port>" of the configured MySQL backend; nothing
+          # when the profile has no database backend.
+          f_db_target() {
+            local f_file
+            f_file=${g_advancedsettings}
+            [[ -f $f_file ]] || f_file=${g_advancedsettings_off}
+            [[ -f $f_file ]] || return 0
+            grep -q mysql "$f_file" 2>/dev/null || return 0
+            printf '%s %s\n' \
+              "$(grep "<host>" "$f_file" | head -n1 | cut -d"<" -f2 | cut -d">" -f2)" \
+              "$(grep "<port>" "$f_file" | head -n1 | cut -d"<" -f2 | cut -d">" -f2)"
+          }
+
+          # Is the media database reachable? A bare /dev/tcp connect hangs for
+          # the whole kernel SYN timeout (~2 min) against a firewalled host,
+          # so the probe is bounded.
+          f_db_up() {
+            local f_host f_port
+            read -r f_host f_port <<<"$(f_db_target)"
+            [[ -n $f_host ]] || return 0
+            timeout 3 bash -c "exec 3<>/dev/tcp/${f_host}/${f_port:-3306}" 2>/dev/null
+          }
+
+          # Park or restore the remote database section. Only called while
+          # Kodi is stopped, so the switch needs no restart.
+          f_db_off() {
+            [[ -f $g_advancedsettings ]] || return 0
+            mv -f "$g_advancedsettings" "$g_advancedsettings_off"
+            echo "media database unreachable - starting with the local library"
+          }
+
+          f_db_on() {
+            [[ -f $g_advancedsettings_off ]] || return 0
+            mv -f "$g_advancedsettings_off" "$g_advancedsettings"
+            echo "media database reachable - back to the shared library"
+          }
+
+          # Restart Kodi at most once per 5 minutes: the database error stays
+          # in the log until the next start, so an unguarded restart would
+          # turn into a loop.
+          f_restart_kodi() {
+            local f_stamp=/run/switch-kodi-desk.last-restart
+            if [[ -f $f_stamp ]]
+            then
+              [[ $(( $(date +%s) - $(stat -c %Y "$f_stamp") )) -ge 300 ]] || return 0
+            fi
+            touch "$f_stamp"
+            systemctl restart kodi-standalone.service
+          }
+
+          # Start Kodi with the shared library when the database answers
+          # within the grace period, with the local library otherwise.
+          f_start_kodi() {
+            local f_i
+            if ! f_db_up
+            then
+              echo "waiting up to 60s for the media database $(f_db_target)"
+              for (( f_i = 0; f_i < 12; f_i++ ))
+              do
+                sleep 5
+                f_db_up && break
+              done
+            fi
+            if f_db_up
+            then
+              f_db_on
+            else
+              f_db_off
+            fi
+            systemctl start kodi-standalone
+          }
+
           deskorkodi="kodi"
           while true
           do
-
-            # wait for the kodi media database (mysql) if configured
-            if grep -q mysql /home/kodi/.kodi/userdata/advancedsettings.xml 2>/dev/null
-            then
-              dbhost=$(grep "<host>" /home/kodi/.kodi/userdata/advancedsettings.xml | head -n1 | cut -d"<" -f2 | cut -d">" -f2)
-              dbport=$(grep "<port>" /home/kodi/.kodi/userdata/advancedsettings.xml | head -n1 | cut -d"<" -f2 | cut -d">" -f2)
-              while ! (exec 3<>"/dev/tcp/${dbhost}/${dbport}") 2>/dev/null
-              do
-                sleep 1
-              done
-              exec 3>&-
-            fi
 
             ps axu >/tmp/deskorkodi-$$
             if egrep "/usr/bin/kodi |kodi\.bin " /tmp/deskorkodi-$$
@@ -526,8 +612,18 @@
               f_enable_addons
               # Kodi shutdown hang detection
               egrep -iq "info <general>: Stopping the application..." /home/kodi/.kodi/temp/kodi.log && grep -q "info <general>: Stopping all" /home/kodi/.kodi/temp/kodi.log && killall -9 kodi kodi.bin
-              # Restart kodi if the remote database connection fails
-              egrep -iq " Unable to open database: .*t connect to server" /home/kodi/.kodi/temp/kodi.log && systemctl restart kodi-standalone.service
+              if [[ -f $g_advancedsettings_off ]]
+              then
+                # running on the local fallback: switch back once the shared
+                # database answers again
+                f_db_up && f_db_on && f_restart_kodi
+              elif f_db_up && egrep -iq " Unable to open database: .*t connect to server" /home/kodi/.kodi/temp/kodi.log
+              then
+                # Restart Kodi if the remote database connection fails - only
+                # while the database answers (a restart against an unreachable
+                # host would just loop) and rate-limited.
+                f_restart_kodi
+              fi
             elif grep "cinnamon" /tmp/deskorkodi-$$
             then
               deskorkodi="kodi"
@@ -535,7 +631,7 @@
               if [[ $deskorkodi = kodi ]]
               then
                 systemctl stop lightdm
-                systemctl start kodi-standalone
+                f_start_kodi
                 deskorkodi="desk"
               elif [[ $deskorkodi = desk ]]
               then
@@ -545,7 +641,7 @@
                 sleep 10
               else
                 systemctl stop lightdm
-                systemctl start kodi-standalone
+                f_start_kodi
                 deskorkodi="desk"
               fi
             fi
