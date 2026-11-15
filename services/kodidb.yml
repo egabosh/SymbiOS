@@ -223,6 +223,12 @@
               env_file:
                 - {{ base_services_root }}/_defaults/mariadb/envroot.db
                 - {{ base_services_root }}/_defaults/mariadb/mariadb.env
+              # Published on all addresses on purpose: the database is meant to
+              # be reachable from every routed network (LAN, IoT, Tor-LAN,
+              # VPN), and which network may route here is decided on the
+              # router. Note that a published container port is reached
+              # through Docker's own DNAT/forward rules, so UFW does not gate
+              # it - see the UFW task further down.
               ports:
                 - 0.0.0.0:3307:3306
 
@@ -319,10 +325,35 @@
         backup: yes
         validate: /bin/bash -n %s
 
-    - name: Allow mysql/kodidb over network
+    # The database is published on all addresses on purpose (compose ports
+    # above) and the network policy is made on the router. These rules keep the
+    # host firewall free of a blanket "allow anywhere" entry for a database
+    # port; they do not gate the container port itself, because Docker's DNAT
+    # rules are evaluated before ufw-user-forward.
+    # The delete is guarded because ufw fails on a rule that is already gone.
+    - name: Check for the legacy unrestricted KodiDB rule
+      ansible.builtin.shell: ufw status | grep -qE '^3307/tcp +ALLOW +Anywhere *$'
+      register: kodidb_legacy_ufw
+      changed_when: false
+      failed_when: false
+
+    - name: Remove the legacy unrestricted KodiDB rule
+      ansible.builtin.command: ufw --force delete allow 3307/tcp
+      when: kodidb_legacy_ufw.rc == 0
+      changed_when: true
+
+    # LAN and VPN/Tor-LAN (wg_lan, wg_tor) are RFC1918/ULA - the same private
+    # range set the other host services use, never a public source.
+    - name: Allow mysql/kodidb from LAN and Tor-LAN in the host firewall
       include_tasks: ../shared-tasks/ufw-allow.yml
       vars:
         ufw_port: '3307'
+        ufw_src: "{{ item }}"
+      loop:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - fc00::/7
 
     # Docker-based healthcheck (MariaDB has no HTTP endpoint since phpmyadmin removal)
     - name: Deploy healthcheck
