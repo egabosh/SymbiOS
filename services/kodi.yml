@@ -19,6 +19,7 @@
 #     - base_domain
 #     - locale
 #     - traefik_network_gateway
+#     - twofa_enabled
 #   name: Kodi
 #   short_description: Deploy the Kodi media center on the host
 #   description: >-
