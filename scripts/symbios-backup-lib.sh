@@ -93,6 +93,13 @@ g_bk_keep_monthly=9999
 g_bk_min_free_gb=3
 g_bk_min_free_percent=15
 
+# A restic run to a remote target can be aborted from the outside (a network
+# hiccup, a container recreate on the target host). The data is still fine
+# and restic skips what it already uploaded, so the run is retried instead of
+# losing the whole night.
+g_bk_retry_attempts=3
+g_bk_retry_wait=120
+
 # Read all backup-related settings from inventory.yml into g_bk_* globals.
 function f_bk_read_vars {
   g_bk_host="$(f_symbios_var backup_server_host "")"
@@ -249,6 +256,36 @@ function f_bk_restic {
     RESTIC_REPOSITORY="$f_repo" restic "$@" 2>>"$g_bk_err_file" || f_rc=$?
   fi
   return $f_rc
+}
+
+# Run a restic command and retry it when it fails. A killed or interrupted
+# run leaves its lock behind, so every attempt is preceded by a stale-lock
+# cleanup: "unlock" without arguments never touches a lock of a live process,
+# it only removes the leftovers of a dead one. A retried backup resumes
+# where the previous attempt stopped - restic skips data it already stored.
+# Usage: f_bk_restic_retry <repo> <sshargs|''> <restic-args...>
+function f_bk_restic_retry {
+  local f_repo="$1" f_ssh="$2"
+  shift 2
+  local f_attempt=1 f_rc=0
+  while true
+  do
+    f_bk_restic "$f_repo" "$f_ssh" unlock
+    f_bk_restic "$f_repo" "$f_ssh" "$@"
+    f_rc=$?
+    if [[ $f_rc -eq 0 ]]
+    then
+      return 0
+    fi
+    if [[ $f_attempt -ge $g_bk_retry_attempts ]]
+    then
+      g_echo_error "restic failed after $g_bk_retry_attempts attempts (last rc $f_rc)"
+      return $f_rc
+    fi
+    g_echo_warn "restic failed (attempt $f_attempt/$g_bk_retry_attempts, rc $f_rc) - retrying in ${g_bk_retry_wait}s"
+    sleep "$g_bk_retry_wait"
+    f_attempt=$((f_attempt + 1))
+  done
 }
 
 # Meaningful tail of the captured restic stderr: carriage returns from

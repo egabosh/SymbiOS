@@ -232,7 +232,7 @@ function f_run_restic_backup {
   [[ -d /root/.ssh ]] && f_srcs+=(/root/.ssh)
   f_bk_write_excludes "${g_tmp}/restic-excludes"
   g_echo "Creating restic snapshot in $f_repo"
-  if ! f_bk_restic "$f_repo" "$f_ssh" backup \
+  if ! f_bk_restic_retry "$f_repo" "$f_ssh" backup \
       "${f_srcs[@]}" --exclude-file "${g_tmp}/restic-excludes"
   then
     g_echo_error "Restic snapshot on $f_name failed"
@@ -246,7 +246,7 @@ function f_run_restic_backup {
   [[ "$f_kw" -gt 0 ]] && f_forget+=(--keep-weekly "$f_kw")
   [[ "$f_km" -gt 0 ]] && f_forget+=(--keep-monthly "$f_km")
   g_echo "Applying retention on $f_name (keep-daily $f_kd, keep-weekly $f_kw, keep-monthly $f_km)"
-  if ! f_bk_restic "$f_repo" "$f_ssh" forget --prune "${f_forget[@]}"
+  if ! f_bk_restic_retry "$f_repo" "$f_ssh" forget --prune "${f_forget[@]}"
   then
     g_echo_error "Restic retention (forget --prune) on $f_name failed"
     f_collect_errors "$f_name"
