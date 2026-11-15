@@ -17,6 +17,7 @@
 #   uses_vars:
 #     - acme_resolver
 #     - base_domain
+#     - locale
 #     - traefik_network_gateway
 #   name: Kodi
 #   short_description: Deploy the Kodi media center on the host
@@ -31,7 +32,8 @@
 #     direct access is LAN-only, global access runs through Authelia/Traefik at
 #     kodi.<base_domain> (group kodi). Optional: MariaDB media database backend
 #     (see services/kodidb.yml), SFTP media sources and automatic addon
-#     installation from mirrors.kodi.tv.
+#     installation from mirrors.kodi.tv. The Kodi UI language follows the
+#     system locale (inventory "locale"), the same language the desktop uses.
 #   url: "https://kodi.{{ base_domain }}"
 #   config:
 #     title: Kodi Options
@@ -121,10 +123,16 @@
     # writable config dir, not in inventory.yml. Only one options row makes
     # sense for a single media center; the first row of the list is used.
     kodi_options_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/kodi/instances.yml"
+    # The UI language is the system language, not a Kodi-specific setting:
+    # inventory "locale" (en_US.UTF-8) maps to the Kodi language addon
+    # resource.language.en_us. Addons use <ll>_<cc> lowercase; there is no
+    # language pack for every system locale, hence the lookup before install.
+    kodi_language: "resource.language.{{ locale.split('.')[0].split('@')[0] | lower }}"
     # Addons installed automatically on first run (latest version fetched from
-    # mirrors.kodi.tv/addons/omega), plus one pinned repository addon.
+    # mirrors.kodi.tv/addons/omega), plus one pinned repository addon. The
+    # language addon is handled separately below, because it is derived from
+    # the inventory.
     kodi_addons_omega:
-      - resource.language.de_de
       - plugin.video.invidious
       - plugin.audio.podcasts
       - plugin.video.ctuplinkrss
@@ -224,7 +232,8 @@
     # Seed the Kodi profile settings on the very first run only (force: false).
     # After the first start Kodi owns guisettings.xml and keeps it updated.
     # The web server (Kodi Remote / JSON-RPC) runs on 8081 with Basic auth;
-    # the language addon is preselected so the UI starts in German.
+    # the language addon is preselected so the UI starts in the system
+    # language.
     - name: Seed ~/.kodi/userdata/guisettings.xml (first start only)
       ansible.builtin.copy:
         dest: /home/kodi/.kodi/userdata/guisettings.xml
@@ -234,7 +243,7 @@
         force: false
         content: |
           <settings version="2">
-              <setting id="locale.language" default="true">resource.language.de_de</setting>
+              <setting id="locale.language" default="true">{{ kodi_language }}</setting>
               <setting id="services.webserver">true</setting>
               <setting id="services.webserverport" default="true">8081</setting>
               <setting id="services.webserverauthentication" default="true">true</setting>
@@ -416,6 +425,25 @@
       loop: "{{ kodi_addons_omega }}"
       args:
         creates: /home/kodi/.kodi/addons/{{ item }}
+
+    # The language addon matches the system locale. Not every locale has a Kodi
+    # language pack (en_gb is built in), so the mirror index is asked first and
+    # a missing pack stays a no-op instead of failing the install.
+    - name: Look up the language addon {{ kodi_language }} on mirrors.kodi.tv
+      ansible.builtin.shell: wget -q https://mirrors.kodi.tv/addons/omega/{{ kodi_language }}/ -O - | egrep "{{ kodi_language }}-.+\.zip" | tail -n1 | cut -d\" -f2
+      register: kodi_language_zip
+      changed_when: false
+      failed_when: false
+
+    - name: Install the Kodi language addon {{ kodi_language }}
+      ansible.builtin.shell: |
+        cd /home/kodi/.kodi/addons
+        wget -q "https://mirrors.kodi.tv/addons/omega/{{ kodi_language }}/{{ kodi_language_zip.stdout }}"
+        unzip -o "{{ kodi_language_zip.stdout }}"
+      args:
+        creates: /home/kodi/.kodi/addons/{{ kodi_language }}
+      register: kodi_language_install
+      when: kodi_language_zip.stdout | trim | length > 0
 
     # The mediathekview repository is not in the official Kodi repository; pin
     # the zip from the project's own kodirepo.
@@ -675,6 +703,57 @@
     - name: Reload systemd unit files
       ansible.builtin.systemd:
         daemon_reload: yes
+
+    # A profile that already exists keeps its own language (the seed above only
+    # applies on the very first start). Two paths converge it: a stopped Kodi
+    # gets the value in its profile file, a running one is asked over the
+    # JSON-RPC web server, because a running instance owns guisettings.xml and
+    # rewrites it. The running path also restarts the session - the switch is
+    # persisted at once, but the UI only loads the new language on the next
+    # start.
+    - name: Check whether a Kodi session is running
+      ansible.builtin.command: systemctl is-active kodi-standalone.service
+      register: kodi_running
+      changed_when: false
+      failed_when: false
+
+    - name: Set the UI language in a stopped Kodi profile ({{ kodi_language }})
+      ansible.builtin.lineinfile:
+        path: /home/kodi/.kodi/userdata/guisettings.xml
+        regexp: '^(\s*)<setting id="locale.language".*</setting>$'
+        line: '\1<setting id="locale.language" default="true">{{ kodi_language }}</setting>'
+        backrefs: yes
+      when: kodi_running.stdout | trim != 'active'
+
+    - name: Read the UI language of the running Kodi session
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-kodi-language.sh get"
+      register: kodi_language_live
+      changed_when: false
+      failed_when: false
+      when: kodi_running.stdout | trim == 'active'
+
+    - name: Set the UI language of the running Kodi session ({{ kodi_language }})
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-kodi-language.sh set {{ kodi_language }}"
+      register: kodi_language_set
+      changed_when: "'kodi-language-changed' in kodi_language_set.stdout"
+      when:
+        - kodi_running.stdout | trim == 'active'
+        - kodi_language_live.rc | default(1) == 0
+        - kodi_language_live.stdout | default('') | trim != kodi_language
+
+    # Switcher down first: a restarted Kodi without it looks like "the user
+    # left Kodi" and the next loop turn would fall back to the desktop session.
+    # A freshly installed language pack needs the restart as well: Kodi only
+    # registers addons at start, and a pack it does not know yet is ignored.
+    - name: Restart the Kodi session to apply the language
+      ansible.builtin.shell: |
+        systemctl stop switch-kodi-desk.service
+        systemctl restart kodi-standalone.service
+        systemctl start switch-kodi-desk.service
+      changed_when: true
+      when:
+        - kodi_running.stdout | trim == 'active'
+        - kodi_language_set is changed or kodi_language_install is changed
 
     # Boot policy (AGENTS.md): both units need the profile below /symbios, so
     # they are never boot-enabled. rc.local starts the switcher once the LUKS

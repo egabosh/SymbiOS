@@ -17,6 +17,7 @@
 # docs:
 #   uses_vars:
 #     - base_domain
+#     - locale
 #   name: Basics
 #   short_description: Basic SymbiOS host setup
 #   description: 'Performs base system configuration: packages, users, locale/timezone, SSH, logging (rsyslog), mail relay (postfix) and other foundational settings used by all other roles.'
@@ -455,7 +456,7 @@
           if [ -f /etc/debian_version ]
           then
             export DEBIAN_FRONTEND='noninteractive'
-            export LANG="en_US.UTF-8"
+            export LANG="{{ locale }}"
             alias ls='ls --color=auto'
             alias grep='grep --colour=auto'
             alias egrep='grep -E --colour=auto'
@@ -469,7 +470,7 @@
             then
               echo '. /etc/profile.d/settings-from-ansible.sh' >> ~/.bashrc
             fi
-            export LANG="en_US.UTF-8"
+            export LANG="{{ locale }}"
           fi
         backup: yes
         validate: /bin/bash -n %s

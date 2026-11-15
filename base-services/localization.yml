@@ -66,12 +66,36 @@
       notify: setupcon
       when: nocontainer.stat.exists == true
 
+    # The locale has to be converged, not just generated. basics.yml already
+    # generates en_US/en_GB at install time, so locale_gen reports "ok" for
+    # them and a notify-driven handler never fires: the inventory value then
+    # had no effect at all (seen live: inventory en_US.UTF-8, system
+    # en_GB.UTF-8). Read the current setting and write it on a real
+    # difference.
     - name: Ensure {{ locale }} locale exists
       community.general.locale_gen:
         name: "{{ locale }}"
         state: present
-      notify: localectl
       when: nocontainer.stat.exists == true
+
+    - name: Read the current system locale
+      ansible.builtin.command: localectl status
+      register: locale_current
+      changed_when: false
+      check_mode: false
+      when: nocontainer.stat.exists == true
+
+    # localectl writes /etc/locale.conf (the /etc/default/locale symlink points
+    # to it) and updates the systemd manager environment, so services started
+    # later inherit the new locale. Running sessions keep the environment they
+    # were started with - a desktop session shows the new language after the
+    # next login.
+    - name: Set the system locale to {{ locale }}
+      ansible.builtin.command: localectl set-locale LANG={{ locale }}
+      when:
+        - nocontainer.stat.exists == true
+        - ("LANG=" ~ locale) not in locale_current.stdout
+      changed_when: true
 
     # /etc/default/keyboard above only feeds the console (setupcon) and future
     # display managers. It never reaches a running X server or desktop
@@ -147,9 +171,6 @@
 
     - name: setupcon
       ansible.builtin.shell: setupcon
-
-    - name: localectl
-      ansible.builtin.shell: localectl set-locale LANG="{{ locale }}"
 
     - name: dconf update
       ansible.builtin.command: dconf update

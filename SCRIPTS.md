@@ -540,6 +540,7 @@ texts opportunistically).
 | `symbios-openwrt-image.sh` | Build OpenWrt image (patch) + define libvirt domain | `<patch\|define> --root ...` |
 | `symbios-ldap-offline-acl.sh` | LDAP offline sftp-reader ACL import + bind account | `<rewrite\|add-reader> --ldif/--basedn ...` |
 | `symbios-mailcow-autoconfig-sync.sh` | Autoconfig/autodiscover Traefik routes from the mailcow domains (mailcow.yml, daily cron) | `[--dry-run\|-v]` |
+| `symbios-kodi-language.sh` | Kodi UI language over the JSON-RPC web server (services/kodi.yml) | `get\|set <resource.language.xx_yy>` |
 
 ### 4.8 Power management (WoL / idle suspend)
 
