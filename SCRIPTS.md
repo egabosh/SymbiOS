@@ -514,6 +514,7 @@ texts opportunistically).
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | `symbios-nextcloud-admin-sync.sh` | Nextcloud admins from LDAP `nextcloud-admins` | no args |
+| `symbios-nextcloud-ai.sh` | Nextcloud AI providers (app `integration_openai`) from the inventory `ai_*` values | `[--check]` |
 | `symbios-nextcloud-media-scan.sh` | Index new files on Nextcloud external media mounts | `[mount ...]` |
 | `symbios-openwebui-admin-sync.sh` | OpenWebUI admin roles from LDAP `openwebui-admins` | no args |
 | `symbios-home-assistant-admin-sync.sh` | Home Assistant admins from LDAP group | no args |
