@@ -16,6 +16,8 @@
 # docs:
 #   uses_vars:
 #     - acme_resolver
+#     - ai_apikey
+#     - ai_server
 #     - base_domain
 #     - media_documents
 #     - media_gid
@@ -23,7 +25,7 @@
 #     - twofa_enabled
 #   name: Paperless-ngx
 #   short_description: Deploy the Paperless-ngx document management system
-#   description: Deploys Paperless-ngx for document management with OCR, tagging, and full-text search. Includes Redis broker. Exposed via Traefik.
+#   description: Deploys Paperless-ngx for document management with OCR, tagging, and full-text search. Includes Redis broker. Exposed via Traefik. The AI suggestions (tags, correspondent, document type, title) run against the SymbiOS AI endpoint from Settings -> AI (ai_server/ai_apikey); they stay off while ai_server is empty.
 #   url: "https://paperless.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
@@ -58,6 +60,7 @@
 #       - paperless-admins
 #     authelia_blocks:
 #       - "paperless ACCESS CONTROL"
+#       - "paperless BYPASS RESOURCES"
 #   actions:
 #     start: docker compose -f /symbios/services/paperless/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/paperless/docker-compose.yml down
@@ -200,6 +203,17 @@
                 # as fallback, per upstream docs).
                 - PAPERLESS_REDIRECT_LOGIN_TO_SSO=true
                 - PAPERLESS_DISABLE_REGULAR_LOGIN=true
+                # AI suggestions (tags, correspondent, document type, title)
+                # run against the SymbiOS AI endpoint from Settings -> AI.
+                # The lines are only written when the inventory of this host
+                # sets ai_server/ai_apikey (unset keeps Paperless AI off).
+                # No LLM model is set on purpose: llama-server serves a
+                # single model and ignores the request's model field.
+                {{ '- PAPERLESS_AI_ENABLED=true' if ai_server | default('', true) else '' }}
+                {{ '- PAPERLESS_AI_LLM_BACKEND=openai-like' if ai_server | default('', true) else '' }}
+                {{ '- PAPERLESS_AI_LLM_ENDPOINT=' + ai_server if ai_server | default('', true) else '' }}
+                {{ '- PAPERLESS_AI_LLM_API_KEY=' + ai_apikey if (ai_server | default('', true)) and (ai_apikey | default('', true)) else '' }}
+                {{ '- PAPERLESS_AI_LLM_REQUEST_TIMEOUT=300' if ai_server | default('', true) else '' }}
               networks:
                 paperless: {}
                 symbios_services: null
@@ -289,6 +303,13 @@
         authelia_subjects:
           - "group:paperless-users"
           - "group:paperless-admins"
+        # Native app clients (Paperless Go, ...) cannot do the interactive
+        # SSO login, and Authelia answers their "Authorization: Token ..."
+        # requests with 401 before paperless ever sees them. /api/ therefore
+        # bypasses Authelia and relies on paperless's own token/session auth
+        # (same pattern as forgejo .git).
+        authelia_bypass_resources:
+          - '^/api/'
 
     - name: Deploy LDAP group-change hook (immediate admin sync on membership changes)
       ansible.builtin.copy:
