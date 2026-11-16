@@ -457,6 +457,30 @@
                 - nextcloud
                 - symbios_base_services
 
+            # Executes Task Processing tasks (Nextcloud Assistant) as they
+            # arrive. nextcloud-cron only ticks every 5 minutes, so without
+            # this worker every AI request sat in the queue for minutes.
+            # The worker polls once per second and restarts every 5 minutes
+            # (--timeout) to pick up configuration changes.
+            # The first occ call waits for a usable installation (database up,
+            # config readable), otherwise it prints a Doctrine stack trace at
+            # every container start.
+            nextcloud-tpworker:
+              image: nextcloud:stable-apache
+              container_name: nextcloud-tpworker
+              restart: unless-stopped
+              entrypoint:
+                - /bin/sh
+                - -c
+                - 'until su -s /bin/sh www-data -c "php /var/www/html/occ status" >/dev/null 2>&1; do sleep 5; done; while true; do su -s /bin/sh www-data -c "php /var/www/html/occ taskprocessing:worker --timeout=300 --interval=1"; sleep 5; done'
+              volumes:
+                - ./nextcloud-data:/var/www/html
+                - /etc/localtime:/etc/localtime:ro
+              depends_on:
+                - nextcloud-db
+              networks:
+                - nextcloud
+
             nextcloud-phpmyadmin:
               image: phpmyadmin:latest
               container_name: nextcloud-phpmyadmin
