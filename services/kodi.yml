@@ -252,19 +252,25 @@
               <setting id="services.webserverpassword">{{ lookup('file', '/symbios/services/kodi/.kodi_web_pw') | trim }}</setting>
           </settings>
 
-    # Personal Kodi presets (addon_data for pvr.iptvsimple/podcasts/mediathekview,
-    # keymaps, peripheral_data) from the linux-setups repo. --ignore-existing so
-    # the managed files above (guisettings.xml with port 8081 + generated
-    # password) always win; runs once, marked by the preset addon_data dir.
-    - name: Deploy Kodi presets from linux-setups (first start only)
-      ansible.builtin.shell: |
-        f_dir=$(mktemp -d)
-        git clone --depth 1 https://github.com/egabosh/linux-setups.git "$f_dir/linux-setups"
-        rsync -a --ignore-existing "$f_dir/linux-setups/debian/kodi/kodi-settings/" /home/kodi/.kodi/
-        chown -R kodi:kodi /home/kodi/.kodi
-        rm -rf "$f_dir"
-      args:
-        creates: /home/kodi/.kodi/userdata/addon_data
+    # Personal Kodi presets ship with the playbook: addon_data for the IPTV and
+    # podcast addons, the keymaps and the CEC peripheral settings. They are
+    # seeded once, on the first start, so every later change in the Kodi UI
+    # wins and a reapply never overwrites it. guisettings.xml is not part of
+    # the tree - the managed seed above owns that file.
+    - name: Check whether the Kodi presets were seeded already
+      ansible.builtin.stat:
+        path: /home/kodi/.kodi/userdata/addon_data
+      register: kodi_presets_seeded
+
+    - name: Seed the Kodi presets (first start only)
+      ansible.builtin.copy:
+        src: kodi/files/userdata/
+        dest: /home/kodi/.kodi/userdata/
+        owner: kodi
+        group: kodi
+        mode: '0644'
+        directory_mode: '0755'
+      when: not kodi_presets_seeded.stat.exists
 
     # Estuary requests its fonts by lowercase-hyphenated names (notosans-regular.ttf,
     # roboto-thin.ttf, notomono-regular.ttf). The skin's own symlinks only resolve when
