@@ -8,26 +8,21 @@ fi
 
 g_echo_ok "check for updates"
 
-# A backup run keeps a transfer open for hours; recreating a container in the
-# middle of it aborts the upload, and the image pulls and rebuilds would
-# compete with the backup for the same disks. Defer the whole Docker update
-# to the next run while a backup is running - that is either this host's own
-# backup (lock file) or a backup INTO this host (the client refreshes the
-# restic lock inside its repository every few minutes).
-g_backup_pid="$(cat /var/lock/backup.sh.lock 2>/dev/null)"
-if [[ -n "$g_backup_pid" ]] && [[ -d "/proc/$g_backup_pid" ]]
-then
-  g_echo_note "A backup is running on this host - deferring the Docker update to the next run"
-  return 0
-fi
-# Only the known repository layout is probed: a search over the whole media
-# volume takes almost a minute, the repositories live at <media_root>/[<dir>/]<repo>.
+# Only the receiving side of a backup has to stand still: the client holds one
+# SFTP transfer open for hours and recreating the receiving SFTP server aborts
+# the upload. Every other service - and the whole sending host - updates
+# normally, because no long-lived connection depends on them.
+# A backup INTO this host is detected through its restic lock, which the client
+# refreshes every few minutes. Only the known repository layout is probed: a
+# search over the whole media volume takes almost a minute, the repositories
+# live at <media_root>/[<dir>/]<repo>.
+g_backup_incoming=0
 g_media_root="$(f_symbios_var media_root "${g_data_root}/media")"
 if [[ -n "$(find "$g_media_root"/*/locks "$g_media_root"/*/*/locks \
     -maxdepth 1 -type f -newermt "-15 minutes" -print -quit 2>/dev/null)" ]]
 then
-  g_echo_note "A backup into this host is running - deferring the Docker update to the next run"
-  return 0
+  g_backup_incoming=1
+  g_echo_note "A backup into this host is running - skipping the SFTP server for this run"
 fi
 
 # Clean up Docker images
@@ -39,6 +34,12 @@ do
   # Skip directories without a compose file
   if [ ! -f "$g_docker_dir/docker-compose.yml" ]
   then
+    continue
+  fi
+  # Never recreate the SFTP server while a backup is being written into it
+  if [[ "$g_backup_incoming" == 1 ]] && [[ "$(basename "$g_docker_dir")" == "sftp-share" ]]
+  then
+    g_echo_note "$g_docker_dir: skipped - a backup into this host is running"
     continue
   fi
   g_echo_ok "$g_docker_dir"
