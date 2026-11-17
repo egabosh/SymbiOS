@@ -38,8 +38,18 @@
 #     that installs the libretro cores available as Debian packages on the
 #     target release (trixie: gb/gbc, gba, nes/fds, snes, Sega MD/MS/GG/
 #     SG-1000/SegaCD, NDS, WonderSwan, Virtual Boy) plus Mupen64Plus-Next for
-#     N64 built from source (no Debian package exists); cores missing on a
-#     release are skipped, systems without a core show up in no scan. N64
+#     N64 and FBNeo for arcade (Neo Geo MVS/AES, CPS, classic boards) built
+#     from source (no Debian package exists); cores missing on a release are
+#     skipped, systems without a core show up in no scan. FBNeo takes MAME
+#     style zipped sets (one archive per game, BIOS in neogeo.zip) and opens
+#     the archive itself, so a bare chip dump directory has to be repacked
+#     first: scripts/symbios-fbneo-repack.py reads the CRC lists of the
+#     driver source and writes one zip per complete set (--roms, --out). The
+#     core must parse those archives with its own stdio: Kodi's game.libretro
+#     wrapper answers the frontend-VFS request for every core, but a seek
+#     through the handle it hands out fails, so unzOpen() aborts and each set
+#     logs "No romset found at ...". A source patch keeps the VFS opt-in, so
+#     the core falls back to plain file I/O. N64
 #     games render with the angrylion software RDP (set as an addon user
 #     setting): Kodi 21 has no HW framebuffer game stream, so the default
 #     GLideN64 OpenGL renderer cannot load. Angrylion in turn forces the
@@ -244,6 +254,29 @@
         core: mupen64plus_next_libretro.so
         patch: mupen64plus-rsp-parallel-page-size.patch
         controllers: [game.controller.n64]
+      # Arcade (Neo Geo MVS/AES, CPS, classic boards): no Debian package and
+      # the official add-on repository builds the game client for
+      # windows-x86_64 only, so the core is built here. FBNeo over
+      # mame2003-plus: its set definitions are maintained against the current
+      # MAME dumps and cover the whole Neo Geo line (KOF 94-2003, Metal Slug
+      # 1-5/X, Samurai Shodown 1-5, Fatal Fury/Real Bout, Garou), where the
+      # 0.78-era cores stop at the older sets. From a 0.78-era RetroPie chip
+      # dump 228 of its 711 Neo Geo sets come out complete - the rest are
+      # hacks, prototypes and sets whose chip revision the dump lacks. The
+      # libretro Makefile sits in a subdirectory (the repository root has
+      # none), hence core_path. The core opens the archive itself
+      # (need_fullpath), so the add-on is marked local and Kodi needs a real
+      # file path. The frontend-VFS patch keeps the core on its own stdio:
+      # Kodi's game.libretro wrapper answers the VFS request for every core,
+      # but a seek through the handle it hands out fails, so unzOpen() aborts
+      # and every zipped set logs "No romset found at ...".
+      - addon: game.libretro.fbneo
+        build: libretro/FBNeo
+        core: fbneo_libretro.so
+        core_path: src/burner/libretro/fbneo_libretro.so
+        patch: fbneo-frontend-vfs.patch
+        local: true
+        controllers: [game.controller.arcade.neogeo]
   tasks:
 
     # Load the options from the WebUI-managed config file. When the file does
@@ -358,8 +391,10 @@
         - kodi_game_cores_available | selectattr('build', 'defined') | list | length > 0
 
     # Libretro cores without a Debian package are built from source once into
-    # the service dir (Mupen64Plus-Next is fully vendored, no git submodules;
-    # plain make yields the .so). The N64 core needs its software RDP
+    # the service dir (Mupen64Plus-Next and FBNeo are fully vendored, no git
+    # submodules; plain make yields the .so - in FBNeo's case below
+    # src/burner/libretro, hence the optional catalog key core_path). The N64
+    # core needs its software RDP
     # angrylion on Kodi 21 (no HW framebuffer game stream there), so it is
     # built with HAVE_THR_AL plus a non-HLE RSP fallback (parallel or LLE) -
     # without one of those the core silently falls back to GLideN64. The flags
@@ -368,6 +403,32 @@
     # aborts on 16 KB page kernels (Raspberry Pi 4/5). A re-run skips through
     # "creates"; a newer build replaces the .so in place and the wrapper
     # symlink follows it.
+
+    # Source patches (catalog key "patch", one file below files/patches/).
+    # Applied before the build and idempotent: a patch already in the tree is
+    # left alone, so a re-run changes nothing. A newly applied patch deletes
+    # the built .so, otherwise the build task below would skip through its
+    # "creates" guard and the add-on would keep running the unpatched core.
+    - name: Apply the source patches of the built libretro cores
+      ansible.builtin.shell: |
+        set -e
+        src=/symbios/services/kodi/src/{{ (item.build | split('/'))[-1] }}
+        patch={{ playbook_dir }}/kodi/files/patches/{{ item.patch }}
+        if git -C "$src" apply --reverse --check "$patch" 2>/dev/null; then
+          exit 0
+        fi
+        git -C "$src" apply "$patch"
+        rm -f "$src/{{ item.core_path | default(item.core) }}"
+        echo patched
+      loop: "{{ kodi_game_cores_available | selectattr('patch', 'defined') | list }}"
+      args:
+        executable: /bin/bash
+      register: kodi_core_patches
+      changed_when: "'patched' in kodi_core_patches.stdout"
+      when:
+        - kodi_roms_configured
+        - kodi_game_cores_available | selectattr('patch', 'defined') | list | length > 0
+
     - name: Build libretro cores from source (no Debian package)
       ansible.builtin.shell: |
         set -e
@@ -375,14 +436,10 @@
         if [[ ! -d $src ]]; then
           git clone --depth 1 "https://github.com/{{ item.build }}" "$src"
         fi
-        patch={{ (playbook_dir ~ '/kodi/files/patches/' ~ item.patch) if item.patch is defined else '' }}
-        if [[ -n $patch ]] && ! git -C "$src" apply --reverse --check "$patch" 2>/dev/null; then
-          git -C "$src" apply "$patch"
-        fi
-        make -C "$src" -j"$(nproc)" HAVE_THR_AL=1 HAVE_PARALLEL_RSP=1 LLE=1
+        make -C "$src/{{ (item.core_path | default(item.core)) | dirname }}" -j"$(nproc)" HAVE_THR_AL=1 HAVE_PARALLEL_RSP=1 LLE=1
       loop: "{{ kodi_game_cores_available | selectattr('build', 'defined') | list }}"
       args:
-        creates: /symbios/services/kodi/src/{{ (item.build | split('/'))[-1] }}/{{ item.core }}
+        creates: /symbios/services/kodi/src/{{ (item.build | split('/'))[-1] }}/{{ item.core_path | default(item.core) }}
         executable: /bin/bash
       when:
         - kodi_roms_configured
@@ -575,22 +632,13 @@
         path: /home/kodi/.kodi/userdata/advancedsettings.xml.db-off
         state: absent
 
-    # SFTP media sources (vfs.sftp) and game ROM sources: written while a
-    # server is configured or a ROM path exists, removed otherwise. Only
-    # categories with a set path get a source entry. The source URLs stay
-    # user-less; the credentials live in userdata/passwords.xml (Kodi's
-    # password store maps the plain URL to the one carrying user@host), so
-    # vfs.sftp authenticates non-interactively without baking the user into
-    # every source path.
-    - name: Write ~/.kodi/userdata/sources.xml (SFTP + game sources)
-      ansible.builtin.template:
-        src: kodi/templates/sources.xml.j2
-        dest: /home/kodi/.kodi/userdata/sources.xml
-        owner: kodi
-        group: kodi
-        mode: '0600'
-      when: (kodi_options | default({})).sftp_server | default('') | length > 0 or kodi_roms_configured
-
+    # SFTP media sources (vfs.sftp): written while a server is configured,
+    # removed otherwise. Only categories with a set path get a source entry.
+    # The source URLs stay user-less; the credentials live in
+    # userdata/passwords.xml (Kodi's password store maps the plain URL to the
+    # one carrying user@host), so vfs.sftp authenticates non-interactively
+    # without baking the user into every source path. The game sources of the
+    # same file are written below, after the ROM share is mounted.
     - name: Write ~/.kodi/userdata/mediasources.xml (SFTP media source)
       ansible.builtin.template:
         src: kodi/templates/mediasources.xml.j2
@@ -738,6 +786,59 @@
       failed_when: false
       when: kodi_roms_mount_unit_removed is changed
 
+    # The Games window has no default source: Kodi's GetDefaultSource knows
+    # programmes/files/music/pictures only, so ActivateWindow(Games) (the
+    # skin's home button) always opens the source list. With a single source
+    # for the whole tree that list holds one "ROMs" entry; one source per
+    # console folder puts the consoles on the first screen, the way the video
+    # sources behave. Enumerating needs a local path (the sshfs mount above,
+    # mounted at this point); a pure SFTP source keeps the single entry.
+    - name: Collect the console folders of the local ROM source
+      ansible.builtin.find:
+        paths: "{{ kodi_roms_games_source }}"
+        recurse: false
+        file_type: directory
+      register: kodi_roms_console_dirs
+      when:
+        - kodi_roms_configured
+        - kodi_roms_games_source is match('^/')
+
+    - name: Build the game source list (one source per console folder)
+      ansible.builtin.set_fact:
+        kodi_game_sources: "{{ (kodi_roms_console_dirs.files | default([])) | map(attribute='path') | sort }}"
+
+    - name: Write ~/.kodi/userdata/sources.xml (SFTP + game sources)
+      ansible.builtin.template:
+        src: kodi/templates/sources.xml.j2
+        dest: /home/kodi/.kodi/userdata/sources.xml
+        owner: kodi
+        group: kodi
+        mode: '0600'
+      register: kodi_sources
+      when: (kodi_options | default({})).sftp_server | default('') | length > 0 or kodi_roms_configured
+
+    # Kodi reads sources.xml at start (or when the UI adds a source), so a
+    # changed file only reaches the running session after a restart. The
+    # switcher is stopped for it: a Kodi it does not see would look like "the
+    # user left Kodi" and the next loop turn would fall back to the desktop.
+    - name: Check whether a Kodi session is running (source update)
+      ansible.builtin.command: systemctl is-active kodi-standalone.service
+      register: kodi_sources_running
+      changed_when: false
+      failed_when: false
+      when: kodi_sources is changed
+
+    - name: Restart the Kodi session to apply the new sources
+      ansible.builtin.shell: |
+        systemctl stop switch-kodi-desk.service
+        systemctl stop kodi-standalone.service
+        systemctl start kodi-standalone.service
+        systemctl start switch-kodi-desk.service
+      changed_when: true
+      when:
+        - kodi_sources is changed
+        - kodi_sources_running.stdout | trim == 'active'
+
     # Automatic addon installation on first run: fetch the latest version from
     # the mirrors.kodi.tv omega repository index (the last listed zip is the
     # newest) and unzip it into ~/.kodi/addons/. An existing addon dir skips.
@@ -769,7 +870,7 @@
       when: kodi_roms_configured
 
     - name: Generate the game addon wrappers from source builds
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-kodi-game-addon.sh install {{ item.addon }} {{ item.core }} /symbios/services/kodi/src/{{ (item.build | split('/'))[-1] }}/{{ item.core }}"
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-kodi-game-addon.sh install {{ item.addon }} {{ item.core }} /symbios/services/kodi/src/{{ (item.build | split('/'))[-1] }}/{{ item.core_path | default(item.core) }}"
       loop: "{{ kodi_game_cores_available | selectattr('build', 'defined') | list }}"
       register: kodi_game_addon_build_result
       changed_when: "'kodi-game-addon-installed' in (kodi_game_addon_build_result.stdout | default(''))"

@@ -1,0 +1,37 @@
+Subject: [PATCH] Make the frontend VFS opt-in instead of unconditional
+
+Kodi's game.libretro wrapper answers RETRO_ENVIRONMENT_GET_VFS_INTERFACE for
+every core and only uses the addon.xml property supports_vfs for its own
+load-time consistency check. FBNeo therefore routes all archive I/O through
+the frontend handle, and a seek through that handle fails: unzOpen() aborts
+and the core logs "No romset found at ...", so every zipped set refuses to
+load. The core's own stdio parses the same archives without a problem.
+
+Gate the VFS initialization behind FBNEO_FRONTEND_VFS so a frontend that
+hands out a working interface can still enable it, while a plain build keeps
+its own file I/O.
+
+diff --git a/src/burner/libretro/libretro.cpp b/src/burner/libretro/libretro.cpp
+index 28c115e..0a46ae4 100644
+--- a/src/burner/libretro/libretro.cpp
++++ b/src/burner/libretro/libretro.cpp
+@@ -370,12 +370,19 @@ void retro_set_environment(retro_environment_t cb)
+ 	struct retro_vfs_interface_info vfs_iface_info;
+ 	vfs_iface_info.required_interface_version = FILESTREAM_REQUIRED_VFS_VERSION;
+ 	vfs_iface_info.iface                      = NULL;
++#ifdef FBNEO_FRONTEND_VFS
+ 	if (environ_cb(RETRO_ENVIRONMENT_GET_VFS_INTERFACE, &vfs_iface_info))
+ 	{
+ 		dirent_vfs_init(&vfs_iface_info);
+ 		filestream_vfs_init(&vfs_iface_info);
+ 		path_vfs_init(&vfs_iface_info);
+ 	}
++#else
++	/* Frontend VFS is opt-in: a frontend that offers an interface without
++	   supporting it breaks archive parsing here (a seek through the handle
++	   fails and unzOpen() aborts), so the core keeps its own stdio. */
++	(void)vfs_iface_info;
++#endif
+ 
+ 	struct retro_core_options_update_display_callback update_display_cb;
+ 	update_display_cb.callback = apply_dipswitches_from_variables;

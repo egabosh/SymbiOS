@@ -37,11 +37,20 @@
     </music>
     <games>
 {% if kodi_roms_configured | default(false) %}
+{% for f_console in kodi_game_sources | default([]) %}
+        <source>
+            <name>{{ f_console | basename }}</name>
+            <path pathversion="1">{{ f_console }}/</path>
+            <allowsharing>true</allowsharing>
+        </source>
+{% endfor %}
+{% if (kodi_game_sources | default([])) | length == 0 %}
         <source>
             <name>ROMs</name>
             <path pathversion="1">{{ kodi_roms_games_source | default((kodi_options | default({})).path_roms) }}</path>
             <allowsharing>true</allowsharing>
         </source>
+{% endif %}
 {% endif %}
     </games>
 </sources>
