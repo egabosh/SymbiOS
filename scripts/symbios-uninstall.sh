@@ -316,7 +316,7 @@ function f_remove_authelia_blocks {
   if ! cmp -s "$f_conf" "$f_snap"
   then
     # Only accept the change when the result is still valid YAML.
-    if python3 -c "import yaml; yaml.safe_load(open('${f_conf}'))" 2>/dev/null
+    if yq eval '.' "${f_conf}" >/dev/null 2>&1
     then
       f_changed=1
       g_echo_note "Removed Authelia configuration blocks (backup: ${f_backup})"

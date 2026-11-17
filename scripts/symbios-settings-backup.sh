@@ -456,49 +456,39 @@ then
   f_ss_fail_validation "Invalid --keep-monthly: ${f_new_keep_monthly} (expected 0-99999)"
 fi
 
-# Additional servers: validate and normalize the JSON list (python does the
-# JSON handling, bash only passes the normalized result into the merge).
+# Additional servers: validate and normalize the JSON list with jq, then pass
+# the normalized result into the single inventory merge below.
 if [[ "${f_given_servers}" == "yes" ]]
 then
-  if ! f_servers_norm="$(printf '%s' "${f_new_servers}" | python3 -c '
-import json, sys
-
-def num(value, default):
-    if value in (None, ""):
-        return str(default)
-    try:
-        v = int(value)
-    except (TypeError, ValueError):
-        return str(default)
-    return str(v if 0 <= v <= 99999 else default)
-
-try:
-    data = json.load(sys.stdin) or []
-except Exception:
-    sys.exit(2)
-if not isinstance(data, list):
-    sys.exit(2)
-out = []
-for srv in data:
-    if not isinstance(srv, dict):
-        sys.exit(2)
-    host = str(srv.get("host") or "").strip()
-    path = str(srv.get("path") or "").strip()
-    user = str(srv.get("user") or "").strip() or "root"
-    name = str(srv.get("name") or "").strip() or host
-    if not host or not path:
-        sys.exit(2)
-    if any(ch.isspace() for ch in (host + user + name)):
-        sys.exit(2)
-    if not path.startswith("/"):
-        path = "/" + path
-    out.append({"name": name, "host": host, "port": num(srv.get("port"), 22),
-                "user": user, "path": path,
-                "keep_daily": int(num(srv.get("keep_daily"), 7)),
-                "keep_weekly": int(num(srv.get("keep_weekly"), 4)),
-                "keep_monthly": int(num(srv.get("keep_monthly"), 9999))})
-print(json.dumps(out))
-')"
+  if ! f_servers_norm="$(printf '%s' "${f_new_servers}" | jq -c '
+    def s:
+      if . == null or . == false or . == 0 or . == "" or . == [] or . == {}
+      then "" else (tostring | gsub("^\\s+|\\s+$"; "")) end;
+    def num($default):
+      if . == null or . == "" then $default
+      else (tonumber? // $default) as $n
+      | if $n >= 0 and $n <= 99999 then ($n | floor) else $default end end;
+    def bad: ("invalid server entry" | halt_error(2));
+    if type != "array" then bad else . end
+    | [ .[] as $srv
+        | if ($srv | type) != "object" then bad else $srv end
+        | ($srv.host | s) as $host
+        | ($srv.path | s) as $path
+        | ($srv.user | s) as $user
+        | ($srv.name | s) as $name
+        | if $host == "" or $path == "" then bad else . end
+        | if (($host + $user + $name) | test("\\s")) then bad else . end
+        | (if $path | startswith("/") then $path else "/" + $path end) as $path
+        | { name: (if $name == "" then $host else $name end),
+            host: $host,
+            port: ($srv.port | num(22) | tostring),
+            user: (if $user == "" then "root" else $user end),
+            path: $path,
+            keep_daily: ($srv.keep_daily | num(7)),
+            keep_weekly: ($srv.keep_weekly | num(4)),
+            keep_monthly: ($srv.keep_monthly | num(9999)) }
+      ]
+  ' 2>/dev/null)"
   then
     f_ss_fail_validation "Invalid --servers JSON (expected an array of objects with host and path)"
   fi
@@ -526,37 +516,27 @@ if [[ -n "${f_new_host}" && -n "${f_new_path}" ]] \
 then
   f_primary_name="${f_new_name:-}"
   [[ -z "${f_primary_name}" ]] && f_primary_name="$(f_symbios_var backup_server_name "$(hostname)")"
-  if ! f_unified_json="$(python3 -c '
-import json, sys
-name = sys.argv[1]
-host = sys.argv[2]
-port = sys.argv[3]
-user = sys.argv[4]
-path = sys.argv[5]
-kd = sys.argv[6]
-kw = sys.argv[7]
-km = sys.argv[8]
-base = json.loads(sys.argv[9])
-srv = {"name": name or host, "host": host, "port": port or "22",
-       "user": user or "root", "path": path,
-       "keep_daily": int(kd) if str(kd).isdigit() else 7,
-       "keep_weekly": int(kw) if str(kw).isdigit() else 4,
-       "keep_monthly": int(km) if str(km).isdigit() else 9999}
-servers = [srv]
-for a in base:
-    if not isinstance(a, dict):
-        continue
-    if not a.get("host") or not a.get("path"):
-        continue
-    # Skip duplicates of the primary (same host and path)
-    if any(s.get("host") == a.get("host") and s.get("path") == a.get("path")
-           for s in servers):
-        continue
-    servers.append(a)
-print(json.dumps(servers))
-' "${f_primary_name}" "${f_new_host}" "${f_new_port}" "${f_new_user}" \
-    "${f_new_path}" "${f_new_keep_daily:-7}" "${f_new_keep_weekly:-4}" \
-    "${f_new_keep_monthly:-9999}" "${f_base_servers}")"
+  if ! f_unified_json="$(jq -c -n \
+      --arg name "${f_primary_name}" --arg host "${f_new_host}" \
+      --arg port "${f_new_port}" --arg user "${f_new_user}" \
+      --arg path "${f_new_path}" \
+      --arg kd "${f_new_keep_daily:-7}" --arg kw "${f_new_keep_weekly:-4}" \
+      --arg km "${f_new_keep_monthly:-9999}" \
+      --arg base "${f_base_servers}" '
+    def s($default): if . == null or . == "" then $default else . end;
+    def intval($default):
+      if test("^[0-9]+$") then tonumber else $default end;
+    ($base | fromjson) as $base_list
+    | [ { name: ($name | s($host)), host: $host, port: ($port | s("22")),
+          user: ($user | s("root")), path: $path,
+          keep_daily: ($kd | intval(7)), keep_weekly: ($kw | intval(4)),
+          keep_monthly: ($km | intval(9999)) } ]
+    + [ $base_list[]?
+        | select((type == "object") and (.host != null) and (.host != "")
+                 and (.path != null) and (.path != ""))
+        | select(.host != $host or .path != $path)
+      ]
+  ' 2>/dev/null)"
   then
     f_ss_fail_validation "Failed to build the unified server list"
   fi
@@ -569,43 +549,37 @@ fi
 # never see a stale or ghost target. Explicitly given retention values and
 # names win over the derived ones. The result is a JSON fragment that is
 # spliced into the merge object below.
-if ! f_legacy_frag="$(python3 -c '
-import json, sys
-unified = json.loads(sys.argv[1]) or []
-given_kd, kd = sys.argv[2], sys.argv[3]
-given_kw, kw = sys.argv[4], sys.argv[5]
-given_km, km = sys.argv[6], sys.argv[7]
-given_name, name = sys.argv[8], sys.argv[9]
-if unified and isinstance(unified[0], dict):
-    s = unified[0]
-    out = {"backup_server_name": str(s.get("name") or ""),
-           "backup_server_host": str(s.get("host") or ""),
-           "backup_server_port": str(s.get("port") or "22"),
-           "backup_server_user": str(s.get("user") or "root"),
-           "backup_server_path": str(s.get("path") or ""),
-           "backup_keep_daily": int(s.get("keep_daily", 7)),
-           "backup_keep_weekly": int(s.get("keep_weekly", 4)),
-           "backup_keep_monthly": int(s.get("keep_monthly", 9999))}
-else:
-    out = {"backup_server_name": "", "backup_server_host": "",
-           "backup_server_port": "22", "backup_server_user": "root",
-           "backup_server_path": "", "backup_keep_daily": 7,
-           "backup_keep_weekly": 4, "backup_keep_monthly": 9999}
-if given_kd == "yes":
-    out["backup_keep_daily"] = int(kd)
-if given_kw == "yes":
-    out["backup_keep_weekly"] = int(kw)
-if given_km == "yes":
-    out["backup_keep_monthly"] = int(km)
-if given_name and name:
-    out["backup_server_name"] = name
-print(json.dumps(out, separators=(", ", ": "))[1:-1])
-' "${f_unified_json}" \
-    "${f_given_keep_daily}" "${f_new_keep_daily}" \
-    "${f_given_keep_weekly}" "${f_new_keep_weekly}" \
-    "${f_given_keep_monthly}" "${f_new_keep_monthly}" \
-    "${f_given_name}" "${f_new_name}")"
-then
+if ! f_legacy_frag="$(jq -r -n \
+    --arg unified "${f_unified_json}" \
+    --arg gkd "${f_given_keep_daily}" --arg kd "${f_new_keep_daily}" \
+    --arg gkw "${f_given_keep_weekly}" --arg kw "${f_new_keep_weekly}" \
+    --arg gkm "${f_given_keep_monthly}" --arg km "${f_new_keep_monthly}" \
+    --arg gname "${f_given_name}" --arg name "${f_new_name}" '
+  def sval($default): if . == null or . == "" then $default else tostring end;
+  def intv($default):
+    if type == "number" then .
+    elif (tostring | test("^[0-9]+$")) then (tostring | tonumber)
+    else $default end;
+  ($unified | fromjson) as $list
+  | (if ($list | type) == "array" and ($list | length) > 0
+        and (($list[0] | type) == "object")
+     then $list[0] else {} end) as $s
+  | { backup_server_name: ($s.name | sval("")),
+      backup_server_host: ($s.host | sval("")),
+      backup_server_port: ($s.port | sval("22")),
+      backup_server_user: ($s.user | sval("root")),
+      backup_server_path: ($s.path | sval("")),
+      backup_keep_daily: ($s.keep_daily | intv(7)),
+      backup_keep_weekly: ($s.keep_weekly | intv(4)),
+      backup_keep_monthly: ($s.keep_monthly | intv(9999)) }
+  | if $gkd == "yes" then .backup_keep_daily = ($kd | tonumber) else . end
+  | if $gkw == "yes" then .backup_keep_weekly = ($kw | tonumber) else . end
+  | if $gkm == "yes" then .backup_keep_monthly = ($km | tonumber) else . end
+  | if ($gname == "yes" and $name != "") then .backup_server_name = $name else . end
+  # Same shape as json.dumps(...)[1:-1]: key/value pairs without the braces.
+  | to_entries | map("\(.key | @json): \(.value | @json)") | join(", ")
+' 2>/dev/null)"
+  then
   f_ss_fail_validation "Failed to derive the legacy primary keys"
 fi
 

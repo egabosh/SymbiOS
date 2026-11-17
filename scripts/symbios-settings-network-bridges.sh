@@ -133,36 +133,27 @@ done
   || f_ss_fail_validation "Nothing to set - pass --json-stdin"
 
 f_json="$(cat)"
-# NOTE: this python3 snippet only parses and cleans the stdin JSON object
-# (bash cannot parse JSON); inventory access stays in symbios-inventory.py.
-if ! f_assignments="$(printf '%s' "${f_json}" | python3 -c "
-import json, re, sys
-try:
-    data = json.load(sys.stdin)
-except Exception as e:
-    sys.exit('invalid JSON on stdin: {}'.format(e))
-if not isinstance(data, dict):
-    sys.exit('stdin must hold a JSON object')
-cleaned = {}
-# Same charset as symbios-bridge-assign.sh: only these names ever reach
-# `ip link set ... master ...`, so anything else is rejected here and can
-# never be stored (command injection is impossible).
-name_re = re.compile(r'^[A-Za-z0-9_.@-]+$')
-for k, v in data.items():
-    if not isinstance(k, str) or not name_re.match(k.strip()):
-        sys.exit('invalid interface name: {!r}'.format(k))
-    if v is None:
-        continue
-    if not isinstance(v, str):
-        sys.exit('invalid bridge for {}: {!r}'.format(k, v))
-    # Empty means unassigned (same as the WebUI form) - dropped.
-    if not v.strip():
-        continue
-    if not name_re.match(v.strip()):
-        sys.exit('invalid bridge name: {!r}'.format(v))
-    cleaned[k.strip()] = v.strip()
-print(json.dumps(cleaned))
-" 2>&1)"
+# jq parses and cleans the stdin JSON object; inventory access stays in
+# symbios-inventory.py.
+if ! f_assignments="$(printf '%s' "${f_json}" | jq -c '
+  def trim: gsub("^\\s+|\\s+$"; "");
+  def name_ok: test("^[A-Za-z0-9_.@-]+$");
+  # Same charset as symbios-bridge-assign.sh: only these names ever reach
+  # `ip link set ... master ...`, so anything else is rejected here and can
+  # never be stored (command injection is impossible).
+  if type != "object" then ("stdin must hold a JSON object" | halt_error(2)) else . end
+  | reduce to_entries[] as $e ({};
+      ($e.key | trim) as $k
+      | if ($k | name_ok | not) then ("invalid interface name: \($e.key)" | halt_error(2))
+        elif $e.value == null then .
+        elif ($e.value | type) != "string"
+          then ("invalid bridge for \($k): \($e.value)" | halt_error(2))
+        else ($e.value | trim) as $v
+        | if $v == "" then .
+          elif ($v | name_ok | not) then ("invalid bridge name: \($e.value)" | halt_error(2))
+          else . + {($k): $v} end
+        end)
+' 2>&1)"
 then
   f_ss_fail_validation "${f_assignments}"
 fi

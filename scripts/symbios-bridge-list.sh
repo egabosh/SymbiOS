@@ -129,24 +129,10 @@ then
   ifaces_list="$(echo ${filtered} | tr ' ' '\n' | grep -v '^$')"
 fi
 
-# Read the stored assignments (dict) from the inventory via python3 (robust
-# for both flow and block YAML style; f_symbios_var only supports scalars).
-current_json="$(python3 - "${g_inventory}" <<'PYEOF' 2>/dev/null
-import json
-import sys
-import yaml
-
-path = sys.argv[1]
-try:
-    with open(path) as f:
-        cfg = yaml.safe_load(f) or {}
-except Exception:
-    sys.exit(1)
-assignments = (cfg.get('all', {}).get('vars', {})
-               .get('bridge_assignments') or {})
-print(json.dumps(assignments))
-PYEOF
-)"
+# Read the stored assignments (dict) from the inventory as compact JSON.
+# symbios-inventory.py handles flow and block YAML alike; the helper returns
+# "{}" when the key is unset or the inventory is unreadable.
+current_json="$(f_symbios_var_json bridge_assignments)"
 [[ -z "${current_json}" ]] && current_json='{}'
 
 # Build the JSON payload. Routes the arrays through json_escape-less manual

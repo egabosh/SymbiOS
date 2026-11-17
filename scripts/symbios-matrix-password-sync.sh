@@ -164,22 +164,12 @@ function f_matrix_password_sync {
   # body carries the plaintext, hence the file instead of the command line.
   f_domain="matrix.${g_base_domain}"
   f_body=$(mktemp)
-  export MATRIX_SYNC_UID="${f_uid}"
-  export MATRIX_SYNC_PWFILE="${f_pwfile}"
-  python3 - "${f_body}" <<'PY'
-import json, os, sys
-with open(os.environ["MATRIX_SYNC_PWFILE"], encoding="utf-8") as fh:
-    password = fh.read().rstrip("\n")
-body = {
-    "type": "m.login.password",
-    "identifier": {"type": "m.id.user", "user": os.environ["MATRIX_SYNC_UID"]},
-    "password": password,
-    "initial_device_display_name": "symbios-password-sync",
-}
-with open(sys.argv[1], "w", encoding="utf-8") as fh:
-    json.dump(body, fh)
-PY
-  unset MATRIX_SYNC_UID MATRIX_SYNC_PWFILE
+  # --rawfile reads the password from the 0600 file, never from argv.
+  jq -n --arg user "${f_uid}" --rawfile pw "${f_pwfile}" \
+    '{type: "m.login.password",
+      identifier: {type: "m.id.user", user: $user},
+      password: ($pw | sub("\n+$"; "")),
+      initial_device_display_name: "symbios-password-sync"}' > "${f_body}"
   f_resp=$(curl -s --max-time 20 --resolve "${f_domain}:443:127.0.0.1" \
     -H 'Content-Type: application/json' --data "@${f_body}" \
     "https://${f_domain}/_matrix/client/v3/login")

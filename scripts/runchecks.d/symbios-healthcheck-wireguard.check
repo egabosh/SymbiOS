@@ -8,60 +8,43 @@ f_check_cache "symbios-healthcheck-wireguard" || return 2>/dev/null || true
 
 # Read wireguard_clients from the inventory and verify each enabled tunnel is
 # active and its interface carries an IP. A missing handshake is only a
-# warning (a fresh tunnel has not talked to its peer yet). Done in python3
-# (robust for flow/block YAML); an empty dict means the feature is unused.
-f_bad="$(python3 - "${g_inventory}" <<'PYEOF' 2>/dev/null
-import subprocess
-import sys
-import yaml
-
-path = sys.argv[1]
-try:
-    with open(path) as f:
-        cfg = yaml.safe_load(f) or {}
-except Exception:
-    sys.exit(0)
-clients = (cfg.get('all', {}).get('vars', {})
-           .get('wireguard_clients') or {})
-if not clients:
-    sys.exit(0)  # feature unused
-bad = []
-warn = []
-for name, entry in clients.items():
-    if not isinstance(entry, dict) or not entry.get('enabled'):
-        continue
-    try:
-        subprocess.check_output(
-            ['systemctl', 'is-active', 'wg-quick@{}'.format(name)],
-            stderr=subprocess.DEVNULL)
-    except Exception:
-        bad.append('{} (service down)'.format(name))
-        continue
-    try:
-        out = subprocess.check_output(
-            ['ip', '-o', '-4', 'addr', 'show', 'dev', str(name)],
-            stderr=subprocess.DEVNULL).decode()
-    except Exception:
-        out = ''
-    if 'inet ' not in out:
-        bad.append('{} (no IP on {})'.format(name, name))
-        continue
-    # latest-handshakes prints "<pubkey>\t<epoch>", 0 = never.
-    try:
-        out = subprocess.check_output(
-            ['wg', 'show', str(name), 'latest-handshakes'],
-            stderr=subprocess.DEVNULL).decode()
-    except Exception:
-        out = ''
-    stamps = [line.split('\t')[-1] for line in out.strip().splitlines() if line]
-    if not stamps or all(s.strip() in ('0', '') for s in stamps):
-        warn.append('{} (no handshake yet)'.format(name))
-for entry in bad:
-    print('BAD ' + entry)
-for entry in warn:
-    print('WARN ' + entry)
-PYEOF
-)"
+# warning (a fresh tunnel has not talked to its peer yet). An empty dict means
+# the feature is unused. Keep the BAD/WARN prefixes: the caller parses them.
+f_rows="$(f_symbios_var_json wireguard_clients \
+  | jq -r 'def truthy:
+             if . == false or . == null or . == 0 or . == "" or
+                . == [] or . == {} then false else true end;
+           to_entries[]
+           | select((.value | type) == "object")
+           | select(.value.enabled | truthy)
+           | .key' 2>/dev/null || true)"
+f_bad=""
+while read -r f_name
+do
+  [[ -n "${f_name}" ]] || continue
+  if ! systemctl is-active "wg-quick@${f_name}" >/dev/null 2>&1
+  then
+    f_bad="${f_bad}${f_bad:+$'\n'}BAD ${f_name} (service down)"
+    continue
+  fi
+  f_out="$(ip -o -4 addr show dev "${f_name}" 2>/dev/null || true)"
+  if [[ "${f_out}" != *"inet "* ]]
+  then
+    f_bad="${f_bad}${f_bad:+$'\n'}BAD ${f_name} (no IP on ${f_name})"
+    continue
+  fi
+  # latest-handshakes prints "<pubkey>\t<epoch>", 0 = never.
+  f_handshakes="$(wg show "${f_name}" latest-handshakes 2>/dev/null || true)"
+  f_seen=0
+  while read -r f_pub f_stamp
+  do
+    [[ -n "${f_stamp}" && "${f_stamp}" != "0" ]] && f_seen=1
+  done <<< "${f_handshakes}"
+  if [[ "${f_seen}" -eq 0 ]]
+  then
+    f_bad="${f_bad}${f_bad:+$'\n'}WARN ${f_name} (no handshake yet)"
+  fi
+done <<< "${f_rows}"
 
 # Split the verdict lines: BAD -> error (check fails), WARN -> warning.
 f_errors=""

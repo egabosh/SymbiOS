@@ -6,10 +6,8 @@
 # write goes through symbios-inventory.py (merge, one transaction - lists
 # of dicts are supported). An empty list deletes the key (same as before).
 #
-# NOTE: this companion also parses its stdin JSON with python3 (bash cannot
-# parse JSON); inventory access stays in symbios-inventory.py. JSON strings
-# inside the python3 -c double-quoted block must use single quotes only -
-# a lone double quote silently truncates the program (see AGENTS.md).
+# NOTE: this companion parses its stdin JSON with jq; inventory access stays
+# in symbios-inventory.py.
 
 function f_usage {
   cat << EOF
@@ -101,14 +99,14 @@ then
   fi
   "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" \
     get --json file_manager_scripts 2>/dev/null \
-    | python3 -c 'import json, sys
-try:
-    items = json.load(sys.stdin) or []
-except Exception:
-    items = []
-for item in items:
-    if isinstance(item, dict):
-        print(str(item.get("name", "")) + ": " + str(item.get("command", "")))' 2>/dev/null
+    | jq -r '
+      def pystr: if . == null then "None" else tostring end;
+      if type == "array" then . else [] end
+      | .[]
+      | select(type == "object")
+      | (if has("name") then (.name | pystr) else "" end) + ": "
+        + (if has("command") then (.command | pystr) else "" end)
+    ' 2>/dev/null
   exit 0
 fi
 
@@ -143,29 +141,22 @@ done
   || f_ss_fail_validation "Nothing to set - pass --json-stdin"
 
 f_json="$(cat)"
-if ! f_cleaned="$(printf '%s' "${f_json}" | python3 -c '
-import json, sys
-try:
-    raw = json.load(sys.stdin)
-except Exception as e:
-    sys.exit("invalid JSON on stdin")
-if not isinstance(raw, list):
-    sys.exit("stdin must hold a JSON list")
-cleaned = []
-for item in raw:
-    if not isinstance(item, dict):
-        continue
-    name = str(item.get("name") or "").strip()
-    command = str(item.get("command") or "").strip()
-    if not name or not command or chr(10) in name:
-        continue
-    test = name.replace("-", "").replace("_", "").replace(" ", "").replace(".", "")
-    if not test.isalnum():
-        sys.exit("invalid script name")
-    if len(command) > 4000:
-        sys.exit("command too long (max 4000 chars)")
-    cleaned.append({"name": name, "command": command})
-print(json.dumps(cleaned))
+if ! f_cleaned="$(printf '%s' "${f_json}" | jq -c '
+  def s:
+    if . == null or . == false or . == 0 or . == "" or . == [] or . == {}
+    then "" else (tostring | gsub("^\\s+|\\s+$"; "")) end;
+  if type != "array" then ("stdin must hold a JSON list" | halt_error(2)) else . end
+  | [ .[] as $item
+      | if ($item | type) != "object" then empty else $item end
+      | ($item.name | s) as $name
+      | ($item.command | s) as $command
+      | if $name == "" or $command == "" or ($name | contains("\n")) then empty else . end
+      | if (($name | gsub("[-_. ]"; "")) | test("^[[:alnum:]]+$") | not)
+        then ("invalid script name" | halt_error(2)) else . end
+      | if ($command | length) > 4000
+        then ("command too long (max 4000 chars)" | halt_error(2)) else . end
+      | {name: $name, command: $command}
+    ]
 ' 2>&1)"
 then
   f_ss_fail_validation "${f_cleaned}"

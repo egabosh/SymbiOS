@@ -129,7 +129,12 @@ PY
 
 # Print the inventory command of a docs JSON document.
 function f_inventory_command {
-  python3 -c 'import json,sys; inv=(json.load(open(sys.argv[1])) or {}).get("inventory") or {}; print(inv.get("command") or "")' "$1"
+  jq -r '
+    def s:
+      if . == false or . == null or . == 0 or . == "" or . == [] or . == {}
+      then "" else . end;
+    .inventory.command | s
+  ' "$1"
 }
 
 # --- arguments --------------------------------------------------------------
@@ -176,7 +181,13 @@ then
 fi
 
 # Both modes need a declared inventory, otherwise there is nothing to show.
-if ! python3 -c 'import json,sys; sys.exit(0 if ((json.load(open(sys.argv[1])) or {}).get("inventory")) else 1)' "${g_docs}"
+# Mirror Python truthiness so empty dict/string/list count as "not declared".
+if ! jq -e '
+  def truthy:
+    if . == false or . == null or . == 0 or . == "" or . == [] or . == {}
+    then false else true end;
+  .inventory | truthy
+' "${g_docs}" >/dev/null 2>&1
 then
   f_fail "No docs.inventory declared in ${g_playbook}" 2
 fi

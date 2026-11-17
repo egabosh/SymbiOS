@@ -147,7 +147,7 @@ Registry row snippet for webui/main/settings_registry.py:
 Contract smoke test (on the host, after rsync scripts/):
   symbios-settings-SLUG_PLACEHOLDER.sh --help
   symbios-settings-SLUG_PLACEHOLDER.sh get
-  symbios-settings-SLUG_PLACEHOLDER.sh schema | python3 -c "import json,sys; json.load(sys.stdin)"
+  symbios-settings-SLUG_PLACEHOLDER.sh schema | jq -e . >/dev/null
   symbios-settings-SLUG_PLACEHOLDER.sh set --check   # must change nothing
   symbios-settings-SLUG_PLACEHOLDER.sh apply --dry-run  # lists consumers
 EOF

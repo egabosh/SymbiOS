@@ -218,7 +218,7 @@ do
     f_check "${f_script} get" "${f_bin}" get
   fi
   if f_schema="$("${f_bin}" schema 2>/dev/null)" \
-    && printf '%s' "${f_schema}" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null
+    && printf '%s' "${f_schema}" | jq -e . >/dev/null 2>&1
   then
     g_echo "PASS: ${f_script} schema" 2>/dev/null || echo "PASS: ${f_script} schema"
   else

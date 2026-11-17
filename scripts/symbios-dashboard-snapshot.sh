@@ -64,46 +64,43 @@ f_refresh() {
   fi
 }
 
+# Read a snapshot as single-line JSON; a missing or corrupt file becomes {}.
+function f_snapshot_json {
+  local f_path="$1" f_json
+  f_json="$(jq -c . "${f_path}" 2>/dev/null)"
+  if [[ -z "${f_json}" ]]
+  then
+    printf '{}\n'
+  else
+    printf '%s\n' "${f_json}"
+  fi
+}
+
 # Append a combined stats + top JSON line to today's history file. The line
 # merges every field of dashboard-stats.json with the top process lists so a
 # single reader (CLI or WebUI) yields the full minute snapshot.
 f_append_history() {
-  python3 - "${g_log_dir}/dashboard-stats.json" "${g_log_dir}/dashboard-top.json" \
-    "${g_log_dir}/dashboard-docker.json" \
-    "${g_log_dir}/dashboard-history-$(date -u +%Y%m%d).jsonl" <<'PYEOF'
-import json
-import os
-import sys
-
-stats_path, top_path, docker_path, out_path = sys.argv[1:5]
-line = {}
-if os.path.exists(stats_path):
-    with open(stats_path) as fh:
-        line = json.load(fh)
-top = {}
-if os.path.exists(top_path):
-    try:
-        with open(top_path) as fh:
-            top = json.load(fh)
-    except (ValueError, OSError):
-        top = {}
-line["top_cpu"] = top.get("cpu", [])
-line["top_mem"] = top.get("mem", [])
-line["top_io"] = top.get("io", [])
-line["measuring_io"] = top.get("measuring_io", True)
-line["interval_sec"] = top.get("interval_sec", 0)
-docker = []
-if os.path.exists(docker_path):
-    try:
-        with open(docker_path) as fh:
-            docker = json.load(fh).get("containers", [])
-    except (ValueError, OSError):
-        pass
-line["docker"] = docker
-with open(out_path, "a", encoding="utf-8") as fh:
-    fh.write(json.dumps(line, ensure_ascii=False, separators=(",", ":")))
-    fh.write("\n")
-PYEOF
+  local f_out="${g_log_dir}/dashboard-history-$(date -u +%Y%m%d).jsonl"
+  local f_stats f_top f_docker
+  f_stats="$(f_snapshot_json "${g_log_dir}/dashboard-stats.json")"
+  f_top="$(f_snapshot_json "${g_log_dir}/dashboard-top.json")"
+  f_docker="$(f_snapshot_json "${g_log_dir}/dashboard-docker.json")"
+  jq -c -n \
+    --argjson stats "${f_stats}" \
+    --argjson top "${f_top}" \
+    --argjson docker "${f_docker}" \
+    '($stats | if type == "object" then . else {} end) as $s
+     | ($top | if type == "object" then . else {} end) as $t
+     | ($docker | if type == "object" then . else {} end) as $d
+     | $s + {
+         top_cpu: ($t.cpu // []),
+         top_mem: ($t.mem // []),
+         top_io: ($t.io // []),
+         # has() keeps an explicit false from becoming the default true.
+         measuring_io: (if ($t | has("measuring_io")) then $t.measuring_io else true end),
+         interval_sec: ($t.interval_sec // 0),
+         docker: ($d.containers // [])
+       }' >> "${f_out}"
 }
 
 # Prune history files older than one week.

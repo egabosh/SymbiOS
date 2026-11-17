@@ -45,31 +45,20 @@ g_old_pairs_file="$(mktemp)"
 # A plain trap ... EXIT here would replace it and leak the $g_tmp dir.
 trap 'rm -f "${g_pairs_file}" "${g_old_pairs_file}"; eval "${g_trap_exit:-}"' EXIT
 
-# Parse a JSON/YAML dict into "iface<TAB>bridge" lines (stdin -> stdout).
-# Validates names against [A-Za-z0-9_.@-] and rejects non-dict input.
+# Parse a JSON dict into "iface<TAB>bridge" lines (stdin -> stdout).
+# Validates names against [A-Za-z0-9_.@-] and rejects non-object input.
 f_parse_pairs() {
-  python3 - "$1" <<'PYEOF'
-import re
-import sys
-import yaml
-
-raw = sys.argv[1]
-try:
-    data = yaml.safe_load(raw) or {}
-except Exception:
-    sys.exit(2)
-if not isinstance(data, dict):
-    sys.exit(2)
-name_re = re.compile(r'^[A-Za-z0-9_.@-]+$')
-out = []
-for iface, bridge in sorted(data.items()):
-    if not name_re.match(str(iface)) or not name_re.match(str(bridge)):
-        sys.exit(2)
-    out.append(str(iface) + "\t" + str(bridge))
-if out:
-    out.append("")
-sys.stdout.write("\n".join(out))
-PYEOF
+  printf '%s' "$1" | jq -r '
+    def name_ok: test("^[A-Za-z0-9_.@-]+$");
+    if type != "object" then ("invalid assignments" | halt_error(2)) else . end
+    | to_entries
+    | map([.key, (.value | tostring)])
+    | if any(.[]; (.[0] | name_ok | not) or (.[1] | name_ok | not))
+      then ("invalid interface or bridge name" | halt_error(2))
+      else . end
+    | sort_by(.[0])
+    | .[] | "\(.[0])\t\(.[1])"
+  ' 2>/dev/null
 }
 
 # Insert/replace the marker block in /etc/rc.local (idempotent). The ignored
@@ -153,23 +142,9 @@ except Exception:
 PYEOF
 }
 
-# Read the stored assignments dict from inventory.yml (block or flow YAML).
+# Read the stored assignments dict from inventory.yml as compact JSON.
 f_read_inventory_assignments() {
-  python3 - "${g_inventory}" <<'PYEOF' 2>/dev/null
-import json
-import sys
-import yaml
-
-path = sys.argv[1]
-try:
-    with open(path) as f:
-        cfg = yaml.safe_load(f) or {}
-except Exception:
-    sys.exit(1)
-assignments = (cfg.get('all', {}).get('vars', {})
-               .get('bridge_assignments') or {})
-print(json.dumps(assignments))
-PYEOF
+  f_symbios_var_json bridge_assignments
 }
 
 # Read the JSON from stdin (the WebUI/detached job pipes the .input file).

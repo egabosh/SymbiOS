@@ -79,86 +79,47 @@ then
   exit 0
 fi
 
-python3 - "${f_raw_tmp}" "${f_ts}" <<'PYEOF'
-import json
-import re
-import sys
+# Normalize the human-readable docker units. jq rounds half away from zero
+# where Python used banker's rounding - immaterial for dashboard figures.
+jq -R -s -c --arg ts "${f_ts}" '
+  def pct:
+    ((capture("^\\s*(?<n>[0-9.]+)") // {n: "0"}).n | tonumber? // 0);
+  def size:
+    (capture("^\\s*(?<n>[0-9.]+)\\s*(?<u>[A-Za-z]*)\\s*$") // {n: "0", u: ""}) as $m
+    | (($m.n | tonumber? // 0)
+       * ({"": 1, "B": 1, "kB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12,
+           "KiB": 1024, "MiB": 1048576, "GiB": 1073741824,
+           "TiB": 1099511627776}[$m.u] // 1)) / 1048576;
+  def io:
+    split("/") | [ (.[0] // "" | size), (.[1] // "" | size) ];
+  def r1: ((. * 10) | round) / 10;
+  def r2: ((. * 100) | round) / 100;
+  def pids:
+    ((capture("^(?<n>[0-9]+)") // {n: "0"}).n | tonumber? // 0);
 
-raw_path, ts = sys.argv[1:3]
-
-_PREFIXES = {
-    "": 1.0, "B": 1.0, "kB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12,
-    "KiB": 1024.0, "MiB": 1024.0 ** 2, "GiB": 1024.0 ** 3, "TiB": 1024.0 ** 4,
-}
-
-
-def _parse_size(text):
-    """Normalize a docker human-readable size ('1.2GiB', '512kB') to MB."""
-    m = re.match(r"^\s*([0-9.]+)\s*([A-Za-z]*)\s*$", text or "")
-    if not m:
-        return 0.0
-    try:
-        return float(m.group(1)) * _PREFIXES.get(m.group(2), 1.0) / (1024.0 ** 2)
-    except ValueError:
-        return 0.0
-
-
-def _split_io(text):
-    """Split a 'rxB / txB' pair into (rx_mb, tx_mb)."""
-    parts = str(text or "").split("/")
-    return _parse_size(parts[0]) if parts else 0.0, (_parse_size(parts[1]) if len(parts) > 1 else 0.0)
-
-
-def _parse_pct(text):
-    m = re.match(r"^\s*([0-9.]+)", text or "")
-    if not m:
-        return 0.0
-    try:
-        return float(m.group(1))
-    except ValueError:
-        return 0.0
-
-
-def _parse_pids(text):
-    m = re.match(r"\d+", str(text or ""))
-    try:
-        return int(m.group(0)) if m else 0
-    except ValueError:
-        return 0
-
-
-containers = []
-with open(raw_path, encoding="utf-8", errors="replace") as fh:
-    for raw in fh:
-        raw = raw.strip()
-        if not raw:
-            continue
-        try:
-            obj = json.loads(raw)
-        except (ValueError, json.JSONDecodeError):
-            continue
-        name = str(obj.get("Name", "")).lstrip("/") or obj.get("Container", "")
-        used, limit = _split_io(obj.get("MemUsage"))
-        net_rx, net_tx = _split_io(obj.get("NetIO"))
-        blk_r, blk_w = _split_io(obj.get("BlockIO"))
-        containers.append({
-            "name": name,
-            "id": str(obj.get("ID", obj.get("Container", "")))[:12],
-            "cpu_percent": round(_parse_pct(obj.get("CPUPerc")), 2),
-            "mem_percent": round(_parse_pct(obj.get("MemPerc")), 2),
-            "mem_used_mb": round(used, 1),
-            "mem_limit_mb": round(limit, 1),
-            "net_rx_mb": round(net_rx, 1),
-            "net_tx_mb": round(net_tx, 1),
-            "block_read_mb": round(blk_r, 1),
-            "block_write_mb": round(blk_w, 1),
-            "pids": _parse_pids(obj.get("PIDs")),
-        })
-
-containers.sort(key=lambda c: c["mem_percent"], reverse=True)
-out = {"timestamp": ts, "containers": containers}
-print(json.dumps(out, separators=(",", ":"), ensure_ascii=False))
-PYEOF
+  [ split("\n")[]
+    | select(length > 0)
+    | fromjson?
+    | . as $o
+    | ($o.MemUsage // "" | io) as $mem
+    | ($o.NetIO // "" | io) as $net
+    | ($o.BlockIO // "" | io) as $blk
+    | (($o.Name // "" | tostring) | sub("^/+"; "")) as $name
+    | (if $name == "" then ($o.Container // "" | tostring) else $name end)
+    | { name: .,
+        id: (($o.ID // $o.Container // "") | tostring | .[0:12]),
+        cpu_percent: ($o.CPUPerc // "" | pct | r2),
+        mem_percent: ($o.MemPerc // "" | pct | r2),
+        mem_used_mb: ($mem[0] | r1),
+        mem_limit_mb: ($mem[1] | r1),
+        net_rx_mb: ($net[0] | r1),
+        net_tx_mb: ($net[1] | r1),
+        block_read_mb: ($blk[0] | r1),
+        block_write_mb: ($blk[1] | r1),
+        pids: ($o.PIDs // "" | pids) }
+  ] | sort_by(-.mem_percent)
+    | {timestamp: $ts, containers: .}
+' "${f_raw_tmp}"
 
 rm -f "${f_raw_tmp}" "${f_err_tmp}"
 exit 0

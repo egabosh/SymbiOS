@@ -53,6 +53,7 @@
 # Functions:
 #   f_symbios_var <key> <default>   read a scalar from inventory.yml
 #   f_symbios_var_set <key> <value> set a scalar under all.vars (host only)
+#   f_symbios_var_json <key>        read a dict/list as compact JSON ({} if unset)
 #   f_symbios_ssh_key_usable <key>  check a key is usable unattended (reason on failure)
 #   f_json_escape                   escape a string (stdin) for JSON
 #   f_json_error <msg>              print {"ok":false,"error":"<msg>"}
@@ -95,6 +96,7 @@ g_* globals. Provides helper functions:
 
   f_symbios_var <key> <default>    read a scalar from inventory.yml
   f_symbios_var_set <key> <value>  set a scalar under all.vars (host only)
+  f_symbios_var_json <key>         read a dict/list as compact JSON ({} if unset)
   f_external_target <target_id>    resolve an external system from
                                    external-systems.yml (g_ext_host/_port/
                                    _user/_type)
@@ -201,6 +203,22 @@ function f_symbios_var {
   f_value="${f_value%"${f_value##*[![:space:]]}"}"
 
   [[ -n "${f_value}" ]] && echo "${f_value}" || echo "${f_default}"
+}
+
+# Read a structured value (dict/list) from inventory.yml as compact JSON.
+# Delegates to symbios-inventory.py, so flow and block YAML behave the same.
+# Missing/unreadable keys become {} so health checks stay silent.
+function f_symbios_var_json {
+  local f_key="$1" f_dir f_json
+  f_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+  f_json="$("${f_dir}/symbios-inventory.py" --inventory "${g_inventory}" \
+    get --json "${f_key}" 2>/dev/null)"
+  if [[ -z "${f_json}" ]]
+  then
+    printf '{}\n'
+  else
+    printf '%s\n' "${f_json}"
+  fi
 }
 
 # Set a scalar under all.vars in inventory.yml (host side).

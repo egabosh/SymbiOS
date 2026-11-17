@@ -40,28 +40,13 @@ f_certified=""
 if [[ -f "${g_acme_json}" ]]
 then
   # The sans lists are written multi-line, so a line based grep only sees
-  # the main names and reports every SAN as missing. Read the store with a
-  # JSON parser instead.
-  f_certified=$(python3 - "${g_acme_json}" <<'PYEOF' 2>/dev/null
-import json
-import sys
-
-try:
-    with open(sys.argv[1]) as fh:
-        data = json.load(fh)
-except (OSError, ValueError):
-    sys.exit(0)
-
-for resolver in data.values():
-    if not isinstance(resolver, dict):
-        continue
-    for cert in resolver.get("Certificates") or []:
-        domain = cert.get("domain") or {}
-        for name in [domain.get("main", "")] + list(domain.get("sans") or []):
-            if name:
-                print(name)
-PYEOF
-)
+  # the main names and reports every SAN as missing. Read the store with jq.
+  f_certified=$(jq -r \
+    '[.[]? | select(type == "object") | (.Certificates // [])[]?
+      | select(type == "object") | (.domain // {})
+      | select(type == "object") | (.main // ""), ((.sans // [])[]?) ]
+     | .[] | select(type == "string" and length > 0)' \
+    "${g_acme_json}" 2>/dev/null || true)
   f_certified=$(printf '%s\n' "${f_certified}" | grep . | sort -u || true)
 fi
 

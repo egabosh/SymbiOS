@@ -98,13 +98,9 @@ function f_ha_admin_sync {
   # Process each non-system-generated user in HA storage
   local f_changed=0
   local f_user_ids
-  f_user_ids=$(echo "$f_storage" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-for u in data['data']['users']:
-    if not u.get('system_generated', False) and u.get('name'):
-        print(u['id'] + '|' + u['name'])
-" 2>/dev/null)
+  f_user_ids=$(echo "$f_storage" | jq -r \
+    '.data.users[] | select((.system_generated // false) | not) |
+     select((.name // "") != "") | "\(.id)|\(.name)"' 2>/dev/null)
 
   while IFS='|' read -r f_user_id f_user_name
   do
@@ -115,14 +111,9 @@ for u in data['data']['users']:
     local f_uid="$f_user_name"
 
     # Check current group_ids for this user
-    f_current_groups=$(echo "$f_storage" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-for u in data['data']['users']:
-    if u['id'] == '${f_user_id}':
-        print(' '.join(u.get('group_ids', [])))
-        break
-" 2>/dev/null)
+    f_current_groups=$(echo "$f_storage" | jq -r \
+      --arg id "${f_user_id}" \
+      '.data.users[] | select(.id == $id) | (.group_ids // []) | join(" ")' 2>/dev/null)
 
     # Determine desired groups based on LDAP membership
     local f_is_admin=0
@@ -151,18 +142,11 @@ for u in data['data']['users']:
       continue
     fi
 
-    # Apply change via Python (atomic JSON update)
+    # Apply the group change via jq (same indent=2 output as before).
     g_echo_note "Updating ${f_uid}: ${f_current_groups} -> ${f_target_group}"
-    f_storage=$(echo "$f_storage" | python3 -c "
-import sys, json
-
-data = json.load(sys.stdin)
-for u in data['data']['users']:
-    if u['id'] == '${f_user_id}':
-        u['group_ids'] = ['${f_target_group}']
-        break
-json.dump(data, sys.stdout, indent=2)
-" 2>/dev/null)
+    f_storage=$(echo "$f_storage" | jq \
+      --arg id "${f_user_id}" --arg group "${f_target_group}" \
+      '(.data.users[] | select(.id == $id) | .group_ids) = [$group]' 2>/dev/null)
     f_changed=1
   done <<<"$f_user_ids"
 

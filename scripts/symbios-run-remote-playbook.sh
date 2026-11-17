@@ -117,7 +117,7 @@ printf '{}\n' > "${g_vars_file}"
 if (( g_vars_stdin ))
 then
   cat > "${g_vars_file}"
-  if ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "${g_vars_file}" 2> /dev/null
+  if ! jq -e 'type == "object"' "${g_vars_file}" > /dev/null 2>&1
   then
     f_fail "Invalid JSON on stdin (expected an object)" 2
   fi

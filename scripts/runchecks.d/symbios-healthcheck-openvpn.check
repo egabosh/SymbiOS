@@ -7,48 +7,34 @@ CHECK_DETAIL="Verifies openvpn@<name>.service is active and the tunnel interface
 f_check_cache "symbios-healthcheck-openvpn" || return 2>/dev/null || true
 
 # Read openvpn_clients from the inventory and verify each enabled tunnel is
-# active and its interface carries an IP. Done in python3 (robust for
-# flow/block YAML); an empty dict means the feature is unused.
-f_bad="$(python3 - "${g_inventory}" <<'PYEOF' 2>/dev/null
-import subprocess
-import sys
-import yaml
-
-path = sys.argv[1]
-try:
-    with open(path) as f:
-        cfg = yaml.safe_load(f) or {}
-except Exception:
-    sys.exit(0)
-clients = (cfg.get('all', {}).get('vars', {})
-           .get('openvpn_clients') or {})
-if not clients:
-    sys.exit(0)  # feature unused
-bad = []
-for name, entry in clients.items():
-    if not isinstance(entry, dict) or not entry.get('enabled'):
-        continue
-    try:
-        subprocess.check_output(
-            ['systemctl', 'is-active', 'openvpn@{}'.format(name)],
-            stderr=subprocess.DEVNULL)
-    except Exception:
-        bad.append('{} (service down)'.format(name))
-        continue
-    iface = entry.get('interface') or ''
-    if iface and iface not in ('tun', 'tap', 'null'):
-        try:
-            out = subprocess.check_output(
-                ['ip', '-o', '-4', 'addr', 'show', 'dev', str(iface)],
-                stderr=subprocess.DEVNULL).decode()
-        except Exception:
-            out = ''
-        if 'inet ' not in out:
-            bad.append('{} (no IP on {})'.format(name, iface))
-if bad:
-    print('\n'.join(bad))
-PYEOF
-)"
+# active and its interface carries an IP. An empty dict means the feature is
+# unused. jq keeps Python's truthiness rules for the enabled flag.
+f_rows="$(f_symbios_var_json openvpn_clients \
+  | jq -r 'def truthy:
+             if . == false or . == null or . == 0 or . == "" or
+                . == [] or . == {} then false else true end;
+           to_entries[]
+           | select((.value | type) == "object")
+           | select(.value.enabled | truthy)
+           | [.key, (.value.interface // "" | tostring)] | @tsv' \
+  2>/dev/null || true)"
+f_bad=""
+while IFS=$'\t' read -r f_name f_iface
+do
+  [[ -n "${f_name}" ]] || continue
+  if ! systemctl is-active "openvpn@${f_name}" >/dev/null 2>&1
+  then
+    f_bad="${f_bad}${f_bad:+$'\n'}${f_name} (service down)"
+    continue
+  fi
+  if [[ -n "${f_iface}" && "${f_iface}" != "tun" && \
+        "${f_iface}" != "tap" && "${f_iface}" != "null" ]]
+  then
+    f_out="$(ip -o -4 addr show dev "${f_iface}" 2>/dev/null || true)"
+    [[ "${f_out}" == *"inet "* ]] || \
+      f_bad="${f_bad}${f_bad:+$'\n'}${f_name} (no IP on ${f_iface})"
+  fi
+done <<< "${f_rows}"
 if [[ -n "${f_bad}" ]]
 then
   g_echo_error "OpenVPN tunnels down: ${f_bad}"

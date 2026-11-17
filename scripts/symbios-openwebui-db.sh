@@ -58,7 +58,7 @@ function f_owui_api_key {
   f_user_id=$(sqlite3 "${g_db}" "SELECT id FROM \"user\" ORDER BY role='admin' DESC LIMIT 1")
   if [[ -z "${f_user_id}" ]]
   then
-    f_uuid=$(python3 -c "import uuid; print(uuid.uuid4())")
+    f_uuid=$(cat /proc/sys/kernel/random/uuid)
     f_now=$(date +%s%3N)
     sqlite3 "${g_db}" \
       "INSERT INTO \"user\"(id,name,email,role,profile_image_url,created_at,updated_at,last_active_at) \
@@ -76,7 +76,7 @@ function f_owui_api_key {
   fi
 
   # Generate a fresh UUID, API key and timestamp
-  f_uuid=$(python3 -c "import uuid; print(uuid.uuid4())")
+  f_uuid=$(cat /proc/sys/kernel/random/uuid)
   f_api_key="sk-$(openssl rand -base64 48 | tr '+/' '-_' | tr -d '=')"
   f_now=$(date +%s%3N)
 

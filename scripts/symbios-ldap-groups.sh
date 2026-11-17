@@ -139,7 +139,7 @@ case "${f_action}" in
   create)
     g_echo_note "Creating group: ${f_name}"
 
-    # Fixed GID for infrastructure groups, hash-based GID otherwise
+    # Fixed GID for infrastructure groups, deterministic checksum GID otherwise
     if [[ -n "${f_gid}" ]]
     then
       if ! [[ "${f_gid}" =~ ^[0-9]+$ ]]
@@ -148,7 +148,9 @@ case "${f_action}" in
         exit 1
       fi
     else
-      f_gid="$(python3 -c "print(abs(hash('${f_name}')) % 10000 + 20000)" 2>/dev/null || echo 20001)"
+      # cksum is stable across processes; Python hash() is salted per process.
+      f_gid="$(printf '%s' "${f_name}" | cksum)"
+      f_gid=$(( ${f_gid%% *} % 10000 + 20000 ))
     fi
 
     f_ldif="dn: ${f_group_dn}

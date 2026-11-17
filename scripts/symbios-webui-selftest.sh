@@ -151,24 +151,21 @@ do
   # JSON object into a curl config file (avoids all shell quoting issues
   # with values holding spaces or quotes).
   f_cfg="$(mktemp /tmp/symbios-selftest-curl.XXXXXX)"
-  printf '%s' "${f_values}" | python3 -c "
-import json, sys
-try:
-    values = json.load(sys.stdin)
-except Exception:
-    values = {}
-for k, v in values.items():
-    if k.endswith('_set'):
-        continue
-    if isinstance(v, bool):
-        v = 'true' if v else 'false'
-    elif not isinstance(v, str):
-        v = json.dumps(v)
-    if v == '' and any(s in k for s in ('key', 'pass', 'token', 'secret')):
-        continue
-    safe = v.replace('\\\\', '\\\\\\\\').replace('\"', '\\\\\"')
-    print('data-urlencode = \"%s=%s\"' % (k, safe))
-" > "${f_cfg}"
+  printf '%s' "${f_values}" | jq -r '
+    # Same rendering as the old helper: booleans lowercase, other non-strings
+    # as JSON. @json quotes the curl config value and escapes quotes/backslashes.
+    def vstr:
+      if type == "boolean" then (if . then "true" else "false" end)
+      elif type == "string" then .
+      else tostring end;
+    if type != "object" then {} else . end
+    | to_entries[]
+    | select((.key | endswith("_set")) | not)
+    | .key as $k
+    | (.value | vstr) as $v
+    | select(($v != "") or (($k | test("key|pass|token|secret")) | not))
+    | "data-urlencode = " + ("\($k)=\($v)" | @json)
+  ' > "${f_cfg}"
   f_resp="$(curl -s -b "${f_cookies}" -H "X-CSRFToken: ${f_token}" \
     -H 'X-Requested-With: XMLHttpRequest' \
     -K "${f_cfg}" \

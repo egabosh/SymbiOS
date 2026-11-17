@@ -221,7 +221,8 @@ do
 
   # Write JSON results
   g_json="{\"last_run\":\"${g_json_ts}\",\"categories\":[${g_json_cats}],\"checks\":[${g_json_results}]}"
-  echo "$g_json" | python3 -m json.tool > "$g_json_file.tmp" 2>/dev/null && \
+  # jq validates the hand-built JSON before it replaces the previous file.
+  echo "$g_json" | jq . > "$g_json_file.tmp" 2>/dev/null && \
     mv "$g_json_file.tmp" "$g_json_file" || \
     echo "$g_json" > "$g_json_file"
 done
