@@ -842,6 +842,13 @@
     # addons.xml as a repository, so every official add-on is browsable and
     # installable in the Kodi UI (Add-ons -> Install from repository). The
     # relative <path> entries of that index resolve against the datadir below.
+    # The entries MUST live inside <dir> (schema since Kodi 14 "Gotham"): the
+    # bare <info>/<checksum>/<datadir> form of the dharma era is still parsed
+    # for the "old schema" warning but no longer turned into a repository, so
+    # Kodi reports "no directory matching <version>" and serves nothing.
+    # The version bump makes Kodi re-fetch the index right away instead of
+    # waiting for the stored next check (up to 24 h): a host that still runs
+    # the broken 1.0.0 schema then repairs itself on the next Kodi start.
     - name: Create the repository.kodi.community addon dir
       ansible.builtin.file:
         path: /home/kodi/.kodi/addons/repository.kodi.community
@@ -860,12 +867,14 @@
           <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
           <addon id="repository.kodi.community"
               name="Kodi Community Repository (Omega)"
-              version="1.0.0"
+              version="1.1.0"
               provider-name="Team Kodi">
             <extension point="xbmc.addon.repository" name="Kodi Community Repository (Omega)">
-              <info compressed="false">https://mirrors.kodi.tv/addons/omega/addons.xml</info>
-              <checksum>https://mirrors.kodi.tv/addons/omega/addons.xml.md5</checksum>
-              <datadir zip="true">https://mirrors.kodi.tv/addons/omega/</datadir>
+              <dir>
+                <info compressed="false">https://mirrors.kodi.tv/addons/omega/addons.xml</info>
+                <checksum>https://mirrors.kodi.tv/addons/omega/addons.xml.md5</checksum>
+                <datadir zip="true">https://mirrors.kodi.tv/addons/omega/</datadir>
+              </dir>
             </extension>
             <extension point="xbmc.addon.metadata">
               <summary lang="en_GB">Official Kodi add-on repository (Kodi 21 Omega)</summary>
