@@ -35,10 +35,35 @@
 #     (see services/kodidb.yml), SFTP media sources and automatic addon
 #     installation from mirrors.kodi.tv. Optional: a game ROM source (Kodi
 #     Options "path_roms", local or SFTP-relative like the other media paths)
-#     that installs the libretro cores available as Debian trixie packages
-#     (gb/gbc, gba, nes/fds, snes, Sega MD/MS/GG/SG-1000/SegaCD); systems
-#     without a trixie core simply show up in no scan. The
-#     Kodi UI language follows the system locale (inventory "locale"), the same
+#     that installs the libretro cores available as Debian packages on the
+#     target release (trixie: gb/gbc, gba, nes/fds, snes, Sega MD/MS/GG/
+#     SG-1000/SegaCD, NDS, WonderSwan, Virtual Boy) plus Mupen64Plus-Next for
+#     N64 built from source (no Debian package exists); cores missing on a
+#     release are skipped, systems without a core show up in no scan. N64
+#     games render with the angrylion software RDP (set as an addon user
+#     setting): Kodi 21 has no HW framebuffer game stream, so the default
+#     GLideN64 OpenGL renderer cannot load. Angrylion in turn forces the
+#     ParaLLEl-RSP JIT instead of the HLE RSP, and that JIT needs the
+#     page-size patch applied before the build: upstream aligns its code
+#     windows to 4 KB and aborts on 16 KB page kernels (Raspberry Pi 4/5).
+#     The software rasterizer is CPU bound and cannot be tuned around: a
+#     Raspberry Pi 5 needs ~40 ms per frame and therefore emulates at ~0.8 of
+#     real time (measured over the audio clock and the frame rate), while
+#     Kodi keeps the audio sink fed and pads the missing time with silence -
+#     audible as a short dropout every few seconds. No VI filter, thread
+#     count, RSP plugin or frame-rate option changes that; x86_64 hosts run
+#     full speed. Kodi 21 has no hardware framebuffer stream at all
+#     (StreamType::HW_BUFFER is unimplemented), so the OpenGL renderers
+#     (GLideN64, ParaLLEl-RDP) are out of reach; Kodi 22 (Piers) implements
+#     them for game clients with Game API 8.2.0 and is the actual fix.
+#     ROMs that only a need_fullpath core can play (Sega via genplus, NDS via
+#     desmume; addon.xml supports_vfs=false) need a plain local path, because
+#     Kodi drops such a core for non-local sources. While the ROM source is an
+#     SFTP share, the playbook mounts that share read-only with sshfs (the
+#     kodi SSH key must be registered on the SFTP user, e.g. as LDAP
+#     sshPublicKey) and points the games source at the mount, so every core
+#     sees local files without copying the ROM library to the host. The Kodi
+#     UI language follows the system locale (inventory "locale"), the same
 #     language the desktop uses.
 #   url: "https://kodi.{{ base_domain }}"
 #   config:
@@ -106,7 +131,7 @@
 #     - name: kodi-standalone
 #       command: journalctl -u kodi-standalone --no-pager -n 100
 #   uninstall:
-#     stop: systemctl stop switch-kodi-desk kodi-standalone; rm -f /etc/systemd/system/kodi-standalone.service /etc/systemd/system/switch-kodi-desk.service
+#     stop: systemctl stop switch-kodi-desk kodi-standalone; umount /symbios/services/kodi/roms 2>/dev/null; rm -f /etc/systemd/system/symbios-services-kodi-roms.mount /etc/systemd/system/kodi-standalone.service /etc/systemd/system/switch-kodi-desk.service
 #     program_paths:
 #       - /home/kodi/
 #       - /usr/local/sbin/switch-kodi-desk.sh
@@ -133,6 +158,15 @@
     # writable config dir, not in inventory.yml. Only one options row makes
     # sense for a single media center; the first row of the list is used.
     kodi_options_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/kodi/instances.yml"
+    # Mount point and unit of the SFTP ROM share for cores that cannot read a
+    # Kodi VFS URL (catalog key "local", see kodi_game_cores). sshfs mounts
+    # the same SFTP endpoint the media sources use, so no ROM data is copied
+    # onto the host.
+    kodi_roms_mount: /symbios/services/kodi/roms
+    kodi_roms_mount_unit: symbios-services-kodi-roms.mount
+    # Path of the games source (set from the options below); empty while no
+    # ROM path is configured.
+    kodi_roms_games_source: ""
     # The UI language is the system language, not a Kodi-specific setting:
     # inventory "locale" (en_US.UTF-8) maps to the Kodi language addon
     # resource.language.en_us. Addons use <ll>_<cc> lowercase; there is no
@@ -154,12 +188,18 @@
     # Index of the MediathekView plugin zips (repo-matrix = Kodi >= 19, this is
     # Kodi 21). The listing order ends with the newest zip, like mirrors.kodi.tv.
     kodi_addon_mediathekview_index_url: "https://kodirepo.mediathekview.de/repo-matrix/plugin.video.mediathekview/"
-    # Libretro cores available as Debian trixie packages, one entry per core.
-    # All of them are installed while a ROM path is configured (they are
+    # Libretro cores for the ROM source, one entry per core. A core is either
+    # a Debian package ("package") or a source build ("build", GitHub repo of
+    # the libretro organization); entries whose package the target release
+    # does not know are skipped by the availability check below, so the same
+    # catalog runs on every SymbiOS host (trixie/bookworm, arm64/x86_64). All
+    # selected cores are installed while a ROM path is configured (they are
     # small); their controller addons are plain XML/PNG addons fetched from
     # mirrors.kodi.tv in the same loop as the other addons. The wrapper addons
     # are generated by symbios-kodi-game-addon.sh because mirrors.kodi.tv
-    # ships no Linux gameclient addons.
+    # ships no Linux gameclient addons. One core per system family on purpose:
+    # with two cores claiming the same extension (snes9x vs bsnes-mercury on
+    # .sfc) Kodi would pop a selection dialog for every game.
     kodi_game_cores:
       - addon: game.libretro.gambatte
         package: libretro-gambatte
@@ -180,7 +220,30 @@
       - addon: game.libretro.genplus
         package: libretro-genesisplusgx
         core: genesis_plus_gx_libretro.so
+        # needs a real local file path (addon.xml: supports_vfs=false)
+        local: true
         controllers: [game.controller.genesis.3button, game.controller.genesis.6button, game.controller.genesis.mouse, game.controller.genesis.4wayplay, game.controller.genesis.teamplayer]
+      - addon: game.libretro.desmume
+        package: libretro-desmume
+        core: desmume_libretro.so
+        local: true
+        controllers: [game.controller.nds]
+      - addon: game.libretro.beetle-wswan
+        package: libretro-beetle-wswan
+        core: mednafen_wswan_libretro.so
+        controllers: [game.controller.ws]
+      - addon: game.libretro.beetle-vb
+        package: libretro-beetle-vb
+        core: mednafen_vb_libretro.so
+        controllers: [game.controller.vb]
+      # N64: no Debian package in trixie or sid, so the core is built from
+      # source (Mupen64Plus-Next, fully vendored, plain make); the wrapper
+      # generator links the built .so directly.
+      - addon: game.libretro.mupen64plus-nx
+        build: libretro/mupen64plus-libretro-nx
+        core: mupen64plus_next_libretro.so
+        patch: mupen64plus-rsp-parallel-page-size.patch
+        controllers: [game.controller.n64]
   tasks:
 
     # Load the options from the WebUI-managed config file. When the file does
@@ -213,9 +276,42 @@
       ansible.builtin.set_fact:
         kodi_roms_is_sftp: "{{ kodi_roms_configured and not (((kodi_options | default({})).path_roms) is match('^/')) and (((kodi_options | default({})).sftp_server | default('')) | length > 0) }}"
 
-    - name: Collect the controller addons of all game cores
+    # Not every Debian release ships every libretro core (trixie has nine,
+    # others fewer or none): ask the target's package index per package and
+    # keep only what is installable, so the same catalog runs on any host.
+    # apt-cache show exits 0 for a known package, non-zero otherwise; it reads
+    # the local lists only (autoupdate keeps them fresh).
+    - name: Check which libretro core packages are available
+      ansible.builtin.command: apt-cache show {{ item }}
+      loop: "{{ kodi_game_cores | selectattr('package', 'defined') | map(attribute='package') | unique | list }}"
+      register: kodi_core_packages_available
+      changed_when: false
+      failed_when: false
+
+    # The catalog narrowed to what this host can run: all source-build cores
+    # plus the package cores whose package the index knows.
+    - name: Resolve the installable game cores
       ansible.builtin.set_fact:
-        kodi_game_controller_addons: "{{ kodi_game_cores | map(attribute='controllers') | flatten | unique | list }}"
+        kodi_game_cores_available: "{{ kodi_game_cores | selectattr('build', 'defined') | list + (kodi_game_cores | selectattr('package', 'defined') | selectattr('package', 'in', kodi_core_packages_available.results | selectattr('rc', 'equalto', 0) | map(attribute='item') | list) | list) }}"
+
+    - name: Collect the controller addons of all installable game cores
+      ansible.builtin.set_fact:
+        kodi_game_controller_addons: "{{ kodi_game_cores_available | map(attribute='controllers') | flatten | unique | list }}"
+
+    # A core marked "local" in the catalog declares supports_vfs=false: Kodi
+    # skips it for a non-local source path (GameUtils::GetGameClients filters
+    # exactly that), so the ROM has to be a plain file path. With an SFTP ROM
+    # source that means mounting the share locally.
+    - name: Resolve whether the ROM source needs a local mount
+      ansible.builtin.set_fact:
+        kodi_roms_needs_local: "{{ kodi_roms_is_sftp and (kodi_game_cores_available | selectattr('local', 'defined') | list | length > 0) }}"
+
+    # The games source: the local mount when a local-path core is installed,
+    # else the SFTP URL or the configured local directory.
+    - name: Resolve the game ROM source path
+      ansible.builtin.set_fact:
+        kodi_roms_games_source: "{{ kodi_roms_mount ~ '/' if kodi_roms_needs_local else ('sftp://' ~ kodi_options.sftp_server ~ ':' ~ (kodi_options.sftp_port | default(28)) ~ '/' ~ kodi_options.path_roms ~ '/' if kodi_roms_is_sftp else kodi_options.path_roms ~ '/') }}"
+      when: kodi_roms_configured
 
     # Kodi and its VFS/game/pvr addons; unzip for the addon installs below.
     # The font packages provide the targets of the Estuary skin's font symlinks
@@ -238,14 +334,59 @@
         update_cache: no
         install_recommends: no
 
-    # Libretro cores for the configured ROM source (trixie packages, see
-    # kodi_game_cores above).
+    # Libretro core packages for the configured ROM source (see
+    # kodi_game_cores above); only the cores the target release actually ships.
     - name: Install libretro core packages for the configured ROM source
       ansible.builtin.apt:
-        name: "{{ kodi_game_cores | map(attribute='package') | unique | list }}"
+        name: "{{ kodi_game_cores_available | selectattr('package', 'defined') | map(attribute='package') | unique | list }}"
         update_cache: no
         install_recommends: no
       when: kodi_roms_configured
+
+    # Build tools for the source-built cores: a bare media center carries no
+    # compiler chain by default.
+    - name: Install build tools for the libretro source builds
+      ansible.builtin.apt:
+        name:
+          - build-essential
+          # OpenGL headers (GL/gl.h) for the N64 core's GLideN64 renderer
+          - libgl-dev
+        update_cache: no
+        install_recommends: no
+      when:
+        - kodi_roms_configured
+        - kodi_game_cores_available | selectattr('build', 'defined') | list | length > 0
+
+    # Libretro cores without a Debian package are built from source once into
+    # the service dir (Mupen64Plus-Next is fully vendored, no git submodules;
+    # plain make yields the .so). The N64 core needs its software RDP
+    # angrylion on Kodi 21 (no HW framebuffer game stream there), so it is
+    # built with HAVE_THR_AL plus a non-HLE RSP fallback (parallel or LLE) -
+    # without one of those the core silently falls back to GLideN64. The flags
+    # are no-ops for other cores' Makefiles. The bundled ParaLLEl-RSP JIT
+    # needs the page-size patch: it aligns its mprotect() windows to 4 KB and
+    # aborts on 16 KB page kernels (Raspberry Pi 4/5). A re-run skips through
+    # "creates"; a newer build replaces the .so in place and the wrapper
+    # symlink follows it.
+    - name: Build libretro cores from source (no Debian package)
+      ansible.builtin.shell: |
+        set -e
+        src=/symbios/services/kodi/src/{{ (item.build | split('/'))[-1] }}
+        if [[ ! -d $src ]]; then
+          git clone --depth 1 "https://github.com/{{ item.build }}" "$src"
+        fi
+        patch={{ (playbook_dir ~ '/kodi/files/patches/' ~ item.patch) if item.patch is defined else '' }}
+        if [[ -n $patch ]] && ! git -C "$src" apply --reverse --check "$patch" 2>/dev/null; then
+          git -C "$src" apply "$patch"
+        fi
+        make -C "$src" -j"$(nproc)" HAVE_THR_AL=1 HAVE_PARALLEL_RSP=1 LLE=1
+      loop: "{{ kodi_game_cores_available | selectattr('build', 'defined') | list }}"
+      args:
+        creates: /symbios/services/kodi/src/{{ (item.build | split('/'))[-1] }}/{{ item.core }}
+        executable: /bin/bash
+      when:
+        - kodi_roms_configured
+        - kodi_game_cores_available | selectattr('build', 'defined') | list | length > 0
 
     # Dedicated user for the Kodi session (media-center mode). The home dir
     # lives below /symbios/home, so the profile survives reboots on the LUKS
@@ -262,13 +403,6 @@
         shell: /bin/false
         groups: render,video,input,audio
         append: true
-
-    # The home dir lives below data_root, which is 0750 root:root - grant the
-    # kodi user traverse access with a named ACL entry (it survives the chmod
-    # of basics.yml, which only touches the mask bits).
-    - name: Grant kodi traverse access on {{ data_root }}
-      ansible.builtin.shell: setfacl -m u:kodi:x "{{ data_root }}"
-      changed_when: false
 
     - name: Create ~/.kodi directories
       ansible.builtin.file:
@@ -292,6 +426,19 @@
         state: directory
         mode: '0750'
 
+    # The home dir lives below data_root and the source-built cores below
+    # /symbios/services - both are 0750, so grant the kodi user traverse
+    # access on the whole chain with named ACL entries (they survive the
+    # chmod of basics.yml, which only touches the mask bits). Without this
+    # Kodi cannot dlopen the built core libraries.
+    - name: Grant kodi traverse access to the core paths
+      ansible.builtin.shell: setfacl -m u:kodi:x "{{ item }}"
+      loop:
+        - "{{ data_root }}"
+        - /symbios/services
+        - /symbios/services/kodi
+      changed_when: false
+
     # Basic-auth password of the Kodi JSON-RPC web server (Kodi Remote).
     # Generated once and kept in the service dir; the seed below bakes it into
     # guisettings.xml, the healthcheck reads it back.
@@ -304,7 +451,10 @@
     # After the first start Kodi owns guisettings.xml and keeps it updated.
     # The web server (Kodi Remote / JSON-RPC) runs on 8081 with Basic auth;
     # the language addon is preselected so the UI starts in the system
-    # language.
+    # language. No value carries the default="true" attribute: Kodi resets
+    # any value marked as default to its compiled-in default at load, which
+    # would silently turn a non-default language (or port) back into
+    # English/8080 on every start.
     - name: Seed ~/.kodi/userdata/guisettings.xml (first start only)
       ansible.builtin.copy:
         dest: /home/kodi/.kodi/userdata/guisettings.xml
@@ -314,11 +464,11 @@
         force: false
         content: |
           <settings version="2">
-              <setting id="locale.language" default="true">{{ kodi_language }}</setting>
+              <setting id="locale.language">{{ kodi_language }}</setting>
               <setting id="services.webserver">true</setting>
-              <setting id="services.webserverport" default="true">8081</setting>
-              <setting id="services.webserverauthentication" default="true">true</setting>
-              <setting id="services.webserverusername" default="true">kodi</setting>
+              <setting id="services.webserverport">8081</setting>
+              <setting id="services.webserverauthentication">true</setting>
+              <setting id="services.webserverusername">kodi</setting>
               <setting id="services.webserverpassword">{{ lookup('file', '/symbios/services/kodi/.kodi_web_pw') | trim }}</setting>
           </settings>
 
@@ -500,6 +650,94 @@
       changed_when: false
       when: (kodi_options | default({})).sftp_server | default('') | length > 0
 
+    # sshfs mount of the ROM share for cores that need a real local path (see
+    # kodi_roms_needs_local). Read-only: Kodi only reads ROMs, savestates stay
+    # in the profile. The unit is not boot-enabled (boot policy, AGENTS.md):
+    # its mount point lives below /symbios and kodi-standalone pulls it in
+    # (Wants=) after rc.local started the switcher post-mount.
+    - name: Install sshfs for the local ROM mount
+      ansible.builtin.apt:
+        name: sshfs
+        update_cache: no
+        install_recommends: no
+      when: kodi_roms_needs_local
+
+    # sshfs mounts as root; allow_other lets the kodi user read the files.
+    - name: Allow other users on FUSE mounts (sshfs ROM share)
+      ansible.builtin.lineinfile:
+        path: /etc/fuse.conf
+        regexp: '^#?\s*user_allow_other\s*$'
+        line: user_allow_other
+        create: true
+        mode: '0644'
+      when: kodi_roms_needs_local
+
+    # While the share is mounted the mount point reports the metadata of the
+    # remote directory, so a chown/chmod/setfacl below would hit a read-only
+    # filesystem. Both tasks therefore only run on an unmounted mount point
+    # (the remote permissions apply once sshfs is up).
+    - name: Create the ROM share mount point
+      ansible.builtin.file:
+        path: "{{ kodi_roms_mount }}"
+        owner: root
+        group: root
+        state: directory
+        mode: '0750'
+      when:
+        - kodi_roms_needs_local
+        - kodi_roms_mount not in ansible_mounts | map(attribute='mount') | list
+
+    - name: Grant kodi read access to the ROM share mount point
+      ansible.builtin.shell: setfacl -m u:kodi:rx "{{ kodi_roms_mount }}"
+      changed_when: false
+      when:
+        - kodi_roms_needs_local
+        - kodi_roms_mount not in ansible_mounts | map(attribute='mount') | list
+
+    - name: /etc/systemd/system/{{ kodi_roms_mount_unit }} (sshfs ROM share)
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/{{ kodi_roms_mount_unit }}"
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=ROM share of the Kodi media center (sshfs)
+          After=network-online.target
+          Wants=network-online.target
+
+          [Mount]
+          What={{ kodi_options.sftp_user | default('kodi') }}@{{ kodi_options.sftp_server }}:/{{ kodi_options.path_roms }}
+          Where={{ kodi_roms_mount }}
+          Type=fuse.sshfs
+          Options=port={{ kodi_options.sftp_port | default(28) }},IdentityFile=/home/kodi/.ssh/id_ed25519,UserKnownHostsFile=/home/kodi/.ssh/known_hosts,StrictHostKeyChecking=yes,ConnectTimeout=10,ServerAliveInterval=15,ServerAliveCountMax=3,reconnect,ro,allow_other,uid=kodi,gid=kodi
+          TimeoutSec=30
+      register: kodi_roms_mount_unit_file
+      when: kodi_roms_needs_local
+
+    - name: Reload systemd and mount the ROM share (unit changed)
+      ansible.builtin.shell: systemctl daemon-reload && systemctl restart {{ kodi_roms_mount_unit }}
+      changed_when: true
+      failed_when: false
+      when:
+        - kodi_roms_needs_local
+        - kodi_roms_mount_unit_file is changed
+
+    # No local-path core installed or no SFTP ROM source: the mount unit goes
+    # away again (a plain local ROM dir needs no mount).
+    - name: Remove the ROM share mount unit (not needed)
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ kodi_roms_mount_unit }}"
+        state: absent
+      register: kodi_roms_mount_unit_removed
+      when: not kodi_roms_needs_local
+
+    - name: Unmount the ROM share and reload systemd (unit removed)
+      ansible.builtin.shell: umount {{ kodi_roms_mount }} 2>/dev/null; systemctl daemon-reload
+      changed_when: true
+      failed_when: false
+      when: kodi_roms_mount_unit_removed is changed
+
     # Automatic addon installation on first run: fetch the latest version from
     # the mirrors.kodi.tv omega repository index (the last listed zip is the
     # newest) and unzip it into ~/.kodi/addons/. An existing addon dir skips.
@@ -515,18 +753,47 @@
       args:
         creates: /home/kodi/.kodi/addons/{{ item }}
 
-    # Game addon wrappers for all trixie cores (see kodi_game_cores above).
-    # Debian ships only the bare core libraries and mirrors.kodi.tv has no
-    # Linux gameclient addons, so symbios-kodi-game-addon.sh generates the
-    # wrapper (addon.xml + resources from the upstream kodi-game/<addon> repo
-    # plus a symlink to the packaged core) in ~/.kodi/addons. Kodi registers
-    # it on the next start; f_enable_addons in switch-kodi-desk enables it.
-    - name: Generate the game addon wrappers (configured ROM source)
+    # Game addon wrappers for all installable cores (see kodi_game_cores
+    # above). Debian ships only the bare core libraries and mirrors.kodi.tv
+    # has no Linux gameclient addons, so symbios-kodi-game-addon.sh generates
+    # the wrapper (addon.xml + resources from the upstream kodi-game/<addon>
+    # repo plus a symlink to the packaged or source-built core) in
+    # ~/.kodi/addons. The third argument is the package name or, for source
+    # builds, the path of the built .so. Kodi registers it on the next start;
+    # f_enable_addons in switch-kodi-desk enables it.
+    - name: Generate the game addon wrappers from Debian packages
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-kodi-game-addon.sh install {{ item.addon }} {{ item.core }} {{ item.package }}"
-      loop: "{{ kodi_game_cores }}"
+      loop: "{{ kodi_game_cores_available | selectattr('package', 'defined') | list }}"
       register: kodi_game_addon_result
       changed_when: "'kodi-game-addon-installed' in (kodi_game_addon_result.stdout | default(''))"
       when: kodi_roms_configured
+
+    - name: Generate the game addon wrappers from source builds
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-kodi-game-addon.sh install {{ item.addon }} {{ item.core }} /symbios/services/kodi/src/{{ (item.build | split('/'))[-1] }}/{{ item.core }}"
+      loop: "{{ kodi_game_cores_available | selectattr('build', 'defined') | list }}"
+      register: kodi_game_addon_build_result
+      changed_when: "'kodi-game-addon-installed' in (kodi_game_addon_build_result.stdout | default(''))"
+      when: kodi_roms_configured
+
+    # Mupen64Plus-Next's default RDP (GLideN64) renders through OpenGL, which
+    # needs the HW framebuffer game stream - missing in Kodi 21.3, so the core
+    # fails to load any game ("No stream implementation for type: 3"). The
+    # angrylion software RDP is compiled into the source build above and
+    # selected here via the addon's user settings; the wrapper asks Kodi for
+    # every option value at init and picks it up from there.
+    - name: Select the angrylion software RDP for the N64 core
+      ansible.builtin.copy:
+        dest: /home/kodi/.kodi/userdata/addon_data/game.libretro.mupen64plus-nx/settings.xml
+        owner: kodi
+        group: kodi
+        mode: '0600'
+        content: |
+          <settings version="2">
+              <setting id="mupen64plus-rdp-plugin">angrylion</setting>
+          </settings>
+      when:
+        - kodi_roms_configured
+        - kodi_game_cores_available | selectattr('addon', 'equalto', 'game.libretro.mupen64plus-nx') | list | length > 0
 
     # The language addon matches the system locale. Not every locale has a Kodi
     # language pack (en_gb is built in), so the mirror index is asked first and
@@ -616,6 +883,9 @@
     # lightdm so only one graphical session is active at a time. Not boot-
     # enabled (boot policy: the profile lives below /symbios) - switch-kodi-desk
     # starts it after the mount via rc.local.
+    # The unit orders after the sshfs ROM share and pulls it in while a
+    # local-path core needs it; Wants= keeps Kodi starting when the mount
+    # fails (the games stay unavailable, the media center works).
     - name: /etc/systemd/system/kodi-standalone.service
       ansible.builtin.copy:
         dest: /etc/systemd/system/kodi-standalone.service
@@ -625,7 +895,8 @@
         content: |
           [Unit]
           Description=Kodi Media Center Standalone
-          After=systemd-user-sessions.service
+          After=systemd-user-sessions.service{{ ' ' ~ kodi_roms_mount_unit if kodi_roms_needs_local | default(false) else '' }}
+          {{ 'Wants=' ~ kodi_roms_mount_unit if kodi_roms_needs_local | default(false) else '' }}
           Conflicts=lightdm.service
 
           [Service]
@@ -859,21 +1130,23 @@
     # A profile that already exists keeps its own language (the seed above only
     # applies on the very first start). Two paths converge it: a stopped Kodi
     # gets the value in its profile file, a running one is asked over the
-    # JSON-RPC web server, because a running instance owns guisettings.xml and
-    # rewrites it. The running path also restarts the session - the switch is
-    # persisted at once, but the UI only loads the new language on the next
-    # start.
+    # JSON-RPC web server - and because a systemctl stop does not trigger
+    # Kodi's clean-shutdown save, the running path also writes the profile
+    # file while the session is stopped. Both paths end with a restart, so
+    # the UI loads the new language right away.
     - name: Check whether a Kodi session is running
       ansible.builtin.command: systemctl is-active kodi-standalone.service
       register: kodi_running
       changed_when: false
       failed_when: false
 
+    # No default="true" in the replacement line: Kodi resets values marked as
+    # default to the compiled-in default (English) at load.
     - name: Set the UI language in a stopped Kodi profile ({{ kodi_language }})
       ansible.builtin.lineinfile:
         path: /home/kodi/.kodi/userdata/guisettings.xml
         regexp: '^(\s*)<setting id="locale.language".*</setting>$'
-        line: '\1<setting id="locale.language" default="true">{{ kodi_language }}</setting>'
+        line: '\1<setting id="locale.language">{{ kodi_language }}</setting>'
         backrefs: yes
       when: kodi_running.stdout | trim != 'active'
 
@@ -893,14 +1166,38 @@
         - kodi_language_live.rc | default(1) == 0
         - kodi_language_live.stdout | default('') | trim != kodi_language
 
-    # Switcher down first: a restarted Kodi without it looks like "the user
-    # left Kodi" and the next loop turn would fall back to the desktop session.
-    # A freshly installed language pack needs the restart as well: Kodi only
-    # registers addons at start, and a pack it does not know yet is ignored.
-    - name: Restart the Kodi session to apply the language
+    # The live set above only changes the running session's memory: a
+    # systemctl stop does not trigger Kodi's clean-shutdown save, so the
+    # profile file still carries the old value and wins on the next start.
+    # The switch is therefore written into the file while the session is
+    # stopped (Kodi rewrites guisettings.xml at start with what it loaded,
+    # so a stopped edit survives). Switcher down first: a restarted Kodi
+    # without it looks like "the user left Kodi" and the next loop turn would
+    # fall back to the desktop session. A freshly installed language pack
+    # needs the restart as well: Kodi only registers addons at start, and a
+    # pack it does not know yet is ignored.
+    - name: Stop the Kodi session for the profile update
       ansible.builtin.shell: |
         systemctl stop switch-kodi-desk.service
-        systemctl restart kodi-standalone.service
+        systemctl stop kodi-standalone.service
+      changed_when: true
+      when:
+        - kodi_running.stdout | trim == 'active'
+        - kodi_language_set is changed or kodi_language_install is changed
+
+    - name: Set the UI language in the profile file ({{ kodi_language }})
+      ansible.builtin.lineinfile:
+        path: /home/kodi/.kodi/userdata/guisettings.xml
+        regexp: '^(\s*)<setting id="locale.language".*</setting>$'
+        line: '\1<setting id="locale.language">{{ kodi_language }}</setting>'
+        backrefs: yes
+      when:
+        - kodi_running.stdout | trim == 'active'
+        - kodi_language_set is changed or kodi_language_install is changed
+
+    - name: Restart the Kodi session to apply the language
+      ansible.builtin.shell: |
+        systemctl start kodi-standalone.service
         systemctl start switch-kodi-desk.service
       changed_when: true
       when:

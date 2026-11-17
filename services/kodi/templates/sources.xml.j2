@@ -39,11 +39,7 @@
 {% if kodi_roms_configured | default(false) %}
         <source>
             <name>ROMs</name>
-{% if kodi_roms_is_sftp | default(false) %}
-            <path pathversion="1">sftp://{{ kodi_options.sftp_server }}:{{ kodi_options.sftp_port | default(28) }}/{{ (kodi_options | default({})).path_roms }}/</path>
-{% else %}
-            <path pathversion="1">{{ (kodi_options | default({})).path_roms }}/</path>
-{% endif %}
+            <path pathversion="1">{{ kodi_roms_games_source | default((kodi_options | default({})).path_roms) }}</path>
             <allowsharing>true</allowsharing>
         </source>
 {% endif %}

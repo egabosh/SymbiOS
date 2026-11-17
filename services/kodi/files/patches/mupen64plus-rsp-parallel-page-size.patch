@@ -1,0 +1,30 @@
+Fix the ParaLLEl-RSP JIT on hosts with 16 KB pages (Raspberry Pi 4/5).
+
+The JIT allocator of the RSP reserves one large mapping and commits windows
+of it with mprotect(). Upstream aligns those windows to 4 KB everywhere
+except Apple silicon, but mprotect() rejects an address that is not aligned
+to the real page size. On a 16 KB page kernel the second allocation fails,
+the RSP calls abort() and takes the whole Kodi process down a few hundred
+milliseconds into the first N64 game (SIGABRT in
+RSP::JIT::CPU::jit_region). Use the real page size on every POSIX host.
+
+Apply with: git -C <src> apply <this file>
+
+--- a/mupen64plus-rsp-paraLLEl/jit_allocator.cpp
++++ b/mupen64plus-rsp-paraLLEl/jit_allocator.cpp
+@@ -36,11 +36,11 @@ Allocator::~Allocator()
+ 
+ static size_t align_page(size_t offset)
+ {
+-#if defined(__APPLE__) && defined(__aarch64__)
++	// mprotect() rejects a region whose address is not aligned to the real
++	// host page size. The hardcoded 4 KB mask breaks every kernel with 16 KB
++	// pages (Raspberry Pi 4/5): the second JIT allocation fails and the RSP
++	// aborts, taking Kodi down with it.
+ 	size_t pagesize = sysconf(_SC_PAGESIZE) - 1;
+-#else
+-	size_t pagesize = 4095;
+-#endif
+ 	return (offset + pagesize) & ~size_t(pagesize);
+ }
+ 

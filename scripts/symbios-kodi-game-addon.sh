@@ -13,7 +13,9 @@
 #   <kodi home>/.kodi/addons/<addon-id>/<core-so>      symlink to the core
 #
 # The template (addon.xml.in) and the resources come from the upstream repo
-# kodi-game/<addon-id>, the core library from the Debian package (libretro-*).
+# kodi-game/<addon-id>, the core library either from the Debian package
+# (libretro-*) or, for cores no package ships (N64), from a source build that
+# services/kodi.yml places below /symbios/services/kodi/src.
 # Kodi resolves "library_linux" relative to the addon directory
 # (CAddon::LibPath = Path() + lib name), so the core has to sit next to
 # addon.xml - a symlink keeps a single copy that follows package upgrades.
@@ -23,31 +25,37 @@
 # wrapper. To rebuild after an upstream metadata change, remove the addon dir.
 #
 # Usage:
-#   symbios-kodi-game-addon.sh install <addon-id> <core-so> <core-package>
+#   symbios-kodi-game-addon.sh install <addon-id> <core-so> <core-package|core-path>
 #   symbios-kodi-game-addon.sh list
 #
 # Output: "install" prints a machine-readable state token as the last line
 # (kodi-game-addon-installed / kodi-game-addon-unchanged); "list" prints one
 # "<addon-id> <version>" line per generated addon.
 # Exit codes: 0 ok (also when the addon already exists), 1 technical error
-# (core package not installed, download failed), 2 usage error.
+# (core package not installed, core path missing, download failed), 2 usage
+# error.
 
 function f_usage {
   cat << EOF
-Usage: $(basename "$0") install <addon-id> <core-so> <core-package>
+Usage: $(basename "$0") install <addon-id> <core-so> <core-package|core-path>
        $(basename "$0") list
 
-Generate a Kodi game addon for a libretro core installed by a Debian package.
+Generate a Kodi game addon for a libretro core installed by a Debian package
+or built from source.
 
 Commands:
-  install <addon-id> <core-so> <core-package>
+  install <addon-id> <core-so> <core-package|core-path>
                           Generate ~kodi/.kodi/addons/<addon-id> from the
                           upstream template kodi-game/<addon-id> and link the
-                          core library of <core-package> into it. Existing
-                          addons are kept (kodi-game-addon-unchanged).
-                          Example:
+                          core library into it. The third argument is either a Debian
+                          package name (libretro-*, resolved via dpkg) or an absolute
+                          path to a built core library. Existing addons are kept
+                          (kodi-game-addon-unchanged). Examples:
                             install game.libretro.gambatte \\
                                     gambatte_libretro.so libretro-gambatte
+                            install game.libretro.mupen64plus-nx \\
+                                    mupen64plus_next_libretro.so \\
+                                    /symbios/services/kodi/src/mupen64plus-libretro-nx/mupen64plus_next_libretro.so
   list                    Print the generated game addons with their version
 
 Options:
@@ -55,7 +63,7 @@ Options:
 
 Exit codes:
   0  ok (also when the addon already exists)
-  1  core package not installed, download or extraction failed
+  1  core package not installed, core path missing, download or extraction failed
   2  usage error
 EOF
 }
@@ -85,6 +93,8 @@ g_upstream_url="https://codeload.github.com/kodi-game"
 g_addon_re='^game\.libretro\.[a-z0-9][a-z0-9._-]*$'
 g_core_re='^[a-z0-9][a-z0-9._-]*\.so$'
 g_package_re='^[a-z0-9][a-z0-9.+-]*$'
+# A direct core path is an absolute path to a built .so (source builds).
+g_core_path_re='^/[A-Za-z0-9._/-]+\.so$'
 
 # Resolve the core library of a Debian package. dpkg -L is used instead of a
 # hardcoded multiarch path, so the script works on every architecture.
@@ -92,6 +102,19 @@ function f_core_path {
   local f_package="$1"
   local f_core="$2"
   local f_path
+
+  # A direct path to a built core (no package): it must exist and carry
+  # the expected file name.
+  if [[ "$f_package" =~ $g_core_path_re ]]
+  then
+    if [[ ! -e $f_package || $(basename "$f_package") != "$f_core" ]]
+    then
+      g_echo_error "core library ${f_package} is missing or not named ${f_core}"
+      return 1
+    fi
+    printf '%s\n' "$f_package"
+    return 0
+  fi
 
   if ! dpkg -s "$f_package" >/dev/null 2>&1
   then
@@ -250,9 +273,9 @@ case "${1:-}" in
       g_echo_error "not a libretro core library name: ${3}"
       exit 2
     fi
-    if [[ ! "${4}" =~ $g_package_re ]]
+    if [[ ! "${4}" =~ $g_core_path_re && ! "${4}" =~ $g_package_re ]]
     then
-      g_echo_error "not a Debian package name: ${4}"
+      g_echo_error "not a Debian package name or core path: ${4}"
       exit 2
     fi
     f_install_addon "${2}" "${3}" "${4}" || exit 1
