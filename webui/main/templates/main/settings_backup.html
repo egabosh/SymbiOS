@@ -300,16 +300,17 @@
           One folder per line, relative to <code>/symbios</code>.
         </p>
         <textarea class="form-control font-monospace small" name="backup_exclude" rows="4"
-                  placeholder="/services/my-service/downloads&#10;/services/nextcloud/data/files_trashbin">{% if vars.backup_exclude %}{% for line in vars.backup_exclude %}{{ line }}
+                  placeholder="/services/my-service/downloads&#10;/media/videos/downloads">{% if vars.backup_exclude %}{% for line in vars.backup_exclude %}{{ line }}
 {% endfor %}{% endif %}</textarea>
         <div class="form-text small">Empty lines and lines starting with <code>#</code> are ignored.</div>
         <details class="mt-2">
           <summary class="small text-muted">What is always left out automatically?</summary>
           <ul class="small text-muted mb-1 mt-2 ps-3">
             <li>Docker and container data (<code>/symbios/docker</code>, <code>/symbios/containerd</code>) - images and layers can be downloaded again.</li>
-            <li>Nextcloud preview images - they are regenerated when needed.</li>
-            <li>Python cache folders (<code>__pycache__</code>) and leftover backup files.</li>
-            <li>The local backup repository and the backup password itself.</li>
+            <li>The swap file on the data disk - it changes constantly and has no value in a restore.</li>
+            <li>Regenerable caches: Python bytecode (<code>__pycache__</code>), program caches (<code>.cache</code>), gaboshlib temp folders (<code>.g_tmp*</code>) and Navidrome's media cache.</li>
+            <li>Nextcloud: preview images, the file trash and the file version history - the current files are what a restore needs.</li>
+            <li>The local backup repository itself - the snapshots are already on the target server.</li>
           </ul>
           {% if data.auto_exclude %}
           <div class="small text-muted">Exact patterns:</div>

@@ -48,7 +48,7 @@
 #     filesystem root when restoring with "--target /").
 #   - Negated include patterns ("!pattern") keep paths out of the restore
 #     AND out of the delete walk (protection for the local backup
-#     repository, docker internals and the repository password file).
+#     repository and docker internals).
 
 function f_usage {
   cat << EOF
@@ -507,7 +507,7 @@ function f_import_db_dumps {
 # Write the include patterns for the full restore: the restore scopes as
 # plain includes, the backup excludes as NEGATED includes. A negated
 # pattern keeps a path out of the restore AND out of the --delete walk
-# (local backup repository, docker internals, repository password file).
+# (local backup repository, docker internals).
 function f_write_restore_includes {
   f_bk_write_excludes "${g_tmp}/backup-excludes"
   {
@@ -624,8 +624,7 @@ else
   g_echo "Restoring ${g_data_root} from $g_date (${g_src_desc})"
   # --delete only in include mode (see header): removes files that
   # appeared below the data root after the snapshot; the negated includes
-  # protect the local backup repository, docker internals and the
-  # repository password file.
+  # protect the local backup repository and docker internals.
   g_inc_args=()
   f_include_args "${g_tmp}/restore-includes"
   if ! f_r_restic restore "$g_restic_sid" --target / --delete "${g_inc_args[@]}"

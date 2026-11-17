@@ -335,22 +335,42 @@ function f_bk_restic_ensure_repo {
 # Usage: f_bk_builtin_excludes
 function f_bk_builtin_excludes {
   local f_root="${g_data_root%/}"
-  # Never back up the local repository itself - its parent ${data_root}/backup
-  # holds regular data (service config copies) and stays in the snapshot:
-  echo "$f_root/backup/restic"
+  # --- re-creatable state -------------------------------------------------
   # Skip the whole docker/containerd state (images and layers are
   # re-pullable, named volumes live below services/), keep all other data:
   echo "$f_root/docker"
   echo "$f_root/containerd"
-  # Nextcloud file previews are regenerated on demand - skip them:
-  echo "$f_root/services/nextcloud/nextcloud-data/data/appdata_*/preview/"
-  # Runtime noise that must not be copied, wherever it appears:
+  # The swap file SymbiOS creates on the data disk: it changes constantly and
+  # a swap page has no value in a restore.
+  echo "$f_root/swapfile"
+  # ext4 artefact of the data partition - only fsck debris lives there:
+  echo "$f_root/lost+found"
+  # Caches, wherever they appear (regenerable by definition, so they only
+  # cost time and space): Python bytecode, the gaboshlib temp dirs
+  # (~/.g_tmp, ~/.g_tmp_<script>-<pid>) and the generic program cache:
   echo "**/__pycache__/"
-  # Never back up the backup credentials themselves (.backup_restic_password
-  # in the config dir): a repository password inside its own encrypted
-  # repository is useless (chicken and egg) - it lives in the WebUI /
-  # off-site instead.
-  echo "**/.backup*"
+  echo "**/.g_tmp*"
+  echo "**/.cache/"
+  # Navidrome's generated image/transcode cache:
+  echo "**/navidrome-data/cache/"
+  # Nextcloud preview images are regenerated on demand:
+  echo "$f_root/services/nextcloud/nextcloud-data/data/appdata_*/preview/"
+  # Nextcloud soft-deleted files and the file version history: the current
+  # files are what a restore needs.
+  echo "$f_root/services/nextcloud/nextcloud-data/data/*/files_trashbin/"
+  echo "$f_root/services/nextcloud/nextcloud-data/data/*/files_versions/"
+  # --- the repository itself ----------------------------------------------
+  # Never back up the local repository into itself - its parent
+  # ${data_root}/backup holds regular data (service config copies) and stays
+  # in the snapshot:
+  echo "$f_root/backup/restic"
+  # The repository password file (.backup_restic_password) is deliberately
+  # NOT excluded: the rest of the config dir (inventory.yml with its
+  # secrets, .ldap_admin_pw, .ssh/id_symbios) is backed up as well, so a
+  # single exception buys nothing. A password stored inside the repository
+  # it protects cannot open that repository either way, and leaving it out
+  # only hurt the restore - backup.yml would generate a fresh password for
+  # the missing file and then fail against the existing repository.
 }
 
 # Write the restic exclude file for the backup and the full restore.

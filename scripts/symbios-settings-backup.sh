@@ -127,7 +127,7 @@ then
    "required": false, "default": "9999", "secret": false},
   {"name": "backup_exclude", "type": "multiline", "label": "Extra exclude patterns",
    "required": false, "default": [], "secret": false,
-   "note": "One restic exclude pattern per line, # comments allowed. Applied in addition to the built-in excludes (docker/containerd, Nextcloud previews, Python caches, the backup repository itself)."}
+   "note": "One restic exclude pattern per line, # comments allowed. Applied in addition to the built-in excludes (docker/containerd, the swap file, caches, Nextcloud trash/previews/versions, the backup repository itself)."}
 ]
 EOF
   exit 0
