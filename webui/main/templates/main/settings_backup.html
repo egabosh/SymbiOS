@@ -290,16 +290,33 @@
 
     <!-- Step 2: excludes -->
     <div class="card mb-3">
-      <div class="card-header"><i class="bi bi-2-circle"></i> <strong>Leave things out (optional)</strong></div>
+      <div class="card-header"><i class="bi bi-2-circle"></i> <strong>Leave more things out (optional)</strong></div>
       <div class="card-body">
         <p class="text-muted small mb-2">
-          Normally you do not need to change anything here. If single folders should NOT be backed up
-          (e.g. a huge download directory), enter them here - one line per folder.
+          SymbiOS always leaves out some things automatically (see below). Everything entered
+          here is left out <strong>in addition</strong> to that - it does not replace the
+          automatic list. Normally you do not need to change anything; use it for single
+          folders that must not be backed up (e.g. a huge download directory).
+          One folder per line, relative to <code>/symbios</code>.
         </p>
         <textarea class="form-control font-monospace small" name="backup_exclude" rows="4"
                   placeholder="/services/my-service/downloads&#10;/services/nextcloud/data/files_trashbin">{% if vars.backup_exclude %}{% for line in vars.backup_exclude %}{{ line }}
 {% endfor %}{% endif %}</textarea>
-        <div class="form-text small">Patterns are applied to the restic backup. System internals are excluded automatically.</div>
+        <div class="form-text small">Empty lines and lines starting with <code>#</code> are ignored.</div>
+        <details class="mt-2">
+          <summary class="small text-muted">What is always left out automatically?</summary>
+          <ul class="small text-muted mb-1 mt-2 ps-3">
+            <li>Docker and container data (<code>/symbios/docker</code>, <code>/symbios/containerd</code>) - images and layers can be downloaded again.</li>
+            <li>Nextcloud preview images - they are regenerated when needed.</li>
+            <li>Python cache folders (<code>__pycache__</code>) and leftover backup files.</li>
+            <li>The local backup repository and the backup password itself.</li>
+          </ul>
+          {% if data.auto_exclude %}
+          <div class="small text-muted">Exact patterns:</div>
+          <pre class="small mb-0">{% for p in data.auto_exclude %}{{ p }}
+{% endfor %}</pre>
+          {% endif %}
+        </details>
       </div>
     </div>
 

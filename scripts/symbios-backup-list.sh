@@ -27,7 +27,8 @@ Queries the local restic repository and, for every configured backup server,
 its remote restic repository. No arguments.
 
 Output JSON: {"ok":true,"mode":"local|remote-restic","targets":[...],
-"snapshots":[...],"services":[...],"warning":...,"pubkey":...}
+"snapshots":[...],"services":[...],"auto_exclude":[...],"warning":...,
+"pubkey":...}
 Every snapshot entry: {"date":"YYYY-MM-DD","local":0|1,
 "servers":["<target name>", ...]} - restic repositories are always
 encrypted, so there is no separate encrypted flag.
@@ -197,6 +198,11 @@ fi
 g_pubkey=""
 [[ -r "${g_bk_ssh_pubkey}" ]] && g_pubkey="$(cat "${g_bk_ssh_pubkey}")"
 
+# The always applied exclude patterns: the settings page lists them next to
+# the user's own entries, so it is clear those are an addition on top.
+g_auto_exclude_json="$(f_bk_builtin_excludes \
+  | jq -Rsc 'split("\n") | map(select(length > 0))')"
+
 # Names of all configured restic targets (for the UI)
 g_targets_json="["
 g_first=1
@@ -214,6 +220,7 @@ cat <<EOF
 "targets":$g_targets_json,
 "snapshots":$g_snap_json,
 "services":$(f_list_services | f_json_array),
+"auto_exclude":${g_auto_exclude_json:-[]},
 "warning":$(printf '%s' "$g_warning" | f_json_escape),
 "pubkey":$(printf '%s' "$g_pubkey" | f_json_escape)}
 EOF

@@ -336,8 +336,10 @@ def settings_backup(request):
             messages.error(request, f'Error: {e}')
         return redirect('settings_backup')
 
-    # GET: collect snapshot list, service scopes and the SSH public key
-    data = {'snapshots': [], 'services': [], 'mode': '', 'warning': '', 'pubkey': ''}
+    # GET: collect snapshot list, service scopes, the always applied exclude
+    # patterns and the SSH public key
+    data = {'snapshots': [], 'services': [], 'auto_exclude': [],
+            'mode': '', 'warning': '', 'pubkey': ''}
     try:
         ok, stdout, stderr = run_command('symbios-backup-list.sh', timeout=90)
         if ok and stdout:

@@ -328,6 +328,31 @@ function f_bk_restic_ensure_repo {
   return 1
 }
 
+# Print the built-in (always applied) exclude patterns, one per line. Single
+# source of truth: f_bk_write_excludes uses it for the backup and the WebUI
+# lists the same patterns on the backup settings page, so a user entry is
+# clearly an addition on top of them.
+# Usage: f_bk_builtin_excludes
+function f_bk_builtin_excludes {
+  local f_root="${g_data_root%/}"
+  # Never back up the local repository itself - its parent ${data_root}/backup
+  # holds regular data (service config copies) and stays in the snapshot:
+  echo "$f_root/backup/restic"
+  # Skip the whole docker/containerd state (images and layers are
+  # re-pullable, named volumes live below services/), keep all other data:
+  echo "$f_root/docker"
+  echo "$f_root/containerd"
+  # Nextcloud file previews are regenerated on demand - skip them:
+  echo "$f_root/services/nextcloud/nextcloud-data/data/appdata_*/preview/"
+  # Runtime noise that must not be copied, wherever it appears:
+  echo "**/__pycache__/"
+  # Never back up the backup credentials themselves (.backup_restic_password
+  # in the config dir): a repository password inside its own encrypted
+  # repository is useless (chicken and egg) - it lives in the WebUI /
+  # off-site instead.
+  echo "**/.backup*"
+}
+
 # Write the restic exclude file for the backup and the full restore.
 # restic matches a pattern against the complete path of an entry, so the
 # built-in directory patterns are anchored to the data root: an unanchored
@@ -340,23 +365,7 @@ function f_bk_write_excludes {
   local f_out="$1"
   local f_root="${g_data_root%/}"
   {
-    # Built-in defaults. Never back up the local repository itself - its
-    # parent ${data_root}/backup holds regular data (service config copies)
-    # and stays in the snapshot:
-    echo "$f_root/backup/restic"
-    # Skip the whole docker/containerd state (images and layers are
-    # re-pullable, named volumes live below services/), keep all other data:
-    echo "$f_root/docker"
-    echo "$f_root/containerd"
-    # Nextcloud file previews are regenerated on demand - skip them:
-    echo "$f_root/services/nextcloud/nextcloud-data/data/appdata_*/preview/"
-    # Runtime noise that must not be copied, wherever it appears:
-    echo "**/__pycache__/"
-    # Never back up the backup credentials themselves (.backup_restic_password
-    # in the config dir): a repository password inside its own encrypted
-    # repository is useless (chicken and egg) - it lives in the WebUI /
-    # off-site instead.
-    echo "**/.backup*"
+    f_bk_builtin_excludes
     # User-defined excludes from inventory.yml (one path per line, relative
     # to the data root; # comments are skipped). Read through the inventory
     # CLI - the file itself is never parsed here.

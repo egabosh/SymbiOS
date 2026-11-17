@@ -26,7 +26,7 @@ exclude patterns).
 
 Commands:
   get [--json]                    Print current values (key=value lines;
-                                  backup_exclude one pattern per line;
+                                  backup_exclude one extra pattern per line;
                                   or a JSON object with --json)
   set [--host H --port P --user U --path P
        --enabled true|false --exclude-stdin
@@ -38,8 +38,10 @@ Commands:
                                    Options left out keep their current value;
                                    an empty --port/--user falls back to 22 /
                                    root (same as the WebUI). --exclude-stdin
-                                   reads restic exclude patterns from stdin
-                                   (empty lines and # comments skipped).
+                                   reads extra restic exclude patterns from
+                                   stdin (empty lines and # comments skipped);
+                                   they are applied in addition to the
+                                   built-in excludes, not instead of them.
                                    --keep-* set the restic retention of the
                                    primary target (non-negative integers,
                                    0 = disabled, default 7/4/9999).
@@ -123,9 +125,9 @@ then
    "required": false, "default": "4", "secret": false},
   {"name": "backup_keep_monthly", "type": "number", "label": "Keep monthly snapshots",
    "required": false, "default": "9999", "secret": false},
-  {"name": "backup_exclude", "type": "multiline", "label": "Exclude patterns",
+  {"name": "backup_exclude", "type": "multiline", "label": "Extra exclude patterns",
    "required": false, "default": [], "secret": false,
-   "note": "One restic exclude pattern per line, # comments allowed"}
+   "note": "One restic exclude pattern per line, # comments allowed. Applied in addition to the built-in excludes (docker/containerd, Nextcloud previews, Python caches, the backup repository itself)."}
 ]
 EOF
   exit 0
