@@ -172,7 +172,8 @@ fi
 
 # Resolve which repository holds the requested date: the local repository
 # first (cheapest), then every configured remote target in order. Sets
-# g_bk_src_kind, g_restic_target (TSV line or "local") and g_restic_sid.
+# g_bk_src_kind, g_restic_target ("|"-joined target line or "local") and
+# g_restic_sid.
 if ! f_bk_resolve_source "$g_date"
 then
   f_die_json "No snapshot found for $g_date."
@@ -216,18 +217,10 @@ function f_r_restic {
 # Index of all paths in the resolved snapshot (one absolute path per line,
 # from a single "restic ls --json" call - cheaper than probing per path).
 function f_snap_index {
-  f_bk_restic "$g_repo" "$g_sshargs" ls "$g_restic_sid" --json | python3 -c "
-import sys, json
-for line in sys.stdin:
-    try:
-        d = json.loads(line)
-    except Exception:
-        continue
-    if d.get('message_type') == 'node' or d.get('struct_type') == 'node':
-        p = d.get('path')
-        if p:
-            print(p)
-" > "${g_tmp}/snap-paths"
+  # "restic ls --json" streams JSON Lines: keep the node paths only.
+  f_bk_restic "$g_repo" "$g_sshargs" ls "$g_restic_sid" --json \
+    | jq -rR 'fromjson? | select(type == "object") | select(.message_type == "node" or .struct_type == "node") | select((.path // "") != "") | .path' \
+    > "${g_tmp}/snap-paths"
 }
 
 # True if the given absolute directory exists in the snapshot.
@@ -252,20 +245,13 @@ function f_cat_dump {
 
 if [[ "$g_action" == "find" ]]
 then
-  f_r_restic find "$g_pattern" "$g_restic_sid" --json 2>/dev/null | python3 -c "
-import sys, json
-res = []
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    data = []
-for snap in data:
-    for m in snap.get('matches') or []:
-        p = m.get('path')
-        if p:
-            res.append(p)
-print(json.dumps({'ok': True, 'matches': res}))
-"
+  # "restic find --json" prints one array of per-snapshot match objects:
+  # flatten it to the plain path list the caller expects and always answer
+  # with valid JSON (also when restic failed or found nothing).
+  g_find_json="$(f_r_restic find "$g_pattern" "$g_restic_sid" --json 2>/dev/null \
+    | jq -c '{ok: true, matches: [ .[]? | .matches[]? | .path // empty ]}' 2>/dev/null)"
+  [[ -n "$g_find_json" ]] || g_find_json='{"ok": true, "matches": []}'
+  printf '%s\n' "$g_find_json"
   exit 0
 fi
 
@@ -534,9 +520,9 @@ function f_write_restore_includes {
       echo "/root/.ssh"
       echo "/root/.ssh/**"
     fi
-    # Protected paths derived from the backup exclude list: "**/x" (a
-    # directory anywhere in the tree) becomes "!**/x/**", a pattern that
-    # already ends in a glob is negated as-is.
+    # Protected paths derived from the backup exclude list: an anchored
+    # directory pattern becomes "!<path>/**", a pattern that already ends
+    # in a glob is negated as-is.
     local f_line
     while IFS= read -r f_line
     do

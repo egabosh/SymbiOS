@@ -139,62 +139,36 @@ function f_bk_targets_tsv {
   f_name="$(f_symbios_var backup_server_name "")"
   f_json="$("$g_symbios_dir/symbios-inventory.py" \
     --inventory "${g_inventory}" get --json backup_servers 2>/dev/null)" || f_json="[]"
-  BK_HOST="$g_bk_host" BK_PATH="$g_bk_path" BK_USER="$g_bk_user" BK_PORT="$g_bk_port" \
-  BK_NAME="$f_name" BK_KEEP_DAILY="$g_bk_rkeep_daily" BK_KEEP_WEEKLY="$g_bk_rkeep_weekly" \
-  BK_KEEP_MONTHLY="$g_bk_rkeep_monthly" \
-  python3 -c '
-import json, sys, os
-
-def num(value, default):
-    if value in (None, ""):
-        return str(default)
-    try:
-        v = int(value)
-    except (TypeError, ValueError):
-        return str(default)
-    return str(v if 0 <= v <= 99999 else default)
-
-try:
-    data = json.load(sys.stdin) or []
-except Exception:
-    data = []
-
-rows = []
-for srv in data:
-    if not isinstance(srv, dict):
-        continue
-    host = str(srv.get("host") or "").strip()
-    path = str(srv.get("path") or "").strip()
-    user = str(srv.get("user") or "").strip() or "root"
-    name = str(srv.get("name") or "").strip() or host
-    if not host or not path:
-        continue
-    if not path.startswith("/"):
-        path = "/" + path
-    rows.append((name, host, num(srv.get("port"), 22), user, path,
-                 num(srv.get("keep_daily"), 7),
-                 num(srv.get("keep_weekly"), 4),
-                 num(srv.get("keep_monthly"), 9999)))
-
-# Backward compatibility: legacy primary keys not covered by the array yet
-host = os.environ.get("BK_HOST", "").strip()
-path = os.environ.get("BK_PATH", "").strip()
-if host and path:
-    if not path.startswith("/"):
-        path = "/" + path
-    if not any(r[1] == host and r[4] == path for r in rows):
-        name = os.environ.get("BK_NAME", "").strip() or os.uname().nodename
-        user = os.environ.get("BK_USER", "").strip() or "root"
-        port = os.environ.get("BK_PORT", "").strip() or "22"
-        kd = os.environ.get("BK_KEEP_DAILY", "").strip() or "7"
-        kw = os.environ.get("BK_KEEP_WEEKLY", "").strip() or "4"
-        km = os.environ.get("BK_KEEP_MONTHLY", "").strip() or "9999"
-        rows.insert(0, (name, host, num(port, 22), user, path,
-                        num(kd, 7), num(kw, 4), num(km, 9999)))
-
-for row in rows:
-    print("\t".join(row))
-' <<< "$f_json"
+  # Normalize the configured servers (defaults, leading slash, numeric guards)
+  # and prepend the legacy primary target when the array does not cover it yet.
+  jq -r \
+    --arg host "$g_bk_host" --arg path "$g_bk_path" --arg name "$f_name" \
+    --arg user "$g_bk_user" --arg port "$g_bk_port" \
+    --arg kd "$g_bk_rkeep_daily" --arg kw "$g_bk_rkeep_weekly" \
+    --arg km "$g_bk_rkeep_monthly" --arg node "$(uname -n)" '
+    # int-or-default with the range guard the numeric keys had before
+    def num(v; d):
+      if v == null or v == "" then d
+      else (try (v | if type == "number" then . else (tostring | tonumber) end) catch d) as $n
+        | if ($n | type) == "number" and ($n | floor) == $n and $n >= 0 and $n <= 99999
+          then $n else d end
+      end;
+    def clean(v): (v // "") | tostring | gsub("^\\s+|\\s+$"; "");
+    def orz(v; d): clean(v) as $c | if $c == "" then d else $c end;
+    def slash(p): if (p | startswith("/")) then p else "/" + p end;
+    [ .[]? | select(type == "object")
+      | clean(.host) as $h | clean(.path) as $p
+      | select($h != "" and $p != "")
+      | [ orz(.name; $h), $h, num(.port; 22), orz(.user; "root"), slash($p),
+          num(.keep_daily; 7), num(.keep_weekly; 4), num(.keep_monthly; 9999) ] ] as $rows
+    | (if ($host != "" and $path != "")
+         and ([ $rows[] | select(.[1] == $host and .[4] == slash($path)) ] | length == 0)
+       then [ [ (if $name == "" then $node else $name end), $host, num($port; 22),
+                (if $user == "" then "root" else $user end), slash($path),
+                num($kd; 7), num($kw; 4), num($km; 9999) ] ] + $rows
+       else $rows end)
+    | .[] | @tsv
+  ' <<< "$f_json"
 }
 
 # True if at least one remote restic target is configured.
@@ -355,26 +329,28 @@ function f_bk_restic_ensure_repo {
 }
 
 # Write the restic exclude file for the backup and the full restore.
-# Patterns are unanchored ("**/" prefix) so they match below every backup
-# source root (/symbios and /root/.ssh); this mirrors the rsync-era
-# semantics of the inventory patterns (paths relative to the data root).
+# restic matches a pattern against the complete path of an entry, so the
+# built-in directory patterns are anchored to the data root: an unanchored
+# "**/docker" would also drop every equally named directory anywhere below
+# the sources - a user folder "backup" inside the Nextcloud data would
+# silently disappear from the backup. Only the generic noise patterns stay
+# unanchored on purpose.
 # Usage: f_bk_write_excludes <outfile>
 function f_bk_write_excludes {
   local f_out="$1"
-  local f_dir
+  local f_root="${g_data_root%/}"
   {
-    # Built-in defaults: never back up the local repository itself, skip
-    # the whole docker/containerd state (images and layers are re-pullable,
-    # named volumes live below services/), keep all other data. Runtime
-    # noise that must not be copied:
-    for f_dir in backup docker containerd
-    do
-      echo "**/$f_dir"
-    done
-    # Nextcloud file previews are regenerated on demand - skip them. The
-    # pattern must repeat the full path below the source root (restic
-    # matches it against the complete path of every entry).
-    echo "**/services/nextcloud/nextcloud-data/data/appdata_*/preview/"
+    # Built-in defaults. Never back up the local repository itself - its
+    # parent ${data_root}/backup holds regular data (service config copies)
+    # and stays in the snapshot:
+    echo "$f_root/backup/restic"
+    # Skip the whole docker/containerd state (images and layers are
+    # re-pullable, named volumes live below services/), keep all other data:
+    echo "$f_root/docker"
+    echo "$f_root/containerd"
+    # Nextcloud file previews are regenerated on demand - skip them:
+    echo "$f_root/services/nextcloud/nextcloud-data/data/appdata_*/preview/"
+    # Runtime noise that must not be copied, wherever it appears:
     echo "**/__pycache__/"
     # Never back up the backup credentials themselves (.backup_restic_password
     # in the config dir): a repository password inside its own encrypted
@@ -382,21 +358,17 @@ function f_bk_write_excludes {
     # off-site instead.
     echo "**/.backup*"
     # User-defined excludes from inventory.yml (one path per line, relative
-    # to the data root; # comments are skipped)
+    # to the data root; # comments are skipped). Read through the inventory
+    # CLI - the file itself is never parsed here.
     if [[ -r "${g_inventory}" ]]
     then
-      python3 - "${g_inventory}" <<'PYEOF'
-import sys, yaml
-try:
-    with open(sys.argv[1]) as fh:
-        cfg = yaml.safe_load(fh) or {}
-except Exception:
-    sys.exit(0)
-for line in (cfg.get('all', {}).get('vars', {}).get('backup_exclude') or []):
-    line = str(line).strip().lstrip('/')
-    if line and not line.startswith('#'):
-        print('**/' + line)
-PYEOF
+      "$g_symbios_dir/symbios-inventory.py" --inventory "${g_inventory}" \
+        get --json backup_exclude 2>/dev/null \
+        | jq -r --arg root "$f_root" '
+            .[]? | tostring | gsub("^\\s+|\\s+$"; "")
+            | select(length > 0 and (startswith("#") | not))
+            | $root + "/" + sub("^/+"; "")
+          '
     fi
   } > "$f_out"
 }
@@ -405,18 +377,10 @@ PYEOF
 # when the repository holds none). Usage: f_bk_restic_find_sid <repo> <sshargs|''> <YYYY-MM-DD>
 function f_bk_restic_find_sid {
   local f_repo="$1" f_ssh="$2" f_date="$3"
-  f_bk_restic "$f_repo" "$f_ssh" snapshots --json | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-for s in data:
-    t = s.get('time', '')
-    if t[:10] == '$f_date':
-        print(s.get('short_id') or s.get('id'))
-        break
-"
+  f_bk_restic "$f_repo" "$f_ssh" snapshots --json 2>/dev/null \
+    | jq -r --arg d "$f_date" \
+        '.[]? | select((.time // "")[0:10] == $d) | (.short_id // .id) // empty' \
+    | head -n1
   return 0
 }
 
@@ -431,27 +395,17 @@ function f_bk_restic_dates {
   then
     return $f_rc
   fi
-  printf '%s' "$f_json" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-dates = set()
-for s in data:
-    t = s.get('time', '')
-    if len(t) >= 10:
-        dates.add(t[:10])
-for d in sorted(dates, reverse=True):
-    print(d)
-"
+  # Unique dates, newest first (jq emits nothing on unparsable input).
+  jq -r '[.[]? | (.time // "")[0:10] | select(length == 10)] | unique | reverse | .[]' \
+    <<< "$f_json" 2>/dev/null
   return 0
 }
 
 # Resolve how a given date can be restored. Sets g_bk_src_kind to
-# "local-restic" or "remote-restic", g_restic_target to the TSV line (or
-# "local") and g_restic_sid to the short snapshot id. Returns 1 when no
-# repository holds that date. Usage: f_bk_resolve_source <YYYY-MM-DD>
+# "local-restic" or "remote-restic", g_restic_target to the target line in
+# the "|"-joined form f_bk_repo_url expects (or "local") and g_restic_sid to
+# the short snapshot id. Returns 1 when no repository holds that date.
+# Usage: f_bk_resolve_source <YYYY-MM-DD>
 function f_bk_resolve_source {
   local f_date="$1"
   g_bk_src_kind=""
@@ -471,16 +425,19 @@ function f_bk_resolve_source {
       return 0
     fi
   fi
-  # Remote targets in configured order (primary first).
-  local f_line
+  # Remote targets in configured order (primary first). f_bk_targets_tsv
+  # prints tab separated lines, f_bk_repo_url and the restore script's source
+  # description read them "|"-joined - convert once here.
+  local f_line f_pipe
   while IFS= read -r f_line
   do
     [[ -n "$f_line" ]] || continue
-    g_restic_sid="$(f_bk_restic_find_sid "$(f_bk_repo_url "$f_line")" "$(f_bk_sshargs)" "$f_date")"
+    f_pipe="${f_line//$'\t'/|}"
+    g_restic_sid="$(f_bk_restic_find_sid "$(f_bk_repo_url "$f_pipe")" "$(f_bk_sshargs)" "$f_date")"
     if [[ -n "$g_restic_sid" ]]
     then
       g_bk_src_kind="remote-restic"
-      g_restic_target="$f_line"
+      g_restic_target="$f_pipe"
       return 0
     fi
   done < <(f_bk_targets_tsv)
@@ -494,13 +451,10 @@ function f_bk_stats_json {
   local f_count=0 f_size_mb=0
   if [[ -d "$g_bk_local_repo" ]]
   then
-    f_count=$(f_bk_restic "$g_bk_local_repo" "" snapshots --json | python3 -c "
-import sys, json
-try:
-    print(len(json.load(sys.stdin)))
-except Exception:
-    print(0)
-")
+    # Number of snapshots in the local repository (jq prints nothing when
+    # restic output is not parsable - the guard below turns that into 0).
+    f_count=$(f_bk_restic "$g_bk_local_repo" "" snapshots --json 2>/dev/null | jq 'length' 2>/dev/null)
+    [[ "$f_count" =~ ^[0-9]+$ ]] || f_count=0
     # du -sx counts hardlinked files once (-x: stay on the repository fs).
     f_size_mb=$(du -sx -B1M "$g_bk_local_repo" 2>/dev/null | awk '{print $1}')
     [[ "$f_size_mb" =~ ^[0-9]+$ ]] || f_size_mb=0

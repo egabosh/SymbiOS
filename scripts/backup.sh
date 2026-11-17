@@ -39,11 +39,10 @@ set -o pipefail
 #
 # It has to live inside the data root, because symbios-backup.sh snapshots all
 # of it and the dumps are the reason these modules run before the snapshot.
-# It must not be below ${data_root}/backup: that path holds the local restic
-# repository itself and is excluded from the snapshot (see
-# f_bk_write_excludes), so dumps stored there would never reach the backup
-# server. backup_root (<data_root>/backups) is included in the snapshot and
-# not excluded.
+# The local restic repository lives at ${data_root}/backup/restic and is
+# excluded from the snapshot (see f_bk_write_excludes), so dumps stored there
+# would never reach the backup server. backup_root (<data_root>/backups) is
+# included in the snapshot and not excluded.
 #
 # g_backupdir was a gaboshlib global that no longer exists; with it unset the
 # modules redirected their dumps to "/<name>" and silently backed up nothing.
