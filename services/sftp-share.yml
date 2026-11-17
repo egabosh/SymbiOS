@@ -177,7 +177,11 @@
       path: "{{ sftp_share_datadir }}"
       state: directory
 
-  - name: Gen sshd ed25519 host-keys
+  # Persistent host key: the image is rebuilt nightly (docker.update) and
+  # OpenSSH would otherwise generate a fresh key at build time, so clients'
+  # known_hosts entries would break on every rebuild. The container serves
+  # exactly this mounted key and nothing else (sftp-share.conf).
+  - name: Gen persistent sshd ed25519 host key
     ansible.builtin.shell: ssh-keygen -q -N "" -t ed25519 -f ssh_host_ed25519_key
     args:
       chdir: /symbios/services/sftp-share
@@ -396,6 +400,11 @@
       block: |
         Port 28
         Protocol 2
+        # Serve exactly the persistent host key bind-mounted from the service
+        # dir (the image rebuild would otherwise bring a fresh one) and offer
+        # no other key type.
+        HostKey /etc/ssh/ssh_host_ed25519_key
+        HostKeyAlgorithms ssh-ed25519
         # LDAP password via PAM + SSH pubkeys from LDAP sshPublicKey
         # (AuthorizedKeysCommand). Either method grants access.
         PasswordAuthentication yes
@@ -431,7 +440,6 @@
         ClientAliveInterval 60
         ## Ciphers Check https://sshcheck.com/server/gabosh.net/28
         #KexAlgorithms curve25519-sha256@libssh.org
-        #HostKeyAlgorithms ssh-ed25519
         #Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com
         #MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com
         #AuthenticationMethods publickey,keyboard-interactive

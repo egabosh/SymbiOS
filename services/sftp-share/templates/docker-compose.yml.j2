@@ -14,6 +14,8 @@ services:
       - "28:28"
     volumes:
       - /etc/localtime:/etc/localtime:ro
+      # Persistent host key: stable across the nightly image rebuilds, so
+      # clients' known_hosts entries never break (see sftp-share.yml).
       - ./ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key
       - ./ssh_host_ed25519_key.pub:/etc/ssh/ssh_host_ed25519_key.pub
       - ./sftp-share.conf:/etc/sftp-share.conf:ro
