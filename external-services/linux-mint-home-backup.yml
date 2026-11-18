@@ -1,0 +1,133 @@
+# docs:
+#   name: "Linux Mint - Home Backup"
+#   short_description: "Install the manual home backup client"
+#   description: >
+#     Installs a root-only script on Linux Mint systems that archives the
+#     interactive users' homes on demand and streams the archive over SSH into
+#     /symbios/backups/mint/<id>/ on the SymbiOS host. The script is run by the
+#     user, never by a cron job; the next restic snapshot picks up the archive.
+#   category: linux-mint
+#   type: linux-mint
+#   icon: "bi-house-door"
+#   params:
+#     - name: "symbios_host"
+#       label: "SymbiOS host"
+#       type: "text"
+#       required: true
+#       placeholder: "172.23.0.222"
+#     - name: "symbios_port"
+#       label: "SSH port"
+#       type: "text"
+#       placeholder: "33"
+#     - name: "symbios_user"
+#       label: "SSH user"
+#       type: "text"
+#       placeholder: "root"
+#   healthcheck:
+#     command: exit 0
+# ---
+# The client key is generated on the target; its public half is printed at the
+# end of the run and has to be authorized ONCE in /root/.ssh/authorized_keys
+# on the SymbiOS host. See playbooks.md ("Home backup of Linux Mint systems").
+- name: Install Linux Mint home backup client
+  hosts: all
+  gather_facts: no
+
+  vars:
+    # Defaults keep the playbook runnable standalone; WebUI params win.
+    symbios_port: "33"
+    symbios_user: "root"
+    backup_id: "{{ inventory_hostname }}"
+    backup_dir: "/symbios/backups/mint/{{ backup_id }}"
+    config_path: "/etc/symbios/home-backup.conf"
+    script_path: "/usr/local/sbin/mint-home-backup.sh"
+    ssh_key_path: "/etc/symbios/home-backup/id_ed25519"
+    retention: 7
+    managed_id: "linux-mint-home-backup.yml"
+    managed_playbook: "linux-mint-home-backup.yml"
+    managed_resource_type: "mint_home_backup"
+    managed_ref: "target={{ backup_dir }} users=interactive"
+    managed_remove_ids: []
+
+  pre_tasks:
+    - name: Check required parameters
+      ansible.builtin.assert:
+        that:
+          - symbios_host is defined and (symbios_host | string | trim | length > 0)
+          - symbios_host is match('^[A-Za-z0-9][A-Za-z0-9._:-]*$')
+          - symbios_port is match('^[0-9]+$')
+          - (symbios_port | int) >= 1 and (symbios_port | int) <= 65535
+          - symbios_user is match('^[A-Za-z0-9_][A-Za-z0-9_-]*$')
+          - backup_id is match('^[A-Za-z0-9][A-Za-z0-9_-]*$')
+        fail_msg: "symbios_host (host/IP), symbios_port (1-65535), symbios_user and the target id must be valid."
+        quiet: true
+
+  tasks:
+    - name: Ensure SSH client is installed
+      ansible.builtin.package:
+        name: openssh-client
+        state: present
+
+    - name: Create backup config directory
+      ansible.builtin.file:
+        path: /etc/symbios/home-backup
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Check for an existing backup SSH key
+      ansible.builtin.stat:
+        path: "{{ ssh_key_path }}"
+      register: backup_key_stat
+
+    # Never regenerate: the public half is already authorized on the server.
+    - name: Generate a dedicated backup SSH key
+      ansible.builtin.command:
+        cmd: >-
+          ssh-keygen -q -t ed25519 -N '' -C "mint-home-backup-{{ backup_id }}"
+          -f {{ ssh_key_path }}
+      when: not backup_key_stat.stat.exists
+      register: keygen_result
+      changed_when: true
+      failed_when: keygen_result.rc != 0
+
+    - name: Install the backup client script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/mint-home-backup.sh"
+        dest: "{{ script_path }}"
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Write the backup client configuration
+      ansible.builtin.copy:
+        dest: "{{ config_path }}"
+        owner: root
+        group: root
+        mode: '0600'
+        backup: yes
+        content: |
+          # Managed by SymbiOS - external-services/linux-mint-home-backup.yml
+          SYMBIOS_HOST="{{ symbios_host | string | trim }}"
+          SYMBIOS_PORT="{{ symbios_port }}"
+          SYMBIOS_USER="{{ symbios_user }}"
+          SYMBIOS_DIR="{{ backup_dir }}"
+          BACKUP_ID="{{ backup_id }}"
+          SSH_KEY="{{ ssh_key_path }}"
+          RETENTION="{{ retention }}"
+
+    - name: Read the generated public key
+      ansible.builtin.slurp:
+        src: "{{ ssh_key_path }}.pub"
+      register: backup_pubkey
+
+    - name: Show the key to authorize on the SymbiOS host
+      ansible.builtin.debug:
+        msg: |
+          Add this key ONCE to /root/.ssh/authorized_keys on {{ symbios_host }}
+          (Settings -> SSH Keys) before running {{ script_path }}:
+          {{ backup_pubkey.content | b64decode | trim }}
+
+    - name: Record managed state
+      ansible.builtin.include_tasks: _managed-state.yml

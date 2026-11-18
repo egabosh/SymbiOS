@@ -294,6 +294,26 @@ Consequence for new playbooks: a file SymbiOS writes below `/etc` that is not
 listed in `/etc/sysupgrade.conf` (written by `external-services/openwrt_basics.yml`)
 is missing from the firmware upgrade **and** from the backup. Add it there.
 
+### Home backup of Linux Mint systems
+
+`external-services/linux-mint-home-backup.yml` installs
+`scripts/mint-home-backup.sh` as `/usr/local/sbin/mint-home-backup.sh` on every
+system registered as `type: linux-mint`. There is deliberately no cron job and
+no central trigger: the user runs the script on the Mint machine when it is on
+(`--dry-run` first, then the real run). It selects interactive users (UID
+1000..65533, home below `/home`, bash/zsh/fish shell), excludes caches and
+Trash, and streams a `tar.gz` over SSH to
+`${data_root}/backups/mint/<target-id>/<target-id>-<timestamp>.tar.gz`. A JSON
+sidecar holds SHA256, size and file count; seven archives are kept locally.
+The next nightly restic snapshot picks them up automatically.
+
+One-time setup per target: the playbook generates a dedicated ed25519 key at
+`/etc/symbios/home-backup/id_ed25519` and prints its public half. Add that key
+to `/root/.ssh/authorized_keys` on the SymbiOS host via Settings -> SSH Keys
+before the first backup. The client sets a timestamped `/tmp/no-suspend` while
+it reads the homes so an idle-suspend watchdog cannot suspend the machine
+mid-transfer.
+
 ### Package updates on the target
 
 `external-services/openwrt_autoupdate.yml` installs

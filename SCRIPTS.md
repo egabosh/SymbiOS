@@ -502,6 +502,7 @@ texts opportunistically).
 | `symbios-restore.sh` | Per-service or full restore with `plan` dry-run | `plan\|restore <date> [service\|--full] [--yes]` |
 | `autoupdate.sh` | Update dispatcher (runs `autoupdate.d/*.update`) | `[module ...]` |
 | `autoupdate.d/` | 5 update modules (debian, docker, symbios, ...) | via `autoupdate.sh` |
+| `mint-home-backup.sh` | Installed by `external-services/linux-mint-home-backup.yml` **on the Mint target**, not on the SymbiOS host: archives interactive users' homes and streams them to `/symbios/backups/mint/<id>/` | `--dry-run`, `--output <file>`, `--config <file>`, `--help` |
 
 ### 4.6 Monitoring and health
 
