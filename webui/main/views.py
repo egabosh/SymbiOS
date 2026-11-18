@@ -18,6 +18,7 @@ import yaml
 import json
 import shlex
 from django.shortcuts import render, redirect
+from django.http import HttpResponse
 from django.contrib import messages
 from .decorators import login_required
 from .constants import CONFIG_PATH
@@ -219,6 +220,45 @@ def health_data(request):
     from .health import run_all
     from django.http import JsonResponse
     return JsonResponse(run_all())
+
+
+@login_required
+def stats(request):
+    """Show the pre-generated GoAccess report for the Traefik access log."""
+    from .setup_status import setup_steps, is_setup_complete
+    config = _get_inventory_config()
+    vars_ = config.get('all', {}).get('vars', {})
+    ldap_users = _get_ldap_users()
+    steps = setup_steps(vars_, ldap_users=ldap_users)
+    pending = [s for s in steps if not s['optional'] and s['status'] != 'done']
+    report_status = {}
+    try:
+        with open('/log/traefik-stats/status.json', 'r') as status_file:
+            report_status = json.load(status_file)
+    except (OSError, ValueError):
+        pass
+    return render(request, 'main/stats.html', {
+        'setup_incomplete': not is_setup_complete(vars_, ldap_users=ldap_users),
+        'setup_pending': len(pending),
+        'generated_at': report_status.get('generated_at', ''),
+        'invalid_requests': report_status.get('invalid_requests', 0),
+    })
+
+
+@login_required
+def stats_report(request):
+    """Serve the generated HTML report from the /log volume mount."""
+    report_path = '/log/traefik-stats/report.html'
+    try:
+        with open(report_path, 'rb') as report_file:
+            return HttpResponse(report_file.read(), content_type='text/html; charset=utf-8')
+    except OSError:
+        return HttpResponse(
+            '<p>No statistics report is available yet. It is generated hourly '
+            'by symbios-traefik-stats.sh.</p>',
+            content_type='text/html; charset=utf-8',
+            status=503,
+        )
 
 
 @login_required

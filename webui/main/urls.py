@@ -43,6 +43,8 @@ from .utils.log_utils import logs_stream
 
 urlpatterns = [
     path('health/', views.health, name='health'),
+    path('stats/', views.stats, name='stats'),
+    path('stats/report/', views.stats_report, name='stats_report'),
     path('services/', views_services.services, name='services'),
     path('services/manage/', views_services.services_manage, name='services_manage'),
     re_path(r'^services/(?P<playbook>.+\.yml)/$', views_services.services_detail, name='services_detail'),

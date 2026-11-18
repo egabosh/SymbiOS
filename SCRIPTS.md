@@ -515,6 +515,7 @@ texts opportunistically).
 | `symbios-top-procs.sh` | Top processes by CPU/mem/IO as JSON (delta-based I/O) | `[top_n]` |
 | `symbios-docker-stats.sh` | `docker stats` snapshot JSON (normalized units) | `[timeout]` |
 | `symbios-dashboard-snapshot.sh` | Minutely dashboard snapshot + 7-day history (cron) | no args |
+| `symbios-traefik-stats.sh` | Build the hourly GoAccess report from the Traefik access log | no args |
 | `traefik-qualys-ssl-labs-check.sh` | TLS grades via Qualys SSL Labs API | no args |
 
 ### 4.7 Service admin sync and maintenance

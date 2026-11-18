@@ -154,6 +154,12 @@
                 # log
                 - --accesslog.filepath=/log/access.log
                 - --accesslog.format=json
+                # Keep only the two headers needed for GoAccess browser/referrer
+                # stats. The default drops headers, so no other sensitive header
+                # reaches the log.
+                - --accesslog.fields.headers.defaultmode=drop
+                - --accesslog.fields.headers.names.User-Agent=keep
+                - --accesslog.fields.headers.names.Referer=keep
               container_name: symbios-base-traefik
               restart: unless-stopped
               security_opt:
@@ -307,6 +313,13 @@
         interface: services
         direction: in
 
+    - name: Install GoAccess for Traefik access statistics
+      ansible.builtin.apt:
+        name: goaccess
+        state: present
+        update_cache: no
+        install_recommends: no
+
     - name: Install logrotate for Traefik access log
       ansible.builtin.copy:
         dest: /etc/logrotate.d/traefik
@@ -321,6 +334,26 @@
               notifempty
               copytruncate
           }
+
+    - name: /etc/cron.d/traefik-stats (build GoAccess report hourly)
+      ansible.builtin.blockinfile:
+        path: /etc/cron.d/traefik-stats
+        create: yes
+        mode: 0644
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          SHELL=/bin/bash
+          0 * * * * root PATH={{ git_root }}/scripts:$PATH && [[ -x {{ git_root }}/scripts/symbios-traefik-stats.sh ]] && symbios-traefik-stats.sh
+        backup: yes
+
+    - name: Generate initial Traefik access statistics report
+      # The cron job refreshes the report hourly; create the first one during
+      # deployment so the WebUI page is populated immediately.
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-traefik-stats.sh"
+      args:
+        creates: "{{ base_services_root }}/symbios-ui/log/traefik-stats/report.html"
 
     - name: Ensure ACME account directories exist
       ansible.builtin.file:
