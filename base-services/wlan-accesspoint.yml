@@ -181,28 +181,15 @@
         daemon_reload: true
       when: not (ap_enabled | default(true) | bool)
 
+    # The repo copy is the single source of truth: an inline copy here used to
+    # drift from it and reintroduced an error on hosts without an access point.
     - name: Deploy hostapd healthcheck
       ansible.builtin.copy:
-        content: |
-          CHECK_CATEGORY="services"
-          CHECK_TITLE="WLAN Access Point"
-          CHECK_DESC="Checks if the wireless LAN access point (hostapd) is running."
-          CHECK_DETAIL="Verifies hostapd.service is active via systemctl.|hostapd provides the wireless access point.|If down, WiFi clients cannot connect."
-
-          # Healthcheck for hostapd (WLAN Access Point)
-          f_check_cache "symbios-healthcheck-wlan-ap" || return 2>/dev/null || true
-          # Only relevant while the AP is enabled (ap_enabled in inventory).
-          # When the master switch is off, a stopped hostapd is the expected state.
-          f_ap_enabled="$(f_symbios_var ap_enabled true)"
-          if [[ "${f_ap_enabled}" == "true" ]] && ! systemctl is-active hostapd.service >/dev/null 2>&1
-          then
-            g_echo_error "Healthcheck failed for wlan-ap: hostapd not active"
-          fi
+        src: "{{ git_root }}/scripts/runchecks.d/symbios-healthcheck-wlan-ap.check"
         dest: "{{ data_root }}/runchecks.d/symbios-healthcheck-wlan-ap.check"
         owner: root
         group: root
         mode: '0400'
-      changed_when: true
 
     - name: Register playbook as installed
       include_tasks: ../shared-tasks/state-register.yml
