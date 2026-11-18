@@ -72,10 +72,10 @@ Debian server from a WebUI.
 
 ### Design Principles
 
-1. **Single Admin Model**: Only one operator (the admin) manages the server.
-   The `ldap-admins` group is for privileged management access.
-   The `ldap-users` group exists for service-level access (e.g. Nextcloud,
-   Matrix) but NOT for server management.
+1. **Admin Model**: Members of the `ldap-admins` group (including `admin`)
+   have full WebUI access via Authelia SSO. The `ldap-users` group exists for
+   service-level access (e.g. Nextcloud, Matrix) but NOT for server management.
+   The host-local break-glass on 127.0.0.1:8080 stays admin-only.
 
 2. **SSH Exec Gateway**: The WebUI sends commands to the host via SSH
    (`symbios-exec.sh`). The SSH key has no `command=` restriction - this is

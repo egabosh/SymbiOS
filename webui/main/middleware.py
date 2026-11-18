@@ -139,12 +139,18 @@ class AutheliaMiddleware:
         else:
             remote_user = request.META.get('HTTP_REMOTE_USER')
             # Only honor the forward-auth header when it originates from the
-            # proxy; drop it otherwise so it cannot be spoofed.
+            # proxy; drop it otherwise so it cannot be spoofed. Traefik also
+            # forwards Authelia's Remote-Groups header, so membership in the
+            # infrastructure admin group grants full WebUI access for SSO
+            # users; the host-local break-glass above stays admin-only.
             if remote_user and remote_addr in self._trusted:
+                remote_groups = request.META.get('HTTP_REMOTE_GROUPS', '')
+                groups = [g.strip() for g in remote_groups.split(',') if g.strip()]
+                webui_admin = remote_user in ('admin', 'root') or 'ldap-admins' in groups
                 user = SymbiosUser(
                     remote_user,
-                    is_staff=remote_user in ('admin', 'root'),
-                    is_superuser=remote_user in ('admin', 'root'),
+                    is_staff=webui_admin,
+                    is_superuser=webui_admin,
                 )
                 if remote_user == 'admin' and 'force_password_change' not in request.session:
                     if _admin_password_status() == 'default':
