@@ -32,7 +32,8 @@ Actions (default: --apply):
   --dump                       Print all forwards as JSON (for the WebUI)
   --add --name <n> --host <h> --target <t> --port <p>
       [--scheme http|https] [--access open|local|authelia]
-      [--insecure true|false] [--api] [--disabled]
+      [--insecure true|false] [--api|--no-api]
+      [--enabled|--disabled]
                                Add a forward (fails when the name exists)
   --set --name <n> [same fields as --add]
                                Change fields of an existing forward
@@ -307,9 +308,12 @@ print(json.dumps([e for e in f_data if isinstance(e, dict)]))
 PYEOF
 }
 
+# Actions and field options are validated strictly: an unknown option, a
+# value-less option or a stray word aborts instead of being dropped (a typo
+# used to fall through into the default action, apply).
 f_action="apply"
 f_import_dir=""
-f_rest=()
+f_manage_args=()
 while [[ $# -gt 0 ]]
 do
   case "$1" in
@@ -322,23 +326,63 @@ do
       shift
       ;;
     --import)
+      if [[ $# -lt 2 || "$2" == -* ]]
+      then
+        g_echo_error "--import needs a directory"
+        f_usage >&2
+        exit 2
+      fi
       f_action="import"
-      f_import_dir="${2:-}"
+      f_import_dir="$2"
       shift 2
       ;;
-    *)
-      f_rest+=("$1")
+    --name|--host|--target|--port|--scheme|--access|--insecure)
+      if [[ $# -lt 2 || "$2" == -* ]]
+      then
+        g_echo_error "option $1 needs a value"
+        f_usage >&2
+        exit 2
+      fi
+      f_manage_args+=("$1" "$2")
+      shift 2
+      ;;
+    --api|--no-api|--enabled|--disabled)
+      f_manage_args+=("$1")
       shift
+      ;;
+    -*)
+      g_echo_error "unknown option: $1"
+      f_usage >&2
+      exit 2
+      ;;
+    *)
+      g_echo_error "unexpected argument: $1"
+      f_usage >&2
+      exit 2
       ;;
   esac
 done
 
+# Field options only belong to a mutating action; with --list/--dump/--apply
+# they would be ignored.
+if [[ ${#f_manage_args[@]} -gt 0 ]]
+then
+  case "${f_action}" in
+    add|set|delete|toggle) : ;;
+    *)
+      g_echo_error "options are not valid with --${f_action}"
+      f_usage >&2
+      exit 2
+      ;;
+  esac
+fi
+
 if [[ "${f_action}" == "import" ]]
 then
-  if [[ -z "${f_import_dir}" || ! -d "${f_import_dir}" ]]
+  if [[ ! -d "${f_import_dir}" ]]
   then
     g_echo_error "--import needs an existing directory"
-    exit 1
+    exit 2
   fi
   f_import "${f_import_dir}"
   exit 0
@@ -370,7 +414,7 @@ then
 fi
 
 # Mutating actions validate first (inside f_manage), then auto-apply.
-if f_manage "${f_action}" "${g_file}" "${f_rest[@]}"
+if f_manage "${f_action}" "${g_file}" "${f_manage_args[@]}"
 then
   f_apply "${g_file}"
 fi
