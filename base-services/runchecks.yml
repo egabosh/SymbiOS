@@ -169,11 +169,9 @@
         enabled: false
 
     - name: 'disable via systemd - started by symbios-after-mount.sh'
-      command: systemctl disable runchecks
-      args:
-        creates: /etc/systemd/system/multi-user.target.wants/runchecks.service
-
-
+      ansible.builtin.systemd:
+        name: runchecks
+        enabled: false
 
     - name: Register playbook as installed
       include_tasks: ../shared-tasks/state-register.yml
