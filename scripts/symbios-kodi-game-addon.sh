@@ -24,8 +24,15 @@
 # a newer core is picked up through the symlink without regenerating the
 # wrapper. To rebuild after an upstream metadata change, remove the addon dir.
 #
+# A core that emulates several systems declares one extension list for all of
+# them. When another core already covers those systems, Kodi would offer a
+# selection dialog for every game of the overlap (it only starts silently when
+# exactly one client claims the extension). The optional fourth argument
+# narrows the wrapper to the extensions the host actually needs from that
+# core, so the specialised core keeps the rest.
+#
 # Usage:
-#   symbios-kodi-game-addon.sh install <addon-id> <core-so> <core-package|core-path>
+#   symbios-kodi-game-addon.sh install <addon-id> <core-so> <core-package|core-path> [extensions]
 #   symbios-kodi-game-addon.sh list
 #
 # Output: "install" prints a machine-readable state token as the last line
@@ -37,25 +44,32 @@
 
 function f_usage {
   cat << EOF
-Usage: $(basename "$0") install <addon-id> <core-so> <core-package|core-path>
+Usage: $(basename "$0") install <addon-id> <core-so> <core-package|core-path> [extensions]
        $(basename "$0") list
 
 Generate a Kodi game addon for a libretro core installed by a Debian package
 or built from source.
 
 Commands:
-  install <addon-id> <core-so> <core-package|core-path>
+  install <addon-id> <core-so> <core-package|core-path> [extensions]
                           Generate ~kodi/.kodi/addons/<addon-id> from the
                           upstream template kodi-game/<addon-id> and link the
                           core library into it. The third argument is either a Debian
                           package name (libretro-*, resolved via dpkg) or an absolute
                           path to a built core library. Existing addons are kept
-                          (kodi-game-addon-unchanged). Examples:
+                          (kodi-game-addon-unchanged). The optional extensions
+                          ("32x", "gb|gbc") replace the extension list of the
+                          upstream template, so a core that covers several
+                          systems only claims what no other core handles.
+                          Examples:
                             install game.libretro.gambatte \\
                                     gambatte_libretro.so libretro-gambatte
                             install game.libretro.mupen64plus-nx \\
                                     mupen64plus_next_libretro.so \\
                                     /symbios/services/kodi/src/mupen64plus-libretro-nx/mupen64plus_next_libretro.so
+                            install game.libretro.picodrive \\
+                                    picodrive_libretro.so \\
+                                    /symbios/services/kodi/src/picodrive/picodrive_libretro.so 32x
   list                    Print the generated game addons with their version
 
 Options:
@@ -202,6 +216,7 @@ function f_install_addon {
   local f_addon="$1"
   local f_core="$2"
   local f_package="$3"
+  local f_extensions="${4:-}"
   local f_addon_dir="${g_addons_dir}/${f_addon}"
   local f_src f_tmp f_lib
 
@@ -224,6 +239,20 @@ function f_install_addon {
   # filename is the core the wrapper loads.
   sed -e 's|@PLATFORM@|linux|g' -e "s|@LIBRARY_FILENAME@|${f_core}|g" \
     "${f_src}/addon.xml.in" > "${f_tmp}/addon.xml"
+  # A narrowed extension list keeps the core out of the systems another core
+  # already serves (Kodi asks which client to use whenever two match). The
+  # list itself is "|"-separated, so the substitution uses "#" as delimiter.
+  if [[ -n $f_extensions ]]
+  then
+    sed -i -E "s#<extensions>[^<]*</extensions>#<extensions>${f_extensions}</extensions>#" \
+      "${f_tmp}/addon.xml"
+    if ! grep -qF "<extensions>${f_extensions}</extensions>" "${f_tmp}/addon.xml"
+    then
+      g_echo_error "extension list of ${f_addon} not applied: ${f_extensions}"
+      rm -rf "$f_tmp"
+      return 1
+    fi
+  fi
   if [[ -d "${f_src}/resources" ]]
   then
     cp -a "${f_src}/resources" "${f_tmp}/resources"
@@ -258,7 +287,7 @@ function f_list_addons {
 
 case "${1:-}" in
   install)
-    if [[ $# -ne 4 ]]
+    if [[ $# -lt 4 || $# -gt 5 ]]
     then
       f_usage >&2
       exit 2
@@ -278,7 +307,7 @@ case "${1:-}" in
       g_echo_error "not a Debian package name or core path: ${4}"
       exit 2
     fi
-    f_install_addon "${2}" "${3}" "${4}" || exit 1
+    f_install_addon "${2}" "${3}" "${4}" "${5:-}" || exit 1
     ;;
   list)
     f_list_addons

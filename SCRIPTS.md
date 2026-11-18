@@ -566,6 +566,10 @@ texts opportunistically).
 | `symbios-ldap-offline-acl.sh` | LDAP offline sftp-reader ACL import + bind account | `<rewrite\|add-reader> --ldif/--basedn ...` |
 | `symbios-mailcow-autoconfig-sync.sh` | Autoconfig/autodiscover Traefik routes from the mailcow domains (mailcow.yml, daily cron) | `[--dry-run\|-v]` |
 | `symbios-kodi-language.sh` | Kodi UI language over the JSON-RPC web server (services/kodi.yml) | `get\|set <resource.language.xx_yy>` |
+| `symbios-kodi-setting.sh` | Read/set a Kodi setting of the running session (services/kodi.yml) | `get\|set <setting-id> [value]` |
+| `symbios-kodi-game-addon.sh` | Generate a Kodi game addon for an installed or built libretro core | `install <addon> <core-so> <package\|core-path> [extensions]\|list` |
+| `symbios-fbneo-repack.py` | Repack a chip dump into one zip per FBNeo set (CRC32 matched) | `--roms <dir> --out <dir> [--sets a,b] [--force] [--dry-run]` |
+| `symbios-dosbox-repack.py` | Prepare DOS games for DOSBox Pure: one DOSZ archive per game folder, plus the start marker that skips the core's menu | `pack --roms <dir> --archive <dir>` / `autostart --roms <dir>` (both dry runs, add `--apply`) |
 | `symbios-roms-variant-prune.py` | Move redundant ROM variants (`[o1]`, `[b1]`, ...) out of a Kodi ROM tree | `--roms <dir> --archive <dir> [--classes ob] [--force] [--apply]` |
 
 ### 4.8 Power management (WoL / idle suspend)
