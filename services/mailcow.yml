@@ -22,7 +22,7 @@
 #     - twofa_enabled
 #   name: Mailcow
 #   short_description: Deploy the Mailcow mail server (mailcow-dockerized)
-#   description: Deploys Mailcow with Traefik integration. TLS certificates are provided by Traefik (ACME) and synced into the mailcow nginx. All persistent data (mailboxes, databases) lives in bind-mounted volumes under ./volumes/, i.e. as plain files inside the service directory. Mailcow manages its own users, so there are no LDAP groups and no Authelia protection - the login of the Mailcow runs in Mailcow itself.
+#   description: Deploys Mailcow with Traefik integration. TLS certificates are provided by Traefik (ACME) and synced into the mailcow nginx. All persistent data (mailboxes, databases) lives in bind-mounted volumes under ./volumes/, i.e. as plain files inside the service directory. Mailcow manages its own users, so there are no LDAP groups and no Authelia protection - the login of the Mailcow runs in Mailcow itself. External mailboxes are retrieved with Mailcow's own IMAP sync jobs (E-Mail > Konfiguration > Sync jobs). The "Mailcow Optionen" tab controls the optional RAM-hungry scanners ClamAV and FTS.
 #   url: "https://mail.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '1.0'
@@ -36,6 +36,19 @@
 #   category: Service
 #   access:
 #     none: Mailcow manages its own users and runs its own login
+#   config:
+#     title: Mailcow Optionen
+#     file: services/mailcow/options.yml
+#     single: true
+#     fields:
+#       clamav_enabled:
+#         label: ClamAV-Virenscan aktivieren (mehr RAM)
+#         type: bool
+#         default: false
+#       fts_enabled:
+#         label: Volltextsuche (FTS) aktivieren (mehr RAM)
+#         type: bool
+#         default: false
 #   service_control:
 #     services:
 #     - name: mailcow
@@ -70,6 +83,11 @@
     service_name: mailcow
     service_domain: "mail.{{ base_domain }}"
     mailcow_root: "{{ services_root }}/mailcow"
+    # WebUI-managed service options (see docs.config above). The optional
+    # scanners stay disabled unless explicitly enabled in the WebUI, which
+    # preserves the hardcoded defaults this playbook used before.
+    mailcow_options_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/mailcow/options.yml"
+    mailcow_options: {}
     # All persistent mailcow data lives in the upstream named volumes.
     # The override replaces them by plain bind mounts onto directories in
     # the service directory, so the whole mail store is visible as plain
@@ -199,6 +217,24 @@
         insertbefore: BOF
         line: "#!/bin/bash"
 
+    # Load the WebUI-managed options. The file holds one options row;
+    # without it both optional scanners keep their previous disabled state.
+    - name: Read mailcow options config file
+      ansible.builtin.slurp:
+        src: "{{ mailcow_options_file }}"
+      register: mailcow_options_slurp
+      failed_when: false
+
+    - name: Set mailcow_options from config file (first row)
+      ansible.builtin.set_fact:
+        mailcow_options: "{{ (mailcow_options_slurp.content | default('') | b64decode) | from_yaml | default([], true) | first | default({}) }}"
+      when: mailcow_options_slurp.content | default('') | length > 0
+
+    - name: Resolve optional mailcow scanners
+      ansible.builtin.set_fact:
+        mailcow_clamav_enabled: "{{ (mailcow_options.get('clamav_enabled', false)) | bool }}"
+        mailcow_fts_enabled: "{{ (mailcow_options.get('fts_enabled', false)) | bool }}"
+
     # Generate mailcow.conf directly (bypasses the interactive generate_config.sh).
     # Secrets are stored in per-service files so re-applies keep stable passwords.
     # HTTP/HTTPS are bound to the symbios_services gateway; Traefik terminates TLS
@@ -254,13 +290,15 @@
           # (scripts/autoupdate.d/mailcow.update), which restores the
           # configuration right afterwards.
           AUTO_UPDATE=n
-          SKIP_CLAMD=y
+          # Optional scanners come from the WebUI service options. Unchecked
+          # (or no options file at all) keeps the previous SKIP_* defaults.
+          SKIP_CLAMD={{ 'n' if mailcow_clamav_enabled else 'y' }}
           SKIP_OLEFY=n
           SKIP_SOGO=n
           # FTS = Flatcurve full-text search (successor of the removed Solr).
-          # Keep it disabled on small hosts to save memory; search still works
-          # on the raw MAILDIR when disabled.
-          SKIP_FTS=y
+          # Disabled by default to save memory; search still works on the
+          # raw MAILDIR when disabled.
+          SKIP_FTS={{ 'n' if mailcow_fts_enabled else 'y' }}
           FTS_HEAP=128
           FTS_PROCS=1
           ALLOW_ADMIN_EMAIL_LOGIN=y
