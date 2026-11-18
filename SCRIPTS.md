@@ -436,7 +436,6 @@ texts opportunistically).
 | `symbios-reapply.sh` | Re-run installed playbooks in background (from state file) | `[--only [--force] <playbook> ...]` |
 | `symbios-run-detached.sh` | Detached host jobs pollable by the WebUI | `start\|poll\|... <job-id> <command>` |
 | `symbios-state.sh` | `installed-playbooks.yml` state file manager | `set\|unset\|list\|is-installed <path>` |
-| `symbios-restart-docker-services.sh` | Restart all Docker Compose stacks cleanly after boot | no args |
 | `symbios-uninstall.sh` | Uninstall a service (full wipe or program-only, per `# docs:` block) | `<playbook> full\|program` |
 | `symbios-update.sh` | Git pull + run changed installed playbooks | no args |
 | `symbios-settings-new.sh` | Scaffold a new settings CLI script + registry snippet | `<slug>` |
