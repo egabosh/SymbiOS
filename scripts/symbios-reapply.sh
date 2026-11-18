@@ -67,24 +67,29 @@ g_pid_file="/run/symbios-reapply.pid"
 g_only_playbooks=""
 g_force=false
 
-# Parse arguments
+# Parse arguments: --only collects playbook names, --force skips the
+# installed-state check. Anything unknown aborts instead of being ignored
+# (a stray word used to be dropped silently, so a typo ran a full reapply).
 g_collect_playbooks=false
 while [[ $# -gt 0 ]]
 do
   if [[ "$g_collect_playbooks" == true ]]
   then
-    # Rest of args are playbook names (stop on flags)
-    if [[ "$1" == --* ]]
-    then
-      # Handle flags mixed in after --only
-      case "$1" in
-        --force) g_force=true ;;
-      esac
-      shift
-      continue
-    fi
-    g_only_playbooks=$(printf '%s\n' "$g_only_playbooks" "$1")
-    shift
+    case "$1" in
+      --force)
+        g_force=true
+        shift
+        ;;
+      -*)
+        printf 'Unknown option: %s\n' "$1" >&2
+        f_usage >&2
+        exit 2
+        ;;
+      *)
+        g_only_playbooks=$(printf '%s\n' "$g_only_playbooks" "$1")
+        shift
+        ;;
+    esac
   else
     case "$1" in
       --force)
@@ -95,14 +100,29 @@ do
         g_collect_playbooks=true
         shift
         ;;
+      -*)
+        printf 'Unknown option: %s\n' "$1" >&2
+        f_usage >&2
+        exit 2
+        ;;
       *)
-        shift
+        printf 'Unexpected argument: %s (playbooks need --only)\n' "$1" >&2
+        f_usage >&2
+        exit 2
         ;;
     esac
   fi
 done
 # Trim leading blank line from multi-line collection
 g_only_playbooks=$(echo "$g_only_playbooks" | sed '/^$/d' | sed '/^[[:space:]]*$/d')
+
+# An --only without a playbook name would silently become a full reapply.
+if [[ "$g_collect_playbooks" == true && -z "$g_only_playbooks" ]]
+then
+  printf '%s\n' "--only needs at least one playbook" >&2
+  f_usage >&2
+  exit 2
+fi
 
 function f_cleanup {
   rm -f "$g_pid_file"

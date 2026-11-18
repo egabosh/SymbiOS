@@ -20,6 +20,14 @@ then
   exit 0
 fi
 
+# Reject stray arguments instead of silently running the default action.
+if [[ $# -gt 0 ]]
+then
+  printf 'Unknown argument: %s (this script takes no arguments)\n' "$1" >&2
+  f_usage >&2
+  exit 2
+fi
+
 # Probes default gateway for UPnP IGD, extracts manufacturer/model,
 # and classifies as fritzbox or generic_upnp. Outputs JSON to stdout.
 

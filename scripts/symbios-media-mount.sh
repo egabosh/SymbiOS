@@ -47,7 +47,7 @@ fi
 if [[ $# -gt 0 ]]
 then
   echo "Unknown arguments (see --help)" >&2
-  exit 0
+  exit 2
 fi
 
 # Only the compat bind target is configurable (inventory media_compat_bind,

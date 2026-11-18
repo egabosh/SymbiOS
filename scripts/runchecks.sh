@@ -7,7 +7,7 @@ Usage: $(basename "$0")
 SymbiOS health daemon (normally started via runchecks.service). Runs
 continuously: every 5 minutes it executes all runchecks.d/*.check scripts
 and writes the combined JSON result to <log>/runchecks-results.json, which
-the WebUI reads for the sidebar status and the Health page.
+the WebUI reads for the sidebar status and the Health page. No arguments.
 
 Options:
   -h, --help          Show this help and exit
@@ -24,6 +24,7 @@ fi
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
+f_no_args "$@"
 g_lockfile
 g_nice
 g_all-to-syslog

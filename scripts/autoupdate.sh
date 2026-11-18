@@ -36,6 +36,28 @@ fi
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
+
+# Validate requested modules against the installed *.update files: a typo
+# must fail loudly instead of silently running nothing (or everything).
+if [[ $# -gt 0 ]]
+then
+  f_known_modules=""
+  for f_update in $(find /usr/local/sbin/autoupdate.d "${g_data_root}/autoupdate.d" "${g_git_root}/scripts/autoupdate.d" -name "*.update" -type f 2>/dev/null)
+  do
+    f_known_modules="${f_known_modules} $(basename "${f_update}" .update)"
+  done
+  for f_arg in "$@"
+  do
+    f_arg="${f_arg%.update}"
+    if [[ "${f_known_modules} " != *" ${f_arg} "* ]]
+    then
+      printf 'Unknown update module: %s\n' "$f_arg" >&2
+      f_usage >&2
+      exit 2
+    fi
+  done
+fi
+
 g_nice
 g_lockfile
 g_all-to-syslog

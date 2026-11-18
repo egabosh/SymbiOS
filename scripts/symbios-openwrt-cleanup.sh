@@ -34,6 +34,7 @@ then
   . /etc/bash/gaboshlib.include
 fi
 source "${g_script_dir}/symbios-lib.sh"
+f_no_args "$@"
 
 function f_openwrt_cleanup {
   local f_bridge

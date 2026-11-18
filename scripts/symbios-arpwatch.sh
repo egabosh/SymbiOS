@@ -27,7 +27,7 @@ Usage: $(basename "$0")
 Reconcile arpwatch template instances with the currently present LAN
 interfaces: enable and start missing ones, disable and stop instances
 of removed interfaces. Eligible means a private IPv4 address, excluding
-lo, veth*, virbr*, br-*, docker*, base-services and services.
+lo, veth*, virbr*, br-*, docker*, base-services and services. No arguments.
 EOF
 }
 
@@ -36,6 +36,8 @@ then
   f_usage
   exit 0
 fi
+
+f_no_args "$@"
 
 if ! systemctl cat arpwatch@.service >/dev/null 2>&1
 then

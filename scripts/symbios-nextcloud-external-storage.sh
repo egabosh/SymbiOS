@@ -27,6 +27,16 @@ then
   exit 0
 fi
 
+# Reject unknown options instead of silently running the default action.
+case "${1:-}" in
+  ""|--no-previews) ;;
+  *)
+    printf 'Unknown option: %s\n' "$1" >&2
+    f_usage >&2
+    exit 2
+    ;;
+esac
+
 # Source shared libraries (absolute paths so cron works without profile PATH)
 g_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f /etc/bash/gaboshlib.include ]]

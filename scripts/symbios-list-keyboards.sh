@@ -20,6 +20,14 @@ then
   exit 0
 fi
 
+# Reject stray arguments instead of silently running the default action.
+if [[ $# -gt 0 ]]
+then
+  printf 'Unknown argument: %s (this script takes no arguments)\n' "$1" >&2
+  f_usage >&2
+  exit 2
+fi
+
 source /etc/bash/gaboshlib.include
 
 find /usr/share/X11/xkb/symbols -maxdepth 1 -type f 2>/dev/null \

@@ -104,6 +104,7 @@ g_* globals. Provides helper functions:
   f_json_escape                    escape a string (stdin) for JSON
   f_json_error <msg>               print {"ok":false,"error":"<msg>"}
   f_json_get <json> <key>          extract a string value from JSON
+  f_no_args "$@"                   reject stray arguments (usage + exit 2)
   f_check_cache <name>             skip a check that ran within 5 min
   f_symbios_ldap_init              set f_ldap_uri/f_base_dn/f_admin_pw/f_bind_dn
   f_ldap_exec / f_ldap_ldif        run LDAP in the webui container
@@ -322,6 +323,22 @@ function f_json_error {
   local f_msg="$1"
   printf '{"ok":false,"error":%s}\n' "$(echo "$f_msg" | f_json_escape)"
   exit 1
+}
+
+# Reject stray arguments in scripts that take none: a typo like "status"
+# must never fall through into the script's default action. Prints the
+# calling script's f_usage (when defined) to stderr and exits 2.
+# Usage: f_no_args "$@"
+function f_no_args {
+  if [[ $# -gt 0 ]]
+  then
+    printf 'Unknown argument: %s (this script takes no arguments)\n' "$1" >&2
+    if declare -F f_usage >/dev/null
+    then
+      f_usage >&2
+    fi
+    exit 2
+  fi
 }
 
 # Extract a string value for <key> from a JSON document.

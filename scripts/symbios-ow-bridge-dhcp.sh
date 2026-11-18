@@ -26,6 +26,14 @@ then
   exit 0
 fi
 
+# Reject stray arguments instead of silently running the default action.
+if [[ $# -gt 0 ]]
+then
+  printf 'Unknown argument: %s (this script takes no arguments)\n' "$1" >&2
+  f_usage >&2
+  exit 2
+fi
+
 # The OpenWrt VM (the per-segment dnsmasq/DHCP server) only starts
 # after the LUKS boot-unlock via rc.local, i.e. after ifupdown already ran.
 # This script is driven by the symbios-ow-bridge-dhcp.timer (every 5

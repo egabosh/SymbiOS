@@ -40,6 +40,7 @@ then
   . /etc/bash/gaboshlib.include
 fi
 source "${g_script_dir}/symbios-lib.sh"
+f_no_args "$@"
 
 function f_nextcloud_admin_sync {
   local f_pw f_desired f_current f_uid f_in_ldap f_db_user f_db_pass

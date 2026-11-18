@@ -28,6 +28,7 @@ fi
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
+f_no_args "$@"
 
 # Sample interval in seconds; a short delay is needed to compute rates.
 f_interval=1

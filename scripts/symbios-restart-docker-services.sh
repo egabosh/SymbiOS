@@ -37,6 +37,7 @@ fi
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
+f_no_args "$@"
 g_lockfile
 
 for f_compose in $(find "${g_base_services_root}" "${g_services_root}" -maxdepth 2 -name docker-compose.yml | sort)

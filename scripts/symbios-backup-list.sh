@@ -50,6 +50,7 @@ g_alltosyslog=1
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
+f_no_args "$@"
 source "$g_symbios_dir/symbios-backup-lib.sh"
 
 f_bk_read_vars

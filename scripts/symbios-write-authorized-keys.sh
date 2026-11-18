@@ -8,7 +8,7 @@ Usage: $(basename "$0")
 Write /root/.ssh/authorized_keys from stdin. Reads the list of SSH public
 keys from stdin and replaces the existing keys, always preserving the
 symbios-base-webui exec-gateway key. Called by the WebUI for SSH key
-management.
+management. No arguments (the keys come in via stdin).
 
 Example:
   printf '%s\n' "ssh-ed25519 AAAA... user@host" | $(basename "$0")
@@ -22,6 +22,14 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
 then
   f_usage
   exit 0
+fi
+
+# Reject stray arguments instead of silently running the default action.
+if [[ $# -gt 0 ]]
+then
+  printf 'Unknown argument: %s (this script takes no arguments)\n' "$1" >&2
+  f_usage >&2
+  exit 2
 fi
 
 # Reads keys from stdin and writes to /root/.ssh/authorized_keys

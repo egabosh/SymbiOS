@@ -36,6 +36,7 @@ fi
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
+f_no_args "$@"
 
 # Helper: print "yes" when a candidate name matches one of the reserved
 # patterns. "base-services" and "services" are exact names - not prefixes -

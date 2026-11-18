@@ -59,10 +59,18 @@ then
   f_cache="${g_tmp:-/tmp}/symbios-network-scan.json"
 fi
 f_fresh=0
-if [[ "${1:-}" == "--fresh" ]]
-then
-  f_fresh=1
-fi
+case "${1:-}" in
+  "")
+    ;;
+  --fresh)
+    f_fresh=1
+    ;;
+  *)
+    printf 'Unknown option: %s\n' "$1" >&2
+    f_usage >&2
+    exit 2
+    ;;
+esac
 
 # Serve the cached result unless a fresh scan is requested.
 if [[ "${f_fresh}" -ne 1 ]] && [[ -s "${f_cache}" ]]

@@ -19,6 +19,7 @@ async_create_user), so once a user is created with system-users, later LDAP
 group changes are never reflected. This script reconciles the HA auth
 storage with LDAP group membership directly. Runs from the LDAP group-change
 hook system (/symbios/ldap-groups.d/) and from services/home-assistant.yml.
+No arguments.
 
 Options:
   -h, --help          Show this help and exit
@@ -37,6 +38,7 @@ then
   . /etc/bash/gaboshlib.include
 fi
 source "${g_script_dir}/symbios-lib.sh"
+f_no_args "$@"
 
 function f_ha_admin_sync {
   local f_pw f_desired f_desired_users f_current_groups

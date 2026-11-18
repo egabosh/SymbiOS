@@ -23,6 +23,7 @@ fi
 
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
+f_no_args "$@"
 # Use the interface of the default route - no external host is contacted.
 f_dev=$(ip -4 route show default 2>/dev/null | grep -oP "dev \K\S+" | head -1)
 if [[ -n "$f_dev" ]]

@@ -23,6 +23,7 @@ fi
 
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
+f_no_args "$@"
 g_index_file="${g_log_dir}/docker-containers.tsv"
 g_temp_file="${g_index_file}.tmp"
 

@@ -33,6 +33,7 @@ then
   . /etc/bash/gaboshlib.include
 fi
 source "${g_script_dir}/symbios-lib.sh"
+f_no_args "$@"
 
 function f_quota_one {
   local f_projid="${1}" f_path="${2}" f_limit="${3}" f_root="${4}"

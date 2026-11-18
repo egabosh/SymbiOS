@@ -492,6 +492,13 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --service)
+      # Reject a missing value instead of filtering on an empty name.
+      if [[ -z "${2:-}" || "${2:-}" == -* ]]
+      then
+        echo "--service needs a service name" >&2
+        f_usage >&2
+        exit 1
+      fi
       shift
       g_filter_services+=("$1")
       ;;

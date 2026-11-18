@@ -34,6 +34,7 @@ fi
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
+f_no_args "$@"
 
 # Maximum age of the results JSON before the daemon counts as dead
 # (3 x 5min loop interval plus jitter)

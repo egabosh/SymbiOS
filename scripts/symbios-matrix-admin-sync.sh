@@ -57,6 +57,7 @@ then
   . /etc/bash/gaboshlib.include
 fi
 source "${g_script_dir}/symbios-lib.sh"
+f_no_args "$@"
 
 function f_matrix_admin_sync {
   local f_mx_dir="${g_services_root}/matrix"

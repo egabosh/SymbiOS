@@ -54,6 +54,15 @@ rsync -e "ssh -p44" scripts/<file> root@symbios-dev.dedyn.io:/symbios/git/SymbiO
   `--help` via the `BASH_SOURCE == $0` guard instead of executing.
 - Exit codes: `0` = ok / nothing to do, `2` = usage or validation error,
   `1` = technical error.
+- Argument handling: a script that takes no arguments rejects stray ones
+  instead of running its default action - `f_no_args "$@"` (from
+  `symbios-lib.sh`, after the `--help` block, before the first action and
+  before `g_lockfile`) or the inline `if [[ $# -gt 0 ]]` guard with
+  `f_usage >&2` and `exit 2`. `--help` stays exit `0`; the usage text says
+  "No arguments." Scripts with options validate strictly: unknown option
+  or a value-less flag (`--only` with no playbook) is usage + `exit 2`.
+  `symbios-settings-check.sh --static` enforces the marker (usage text
+  saying "no arguments" requires the guard).
 - Idempotency: running twice with the same input changes nothing the
   second time and reports `unchanged`. State-changing scripts print a
   machine-readable token on the last line (`<domain>-changed` /
@@ -569,7 +578,7 @@ texts opportunistically).
 
 | File | Purpose |
 |------|---------|
-| `symbios-lib.sh` | Central config: `g_*` paths from `inventory.yml`, `f_symbios_var` (read), `f_symbios_var_set` (write via `symbios-inventory.py`), JSON/LDAP/Traefik helpers |
+| `symbios-lib.sh` | Central config: `g_*` paths from `inventory.yml`, `f_symbios_var` (read), `f_symbios_var_set` (write via `symbios-inventory.py`), `f_no_args` (reject stray arguments, exit 2), JSON/LDAP/Traefik helpers |
 | `symbios-settings-lib.sh` | Shared settings plumbing: `f_ss_fail_*` (exit 0/2/1), `f_ss_parse_bool`, `f_ss_require_url/single_line`, `f_ss_merge_add`, `f_ss_merge`, `f_ss_result` (merge + state token), `f_ss_playbooks_for_vars` / `f_ss_apply` / `f_ss_apply_cmd` (`apply` subcommand from `f_managed_vars`). Sourced by every `symbios-settings-*.sh` after `symbios-lib.sh` |
 | `symbios-backup-lib.sh` | Shared backup/restore helpers (sourced by `backup.sh`, `restore.sh`, ...) |
 | `symbios-wol-common.sh` | Shared WoL watcher helpers |
