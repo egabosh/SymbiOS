@@ -77,7 +77,12 @@
 #     so with libretro cores alone its widget stays empty and offers the
 #     add-on browser instead; the playbook repoints that widget at the game
 #     sources, so the home screen lists the consoles and opens the selected
-#     one in the Games window. The Kodi
+#     one in the Games window. A large ROM tree can be split into groups
+#     (option "roms_groups") below the ROM path: Kodi still gets one flat
+#     source list, every group contributes its subfolders as sources, and a
+#     group that holds files directly becomes a source itself. Names listed
+#     in "roms_exclude" are left out of that list (systems whose archives
+#     are slow to list and that no installed core can play). The Kodi
 #     UI language follows the system locale (inventory "locale"), the same
 #     language the desktop uses.
 #   url: "https://kodi.{{ base_domain }}"
@@ -132,6 +137,14 @@
 #         label: ROM-Pfad
 #         type: text
 #         placeholder: /symbios/media/roms
+#       roms_groups:
+#         label: System-Gruppen
+#         type: list
+#         placeholder: consoles, computers
+#       roms_exclude:
+#         label: Ausgeblendete Systeme
+#         type: list
+#         placeholder: n64, psx
 #   service_control:
 #     services:
 #     - name: kodi-standalone
@@ -317,6 +330,19 @@
     - name: Resolve the ROM source mode (local or SFTP)
       ansible.builtin.set_fact:
         kodi_roms_is_sftp: "{{ kodi_roms_configured and not (((kodi_options | default({})).path_roms) is match('^/')) and (((kodi_options | default({})).sftp_server | default('')) | length > 0) }}"
+
+    # Two optional list options narrow the source list: "roms_groups" names the
+    # group folders below the ROM path (the groups organize the disk only, Kodi
+    # keeps a flat list) and "roms_exclude" names the systems to leave out.
+    # Both accept a YAML list or a comma separated string, the form the
+    # instance editor produces.
+    - name: Normalize the ROM source list options
+      vars:
+        f_groups: "{{ (kodi_options | default({})).roms_groups | default('', true) }}"
+        f_exclude: "{{ (kodi_options | default({})).roms_exclude | default('', true) }}"
+      ansible.builtin.set_fact:
+        kodi_roms_groups: "{{ (f_groups if f_groups is string else f_groups | join(',')) | split(',') | map('trim') | reject('equalto', '') | list }}"
+        kodi_roms_exclude: "{{ (f_exclude if f_exclude is string else f_exclude | join(',')) | split(',') | map('trim') | reject('equalto', '') | list }}"
 
     # Not every Debian release ships every libretro core (trixie has nine,
     # others fewer or none): ask the target's package index per package and
@@ -807,19 +833,79 @@
     # console folder puts the consoles on the first screen, the way the video
     # sources behave. Enumerating needs a local path (the sshfs mount above,
     # mounted at this point); a pure SFTP source keeps the single entry.
-    - name: Collect the console folders of the local ROM source
+    - name: Resolve the ROM root without a trailing slash
+      ansible.builtin.set_fact:
+        kodi_roms_root: "{{ kodi_roms_games_source | regex_replace('/+$', '') }}"
+      when:
+        - kodi_roms_configured
+        - kodi_roms_games_source is match('^/')
+
+    - name: Collect the console folders of an ungrouped ROM root
       ansible.builtin.find:
-        paths: "{{ kodi_roms_games_source }}"
+        paths: "{{ kodi_roms_root }}"
         recurse: false
         file_type: directory
       register: kodi_roms_console_dirs
       when:
         - kodi_roms_configured
-        - kodi_roms_games_source is match('^/')
+        - kodi_roms_root is defined
+        - kodi_roms_groups | length == 0
 
     - name: Build the game source list (one source per console folder)
       ansible.builtin.set_fact:
         kodi_game_sources: "{{ (kodi_roms_console_dirs.files | default([])) | map(attribute='path') | sort }}"
+      when:
+        - kodi_roms_configured
+        - kodi_roms_groups | length == 0
+
+    # Grouped ROM tree (option "roms_groups"): every group folder contributes
+    # its subfolders as sources, a group that holds files directly (one system
+    # per folder, e.g. a directory of arcade archives) becomes a source itself.
+    # A missing or empty group contributes nothing.
+    - name: Collect the entries of each configured ROM group
+      ansible.builtin.find:
+        paths: "{{ kodi_roms_root }}/{{ item }}"
+        recurse: false
+        file_type: any
+      loop: "{{ kodi_roms_groups }}"
+      register: kodi_roms_group_entries
+      when:
+        - kodi_roms_configured
+        - kodi_roms_root is defined
+        - kodi_roms_groups | length > 0
+
+    - name: Start the game source list empty (grouped ROM tree)
+      ansible.builtin.set_fact:
+        kodi_game_sources: []
+      when:
+        - kodi_roms_configured
+        - kodi_roms_groups | length > 0
+
+    - name: Add the systems of each ROM group to the game source list
+      ansible.builtin.set_fact:
+        kodi_game_sources: >-
+          {{ kodi_game_sources | default([])
+             + (item.files | selectattr('isdir') | map(attribute='path') | sort | list
+                if item.files | selectattr('isdir') | list | length > 0
+                else ([kodi_roms_root ~ '/' ~ item.item] if item.files | length > 0 else [])) }}
+      loop: "{{ kodi_roms_group_entries.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - kodi_roms_configured
+        - kodi_roms_groups | length > 0
+
+    # A source is labelled with its folder name, so "roms_exclude" carries the
+    # names shown in the Games window. A pure SFTP source is a single string
+    # (see the vars above), which becomes a one element list here.
+    - name: Drop the excluded systems from the game source list
+      vars:
+        f_sources: "{{ [kodi_game_sources] if kodi_game_sources is string and kodi_game_sources | length > 0 else ([] if kodi_game_sources is string else kodi_game_sources) }}"
+      ansible.builtin.set_fact:
+        kodi_game_sources: "{{ f_sources | zip(f_sources | map('basename')) | rejectattr('1', 'in', kodi_roms_exclude) | map('first') | list }}"
+      when:
+        - kodi_roms_configured
+        - kodi_roms_exclude | length > 0
 
     # An empty local ROM source is a mount that is not up (sshfs died, share
     # unreachable), not an empty library: in that case the existing
