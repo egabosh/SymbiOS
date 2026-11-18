@@ -82,13 +82,20 @@
 #     source list, every group contributes its subfolders as sources, and a
 #     group that holds files directly becomes a source itself. Names listed
 #     in "roms_exclude" are left out of that list (systems whose archives
-#     are slow to list and that no installed core can play). The Kodi
+#     are slow to list and that no installed core can play). The labels of
+#     the standard system folder names are spelled out ("Game Boy" instead of
+#     "gb"); a file named like the folder and lying next to it becomes the
+#     artwork of that source, so the list shows a console logo instead of the
+#     generic disk icon. Without such a file the playbook downloads the icon of
+#     that system from the RetroArch asset set (CC BY 4.0, attribution is
+#     written next to the downloads). The Kodi
 #     UI language follows the system locale (inventory "locale"), the same
 #     language the desktop uses.
 #   url: "https://kodi.{{ base_domain }}"
 #   config:
 #     title: Kodi Options
 #     file: services/kodi/instances.yml
+#     single: true
 #     fields:
 #       db_host:
 #         label: DB-Host
@@ -183,8 +190,9 @@
     service_name: kodi
     service_domain: "kodi.{{ base_domain }}"
     # Options are managed by the WebUI (Kodi Options tab) and stored in the
-    # writable config dir, not in inventory.yml. Only one options row makes
-    # sense for a single media center; the first row of the list is used.
+    # writable config dir, not in inventory.yml. One media center needs one
+    # options row, so the config block is marked "single: true" (the WebUI
+    # offers exactly one row) and the playbook reads that row.
     kodi_options_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/kodi/instances.yml"
     # Mount point and unit of the SFTP ROM share for cores that cannot read a
     # Kodi VFS URL (catalog key "local", see kodi_game_cores). sshfs mounts
@@ -194,8 +202,109 @@
     kodi_roms_mount_unit: symbios-services-kodi-roms.mount
     # Home screen of the shipped skin (Estuary). Its games widget lists
     # standalone game add-ons instead of the game sources, so the widget is
-    # repointed at the sources (see the patch below).
+    # repointed at the sources (see the patch below). The widget renders its
+    # artwork through a skin variable that only knows icons, so the same patch
+    # section teaches it the source thumbnail.
     kodi_skin_home: /usr/share/kodi/addons/skin.estuary/xml/Home.xml
+    kodi_skin_variables: /usr/share/kodi/addons/skin.estuary/xml/Variables.xml
+    # Display names of the standard system folder names (RetroPie/Recalbox
+    # convention, "gb" instead of "Game Boy"): the source label is what the
+    # Games window and the home widget list. A folder that is not listed keeps
+    # its own name, so a custom tree needs no configuration.
+    kodi_roms_labels:
+      amiga: Commodore Amiga
+      amstradcpc: Amstrad CPC
+      arcade: Arcade
+      atari2600: Atari 2600
+      atari5200: Atari 5200
+      atari7800: Atari 7800
+      atari800: Atari 800
+      atarijaguar: Atari Jaguar
+      atarilynx: Atari Lynx
+      c64: Commodore 64
+      dreamcast: Sega Dreamcast
+      fds: Famicom Disk System
+      gb: Game Boy
+      gba: Game Boy Advance
+      gbc: Game Boy Color
+      gamegear: Sega Game Gear
+      mastersystem: Sega Master System
+      megadrive: Sega Mega Drive
+      msx: MSX
+      n64: Nintendo 64
+      nds: Nintendo DS
+      neogeo: Neo Geo
+      nes: Nintendo NES
+      pc: PC (DOS)
+      pcengine: PC Engine
+      pcenginecd: PC Engine CD
+      psp: PlayStation Portable
+      psx: PlayStation
+      saturn: Sega Saturn
+      scummvm: ScummVM
+      sega32x: Sega 32X
+      sg-1000: Sega SG-1000
+      snes: Super Nintendo
+      vectrex: Vectrex
+      virtualboy: Virtual Boy
+      wonderswan: WonderSwan
+      wonderswancolor: WonderSwan Color
+      zxspectrum: ZX Spectrum
+    # System artwork becomes the source thumbnail, so the list shows a console
+    # logo instead of the generic disk icon. Two sources, in this order: a file
+    # named like the ROM folder and lying next to it (consoles/gb.png for
+    # consoles/gb, user data on the media server - the last extension that
+    # exists wins), otherwise a download from the RetroArch asset set below
+    # into kodi_roms_art_dir for the systems that are present.
+    kodi_roms_art_extensions: [png, jpg, jpeg, webp]
+    kodi_roms_art_dir: "{{ kodi_roms_mount | dirname }}/artwork"
+    kodi_roms_art: {}
+    # The white line icons of the RetroArch XMB "monochrome" set, licensed
+    # under CC BY 4.0 (attribution is written next to the downloads). The map
+    # is folder name -> file name of the set; a folder that is not listed gets
+    # no download. The set names its files after the system, the logos are
+    # trademarks of the console makers and used here only to label the ROM
+    # folder of that very system.
+    kodi_roms_art_source: https://raw.githubusercontent.com/libretro/retroarch-assets/master/xmb/monochrome/png
+    kodi_roms_art_files:
+      amiga: Commodore - Amiga.png
+      amstradcpc: Amstrad - CPC.png
+      arcade: Arcade Controller.png
+      atari2600: Atari - 2600.png
+      atari5200: Atari - 5200.png
+      atari7800: Atari - 7800.png
+      atari800: Atari - 800.png
+      atarijaguar: Atari - Jaguar.png
+      atarilynx: Atari - Lynx.png
+      c64: Commodore - 64.png
+      dreamcast: Sega - Dreamcast.png
+      fds: Nintendo - Family Computer Disk System.png
+      gb: Nintendo - Game Boy.png
+      gba: Nintendo - Game Boy Advance.png
+      gbc: Nintendo - Game Boy Color.png
+      gamegear: Sega - Game Gear.png
+      mastersystem: Sega - Master System - Mark III.png
+      megadrive: Sega - Mega Drive - Genesis.png
+      msx: Microsoft - MSX.png
+      n64: Nintendo - Nintendo 64.png
+      nds: Nintendo - Nintendo DS.png
+      neogeo: SNK - Neo Geo.png
+      nes: Nintendo - Nintendo Entertainment System.png
+      pc: DOS.png
+      pcengine: NEC - PC Engine - TurboGrafx 16.png
+      pcenginecd: NEC - PC Engine CD - TurboGrafx-CD.png
+      psp: Sony - PlayStation Portable.png
+      psx: Sony - PlayStation.png
+      saturn: Sega - Saturn.png
+      scummvm: ScummVM.png
+      sega32x: Sega - 32X.png
+      sg-1000: Sega - SG-1000.png
+      snes: Nintendo - Super Nintendo Entertainment System.png
+      vectrex: GCE - Vectrex.png
+      virtualboy: Nintendo - Virtual Boy.png
+      wonderswan: Bandai - WonderSwan.png
+      wonderswancolor: Bandai - WonderSwan Color.png
+      zxspectrum: Sinclair - ZX Spectrum +3.png
     # Path of the games source (set from the options below); empty while no
     # ROM path is configured.
     kodi_roms_games_source: ""
@@ -895,9 +1004,10 @@
         - kodi_roms_configured
         - kodi_roms_groups | length > 0
 
-    # A source is labelled with its folder name, so "roms_exclude" carries the
-    # names shown in the Games window. A pure SFTP source is a single string
-    # (see the vars above), which becomes a one element list here.
+    # "roms_exclude" carries the folder names, not the display labels: the
+    # label only affects what the Games window shows (see kodi_roms_labels). A
+    # pure SFTP source is a single string (see the vars above), which becomes a
+    # one element list here.
     - name: Drop the excluded systems from the game source list
       vars:
         f_sources: "{{ [kodi_game_sources] if kodi_game_sources is string and kodi_game_sources | length > 0 else ([] if kodi_game_sources is string else kodi_game_sources) }}"
@@ -906,6 +1016,106 @@
       when:
         - kodi_roms_configured
         - kodi_roms_exclude | length > 0
+
+    # System artwork for the sources (see kodi_roms_art_files): the icons are
+    # fetched for the systems that are present, so a tree without e.g. a Game
+    # Gear folder downloads nothing for it. A system that has a file next to
+    # its folder keeps that one (see below).
+    - name: Create the directory for the downloaded system artwork
+      ansible.builtin.file:
+        path: "{{ kodi_roms_art_dir }}"
+        state: directory
+        owner: kodi
+        group: kodi
+        mode: '0755'
+      when:
+        - kodi_roms_configured
+        - kodi_roms_art_files | length > 0
+        - kodi_game_sources is not string
+        - kodi_game_sources | length > 0
+
+    - name: Download the artwork of the systems that are present
+      ansible.builtin.get_url:
+        url: "{{ kodi_roms_art_source }}/{{ kodi_roms_art_files[item | basename | lower] | urlencode }}"
+        dest: "{{ kodi_roms_art_dir }}/{{ item | basename }}.png"
+        owner: kodi
+        group: kodi
+        mode: '0644'
+        timeout: 30
+      loop: "{{ kodi_game_sources }}"
+      loop_control:
+        label: "{{ item | basename }}"
+      register: kodi_roms_art_download
+      failed_when: false
+      when:
+        - kodi_roms_configured
+        - kodi_game_sources is not string
+        - kodi_game_sources | length > 0
+        - (item | basename | lower) in kodi_roms_art_files
+
+    # CC BY 4.0 requires the attribution to travel with the material, so it is
+    # written next to the downloads instead of only living in this playbook.
+    - name: Attribute the downloaded artwork
+      ansible.builtin.copy:
+        dest: "{{ kodi_roms_art_dir }}/ATTRIBUTION.txt"
+        mode: '0644'
+        content: |
+          System artwork in this directory comes from the RetroArch asset set
+          {{ kodi_roms_art_source }}
+          (repository https://github.com/libretro/retroarch-assets),
+          author: RetroArch contributors (libretro),
+          license: Creative Commons Attribution 4.0 International (CC BY 4.0),
+          https://creativecommons.org/licenses/by/4.0/
+
+          The icons carry the names and logos of the console makers. Those are
+          trademarks of the respective owners and are used here only to label
+          the ROM folder of that very system.
+      when:
+        - kodi_roms_configured
+        - kodi_roms_art_files | length > 0
+        - kodi_game_sources is not string
+        - kodi_game_sources | length > 0
+
+    # Console artwork next to the ROM folders (see kodi_roms_art_extensions):
+    # every source is probed for a file named like its folder, the hit becomes
+    # the <thumbnail> of the source.
+    - name: Look for artwork next to the ROM folders
+      ansible.builtin.stat:
+        path: "{{ item.0 | dirname }}/{{ item.0 | basename }}.{{ item.1 }}"
+      loop: "{{ kodi_game_sources | product(kodi_roms_art_extensions) | list }}"
+      loop_control:
+        label: "{{ item.0 | basename }}.{{ item.1 }}"
+      register: kodi_roms_art_stat
+      when:
+        - kodi_roms_configured
+        - kodi_game_sources is not string
+        - kodi_game_sources | length > 0
+
+    - name: Look for the downloaded artwork
+      ansible.builtin.stat:
+        path: "{{ kodi_roms_art_dir }}/{{ item | basename }}.png"
+      loop: "{{ kodi_game_sources }}"
+      loop_control:
+        label: "{{ item | basename }}"
+      register: kodi_roms_art_download_stat
+      when:
+        - kodi_roms_configured
+        - kodi_roms_art_files | length > 0
+        - kodi_game_sources is not string
+        - kodi_game_sources | length > 0
+
+    # A file next to the ROM folder wins over the download (it is the user's
+    # own artwork), so the local hits are combined over the downloaded ones.
+    - name: Map each game source to the artwork found for it
+      vars:
+        f_hits: "{{ kodi_roms_art_stat.results | default([]) | selectattr('stat', 'defined') | selectattr('stat.exists') | list }}"
+        f_downloads: "{{ kodi_roms_art_download_stat.results | default([]) | selectattr('stat', 'defined') | selectattr('stat.exists') | list }}"
+      ansible.builtin.set_fact:
+        kodi_roms_art: "{{ dict(f_downloads | map(attribute='item') | zip(f_downloads | map(attribute='stat.path'))) | combine(dict(f_hits | map(attribute='item') | map(attribute='0') | zip(f_hits | map(attribute='stat.path')))) }}"
+      when:
+        - kodi_roms_configured
+        - kodi_game_sources is not string
+        - kodi_game_sources | length > 0
 
     # An empty local ROM source is a mount that is not up (sshfs died, share
     # unreachable), not an empty library: in that case the existing
@@ -969,6 +1179,37 @@
         - kodi_roms_configured
         - kodi_skin_home_file.stat.exists
 
+    # The widget renders through "InfoWallThumbVar", which knows poster, fanart
+    # and icon but never the thumbnail - so a source logo (<thumbnail> in
+    # sources.xml) would stay invisible on the home screen while the Games
+    # window shows it. The variable gains the thumbnail as the second to last
+    # fallback; the poster and the episode rules keep precedence, the plain
+    # icon stays the last resort for items without any artwork.
+    - name: Look up the skin variables file
+      ansible.builtin.stat:
+        path: "{{ kodi_skin_variables }}"
+      register: kodi_skin_variables_file
+      changed_when: false
+
+    - name: Read the skin variables (the artwork patch is not idempotent by itself)
+      ansible.builtin.slurp:
+        src: "{{ kodi_skin_variables }}"
+      register: kodi_skin_variables_content
+      when:
+        - kodi_roms_configured
+        - kodi_skin_variables_file.stat.exists
+
+    - name: Show source artwork in the home widgets
+      ansible.builtin.replace:
+        path: "{{ kodi_skin_variables }}"
+        regexp: '(<variable name="InfoWallThumbVar">[\s\S]*?)\n\t\t<value>\$INFO\[ListItem\.Icon\]</value>\n\t</variable>'
+        replace: '\1\n\t\t<value condition="!String.IsEmpty(ListItem.Thumb)">$INFO[ListItem.Thumb]</value>\n\t\t<value>$INFO[ListItem.Icon]</value>\n\t</variable>'
+      register: kodi_skin_thumb_var
+      when:
+        - kodi_roms_configured
+        - kodi_skin_variables_file.stat.exists
+        - (kodi_skin_variables_content.content | default('') | b64decode) is not search('!String\.IsEmpty\(ListItem\.Thumb\)')
+
     # Kodi reads sources.xml at start (or when the UI adds a source) and loads
     # the skin XML once, so a changed file only reaches the running session
     # after a restart. The switcher is stopped for it: a Kodi it does not see
@@ -979,7 +1220,7 @@
       register: kodi_sources_running
       changed_when: false
       failed_when: false
-      when: kodi_sources is changed or kodi_skin_games_widget is changed
+      when: kodi_sources is changed or kodi_skin_games_widget is changed or kodi_skin_thumb_var is changed
 
     - name: Restart the Kodi session to apply the new sources and skin
       ansible.builtin.shell: |
@@ -989,7 +1230,7 @@
         systemctl start switch-kodi-desk.service
       changed_when: true
       when:
-        - kodi_sources is changed or kodi_skin_games_widget is changed
+        - kodi_sources is changed or kodi_skin_games_widget is changed or kodi_skin_thumb_var is changed
         - kodi_sources_running.stdout | trim == 'active'
 
     # Automatic addon installation on first run: fetch the latest version from

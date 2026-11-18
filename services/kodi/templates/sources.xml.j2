@@ -38,9 +38,13 @@
     <games>
 {% if kodi_roms_configured | default(false) %}
 {% for f_console in kodi_game_sources | default([]) %}
+{% set f_name = f_console | basename %}
         <source>
-            <name>{{ f_console | basename }}</name>
+            <name>{{ kodi_roms_labels.get(f_name | lower, f_name) }}</name>
             <path pathversion="1">{{ f_console }}/</path>
+{% if (kodi_roms_art | default({})).get(f_console) %}
+            <thumbnail>{{ kodi_roms_art[f_console] }}</thumbnail>
+{% endif %}
             <allowsharing>true</allowsharing>
         </source>
 {% endfor %}
