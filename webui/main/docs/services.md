@@ -25,8 +25,8 @@ shows tiles for installed services only. A tile appears when:
   `docs.access.admin_group` (admins see all services; `docs.access.none`
   means the service is shown to every authenticated user).
 
-Services with per-instance domains (for example Static Web or WordPress) have
-no fixed `url` in their docs header and are not shown in v1. The page is
+Services with per-instance domains (for example Mastodon, Static Web or
+WordPress) have no fixed `url` in their docs header and are not shown in v1. The page is
 rendered on each request from the local service catalog and the group list that
 Traefik forwards from Authelia, so it never needs a cron job or static file.
 

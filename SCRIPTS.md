@@ -545,6 +545,9 @@ texts opportunistically).
 | `symbios-matrix-admin-sync.sh` | Matrix (MAS) admin flags from LDAP `matrix-admins` (group hook) | no args |
 | `symbios-matrix-password-sync.sh` | Matrix (MAS) passwords of technical accounts from LDAP `matrix-bots` (password hook) | `<event> <uid> [pwfile]` |
 | `symbios-matrix-recreate-room.sh` | Recreate a broken Matrix room under the same alias (E2EE default) | `<ALIAS> [userid ...]` |
+| `symbios-mastodon-secrets.sh` | Generate persistent per-instance DB, Redis, Rails and VAPID secrets (Mastodon) | `<instance> [...]` |
+| `symbios-mastodon-admin-sync.sh` | Reconcile Mastodon Admin roles from LDAP `mastodon-<instance>-admins` (group hook) | `<instance> <add\|remove\|reconcile> [uid]` |
+| `symbios-mastodon-cleanup.sh` | Remove Mastodon LDAP groups and Authelia client/policy blocks (uninstall command) | `[all\|groups\|authelia]` |
 | `symbios-synapse-purge.sh` | Synapse DB cleanup (vacuum/purge; destructive modes manual only) | `daily\|weekly\|monthly\|purge\|...\|vacuum*` |
 | `symbios-wordpress-db.sh` | Per-instance DBs/users on the shared MariaDB | `<instance> [...]` |
 | `symbios-wordpress-env.sh` | Shared-db `.env` with root + per-instance passwords | `<instance> [...]` |

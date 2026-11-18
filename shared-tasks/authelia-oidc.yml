@@ -26,12 +26,16 @@
 # Optional vars:  oidc_public_client      (default false)
 #                 True for browser SPAs that cannot hold a client secret
 #                 (authorization code + PKCE only, no client_secret line).
+# Optional vars:  oidc_authorization_policy (default "default")
+#                 Name of a policy under
+#                 identity_providers.oidc.authorization_policies. Services
+#                 that need a client-specific group gate deploy their own
+#                 named policy block (see services/mastodon.yml).
 #
-# NOTE: The client always references the named authorization policy
-# 'default' (identity_providers.oidc.authorization_policies.default,
-# rendered by base-services/authelia.yml). That policy carries the central
-# 2FA level and - with twofa_lan_bypass enabled - a networks rule that
-# downgrades logins from private ranges to one factor.
+# NOTE: The client references the named authorization policy 'default' unless
+# oidc_authorization_policy is set. That policy carries the central 2FA level
+# and - with twofa_lan_bypass enabled - a networks rule that downgrades logins
+# from private ranges to one factor.
 #
 # NOTE: All services use the standard 4 OIDC scopes (openid, profile,
 # email, groups). The extra 'email' scope is harmless - Authelia serves
@@ -61,7 +65,9 @@
   ansible.builtin.blockinfile:
     path: /symbios/base-services/authelia/authelia-data/configuration.yml
     marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC {{ service_name }}"
-    block: "      # {{ oidc_client_name | default(service_name) }}\n      - client_id: '{{ service_name }}'\n        client_name: '{{ oidc_client_name | default(service_name) }}'\n{{ oidc_client_auth_lines }}        require_pkce: {{ oidc_require_pkce | default(true) | lower }}\n        pkce_challenge_method: '{{ oidc_pkce_challenge_method | default('S256') }}'\n        authorization_policy: 'default'\n        consent_mode: '{{ oidc_consent_mode | default('implicit') }}'\n{{ oidc_claims_policy_line }}        redirect_uris:\n          - '{{ oidc_redirect_uris | first }}'\n        scopes:\n          - 'openid'\n          - 'profile'\n          - 'email'\n          - 'groups'\n        response_types:\n          - 'code'\n        grant_types:\n          - 'authorization_code'\n        access_token_signed_response_alg: 'none'\n        userinfo_signed_response_alg: 'none'\n        token_endpoint_auth_method: '{{ oidc_token_endpoint_auth_method | default('none' if (oidc_public_client | default(false) | bool) else 'client_secret_post') }}'"
-    insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC"
+    block: "      # {{ oidc_client_name | default(service_name) }}\n      - client_id: '{{ service_name }}'\n        client_name: '{{ oidc_client_name | default(service_name) }}'\n{{ oidc_client_auth_lines }}        require_pkce: {{ oidc_require_pkce | default(true) | lower }}\n        pkce_challenge_method: '{{ oidc_pkce_challenge_method | default('S256') }}'\n        authorization_policy: '{{ oidc_authorization_policy | default('default') }}'\n        consent_mode: '{{ oidc_consent_mode | default('implicit') }}'\n{{ oidc_claims_policy_line }}        redirect_uris:\n          - '{{ oidc_redirect_uris | first }}'\n        scopes:\n          - 'openid'\n          - 'profile'\n          - 'email'\n          - 'groups'\n        response_types:\n          - 'code'\n        grant_types:\n          - 'authorization_code'\n        access_token_signed_response_alg: 'none'\n        userinfo_signed_response_alg: 'none'\n        token_endpoint_auth_method: '{{ oidc_token_endpoint_auth_method | default('none' if (oidc_public_client | default(false) | bool) else 'client_secret_post') }}'"
+    # Anchor the exact OIDC block end: named policies use markers like
+    # "OIDC POLICY mastodon-<name>" and must not attract new client blocks.
+    insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC$"
     backup: yes
   notify: Restart authelia

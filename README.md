@@ -535,6 +535,9 @@ Only LDAP users who are members of the service's designated group(s) may log in.
     `--group-restrict-login-to-whitelist` (requires the `groups` scope; a
     plain LDAP `ldapUserFilterGroups` filter does NOT work because OpenLDAP
     has no memberOf overlay)
+  - `mastodon`: one named Authelia authorization policy per instance, allowing
+    only `mastodon-<instance>-users` and `mastodon-<instance>-admins`; public
+    federation and reads stay open
 - **Authelia forward-auth services**: Add an Authelia `access_control` rule
   with `subject` restricting to `<service>-users` / `<service>-admins`.
 - **Internal auth services**: No LDAP groups needed (service manages own users).

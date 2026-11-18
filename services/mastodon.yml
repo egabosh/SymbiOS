@@ -1,0 +1,406 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
+#     - smtp_from
+#     - smtp_password
+#     - smtp_port
+#     - smtp_server
+#     - smtp_tls
+#     - smtp_user
+#     - twofa_enabled
+#   name: Mastodon
+#   short_description: Deploy multiple Mastodon instances
+#   description: >-
+#     Deploys every instance stored in the WebUI under the Instances tab (the
+#     data lives in <config>/services/mastodon/instances.yml, not in
+#     inventory.yml). Each instance gets its own PostgreSQL, Redis, web,
+#     streaming and Sidekiq containers, its own persistent volumes, a Traefik
+#     route (domain plus optional aliases) and an HTTP healthcheck. Public
+#     federation and public reads stay reachable; anonymous registration is
+#     closed. Login goes exclusively through Authelia OIDC and is restricted
+#     to the LDAP groups mastodon-<instance>-users and
+#     mastodon-<instance>-admins by a named Authelia authorization policy.
+#     Members of the admins group get Mastodon's built-in Admin role.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Service
+#   config:
+#     title: Instances
+#     file: services/mastodon/instances.yml
+#     fields:
+#       name:
+#         label: Name
+#         type: text
+#         required: true
+#         pattern: '^[a-z0-9][a-z0-9-]*$'
+#         placeholder: mastodon
+#       domain:
+#         label: Domain
+#         type: text
+#         required: true
+#         pattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
+#         placeholder: mastodon.example.com
+#       aliases:
+#         label: Aliases
+#         type: list
+#         placeholder: alt1.example.com, alt2.example.com
+#   service_control:
+#     services:
+#     - name: mastodon
+#       type: docker
+#       compose_file: /symbios/services/mastodon/docker-compose.yml
+#       status: test -d /symbios/services/mastodon && docker compose -f /symbios/services/mastodon/docker-compose.yml ps | grep -q "Up "
+#     logs:
+#     - name: mastodon
+#       command: docker compose -f /symbios/services/mastodon/docker-compose.yml logs -f --tail=100
+#   uninstall:
+#     stop: docker compose -f /symbios/services/mastodon/docker-compose.yml down
+#     commands:
+#       - docker compose -f /symbios/services/mastodon/docker-compose.yml down --volumes
+#       - symbios-mastodon-cleanup.sh groups
+#       - symbios-mastodon-cleanup.sh authelia
+#     program_paths:
+#       - /symbios/services/mastodon/
+#       - /symbios/base-services/traefik/providers/mastodon.yml
+#       - /symbios/runchecks.d/symbios-healthcheck-mastodon-*.check
+#       - /symbios/ldap-groups.d/mastodon-admin-sync.hook
+#   actions:
+#     start: docker compose -f /symbios/services/mastodon/docker-compose.yml up -d
+#     stop: docker compose -f /symbios/services/mastodon/docker-compose.yml down
+#     restart: docker compose -f /symbios/services/mastodon/docker-compose.yml restart
+#     reload: docker compose -f /symbios/services/mastodon/docker-compose.yml up -d --remove-orphans
+#
+---
+- name: mastodon
+  hosts: all
+  gather_facts: no
+  vars:
+    service_name: mastodon
+    # No service_domain on purpose: every instance has its own domain.
+    mastodon_instances_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/mastodon/instances.yml"
+    mastodon_service_root: "{{ services_root | default('/symbios/services') }}/mastodon"
+    mastodon_image_tag: 'v4.7.5'
+    mastodon_oidc_issuer: "https://auth.{{ base_domain }}"
+    mastodon_auth_policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool) else 'one_factor' }}"
+    mastodon_smtp_server: "{{ smtp_server | default('') }}"
+    mastodon_smtp_port: "{{ smtp_port | default('') }}"
+    mastodon_smtp_user: "{{ smtp_user | default('') }}"
+    mastodon_smtp_password: "{{ smtp_password | default('') }}"
+    mastodon_smtp_from: "{{ smtp_from | default('') }}"
+    mastodon_smtp_tls: "{{ smtp_tls | default('') }}"
+    mastodon_smtp_login: "{{ (smtp_from | default('')) if (smtp_user | default('') == '%EMAILADDRESS%') else (smtp_user | default('')) }}"
+  tasks:
+
+    # Load the instance list from the WebUI-managed config file. When the file
+    # does not exist yet, the loops below simply render no instances.
+    - name: Read Mastodon instance config file
+      ansible.builtin.slurp:
+        src: "{{ mastodon_instances_file }}"
+      register: mastodon_instances_slurp
+      failed_when: false
+
+    - name: Set mastodon_instances from config file
+      ansible.builtin.set_fact:
+        mastodon_instances: "{{ ((mastodon_instances_slurp.content | default('') | b64decode) | from_yaml | default([], true)) }}"
+      when: mastodon_instances_slurp.content | default('') | length > 0
+
+    - name: Set empty mastodon_instances when no config exists
+      ansible.builtin.set_fact:
+        mastodon_instances: []
+      when: mastodon_instances is not defined
+
+    # LOCAL_DOMAIN is immutable in Mastodon, so validate the WebUI data before
+    # rendering any files. Duplicate names would collide on container names.
+    - name: Validate Mastodon instance names and domains
+      ansible.builtin.assert:
+        that:
+          - item.name is match('^[a-z0-9][a-z0-9-]*$')
+          - item.domain is match('^[a-z0-9.-]+\.[a-z]{2,}$')
+        fail_msg: "Invalid Mastodon instance name or domain: {{ item.name }} / {{ item.domain }}"
+      loop: "{{ mastodon_instances }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Assert unique Mastodon instance names
+      ansible.builtin.assert:
+        that: mastodon_instances | map(attribute='name') | list | unique | length == mastodon_instances | length
+        fail_msg: "Mastodon instance names must be unique"
+
+    - name: Create Mastodon service directory
+      ansible.builtin.file:
+        path: "{{ mastodon_service_root }}"
+        owner: root
+        group: docker
+        state: directory
+        mode: '0550'
+
+    # The OIDC client secret must exist before the env files are rendered:
+    # Authelia stores the digest, Mastodon needs the plaintext counterpart.
+    - name: Create the OIDC client secret of each instance
+      ansible.builtin.shell: >
+        {{ base_services_root | default('/symbios/base-services') }}/authelia/gen-oidc-client-secret.sh
+        {{ mastodon_service_root }}/{{ item.name }}-oidc
+      loop: "{{ mastodon_instances }}"
+      changed_when: false
+
+    - name: Generate persistent secrets of each instance
+      ansible.builtin.shell: >
+        {{ git_root }}/scripts/symbios-mastodon-secrets.sh
+        {{ mastodon_instances | map(attribute='name') | join(' ') }}
+      changed_when: false
+      when: mastodon_instances | length > 0
+
+    # Group names are the gate for the named Authelia policy and the source of
+    # the Mastodon admin role sync. The shared task creates users + admins and
+    # puts the admin user into the admins group.
+    - name: Create LDAP groups of each Mastodon instance
+      ansible.builtin.include_tasks: ../shared-tasks/oidc-groups.yml
+      loop: "{{ mastodon_instances }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        service_name: "mastodon-{{ item.name }}"
+
+    - name: Deploy Mastodon admin role sync hook
+      ansible.builtin.copy:
+        dest: "{{ data_root }}/ldap-groups.d/mastodon-admin-sync.hook"
+        content: |
+          #!/bin/bash
+          # Hook for Mastodon admin roles. Args: $1=event $2=group $3=uid
+          case "${1:-}" in
+            member-added|member-removed) ;;
+            *) exit 0 ;;
+          esac
+          [[ "${2:-}" =~ ^mastodon-([a-z0-9][a-z0-9-]*)-admins$ ]] || exit 0
+          # Reconcile the whole membership: idempotent and self-healing if a
+          # hook was missed while Mastodon was down.
+          exec "{{ git_root }}/scripts/symbios-mastodon-admin-sync.sh" "${BASH_REMATCH[1]}" reconcile
+        mode: '0755'
+        owner: root
+        group: root
+
+    # Named policy per instance: only members of that instance's LDAP groups
+    # may complete the OIDC flow. No forward auth on the site itself, otherwise
+    # WebFinger, ActivityPub and public APIs would break.
+    - name: Write named Authelia policy of each instance
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC POLICY mastodon-{{ item.name }}"
+        block: "{{ lookup('template', git_root + '/services/mastodon/templates/authelia-policy.yml.j2') }}"
+        insertbefore: "^    clients:"
+        backup: yes
+      loop: "{{ mastodon_instances }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        mastodon_instance: "{{ item }}"
+      notify: Restart authelia
+
+    - name: Write OIDC client of each instance in Authelia
+      ansible.builtin.include_tasks: ../shared-tasks/authelia-oidc.yml
+      loop: "{{ mastodon_instances }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        service_name: "mastodon-{{ item.name }}"
+        oidc_client_name: "Mastodon {{ item.name }}"
+        oidc_secret_file: "{{ mastodon_service_root }}/{{ item.name }}-oidc/oidc_digest"
+        oidc_claims_policy: 'email'
+        oidc_token_endpoint_auth_method: 'client_secret_basic'
+        oidc_authorization_policy: "mastodon-{{ item.name }}"
+        oidc_redirect_uris:
+          - "https://{{ item.domain }}/auth/auth/openid_connect/callback"
+
+    # Prune stale client and policy blocks of instances removed from the
+    # config. Clients go first: Authelia rejects a client that references a
+    # policy which no longer exists.
+    - name: Read Authelia configuration for stale Mastodon blocks
+      ansible.builtin.slurp:
+        src: /symbios/base-services/authelia/authelia-data/configuration.yml
+      register: mastodon_authelia_cfg
+
+    - name: Detect stale Mastodon OIDC clients and policies
+      ansible.builtin.set_fact:
+        mastodon_stale_clients: "{{ (mastodon_authelia_cfg.content | b64decode | regex_findall('^# BEGIN ANSIBLE MANAGED BLOCK OIDC (mastodon-[^ ]+)$', multiline=True) | list) | difference(mastodon_current_names) }}"
+        mastodon_stale_policies: "{{ (mastodon_authelia_cfg.content | b64decode | regex_findall('^# BEGIN ANSIBLE MANAGED BLOCK OIDC POLICY (mastodon-[^ ]+)$', multiline=True) | list) | difference(mastodon_current_names) }}"
+      vars:
+        mastodon_current_names: "{{ mastodon_instances | map(attribute='name') | map('regex_replace', '^', 'mastodon-') | list }}"
+      changed_when: false
+
+    - name: Remove stale Mastodon OIDC clients
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC {{ item }}"
+        state: absent
+        backup: yes
+      loop: "{{ mastodon_stale_clients }}"
+      notify: Restart authelia
+
+    - name: Remove stale Mastodon OIDC policies
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/authelia/authelia-data/configuration.yml
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC POLICY {{ item }}"
+        state: absent
+        backup: yes
+      loop: "{{ mastodon_stale_policies }}"
+      notify: Restart authelia
+
+    # Render the per-instance .env.production files from the generated secrets
+    # and the central SMTP / OIDC settings. Secrets are never passed as args.
+    - name: Render Mastodon environment of each instance
+      ansible.builtin.template:
+        src: mastodon/templates/mastodon.env.j2
+        dest: "{{ mastodon_service_root }}/{{ item.name }}.env.production"
+        owner: root
+        group: root
+        mode: '0600'
+      loop: "{{ mastodon_instances }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        mastodon_instance: "{{ item }}"
+        mastodon_secret_dir: "{{ mastodon_service_root }}/{{ item.name }}-secrets"
+        mastodon_oidc_secret_file: "{{ mastodon_service_root }}/{{ item.name }}-oidc/oidc_password"
+
+    - name: Render Mastodon compose stack
+      ansible.builtin.template:
+        src: mastodon/templates/docker-compose.yml.j2
+        dest: "{{ mastodon_service_root }}/docker-compose.yml"
+        owner: root
+        group: docker
+        mode: '0440'
+      when: mastodon_instances | length > 0
+      notify: Restart mastodon
+
+    # Traffic reaches the public web UI, WebFinger, ActivityPub and the
+    # streaming endpoint. No Authelia forward auth middleware is used here.
+    - name: Render Mastodon Traefik provider
+      ansible.builtin.template:
+        src: mastodon/templates/traefik-mastodon.yml.j2
+        dest: /symbios/base-services/traefik/providers/mastodon.yml
+        owner: root
+        group: docker
+        mode: '0444'
+      when: mastodon_instances | length > 0
+
+    - name: Deploy HTTP healthcheck of each instance
+      ansible.builtin.include_tasks: ../shared-tasks/runcheck.yml
+      loop: "{{ mastodon_instances }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        service_name: "mastodon-{{ item.name }}"
+        service_domain: "{{ item.domain }}"
+
+    - name: Detect deployed Mastodon instance healthchecks
+      ansible.builtin.find:
+        paths: "{{ data_root }}/runchecks.d"
+        patterns: "symbios-healthcheck-mastodon-*.check"
+      register: mastodon_hc_existing
+
+    - name: Remove healthchecks of removed Mastodon instances
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ mastodon_hc_stale }}"
+      vars:
+        mastodon_hc_current: "{{ mastodon_instances | map(attribute='name') | map('regex_replace', '^', data_root ~ '/runchecks.d/symbios-healthcheck-mastodon-') | map('regex_replace', '$', '.check') | list }}"
+        mastodon_hc_stale: "{{ mastodon_hc_existing.files | map(attribute='path') | difference(mastodon_hc_current) | list }}"
+
+    # Bring up databases and Redis first, run Rails migrations with a one-off
+    # web container, then start the full stack. This also covers first boot.
+    - name: Remove the Mastodon stack when no instances are configured
+      ansible.builtin.shell: docker compose down --remove-orphans
+      args:
+        chdir: "{{ mastodon_service_root }}"
+      changed_when: false
+      failed_when: false
+      when: mastodon_instances | length == 0
+
+    - name: Remove the Mastodon Traefik provider when no instances are configured
+      ansible.builtin.file:
+        path: /symbios/base-services/traefik/providers/mastodon.yml
+        state: absent
+      when: mastodon_instances | length == 0
+
+    - name: Start Mastodon databases and Redis
+      ansible.builtin.shell: docker compose up -d {{ mastodon_instances | map(attribute='name') | map('regex_replace', '^', 'mastodon-') | map('regex_replace', '$', '-db') | join(' ') }} {{ mastodon_instances | map(attribute='name') | map('regex_replace', '^', 'mastodon-') | map('regex_replace', '$', '-redis') | join(' ') }}
+      args:
+        chdir: "{{ mastodon_service_root }}"
+      changed_when: false
+      when: mastodon_instances | length > 0
+
+    - name: Run Mastodon database migrations
+      ansible.builtin.shell: docker compose run --rm --no-deps mastodon-{{ item.name }}-web bundle exec rails db:migrate
+      args:
+        chdir: "{{ mastodon_service_root }}"
+      loop: "{{ mastodon_instances }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: false
+
+    - name: Start Mastodon stack
+      ansible.builtin.shell: docker compose up -d --remove-orphans
+      args:
+        chdir: "{{ mastodon_service_root }}"
+      changed_when: false
+      when: mastodon_instances | length > 0
+
+    # Registration stays closed permanently; accounts are provisioned by the
+    # first Authelia login. Retry briefly because tootctl needs a ready web
+    # container after a fresh install.
+    - name: Close registrations of each instance
+      ansible.builtin.shell: docker exec symbios-mastodon-{{ item.name }}-web tootctl settings registrations close
+      loop: "{{ mastodon_instances }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: mastodon_registrations
+      until: mastodon_registrations.rc == 0
+      retries: 10
+      delay: 10
+      changed_when: false
+
+    - name: Reconcile Mastodon admin roles from LDAP
+      ansible.builtin.shell: >
+        {{ git_root }}/scripts/symbios-mastodon-admin-sync.sh {{ item.name }} reconcile
+      loop: "{{ mastodon_instances }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: false
+
+    - name: Register Mastodon playbook as installed
+      ansible.builtin.include_tasks: ../shared-tasks/state-register.yml
+
+  handlers:
+    - name: Restart mastodon
+      ansible.builtin.shell: docker compose restart
+      args:
+        chdir: "{{ mastodon_service_root }}"
+      changed_when: false
+
+    - name: Restart authelia
+      ansible.builtin.include_tasks: ../shared-tasks/authelia-restart.yml

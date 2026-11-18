@@ -735,7 +735,9 @@ Writes an OIDC client configuration block in Authelia's `configuration.yml`.
 ```yaml
     # Required vars: service_name, service_domain
     # Optional vars: oidc_client_name, oidc_redirect_uris (list), oidc_consent_mode,
-    #                oidc_require_pkce, oidc_pkce_challenge_method, oidc_scopes (list)
+    #                oidc_require_pkce, oidc_pkce_challenge_method, oidc_scopes (list),
+    #                oidc_token_endpoint_auth_method, oidc_public_client,
+    #                oidc_authorization_policy (default: "default")
 
     - name: Write OIDC config
       include_tasks: ../shared-tasks/authelia-oidc.yml
@@ -745,6 +747,11 @@ Writes an OIDC client configuration block in Authelia's `configuration.yml`.
         oidc_redirect_uris:
           - "https://nextcloud.{{ base_domain }}/apps/user_oidc/code"
 ```
+
+Clients use the named Authelia authorization policy `default` by default. A
+service that needs a client-specific group gate can deploy its own policy block
+and reference it with `oidc_authorization_policy`; `services/mastodon.yml` is
+the reference implementation.
 
 ### `shared-tasks/runcheck.yml` - HTTP healthcheck probe
 
