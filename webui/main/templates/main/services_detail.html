@@ -837,7 +837,7 @@ function loadInventory() {
           btn.addEventListener('click', () => {
             if (a.confirm && !window.confirm(a.confirm)) return;
             /* A download action fetches a file, every other action runs a playbook. */
-            if (a.download) downloadInventoryFile(a.name, row);
+            if (a.download) downloadInventoryFile(a.name, row, a.download.display);
             else runInventoryAction(a.name, row);
           });
           actionsCell.appendChild(btn);
@@ -866,8 +866,8 @@ function runInventoryAction(action, row) {
 
 /* Fetch the file a docs.inventory download action declares. The row travels
    in the POST body (values may be secrets), the file name comes back in the
-   Content-Disposition header. */
-function downloadInventoryFile(action, row) {
+   Content-Disposition header. display:inline opens it in a tab instead. */
+function downloadInventoryFile(action, row, display) {
   const fd = new FormData();
   fd.append('system_id', inventoryTarget());
   fd.append('action', action);
@@ -881,6 +881,12 @@ function downloadInventoryFile(action, row) {
       }
       return r.blob().then(blob => {
         const url = URL.createObjectURL(blob);
+        if (display === 'inline') {
+          window.open(url, '_blank');
+          /* The new tab still needs the blob URL after this function returns. */
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          return;
+        }
         const link = document.createElement('a');
         link.href = url;
         link.download = match ? match[1] : action;

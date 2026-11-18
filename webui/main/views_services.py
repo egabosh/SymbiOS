@@ -669,8 +669,10 @@ def services_inventory_download(request, playbook):
     values = _inventory_action_values(action, row)
     response = HttpResponse(
         stdout, content_type=download.get('mime') or 'text/plain; charset=utf-8')
-    response['Content-Disposition'] = 'attachment; filename="%s"' % (
-        _inventory_download_filename(download, values, action_name))
+    # Inline output is opened in a browser tab, so a QR code can be scanned.
+    disposition = 'inline' if download.get('display') == 'inline' else 'attachment'
+    response['Content-Disposition'] = '%s; filename="%s"' % (
+        disposition, _inventory_download_filename(download, values, action_name))
     response['Cache-Control'] = 'no-store'
     return response
 
