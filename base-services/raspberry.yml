@@ -266,6 +266,21 @@
           dconf write /com/linuxmint/updates/auto-update-flatpaks true
           dconf write /com/linuxmint/updates/auto-update-cinnamon-spices true
 
+          # LightDM logs symbios in automatically. Without a usable password an
+          # idle screen lock would strand the console, so keep Cinnamon unlocked
+          # until a password exists. The marker limits the reset to keys we set.
+          if [ "$(passwd -S "$(id -un)" 2>/dev/null | awk '{print $2}')" != "P" ]
+          then
+            dconf write /org/cinnamon/desktop/screensaver/lock-enabled false
+            dconf write /org/cinnamon/desktop/session/idle-delay 0
+            date > ~/.symbios-no-autolock
+          elif [ -s ~/.symbios-no-autolock ]
+          then
+            dconf reset /org/cinnamon/desktop/screensaver/lock-enabled
+            dconf reset /org/cinnamon/desktop/session/idle-delay
+            rm -f ~/.symbios-no-autolock
+          fi
+
           # First-run initial config
           if ! [ -s ~/.initial-mint-config-by-xsessionrc ]
           then
