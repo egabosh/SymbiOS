@@ -1009,14 +1009,14 @@ base-services/authelia.yml: "2025-07-21T12:30:05Z"
 
 ### How it works
 
-- **`symbios-state.sh`** (`/usr/local/sbin/symbios-state.sh`) manages the state file.
+- **`symbios-state.sh`** (`<git_root>/scripts/symbios-state.sh`) manages the state file.
   Commands: `set <path>` (register), `unset <path>` (remove), `list` (print paths),
   `is-installed <path>` (exit 0/1).
 
 - **Automatic registration** - every time the WebUI runs (Re)Install successfully,
   it calls `symbios-state.sh set <playbook>` on the host. Uninstall calls `symbios-state.sh unset <playbook>`.
 
-- **`symbios-reapply.sh`** (`/usr/local/sbin/symbios-reapply.sh`) reads the state file
+- **`symbios-reapply.sh`** (`<git_root>/scripts/symbios-reapply.sh`) reads the state file
   and re-runs all registered playbooks in dependency order. Runs in the background.
 
 ### When reapply runs
@@ -1024,7 +1024,11 @@ base-services/authelia.yml: "2025-07-21T12:30:05Z"
 - After any settings save, only the relevant playbooks are re-run (e.g. localization
   only re-runs `localization.yml` and `raspberry.yml`).
 - The WebUI can trigger a reapply via `symbios-reapply.sh [--only <playbook> ...]`.
-- Progress is written to `/tmp/symbios-reapply.status` and polled by the WebUI.
+- The WebUI runs the reapply as a tracked job and streams its output into the
+  exec modal. For a run started outside the WebUI (or after a page reload) the
+  progress marker lives in `/run/symbios-reapply.status` (`running:<n>/<total>
+  <playbook>` while running, `done:<exit code>` afterwards) and the per-playbook
+  history in `<log>/reapply.log`.
 
 ### Manual equivalents
 
