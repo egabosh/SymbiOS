@@ -999,6 +999,12 @@
           docker compose exec -T -u www-data nextcloud ./occ dav:sync-birthday-calendar
           docker compose exec -T -u www-data nextcloud ./occ trashbin:cleanup --all-users
           docker compose exec -T -u www-data nextcloud ./occ files:cleanup
+
+          # Stale LibreOffice/Collabora locks are plain .~lock.<file># files in
+          # the user data tree. files:cleanup and files_lock lock_timeout never
+          # see them, so drop only files older than 7 days (logged per file).
+          symbios-nextcloud-lock-cleanup.sh clean --older-than 7
+
           docker compose exec -T -u www-data nextcloud ./occ files:scan --all --generate-metadata --home-only --no-interaction -q
           # External storage filled from outside (paperless inflow, uploads)
           # is indexed per configured mount (see nextcloud_media_scan_mounts:
@@ -1039,6 +1045,29 @@
     # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
     - name: Deploy healthcheck
       include_tasks: ../shared-tasks/runcheck.yml
+
+    # The HTTP healthcheck cannot see file locks; a stale one blocks editing
+    # and syncing. Report it as a warning - the nightly update removes it.
+    - name: Deploy stale lock file check
+      ansible.builtin.blockinfile:
+        path: "{{ data_root }}/runchecks.d/symbios-healthcheck-nextcloud-locks.check"
+        mode: "0400"
+        owner: root
+        group: root
+        create: yes
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          CHECK_CATEGORY="services"
+          CHECK_TITLE="Nextcloud locks"
+          CHECK_DESC="Warns about stale LibreOffice/Collabora lock files in Nextcloud user data."
+          CHECK_DETAIL="Scans */files/ for .~lock.<file># files older than 7 days.|A stale lock makes a file look permanently locked by another user and blocks editing/sync.|The nightly nextcloud.update removes them via symbios-nextcloud-lock-cleanup.sh clean --older-than 7.|Only old lock files are reported - active locks are never touched."
+          g_lock_report="$("{{ git_root }}/scripts/symbios-nextcloud-lock-cleanup.sh" report --older-than 7 2>/dev/null)"
+          if [ -n "$g_lock_report" ]
+          then
+            g_echo_warn "Stale Nextcloud lock files: $g_lock_report"
+          fi
+        backup: yes
+        validate: /bin/bash -n %s
 
     - name: Register playbook as installed
       include_tasks: ../shared-tasks/state-register.yml
