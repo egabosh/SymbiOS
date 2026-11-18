@@ -26,8 +26,8 @@ mounted (LUKS boot-unlock). Called from /etc/rc.local, not by hand.
 
 Order: container runtime (docker/containerd) -> network bridge assignments
 -> libvirt default storage pool -> WoL watcher instances -> arpwatch
-reconcile -> nslcd -> RustDesk service -> runchecks daemon + watchdog timer
-(delayed, backgrounded).
+reconcile -> nslcd -> RustDesk service -> hd-idle (only for real rotating
+disks) -> runchecks daemon + watchdog timer (delayed, backgrounded).
 
 Exit code is always 0. Single failures only print a warning.
 EOF
@@ -163,7 +163,16 @@ then
   fi
 fi
 
-# 8. Health daemon + watchdog timer, delayed so post-mount starters
+# 8. hd-idle spindown, only for real rotating disks. The helper detects HDDs
+# via udev (USB bridges report ROTA=1 even for SSDs) and starts a transient
+# systemd unit; on hosts without HDDs it stops an old unit instead.
+if [[ -x "${g_git_root}/scripts/symbios-hd-idle.sh" ]]
+then
+  "${g_git_root}/scripts/symbios-hd-idle.sh" || \
+    g_echo_warn "hd-idle start failed"
+fi
+
+# 9. Health daemon + watchdog timer, delayed so post-mount starters
 # (OpenVPN, hostapd, VM restore blocks later in rc.local) settle first.
 # Same detachment rule as above: transient timer unit, not a background sleep.
 systemd-run --unit=symbios-runchecks-delayed --collect --on-active=30s /bin/systemctl start runchecks.service runchecks-watchdog.timer 2>/dev/null || \

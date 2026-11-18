@@ -628,14 +628,13 @@
       - Restart rsyslog
       when: nocontainer.stat.exists == true
 
-    # hd-idle spins down idle disks. SymbiOS leaves it OFF by default: system
-    # and data disks (USB SSD, LUKS, databases/VMs) must never spin down, and
-    # with the Debian default START_HD_IDLE=false the enabled unit exits
-    # instantly and hits the systemd start limit at every boot (FAILED noise).
-    # Manage it explicitly: stopped, disabled, failed-state cleared. Admins
-    # who need it for archive HDDs set START_HD_IDLE=true with -a <disk> and
-    # enable it by hand (a reapply will undo that - no inventory knob yet).
-    - name: hd-idle for spinning down disks after XXX seconds idle
+    # hd-idle is started by symbios-after-mount.sh only when a real rotating
+    # disk is present. USB bridges report ROTA=1 even for SSDs, so the helper
+    # uses udev ID_ATA_ROTATION_RATE_RPM and also excludes the root disk.
+    # The Debian unit stays stopped/disabled: START_HD_IDLE=false otherwise
+    # exits instantly and hits the systemd start limit at every boot. Its
+    # default options never spin down a disk, even if started by hand.
+    - name: hd-idle safe defaults (disk rules come from the boot helper)
       blockinfile:
         path: /etc/default/hd-idle
         create: yes
@@ -645,17 +644,16 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           START_HD_IDLE=false
-          HD_IDLE_OPTS="-i 300 -l /var/log/hd-idle.log"
+          HD_IDLE_OPTS="-i 0 -l /var/log/hd-idle.log"
         backup: yes
       when: nocontainer.stat.exists == true
 
-    - name: Disable hd-idle (spindown off by default, no boot restart-loop)
+    - name: Disable Debian hd-idle unit (conditional start via after-mount)
       ansible.builtin.systemd:
         name: hd-idle
         enabled: false
         state: stopped
         daemon_reload: true
-      register: hd_idle_disabled
       failed_when: false
       when: nocontainer.stat.exists == true
 

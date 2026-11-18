@@ -459,6 +459,7 @@ texts opportunistically).
 | `symbios-media-partition.sh` | Optional `SYMBIOS_MEDIA` volume (labels `SYMBIOS_MEDIA` / `CRYPT_LUKS_SYMBIOS_MEDIA`) incl. setup/adopt/rollback, no reboot; `prepare-member` turns a replacement disk into an encrypted member (LUKS + boot keyfile, opened) for a btrfs replace (`--force` overwrites foreign signatures, `--unmount` releases leftover mounts) | `status\|setup\|adopt\|prepare-member\|rollback` |
 | `symbios-media-mount.sh` | Boot mount of the media volume (keyfile on `/symbios`, compat bind, never boot-blocking) | no args |
 | `symbios-after-mount.sh` | Post-mount dispatcher (rootfs): starts all `/symbios`-dependent units in order (boot policy, AGENTS.md) | `[-h\|--help]`, no args |
+| `symbios-hd-idle.sh` | Start hd-idle only for udev-detected rotating disks (skips SSDs/USB bridges and the root disk), 900s idle time; transient systemd unit via the after-mount dispatcher | `[-h\|--help\|--dry-run]`, no args |
 | `symbios-detect-network-type.sh` | Connection type (`home`/`root`/`airgapped`) as JSON | no args |
 | `symbios-get-local-ip.sh` | Local RFC1918 IPv4 (`.host-ip` file, `hostname -I` fallback) | no args |
 | `symbios-get-local-ips.sh` | Hostname + LAN IPv4 + global IPv6 as JSON | no args |
