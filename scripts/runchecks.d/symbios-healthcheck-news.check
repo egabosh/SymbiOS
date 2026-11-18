@@ -6,15 +6,16 @@ CHECK_DETAIL="Reads the hourly news snapshot in <log>/news.json.|Warns while ale
 # The snapshot is written by symbios-news.sh refresh (hourly cron). Before the
 # first run, or while the feed is disabled, there is nothing to report.
 g_news_snapshot="${g_log_dir}/news.json"
+# This file is sourced by runchecks.sh - use return, exit would kill the daemon.
 if [[ ! -s "${g_news_snapshot}" ]]
 then
-  exit 0
+  return 0
 fi
 
 g_news_status="$(jq -r '.status // "ok"' "${g_news_snapshot}" 2>/dev/null)"
 if [[ "${g_news_status}" == "disabled" ]]
 then
-  exit 0
+  return 0
 fi
 
 g_news_unread="$(jq -r '.unread // 0' "${g_news_snapshot}" 2>/dev/null)"
