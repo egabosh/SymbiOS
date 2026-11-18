@@ -367,7 +367,9 @@ echo '{"feat": {"enabled": true}}' | symbios-config.py --file services/openwrt-v
 `scripts/symbios-instances.py` is schema-aware on top of it: it parses
 the service playbook's `# docs:` config block (same source the WebUI
 catalog reads), coerces stdin JSON rows (bool/number/list/text + patterns,
-same rules as the retired WebUI helper), and delegates the write:
+same rules as the retired WebUI helper), and delegates the write. A block
+marked `single: true` (options of one service, e.g. Kodi) takes exactly one
+row - a second one is refused with exit 2:
 
 ```bash
 symbios-instances.py --playbook services/wordpress.yml get

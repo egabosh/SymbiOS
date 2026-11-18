@@ -23,6 +23,10 @@ page; saving (schema coercion + atomic write) goes through
 scripts/symbios-instances.py on the host, which parses the same docs.config
 source. Reads stay container-local via load_instances() below.
 
+A service with options instead of instances (one media center, not many) marks
+the block ``single: true``: the tab then offers exactly one row, and the
+host-side writer refuses a second one.
+
 Persisted rows land in a YAML file inside the writable config dir:
 
     <config_root>/<docs.config.file>  (default services/<svc>/instances.yml)
@@ -36,6 +40,7 @@ docs.config schema (parsed by the playbook catalog, no validation enforced):
     #   config:
     #     title: Instances
     #     file: services/<service>/instances.yml
+    #     single: true            # one options row instead of a list
     #     fields:
     #       name:
     #         label: Name
@@ -83,6 +88,10 @@ def get_config_meta(item):
     return {
         "title": meta.get("title") or "Instances",
         "file": file_path,
+        # A "single" config holds the options of one service instead of a list
+        # of instances (kodi: one media center). The WebUI then offers exactly
+        # one row and the host-side writer rejects a second one.
+        "single": bool(meta.get("single")),
         "fields": fields,
         "field_order": list(fields.keys()),
         "fields_json": fields,   # for templates

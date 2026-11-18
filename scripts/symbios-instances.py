@@ -27,7 +27,9 @@
 # container (read-only /config mount); writes go through here.
 #
 # Only base-system settings belong into inventory.yml; instance lists are
-# service data and live in the config dir instead.
+# service data and live in the config dir instead. A config that holds the
+# options of a single service (docs.config "single: true") is stored the same
+# way - as a one element list - and rejected here when more rows arrive.
 
 import argparse
 import json
@@ -71,7 +73,9 @@ def get_service_name(playbook):
 def load_docs_config(git_root, playbook):
     """Parse the docs.config block from the playbook (mirrors playbook_catalog).
 
-    Returns (service, file_rel, fields) or exits 2 when absent/unreadable.
+    Returns (service, file_rel, fields, single) or exits 2 when
+    absent/unreadable. "single" marks a config that holds one options row
+    instead of a list of instances (docs.config "single: true").
     """
     if os.path.isabs(playbook) or ".." in playbook.split("/"):
         e_usage("playbook must be repo-relative, got {!r}".format(playbook))
@@ -116,6 +120,7 @@ def load_docs_config(git_root, playbook):
         e_usage("playbook {} declares no docs.config block".format(playbook))
     svc = get_service_name(playbook)
     file_rel = meta.get("file") or "services/%s/instances.yml" % svc
+    single = bool(meta.get("single"))
     raw_fields = meta.get("fields") or {}
     fields = {}
     items = raw_fields if isinstance(raw_fields, dict) else {}
@@ -137,7 +142,7 @@ def load_docs_config(git_root, playbook):
             "default": raw.get("default"),
             "separator": raw.get("separator") or ",",
         }
-    return svc, file_rel, fields
+    return svc, file_rel, fields, single
 
 
 def coerce_row(fields, raw_row):
@@ -211,7 +216,7 @@ def engine(args, sub_args, stdin_data=None):
 
 def cmd_get(args):
     """Print the instance list as JSON (missing file -> [])."""
-    svc, file_rel, _fields = load_docs_config(args.git_root, args.playbook)
+    svc, file_rel, _fields, _single = load_docs_config(args.git_root, args.playbook)
     _ok, out, _err = engine(args, ["--file", file_rel, "get", "--json"])
     # A missing file is not an error for reads (same as the WebUI: absent
     # means no instances yet).
@@ -223,13 +228,13 @@ def cmd_get(args):
 
 def cmd_schema(args):
     """Print the normalized docs.config fields as JSON."""
-    _svc, _rel, fields = load_docs_config(args.git_root, args.playbook)
+    _svc, _rel, fields, _single = load_docs_config(args.git_root, args.playbook)
     print(json.dumps([fields[name] for name in fields]))
 
 
 def cmd_save(args):
     """Coerce stdin JSON rows against the schema and store them."""
-    _svc, file_rel, fields = load_docs_config(args.git_root, args.playbook)
+    _svc, file_rel, fields, single = load_docs_config(args.git_root, args.playbook)
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else []
@@ -238,6 +243,11 @@ def cmd_save(args):
     raw_rows = payload.get("rows") if isinstance(payload, dict) else payload
     if not isinstance(raw_rows, list):
         e_usage("stdin must hold a JSON list (or {\"rows\": [...]})")
+    # A "single" config is one options row, not a list of instances: the
+    # playbook reads only the first row, so a second one would be dead weight
+    # that silently takes over once the first is removed.
+    if single and len(raw_rows) > 1:
+        e_usage("{} takes exactly one entry, got {}".format(file_rel, len(raw_rows)))
     rows = []
     for raw_row in raw_rows:
         if not isinstance(raw_row, dict):
@@ -268,7 +278,8 @@ def main(argv=None):
         description="Schema-aware manager for per-service instance lists "
                     "(docs.config). Reads the field schema from the "
                     "playbook's # docs: block, coerces stdin JSON rows, and "
-                    "delegates the atomic write to symbios-config.py.",
+                    "delegates the atomic write to symbios-config.py. A "
+                    "docs.config marked \"single: true\" accepts one row.",
         epilog="Examples:\n"
                "  symbios-instances.py --playbook services/wordpress.yml get\n"
                "  symbios-instances.py --playbook services/wordpress.yml schema\n"

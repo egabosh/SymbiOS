@@ -412,7 +412,7 @@
         </button>
       </div>
     </div>
-    <p class="text-muted small mb-2">Define one entry per instance. Saved to <code>{{ config_meta.file }}</code> and applied by the service playbook. Create the rows, then "Save &amp; Apply" to deploy.</p>
+    <p class="text-muted small mb-2">{% if config_meta.single %}This entry holds the options of this service.{% else %}Define one entry per instance.{% endif %} Saved to <code>{{ config_meta.file }}</code> and applied by the service playbook. {% if config_meta.single %}Fill it in{% else %}Create the rows{% endif %}, then "Save &amp; Apply" to deploy.</p>
     <div class="table-responsive">
       <table class="table table-sm align-middle" id="instances-table">
         <thead>
@@ -424,7 +424,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr class="instances-empty d-none"><td colspan="99" class="text-muted small py-3">No instances yet - click "Add" below.</td></tr>
+          <tr class="instances-empty d-none"><td colspan="99" class="text-muted small py-3">{% if config_meta.single %}No options configured yet - click "Add" below.{% else %}No instances yet - click "Add" below.{% endif %}</td></tr>
           {% for r in config_rows %}
           <tr class="instances-row">
             {% for fname in config_meta.field_order %}
@@ -511,6 +511,10 @@ function refreshInstancesEmpty() {
   const rows = document.querySelectorAll('#instances-table .instances-row');
   const empty = document.querySelector('.instances-empty');
   if (empty) empty.classList.toggle('d-none', rows.length > 0);
+  // A "single" config holds one entry only: the add button disappears as soon
+  // as that entry exists, so a second row cannot be created in the UI.
+  const add = document.getElementById('instances-add');
+  if (add && CFG && CFG.single) add.classList.toggle('d-none', rows.length > 0);
 }
 
 function collectInstances() {
