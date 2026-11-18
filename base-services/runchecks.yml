@@ -107,7 +107,7 @@
           Type=simple
           User=root
           Environment=PATH={{ git_root }}/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
-          ExecStartPre=/bin/bash -c '[[ -x /symbios/git/SymbiOS/scripts/runchecks.sh ]] || exit 1'
+          ExecStartPre=/bin/bash -c '[[ -x {{ git_root }}/scripts/runchecks.sh ]] || exit 1'
           ExecStart={{ git_root }}/scripts/runchecks.sh
           Restart=always
           RestartSec=10

@@ -312,9 +312,9 @@
           fi
           # Optional media volume (label-triggered, keyfile lives on /symbios -
           # see scripts/symbios-media-mount.sh). Missing volume: no-op.
-          if [[ -x /symbios/git/SymbiOS/scripts/symbios-media-mount.sh ]]
+          if [[ -x {{ git_root }}/scripts/symbios-media-mount.sh ]]
           then
-            /symbios/git/SymbiOS/scripts/symbios-media-mount.sh || echo "ERROR symbios-media-mount.sh FAILED!!!"
+            {{ git_root }}/scripts/symbios-media-mount.sh || echo "ERROR symbios-media-mount.sh FAILED!!!"
           fi
           # Start all /symbios-dependent host services in order (boot policy: AGENTS.md)
           if [[ -x /usr/local/sbin/symbios-after-mount.sh ]]
