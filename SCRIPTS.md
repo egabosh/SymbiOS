@@ -477,7 +477,7 @@ texts opportunistically).
 
 | Script | Purpose | Usage |
 |--------|---------|-------|
-| `symbios-network-scan.sh` | LAN devices + WiFi stations as JSON (60 s cached) | `[--fresh]` |
+| `symbios-network-scan.sh` | Default-route uplink (IPv4/IPv6 + gateways), LAN devices + WiFi stations as JSON (60 s cached) | `[--fresh]` |
 | `symbios-router-detect.sh` | Router detection via UPnP IGD (`fritzbox`/`generic_upnp`) | no args |
 | `symbios-router-upnp.sh` | Port-forwarding dispatcher (FRITZ!Box vs generic UPnP) | `config\|add\|delete\|list\|...` |
 | `symbios-router-fritz.py` | FRITZ!Box `data.lua` API backend (env credentials) | called via router-upnp |

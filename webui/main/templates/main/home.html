@@ -59,6 +59,35 @@
 </div>
 {% endif %}
 
+{# --- SymbiOS News --- #}
+{% if news_items or news_status %}
+<div class="mb-4">
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <i class="bi bi-newspaper text-primary"></i>
+    <h5 class="mb-0">SymbiOS News</h5>
+    {% if news_unread %}<span class="badge text-bg-warning">{{ news_unread }} unread</span>{% endif %}
+    <a href="/news/" class="ms-auto small text-muted text-decoration-none">View all <i class="bi bi-arrow-right"></i></a>
+  </div>
+  <div class="svc-base-card">
+    {% if news_items %}
+      {% for item in news_items %}
+      <div class="d-flex align-items-start gap-2 py-2 px-3 {% if not forloop.last %}border-bottom{% endif %}">
+        {% if item.severity == 'alert' %}<i class="bi bi-exclamation-triangle-fill text-warning mt-1"></i>{% else %}<i class="bi bi-info-circle text-muted mt-1"></i>{% endif %}
+        <div class="flex-grow-1 min-width-0">
+          {% if item.link %}<a href="{{ item.link }}" target="_blank" rel="noopener noreferrer" class="fw-semibold text-decoration-none" style="font-size:0.88rem;">{{ item.title }}</a>{% else %}<span class="fw-semibold" style="font-size:0.88rem;">{{ item.title }}</span>{% endif %}
+          {% if item.published_local %}<div class="small text-muted">{{ item.published_local }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    {% elif news_status == 'error' %}
+      <div class="py-2 px-3 small text-muted">News feed is currently unreachable.</div>
+    {% else %}
+      <div class="py-2 px-3 small text-muted">No news yet. The feed is refreshed hourly.</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 {# --- Installed Services --- #}
 <div class="d-flex align-items-center justify-content-between mb-3">
   <h2 class="mb-0">Services</h2>
@@ -207,12 +236,27 @@
   {% endif %}
 </div>
 
-{# --- Network overview: one separate card per network --- #}
+{# --- Network overview: uplink summary + one separate card per network --- #}
 <div class="d-flex align-items-center gap-2 mb-2">
   <i class="bi bi-hdd-network text-muted"></i>
   <span class="fw-semibold">Network Devices</span>
   <span class="ms-auto small text-muted" id="net-meta"></span>
 </div>
+{% with uplink=network.uplink %}
+{% if uplink.interface or uplink.ipv4 or uplink.ipv6 %}
+<div class="card svc-base-card mb-3" style="height:auto">
+  <div class="card-body py-2" id="net-uplink">
+    <div class="d-flex flex-wrap gap-3 small">
+      <span><span class="text-muted">Default gateway device</span> <code>{{ uplink.interface }}</code></span>
+      <span><span class="text-muted">IPv4</span> {% for ip in uplink.ipv4 %}<code>{{ ip }}</code>{% if not forloop.last %}, {% endif %}{% empty %}&ndash;{% endfor %}</span>
+      <span><span class="text-muted">IPv6</span> {% for ip in uplink.ipv6 %}<code>{{ ip }}</code>{% if not forloop.last %}, {% endif %}{% empty %}&ndash;{% endfor %}</span>
+      <span><span class="text-muted">Gateway v4</span> {% if uplink.gateway_ipv4 %}<code>{{ uplink.gateway_ipv4 }}</code>{% else %}&ndash;{% endif %}</span>
+      <span><span class="text-muted">Gateway v6</span> {% if uplink.gateway_ipv6 %}<code>{{ uplink.gateway_ipv6 }}</code>{% else %}&ndash;{% endif %}</span>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endwith %}
 <div id="net-groups" class="mb-3">
   {% for g in network.groups %}
   <div class="card svc-base-card mb-3" style="height:auto">
@@ -221,7 +265,7 @@
       <table class="table table-sm align-middle mb-0">
         <thead>
           <tr class="table-light">
-            <th colspan="4">
+            <th colspan="5">
               <span class="text-muted">Interface</span> <code>{{ g.interface }}</code>
               <span class="text-muted ms-2">Subnet</span> {{ g.cidr }}
               {% if g.self %}
@@ -235,6 +279,7 @@
           </tr>
           <tr>
             <th>IP</th>
+            <th>IPv6</th>
             <th>Hostname</th>
             <th>MAC</th>
             <th>Vendor</th>
@@ -248,13 +293,14 @@
               {% if d.wifi %}<i class="bi bi-wifi text-success me-1" title="{{ d.ap }} AP"></i>{% endif %}
               <code>{{ d.ip }}</code>
             </td>
+            <td class="text-nowrap small">{% if d.ipv6 %}<code>{{ d.ipv6 }}</code>{% else %}<span class="text-muted">&ndash;</span>{% endif %}</td>
             <td>{{ d.hostname }}</td>
             <td>{% if d.mac %}<code class="text-uppercase">{{ d.mac }}</code>{% else %}<span class="text-muted">&ndash;</span>{% endif %}</td>
             <td class="text-muted">{{ d.vendor }}{% if d.wifi %} <span class="text-nowrap">({{ d.signal }} dBm)</span>{% endif %}</td>
           </tr>
           {% empty %}
           <tr>
-            <td colspan="4" class="text-center text-muted py-2">No other devices found in this network.</td>
+            <td colspan="5" class="text-center text-muted py-2">No other devices found in this network.</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -267,6 +313,8 @@
       <div class="card-body py-3 text-center text-muted">
         {% if network.subnets %}
         No devices found.
+        {% elif network.uplink.interface or network.uplink.ipv4 or network.uplink.ipv6 %}
+        No private LAN subnets on the default-route interface.
         {% else %}
         Network overview unavailable.
         {% endif %}
@@ -355,7 +403,7 @@
 
   // One table per network: the title row (merged columns) carries the
   // interface, subnet and the host's own IP/hostname/MAC in that network,
-  // so the device rows only need IP/hostname/MAC/vendor.
+  // so the device rows only need IP/IPv6/hostname/MAC/vendor.
   function netGroups(n) {
     if (n && n.groups && n.groups.length) return n.groups;
     // Fallback for payloads without groups: build them from subnets+devices.
@@ -379,41 +427,68 @@
     } else {
       title += ' <span class="text-muted ms-2">SymbiOS has no address in this network.</span>';
     }
-    return '<tr class="table-light"><th colspan="4">' + title + '</th></tr>'
-      + '<tr><th>IP</th><th>Hostname</th><th>MAC</th><th>Vendor</th></tr>';
+    return '<tr class="table-light"><th colspan="5">' + title + '</th></tr>'
+      + '<tr><th>IP</th><th>IPv6</th><th>Hostname</th><th>MAC</th><th>Vendor</th></tr>';
   }
 
   function netDeviceRow(d) {
     let badges = '';
     if (d.gateway) badges += '<span class="badge text-bg-warning me-1">router</span>';
     if (d.wifi) badges += '<i class="bi bi-wifi text-success me-1" title="' + escapeHtml((d.ap || '') + ' AP') + '"></i>';
+    const v6 = d.ipv6 ? '<code>' + escapeHtml(d.ipv6) + '</code>' : '<span class="text-muted">&ndash;</span>';
     const mac = d.mac ? '<code class="text-uppercase">' + escapeHtml(d.mac) + '</code>' : '<span class="text-muted">&ndash;</span>';
     const sig = d.wifi ? ' <span class="text-nowrap">(' + escapeHtml(d.signal + ' dBm') + ')</span>' : '';
     return '<tr><td class="text-nowrap">' + badges + '<code>' + escapeHtml(d.ip) + '</code></td>'
+      + '<td class="text-nowrap small">' + v6 + '</td>'
       + '<td>' + escapeHtml(d.hostname || '') + '</td>'
       + '<td>' + mac + '</td>'
       + '<td class="text-muted">' + escapeHtml(d.vendor || '') + sig + '</td></tr>';
   }
 
+  // Uplink summary: always shown when the scan found a default route, even
+  // on hosts without any private LAN subnet (public-only cloud hosts).
+  function netUplink(u) {
+    if (!u || (!u.interface && !(u.ipv4 || []).length && !(u.ipv6 || []).length)) return '';
+    const list = function (values) {
+      return (values || []).map(escapeHtml).join(', ') || '&ndash;';
+    };
+    const item = function (label, value) {
+      return '<span><span class="text-muted">' + label + '</span> ' + value + '</span>';
+    };
+    return '<div class="d-flex flex-wrap gap-3 small">'
+      + item('Default gateway device', '<code>' + escapeHtml(u.interface || '') + '</code>')
+      + item('IPv4', list(u.ipv4))
+      + item('IPv6', list(u.ipv6))
+      + item('Gateway v4', u.gateway_ipv4 ? '<code>' + escapeHtml(u.gateway_ipv4) + '</code>' : '&ndash;')
+      + item('Gateway v6', u.gateway_ipv6 ? '<code>' + escapeHtml(u.gateway_ipv6) + '</code>' : '&ndash;')
+      + '</div>';
+  }
+
   function renderNetwork(n) {
     const box = document.getElementById('net-groups');
     const meta = document.getElementById('net-meta');
+    const uplink = document.getElementById('net-uplink');
     const groups = netGroups(n);
     const subnets = (n && n.subnets) || [];
+    const u = (n && n.uplink) || {};
+    const hasUplink = !!(u.interface || (u.ipv4 || []).length || (u.ipv6 || []).length);
+    if (uplink) uplink.innerHTML = netUplink(u);
     if (meta) {
       const sub = subnets.length ? escapeHtml(String(subnets.length) + ' subnets') : '';
       const at = (n && n.scanned_at) ? dashLinked(n.scanned_at) : '';
       meta.innerHTML = sub ? '<span class="small text-muted">' + sub + ' &middot; updated ' + escapeHtml(at) + '</span>' : '';
     }
     if (!groups.length) {
+      const empty = subnets.length ? 'No devices found.'
+        : (hasUplink ? 'No private LAN subnets on the default-route interface.' : 'Network overview unavailable.');
       box.innerHTML = '<div class="card svc-base-card mb-3" style="height:auto"><div class="card-body py-3 text-center text-muted">'
-        + (subnets.length ? 'No devices found.' : 'Network overview unavailable.') + '</div></div>';
+        + empty + '</div></div>';
       return;
     }
     box.innerHTML = groups.map(function (g) {
       const rows = g.devices.length
         ? g.devices.map(netDeviceRow).join('')
-        : '<tr><td colspan="4" class="text-center text-muted py-2">No other devices found in this network.</td></tr>';
+        : '<tr><td colspan="5" class="text-center text-muted py-2">No other devices found in this network.</td></tr>';
       return '<div class="card svc-base-card mb-3" style="height:auto"><div class="card-body p-0">'
         + '<div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead>'
         + netTitleRow(g) + '</thead><tbody>' + rows + '</tbody></table></div>'

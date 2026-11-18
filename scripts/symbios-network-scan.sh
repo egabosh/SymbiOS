@@ -7,14 +7,16 @@ Usage: $(basename "$0") [--fresh]
 
 Discover devices on the host's networks for the dashboard WebUI. Output:
 JSON with the scanned subnets (interface, CIDR) and the devices found in
-them (IP, MAC, vendor, hostname), plus the WiFi stations currently
-associated to the hostapd access point.
+them (IPv4, optional IPv6, MAC, vendor, hostname), the WiFi stations
+currently associated to the hostapd access point, and an uplink block with
+the addresses and gateways of the default-route interface(s).
 
 Which networks are scanned: every interface with a private IPv4 address
 except the intentionally internal networks (Docker bridges br-*/docker0 and
 the SymbiOS service networks base-services/services). OpenWrt VM bridges and
 their subnets are shown. The default-route subnet is listed first so the
-physical LAN sorts on top in the WebUI.
+physical LAN sorts on top in the WebUI. Hosts with only a public IP on the
+default-route interface still get a valid payload with the uplink block.
 
 Results are cached for 60 seconds so a frequently reloaded dashboard does
 not hammer the network.
@@ -32,14 +34,16 @@ then
 fi
 
 # Output: JSON with the scanned subnets (interface, CIDR) and the devices
-# found in them (IP, MAC, vendor, hostname), plus the WiFi stations that are
-# currently associated to the hostapd access point.
+# found in them (IPv4, optional IPv6, MAC, vendor, hostname), the WiFi
+# stations currently associated to the hostapd access point, and an uplink
+# block with the addresses and gateways of the default-route interface(s).
 #
 # Which networks are scanned: every interface with a private IPv4 address
 # except the intentionally internal networks (Docker bridges br-*/docker0
 # and the SymbiOS service networks base-services/services). OpenWrt VM
 # bridges and their subnets are shown. The default-route subnet is listed
-# first so the physical LAN sorts on top in the WebUI.
+# first so the physical LAN sorts on top in the WebUI. A public-only default
+# interface produces an empty device list, but still a valid uplink block.
 #
 # Results are cached for 60 seconds so a frequently reloaded dashboard does
 # not hammer the network.
@@ -82,29 +86,77 @@ then
   fi
 fi
 
-# The default-route gateway (marked in the device list).
-f_gw=""
-while read -r f_route
-do
-  f_gw_tmp="$(echo "${f_route}" | awk '{ for (i=1;i<=NF;i++) if ($i=="via") print $(i+1) }')"
-  if [[ -n "${f_gw_tmp}" ]]
-  then
-    f_gw="${f_gw_tmp}"
-    break
-  fi
-done < <(ip -4 route show default 2>/dev/null)
+# Default routes of both families: the IPv4 device still decides which
+# scanned subnet sorts first, while the uplink block below shows both
+# families even when the default interface has no private IPv4 address.
+f_route4="$(ip -4 route show default 2>/dev/null | head -1)"
+f_route6="$(ip -6 route show default 2>/dev/null | head -1)"
+f_gw4="$(printf '%s\n' "${f_route4}" | awk '{ for (i=1;i<=NF;i++) if ($i=="via") { print $(i+1); exit } }')"
+f_gw6="$(printf '%s\n' "${f_route6}" | awk '{ for (i=1;i<=NF;i++) if ($i=="via") { print $(i+1); exit } }')"
+f_defdev="$(printf '%s\n' "${f_route4}" | awk '{ for (i=1;i<=NF;i++) if ($i=="dev") { print $(i+1); exit } }')"
+f_defdev6="$(printf '%s\n' "${f_route6}" | awk '{ for (i=1;i<=NF;i++) if ($i=="dev") { print $(i+1); exit } }')"
+f_uplink_iface="${f_defdev:-${f_defdev6}}"
 
-# The interface that owns the default route (its subnet sorts first).
-f_defdev=""
-while read -r f_route
+# Global IPv6 for the dashboard: GUA (2000::/3) and ULA (fc00::/7).
+# Link-local (fe80::/10) is only valid on one link and would be noise.
+f_is_dashboard_v6() {
+  case "$1" in
+    fe80:*)
+      return 1
+      ;;
+    [23]*|f[cd]*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+f_json_array() {
+  local f_out="[" f_first=1 f_item
+  for f_item in "$@"
+  do
+    if [[ "${f_first}" -eq 1 ]]
+    then
+      f_first=0
+    else
+      f_out+=","
+    fi
+    f_out+="$(printf '%s' "${f_item}" | f_json_escape)"
+  done
+  printf '%s]' "${f_out}"
+}
+
+# Collect the uplink addresses from every interface that owns a default
+# route. The usual case is one interface for both families.
+g_uplink4=()
+g_uplink6=()
+g_uplink_devs=()
+for f_dev in "${f_defdev}" "${f_defdev6}"
 do
-  f_defdev_tmp="$(echo "${f_route}" | awk '{ for (i=1;i<=NF;i++) if ($i=="dev") { print $(i+1); exit } }')"
-  if [[ -n "${f_defdev_tmp}" ]]
-  then
-    f_defdev="${f_defdev_tmp}"
-    break
-  fi
-done < <(ip -4 route show default 2>/dev/null)
+  [[ -z "${f_dev}" ]] && continue
+  [[ " ${g_uplink_devs[*]} " == *" ${f_dev} "* ]] && continue
+  g_uplink_devs+=("${f_dev}")
+done
+for f_dev in ${g_uplink_devs[@]+"${g_uplink_devs[@]}"}
+do
+  while read -r f_fam f_addr
+  do
+    f_addr="${f_addr%%/*}"
+    [[ -z "${f_addr}" ]] && continue
+    case "${f_fam}" in
+      inet)
+        [[ "${f_addr}" == 127.* ]] && continue
+        g_uplink4+=("${f_addr}")
+        ;;
+      inet6)
+        f_is_dashboard_v6 "${f_addr}" || continue
+        g_uplink6+=("${f_addr}")
+        ;;
+    esac
+  done < <(ip -o addr show dev "${f_dev}" scope global 2>/dev/null | awk '{print $3, $4}')
+done
 
 # --- Collect candidate subnets ----------------------------------------------
 # Every interface with a private IPv4 that is not an intentionally internal
@@ -185,10 +237,8 @@ do
   fi
 done < <(ip -o -4 addr show scope global 2>/dev/null | awk '{print $2, $4}')
 
-if [[ "${#g_cidrs[@]}" -eq 0 ]]
-then
-  f_json_error "No scanable private networks found."
-fi
+# No abort when there are no private networks: a public-only uplink still
+# produces a valid payload with an empty device list and the uplink block.
 
 # --- Collect device rows (passive sources only) ------------------------------
 # No active probing: arpwatch data files (MAC, IP, time, hostname as seen on
@@ -221,6 +271,45 @@ f_normmac() {
   done
   printf '%s' "${f_out}"
 }
+
+# Append a value to a comma-separated list without duplicates.
+f_append_csv() {
+  local f_list="$1" f_value="$2"
+  case ",${f_list}," in
+    *",${f_value},"*)
+      printf '%s' "${f_list}"
+      ;;
+    *)
+      if [[ -n "${f_list}" ]]
+      then
+        printf '%s,%s' "${f_list}" "${f_value}"
+      else
+        printf '%s' "${f_value}"
+      fi
+      ;;
+  esac
+}
+
+# Global IPv6 data by MAC (neighbors) and by interface (own addresses). It
+# enriches rows that were discovered over IPv4; IPv6-only devices stay out.
+declare -A g_v6_by_mac
+while read -r f_v6 f_v6mac
+do
+  [[ -z "${f_v6}" ]] && continue
+  f_is_dashboard_v6 "${f_v6}" || continue
+  f_v6mac="$(f_normmac "${f_v6mac}")"
+  [[ -z "${f_v6mac}" ]] && continue
+  f_v6mac="${f_v6mac,,}"
+  g_v6_by_mac[${f_v6mac}]="$(f_append_csv "${g_v6_by_mac[${f_v6mac}]-}" "${f_v6}")"
+done < <(ip -6 neigh show 2>/dev/null | awk '{ for (i=1;i<=NF;i++) if ($i=="lladdr") { print $1, $(i+1); break } }')
+
+declare -A g_v6_by_iface
+while read -r f_ifn f_v6
+do
+  [[ -z "${f_ifn}" ]] && continue
+  f_is_dashboard_v6 "${f_v6}" || continue
+  g_v6_by_iface[${f_ifn}]="$(f_append_csv "${g_v6_by_iface[${f_ifn}]-}" "${f_v6}")"
+done < <(ip -o -6 addr show scope global 2>/dev/null | awk '{print $2, $4}' | sed 's|/.*||')
 
 # Vendor from the OUI database (works for any row, not just self rows).
 f_oui_vendor() {
@@ -293,9 +382,10 @@ f_order=()
 declare -A f_row
 
 f_emit() {
-  # Fields: name|ip|mac|vendor|wifi|ap|signal
+  # Fields: name|ip|mac|vendor|wifi|ap|signal|ipv6
   local f_name="$1" f_ip="$2" f_mac="$3" f_vendor="${4:-}" \
-        f_wifi="${5:-false}" f_ap="${6:-}" f_signal="${7:-}"
+        f_wifi="${5:-false}" f_ap="${6:-}" f_signal="${7:-}" \
+        f_ipv6="${8:-}"
   local f_is_self="false"
   local f_is_gw="false"
   local f_subnet="$(f_cidr_of "${f_ip}")"
@@ -303,7 +393,7 @@ f_emit() {
   # AP interface itself, for everything else the interface of its subnet.
   local f_iface="${f_ap}"
   [[ -z "${f_iface}" ]] && f_iface="$(f_iface_of "${f_ip}")"
-  [[ "${f_ip}" == "${f_gw}" ]] && f_is_gw="true"
+  [[ "${f_ip}" == "${f_gw4}" ]] && f_is_gw="true"
   local f_x
   for f_x in "${g_host_ips[@]}"
   do
@@ -312,8 +402,9 @@ f_emit() {
   local f_sig_json="null"
   [[ -n "${f_signal}" ]] && f_sig_json="${f_signal}"
   local f_json
-  f_json=$(printf '{"ip":%s,"mac":%s,"vendor":%s,"hostname":%s,"subnet":%s,"interface":%s,"self":%s,"gateway":%s,"wifi":%s,"ap":%s,"signal":%s}' \
+  f_json=$(printf '{"ip":%s,"ipv6":%s,"mac":%s,"vendor":%s,"hostname":%s,"subnet":%s,"interface":%s,"self":%s,"gateway":%s,"wifi":%s,"ap":%s,"signal":%s}' \
     "$(printf '%s' "${f_ip}" | f_json_escape)" \
+    "$(printf '%s' "${f_ipv6}" | f_json_escape)" \
     "$(printf '%s' "${f_mac}" | f_json_escape)" \
     "$(printf '%s' "${f_vendor}" | f_json_escape)" \
     "$(printf '%s' "${f_name}" | f_json_escape)" \
@@ -370,7 +461,9 @@ do
   if [[ "${f_state}" == "REACHABLE" ]] || [[ "${f_state}" == "STALE" ]] \
      || [[ "${f_state}" == "DELAY" ]] || [[ "${f_state}" == "PROBE" ]]
   then
-    f_emit "" "${f_fip}" "$(f_normmac "${f_fmac}")"
+    f_fmac="$(f_normmac "${f_fmac}")"
+    f_fv6="${g_v6_by_mac[${f_fmac,,}]-}"
+    f_emit "" "${f_fip}" "${f_fmac}" "" "false" "" "" "${f_fv6}"
   fi
 done < <(ip -4 neigh show 2>/dev/null)
 
@@ -397,7 +490,9 @@ do
       f_aname=""
     fi
     f_amac="$(f_normmac "${f_amac}")"
-    f_emit "${f_aname}" "${f_aip}" "${f_amac}" "$(f_oui_vendor "${f_amac}")"
+    f_av6="${g_v6_by_mac[${f_amac,,}]-}"
+    f_emit "${f_aname}" "${f_aip}" "${f_amac}" "$(f_oui_vendor "${f_amac}")" \
+      "false" "" "" "${f_av6}"
   done < "${f_dat}"
 done
 
@@ -423,7 +518,8 @@ do
     fi
   done
   f_order=(${f_kept[@]+"${f_kept[@]}"})
-  f_emit "" "${f_sip}" "${f_smac}"
+  f_sv6="${g_v6_by_iface[${f_siface}]-}"
+  f_emit "" "${f_sip}" "${f_smac}" "" "false" "" "" "${f_sv6}"
 done
 
 # --- WiFi stations of the hostapd access point ------------------------------
@@ -456,7 +552,9 @@ do
         # Not seen in the scan: resolve the IP via the neighbor table.
         f_sta_ip="$(ip -4 neigh 2>/dev/null | awk -v m="${f_sta_mac,,}" \
           '{ if (tolower($5)==m) { print $1; exit } }')"
-        f_emit "" "${f_sta_ip}" "${f_sta_mac}" "" "true" "${f_wlan}" "${f_sta_sig}"
+        f_sta_v6="${g_v6_by_mac[${f_sta_mac,,}]-}"
+        f_emit "" "${f_sta_ip}" "${f_sta_mac}" "" "true" "${f_wlan}" \
+          "${f_sta_sig}" "${f_sta_v6}"
       fi
       f_sta_mac=""
     fi
@@ -523,8 +621,15 @@ do
     "$(printf '%s' "${g_links[$f_i]}" | f_json_escape)")"
 done
 
-f_payload="$(printf '{"scanned_at":"%s","subnets":[%s],"devices":[%s]}\n' \
-  "${f_scan_end}" "${f_sub_json}" "${f_devices}")"
+f_uplink_json="$(printf '{"interface":%s,"ipv4":%s,"ipv6":%s,"gateway_ipv4":%s,"gateway_ipv6":%s}' \
+  "$(printf '%s' "${f_uplink_iface}" | f_json_escape)" \
+  "$(f_json_array "${g_uplink4[@]}")" \
+  "$(f_json_array "${g_uplink6[@]}")" \
+  "$(printf '%s' "${f_gw4}" | f_json_escape)" \
+  "$(printf '%s' "${f_gw6}" | f_json_escape)")"
+
+f_payload="$(printf '{"scanned_at":"%s","subnets":[%s],"devices":[%s],"uplink":%s}\n' \
+  "${f_scan_end}" "${f_sub_json}" "${f_devices}" "${f_uplink_json}")"
 printf '%s' "${f_payload}" > "${f_cache}"
 printf '%s' "${f_payload}"
 

@@ -107,6 +107,11 @@ def _get_network_devices():
     minutely via cron (symbios-dashboard-snapshot.sh); this loader never
     triggers it.
 
+    The ``uplink`` block holds the addresses and gateways of the
+    default-route interface(s), including hosts whose uplink has only a
+    public IPv4 address. Device rows may carry an ``ipv6`` field enriched
+    from the kernel neighbor table.
+
     Besides the flat ``devices`` list (kept for compatibility) this also
     builds ``groups``: one entry per subnet with the host's own row as
     ``self`` (its IP/hostname/MAC in that network) and the remaining
@@ -118,6 +123,7 @@ def _get_network_devices():
         return {}
     try:
         data['scanned_at'] = _localize_time(data.get('scanned_at'))
+        data['uplink'] = data.get('uplink') or {}
 
         # Sort by subnet (the physical default-route LAN first), then IP.
         subnets = data.get('subnets') or []
@@ -210,6 +216,16 @@ def home(request):
     # Failing healthchecks
     failing_checks = _get_failing_healthchecks()
 
+    # Compact news preview on the dashboard (same pre-fetched snapshot as /news/).
+    news_snapshot = _read_snapshot('news.json')
+    news_items = []
+    for raw in (news_snapshot.get('items') or [])[:3]:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        item['published_local'] = _localize_time(item.get('published'))
+        news_items.append(item)
+
     # Installed services with healthcheck status
     catalog = get_catalog()
     installed = _get_installed_playbooks()
@@ -225,6 +241,9 @@ def home(request):
         'setup_incomplete': not is_setup_complete(vars_, ldap_users=ldap_users),
         'setup_pending': len(pending),
         'failing_checks': failing_checks,
+        'news_items': news_items,
+        'news_status': news_snapshot.get('status', ''),
+        'news_unread': news_snapshot.get('unread', 0),
         'installed_services': installed_services,
         'available_services': available_services,
         'healthcheck_status': healthcheck_status,
