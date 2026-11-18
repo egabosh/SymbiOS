@@ -35,6 +35,8 @@
 #     ("rustdesk.service", /usr/bin/rustdesk --service), and this is the config that instance (unattended
 #     access, login screen) actually uses. No per-user files are needed; the playbook is the source of truth
 #     and rewrites the file on every run, then restarts the service when its unit exists.
+#     /root is a symlink into /symbios, so the config lives on the LUKS volume: systemd boot autostart is
+#     disabled and symbios-after-mount.sh starts the service from rc.local after the data volume is mounted.
 #     Requires services/rustdesk.yml installed first (source of the server public key).
 #
 #     There are no uninstall buttons (the uninstall schema is container-based); remove via "apt-get remove -y rustdesk".
@@ -155,10 +157,14 @@
       failed_when: false
       changed_when: false
 
-    - name: Enable rustdesk service
+    # The service config lives below /root (a symlink into /symbios), so systemd
+    # would start it before the LUKS volume is mounted. Boot start is disabled;
+    # symbios-after-mount.sh starts it from rc.local after the mount.
+    - name: Disable boot autostart for rustdesk service (started via rc.local)
       ansible.builtin.systemd:
         name: rustdesk.service
-        enabled: true
+        state: started
+        enabled: false
       when: rustdesk_client_unit.rc == 0
 
     - name: Deploy healthcheck

@@ -26,7 +26,8 @@ mounted (LUKS boot-unlock). Called from /etc/rc.local, not by hand.
 
 Order: container runtime (docker/containerd) -> network bridge assignments
 -> libvirt default storage pool -> WoL watcher instances -> arpwatch
-reconcile -> runchecks daemon + watchdog timer (delayed, backgrounded).
+reconcile -> nslcd -> RustDesk service -> runchecks daemon + watchdog timer
+(delayed, backgrounded).
 
 Exit code is always 0. Single failures only print a warning.
 EOF
@@ -150,7 +151,19 @@ then
     g_echo_warn "nslcd wait unit failed to schedule"
 fi
 
-# 7. Health daemon + watchdog timer, delayed so post-mount starters
+# 7. RustDesk remote access. Its central config lives in /root/.config/rustdesk
+# (/root is a symlink into /symbios), so the systemd unit is not boot-enabled.
+if systemctl cat rustdesk.service >/dev/null 2>&1
+then
+  if systemctl start rustdesk.service 2>/dev/null
+  then
+    g_echo_note "rustdesk service started"
+  else
+    g_echo_warn "rustdesk service start failed"
+  fi
+fi
+
+# 8. Health daemon + watchdog timer, delayed so post-mount starters
 # (OpenVPN, hostapd, VM restore blocks later in rc.local) settle first.
 # Same detachment rule as above: transient timer unit, not a background sleep.
 systemd-run --unit=symbios-runchecks-delayed --collect --on-active=30s /bin/systemctl start runchecks.service runchecks-watchdog.timer 2>/dev/null || \
