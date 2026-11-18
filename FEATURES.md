@@ -278,6 +278,10 @@ phase of the maintenance window, plus manual runs at any time
 (Debian/Docker/SymbiOS modules, up to 2 h exec-modal jobs).
 - Playbooks: `base-services/autoupdate.yml`, `base-services/maintenance.yml`
 - Scripts: `scripts/autoupdate.sh` + `autoupdate.d/`
+- Optional reboot policy (`Settings -> Security`): a pending reboot (apt
+  marker or newer installed kernel) warns immediately; `reboot_max_days`
+  decides when `reboot_auto` schedules the reboot with a five minute delay in
+  the maintenance window.
 
 ### Language & Timezone (`/settings/localization/`)
 Timezone (from the host's `timedatectl` list), keyboard layout (from

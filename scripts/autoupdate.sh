@@ -14,6 +14,7 @@ Modules:
   debian              operating system packages (unattended upgrades)
   docker              Docker images and running containers
   btrfs-scrub         Btrfs scrub health
+  reboot-threshold    Reboot when required after the configured maximum uptime
   smart-selftest      SMART disk self-tests
   symbios             SymbiOS repo update + changed playbooks
 

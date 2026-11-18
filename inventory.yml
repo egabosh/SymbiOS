@@ -16,6 +16,11 @@ all:
     twofa_enabled: false      # Authelia 2FA enforcement for LDAP users
     password_policy: 'medium' # LDAP password strength (none|low|medium|high|paranoid)
     webui_public_access: false  # expose the WebUI via Traefik to the internet (default: LAN only)
+    # reboot policy: 0 disables it; otherwise warn as soon as a reboot is
+    # pending (apt marker or newer installed kernel). reboot_auto applies the
+    # reboot in the maintenance window only after N days uptime.
+    reboot_max_days: 0
+    reboot_auto: false
     localization_configured: false  # true after the user saved the localization settings in the WebUI
     dns_configured: false           # true after the user saved the DNS settings in the WebUI
     # Docker network IPs (static, defined in base-services/traefik.yml)

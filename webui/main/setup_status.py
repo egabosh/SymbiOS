@@ -113,7 +113,9 @@ PAGE_EXPLAIN = {
     'security': (
         'Configure the global password policy for all user accounts. '
         'This applies to the initial admin password change, user creation, '
-        'and password resets.'
+        'and password resets. You can also set a maximum uptime: a pending '
+        'reboot warns immediately on the Health page, and if enabled the host '
+        'reboots in the daily maintenance window once that uptime is reached.'
     ),
     'updates': (
         'SymbiOS keeps your server up to date automatically once a day: '

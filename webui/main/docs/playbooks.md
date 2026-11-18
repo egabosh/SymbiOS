@@ -641,7 +641,17 @@ without a playbook:
   asked for the reboot) and, because Debian trixie dropped
   `update-notifier-common`, additionally compares the running kernel
   (`uname -r`) with the installed `linux-image-*` packages of the same
-  flavour. The reboot is never triggered automatically.
+  flavour. This check only reports; any reboot comes from the opt-in policy
+  below or an explicit WebUI action.
+- `reboot-uptime.check` - warns as soon as a reboot is pending, even below the
+  configured `reboot_max_days`; the message states when the automatic reboot
+  would happen. It uses the same detector as `reboot-required.check` (Debian
+  apt marker plus running-vs-installed kernel comparison) and stays silent
+  while the policy is disabled or no reboot is needed. With
+  `reboot_auto: true`, `scripts/autoupdate.d/reboot-threshold.update` schedules
+  the reboot with a five minute delay during the daily maintenance window
+  (backup first, then updates), but only once the uptime limit is reached. A
+  non-empty `/run/symbios-no-auto-reboot` suppresses it. See `SECURITY.md`.
 
 ## Shared tasks
 

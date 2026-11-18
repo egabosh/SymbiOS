@@ -510,7 +510,8 @@ texts opportunistically).
 | `symbios-backup-delete.sh` | Delete snapshots in the local and all remote repositories (JSON plan without `--yes`) | `delete <YYYY-MM-DD> [--yes]`, `all [--yes]` |
 | `symbios-restore.sh` | Per-service or full restore with `plan` dry-run | `plan\|restore <date> [service\|--full] [--yes]` |
 | `autoupdate.sh` | Update dispatcher (runs `autoupdate.d/*.update`) | `[module ...]` |
-| `autoupdate.d/` | 5 update modules (debian, docker, symbios, ...) | via `autoupdate.sh` |
+| `autoupdate.d/` | 6 update modules (debian, docker, reboot-threshold, symbios, ...) | via `autoupdate.sh` |
+| `autoupdate.d/reboot-threshold.update` | Schedules a reboot after the maximum uptime only when a reboot is actually pending (opt-in) | via `autoupdate.sh`, `SYMBIOS_REBOOT_DRY_RUN=1` for a test |
 | `mint-home-backup.sh` | Installed by `external-services/linux-mint-home-backup.yml` **on the Mint target**, not on the SymbiOS host: archives interactive users' homes and streams them to `/symbios/backups/mint/<id>/` | `--dry-run`, `--output <file>`, `--config <file>`, `--help` |
 
 ### 4.6 Monitoring and health
@@ -518,7 +519,8 @@ texts opportunistically).
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | `runchecks.sh` | Health daemon: `runchecks.d/*.check` every 5 min -> JSON | no args |
-| `runchecks.d/` | 37 check scripts (basic + per-service healthchecks) | via `runchecks.sh` |
+| `runchecks.d/` | 42 check scripts (basic + per-service healthchecks) | via `runchecks.sh` |
+| `runchecks.d/reboot-uptime.check` | Warns as soon as a reboot is pending and reports the uptime policy | via `runchecks.sh` |
 | `runchecks-watchdog.sh` | Restarts `runchecks.service` when results JSON goes stale | no args |
 | `symbios-run-check.sh` | Single health check on demand (JSON result) | `<check-name>` |
 | `symbios-system-stats.sh` | CPU/load/mem/swap/uptime/IO as JSON (`/proc` based) | no args |

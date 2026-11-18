@@ -1,0 +1,97 @@
+# Autoupdate module: reboot after a configured maximum uptime.
+#
+# Runs from autoupdate.sh inside the daily maintenance window (backup first,
+# updates second). Kernel and libc fixes only become active after a reboot,
+# so a long uptime keeps known-vulnerable code running even on an updated
+# host. With reboot_max_days > 0, reboot_auto true AND an actual pending
+# reboot (apt marker or newer installed kernel), this module schedules a
+# reboot with a five minute delay; the delay lets the rest of the update run
+# finish and leaves time to cancel with "shutdown -c". Uptime alone never
+# reboots an otherwise healthy host.
+#
+# A non-empty /run/symbios-no-auto-reboot suppresses the reboot for manual
+# maintenance. It is checked for content (not just existence) so a leftover
+# empty marker cannot silently disable the policy forever.
+#
+# Test without rebooting: SYMBIOS_REBOOT_DRY_RUN=1 autoupdate.sh reboot-threshold
+
+# Read the runtime policy. A broken value means disabled, never a failure.
+g_max_days="$(f_symbios_var reboot_max_days 0)"
+[[ "${g_max_days}" =~ ^[0-9]+$ ]] || g_max_days=0
+g_max_days=$((10#${g_max_days}))
+[[ "${g_max_days}" -gt 0 ]] || return 0
+
+g_reboot_auto="$(f_symbios_var reboot_auto false)"
+case "${g_reboot_auto,,}" in
+  true|1|yes|on) g_reboot_auto="true" ;;
+  *)             g_reboot_auto="false" ;;
+esac
+
+g_uptime_days="$(awk '{ printf "%d", $1 / 86400 }' /proc/uptime 2>/dev/null || echo 0)"
+[[ -n "${g_uptime_days}" ]] || g_uptime_days=0
+[[ "${g_uptime_days}" -ge "${g_max_days}" ]] || return 0
+
+# A disappeared shutdown means the pending reboot was cancelled. Drop the
+# marker so a later maintenance run can schedule a new one.
+g_reboot_marker="/run/symbios-reboot-threshold.scheduled"
+if [[ -e "${g_reboot_marker}" && ! -f /run/systemd/shutdown/scheduled ]]
+then
+  rm -f "${g_reboot_marker}"
+fi
+
+# Uptime alone is not a reason to reboot. Use the same detector as
+# reboot-required.check so only a pending apt marker or a newer installed
+# kernel can trigger the policy.
+if ! f_reboot_needed
+then
+  return 0
+fi
+
+# Warn-only mode is covered by reboot-uptime.check on the Health page; one
+# extra line here makes the reason visible in the maintenance log as well.
+if [[ "${g_reboot_auto}" != "true" ]]
+then
+  g_echo_warn "${g_reboot_reason} (uptime ${g_uptime_days} days, limit ${g_max_days}): automatic reboot disabled, please reboot manually"
+  return 0
+fi
+
+# Never stack a second shutdown on top of one already pending or while the
+# system is shutting down.
+if [[ -f /run/systemd/shutdown/scheduled ]]
+then
+  g_echo "A shutdown is already scheduled - skipping the uptime reboot"
+  return 0
+fi
+g_system_state="$(systemctl is-system-running 2>/dev/null || true)"
+[[ -n "${g_system_state}" ]] || g_system_state="unknown"
+if [[ "${g_system_state}" == "stopping" ]]
+then
+  g_echo "System is stopping - skipping the uptime reboot"
+  return 0
+fi
+if [[ -s /run/symbios-no-auto-reboot ]]
+then
+  g_echo "Manual maintenance marker present - skipping the uptime reboot"
+  return 0
+fi
+
+if [[ "${SYMBIOS_REBOOT_DRY_RUN:-0}" == "1" ]]
+then
+  g_echo_note "Dry run: would schedule a security reboot in 5 minutes (uptime ${g_uptime_days} days, limit ${g_max_days})"
+  return 0
+fi
+
+# Notify before scheduling so an admin can still cancel with "shutdown -c".
+if [[ -x /usr/local/bin/notify.sh ]]
+then
+  printf '%s' "${g_reboot_reason}. Uptime ${g_uptime_days} days exceeds the limit of ${g_max_days} days. Scheduling a security reboot in 5 minutes (cancel with: shutdown -c)." \
+    | /usr/local/bin/notify.sh -s "SymbiOS security reboot scheduled" 2>/dev/null || true
+fi
+
+if shutdown -r +5 "SymbiOS security reboot: ${g_reboot_reason}" 2>/dev/null
+then
+  touch "${g_reboot_marker}"
+  g_echo_warn "${g_reboot_reason} (uptime ${g_uptime_days} days, limit ${g_max_days}): security reboot scheduled in 5 minutes; cancel with: shutdown -c"
+else
+  g_echo_error "Could not schedule the security reboot"
+fi

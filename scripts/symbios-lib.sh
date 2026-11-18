@@ -375,6 +375,81 @@ function f_check_cache {
   return 0
 }
 
+# Determine whether a reboot is currently required. Sets g_reboot_reason to a
+# human-readable explanation and returns 0 when a reboot is pending.
+#
+# /run/reboot-required is the Debian apt marker. Debian trixie no longer
+# installs update-notifier-common, so the marker can be absent after a kernel
+# update; the running-vs-installed kernel comparison below keeps the result
+# reliable. Both reboot-required.check and reboot-threshold.update use this
+# detector so reporting and the opt-in policy cannot disagree.
+function f_reboot_needed {
+  local f_reason="" f_pkgs="" f_release f_flavour f_version
+  local f_pkg f_cand f_cand_version f_pkg_count=0 f_running_installed=0 f_newer=""
+
+  g_reboot_reason=""
+
+  # Debian marker written by apt postinst scripts (may be missing on trixie).
+  if [[ -f /run/reboot-required ]]
+  then
+    if [[ -s /run/reboot-required.pkgs ]]
+    then
+      f_pkgs="$(sort -u /run/reboot-required.pkgs | tr '\n' ' ')"
+      f_pkgs="${f_pkgs% }"
+    fi
+    f_reason="Reboot required${f_pkgs:+: pending update of ${f_pkgs}}"
+  fi
+
+  # Split uname -r into version and flavour, e.g. "6.1.0-13-amd64" ->
+  # 6.1.0-13 + "-amd64", "6.18.50+rpt-rpi-2712" -> 6.18.50 + "+rpt-rpi-2712".
+  # The flavour filter matters on Pi hosts with two installed kernel flavours.
+  f_release="$(uname -r)"
+  if [[ "${f_release}" == *"+"* ]]
+  then
+    f_flavour="+${f_release#*+}"
+  elif [[ "${f_release}" == *"-"* ]]
+  then
+    f_flavour="-${f_release##*-}"
+  else
+    f_flavour=""
+  fi
+  f_version="${f_release%"${f_flavour}"}"
+
+  # dpkg compares Debian versions correctly (6.1.0-14 > 6.1.0-13). Process
+  # substitution keeps the loop in the current shell so the counters survive.
+  while read -r f_pkg
+  do
+    f_pkg_count=$((f_pkg_count + 1))
+    f_cand="${f_pkg#linux-image-}"
+    [[ "${f_cand}" == "${f_release}" ]] && f_running_installed=1
+    [[ -n "${f_flavour}" && "${f_cand}" != *"${f_flavour}"* ]] && continue
+
+    f_cand_version="${f_cand%"${f_flavour}"}"
+    if dpkg --compare-versions "${f_cand_version}" gt "${f_version}" 2>/dev/null
+    then
+      f_newer="${f_newer} ${f_cand}"
+    fi
+  done < <(dpkg-query -W -f='${Package} ${Status}\n' 'linux-image-[0-9]*' 2>/dev/null | awk '$NF == "installed" {print $1}')
+
+  # Only judge when the host actually has versioned kernel image packages.
+  if [[ "${f_pkg_count}" -gt 0 ]]
+  then
+    if [[ -n "${f_newer}" ]]
+    then
+      [[ -z "${f_reason}" ]] || f_reason="${f_reason}; "
+      f_reason="${f_reason}Kernel update pending: installed${f_newer}, running ${f_release}"
+    elif [[ "${f_running_installed}" -eq 0 ]]
+    then
+      [[ -z "${f_reason}" ]] || f_reason="${f_reason}; "
+      f_reason="${f_reason}Kernel update pending: running kernel ${f_release} is no longer installed"
+    fi
+  fi
+
+  g_reboot_reason="${f_reason}"
+  [[ -n "${f_reason}" ]] && return 0
+  return 1
+}
+
 # Set up LDAP connection details for host-side scripts. Reads the base DN
 # from inventory and the admin password from ${g_config_dir}/.ldap_admin_pw.
 # Sets f_ldap_uri, f_base_dn, f_admin_pw, f_bind_dn.

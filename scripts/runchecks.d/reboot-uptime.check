@@ -1,0 +1,59 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="Reboot Policy"
+CHECK_DESC="Warns as soon as a reboot is pending and reports the configured uptime policy."
+CHECK_DETAIL="Uses the same detector as reboot-required.check: Debian reboot marker plus running-vs-installed kernel comparison.|Warns immediately while the policy is enabled (reboot_max_days > 0), even below the limit.|With reboot_auto enabled, reboot-threshold.update schedules the reboot only once the uptime limit is reached; this check only warns."
+
+# Read the runtime policy. A broken value means disabled: security policy
+# settings must never turn a healthy host into a permanent healthcheck error.
+f_max_days="$(f_symbios_var reboot_max_days 0)"
+[[ "${f_max_days}" =~ ^[0-9]+$ ]] || f_max_days=0
+f_max_days=$((10#${f_max_days}))
+[[ "${f_max_days}" -gt 0 ]] || return 0
+
+f_reboot_auto="$(f_symbios_var reboot_auto false)"
+case "${f_reboot_auto,,}" in
+  true|1|yes|on) f_reboot_auto="true" ;;
+  *)             f_reboot_auto="false" ;;
+esac
+
+# Whole days are enough here: both the warning and the maintenance module
+# use the same coarse comparison, so they agree on when the limit is hit.
+f_uptime_days="$(awk '{ printf "%d", $1 / 86400 }' /proc/uptime 2>/dev/null || echo 0)"
+[[ -n "${f_uptime_days}" ]] || f_uptime_days=0
+f_limit_reached="no"
+[[ "${f_uptime_days}" -ge "${f_max_days}" ]] && f_limit_reached="yes"
+
+# Uptime alone is not a reason to reboot. Warn as soon as the shared detector
+# finds an apt marker or a newer installed kernel, but leave the scheduling
+# decision to reboot-threshold.update (which waits for the uptime limit).
+f_reboot_needed || return 0
+
+if [[ "${f_limit_reached}" == "no" ]]
+then
+  # Early warning: the reboot is due, but the automatic policy is still
+  # waiting for the configured uptime. Tell the admin when it will act.
+  if [[ -f /run/systemd/shutdown/scheduled ]]
+  then
+    g_echo_warn "${g_reboot_reason} (uptime ${f_uptime_days} days, limit ${f_max_days}): reboot scheduled"
+  elif [[ "${f_reboot_auto}" == "true" ]]
+  then
+    g_echo_warn "${g_reboot_reason} (uptime ${f_uptime_days} days): reboot will be scheduled after ${f_max_days} days uptime in the daily maintenance window"
+  else
+    g_echo_warn "${g_reboot_reason} (uptime ${f_uptime_days} days): reboot recommended (automatic reboot disabled)"
+  fi
+  return 0
+fi
+
+# Limit reached: report whether the reboot is already pending or will happen
+# at the next maintenance run, and stay useful in warn-only mode as well.
+if [[ "${f_reboot_auto}" == "true" ]]
+then
+  if [[ -f /run/systemd/shutdown/scheduled ]]
+  then
+    g_echo_warn "${g_reboot_reason} (uptime ${f_uptime_days} days, limit ${f_max_days}): reboot scheduled"
+  else
+    g_echo_warn "${g_reboot_reason} (uptime ${f_uptime_days} days, limit ${f_max_days}): reboot will be scheduled at the next maintenance run"
+  fi
+else
+  g_echo_warn "${g_reboot_reason} (uptime ${f_uptime_days} days, limit ${f_max_days}): reboot recommended (automatic reboot disabled)"
+fi

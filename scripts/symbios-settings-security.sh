@@ -1,5 +1,5 @@
 #!/bin/bash
-# SymbiOS - Manage security settings (password policy, WebUI access scope).
+# SymbiOS - Manage security settings (password policy, WebUI access, reboot).
 #
 # Settings CLI-first architecture: the WebUI page /settings/security/ is a
 # thin wrapper around this script, which owns validation and the
@@ -16,17 +16,24 @@ function f_usage {
   cat << EOF
 Usage: $(basename "$0") <command> [options]
 
-Manage SymbiOS security settings (password policy, WebUI access scope).
+Manage SymbiOS security settings (password policy, WebUI access, reboot
+policy). The reboot keys are read at runtime by the healthcheck and the
+maintenance module, so saving them needs no playbook apply. A reboot is only
+warned about or scheduled when one is actually pending (apt marker or newer
+installed kernel); uptime alone never triggers it.
 
 Commands:
   get [--json]                    Print current values (key=value lines,
                                   or a JSON object with --json)
-  set [--policy POLICY --public-access true|false | --json-stdin]
-       [--check]
+  set [--policy POLICY --public-access true|false
+       --max-days N --auto true|false | --json-stdin] [--check]
                                   Validate and write to inventory.yml.
                                   --json-stdin reads {"password_policy":..,
-                                  "webui_public_access":..}. POLICY is one of
-                                  none|low|medium|high|paranoid. Options left
+                                  "webui_public_access":..,
+                                  "reboot_max_days":.., "reboot_auto":..}.
+                                  POLICY is one of
+                                  none|low|medium|high|paranoid. --max-days 0
+                                  disables the reboot policy. Options left
                                   out keep their current value. --check
                                   changes nothing.
   schema                          Print the field description as JSON
@@ -87,7 +94,13 @@ then
    "options": ["none", "low", "medium", "high", "paranoid"],
    "note": "Levels: none (1+ characters), low (8+), medium (10+ with letter, digit and special character), high (16+, same mix), paranoid (32+, same mix). Enforced for LDAP user passwords."},
   {"name": "webui_public_access", "type": "bool", "label": "WebUI public (internet) access",
-   "required": false, "default": false, "secret": false}
+   "required": false, "default": false, "secret": false},
+  {"name": "reboot_max_days", "type": "number", "label": "Uptime in days after which a pending reboot may be applied automatically",
+   "required": false, "default": 0, "secret": false, "pattern": "^[0-9]+$",
+   "note": "0 disables the reboot policy. Otherwise the healthcheck warns as soon as a reboot is pending; this value only limits when the automatic reboot may happen."},
+  {"name": "reboot_auto", "type": "bool", "label": "Automatic reboot in the daily maintenance window",
+   "required": false, "default": false, "secret": false,
+   "note": "Only effective with a maximum uptime above 0 and a pending reboot. Off means warning only."}
 ]
 EOF
   exit 0
@@ -95,20 +108,45 @@ fi
 
 f_cur_policy="$(f_symbios_var password_policy "")"
 f_cur_public="$(f_symbios_var webui_public_access "")"
+f_cur_max_days="$(f_symbios_var reboot_max_days 0)"
+f_cur_auto="$(f_symbios_var reboot_auto false)"
+
+# inventory.yml keeps inline comments on some defaults. f_symbios_var strips
+# quotes only at the end of the line, so remove comments here before reading
+# the values into the generic settings form.
+f_cur_policy="${f_cur_policy%%#*}"
+f_cur_policy="${f_cur_policy%"${f_cur_policy##*[![:space:]]}"}"
+f_cur_policy="${f_cur_policy#\'}"
+f_cur_policy="${f_cur_policy%\'}"
+f_cur_policy="${f_cur_policy#\"}"
+f_cur_policy="${f_cur_policy%\"}"
+f_cur_public="${f_cur_public%%#*}"
+f_cur_public="${f_cur_public%"${f_cur_public##*[![:space:]]}"}"
+
+# Normalize booleans and the day counter so get --json always emits valid
+# JSON types, even when inventory.yml holds YAML spellings like "True".
 if [[ "${f_cur_public}" == "True" || "${f_cur_public}" == "true" ]]
 then
   f_cur_public="true"
 else
   f_cur_public="false"
 fi
+if [[ "${f_cur_auto,,}" == "true" || "${f_cur_auto}" == "1" ]]
+then
+  f_cur_auto="true"
+else
+  f_cur_auto="false"
+fi
+[[ "${f_cur_max_days}" =~ ^[0-9]+$ ]] || f_cur_max_days=0
+f_cur_max_days=$((10#${f_cur_max_days}))
 
 if [[ "${f_command}" == "get" ]]
 then
   if [[ "${1:-}" == "--json" ]]
   then
-    printf '{"password_policy": %s, "webui_public_access": %s}\n' \
+    printf '{"password_policy": %s, "webui_public_access": %s, "reboot_max_days": %d, "reboot_auto": %s}\n' \
       "$(printf '%s' "${f_cur_policy}" | f_json_escape)" \
-      "${f_cur_public}"
+      "${f_cur_public}" "${f_cur_max_days}" "${f_cur_auto}"
     exit 0
   elif [[ $# -gt 0 ]]
   then
@@ -117,6 +155,8 @@ then
   fi
   echo "password_policy=${f_cur_policy}"
   echo "webui_public_access=${f_cur_public}"
+  echo "reboot_max_days=${f_cur_max_days}"
+  echo "reboot_auto=${f_cur_auto}"
   exit 0
 fi
 
@@ -126,6 +166,10 @@ f_new_policy=""
 f_given_policy="no"
 f_new_public=""
 f_given_public="no"
+f_new_max_days=""
+f_given_max_days="no"
+f_new_auto=""
+f_given_auto="no"
 f_check="no"
 
 while [[ $# -gt 0 ]]
@@ -153,6 +197,28 @@ do
       f_given_public="yes"
       shift
       ;;
+    --max-days)
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      f_new_max_days="$2"
+      f_given_max_days="yes"
+      shift 2
+      ;;
+    --max-days=*)
+      f_new_max_days="${1#--max-days=}"
+      f_given_max_days="yes"
+      shift
+      ;;
+    --auto)
+      [[ $# -ge 2 ]] || f_ss_fail_usage
+      f_new_auto="$2"
+      f_given_auto="yes"
+      shift 2
+      ;;
+    --auto=*)
+      f_new_auto="${1#--auto=}"
+      f_given_auto="yes"
+      shift
+      ;;
     --json-stdin)
       f_json="$(cat)"
       if [[ "${f_json}" == *'"password_policy"'* ]]
@@ -170,6 +236,16 @@ do
         f_onoff="${f_onoff#\"}"
         f_new_public="${f_onoff}"
         f_given_public="yes"
+      fi
+      if [[ "${f_json}" == *'"reboot_max_days"'* ]]
+      then
+        f_new_max_days="$(jq -r '.reboot_max_days' <<< "${f_json}" 2>/dev/null)"
+        f_given_max_days="yes"
+      fi
+      if [[ "${f_json}" == *'"reboot_auto"'* ]]
+      then
+        f_new_auto="$(jq -r '.reboot_auto' <<< "${f_json}" 2>/dev/null)"
+        f_given_auto="yes"
       fi
       shift
       ;;
@@ -192,9 +268,10 @@ do
   esac
 done
 
-if [[ "${f_given_policy}" == "no" && "${f_given_public}" == "no" ]]
+if [[ "${f_given_policy}" == "no" && "${f_given_public}" == "no" \
+  && "${f_given_max_days}" == "no" && "${f_given_auto}" == "no" ]]
 then
-  f_ss_fail_validation "Nothing to set - pass --policy and/or --public-access"
+  f_ss_fail_validation "Nothing to set - pass --policy, --public-access, --max-days and/or --auto"
 fi
 
 if [[ "${f_given_policy}" == "yes" ]]
@@ -217,6 +294,24 @@ then
   f_new_public="${f_parsed_public}"
 fi
 
+if [[ "${f_given_max_days}" == "yes" ]]
+then
+  if [[ ! "${f_new_max_days}" =~ ^[0-9]+$ ]]
+  then
+    f_ss_fail_validation "Invalid --max-days value: ${f_new_max_days} (expected a non-negative integer)"
+  fi
+  f_new_max_days=$((10#${f_new_max_days}))
+fi
+
+if [[ "${f_given_auto}" == "yes" ]]
+then
+  if ! f_parsed_auto="$(f_ss_parse_bool "${f_new_auto}")"
+  then
+    f_ss_fail_validation "Invalid --auto value: ${f_new_auto} (expected true|false)"
+  fi
+  f_new_auto="${f_parsed_auto}"
+fi
+
 # --- transactional write -------------------------------------------------------
 
 f_merge="{"
@@ -230,6 +325,18 @@ if [[ "${f_given_public}" == "yes" ]]
 then
   [[ "${f_merge_first}" == "yes" ]] || f_merge="${f_merge}, "
   f_merge="${f_merge}\"webui_public_access\": ${f_new_public}"
+  f_merge_first="no"
+fi
+if [[ "${f_given_max_days}" == "yes" ]]
+then
+  [[ "${f_merge_first}" == "yes" ]] || f_merge="${f_merge}, "
+  f_merge="${f_merge}\"reboot_max_days\": ${f_new_max_days}"
+  f_merge_first="no"
+fi
+if [[ "${f_given_auto}" == "yes" ]]
+then
+  [[ "${f_merge_first}" == "yes" ]] || f_merge="${f_merge}, "
+  f_merge="${f_merge}\"reboot_auto\": ${f_new_auto}"
 fi
 f_merge="${f_merge}}"
 

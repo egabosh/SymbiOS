@@ -238,3 +238,45 @@ When `false` (default):
 When `true`:
 - WebUI is reachable from the public internet (still requires Authelia auth)
 
+### Reboot Policy
+
+Kernel and libc fixes only become active after a reboot. A host that stays up
+for weeks therefore keeps known-vulnerable code in memory even though its
+packages are patched. SymbiOS can limit that exposure:
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `reboot_max_days` | `0` | Uptime after which a pending reboot may be applied. `0` disables the policy. |
+| `reboot_auto` | `false` | `true` schedules a reboot once the limit is reached; `false` only warns. |
+
+Both keys are configurable under Settings > Security and are read at runtime
+by the scripts, so no playbook reapply is needed.
+
+The pending-reboot detection uses Debian's `/run/reboot-required` marker plus a
+comparison of the running kernel with the installed `linux-image-*` packages,
+because Debian trixie no longer writes the marker reliably after a kernel
+update. Uptime alone never reboots a healthy host.
+
+When `reboot_max_days` is greater than `0`:
+- `reboot-uptime.check` warns as soon as a reboot is pending, even below the
+  limit. The message states when the automatic reboot would happen. It shares
+  the detector with `reboot-required.check`, which already reports the same
+  condition as an error even when the policy is disabled.
+- With `reboot_auto: true`, `autoupdate.d/reboot-threshold.update` schedules
+  `shutdown -r +5` during the daily maintenance window (Settings > Maintenance,
+  default 00:05), but only after the uptime reached `reboot_max_days` **and** a
+  reboot is still pending. Backup always runs before updates in that window,
+  and the shared maintenance lock prevents overlap with manual runs.
+- The five minutes let the rest of the update run finish. An administrator
+  can cancel with `shutdown -c`; a non-empty `/run/symbios-no-auto-reboot`
+  suppresses the reboot for manual maintenance.
+
+The separate `reboot-required.check` reports Debian's reboot marker and an
+outdated running kernel as errors. It only reports; any reboot comes from the
+opt-in policy above or from an explicit WebUI action.
+
+**LUKS caveat**: on hosts whose data volume needs a passphrase after boot
+(for example `symbios-dev`), an automatic reboot leaves the host offline
+until someone unlocks it. Keep `reboot_auto: false` there. Hosts with an
+unlock key in `rc.local` can use the automatic variant.
+
