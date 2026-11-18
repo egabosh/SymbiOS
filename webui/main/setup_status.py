@@ -46,6 +46,12 @@ PAGE_EXPLAIN = {
         'delivered by email and/or into an encrypted matrix room. '
         'At least one of the two channels must be configured.'
     ),
+    'news': (
+        'SymbiOS reads an RSS/Atom feed (by default the release notes of '
+        'this project) and shows new posts in the WebUI. Posts marked as '
+        'security or critical raise a health warning and a notification '
+        'until you mark them as read.'
+    ),
     'matrix': (
         'Sender account for matrix notifications. Messages are sent '
         'E2EE-encrypted into a single room by the matrix-client daemon.'

@@ -40,10 +40,14 @@ from . import views_openvpn
 from . import views_wireguard
 from . import views_filemanager
 from . import views_settings_external_systems
+from . import views_news
 from .utils.log_utils import logs_stream
 
 urlpatterns = [
     path('health/', views.health, name='health'),
+    path('news/', views_news.news, name='news'),
+    path('news/ack/', views_news.news_ack, name='news_ack'),
+    path('news/refresh/', views_news.news_refresh, name='news_refresh'),
     path('stats/', views.stats, name='stats'),
     path('stats/report/', views.stats_report, name='stats_report'),
     path('services/', views_services.services, name='services'),
@@ -93,6 +97,8 @@ urlpatterns = [
     path('settings/mailserver/autoconfig.xml', views_mailserver.autoconfig_xml, name='autoconfig_xml'),
     path('settings/notifications/', views_settings_generic.settings_generic,
          {'slug': 'notifications'}, name='settings_notifications'),
+    path('settings/news/', views_settings_generic.settings_generic,
+         {'slug': 'news'}, name='settings_news'),
     path('settings/notifications/test-mail/', views_notifications.settings_notifications_test_mail, name='settings_notifications_test_mail'),
     path('settings/notifications/test-matrix/', views_notifications.settings_notifications_test_matrix, name='settings_notifications_test_matrix'),
     path('settings/matrix/', views_settings_generic.settings_generic,

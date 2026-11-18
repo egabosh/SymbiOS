@@ -1,0 +1,96 @@
+{% extends "main/base.html" %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h2 class="mb-0"><i class="bi bi-newspaper"></i> SymbiOS News</h2>
+  <div class="d-flex gap-2">
+    <form method="post" action="{% url 'news_refresh' %}" data-exec="true">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-arrow-clockwise"></i> Refresh feed
+      </button>
+    </form>
+    {% if news_unread %}
+    <form method="post" action="{% url 'news_ack' %}" data-exec="true"
+          data-exec-confirm="Mark all current security/critical items as read?">
+      {% csrf_token %}
+      <input type="hidden" name="item_id" value="all">
+      <button type="submit" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-check-all"></i> Mark all as read
+      </button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="alert {% if news_status == 'error' %}alert-warning{% else %}alert-light{% endif %} d-flex align-items-center gap-2 py-2 small">
+  <i class="bi bi-{% if news_status == 'error' %}exclamation-triangle-fill{% else %}info-circle{% endif %}"></i>
+  <span>
+    Feed: {% if news_feed_url %}<a href="{{ news_feed_url }}" target="_blank" rel="noopener noreferrer">{{ news_feed_url }}</a>{% else %}not configured{% endif %}
+    {% if news_status %} &middot; Status: <strong>{{ news_status }}</strong>{% endif %}
+    {% if news_updated %} &middot; Last update: {{ news_updated }}{% endif %}
+    {% if news_checked %} &middot; Checked: {{ news_checked }}{% endif %}
+  </span>
+</div>
+{% if news_error %}
+<div class="alert alert-warning small py-2">{{ news_error }}</div>
+{% endif %}
+{% if news_unread %}
+<div class="alert alert-warning d-flex align-items-center gap-2 py-2 small">
+  <i class="bi bi-exclamation-triangle-fill"></i>
+  <span>{{ news_unread }} unread security/critical item(s). They are shown as a health warning until marked as read.</span>
+</div>
+{% endif %}
+
+{% if news_items %}
+<div class="list-group">
+  {% for item in news_items %}
+  <div class="list-group-item">
+    <div class="d-flex align-items-start gap-2">
+      <i class="bi bi-{% if item.is_alert %}exclamation-triangle-fill text-warning{% else %}info-circle text-muted{% endif %} mt-1"></i>
+      <div class="flex-grow-1 min-width-0">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          {% if item.link %}
+          <a href="{{ item.link }}" target="_blank" rel="noopener noreferrer" class="fw-semibold text-decoration-none">{{ item.title }}</a>
+          {% else %}
+          <span class="fw-semibold">{{ item.title }}</span>
+          {% endif %}
+          {% if item.is_alert %}
+          <span class="badge text-bg-warning">security/critical</span>
+          {% endif %}
+          {% if item.is_alert %}
+            {% if item.is_read %}
+            <span class="badge text-bg-light">read</span>
+            {% else %}
+            <span class="badge text-bg-primary">new</span>
+            {% endif %}
+          {% endif %}
+        </div>
+        {% if item.published_local %}
+        <div class="small text-muted">{{ item.published_local }}</div>
+        {% endif %}
+        {% if item.summary %}
+        <div class="small text-muted mt-1">{{ item.summary }}</div>
+        {% endif %}
+        {% if item.is_alert and not item.is_read %}
+        <form method="post" action="{% url 'news_ack' %}" class="mt-2" data-exec="true">
+          {% csrf_token %}
+          <input type="hidden" name="item_id" value="{{ item.id }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-check2"></i> Mark as read
+          </button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-muted py-4 text-center">
+  <i class="bi bi-inbox fs-2 d-block mb-2"></i>
+  No news items available yet. The feed is refreshed hourly; use &ldquo;Refresh feed&rdquo; to fetch it now.
+</div>
+{% endif %}
+
+{% endblock %}

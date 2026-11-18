@@ -13,8 +13,8 @@ Arguments:
   <check-name>   The check name as shown in the health UI
                  (e.g. "df", "ssl", "containers")
 
-Output: JSON on stdout with fields: name, status, message, title, desc,
-detail, category, script.
+Output: JSON on stdout with fields: name, status (ok|warn|error), message,
+title, desc, detail, category, script.
 
 Options:
   -h, --help          Show this help and exit
@@ -87,8 +87,18 @@ function g_echo_error {
   fi
 }
 
+function g_echo_warn {
+  if [[ -n "$g_current_check_warn" ]]
+  then
+    g_current_check_warn="${g_current_check_warn} | $*"
+  else
+    g_current_check_warn="$*"
+  fi
+}
+
 g_current_check_failed=0
 g_current_check_error=""
+g_current_check_warn=""
 
 # Run the check in the current shell: the check reports its result through
 # g_current_check_failed / g_current_check_error, and a subshell would throw
@@ -119,6 +129,10 @@ if [[ "$g_current_check_failed" -eq 1 ]]
 then
   g_status="error"
   g_msg=$(f_jescape "$g_current_check_error")
+elif [[ -n "$g_current_check_warn" ]]
+then
+  g_status="warn"
+  g_msg=$(f_jescape "$g_current_check_warn")
 else
   g_status="ok"
   g_msg=""

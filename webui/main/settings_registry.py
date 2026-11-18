@@ -137,4 +137,11 @@ SETTINGS = {
         'explain': 'wlan-ap',
         'message': 'WLAN AP settings saved.',
     },
+    'news': {
+        'script': 'symbios-settings-news.sh',
+        'title': 'SymbiOS News',
+        'icon': 'bi-newspaper',
+        'explain': 'news',
+        'message': 'News feed settings saved.',
+    },
 }

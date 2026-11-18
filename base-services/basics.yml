@@ -836,6 +836,19 @@
           * * * * * root [ -x "{{ git_root }}/scripts/symbios-dashboard-snapshot.sh" ] && "{{ git_root }}/scripts/symbios-dashboard-snapshot.sh" >/dev/null 2>&1
 
 
+    - name: /etc/cron.d/symbios-news (hourly news feed refresh)
+      ansible.builtin.copy:
+        dest: /etc/cron.d/symbios-news
+        mode: 0644
+        owner: root
+        group: root
+        content: |
+          # Refresh the WebUI news snapshot once an hour. The script itself
+          # checks news_enabled and skips silently when the feed is off.
+          # The guard keeps the job quiet when /symbios is not mounted yet.
+          17 * * * * root [ -x "{{ git_root }}/scripts/symbios-news.sh" ] && "{{ git_root }}/scripts/symbios-news.sh" refresh >/dev/null 2>&1
+
+
     - name: Install arpwatch (passive LAN device discovery for the dashboard)
       ansible.builtin.apt:
         name: arpwatch

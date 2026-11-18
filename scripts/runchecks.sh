@@ -79,6 +79,7 @@ declare -A CATEGORIES=(
   [system]="Server Resources|bi-cpu"
   [services]="Core Services|bi-hdd-stack"
   [network]="Connectivity|bi-globe"
+  [news]="SymbiOS News|bi-newspaper"
 )
 
 # Main loop - runs forever with 5min intervals
