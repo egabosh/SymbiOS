@@ -89,6 +89,12 @@ Debian server from a WebUI.
    who pass forward-auth are accepted. The `Remote-User` header is only
    honored from the Traefik proxy IP.
 
+5. **User portal**: `portal.<base_domain>` serves a read-only service launcher
+   on the same WebUI container. It uses the forwarded `Remote-Groups` header,
+   but only from the Traefik proxy IP, to filter tiles by LDAP group. The
+   portal answers on `/` only; the management UI stays on the apex domain and
+   remains staff-only.
+
 ---
 
 ## Additional Security Notes

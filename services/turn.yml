@@ -34,6 +34,8 @@
 #   short_description: Deploy the coturn TURN/STUN NAT traversal server
 #   description: Deploys coturn as a generic TURN/STUN server for VoIP and WebRTC media relay. Uses the static-auth-secret (TURN REST API) mechanism, because the TURN protocol cannot carry OIDC or LDAP forward-auth.
 #   url: "turn://{{ service_domain }}"
+#   access:
+#     none: TURN clients use short-lived secrets, there is no LDAP user lookup
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3

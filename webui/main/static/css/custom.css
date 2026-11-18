@@ -295,6 +295,12 @@
 }
 .svc-tile-url:hover { text-decoration: underline; }
 .svc-tile-url i { font-size: 0.65rem; }
+
+/* User portal tiles: the whole card is the link to the service. */
+.portal-tile { text-decoration: none; color: var(--bs-body-color); }
+.portal-tile:hover { color: var(--bs-body-color); }
+.portal-tile .svc-tile-url { color: var(--bs-primary); }
+
 .svc-tile-badges {
   display: flex;
   gap: 0.35rem;

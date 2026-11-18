@@ -25,6 +25,8 @@
 #   short_description: Deploy the Jellyfin media server
 #   description: Deploys Jellyfin, a free and open-source media server, exposed via Traefik.
 #   url: "https://jellyfin.{{ base_domain }}"
+#   access:
+#     none: Jellyfin manages its own users, the route is LAN-only (no Authelia)
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3

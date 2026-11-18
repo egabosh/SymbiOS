@@ -22,6 +22,8 @@
 #   short_description: Deploy the KodiDB media database service
 #   description: Deploys KodiDB (MySQL/MariaDB for Kodi media databases with SSL).
 #   url: "https://kodidb.{{ base_domain }}"
+#   access:
+#     user_group: kodidb
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3

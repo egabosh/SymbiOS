@@ -44,6 +44,7 @@ MIDDLEWARE = [
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'main.middleware.AutheliaMiddleware',
+    'main.middleware.PortalHostMiddleware',
     'main.middleware.SetupRequiredMiddleware',
 ]
 
@@ -99,6 +100,8 @@ try:
         CSRF_TRUSTED_ORIGINS.append('https://' + _vars['base_domain'])
     if _vars.get('base_domain'):
         CSRF_TRUSTED_ORIGINS.append('https://auth.' + _vars['base_domain'])
+    if _vars.get('base_domain'):
+        CSRF_TRUSTED_ORIGINS.append('https://portal.' + _vars['base_domain'])
 except Exception:
     pass
 

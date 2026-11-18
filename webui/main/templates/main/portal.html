@@ -1,0 +1,56 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SymbiOS Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="{% static 'css/custom.css' %}?v=7" rel="stylesheet">
+</head>
+<body class="bg-light">
+  <nav class="navbar navbar-dark bg-dark">
+    <div class="container-fluid">
+      <span class="navbar-brand mb-0 h1"><i class="bi bi-grid-1x2-fill me-2"></i>SymbiOS Portal</span>
+      <div class="d-flex align-items-center gap-3">
+        {% if user.is_authenticated %}
+        <span class="navbar-text text-light"><i class="bi bi-person-circle me-1"></i>{{ user.username }}</span>
+        <a class="btn btn-outline-light btn-sm" href="{{ logout_url }}"><i class="bi bi-box-arrow-right me-1"></i>Logout</a>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+
+  <main class="container py-4">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+      <div>
+        <h1 class="h3 mb-1">Your services</h1>
+        <p class="text-body-secondary mb-0">All applications you are allowed to use on this server.</p>
+      </div>
+      <span class="badge text-bg-secondary">{{ tiles|length }}</span>
+    </div>
+
+    <div class="row g-3">
+      {% for tile in tiles %}
+      <div class="col-sm-6 col-lg-4 col-xl-3">
+        <a class="svc-base-card svc-tile portal-tile" href="{{ tile.url }}" target="_blank" rel="noopener">
+          <div class="svc-tile-icon"><i class="bi {{ tile.icon }}"></i></div>
+          <div class="svc-tile-body">
+            <div class="svc-tile-name">{{ tile.name }}</div>
+            {% if tile.description %}<div class="svc-tile-desc">{{ tile.description }}</div>{% endif %}
+            <div class="svc-tile-url"><i class="bi bi-box-arrow-up-right me-1"></i>{{ tile.host }}</div>
+          </div>
+        </a>
+      </div>
+      {% empty %}
+      <div class="col-12">
+        <div class="alert alert-info mb-0">
+          <i class="bi bi-info-circle me-2"></i>No services have been shared with your account yet.
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </main>
+</body>
+</html>

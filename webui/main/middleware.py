@@ -20,6 +20,7 @@ import socket
 import struct
 import yaml
 from django.shortcuts import redirect
+from django.http import HttpResponseNotFound
 
 from .auth_user import SymbiosUser, AnonymousUser
 from .constants import LDAP_URI
@@ -67,6 +68,16 @@ def _host_source_addresses():
     except Exception:
         pass
     return addrs
+
+
+def _base_domain():
+    """Configured public base domain, used to detect the portal host."""
+    try:
+        with open(os.environ.get('CONFIG_PATH', '/config/inventory.yml')) as f:
+            config = yaml.safe_load(f) or {}
+        return str(config.get('all', {}).get('vars', {}).get('base_domain') or '')
+    except Exception:
+        return ''
 
 
 def _admin_password_status():
@@ -152,6 +163,10 @@ class AutheliaMiddleware:
                     is_staff=webui_admin,
                     is_superuser=webui_admin,
                 )
+                # Keep the groups from the trusted forward-auth response on
+                # the user so the portal can filter tiles without re-reading
+                # an unvalidated header.
+                user.groups = groups
                 if remote_user == 'admin' and 'force_password_change' not in request.session:
                     if _admin_password_status() == 'default':
                         request.session['force_password_change'] = True
@@ -225,4 +240,29 @@ class SetupRequiredMiddleware:
         if not base_domain or base_domain in ('none', '0'):
             return redirect('/setup/')
 
+        return self.get_response(request)
+
+
+class PortalHostMiddleware:
+    """Keep the portal host limited to the read-only launcher page.
+
+    The same Django app answers on the apex (management WebUI) and on
+    ``portal.<base_domain>``. Only the root page is meaningful on the portal
+    host; everything else must not expose the management UI there. The
+    forced-password-change page stays reachable so an admin with the default
+    password is not locked out of the portal.
+    """
+
+    _allowed_paths = ('/', '/change-password/')
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self._portal_host = 'portal.' + _base_domain()
+
+    def __call__(self, request):
+        host = request.get_host().split(':')[0]
+        if self._portal_host and host == self._portal_host:
+            path = request.path
+            if path not in self._allowed_paths and not path.startswith('/static/'):
+                return HttpResponseNotFound('Not found')
         return self.get_response(request)

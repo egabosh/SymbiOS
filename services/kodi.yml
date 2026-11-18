@@ -92,6 +92,8 @@
 #     UI language follows the system locale (inventory "locale"), the same
 #     language the desktop uses.
 #   url: "https://kodi.{{ base_domain }}"
+#   access:
+#     user_group: kodi
 #   config:
 #     title: Kodi Options
 #     file: services/kodi/instances.yml

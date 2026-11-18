@@ -23,6 +23,18 @@ http:
       service: symbios-ui
       tls:
         certResolver: "{{ acme_resolver }}"
+    # User portal: same WebUI container, but the Django app serves a
+    # read-only service launcher on this host (no allowlocalipsonly here).
+    portal:
+      rule: "Host(`portal.{{ base_domain }}`)"
+      entryPoints:
+        - https
+      middlewares:
+        - secHeaders@file
+        - authelia@file
+      service: symbios-ui
+      tls:
+        certResolver: "{{ acme_resolver }}"
     traefik-dashboard:
       rule: "Host(`{{ traefik_domain }}`)"
       entryPoints:

@@ -26,6 +26,10 @@ access_control:
       policy: one_factor
     - domain: "{{ base_domain }}"
       policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
+    # The portal shows only services the logged-in user is allowed to use;
+    # access to the page itself needs an authenticated LDAP account only.
+    - domain: "portal.{{ base_domain }}"
+      policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
     - domain: "{{ traefik_domain }}"
       policy: "{{ 'two_factor' if (twofa_enabled | default(false) | bool and admin_has_mail | default(false) | bool) else 'one_factor' }}"
       subject:

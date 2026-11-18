@@ -23,6 +23,8 @@
 #   name: OpenWrt VM
 #   short_description: OpenWrt QEMU/KVM router VM with preconfigured routing, DNS, Tor and VPNs
 #   url: "https://openwrt.{{ base_domain }}"
+#   access:
+#     user_group: openwrt-vm
 #   description: |
 #     Deploys an OpenWrt VM (latest stable release) as a QEMU/KVM router with
 #     UEFI boot, serial console and five NICs. The VM owns the .1 / ::1

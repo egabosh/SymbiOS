@@ -47,7 +47,9 @@ to know: title, description, available actions, status checks, and log streams.
 #### Fields
 
 - **`short_description` / `description`** - title and longer text shown in the WebUI.
-- **`url`** - web interface URL for the service. Jinja variables like `{{ base_domain }}` are resolved automatically. Displayed as a clickable link on the service detail page.
+- **`url`** - web interface URL for the service. Jinja variables like `{{ base_domain }}` are resolved automatically. Displayed as a clickable link on the service detail page and, for HTTP(S) URLs, on the user portal.
+- **`access`** - LDAP groups that may use the service: `admin_group`, `user_group` (or a single `user_group`). Use `none:` with an explanatory text when the service manages its own users. The user portal at `portal.<base_domain>` uses these groups to filter tiles; keep them in sync with the playbook's Authelia ACL subjects.
+- **`icon`** - optional Bootstrap icon class (e.g. `bi-cloud`) for the portal tile; defaults to `bi-box-seam`.
 - **`author`, `version`, `license`, `copyright`, `min_ansible_version`, `platforms`, `category`** - informational metadata.
 - **`service_control.services[]`** - one entry per container:
   - **`name`** - container/service name

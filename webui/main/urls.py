@@ -28,6 +28,7 @@ from . import views_logs
 from . import views_change_password
 from . import views_services
 from . import views_home
+from . import views_portal
 from . import views_exec
 from . import views_port_forwarding
 from . import views_reverse_proxy
@@ -75,7 +76,7 @@ urlpatterns = [
     path('dashboard/stats/', views_home.dashboard_stats, name='dashboard_stats'),
     path('dashboard/network/', views_home.dashboard_network, name='dashboard_network'),
     path('system/power/', views_home.system_power, name='system_power'),
-    path('', views_home.home, name='home'),
+    path('', views_portal.root, name='home'),
     path('setup/', views.setup, name='setup'),
     path('settings/', views.settings, name='settings'),
     path('settings/dns/', views_settings_dns.settings_dns, name='settings_dns'),
