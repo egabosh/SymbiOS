@@ -489,7 +489,7 @@ texts opportunistically).
 |--------|---------|-------|
 | `backup.sh` | Backup dispatcher (runs `backup.d/*.backup`) | no args |
 | `backup.d/` | 2 backup modules (docker DBs, LDAP) | via `backup.sh` |
-| `symbios-backup.sh` | Backup engine: daily hardlink snapshot, local or rsync/SSH | no args (cron) |
+| `symbios-backup.sh` | Backup engine: restic snapshot, local or SFTP targets | `backup` (default, cron), `get-restic-password`, `gen-restic-password` |
 | `symbios-backup-list.sh` | Backup snapshots as JSON (WebUI backup page) | no args |
 | `symbios-restore.sh` | Per-service or full restore with `plan` dry-run | `plan\|restore <date> [service\|--full] [--yes]` |
 | `autoupdate.sh` | Update dispatcher (runs `autoupdate.d/*.update`) | `[module ...]` |

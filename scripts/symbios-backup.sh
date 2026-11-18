@@ -53,6 +53,8 @@ function f_usage {
   echo "written to <log>/backup-status.json for the WebUI."
   echo ""
   echo "Commands:"
+  echo "  backup                Run the backup now (the default when no"
+  echo "                        command is given - the form the cron job uses)"
   echo "  get-restic-password  Print the restic repository password as JSON"
   echo "  gen-restic-password   Ensure the restic password file exists under"
   echo "                        /symbios (never overwrites an existing one)"
@@ -61,6 +63,8 @@ function f_usage {
   echo ""
   echo "Options:"
   echo "  -h, --help            Show this help and exit"
+  echo ""
+  echo "Exit codes: 0 = ok, 2 = unknown command or usage error, 1 = error."
 }
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]
@@ -68,6 +72,18 @@ then
   f_usage
   exit 0
 fi
+
+# Guard the entry point: only the commands above may start a run. Without
+# this an unknown word (a typo like "status") fell through into a full
+# backup - a harmless read but a surprise on a host that is busy with
+# something else, and it overwrites the run status of the nightly job.
+case "${1:-}" in
+  ""|backup|get-restic-password|gen-restic-password) ;;
+  *)
+    echo "Unknown command: $1" >&2
+    f_usage >&2
+    exit 2 ;;
+esac
 
 # Query subcommands print JSON on stdout: skip the gaboshlib stdout/stderr
 # FIFO redirection (g_all-to-syslog) so the output stays machine-parseable.

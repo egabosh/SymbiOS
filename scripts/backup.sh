@@ -17,6 +17,8 @@ SymbiOS backup dispatcher. No arguments - this is the nightly cron entry point.
 
 Options:
   -h, --help          Show this help and exit
+
+Exit codes: 0 = ok, 2 = usage error, 1 = error.
 EOF
 }
 
@@ -24,6 +26,15 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]
 then
   f_usage
   exit 0
+fi
+
+# No subcommands: this is the cron entry point. Any other argument is a
+# mistake (a typo like "status" used to start a full backup silently).
+if [[ $# -gt 0 ]]
+then
+  echo "Unknown command: $1 (this script takes no arguments)" >&2
+  f_usage >&2
+  exit 2
 fi
 
 . /etc/bash/gaboshlib.include
