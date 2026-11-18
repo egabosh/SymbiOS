@@ -72,6 +72,7 @@ function f_set {
   # Remove old entry if present, then append updated one
   f_unset_quiet "$f_playbook"
   printf '%s: "%s"\n' "$f_playbook" "$f_timestamp" >> "$g_state_file"
+  f_audit_event cli state-set "playbook=$f_playbook"
 }
 
 function f_unset {
@@ -82,6 +83,7 @@ function f_unset {
     exit 1
   fi
   f_unset_quiet "$f_playbook"
+  f_audit_event cli state-unset "playbook=$f_playbook"
 }
 
 function f_unset_quiet {

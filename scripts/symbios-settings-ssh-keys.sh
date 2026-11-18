@@ -54,6 +54,10 @@ Examples:
   $(basename "$0") remove --index 0
   printf '%s\n' "ssh-ed25519 AAAA... user@host" | $(basename "$0") set --stdin
 
+Options:
+  --no-apply                      Skip the automatic playbook apply after a
+                                  real inventory change (smoke tests).
+
 Exit codes:
   0  ok, or nothing to do (unchanged)
   2  validation or usage error (bad key, bad index, ...)
@@ -262,6 +266,10 @@ do
       f_stdin="yes"
       shift
       ;;
+    --no-apply)
+      g_ss_no_apply="yes"
+      shift
+      ;;
     --check)
       f_check="yes"
       shift
@@ -366,4 +374,5 @@ then
 fi
 
 f_ss_result "${f_out}" "ssh-keys" "${f_check}" "${#f_result_user[@]} user key(s)"
-exit 0
+f_ss_finish
+exit $?

@@ -27,7 +27,8 @@ mounted (LUKS boot-unlock). Called from /etc/rc.local, not by hand.
 Order: container runtime (docker/containerd) -> network bridge assignments
 -> libvirt default storage pool -> WoL watcher instances -> arpwatch
 reconcile -> nslcd -> RustDesk service -> hd-idle (only for real rotating
-disks) -> runchecks daemon + watchdog timer (delayed, backgrounded).
+disks) -> runchecks daemon + watchdog timer (delayed, backgrounded) ->
+generic units registered by playbooks in /etc/symbios/after-mount-units.
 
 Exit code is always 0. Single failures only print a warning.
 EOF
@@ -177,6 +178,22 @@ fi
 # Same detachment rule as above: transient timer unit, not a background sleep.
 systemd-run --unit=symbios-runchecks-delayed --collect --on-active=30s /bin/systemctl start runchecks.service runchecks-watchdog.timer 2>/dev/null || \
   g_echo_warn "runchecks delayed start failed to schedule"
+
+# 10. Generic units registered by playbooks via shared-tasks/after-mount-unit.yml.
+# Their config or ExecStart lives below /symbios, so systemd boot start is
+# disabled; playbooks write the names to this rootfs file and we start them
+# here now that the volume is mounted. Failures only warn so one broken unit
+# never stops the rest of the dispatch.
+if [[ -f /etc/symbios/after-mount-units ]]
+then
+  while read -r f_unit f_rest
+  do
+    [[ -z "${f_unit}" ]] && continue
+    [[ "${f_unit}" == \#* ]] && continue
+    systemctl start "${f_unit}" 2>/dev/null || \
+      g_echo_warn "after-mount unit start failed: ${f_unit}"
+  done < /etc/symbios/after-mount-units
+fi
 
 g_echo_note "after-mount dispatch done"
 exit 0

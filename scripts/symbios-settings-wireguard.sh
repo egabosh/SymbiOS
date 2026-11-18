@@ -52,6 +52,10 @@ Examples:
   $(basename "$0") save --name iot --enabled false
   $(basename "$0") remove --name iot
 
+Options:
+  --no-apply                      Skip the automatic playbook apply after a
+                                  real inventory change (smoke tests).
+
 Exit codes:
   0  ok, or nothing to do (unchanged)
   2  validation or usage error
@@ -177,6 +181,10 @@ do
       f_given_ufw="yes"
       shift 2
       ;;
+    --no-apply)
+      g_ss_no_apply="yes"
+      shift
+      ;;
     --check)
       f_check="yes"
       shift
@@ -205,7 +213,8 @@ then
     f_ss_fail_technical "Failed to write inventory: ${f_out}"
   fi
   f_ss_result "${f_out}" "wireguard" "${f_check}"
-  exit 0
+  f_ss_finish
+  exit $?
 fi
 
 # --- subcommand: save ---------------------------------------------------------------
@@ -332,4 +341,5 @@ ${f_flag_out}"
 fi
 
 f_ss_result "${f_out}" "wireguard" "${f_check}"
-exit 0
+f_ss_finish
+exit $?

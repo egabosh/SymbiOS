@@ -52,6 +52,10 @@ Commands:
 Output: human status lines. The final line carries a machine-readable
 state token (matrix-changed / matrix-unchanged).
 
+Options:
+  --no-apply                      Skip the automatic playbook apply after a
+                                  real inventory change (smoke tests).
+
 Exit codes:
   0  ok, or nothing to do (unchanged)
   2  validation or usage error
@@ -151,6 +155,10 @@ then
   while [[ $# -gt 0 ]]
   do
     case "$1" in
+      --no-apply)
+        g_ss_no_apply="yes"
+        shift
+        ;;
       --check)
         f_check="yes"
         shift
@@ -166,7 +174,8 @@ then
     esac
   done
   f_ss_merge '{"matrix_homeserver": null, "matrix_user": null, "matrix_password": null, "matrix_token": null, "matrix_room": null, "notify_matrix_enabled": null}' "matrix" "${f_check}"
-  exit 0
+  f_ss_finish
+  exit $?
 fi
 
 # --- subcommand: set -----------------------------------------------------------
@@ -208,6 +217,10 @@ do
       ;;
     --json-stdin)
       f_json_stdin="yes"
+      shift
+      ;;
+    --no-apply)
+      g_ss_no_apply="yes"
       shift
       ;;
     --check)
@@ -257,7 +270,8 @@ if [[ "${f_input}" == "yes" || "${f_json_stdin}" == "yes" ]] \
    && "${f_given_pw}" == "no" && "${f_given_token}" == "no" ]]
 then
   f_ss_merge '{"matrix_homeserver": null, "matrix_user": null, "matrix_password": null, "matrix_token": null, "matrix_room": null, "notify_matrix_enabled": null}' "matrix" "${f_check}"
-  exit 0
+  f_ss_finish
+  exit $?
 fi
 
 f_missing=()
@@ -329,4 +343,5 @@ fi
 f_merge="${f_merge}}"
 
 f_ss_merge "${f_merge}" "matrix" "${f_check}"
-exit 0
+f_ss_finish
+exit $?

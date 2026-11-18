@@ -66,6 +66,10 @@ Examples:
   $(basename "$0") set --host backup.example.com --user root --path /backups/symbios
   printf '%s\n' '*.tmp' 'cache/' | $(basename "$0") set --exclude-stdin
 
+Options:
+  --no-apply                      Skip the automatic playbook apply after a
+                                  real inventory change (smoke tests).
+
 Exit codes:
   0  ok, or nothing to do (unchanged)
   2  validation or usage error (bad port, bad boolean, ...)
@@ -368,6 +372,10 @@ do
       f_excludes_json="${f_excludes_json}]"
       shift
       ;;
+    --no-apply)
+      g_ss_no_apply="yes"
+      shift
+      ;;
     --check)
       f_check="yes"
       shift
@@ -600,4 +608,5 @@ else
 fi
 
 f_ss_merge "${f_merge}" "backup" "${f_check}"
-exit 0
+f_ss_finish
+exit $?

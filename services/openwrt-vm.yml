@@ -548,9 +548,9 @@
         mode: "0755"
       when: kvm_capable | bool
 
-    - name: Render postconfig hotplug trigger
-      ansible.builtin.template:
-        src: openwrt-vm/templates/openwrt-postconfig-trigger.j2
+    - name: Deploy postconfig hotplug trigger
+      ansible.builtin.copy:
+        src: openwrt-vm/files/openwrt-postconfig-trigger
         dest: /tmp/ow-postconfig-trigger
         mode: "0644"
       when: kvm_capable | bool
@@ -705,11 +705,18 @@
     # gateway router) and wedges the host. The hwaddress in the ifupdown
     # stanza is applied on the next boot/ifup; the retry timer below re-runs
     # the lease request for bridges that still lack an IPv4 address.
+    # Build the bridge=MAC words here: a Jinja loop inside the shell body
+    # makes the task hard to read and obscures the actual shell control flow.
+    - name: Build deterministic MAC mapping for OpenWrt bridges
+      ansible.builtin.set_fact:
+        ow_bridge_mac_pairs: "{{ ow_networks | map(attribute='bridge') | list | zip(ow_networks | map(attribute='mac') | list) | map('join', '=') | join(' ') }}{{ ' ' if ow_networks | length > 0 else '' }}"
+      when: kvm_capable | bool
+
     - name: Apply deterministic MAC to OpenWrt bridges (live MAC only)
       ansible.builtin.shell: |
         set -e
         OUT="mac-ok"
-        for item in {% for n in ow_networks %}{{ n.bridge }}={{ n.mac }} {% endfor %}; do
+        for item in {{ ow_bridge_mac_pairs }}; do
           f_bmac="${item%%=*}"
           f_want="${item##*=}"
           f_cur="$(cat /sys/class/net/${f_bmac}/address 2>/dev/null || true)"

@@ -315,21 +315,17 @@ def settings_backup(request):
         try:
             if is_ajax:
                 from .utils.jobs import create_job
-                cmd = (f'{set_cmd} && symbios-settings-backup.sh apply')
-                job_id = create_job(cmd, timeout=3600, stdin_data=stdin_data)
+                job_id = create_job(set_cmd, timeout=3600, stdin_data=stdin_data)
                 return JsonResponse({'ok': True, 'job': job_id,
                                      'title': 'Applying backup...',
                                      'message': 'Backup settings saved.',
-                                     'command': cmd})
-            ok, stdout, stderr = run_command(set_cmd, timeout=30,
+                                     'command': set_cmd})
+            ok, stdout, stderr = run_command(set_cmd, timeout=3600,
                                             stdin_data=stdin_data)
             if not ok:
                 messages.error(request, f'Error: {stderr or stdout}')
                 return redirect('settings_backup')
-            messages.success(request, 'Backup settings saved.')
-            messages.info(request, 'Applying backup playbook in the background...')
-            from .utils.jobs import create_job
-            create_job('symbios-settings-backup.sh apply', timeout=3600)
+            messages.success(request, 'Backup settings saved and applied.')
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)

@@ -33,6 +33,10 @@ Commands:
 Output: human status lines. The final line carries a machine-readable
 state token (network-bridges-changed / network-bridges-unchanged).
 
+Options:
+  --no-apply                      Skip the automatic playbook apply after a
+                                  real inventory change (smoke tests).
+
 Exit codes:
   0  ok, or nothing to do (unchanged)
   2  validation or usage error
@@ -41,7 +45,7 @@ EOF
 }
 
 # Inventory keys managed here (for apply + coverage check).
-f_managed_vars=""
+f_managed_vars="bridge_assignments"
 
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
@@ -114,6 +118,10 @@ do
       f_json_stdin="yes"
       shift
       ;;
+    --no-apply)
+      g_ss_no_apply="yes"
+      shift
+      ;;
     --check)
       f_check="yes"
       shift
@@ -163,4 +171,5 @@ fi
 f_merge="$(printf '{"bridge_assignments": %s}' "${f_assignments}")"
 
 f_ss_merge "${f_merge}" "network-bridges" "${f_check}"
-exit 0
+f_ss_finish
+exit $?

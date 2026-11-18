@@ -243,12 +243,16 @@
         backup: yes
       when: matrix_client_active | bool
 
+    # The watchdog scripts sit on the rootfs, but their logs land under
+    # matrix_client_dir (/symbios). Guard the mount as well as the executable
+    # so an early cron tick before the LUKS unlock stays quiet instead of
+    # creating files on the bare mountpoint (same pattern as basics.yml jobs).
     - name: Cron fix ignored matrix-commander devices daily
       ansible.builtin.cron:
         name: "Fix ignored matrix-commander devices"
         minute: "30"
         hour: "4"
-        job: /usr/local/sbin/fix-matrix-ignored-devices.sh >>{{ matrix_client_dir }}/fix-ignored-devices.log 2>&1
+        job: '[ -x "/usr/local/sbin/fix-matrix-ignored-devices.sh" ] && mountpoint -q "{{ data_root }}" && /usr/local/sbin/fix-matrix-ignored-devices.sh >>{{ matrix_client_dir }}/fix-ignored-devices.log 2>&1'
       when: matrix_client_active | bool
 
     - name: Cron matrix-device-health daily (unmark stale deleted E2EE devices)
@@ -256,7 +260,7 @@
         name: "Matrix device health"
         minute: "15"
         hour: "4"
-        job: /usr/local/sbin/matrix-device-health.sh >>{{ matrix_client_dir }}/device-health.log 2>&1
+        job: '[ -x "/usr/local/sbin/matrix-device-health.sh" ] && mountpoint -q "{{ data_root }}" && /usr/local/sbin/matrix-device-health.sh >>{{ matrix_client_dir }}/device-health.log 2>&1'
       when: matrix_client_active | bool
 
     # --- Healthcheck: daemon running, FIFO present, sender joined ---

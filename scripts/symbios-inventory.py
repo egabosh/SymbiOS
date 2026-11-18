@@ -44,6 +44,8 @@ except ImportError:
     print("symbios-inventory.py: PyYAML is required (python3-yaml)", file=sys.stderr)
     sys.exit(1)
 
+from symbios_audit import write_event
+
 DEFAULT_INVENTORY = "/symbios/base-services/symbios-ui/config/inventory.yml"
 KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # Subkeys of a stored dict are data, not variable names - they may carry
@@ -570,6 +572,17 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     args.func(args)
+
+    # Audit every real inventory mutation, including direct CLI calls that
+    # never pass through symbios-exec.sh. Keys only, never values, and no
+    # event at all for --check runs.
+    if args.command in (
+        "set", "merge", "del", "dict-set", "dict-del", "dict-merge",
+        "list-add", "list-del", "write",
+    ) and not getattr(args, "check", False):
+        f_detail = getattr(args, "dict_key", None) or getattr(args, "key", None)
+        write_event("cli", "inventory-" + args.command,
+                    "key=" + f_detail if f_detail else "")
     return 0
 
 

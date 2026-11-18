@@ -45,6 +45,10 @@ Examples:
   echo '{"timezone":"Europe/Berlin"}' | $(basename "$0") set --json-stdin
   $(basename "$0") set --timezone Mars/Olympus --check
 
+Options:
+  --no-apply                      Skip the automatic playbook apply after a
+                                  real inventory change (smoke tests).
+
 Exit codes:
   0  ok, or nothing to do (unchanged)
   2  validation or usage error (unknown timezone/keyboard, bad locale, ...)
@@ -184,6 +188,10 @@ do
       f_json_stdin="yes"
       shift
       ;;
+    --no-apply)
+      g_ss_no_apply="yes"
+      shift
+      ;;
     --check)
       f_check="yes"
       shift
@@ -283,4 +291,5 @@ f_merge="$(printf '{"timezone": %s, "keyboard": %s, "locale": %s, "localization_
 
 f_ss_merge "${f_merge}" "localization" "${f_check}" \
   "${f_new_timezone} ${f_new_keyboard} ${f_new_locale}"
-exit 0
+f_ss_finish
+exit $?

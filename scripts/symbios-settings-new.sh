@@ -91,6 +91,10 @@ Commands:
 Output: human status lines. The final line carries a machine-readable
 state token (TOKEN_PLACEHOLDER-changed / TOKEN_PLACEHOLDER-unchanged).
 
+Options:
+  --no-apply                      Skip the automatic playbook apply after a
+                                  real inventory change (smoke tests).
+
 Exit codes:
   0  ok, or nothing to do (unchanged)
   2  validation or usage error

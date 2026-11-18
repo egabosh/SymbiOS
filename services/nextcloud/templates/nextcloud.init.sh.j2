@@ -1,0 +1,209 @@
+# waiting for started Nextcloud (Login-Screen)
+# "direct=1" keeps the regular login page reachable also when SSO auto-redirect is enabled
+#until wget "nextcloud.{{ base_domain }}/login?direct=1" -O - | grep -q Login
+#do
+#  echo "Waiting for Login screen..."
+#  # restart traefik on Problems with ACME/letsencrypt
+#  if [ -f /symbios/base-services/traefik/docker-compose.yml ]
+#  then
+#    if docker compose -f /symbios/base-services/traefik/docker-compose.yml logs | grep -E -q "nextcloud.{{ base_domain }}.+error.+acme-challenge"
+#    then
+#      docker compose -f /symbios/base-services/traefik/docker-compose.yml up -d --force-recreate
+#      docker compose up -d --force-recreate
+#    fi
+#  fi
+#  sleep 120
+#done
+
+# Change to service directory
+if ! cd /symbios/services/nextcloud
+then
+  exit 1
+fi
+
+# Wait for Nextcloud (occ status exits 0 even when the instance is
+# not installed yet, so check the installed flag instead of rc)
+i=0
+docker compose up -d
+until docker compose exec -T -u www-data nextcloud ./occ status 2>/dev/null | grep -q "installed: true"
+do
+  [[ $i -gt 60 ]] && exit 2
+  echo "Waiting for Nextcloud"
+  sleep 10
+  ((i++))
+done
+
+# Install and enable Nextcloud apps
+# The AI apps (Assistant UI + OpenAI compatible provider) are only
+# installed when this host configures an AI endpoint, so a host
+# without Settings -> AI keeps a plain Nextcloud.
+for app in admin_audit bookmarks calendar contacts files_external gpoddersync impersonate maps news notes oauth2 passwords phonetrack photos spreed tasks twofactor_backupcodes twofactor_totp richdocuments user_oidc user_ldap{{ ' assistant integration_openai' if (ai_server | default('', true)) or (ai_stt_url | default('', true)) or (ai_tts_url | default('', true)) else '' }}
+do
+  # The marker alone is not enough: a data reset or a sync of the
+  # document root can remove the app files while the marker stays.
+  # Without the directory the app is broken even though the
+  # database still lists it as installed.
+  # occ app:install puts an app into custom_apps when the main
+  # apps directory is not writable, so both paths count.
+  if [ ! -f "app.${app}.installed" ] \
+    || { [ ! -d "nextcloud-data/apps/${app}" ] && [ ! -d "nextcloud-data/custom_apps/${app}" ]; }
+  then
+    docker compose exec -T -u www-data nextcloud ./occ app:install "${app}" >"app.${app}.installed" 2>&1
+    f_rc=$?
+    cat "app.${app}.installed" >> nextcloud.init.log
+    if [[ $f_rc -ne 0 ]] \
+      && [ ! -d "nextcloud-data/apps/${app}" ] \
+      && [ ! -d "nextcloud-data/custom_apps/${app}" ]
+    then
+      echo "ERROR: app ${app} could not be installed (rc=${f_rc}) - see nextcloud.init.log" >&2
+      rm -f "app.${app}.installed"
+    fi
+  fi
+  docker compose exec -T -u www-data nextcloud ./occ app:enable "${app}" | tee -a nextcloud.init.log >>"app.${app}.installed" 2>&1
+done
+
+# Disable unnecessary apps
+for app in dashboard nextcloud_announcements serverinfo support updatenotification weather_status
+do
+  if [ ! -f "app.${app}.installed" ]
+  then
+    docker compose exec -T -u www-data nextcloud ./occ app:disable "${app}" | tee -a nextcloud.update.log >"app.${app}.disabled" 2>&1
+  fi
+done
+
+# stun/turn server
+if [ -s /symbios/services/turn/env ]
+then
+  source /symbios/services/turn/env
+  docker compose exec -T -u www-data nextcloud ./occ talk:turn:add --secret $TURN_SECRET turns turn.{{ base_domain }}:5349 udp,tcp
+  docker compose exec -T -u www-data nextcloud ./occ talk:stun:add turn.{{ base_domain }}:5349
+  docker compose exec -T -u www-data nextcloud ./occ talk:stun:delete stun.nextcloud.com:443
+fi
+
+#  richdocuments Collabora Office (Nextcloud Office App)
+# The WOPI URLs depend on base_domain, so they are re-asserted on
+# every apply - a stale wopi_url breaks Office after a domain
+# change. The app activation (secret, connectivity test) stays a
+# one-time step, it fails when Collabora is not reachable.
+if ! [ -s app.richdocuments.configured ]
+then
+  docker compose exec -T -u www-data nextcloud ./occ richdocuments:activate-config >>app.richdocuments.configured
+  date >> app.richdocuments.configured
+fi
+docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments wopi_allowlist --value="0.0.0.0/0,::0" >/dev/null
+docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments wopi_callback_url   --value="https://nextcloud.{{ base_domain }}" >/dev/null
+docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments wopi_url            --value="https://office.{{ base_domain }}" >/dev/null
+docker compose exec -T -u www-data nextcloud ./occ config:app:set richdocuments public_wopi_url     --value="https://office.{{ base_domain }}" >/dev/null
+docker compose exec -T -u www-data nextcloud ./occ config:system:set overwrite.cli.url --value="https://nextcloud.{{ base_domain }}" >/dev/null
+docker compose exec -T -u www-data nextcloud ./occ config:system:set trusted_proxies 1 --value="{{ trusted_proxies_cidr }}" >/dev/null
+docker compose exec -T -u www-data nextcloud ./occ config:system:set trusted_proxies 2 --value="fdaa:a192:b168:cd41::/64" >/dev/null
+
+# Redis password
+# Re-asserted on every apply: the password comes from the env file
+# and is rotated with the stack. A stale value in the system config
+# makes every request fail with an authentication error.
+if [ -s /symbios/services/nextcloud/env ]
+then
+  redis_password=$(grep ^REDIS_PASSWORD= /symbios/services/nextcloud/env | cut -d= -f2-)
+  docker compose exec -T -u www-data nextcloud ./occ config:system:set redis password --value="${redis_password}" >/dev/null
+  date >> app.redis.configured
+fi
+
+# OIDC via Authelia (user_oidc)
+# Idempotent upsert on every init run: keeps provider, secret and
+# settings in sync. A success marker alone is not safe here - it can
+# be stale after a data reset or get written even when the occ call
+# failed, which silently left the provider unconfigured before.
+if [ -s /symbios/services/nextcloud/oidc_password ]
+then
+  oidc_secret=$(cat /symbios/services/nextcloud/oidc_password)
+
+  if ! docker compose exec -T -u www-data nextcloud ./occ user_oidc:provider \
+       --clientid="nextcloud" \
+       --clientsecret="${oidc_secret}" \
+       --discoveryuri="https://auth.{{ base_domain }}/.well-known/openid-configuration" \
+       --mapping-uid="preferred_username" \
+       --mapping-groups="groups" \
+       --unique-uid="0" \
+       --scope="openid profile email groups" \
+       --group-whitelist-regex="^nextcloud-(users|admins)$" \
+       --group-restrict-login-to-whitelist=true \
+       Authelia
+  then
+    echo "ERROR: could not configure Authelia OIDC provider for Nextcloud" >&2
+    exit 1
+  fi
+
+  # SSO default login: with exactly one OIDC provider and allow_multiple_user_backends=0
+    # unauthenticated browser visits to /login are redirected to Authelia directly
+    # (regular Nextcloud login form remains reachable via /login?direct=1)
+    docker compose exec -T -u www-data nextcloud ./occ config:app:set user_oidc allow_multiple_user_backends --value="0"
+  # local remote ip
+  docker compose exec -T -u www-data nextcloud ./occ config:system:set allow_local_remote_servers --value true --type bool
+
+fi
+
+
+# LDAP-Backend (user_ldap)
+# The values are re-asserted on every apply, same pattern as the
+# OIDC provider above: ldap_basedn comes from the inventory and the
+# readuser password is rotated, so a one-time setup keeps a stale
+# base DN or host. The app then fails every request with "Lost
+# connection to LDAP server" (HTTP 500) after the LDAP container
+# was redeployed.
+LDAP_BASE_DN="{{ ldap_basedn }}"
+LDAP_BIND_DN="cn=readuser,${LDAP_BASE_DN}"
+
+if [ -s /symbios/base-services/ldap/env.openldap ]
+then
+  LDAP_PASSWORD=$(grep ^LDAP_READUSER_PASSWORD= /symbios/base-services/ldap/env.openldap | cut -d= -f2-)
+fi
+
+# A host that never had the backend keeps the local/OIDC-only
+# login, a host that uses it gets the values below re-asserted.
+if [ ! -s app.user_ldap.configured ] \
+  || docker compose exec -T -u www-data nextcloud ./occ config:app:get user_ldap s01ldap_host >/dev/null 2>&1
+then
+  # The empty config is only created when it is missing - it would
+  # reset the settings below.
+  if ! docker compose exec -T -u www-data nextcloud ./occ config:app:get user_ldap s01ldap_host >/dev/null 2>&1
+  then
+    docker compose exec -T -u www-data nextcloud ./occ ldap:create-empty-config >>app.user_ldap.configured
+  fi
+
+  # The compose service alias, not the public hostname: the LDAP
+  # port is only published on 127.0.0.1 on the host.
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapHost "openldap" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapPort "389" >/dev/null
+  #docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapTLS "1" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapBase "${LDAP_BASE_DN}" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapBaseUsers "ou=users,${LDAP_BASE_DN}" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapBaseGroups "ou=groups,${LDAP_BASE_DN}" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapAgentName "${LDAP_BIND_DN}" >/dev/null
+  if [ -n "${LDAP_PASSWORD}" ]
+  then
+    docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapAgentPassword "${LDAP_PASSWORD}" >/dev/null
+  fi
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapLoginFilter "(&(|(objectclass=posixAccount))(uid=%uid))" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserFilter "(objectClass=posixAccount)" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapGroupFilter "(objectClass=posixGroup)" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapGroupMemberAssocAttr "memberUid" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserDisplayName "cn" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapEmailAttribute "mail" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapConfigurationActive "1" >/dev/null
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapUserLoginName uid >/dev/null
+  # internal username = LDAP uid so LDAP and OIDC logins map to one account
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapExpertUsernameAttr uid >/dev/null
+  # members of the privileged LDAP group get Nextcloud admin rights
+  docker compose exec -T -u www-data nextcloud ./occ ldap:set-config s01 ldapAdminGroup "nextcloud-admins" >/dev/null
+  date >> app.user_ldap.configured
+fi
+
+
+# Sync Nextcloud admins from the LDAP group nextcloud-admins.
+# The script also runs from cron every 5 minutes, so group changes
+# take effect without waiting for the next playbook apply.
+"{{ git_root }}/scripts/symbios-nextcloud-admin-sync.sh" >/dev/null 2>&1 || true
+
+
+exit 0

@@ -197,6 +197,159 @@ then
     f_failures=$((f_failures + 1))
   fi
 
+  # 7. Every settings script with a write path must finish with f_ss_finish
+  # and expose --no-apply, so `set` applies its consumers exactly once while
+  # tests and low-level callers can write inventory only (AP2).
+  f_finish_fail=0
+  for f_script in "${f_root}"/scripts/symbios-settings-*.sh
+  do
+    [[ -f "${f_script}" ]] || continue
+    case "${f_script}" in
+      *-lib.sh|*-new.sh|*-check.sh|*-docs.sh) continue ;;
+    esac
+    grep -q 'f_ss_finish' "${f_script}" || {
+      echo "FAIL: $(basename "${f_script}") never calls f_ss_finish" >&2
+      f_finish_fail=1
+    }
+    grep -q -- '--no-apply' "${f_script}" || {
+      echo "FAIL: $(basename "${f_script}") has no --no-apply escape hatch" >&2
+      f_finish_fail=1
+    }
+  done
+  if [[ "${f_finish_fail}" -eq 0 ]]
+  then
+    g_echo "PASS: all settings scripts finish and support --no-apply" 2>/dev/null || echo "PASS: all settings scripts finish and support --no-apply"
+  else
+    f_failures=$((f_failures + 1))
+  fi
+
+  # 8. Migrated settings views must not hardcode playbook names any more:
+  # the settings CLI resolves consumers from uses_vars (AP2).
+  f_view_fail=0
+  if grep -rn "symbios-run-playbook.sh\|run_playbook(" \
+    "${f_root}"/webui/main/views_settings*.py \
+    "${f_root}"/webui/main/views_mailserver.py \
+    "${f_root}"/webui/main/views_network_bridges.py \
+    "${f_root}"/webui/main/views_wireguard.py \
+    "${f_root}"/webui/main/views_openvpn.py \
+    "${f_root}"/webui/main/views_port_forwarding.py 2>/dev/null \
+    | grep -v __pycache__ | grep -q .
+  then
+    echo "FAIL: hardcoded playbook name in a settings view" >&2
+    grep -rn "symbios-run-playbook.sh\|run_playbook(" \
+      "${f_root}"/webui/main/views_settings*.py \
+      "${f_root}"/webui/main/views_mailserver.py \
+      "${f_root}"/webui/main/views_network_bridges.py \
+      "${f_root}"/webui/main/views_wireguard.py \
+      "${f_root}"/webui/main/views_openvpn.py \
+      "${f_root}"/webui/main/views_port_forwarding.py 2>/dev/null | grep -v __pycache__
+    f_view_fail=1
+  fi
+  if [[ "${f_view_fail}" -eq 0 ]]
+  then
+    g_echo "PASS: no hardcoded playbook names in settings views" 2>/dev/null || echo "PASS: no hardcoded playbook names in settings views"
+  else
+    f_failures=$((f_failures + 1))
+  fi
+
+  # 9. Audit log path: one file on the encrypted partition, never /var/log
+  # (AP1). The gateway helper must exist and the audit writer must be present.
+  f_audit_fail=0
+  if grep -rq --exclude=symbios-settings-check.sh '/var/log/symbios-audit.log' \
+      "${f_root}"/scripts "${f_root}"/base-services 2>/dev/null \
+    || [[ ! -f "${f_root}/scripts/symbios_audit.py" ]] \
+    || ! grep -q 'f_audit_event' "${f_root}/scripts/symbios-lib.sh" \
+    || ! grep -q 'f_audit_event' "${f_root}/scripts/symbios-exec.sh"
+  then
+    echo "FAIL: audit trail is not the shared /symbios log" >&2
+    f_audit_fail=1
+  fi
+  if grep -Eq 'password|passwd|passphrase' "${f_root}/scripts/symbios-exec.sh" 2>/dev/null \
+    && grep -Eq 'stt\[-_\]key' "${f_root}/scripts/symbios-exec.sh" 2>/dev/null
+  then
+    :
+  else
+    echo "FAIL: audit mask misses secret keys from the inventory table" >&2
+    f_audit_fail=1
+  fi
+  if [[ "${f_audit_fail}" -eq 0 ]]
+  then
+    g_echo "PASS: audit path and secret mask" 2>/dev/null || echo "PASS: audit path and secret mask"
+  else
+    f_failures=$((f_failures + 1))
+  fi
+
+  # 10. Boot rule (AP3): a service playbook that declares boot_units must
+  # register the unit through the shared after-mount task.
+  f_boot_fail=0
+  for f_pb in "${f_root}"/base-services/*.yml "${f_root}"/services/*.yml
+  do
+    [[ -f "${f_pb}" ]] || continue
+    grep -q '^#   boot_units:' "${f_pb}" || continue
+    if ! grep -q 'after-mount-unit.yml' "${f_pb}"
+    then
+      echo "FAIL: $(basename "${f_pb}") declares boot_units without registration" >&2
+      f_boot_fail=1
+    fi
+  done
+  [[ -f "${f_root}/shared-tasks/after-mount-unit.yml" ]] || {
+    echo "FAIL: shared-tasks/after-mount-unit.yml is missing" >&2
+    f_boot_fail=1
+  }
+  if [[ "${f_boot_fail}" -eq 0 ]]
+  then
+    g_echo "PASS: boot unit declarations have registrations" 2>/dev/null || echo "PASS: boot unit declarations have registrations"
+  else
+    f_failures=$((f_failures + 1))
+  fi
+
+  # 11. Cron jobs that point into the encrypted data root must stay quiet on
+  # an early tick before rc.local unlocked /symbios (AP3). A bare path in a
+  # cron line without an executability/existence guard is a boot-time error.
+  f_cron_bad="$(grep -RIn --include='*.yml' \
+    -E '^[[:space:]]*([0-9*/,-]+[[:space:]]+){4,5}[0-9*/,-]+[[:space:]]+root[[:space:]].*(\{\{[[:space:]]*(git_root|data_root)[[:space:]]*\}\}|/symbios/)' \
+    "${f_root}"/base-services "${f_root}"/services "${f_root}"/external-services 2>/dev/null \
+    | grep -vE '(\[|\[\[)[[:space:]]*-?[xs][[:space:]]' || true)"
+  if [[ -n "${f_cron_bad}" ]]
+  then
+    echo "FAIL: unguarded cron job below /symbios" >&2
+    echo "${f_cron_bad}" >&2
+    f_failures=$((f_failures + 1))
+  else
+    g_echo "PASS: cron jobs below /symbios are guarded" 2>/dev/null || echo "PASS: cron jobs below /symbios are guarded"
+  fi
+
+  # 12. Every blockinfile that writes /etc/rc.local must use a SymbiOS marker
+  # and insert before the final exit 0, so re-runs cannot duplicate boot blocks.
+  f_rc_bad=""
+  for f_pb in "${f_root}"/base-services/*.yml "${f_root}"/services/*.yml
+  do
+    [[ -f "${f_pb}" ]] || continue
+    f_rc_bad+="$(awk -v f_pb="$(basename "${f_pb}")" '
+      /^[[:space:]]*- name:/ {
+        if (f_bf && f_path && (!f_marker || !f_insert || f_marker_line !~ /SymbiOS/))
+          print f_pb ": " f_task ": rc.local blockinfile needs SymbiOS marker and insertbefore"
+        f_task=$0; f_bf=0; f_path=0; f_marker=0; f_insert=0; f_marker_line=""
+      }
+      /blockinfile:/ { f_bf=1 }
+      /path:[[:space:]]*\/etc\/rc\.local/ { f_path=1 }
+      /marker:/ { f_marker=1; f_marker_line=$0 }
+      /insertbefore:/ { f_insert=1 }
+      END {
+        if (f_bf && f_path && (!f_marker || !f_insert || f_marker_line !~ /SymbiOS/))
+          print f_pb ": " f_task ": rc.local blockinfile needs SymbiOS marker and insertbefore"
+      }
+    ' "${f_pb}")"
+  done
+  if [[ -n "${f_rc_bad}" ]]
+  then
+    echo "FAIL: unmarked rc.local blockinfile task" >&2
+    echo "${f_rc_bad}" >&2
+    f_failures=$((f_failures + 1))
+  else
+    g_echo "PASS: rc.local blocks have SymbiOS markers" 2>/dev/null || echo "PASS: rc.local blocks have SymbiOS markers"
+  fi
+
   if [[ "${f_failures}" -gt 0 ]]
   then
     echo "${f_failures} static check(s) failed" >&2

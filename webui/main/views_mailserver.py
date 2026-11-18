@@ -25,7 +25,7 @@ from .decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
 from .views import _get_inventory_config
-from .utils.ssh_exec import run_playbook, run_command
+from .utils.ssh_exec import run_command
 from .utils.http import is_ajax_request
 from .setup_status import get_page_badge, PAGE_EXPLAIN
 
@@ -46,24 +46,20 @@ def settings_mailserver(request):
             if request.POST.get('action') == 'delete':
                 # Guards (2FA / notifications need a sender) and the key
                 # deletion live in the settings CLI.
-                set_cmd = 'symbios-settings-mailserver.sh remove'
+                # The CLI applies its own playbooks after a real change.
+                cmd = 'symbios-settings-mailserver.sh remove'
                 if is_ajax:
                     from .utils.jobs import create_job
-                    cmd = f'{set_cmd} && symbios-run-playbook.sh base-services/smtp.yml'
                     job_id = create_job(cmd, timeout=3600)
                     return JsonResponse({'ok': True, 'job': job_id,
                                          'title': 'Deleting SMTP config...',
                                          'message': 'SMTP configuration deleted.',
                                          'command': cmd})
-                ok, stdout, stderr = run_command(set_cmd, timeout=30)
+                ok, stdout, stderr = run_command(cmd, timeout=3600)
                 if not ok:
                     messages.error(request, f'Error: {stderr or stdout}')
                     return redirect('settings_mailserver')
-                ok, out = run_playbook('base-services/smtp.yml', timeout=180)
-                if ok:
-                    messages.success(request, 'SMTP configuration deleted.')
-                else:
-                    messages.error(request, f'Applied with errors: {out[:500]}')
+                messages.success(request, 'SMTP configuration deleted.')
                 return redirect('settings_mailserver')
 
             # Secrets travel via stdin JSON, never as argv (visible in ps).
@@ -107,11 +103,10 @@ def settings_mailserver(request):
                 messages.error(request, f'{err}')
                 return redirect('settings_mailserver')
 
-            # Build a single chained command for the exec modal:
-            # validated set, then smtp.yml, optionally authelia.yml if 2FA.
-            cmd = f'{set_cmd} && symbios-run-playbook.sh base-services/smtp.yml'
-            if vars_.get('twofa_enabled'):
-                cmd += ' && symbios-run-playbook.sh base-services/authelia.yml'
+            # set validates, writes and applies in one call. The dynamic
+            # resolver picks smtp.yml and (via shared smtp_* vars) authelia.yml,
+            # so no playbook names belong in this view any more.
+            cmd = set_cmd
 
             if is_ajax:
                 from .utils.jobs import create_job
@@ -121,18 +116,12 @@ def settings_mailserver(request):
                                      'message': 'Mailserver settings saved.',
                                      'command': cmd})
 
-            ok, stdout, stderr = run_command(cmd, timeout=30,
+            ok, stdout, stderr = run_command(cmd, timeout=3600,
                                             stdin_data=payload)
             if not ok:
                 messages.error(request, f'Error: {stderr or stdout}')
                 return redirect('settings_mailserver')
-            ok, out = run_playbook('base-services/smtp.yml', timeout=180)
-            if ok and vars_.get('twofa_enabled'):
-                ok, out = run_playbook('base-services/authelia.yml', timeout=180)
-            if ok:
-                messages.success(request, 'Mailserver settings saved and applied.')
-            else:
-                messages.error(request, f'Applied with errors: {out[:500]}')
+            messages.success(request, 'Mailserver settings saved and applied.')
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)

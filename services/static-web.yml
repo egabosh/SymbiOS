@@ -247,7 +247,7 @@
           server {
             listen 80;
             listen [::]:80;
-            server_name {{ item.domain }}{% for alias in item.aliases | default([]) %} {{ alias }}{% endfor %};
+            server_name {{ ([item.domain] + (item.aliases | default([]) | list)) | join(' ') }};
 
             # Document root and index files
             root /usr/share/nginx/html;
@@ -299,9 +299,9 @@
       ansible.builtin.blockinfile:
         path: /symbios/base-services/authelia/authelia-data/configuration.yml
         marker: "# {mark} ANSIBLE MANAGED BLOCK {{ service_name }} ACCESS CONTROL"
-        # Explicit string form with newline escapes: the block scalar would
-        # strip the leading whitespace that access_control rules need.
-        block: "{% for site in static_web_instances | default([]) %}{% if not (site.public | default(false) | bool) %}    - domain: \"{{ site.domain }}\"\n      policy: {{ static_web_auth_policy }}\n      subject:\n        - [\"group:static-web\"]\n    - domain: \"{{ site.domain }}\"\n      policy: deny\n{% for alias in site.aliases | default([]) %}    - domain: \"{{ alias }}\"\n      policy: {{ static_web_auth_policy }}\n      subject:\n        - [\"group:static-web\"]\n    - domain: \"{{ alias }}\"\n      policy: deny\n{% endfor %}{% endif %}{% endfor %}"
+        # Keep the rendered template in a lookup: a block scalar would strip
+        # the leading whitespace that access_control rules need.
+        block: "{{ lookup('template', git_root + '/services/static-web/templates/authelia-access-control.j2') }}"
         insertafter: "^# END ANSIBLE MANAGED BLOCK ACCESS CONTROL"
         backup: yes
       notify: Restart authelia

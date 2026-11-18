@@ -36,7 +36,6 @@ from .settings_registry import SETTINGS
 from .setup_status import PAGE_EXPLAIN, get_page_badge
 from .utils.http import is_ajax_request
 from .utils.jobs import create_job
-from .utils.settings_cli import run_settings_script, settings_failed
 from .utils.ssh_exec import run_command
 from .views import _get_inventory_config
 
@@ -259,23 +258,21 @@ def _save_generic(request, slug, entry, script):
                                  'redirect': '/setup/' if in_setup else request.path})
         messages.info(request, 'Already up to date - nothing changed.')
         return redirect('setup' if in_setup else request.path)
-    result = run_settings_script(
-        '{} set --json-stdin'.format(script), timeout=30,
-        stdin_data=json.dumps(changed))
-    if not result:
-        return settings_failed(request, result, request.path)
+    # set validates, writes and applies in one call; the whole chain runs in
+    # the job so a slow playbook never hits the sync SSH timeout and a
+    # validation error shows up in the exec modal.
+    cmd = '{} set --json-stdin'.format(script)
+    stdin_data = json.dumps(changed)
     message = entry.get('message') or 'Settings saved.'
-    title = 'Applying {}...'.format(entry.get('title') or slug)
+    title = 'Saving and applying {}...'.format(entry.get('title') or slug)
     if is_ajax:
-        # The sync set above already validated+wrote; the job only applies.
-        cmd = '{} apply'.format(script)
-        job_id = create_job(cmd, timeout=3600)
+        job_id = create_job(cmd, timeout=3600, stdin_data=stdin_data)
         resp = {'ok': True, 'job': job_id, 'title': title,
                 'message': message, 'command': cmd}
         if in_setup:
             resp['redirect'] = '/setup/'
         return JsonResponse(resp)
     messages.success(request, message)
-    messages.info(request, 'Applying in the background...')
-    create_job('{} apply'.format(script), timeout=3600)
+    messages.info(request, 'Saving and applying in the background...')
+    create_job(cmd, timeout=3600, stdin_data=stdin_data)
     return redirect('setup' if in_setup else request.path)

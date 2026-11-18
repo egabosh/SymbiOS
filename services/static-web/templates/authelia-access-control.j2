@@ -1,0 +1,18 @@
+{% for site in static_web_instances | default([]) %}
+{% if not (site.public | default(false) | bool) %}
+    - domain: "{{ site.domain }}"
+      policy: {{ static_web_auth_policy }}
+      subject:
+        - ["group:static-web"]
+    - domain: "{{ site.domain }}"
+      policy: deny
+{% for alias in site.aliases | default([]) %}
+    - domain: "{{ alias }}"
+      policy: {{ static_web_auth_policy }}
+      subject:
+        - ["group:static-web"]
+    - domain: "{{ alias }}"
+      policy: deny
+{% endfor %}
+{% endif %}
+{% endfor %}

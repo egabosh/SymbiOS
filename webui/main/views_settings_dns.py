@@ -65,15 +65,18 @@ def settings_dns(request):
         # then the hostname follows the new domain, then apply resolves
         # consuming playbooks dynamically from uses_vars.
         try:
+            # The hostname must change before the playbooks run, so the CLI
+            # auto-apply is suppressed here and the explicit chain keeps the
+            # ordering: set -> hostname -> dynamic apply.
             if action == 'remove':
-                set_cmd = 'symbios-settings-dns.sh remove'
+                set_cmd = 'symbios-settings-dns.sh remove --no-apply'
                 stdin_data = None
                 message = 'DNS configuration removed.'
                 title = 'Removing DNS config and applying...'
             elif dns_mode == 'self-managed':
                 self_domain = request.POST.get('self_domain', '').strip()
                 set_cmd = ('symbios-settings-dns.sh set --mode self-managed'
-                           f' --domain {shlex.quote(self_domain)}')
+                           f' --domain {shlex.quote(self_domain)} --no-apply')
                 stdin_data = None
                 message = f'DNS settings saved for {self_domain}.'
                 title = 'Applying DNS...'
@@ -86,7 +89,8 @@ def settings_dns(request):
                     'ddns_apikey': request.POST.get('ddns_apikey', ''),
                     'ddns_ipv6': request.POST.get('ddns_ipv6', ''),
                 })
-                set_cmd = 'symbios-settings-dns.sh set --mode desec --json-stdin'
+                set_cmd = ('symbios-settings-dns.sh set --mode desec'
+                           ' --json-stdin --no-apply')
                 stdin_data = payload
                 message = 'DNS settings saved.'
                 title = 'Applying DNS...'
@@ -502,8 +506,11 @@ def settings_dns_finalize(request):
         'ddns_apikey': api_token,
         'ddns_ipv6': request.POST.get('ipv6_mode', ''),
     })
+    # Registration only stores the credentials; applying is a separate user
+    # action (as before). --no-apply keeps this request outside the playbook
+    # path and avoids a synchronous run inside the HTTP request.
     ok, stdout, stderr = run_command(
-        'symbios-settings-dns.sh set --mode desec --json-stdin',
+        'symbios-settings-dns.sh set --mode desec --json-stdin --no-apply',
         timeout=30, stdin_data=payload)
     if not ok:
         return JsonResponse({'ok': False,

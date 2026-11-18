@@ -52,11 +52,19 @@ sourcing order). Provided functions:
                              print consuming host playbooks (ordered)
   f_ss_apply <var>...
                              run consuming playbooks in order, abort on error
-  f_ss_apply_cmd             implements `apply [--dry-run]` from the
+  f_ss_apply_cmd             implements 'apply [--dry-run]' from the
                              caller's f_managed_vars (space-separated keys)
+  f_ss_finish                finish the set subcommand: apply consuming
+                             playbooks once when inventory really changed;
+                             callers set f_managed_vars before invoking it
 
 Options:
   -h, --help  Show this help and exit
+
+Domain scripts also accept --no-apply (set by each script's option parser
+into g_ss_no_apply): it skips the automatic apply after a real change, so
+smoke tests can exercise set against a scratch inventory without running
+playbooks.
 EOF
     exit 0
   fi
@@ -66,6 +74,13 @@ fi
 
 # Directory of this library (= scripts/), independent of PATH.
 g_ss_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+
+# Set to yes by f_ss_result for a real (non-check, non-unchanged) inventory
+# write; f_ss_finish uses it to apply exactly once at the end of `set`.
+g_ss_changed="no"
+# Set to yes by a script's --no-apply option; smoke tests use it to exercise
+# set against a scratch inventory without running any playbook.
+g_ss_no_apply="no"
 
 function f_ss_fail_usage {
   f_usage >&2
@@ -164,7 +179,9 @@ function f_ss_apply {
     g_echo "Nothing to apply."
     return 0
   fi
-  f_pbs="$("$g_ss_dir/symbios-playbooks-for-vars.sh" "${f_vars[@]}" 2>/dev/null)" \
+  # Keep the resolver's stderr: its "skip: ..." notes are part of the job
+  # output and tell the user why a declared consumer was not run.
+  f_pbs="$("$g_ss_dir/symbios-playbooks-for-vars.sh" "${f_vars[@]}")" \
     || return 1
   if [[ -z "${f_pbs}" ]]
   then
@@ -205,6 +222,13 @@ function f_ss_apply_cmd {
     esac
     shift
   done
+  # An empty f_managed_vars is valid (runtime-only settings). The resolver
+  # would reject an empty argument list, so short-circuit before calling it.
+  if [[ -z "${f_managed_vars// /}" ]]
+  then
+    g_echo "Nothing to apply."
+    return 0
+  fi
   # shellcheck disable=SC2086
   if [[ "${f_dry}" == "yes" ]]
   then
@@ -239,6 +263,12 @@ function f_ss_result {
   local f_out="$1" f_token="$2" f_check="${3:-no}" f_detail="${4:-}"
   local f_first=""
   f_first="$(head -n 1 <<< "${f_out}")"
+  # Remember a real change for the final f_ss_finish call. Check mode and
+  # "unchanged" writes must not trigger an apply.
+  if [[ "${f_check}" != "yes" && "${f_first}" != "unchanged" ]]
+  then
+    g_ss_changed="yes"
+  fi
   g_echo "${f_out}"
   if [[ "${f_check}" == "yes" ]]
   then
@@ -259,4 +289,23 @@ function f_ss_result {
   else
     g_echo_note "${f_token}-changed"
   fi
+}
+
+# Finish a write subcommand: run consuming playbooks once after all
+# inventory writes, using the caller's f_managed_vars. Check mode, an
+# unchanged write and --no-apply all return 0 without applying. The last
+# command propagates the apply exit code (0 ok / 1 technical error).
+function f_ss_finish {
+  if [[ "${g_ss_no_apply}" == "yes" ]]
+  then
+    g_echo "Nothing to apply (--no-apply)."
+    return 0
+  fi
+  if [[ "${g_ss_changed}" != "yes" ]]
+  then
+    g_echo "Nothing to apply (unchanged)."
+    return 0
+  fi
+  # shellcheck disable=SC2086
+  f_ss_apply ${f_managed_vars}
 }

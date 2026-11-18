@@ -30,7 +30,6 @@ import shlex
 SCRIPT = 'symbios-wireguard-client.sh'
 WRITE_SCRIPT = 'symbios-write-wireguard-config.sh'
 SETTINGS_SCRIPT = 'symbios-settings-wireguard.sh'
-PLAYBOOK = 'base-services/wireguard-client.yml'
 
 # The tunnel name doubles as the WireGuard interface name (15 chars, IFNAMSIZ).
 _NAME_RE = re.compile(r'^[a-zA-Z0-9_-]{1,15}$')
@@ -124,21 +123,13 @@ def settings_wireguard(request):
                 enabled = 'true' if request.POST.get('enabled') is not None else 'false'
                 dns = 'true' if request.POST.get('dns') is not None else 'false'
                 hooks = 'true' if request.POST.get('hooks') is not None else 'false'
-                set_cmd = (f'{SETTINGS_SCRIPT} save'
-                           f' --name {shlex.quote(name)}'
-                           f' --enabled {enabled}'
-                           f' --dns {dns}'
-                           f' --hooks {hooks}'
-                           f' --ufw-ports {shlex.quote(request.POST.get("ufw_ports", ""))}')
-                ok, stdout, stderr = run_command(set_cmd, timeout=30)
-                if not ok:
-                    err = (stderr or stdout or 'Failed to save tunnel.')
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': err}, status=400)
-                    messages.error(request, f'Error: {err}')
-                    return redirect('settings_wireguard')
-
-                cmd = f'symbios-run-playbook.sh {PLAYBOOK}'
+                cmd = (f'{SETTINGS_SCRIPT} save'
+                       f' --name {shlex.quote(name)}'
+                       f' --enabled {enabled}'
+                       f' --dns {dns}'
+                       f' --hooks {hooks}'
+                       f' --ufw-ports {shlex.quote(request.POST.get("ufw_ports", ""))}')
+                # set validates, writes and applies in one job.
                 if is_ajax:
                     from .utils.jobs import create_job
                     job_id = create_job(cmd, timeout=300)
@@ -146,10 +137,11 @@ def settings_wireguard(request):
                                          'title': f'Applying tunnel {name}...',
                                          'message': f'Tunnel {name} saved.',
                                          'command': cmd})
-                messages.success(request, f'Tunnel {name} saved.')
-                messages.info(request, 'Applying WireGuard playbook in the background...')
-                from .utils.jobs import create_job
-                create_job(cmd, timeout=300)
+                ok, stdout, stderr = run_command(cmd, timeout=300)
+                if not ok:
+                    messages.error(request, f'Error: {stderr or stdout}')
+                    return redirect('settings_wireguard')
+                messages.success(request, f'Tunnel {name} saved and applied.')
                 return redirect('settings_wireguard')
 
             elif action == 'upload':
@@ -178,9 +170,13 @@ def settings_wireguard(request):
                     return redirect('settings_wireguard')
 
                 # Metadata via the settings CLI (name validation included).
+                # --no-apply: the explicit playbook job below deploys the new
+                # config file; without it an unchanged metadata save would
+                # skip apply and leave the uploaded config inactive.
                 meta_cmd = (f'{SETTINGS_SCRIPT} save'
                             f' --name {shlex.quote(name)}'
-                            f' --enabled {"true" if enabled else "false"}')
+                            f' --enabled {"true" if enabled else "false"}'
+                            f' --no-apply')
                 ok, stdout, stderr = run_command(meta_cmd, timeout=30)
                 if not ok:
                     err = (stderr or stdout or 'Failed to save tunnel.')
@@ -191,7 +187,10 @@ def settings_wireguard(request):
                     messages.error(request, f'Error: {err}')
                     return redirect('settings_wireguard')
 
-                cmd = f'symbios-run-playbook.sh {PLAYBOOK}'
+                # The config file is written outside inventory, so an explicit
+                # apply must follow even when the metadata did not change.
+                # The CLI resolver picks the playbook, no name in this view.
+                cmd = f'{SETTINGS_SCRIPT} apply'
                 if is_ajax:
                     from .utils.jobs import create_job
                     job_id = create_job(cmd, timeout=300)

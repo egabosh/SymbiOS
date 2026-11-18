@@ -167,6 +167,7 @@ gidNumber: ${f_gid}
       g_echo_note "Group '${f_name}' created"
       # Notify services about the new group
       f_ldap_groups_hooks "group-created" "${f_name}"
+      f_audit_event cli ldap-group-create "group=${f_name}"
     else
       g_echo_error "Failed to create group '${f_name}'"
       exit 1
@@ -208,6 +209,7 @@ memberUid: ${f_member}
       g_echo_note "Group '${f_name}' deleted"
       # Notify services about the deleted group (all memberships ended)
       f_ldap_groups_hooks "group-deleted" "${f_name}"
+      f_audit_event cli ldap-group-delete "group=${f_name}"
     else
       g_echo_error "Failed to delete group '${f_name}'"
       exit 1
@@ -237,6 +239,7 @@ memberUid: ${f_uid}
       g_echo_note "User '${f_uid}' added to group '${f_name}'"
       # Notify services about the new membership
       f_ldap_groups_hooks "member-added" "${f_name}" "${f_uid}"
+      f_audit_event cli ldap-member-add "group=${f_name} uid=${f_uid}"
     else
       g_echo_error "Failed to add '${f_uid}' to group '${f_name}'"
       exit 1
@@ -266,6 +269,7 @@ memberUid: ${f_uid}
       g_echo_note "User '${f_uid}' removed from group '${f_name}'"
       # Notify services about the ended membership
       f_ldap_groups_hooks "member-removed" "${f_name}" "${f_uid}"
+      f_audit_event cli ldap-member-remove "group=${f_name} uid=${f_uid}"
     else
       g_echo_error "Failed to remove '${f_uid}' from group '${f_name}'"
       exit 1

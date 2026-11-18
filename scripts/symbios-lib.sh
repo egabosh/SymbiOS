@@ -58,6 +58,7 @@
 #   f_json_escape                   escape a string (stdin) for JSON
 #   f_json_error <msg>              print {"ok":false,"error":"<msg>"}
 #   f_json_get <json> <key>         extract a string value from JSON
+#   f_audit_event <src> <act> [det] append a best-effort audit event
 #   f_check_cache <name>            skip a check that ran within 5 min
 #   f_symbios_ldap_init             set f_ldap_uri/f_base_dn/f_admin_pw/f_bind_dn
 #   f_ldap_exec / f_ldap_ldif       run LDAP in the webui container
@@ -105,6 +106,7 @@ g_* globals. Provides helper functions:
   f_json_error <msg>               print {"ok":false,"error":"<msg>"}
   f_json_get <json> <key>          extract a string value from JSON
   f_no_args "$@"                   reject stray arguments (usage + exit 2)
+  f_audit_event <src> <act> [det]  append a best-effort audit event
   f_check_cache <name>             skip a check that ran within 5 min
   f_symbios_ldap_init              set f_ldap_uri/f_base_dn/f_admin_pw/f_bind_dn
   f_ldap_exec / f_ldap_ldif        run LDAP in the webui container
@@ -276,6 +278,9 @@ function f_symbios_load_layout {
   g_docker_root=$(f_symbios_var docker_root "${g_data_root}/docker")
   g_containerd_root=$(f_symbios_var containerd_root "${g_data_root}/containerd")
   g_backup_root=$(f_symbios_var backup_root "${g_data_root}/backups")
+  # Audit trail lives on the encrypted data partition, never in /var/log.
+  g_audit_log="${SYMBIOS_AUDIT_LOG:-$(f_symbios_var audit_log "${g_data_root}/log/symbios-audit.log")}"
+  export SYMBIOS_AUDIT_LOG="${g_audit_log}"
   g_media_root=$(f_symbios_var media_root "${g_data_root}/media")
   g_media_audio=$(f_symbios_var media_audio "${g_media_root}/audio")
   g_media_images=$(f_symbios_var media_images "${g_media_root}/images")
@@ -513,3 +518,19 @@ function f_matrix_admin_token {
 
 # Load layout immediately so sourcing the library is sufficient.
 f_symbios_load_layout
+
+# Append one audit event to the encrypted data partition. The Python helper
+# owns the format; a failed write warns but never aborts the action that
+# triggered it. Detail strings must never contain secret values.
+function f_audit_event {
+  local f_source="$1"
+  local f_action="$2"
+  local f_detail="${3:-}"
+  if ! SYMBIOS_AUDIT_LOG="${g_audit_log}" python3 \
+    "${g_git_root}/scripts/symbios_audit.py" event \
+    "${f_source}" "${f_action}" "${f_detail}" 2>/dev/null
+  then
+    g_echo_warn "audit log write failed - continuing: ${g_audit_log}"
+  fi
+  return 0
+}

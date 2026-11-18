@@ -442,6 +442,7 @@ memberUid: ${f_uid}
     printf '%s' "${f_password}" > "${f_pw_hook_file}"
     f_ldap_password_hooks "${f_uid}" "${f_pw_hook_file}"
     shred -u "${f_pw_hook_file}"
+    f_audit_event cli ldap-user-create "uid=${f_uid}"
     ;;
 
   delete)
@@ -472,6 +473,7 @@ memberUid: ${f_uid}
     if [[ ${f_rc} -eq 0 ]]
     then
       g_echo_note "User '${f_uid}' deleted successfully"
+      f_audit_event cli ldap-user-delete "uid=${f_uid}"
     else
       g_echo_error "Failed to delete user '${f_uid}'"
       exit 1
@@ -515,6 +517,7 @@ userPassword: ${f_password_hash}"
     if [[ ${f_rc} -eq 0 ]]
     then
       g_echo_note "User '${f_uid}' modified successfully"
+      f_audit_event cli ldap-user-modify "uid=${f_uid}"
       # Fire password-set hooks only when a password was actually set
       # (same 0600-file handover as on create, see above).
       if [[ -n "${f_password}" ]]
@@ -524,6 +527,7 @@ userPassword: ${f_password_hash}"
         printf '%s' "${f_password}" > "${f_pw_hook_file}"
         f_ldap_password_hooks "${f_uid}" "${f_pw_hook_file}"
         shred -u "${f_pw_hook_file}"
+        f_audit_event cli ldap-password-set "uid=${f_uid}"
       fi
     else
       g_echo_error "Failed to modify user '${f_uid}'"

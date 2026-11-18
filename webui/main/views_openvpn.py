@@ -29,7 +29,6 @@ import shlex
 
 SCRIPT = 'symbios-openvpn-client.sh'
 WRITE_SCRIPT = 'symbios-write-openvpn-config.sh'
-PLAYBOOK = 'base-services/openvpn-client.yml'
 
 _NAME_RE = re.compile(r'^[a-zA-Z0-9_-]+$')
 
@@ -116,23 +115,15 @@ def settings_openvpn(request):
                 name = request.POST.get('name', '').strip()
                 mode = request.POST.get('mode', 'upload').strip()
                 enabled = 'true' if request.POST.get('enabled') is not None else 'false'
-                set_cmd = ('symbios-settings-openvpn.sh save'
-                           f' --name {shlex.quote(name)}'
-                           f' --mode {shlex.quote(mode)}'
-                           f' --interface {shlex.quote(request.POST.get("interface", "").strip())}'
-                           f' --fetch-cmd {shlex.quote(request.POST.get("fetch_cmd", "").strip())}'
-                           f' --cron {shlex.quote(request.POST.get("cron", "").strip())}'
-                           f' --ufw-ports {shlex.quote(request.POST.get("ufw_ports", ""))}'
-                           f' --enabled {enabled}')
-                ok, stdout, stderr = run_command(set_cmd, timeout=30)
-                if not ok:
-                    err = (stderr or stdout or 'Failed to save tunnel.')
-                    if is_ajax:
-                        return JsonResponse({'ok': False, 'error': err}, status=400)
-                    messages.error(request, f'Error: {err}')
-                    return redirect('settings_openvpn')
-
-                cmd = f'symbios-run-playbook.sh {PLAYBOOK}'
+                cmd = ('symbios-settings-openvpn.sh save'
+                       f' --name {shlex.quote(name)}'
+                       f' --mode {shlex.quote(mode)}'
+                       f' --interface {shlex.quote(request.POST.get("interface", "").strip())}'
+                       f' --fetch-cmd {shlex.quote(request.POST.get("fetch_cmd", "").strip())}'
+                       f' --cron {shlex.quote(request.POST.get("cron", "").strip())}'
+                       f' --ufw-ports {shlex.quote(request.POST.get("ufw_ports", ""))}'
+                       f' --enabled {enabled}')
+                # set validates, writes and applies in one job.
                 if is_ajax:
                     from .utils.jobs import create_job
                     job_id = create_job(cmd, timeout=300)
@@ -140,10 +131,11 @@ def settings_openvpn(request):
                                          'title': f'Applying tunnel {name}...',
                                          'message': f'Tunnel {name} saved.',
                                          'command': cmd})
-                messages.success(request, f'Tunnel {name} saved.')
-                messages.info(request, 'Applying OpenVPN playbook in the background...')
-                from .utils.jobs import create_job
-                create_job(cmd, timeout=300)
+                ok, stdout, stderr = run_command(cmd, timeout=300)
+                if not ok:
+                    messages.error(request, f'Error: {stderr or stdout}')
+                    return redirect('settings_openvpn')
+                messages.success(request, f'Tunnel {name} saved and applied.')
                 return redirect('settings_openvpn')
 
             elif action == 'upload':
@@ -172,10 +164,13 @@ def settings_openvpn(request):
                 # An already stored interface wins over the derived one
                 # (same as before: only new tunnels take the derived value).
                 stored_iface = _get_clients(vars_).get(name, {}).get('interface', '')
+                # --no-apply: the explicit playbook job below deploys the
+                # uploaded config even when the metadata did not change.
                 meta_cmd = ('symbios-settings-openvpn.sh save'
                             f' --name {shlex.quote(name)}'
                             ' --mode upload'
-                            f' --enabled {"true" if enabled else "false"}')
+                            f' --enabled {"true" if enabled else "false"}'
+                            ' --no-apply')
                 if not stored_iface:
                     meta_cmd += f' --interface {shlex.quote(interface)}'
                 ok, stdout, stderr = run_command(meta_cmd, timeout=30)
@@ -186,7 +181,10 @@ def settings_openvpn(request):
                     messages.error(request, f'Error: {err}')
                     return redirect('settings_openvpn')
 
-                cmd = f'{WRITE_SCRIPT} {shlex.quote(name)} && symbios-run-playbook.sh {PLAYBOOK}'
+                # The config file is written outside inventory, so an explicit
+                # apply must follow even when the metadata did not change.
+                cmd = (f'{WRITE_SCRIPT} {shlex.quote(name)}'
+                       ' && symbios-settings-openvpn.sh apply')
                 if is_ajax:
                     from .utils.jobs import create_job
                     job_id = create_job(cmd, timeout=300, stdin_data=cfg_text)

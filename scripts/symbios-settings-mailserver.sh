@@ -52,6 +52,10 @@ Commands:
 Output: human status lines. The final line carries a machine-readable
 state token (mailserver-changed / mailserver-unchanged).
 
+Options:
+  --no-apply                      Skip the automatic playbook apply after a
+                                  real inventory change (smoke tests).
+
 Exit codes:
   0  ok, or nothing to do (unchanged)
   2  validation or usage error (missing field, bad email/port, ...)
@@ -154,6 +158,10 @@ then
   while [[ $# -gt 0 ]]
   do
     case "$1" in
+      --no-apply)
+        g_ss_no_apply="yes"
+        shift
+        ;;
       --check)
         f_check="yes"
         shift
@@ -182,7 +190,8 @@ then
     f_ss_fail_validation "Cannot delete SMTP configuration while mail notifications are enabled - disable them under Settings Notifications first"
   fi
   f_ss_merge '{"smtp_server": null, "smtp_port": null, "smtp_user": null, "smtp_password": null, "smtp_from": null, "smtp_tls": null}' "mailserver" "${f_check}"
-  exit 0
+  f_ss_finish
+  exit $?
 fi
 
 # --- subcommand: set -----------------------------------------------------------
@@ -234,6 +243,10 @@ do
       ;;
     --json-stdin)
       f_json_stdin="yes"
+      shift
+      ;;
+    --no-apply)
+      g_ss_no_apply="yes"
       shift
       ;;
     --check)
@@ -345,4 +358,5 @@ fi
 f_merge="${f_merge}}"
 
 f_ss_merge "${f_merge}" "mailserver" "${f_check}"
-exit 0
+f_ss_finish
+exit $?

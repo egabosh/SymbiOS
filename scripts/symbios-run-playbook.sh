@@ -54,6 +54,8 @@ then
   exit 1
 fi
 
+f_audit_event cli playbook-run "playbook=${g_playbook}"
+
 exec ansible-playbook \
   --connection=local \
   --limit localhost \

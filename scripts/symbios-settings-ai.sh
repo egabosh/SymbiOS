@@ -41,6 +41,10 @@ Examples:
   echo '{"ai_server":"https://ai.example.com/v1","ai_apikey":"sk-.."}' \\
     | $(basename "$0") set --json-stdin
 
+Options:
+  --no-apply                      Skip the automatic playbook apply after a
+                                  real inventory change (smoke tests).
+
 Exit codes:
   0  ok, or nothing to do (unchanged)
   2  validation or usage error
@@ -140,6 +144,10 @@ do
       f_json_stdin="yes"
       shift
       ;;
+    --no-apply)
+      g_ss_no_apply="yes"
+      shift
+      ;;
     --check)
       f_check="yes"
       shift
@@ -195,4 +203,5 @@ f_ss_merge_add "ai_apikey" "${f_new_key}" "${f_given_key}"
 f_merge="${f_merge}}"
 
 f_ss_merge "${f_merge}" "ai" "${f_check}"
-exit 0
+f_ss_finish
+exit $?

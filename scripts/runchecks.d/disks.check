@@ -511,19 +511,19 @@ do
             then
               continue
             fi
-            g_disk_trend "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val - check cable/USB bridge"
+            f_disk_trend "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val - check cable/USB bridge"
           else
-            g_disk_trend "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val"
+            f_disk_trend "SMART $g_aname (id ${g_key#attr_}) of $g_dev_label increased by $((g_val - g_prev)) to $g_val"
           fi
         elif [[ "$g_key" == life_* && "$g_val" -lt "$g_prev" ]]
         then
-          g_disk_trend "SMART life attribute ${g_attr_names[${g_key#life_}]:-} (id ${g_key#life_}) of $g_dev_label decreased from $g_prev to $g_val"
+          f_disk_trend "SMART life attribute ${g_attr_names[${g_key#life_}]:-} (id ${g_key#life_}) of $g_dev_label decreased from $g_prev to $g_val"
         elif [[ "$g_key" == "ataerr" && "$g_val" -gt "$g_prev" ]]
         then
-          g_disk_trend "SMART $g_dev_label ATA error log grew from $g_prev to $g_val entries"
+          f_disk_trend "SMART $g_dev_label ATA error log grew from $g_prev to $g_val entries"
         elif [[ "$g_key" == "selftestfail" && "$g_val" -gt "$g_prev" ]]
         then
-          g_disk_trend "SMART $g_dev_label self-test failures grew from $g_prev to $g_val"
+          f_disk_trend "SMART $g_dev_label self-test failures grew from $g_prev to $g_val"
         fi
       fi
     done < "$g_attrs_now"

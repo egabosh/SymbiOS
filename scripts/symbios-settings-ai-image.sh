@@ -32,6 +32,10 @@ Commands:
 Output: human status lines. The final line carries a machine-readable
 state token (ai-image-changed / ai-image-unchanged).
 
+Options:
+  --no-apply                      Skip the automatic playbook apply after a
+                                  real inventory change (smoke tests).
+
 Exit codes:
   0  ok, or nothing to do (unchanged)
   2  validation or usage error
@@ -158,6 +162,10 @@ do
       f_json_stdin="yes"
       shift
       ;;
+    --no-apply)
+      g_ss_no_apply="yes"
+      shift
+      ;;
     --check)
       f_check="yes"
       shift
@@ -227,4 +235,5 @@ f_ss_merge_add "ai_image_edit_model" "${f_image_edit_model}" "${f_given_image_ed
 f_merge="${f_merge}}"
 
 f_ss_merge "${f_merge}" "ai-image" "${f_check}"
-exit 0
+f_ss_finish
+exit $?

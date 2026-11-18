@@ -78,7 +78,8 @@ def _add_ufw_extra_inbound(ext_port, protocol):
         run_command(
             'symbios-settings-port-forwarding.sh ufw-add'
             f' --port {shlex.quote(str(ext_port))}'
-            f' --proto {shlex.quote(str(protocol))}',
+            f' --proto {shlex.quote(str(protocol))}'
+            ' --no-apply',
             timeout=30)
     except Exception:
         pass
@@ -90,7 +91,8 @@ def _remove_ufw_extra_inbound(ext_port, protocol):
         run_command(
             'symbios-settings-port-forwarding.sh ufw-remove'
             f' --port {shlex.quote(str(ext_port))}'
-            f' --proto {shlex.quote(str(protocol))}',
+            f' --proto {shlex.quote(str(protocol))}'
+            ' --no-apply',
             timeout=30)
     except Exception:
         pass
@@ -209,7 +211,7 @@ def settings_port_forwarding(request):
                 if method in ('auto', 'manual', ''):
                     ok, stdout, stderr = run_command(
                         'symbios-settings-port-forwarding.sh set'
-                        f' --method {shlex.quote(method)}',
+                        f' --method {shlex.quote(method)} --no-apply',
                         timeout=30)
                     if not ok:
                         err = (stderr or stdout or 'Failed to save method.')
@@ -284,9 +286,12 @@ def settings_port_forwarding(request):
                     for ext, intp, desc, at in rules)
                 port_list = ' and '.join(str(e) for e, _, _, _ in rules)
                 # Persist UFW allows for IPv6 forwards so a reapply re-opens them.
+                # ufw-add skips its own apply (best-effort sync helper), so
+                # apply firewall.yml once here in the same modal job.
                 if auto_at in ('ipv6', 'ipv4_ipv6'):
                     _add_ufw_extra_inbound(80, 'TCP')
                     _add_ufw_extra_inbound(443, 'TCP')
+                    cmd += ' && symbios-settings-port-forwarding.sh apply'
                 if is_ajax:
                     job_id = create_job(cmd, timeout=90)
                     resp = {'ok': True, 'job': job_id,
@@ -324,7 +329,7 @@ def settings_port_forwarding(request):
                         # setup assistant and the page badge reflect it.
                         run_command(
                             'symbios-settings-port-forwarding.sh set'
-                            ' --static-ip-configured true',
+                            ' --static-ip-configured true --no-apply',
                             timeout=30)
                         messages.success(request, result.get('message', 'Static IP secured.'))
                     else:
@@ -359,9 +364,10 @@ def settings_port_forwarding(request):
                 cmd = static_prefix + f'{SCRIPT} {args}'
                 # IPv6 forwards connect directly to the host's GUA, so an
                 # extra UFW allow rule is needed on the host. Keep the
-                # inventory in sync so a reapply re-creates it.
+                # inventory in sync and apply firewall.yml in the same job.
                 if accesstype in ('ipv6', 'ipv4_ipv6'):
                     _add_ufw_extra_inbound(ext_port, protocol)
+                    cmd += ' && symbios-settings-port-forwarding.sh apply'
                 if is_ajax:
                     from .utils.jobs import create_job
                     job_id = create_job(cmd, timeout=15)
@@ -399,7 +405,9 @@ def settings_port_forwarding(request):
                 args = f'delete {ext_port} {protocol}'
                 if is_ajax:
                     from .utils.jobs import create_job
-                    job_id = create_job(f'{SCRIPT} {args}', timeout=15)
+                    job_id = create_job(
+                        f'{SCRIPT} {args} && symbios-settings-port-forwarding.sh apply',
+                        timeout=15)
                     _remove_ufw_extra_inbound(ext_port, protocol)
                     return JsonResponse({'ok': True, 'job': job_id,
                                          'title': 'Deleting port forwarding...',
@@ -407,6 +415,8 @@ def settings_port_forwarding(request):
                 result = _run_upnp(args, timeout=15)
                 if result.get('ok'):
                     _remove_ufw_extra_inbound(ext_port, protocol)
+                    run_command('symbios-settings-port-forwarding.sh apply',
+                                timeout=3600)
                     messages.success(request, result.get('message', 'Port forwarding deleted.'))
                 else:
                     messages.error(request, result.get('error', 'Failed to delete port forwarding.'))
@@ -524,7 +534,7 @@ def settings_port_forwarding(request):
             configured = bool(status_by_port.get(80) and status_by_port.get(443))
             if bool(vars_.get('port_forwarding_configured')) != configured:
                 run_command(
-                    'symbios-settings-port-forwarding.sh set --configured {}'.format(
+                    'symbios-settings-port-forwarding.sh set --configured {} --no-apply'.format(
                         'true' if configured else 'false'),
                     timeout=30)
 

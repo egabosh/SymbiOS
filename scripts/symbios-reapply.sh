@@ -213,6 +213,7 @@ fi
 # Execute each playbook
 g_count=0
 g_total=$(echo "$g_playbooks" | grep -c '[^ ]' || echo 0)
+f_audit_event cli reapply "count=${g_total} only=${g_only_playbooks:-all}"
 f_log "Will re-run $g_total playbooks"
 g_echo_note "Re-running $g_total playbook(s)..."
 

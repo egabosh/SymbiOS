@@ -1,0 +1,49 @@
+# Shared task: register host systemd units that need /symbios for after-mount
+# start and disable their systemd boot autostart.
+#
+# A unit whose config or ExecStart lives below /symbios must not be boot-enabled:
+# systemd would start it before rc.local unlocks and mounts the LUKS volume.
+# Each unit name is written to a rootfs file that symbios-after-mount.sh reads
+# once the mount is up. Boot enablement is removed without a state change, so
+# an already running unit is never stopped by a playbook re-run.
+#
+# Required var: after_mount_unit (single unit name or a list of unit names)
+#
+# Usage:
+#   - name: Register ha_pingcheck for after-mount start
+#     include_tasks: ../shared-tasks/after-mount-unit.yml
+#     vars:
+#       after_mount_unit: ha_pingcheck.service
+
+- name: Create /etc/symbios for after-mount unit registration
+  ansible.builtin.file:
+    path: /etc/symbios
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Resolve after-mount unit names
+  ansible.builtin.set_fact:
+    after_mount_unit_names: "{{ [after_mount_unit] if after_mount_unit is string else after_mount_unit }}"
+
+# One block per unit keeps repeated includes from overwriting each other's
+# registration (the marker is stable because it is derived from the unit name).
+- name: Register after-mount units in /etc/symbios/after-mount-units
+  ansible.builtin.blockinfile:
+    path: /etc/symbios/after-mount-units
+    create: yes
+    owner: root
+    group: root
+    mode: '0644'
+    marker: "# {mark} ANSIBLE MANAGED BLOCK after-mount {{ item }}"
+    block: "{{ item }}"
+  loop: "{{ after_mount_unit_names }}"
+
+# No state: here - only the boot enablement is removed; the running instance
+# is left alone and is started from rc.local after the next boot instead.
+- name: Disable boot autostart for after-mount units (keep running instances)
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+  loop: "{{ after_mount_unit_names }}"

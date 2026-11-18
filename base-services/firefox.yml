@@ -38,15 +38,30 @@
   hosts: all
   tasks:
 
+    # Guard - this playbook belongs to the Pi desktop stack and declares
+    # applies_when: raspberry_pi. A manual run on non-Pi hardware would fail
+    # late with confusing apt errors, so abort with a readable reason.
+    - name: Guard - Detect Raspberry Pi hardware
+      ansible.builtin.stat:
+        path: /proc/device-tree/model
+      register: pi_device_tree
+      changed_when: false
+
+    - name: Guard - Abort on non-Pi hardware
+      ansible.builtin.assert:
+        that:
+          - pi_device_tree.stat.exists
+        fail_msg: >-
+          firefox.yml is Raspberry Pi specific (declares
+          applies_when: raspberry_pi); this host has no
+          /proc/device-tree/model and is therefore no Pi. Install order
+          and settings apply skip it there.
+      when: not pi_device_tree.stat.exists
+
     - name: Install Firefox
-      apt:
+      ansible.builtin.apt:
         name:
           - firefox
-
-    - name: create LibreWolf /etc/librewolf/policies dir structure
-      file:
-        path: /etc/librewolf/policies
-        state: directory
 
     - name: Ensure Firefox policy directories exist
       ansible.builtin.file:
@@ -55,7 +70,7 @@
         owner: root
         group: root
         mode: '0755'
-      with_items:
+      loop:
         - "/etc/firefox/policies"
         - "/etc/librewolf/policies"
 
@@ -67,16 +82,17 @@
         group: root
         mode: '0444'
         backup: yes
-      with_items:
+      loop:
         - "/etc/firefox/policies/policies.json"
         - "/etc/librewolf/policies/policies.json"
 
     - name: Get sha256
-      shell: wget -q https://gitlab.com/api/v4/projects/24386000/packages/generic/librewolf/latest/LibreWolf.{{ ansible_architecture }}.AppImage.sha256 -O - | cut -d" " -f1
+      ansible.builtin.shell: wget -q https://gitlab.com/api/v4/projects/24386000/packages/generic/librewolf/latest/LibreWolf.{{ ansible_architecture }}.AppImage.sha256 -O - | cut -d" " -f1
       register: command_output
       changed_when: false
 
-    - set_fact:
+    - name: Store LibreWolf checksum for the download
+      ansible.builtin.set_fact:
         librewolf_sha256: "{{ command_output.stdout }}"
 
     - name: Download LibreWolf as Appimage (flatpak ignores policies.json)
@@ -86,4 +102,10 @@
         checksum: sha256:{{ librewolf_sha256 }}
         mode: "0555"
       changed_when: false
+
+    - name: Register playbook as installed
+      ansible.builtin.include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: firefox
+        state_playbook: base-services/firefox.yml
 

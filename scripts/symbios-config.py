@@ -43,6 +43,8 @@ except ImportError:
     print("symbios-config.py: PyYAML is required (python3-yaml)", file=sys.stderr)
     sys.exit(1)
 
+from symbios_audit import write_event
+
 DEFAULT_CONFIG_DIR = "/symbios/base-services/symbios-ui/config"
 
 
@@ -259,6 +261,9 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     args.func(args)
+    if args.command in ("write", "merge") and not getattr(args, "check", False):
+        write_event("cli", "config-" + args.command,
+                    "file=" + str(getattr(args, "file", "")))
     return 0
 
 

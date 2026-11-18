@@ -722,6 +722,33 @@
           }          
       when: nocontainer.stat.exists == true
 
+    # Audit trail lives on the encrypted partition. Keep it separate from the
+    # /var/log rules: private dir/file modes and longer retention.
+    - name: Symbios audit log directory
+      ansible.builtin.file:
+        path: "{{ data_root }}/log"
+        state: directory
+        mode: "0700"
+        owner: root
+        group: root
+
+    - name: Symbios audit logrotate config
+      ansible.builtin.copy:
+        dest: /etc/logrotate.d/symbios-audit
+        content: |
+          {{ data_root }}/log/symbios-audit.log
+          {
+            rotate 30
+            daily
+            missingok
+            notifempty
+            compress
+            create 0600 root root
+          }
+        mode: "0444"
+        owner: root
+        group: root
+
     - name: Remove logrotates
       ansible.builtin.file:
         path: /etc/logrotate.d/alternatives

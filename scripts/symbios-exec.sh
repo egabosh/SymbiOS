@@ -22,7 +22,8 @@
 # concrete command and sends it (shell-quoted) over SSH; this script only
 # audit-logs the invocation and runs it. The WebUI already holds the playbook
 # metadata, so no host-side parsing or verb dispatch remains.
-# Logging uses the gaboshlib helpers (g_logger -> syslog, g_echo_error).
+# Logging uses the gaboshlib helpers (g_logger -> syslog, g_echo_error) plus
+# the central audit file <data_root>/log/symbios-audit.log.
 
 function f_usage {
   cat << EOF
@@ -39,6 +40,10 @@ Arguments:
 
 Options:
   -h, --help          Show this help and exit
+
+Audit: every executed command is appended to
+<data_root>/log/symbios-audit.log (with source=gateway). Read-only job
+polls are not logged; syslog receives the same line as before.
 EOF
 }
 
@@ -52,11 +57,16 @@ fi
 # Redirect to stderr so helper messages don't corrupt JSON output on stdout.
 source /etc/bash/gaboshlib.include 1>&2
 
+# Self-location works regardless of how this script was invoked (SSH exec,
+# direct call). The library resolves data_root from inventory.yml, so the
+# audit file follows per-host path overrides instead of hardcoding /symbios.
+f_exec_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${f_exec_dir}/symbios-lib.sh" 1>&2
+
 # Ensure the SymbiOS scripts directory is on PATH for every command we run.
 # SSH non-interactive shells do not read /etc/profile.d, so without this the
 # WebUI's unqualified script names (e.g. symbios-run-playbook.sh) would not
-# resolve. Self-location works regardless of how this script was invoked.
-f_exec_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# resolve.
 if [[ "${PATH}" != *"${f_exec_dir}"* ]]
 then
   export PATH="${f_exec_dir}:${PATH}"
@@ -80,13 +90,19 @@ fi
 # Redact sensitive data from the audit log. Secrets are passed to scripts via
 # chmod-600 files or stdin JSON (never CLI args), so these patterns are only
 # a safety net - but the secret inventory in AGENTS.md lists every key, and
-# each one must stay masked here. Matches key=value, key:value, key"value
-# and --flag value forms, case-insensitively.
+# each one must stay masked here. The first pass handles quoted values so a
+# multi-word secret cannot leak past the simple token pattern.
 g_cmd_safe="${g_cmd}"
-g_cmd_safe="$(echo "${g_cmd_safe}" | sed -E 's/(password|passwd|passphrase|apikey|api[-_]key|secret|token)([=: \"]+)[^ \"]+/\1\2***REDACTED***/gi')"
+g_cmd_safe="$(printf '%s\n' "${g_cmd_safe}" | sed -E 's/((password|passwd|passphrase|apikey|api[-_]key|stt[-_]key|tts[-_]key|password[-_]file|secret|token|bearer)([=: ]+))\"[^\"]*\"/\1***REDACTED***/gi')"
+g_cmd_safe="$(printf '%s\n' "${g_cmd_safe}" | sed -E 's/(password|passwd|passphrase|apikey|api[-_]key|stt[-_]key|tts[-_]key|password[-_]file|secret|token|bearer)([=: \"]+)[^ \"]+/\1\2***REDACTED***/gi')"
 
-g_logger "client=${g_client_ip} cmd=${g_cmd_safe}"
-echo "$(date -Iseconds) client=${g_client_ip} cmd=${g_cmd_safe}" >> /var/log/symbios-exec.log 2>/dev/null || true
+# Job polling is read-only and happens once per second; logging it would bury
+# the actual state changes in hundreds of identical lines per job.
+if [[ "${g_cmd}" != *"symbios-run-detached.sh poll "* ]]
+then
+  g_logger "client=${g_client_ip} cmd=${g_cmd_safe}"
+  f_audit_event gateway command "client=${g_client_ip} cmd=${g_cmd_safe}"
+fi
 
 # Run the command as-is. The own gaboshlib $g_tmp dir is removed first:
 # exec would replace this shell and skip its EXIT trap, leaking one

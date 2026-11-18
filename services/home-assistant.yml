@@ -24,6 +24,7 @@
 #     - traefik_ip
 #     - traefik_network_gateway
 #     - twofa_enabled
+#   boot_units: ha_pingcheck.service
 #   name: Home Assistant
 #   short_description: Deploy the Home Assistant service
 #   description: Deploys the Home Assistant container for home automation, managed by SymbiOS.
@@ -655,13 +656,20 @@
         mode: '0644'
       notify: Restart ha_pingcheck
 
-    - name: Enable and start ha_pingcheck service
+    # The ping loop writes below /symbios, so systemd must not start the unit
+    # before rc.local mounted the LUKS volume. Keep it running when the
+    # playbook runs, but register it for after-mount start on the next boot.
+    - name: Start ha_pingcheck service (boot start handled after mount)
       ansible.builtin.systemd:
         name: ha_pingcheck
         state: started
-        enabled: true
         daemon_reload: true
       notify: Restart ha_pingcheck
+
+    - name: Register ha_pingcheck for after-mount start
+      include_tasks: ../shared-tasks/after-mount-unit.yml
+      vars:
+        after_mount_unit: ha_pingcheck.service
 
     - name: Allow port 8889/tcp on iot0 interface for ping healthchecks for example for shelly scripts
       include_tasks: ../shared-tasks/ufw-allow.yml

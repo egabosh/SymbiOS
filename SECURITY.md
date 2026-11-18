@@ -18,8 +18,8 @@ making the system harder to use. The exec gateway is the mechanism by which
 the WebUI manages the host.
 
 **Mitigations**:
-- Host key pinning via fingerprint verification (`ssh_exec.py:46-69`)
-- Audit logging of all commands (`symbios-exec.sh:62-63`)
+- Host key pinning via fingerprint verification (`ssh_exec.py`)
+- Audit logging of all WebUI commands and direct CLI mutations (see below)
 - SSH key is only accessible to the WebUI container (chmod 600)
 - The exec gateway only accepts connections from the WebUI container
 
@@ -117,6 +117,31 @@ Debian server from a WebUI.
    but only from the Traefik proxy IP, to filter tiles by LDAP group. The
    portal answers on `/` only; the management UI stays on the apex domain and
    remains staff-only.
+
+---
+
+## Audit Logging
+
+All state-changing operations are appended to a single audit file on the
+encrypted data partition: `<data_root>/log/symbios-audit.log` (mode 0600,
+directory 0700, 30 daily rotations). Nothing is written to `/var/log`.
+
+Covered sources:
+
+- `source=gateway` - every command sent through `symbios-exec.sh` (the WebUI
+  SSH gateway), with client IP and the shell-quoted command. Secret patterns
+  are masked before writing. Read-only `symbios-run-detached.sh poll` calls
+  are skipped so a long job cannot bury real changes under hundreds of lines.
+- `source=cli` - direct host-side mutations that bypass the gateway:
+  `symbios-inventory.py` and `symbios-config.py` writes, `symbios-state.sh`
+  set/unset, LDAP group/user changes, `symbios-run-playbook.sh` and
+  `symbios-reapply.sh`.
+
+Events carry a UTC timestamp, source, uid, action and a short detail string.
+Callers log key names and object names only, never values or secrets. Writing
+an event is best effort: a failed write warns but never aborts the operation
+that triggered it. The legacy `/var/log/symbios-exec.log` is left untouched as
+historical data; it is no longer written.
 
 ---
 

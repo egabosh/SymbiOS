@@ -25,10 +25,8 @@ from .setup_status import PAGE_EXPLAIN
 
 import json
 
-# Scripts on the host (in scripts/, on PATH).
+# Script on the host (in scripts/, on PATH).
 _LIST_SCRIPT = 'symbios-bridge-list.sh'
-_ASSIGN_SCRIPT = 'symbios-bridge-assign.sh'
-_PLAYBOOK = 'base-services/network-bridges.yml'
 
 
 def _fetch_network_data():
@@ -86,24 +84,15 @@ def settings_network_bridges(request):
                 if bridge:
                     assignments[iface] = bridge
             payload = json.dumps(assignments)
-            set_cmd = 'symbios-settings-network-bridges.sh set --json-stdin'
-            ok, stdout, stderr = run_command(set_cmd, timeout=30,
-                                            stdin_data=payload)
-            if not ok:
-                err = (stderr or stdout or 'Failed to save assignments.')
-                if is_ajax:
-                    return JsonResponse({'ok': False, 'error': err},
-                                        status=400)
-                messages.error(request, f'Error: {err}')
-                return redirect('settings_network_bridges')
-
-            bridge_json = payload
-            cmd = 'symbios-run-playbook.sh {} && {}'.format(
-                _PLAYBOOK, _ASSIGN_SCRIPT)
+            # set validates, writes and applies in one call. The resolver maps
+            # bridge_assignments to base-services/network-bridges.yml, whose
+            # own task invokes symbios-bridge-assign.sh, so no explicit
+            # playbook or assign step belongs in this view any more.
+            cmd = 'symbios-settings-network-bridges.sh set --json-stdin'
 
             if is_ajax:
                 from .utils.jobs import create_job
-                job_id = create_job(cmd, timeout=300, stdin_data=bridge_json)
+                job_id = create_job(cmd, timeout=300, stdin_data=payload)
                 return JsonResponse({
                     'ok': True,
                     'job': job_id,
@@ -112,15 +101,14 @@ def settings_network_bridges(request):
                     'command': cmd,
                 })
 
-            messages.success(request, 'Bridge assignments saved.')
-            ok, stdout, stderr = run_command(
-                cmd, timeout=120, stdin_data=bridge_json)
+            ok, stdout, stderr = run_command(cmd, timeout=300,
+                                             stdin_data=payload)
             if ok:
-                messages.success(request, 'Assignments applied successfully.')
+                messages.success(request, 'Bridge assignments saved and applied.')
             else:
                 output = (stdout + '\n' + stderr).strip()
                 messages.error(
-                    request, 'Applying assignments failed: {}'.format(
+                    request, 'Saving assignments failed: {}'.format(
                         output[:500]))
         except Exception as e:
             if is_ajax:

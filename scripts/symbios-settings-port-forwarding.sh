@@ -46,6 +46,10 @@ Commands:
 Output: human status lines. The final line carries a machine-readable
 state token (port-forwarding-changed / port-forwarding-unchanged).
 
+Options:
+  --no-apply                      Skip the automatic playbook apply after a
+                                  real inventory change (smoke tests).
+
 Exit codes:
   0  ok, or nothing to do (unchanged)
   2  validation or usage error
@@ -53,8 +57,9 @@ Exit codes:
 EOF
 }
 
-# Inventory keys managed here (for apply + coverage check).
-f_managed_vars="port_forwarding_method ufw_extra_inbound"
+# Only ufw_extra_inbound is baked into playbook state. The method and the
+# *_configured markers are read live at runtime and must never trigger apply.
+f_managed_vars="ufw_extra_inbound"
 
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
@@ -169,6 +174,10 @@ then
         f_proto="$2"
         shift 2
         ;;
+      --no-apply)
+        g_ss_no_apply="yes"
+        shift
+        ;;
       --check)
         f_check="yes"
         shift
@@ -196,7 +205,8 @@ then
     f_ss_fail_technical "Failed to write inventory: ${f_out}"
   fi
   f_ss_result "${f_out}" "port-forwarding" "${f_check}"
-  exit 0
+  f_ss_finish
+  exit $?
 fi
 
 # --- subcommand: set -----------------------------------------------------------
@@ -229,6 +239,10 @@ do
       f_static="$2"
       f_given_static="yes"
       shift 2
+      ;;
+    --no-apply)
+      g_ss_no_apply="yes"
+      shift
       ;;
     --check)
       f_check="yes"
@@ -294,4 +308,5 @@ then
 fi
 
 f_ss_merge "${f_merge}" "port-forwarding" "${f_check}"
-exit 0
+f_ss_finish
+exit $?

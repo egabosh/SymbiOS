@@ -16,6 +16,7 @@
 # docs:
 #   uses_vars:
 #     - base_domain
+#   boot_units: rustdesk.service
 #   name: RustDesk Client
 #   short_description: Install the RustDesk client with preconfigured server
 #   description: |
@@ -165,6 +166,13 @@
         name: rustdesk.service
         state: started
         enabled: false
+      when: rustdesk_client_unit.rc == 0
+
+    # The registry file is what rc.local reads after mounting /symbios.
+    - name: Register rustdesk service for after-mount start
+      ansible.builtin.include_tasks: ../shared-tasks/after-mount-unit.yml
+      vars:
+        after_mount_unit: rustdesk.service
       when: rustdesk_client_unit.rc == 0
 
     - name: Deploy healthcheck
