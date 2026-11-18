@@ -361,6 +361,9 @@
       <button type="button" class="btn btn-sm btn-outline-primary" onclick="runBackupNow()">
         <i class="bi bi-play-fill"></i> Run backup now
       </button>
+      <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteAllSnapshots()">
+        <i class="bi bi-trash"></i> Delete all
+      </button>
     </span>
   </div>
   <div class="card-body">
@@ -369,12 +372,12 @@
          needs it to add the first snapshot after a successful run. -->
     <div class="table-responsive" id="snapshot-table-wrap"{% if not data.snapshots %} style="display:none"{% endif %}>
       <table class="table table-sm table-hover align-middle mb-0" id="snapshot-table">
-        <thead><tr><th>Date</th><th>Location</th><th class="text-end"></th></tr></thead>
+        <thead><tr><th>Date</th><th>Location</th><th class="text-end">Actions</th></tr></thead>
         <tbody>
         </tbody>
       </table>
     </div>
-    <div class="form-text small mt-2" id="snapshot-note"{% if not data.snapshots %} style="display:none"{% endif %}>Snapshots are kept automatically: recent days plus monthly long-term copies.</div>
+    <div class="form-text small mt-2" id="snapshot-note"{% if not data.snapshots %} style="display:none"{% endif %}>Snapshots are kept automatically: recent days plus monthly long-term copies. Deleting is permanent: it removes the snapshots from this server and every configured backup server, and automatic retention will not bring them back.</div>
     <p class="text-muted mb-0" id="snapshot-empty"{% if data.snapshots %} style="display:none"{% endif %}>No backups found yet. They will appear here after the first run (tonight, or via <em>"Run backup now"</em>).</p>
   </div>
 </div>
@@ -584,8 +587,9 @@ function renderSnapshots(snapshots, services) {
     });
     if (!where.length) where.push('<span class="text-muted">-</span>');
     tbody.insertAdjacentHTML('beforeend',
-      '<tr><td>' + s.date + '</td><td>' + where.join(' + ') + '</td>' +
-      '<td class="text-end"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="quickRestore(\'' + s.date + '\')">Restore this</button></td></tr>');
+      '<tr><td>' + escapeHtml(s.date) + '</td><td>' + where.join(' + ') + '</td>' +
+      '<td class="text-end"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="quickRestore(\'' + s.date + '\')">Restore this</button> ' +
+      '<button type="button" class="btn btn-sm btn-outline-danger" title="Delete this day from all repositories" onclick="deleteSnapshot(\'' + s.date + '\')"><i class="bi bi-trash"></i></button></td></tr>');
     dateSel.insertAdjacentHTML('beforeend', '<option value="' + s.date + '">' + s.date + '</option>');
   });
   (services || []).forEach(function (svc) {
@@ -644,6 +648,34 @@ function runBackupNow() {
       if (d.job) { SymbiOS.exec.start(d.job, d.title, d.command); }
       else { alert(d.error || 'Could not start backup'); }
     });
+}
+
+/* Delete snapshots from every repository (irreversible) */
+function startDelete(fields) {
+  var fd = new FormData();
+  Object.keys(fields).forEach(function (key) { fd.append(key, fields[key]); });
+  fetch('{% url "settings_backup_delete" %}', {
+    method: 'POST', body: fd, credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken(), 'X-Requested-With': 'XMLHttpRequest' }
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok && d.job) { SymbiOS.exec.start(d.job, d.title, d.command); }
+      else { alert(d.error || 'Could not start deletion'); }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function deleteSnapshot(dateStr) {
+  if (!window.confirm('Delete snapshots of ' + dateStr + ' from this server and all backup servers? This cannot be undone.')) return;
+  startDelete({mode: 'date', date: dateStr});
+}
+
+function deleteAllSnapshots() {
+  if (!window.confirm('Delete ALL snapshots from this server and all backup servers? This cannot be undone.')) return;
+  var answer = window.prompt('Type DELETE to confirm:');
+  if (answer !== 'DELETE') return;
+  startDelete({mode: 'all', confirm: answer});
 }
 
 /* Load the restore plan preview */

@@ -558,6 +558,46 @@ def settings_backup_runnow(request):
     })
 
 
+@login_required
+def settings_backup_delete(request):
+    """AJAX POST - delete snapshots on the host as a background job.
+
+    A date removes every snapshot of that day from the local and all remote
+    repositories; mode=all removes every snapshot everywhere. "all" needs a
+    typed DELETE confirmation, also checked here so a forged POST cannot skip
+    the browser-side guard.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': 'POST required'}, status=400)
+    mode = (request.POST.get('mode') or '').strip()
+    if mode == 'date':
+        date_str = (request.POST.get('date') or '').strip()
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
+            return JsonResponse({'ok': False,
+                                 'error': 'Invalid date format (expected YYYY-MM-DD)'},
+                                status=400)
+        cmd = f'symbios-backup-delete.sh delete {shlex.quote(date_str)} --yes'
+        target = date_str
+    elif mode == 'all':
+        if (request.POST.get('confirm') or '').strip() != 'DELETE':
+            return JsonResponse({'ok': False, 'error': 'Type DELETE to confirm'},
+                                status=400)
+        cmd = 'symbios-backup-delete.sh all --yes'
+        target = 'all snapshots'
+    else:
+        return JsonResponse({'ok': False, 'error': 'Invalid delete mode'}, status=400)
+
+    from .utils.jobs import create_job
+    job_id = create_job(cmd, timeout=3600)
+    return JsonResponse({
+        'ok': True,
+        'job': job_id,
+        'title': f'Deleting {target}...',
+        'message': 'Snapshot deletion started.',
+        'command': cmd,
+    })
+
+
 def settings_backup_find_files(request):
     """AJAX POST - search a restic snapshot for files matching a pattern."""
     if request.method != 'POST':

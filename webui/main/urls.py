@@ -112,6 +112,7 @@ urlpatterns = [
     path('settings/backup/restore-plan/', views_settings.settings_backup_restore_plan, name='settings_backup_restore_plan'),
     path('settings/backup/restore/', views_settings.settings_backup_restore, name='settings_backup_restore'),
     path('settings/backup/run-now/', views_settings.settings_backup_runnow, name='settings_backup_runnow'),
+    path('settings/backup/delete/', views_settings.settings_backup_delete, name='settings_backup_delete'),
     path('settings/backup/find/', views_settings.settings_backup_find_files, name='settings_backup_find_files'),
     path('settings/backup/ls/', views_settings.settings_backup_list_snapshot, name='settings_backup_list_snapshot'),
     path('settings/backup/restore-file/', views_settings.settings_backup_restore_file, name='settings_backup_restore_file'),
