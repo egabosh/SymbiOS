@@ -261,17 +261,17 @@
                 rule: "Host(`{{ service_domain }}`)"
                 entryPoints:
                   - https
-                service: kodidb-pma
+                service: kodidb--ssl
                 tls:
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - secHeaders@file
                   - authelia@file
             services:
-              kodidb-pma:
+              kodidb--ssl:
                 loadBalancer:
                   servers:
-                    - url: "http://kodidb--phpmyadmin:80"
+                    - url: "http://kodidb--ssl:80"
         backup: yes
 
     - name: Get letsencrypt cert from traefik
@@ -355,7 +355,7 @@
         - 192.168.0.0/16
         - fc00::/7
 
-    # Docker-based healthcheck (MariaDB has no HTTP endpoint since phpmyadmin removal)
+    # Docker-based healthcheck (MariaDB has no HTTP endpoint)
     - name: Deploy healthcheck
       include_tasks: ../shared-tasks/runcheck-docker.yml
 
