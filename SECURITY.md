@@ -64,6 +64,29 @@ acceptable because:
 
 ---
 
+## CIS Benchmark Scope and Deviations
+
+SymbiOS audits a curated subset of **CIS Debian Linux 13 Benchmark v1.1.0,
+Level 1 Server** with the read-only script `symbios-cis-audit.sh`. The daily
+result is cached as `<log>/cis-audit.json` and shown as one card on the Health
+page. The audit does not change host configuration and is not a compliance
+certificate.
+
+Controls that SymbiOS deliberately does not implement are listed below. Every
+waiver in `scripts/runchecks.d/cis-audit.conf` must have a row with the same CIS
+ID here; the audit reports undocumented waivers so no deviation is accepted
+silently. Findings that are not in this table are shown as warnings and must be
+either fixed in the owning playbook or added here with a rationale.
+
+| CIS ID | Control | SymbiOS decision | Rationale | Compensating control |
+|--------|---------|------------------|-----------|----------------------|
+| 3.2.1 | IP forwarding disabled | Not applied | Docker requires `net.ipv4.ip_forward=1` for bridge and NAT networking. | Containers run on an isolated bridge network; UFW default deny limits exposure. |
+| 5.1.10 | SSH root login disabled | Partially applied | Management needs direct root access; `PermitRootLogin prohibit-password` allows keys only. | `PasswordAuthentication` is disabled, ed25519 keys are required, fail2ban is active and SSH listens on non-standard ports. |
+| 6.1.1 | auditd enabled | Not applied | auditd adds little value for a single-admin appliance and would duplicate the existing audit trail. | All state-changing WebUI and CLI operations are recorded in `<data_root>/log/symbios-audit.log`; health checks and systemd logs cover host events. |
+| 7.2.1 | Password aging for local accounts | Not applicable | Users are managed in LDAP through the WebUI; local accounts are maintenance-only. | The configurable password policy under Settings -> Security and forced first-login password change apply to all LDAP users. |
+
+---
+
 ## Security Model
 
 SymbiOS is a single-server management platform designed for hobby sysadmins.

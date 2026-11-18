@@ -1,0 +1,75 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   uses_vars: []
+#   name: CIS Audit
+#   short_description: Daily read-only CIS benchmark audit
+#   description: Installs a daily cron job that runs the curated CIS Debian 13 Level 1 Server audit. The check is read-only; accepted deviations are documented in SECURITY.md and waived in scripts/runchecks.d/cis-audit.conf.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Security
+#   service_control:
+#     services:
+#     - name: cis-audit
+#       type: cron
+#       file: /etc/cron.d/cis_audit_local
+#       status: test -f /etc/cron.d/cis_audit_local || exit 2
+#     actions:
+#       run audit: symbios-cis-audit.sh run
+#       show report: symbios-cis-audit.sh show
+
+---
+- name: CIS benchmark audit
+  hosts: all
+  tasks:
+
+    - name: Check that the CIS audit script is present
+      ansible.builtin.stat:
+        path: "{{ git_root }}/scripts/symbios-cis-audit.sh"
+      register: cis_audit_script
+      failed_when: not cis_audit_script.stat.exists
+      changed_when: false
+
+    # The audit is read-only and independent of backup/update maintenance.
+    # A separate cron entry keeps those two phases serialized by their own
+    # lock while still giving the healthcheck a fresh daily report.
+    - name: /etc/cron.d/cis_audit_local
+      ansible.builtin.blockinfile:
+        path: /etc/cron.d/cis_audit_local
+        create: yes
+        mode: "0400"
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          SHELL=/bin/bash
+          ## SymbiOS CIS audit (read-only, curated Level 1 Server subset)
+          17 3 * * * root PATH={{ git_root }}/scripts:$PATH && [[ -x {{ git_root }}/scripts/symbios-cis-audit.sh ]] && symbios-cis-audit.sh run > /dev/null 2>&1
+        backup: yes
+
+    - name: Register playbook as installed
+      include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "cis-audit"
+        state_playbook: "base-services/cis-audit.yml"
