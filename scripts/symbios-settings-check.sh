@@ -172,6 +172,31 @@ then
     g_echo "PASS: uses_vars coverage checked" 2>/dev/null || echo "PASS: uses_vars coverage checked"
   fi
 
+  # 6. No-argument contract: a script whose usage says "no arguments" must
+  # reject stray arguments (f_no_args from symbios-lib.sh or an inline
+  # `[[ $# -gt 0 ]]` guard), so a typo cannot trigger the default action.
+  # Libraries are sourced (no own argv), the checker itself takes a mode.
+  f_noargs_fail=0
+  for f_script in "${f_root}"/scripts/*.sh
+  do
+    [[ -f "${f_script}" ]] || continue
+    case "${f_script}" in
+      *-lib.sh|*/symbios-settings-check.sh) continue ;;
+    esac
+    grep -qi 'no arguments' "${f_script}" || continue
+    if ! grep -qE 'f_no_args|\[\[ *\$\# *-gt *0 *\]\]' "${f_script}"
+    then
+      echo "FAIL: $(basename "${f_script}") documents no arguments but accepts them" >&2
+      f_noargs_fail=1
+    fi
+  done
+  if [[ "${f_noargs_fail}" -eq 0 ]]
+  then
+    g_echo "PASS: no-argument contract (usage marker => guard)" 2>/dev/null || echo "PASS: no-argument contract (usage marker => guard)"
+  else
+    f_failures=$((f_failures + 1))
+  fi
+
   if [[ "${f_failures}" -gt 0 ]]
   then
     echo "${f_failures} static check(s) failed" >&2
