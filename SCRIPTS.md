@@ -425,7 +425,6 @@ texts opportunistically).
 | `symbios-exec.sh` | SSH exec gateway: audit-logs and runs WebUI host commands | `<command>` |
 | `symbios-run-playbook.sh` | Run one Ansible playbook (local connection, host inventory) | `<playbook_path>` |
 | `symbios-reapply.sh` | Re-run installed playbooks in background (from state file) | `[--only [--force] <playbook> ...]` |
-| `symbios-reapply-status.sh` | Read the reapply status string for the WebUI | no args |
 | `symbios-run-detached.sh` | Detached host jobs pollable by the WebUI | `start\|poll\|... <job-id> <command>` |
 | `symbios-state.sh` | `installed-playbooks.yml` state file manager | `set\|unset\|list\|is-installed <path>` |
 | `symbios-restart-docker-services.sh` | Restart all Docker Compose stacks cleanly after boot | no args |
@@ -451,7 +450,6 @@ texts opportunistically).
 | `symbios-get-local-ips.sh` | Hostname + LAN IPv4 + global IPv6 as JSON | no args |
 | `symbios-list-keyboards.sh` | XKB keyboard layouts (wrapped by settings-localization) | no args |
 | `symbios-ssl-check.sh` | Traefik domain certificate validity as JSON | `[-d\|--domain <domain>]` |
-| `symbios-service-status.sh` | System service statuses (TSV for Health page) | no args |
 | `symbios-container-index.sh` | Docker container index + ACL logs for the WebUI | no args |
 | `symbios-test-ssh.sh` | SSH connectivity test with the backup identity | `<host> <port> <user> [path]` |
 | `update_host_ip.sh` | Snapshot host LAN IP to `.host-ip` | no args |
