@@ -262,6 +262,11 @@ gen-restic-password|get-restic-password` - the password is NOT an
 inventory var), restore and manual runs stay with their dedicated scripts
 and thin endpoints.
 
+The daily schedule is not part of the backup settings: it is the shared
+maintenance window managed by `symbios-settings-maintenance.sh`
+(`maintenance_time`, 24h `HH:MM`). One cron job runs the backup phase
+first (when `backup_enabled`) and all update modules afterwards.
+
 ### 3.12 `symbios-settings-dns.sh`
 
 deSEC DynDNS or self-managed domain (the host becomes `base_domain`).
@@ -413,6 +418,7 @@ texts opportunistically).
 | `symbios-settings-acme.sh` | `/settings/acme/` |
 | `symbios-settings-ssh-keys.sh` | `/settings/ssh-keys/` |
 | `symbios-settings-backup.sh` | `/settings/backup/` |
+| `symbios-settings-maintenance.sh` | `/settings/maintenance/` |
 | `symbios-settings-dns.sh` | `/settings/dns/` |
 | `symbios-settings-security.sh` | `/settings/security/` |
 | `symbios-settings-media.sh` | `/settings/media/` |
@@ -495,6 +501,7 @@ texts opportunistically).
 
 | Script | Purpose | Usage |
 |--------|---------|-------|
+| `symbios-maintenance.sh` | Maintenance dispatcher: backup first, then updates (single cron entry) | no args |
 | `backup.sh` | Backup dispatcher (runs `backup.d/*.backup`) | no args |
 | `backup.d/` | 2 backup modules (docker DBs, LDAP) | via `backup.sh` |
 | `symbios-backup.sh` | Backup engine: restic snapshot, local or SFTP targets | `backup` (default, cron), `get-restic-password`, `gen-restic-password` |

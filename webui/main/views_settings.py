@@ -1511,10 +1511,10 @@ UPDATE_ACTIONS = {
 }
 
 
-def _updates_autoupdate_schedule():
-    """Read the daily autoupdate cron time from the host, or None."""
+def _maintenance_schedule():
+    """Read the daily maintenance cron time from the host, or None."""
     try:
-        ok, stdout, _ = run_command('cat /etc/cron.d/autoupdate_local',
+        ok, stdout, _ = run_command('cat /etc/cron.d/maintenance_local',
                                     timeout=10)
         if not ok:
             return None
@@ -1523,7 +1523,7 @@ def _updates_autoupdate_schedule():
             if not line or line.startswith('#'):
                 continue
             parts = line.split()
-            # A daily "M H * * *" entry means automatic updates are active
+            # A daily "M H * * *" entry means the maintenance job is active
             if len(parts) >= 5 and parts[2:5] == ['*', '*', '*']:
                 try:
                     minute, hour = int(parts[0]), int(parts[1])
@@ -1582,15 +1582,15 @@ def settings_updates(request):
         messages.info(request, title)
         return redirect('settings_updates')
 
-    schedule = _updates_autoupdate_schedule()
+    schedule = _maintenance_schedule()
     last_run = _updates_last_run()
     if schedule:
         badge = ('ok', 'Automatic daily',
-                 f'Updates run automatically every day at {schedule}. '
-                 'You do not have to do anything.')
+                 f'Updates run automatically every day at {schedule}, after '
+                 'the backup. Configure the window under Settings -> Maintenance.')
     else:
         badge = ('missing', 'Not configured',
-                 'The autoupdate playbook is not installed - please start '
+                 'The maintenance playbook is not installed - please start '
                  'updates manually here or reinstall it.')
     return render(request, 'main/settings_updates.html', {
         'schedule': schedule,
@@ -1599,6 +1599,81 @@ def settings_updates(request):
         'page_icon': 'bi-arrow-repeat',
         'page_title': 'Updates',
         'page_explain': PAGE_EXPLAIN.get('updates', ''),
+        'page_status': badge[0],
+        'page_status_label': badge[1],
+        'page_status_text': badge[2],
+    })
+
+
+# ---------------------------------------------------------------------------
+# Maintenance - one daily window for backup (first) and updates (second)
+# ---------------------------------------------------------------------------
+
+@login_required
+def settings_maintenance(request):
+    """Configure the maintenance time and start the whole sequence on demand."""
+    from .utils.jobs import create_job
+
+    config = _get_inventory_config()
+    vars_ = (config.get('all') or {}).get('vars') or {}
+
+    if request.method == 'POST':
+        is_ajax = is_ajax_request(request)
+        if request.POST.get('action') == 'run_now':
+            cmd = 'symbios-maintenance.sh'
+            job_id = create_job(cmd, timeout=7200)
+            if is_ajax:
+                return JsonResponse({'ok': True, 'job': job_id,
+                                     'title': 'Running maintenance...',
+                                     'message': 'Maintenance run started.',
+                                     'command': cmd})
+            messages.success(request, 'Maintenance run started.')
+            return redirect('settings_maintenance')
+
+        # The CLI owns validation and the inventory write; the view only
+        # forwards the value and applies the resulting schedule in a job.
+        new_time = (request.POST.get('maintenance_time') or '').strip()
+        if not new_time:
+            if is_ajax:
+                return JsonResponse({'ok': False,
+                                     'error': 'Please enter a time (HH:MM).'},
+                                    status=400)
+            messages.error(request, 'Please enter a time (HH:MM).')
+            return redirect('settings_maintenance')
+        # set validates, writes and applies in one job.
+        cmd = ('symbios-settings-maintenance.sh set --time '
+               + shlex.quote(new_time))
+        message = 'Maintenance time saved.'
+        if is_ajax:
+            job_id = create_job(cmd, timeout=3600)
+            return JsonResponse({'ok': True, 'job': job_id,
+                                 'title': 'Applying maintenance settings...',
+                                 'message': message, 'command': cmd})
+        ok, stdout, stderr = run_command(cmd, timeout=3600)
+        if not ok:
+            messages.error(request, f'Error: {stderr or stdout}')
+            return redirect('settings_maintenance')
+        messages.success(request, 'Maintenance time saved and applied.')
+        return redirect('settings_maintenance')
+
+    schedule = _maintenance_schedule()
+    if schedule:
+        badge = ('ok', 'Automatic daily',
+                 f'Backup (when enabled) and updates run every day at '
+                 f'{schedule}, in that order. They can never overlap.')
+    else:
+        badge = ('missing', 'Not configured',
+                 'The maintenance cron job is missing - reinstall '
+                 'base-services/maintenance.yml.')
+    return render(request, 'main/settings_maintenance.html', {
+        'maintenance_time': str(vars_.get('maintenance_time') or '00:05'),
+        'schedule': schedule,
+        'backup_status': _backup_status(),
+        'update_status': _updates_last_run(),
+        'page_key': 'maintenance',
+        'page_icon': 'bi-clock',
+        'page_title': 'Maintenance',
+        'page_explain': PAGE_EXPLAIN.get('maintenance', ''),
         'page_status': badge[0],
         'page_status_label': badge[1],
         'page_status_text': badge[2],

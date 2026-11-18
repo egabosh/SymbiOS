@@ -30,7 +30,7 @@
 {% else %}
   <div class="alert alert-warning d-flex align-items-center gap-2">
     <i class="bi bi-exclamation-triangle-fill"></i>
-    <div>No backup has run yet. Everything below can stay as it is for now - a backup runs automatically every night at 00:05.</div>
+    <div>No backup has run yet. Everything below can stay as it is for now - a backup runs automatically every night at {{ vars.maintenance_time|default:'00:05' }} (see <a href="{% url 'settings_maintenance' %}">Maintenance</a>).</div>
   </div>
 {% endif %}
 
@@ -48,7 +48,7 @@
                  role="switch" {% if vars.backup_enabled %}checked{% endif %}>
           <label class="form-check-label" for="backup_enabled">
             <strong>Run a backup every night</strong>
-            <span class="text-muted small">- the job is installed on the host only while this is switched on. A snapshot of the whole data root needs a lot of space, so the default is off. A manual backup (button below) works either way.</span>
+            <span class="text-muted small">- the backup phase of the daily maintenance run only executes while this is switched on. A snapshot of the whole data root needs a lot of space, so the default is off. A manual backup (button below) works either way.</span>
           </label>
         </div>
       </div>
@@ -335,7 +335,7 @@
       <div class="card-header"><i class="bi bi-info-circle"></i> How it works</div>
       <div class="card-body small">
         <ul class="mb-2 ps-3">
-          <li>Every night at 00:05 a snapshot of your data (<code>/symbios</code>) is created.</li>
+          <li>Every night at {{ vars.maintenance_time|default:'00:05' }} a snapshot of your data (<code>/symbios</code>) is created, before the updates start.</li>
           <li>Databases (Nextcloud etc.) and the user directory are exported first, so snapshots are always consistent.</li>
           <li>Backups are made with <strong>restic</strong>: always encrypted, and unchanged data is stored only once (deduplication), so snapshots need far less space than a full copy every day.</li>
           <li>With backup servers, everything is mirrored there - each server keeps its own history.</li>

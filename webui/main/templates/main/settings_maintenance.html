@@ -1,0 +1,102 @@
+{% extends "main/base.html" %}
+{% block content %}
+{% include "main/_page_header.html" %}
+
+<!-- The single daily window: backup first, then updates -->
+<div class="row mb-3">
+  <div class="col-md-8">
+    <div class="card h-100">
+      <div class="card-header bg-primary-subtle">
+        <i class="bi bi-clock"></i> <strong>Daily maintenance window</strong>
+      </div>
+      <div class="card-body">
+        <p class="small text-muted">
+          One cron job starts the backup (if enabled) and afterwards all
+          updates. This guarantees a fresh backup before every update and
+          prevents both jobs from running at the same time.
+        </p>
+        <form method="post" action="{% url 'settings_maintenance' %}" data-exec="true">
+          {% csrf_token %}
+          <div class="row align-items-end g-3">
+            <div class="col-sm-5">
+              <label for="maintenance_time" class="form-label fw-semibold">Time (24h HH:MM)</label>
+              <input type="time" class="form-control" id="maintenance_time"
+                     name="maintenance_time" value="{{ maintenance_time }}" required>
+            </div>
+            <div class="col-sm-7">
+              <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save"></i> Save schedule
+              </button>
+              <span class="small text-muted ms-2">
+                Currently active: <strong>{{ schedule|default:"not configured" }}</strong>
+              </span>
+            </div>
+          </div>
+        </form>
+        <hr>
+        <form method="post" action="{% url 'settings_maintenance' %}" data-exec="true"
+              onsubmit="return confirm('Run the backup (if enabled) and all updates now?');">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="run_now">
+          <button type="submit" class="btn btn-outline-primary">
+            <i class="bi bi-play-circle"></i> Run maintenance now
+          </button>
+          <span class="small text-muted ms-2">Can take several minutes to over an hour.</span>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-info-circle"></i> Related pages</div>
+      <div class="card-body d-grid gap-2">
+        <a href="{% url 'settings_backup' %}" class="btn btn-outline-secondary">
+          <i class="bi bi-cloud-arrow-up"></i> Backup targets &amp; restore
+        </a>
+        <a href="{% url 'settings_updates' %}" class="btn btn-outline-secondary">
+          <i class="bi bi-arrow-repeat"></i> Updates &amp; logs
+        </a>
+        <a href="{% url 'logs' %}?log=autoupdate" class="btn btn-outline-secondary">
+          <i class="bi bi-file-text"></i> Update log
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Last results of both phases of the maintenance run -->
+<div class="row">
+  <div class="col-md-6 mb-3">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-cloud-arrow-up"></i> Last backup</div>
+      <div class="card-body">
+        {% if backup_status %}
+        <p class="mb-1"><strong>{{ backup_status.state|default:"unknown" }}</strong></p>
+        <p class="small text-muted mb-1">Finished: {{ backup_status.finished|default:"unknown" }}</p>
+        {% if backup_status.message %}
+        <p class="small text-muted mb-0">{{ backup_status.message }}</p>
+        {% endif %}
+        {% else %}
+        <p class="small text-muted mb-0">No backup has run yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 mb-3">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-arrow-repeat"></i> Last update run</div>
+      <div class="card-body">
+        {% if update_status %}
+        <p class="mb-1">
+          <strong>{% if update_status.ok %}Completed successfully{% else %}Reported errors{% endif %}</strong>
+        </p>
+        <p class="small text-muted mb-0">{{ update_status.last_run_display|default:"unknown" }}</p>
+        {% else %}
+        <p class="small text-muted mb-0">No update has run yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

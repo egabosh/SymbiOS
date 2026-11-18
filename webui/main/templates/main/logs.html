@@ -19,6 +19,7 @@
       <optgroup label="Symbios">
 
         <option value="autoupdate" {% if default_log_name == "autoupdate" %}selected{% endif %}>Updates (autoupdate)</option>
+        <option value="maintenance" {% if default_log_name == "maintenance" %}selected{% endif %}>Maintenance (backup + updates)</option>
         <option value="dedyn" {% if default_log_name == "dedyn" %}selected{% endif %}>DDNS (deSEC)</option>
         <option value="health" {% if default_log_name == "health" %}selected{% endif %}>System Health (JSON)</option>
       </optgroup>

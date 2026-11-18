@@ -37,6 +37,19 @@ fi
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
 
+# The maintenance wrapper holds this lock across backup and updates. Manual
+# runs take the same lock; the wrapper sets the marker, so children here do
+# not deadlock on their parent's lock.
+if [[ -z "${SYMBIOS_MAINTENANCE_LOCK_HELD:-}" ]]
+then
+  exec 9>/run/symbios-maintenance.lock
+  if ! flock -x -n 9
+  then
+    g_echo_error "A SymbiOS maintenance run is active - exiting."
+    exit 1
+  fi
+fi
+
 # Validate requested modules against the installed *.update files: a typo
 # must fail loudly instead of silently running nothing (or everything).
 if [[ $# -gt 0 ]]

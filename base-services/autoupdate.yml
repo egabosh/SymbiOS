@@ -18,7 +18,7 @@
 #   uses_vars: []
 #   name: Auto Updates
 #   short_description: Configure automated system updates
-#   description: Sets up periodic automatic updates 6:05am of the host OS packages via a cron job, keeping the system up2date without manual intervention.
+#   description: Installs the update dispatcher (OS packages, Docker apps, SymbiOS itself and health modules) used by the single daily maintenance window in base-services/maintenance.yml. Updates always run after the backup.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -30,18 +30,9 @@
 #     - '13'
 #   category: Maintenance
 #   service_control:
-#     services:
-#     - name: autoupdate
-#       type: cron
-#       file: /etc/cron.d/autoupdate_local
-#       status: test -f /etc/cron.d/autoupdate_local || exit 2
 #     logs:
 #     - name: autoupdate
 #       command: tail -F /var/log/syslog | grep autoupdate
-#   actions:
-#     enable: sed -i 's/^#//' /etc/cron.d/autoupdate_local
-#     disable: sed -i 's/^/#/' /etc/cron.d/autoupdate_local
-#     run now: autoupdate.sh
 
 ---
 - name: Autoupdate
@@ -64,19 +55,8 @@
         state: directory
         mode: "0700"
 
-    - name: /etc/cron.d/autoupdate_local
-      blockinfile:
-        path: /etc/cron.d/autoupdate_local
-        mode: "0400"
-        owner: root
-        group: root
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          SHELL=/bin/bash
-          ## Auto-Update
-          5 6 * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/autoupdate.sh ]] && autoupdate.sh
-        backup: yes
+    # Scheduling lives in base-services/maintenance.yml: the single cron job
+    # calls symbios-maintenance.sh, which runs backup.sh before this dispatcher.
 
     - name: Register playbook as installed
       include_tasks: ../shared-tasks/state-register.yml

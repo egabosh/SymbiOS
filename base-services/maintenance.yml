@@ -1,0 +1,87 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   uses_vars:
+#     - maintenance_time
+#   name: Maintenance
+#   short_description: Single daily backup and update window
+#   description: Installs the one daily maintenance cron job. Backup (when enabled) always runs before the updates, so both can never overlap. The time is configurable in Settings -> Maintenance.
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Maintenance
+#   service_control:
+#     services:
+#     - name: maintenance
+#       type: cron
+#       file: /etc/cron.d/maintenance_local
+#       status: test -f /etc/cron.d/maintenance_local || exit 2
+#     logs:
+#     - name: maintenance
+#       command: tail -F /var/log/syslog | grep maintenance
+#   actions:
+#     enable: sed -i 's/^#\([0-9]\)/\1/' /etc/cron.d/maintenance_local
+#     disable: sed -i 's/^\([0-9]\)/#\1/' /etc/cron.d/maintenance_local
+#     run now: symbios-maintenance.sh
+
+---
+- name: Maintenance window
+  hosts: all
+  vars:
+    # The inventory key is always present on managed hosts; the default only
+    # keeps older checkouts (and --check runs against them) renderable.
+    f_maint_time: "{{ maintenance_time | default('00:05') }}"
+    f_maint_hour: "{{ f_maint_time.split(':')[0] | int }}"
+    f_maint_minute: "{{ f_maint_time.split(':')[1] | int }}"
+  tasks:
+
+    # Two schedulers would start backup and updates in parallel. Removing the
+    # legacy cron files on every run keeps this an invariant, not a one-time
+    # migration that a missed manual step could break.
+    - name: Remove legacy backup and autoupdate cron files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/cron.d/backup_local
+        - /etc/cron.d/autoupdate_local
+
+    - name: /etc/cron.d/maintenance_local
+      ansible.builtin.blockinfile:
+        path: /etc/cron.d/maintenance_local
+        create: yes
+        mode: "0400"
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          SHELL=/bin/bash
+          ## SymbiOS maintenance: backup first, then updates
+          {{ f_maint_minute }} {{ f_maint_hour }} * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/symbios-maintenance.sh ]] && symbios-maintenance.sh
+        backup: yes
+
+    - name: Register playbook as installed
+      ansible.builtin.include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "maintenance"
+        state_playbook: "base-services/maintenance.yml"

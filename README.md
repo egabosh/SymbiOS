@@ -183,6 +183,7 @@ concern and is idempotent, so it is safe to re-run any of them.
 | `firewall.yml`       | `ufw` firewall; opens SSH (port 33), and the ports services need.      |
 | `backup.yml`         | Installs `rsync` and `/symbios/backup.d/` backup hooks.                  |
 | `autoupdate.yml`     | Unattended upgrades via `/symbios/autoupdate.d/`.                       |
+| `maintenance.yml`    | Single daily cron window: backup first, then updates (`maintenance_time`). |
 | `runchecks.yml`      | Health/SMART/mdadm checks in `/symbios/runchecks.d/`.                   |
 | `docker.yml`         | Installs Docker, creates the `docker` user/group.                       |
 | `dedyn.yml`          | deSEC (dedyn.io) dynamic-DNS client; forces EUI-64 IPv6 addressing (stable interface ID). |
@@ -447,8 +448,8 @@ sudo bash install.sh
 3. Create `/symbios/base-services/symbios-ui/config/inventory.yml` from the bundled
    template on first run.
 4. Run the base-services playbooks in order (basics -> localization ->
-   hardening -> firewall -> backup -> autoupdate -> runchecks -> docker ->
-   dedyn -> ldap -> raspberry (if Pi) -> symbios-ui). The `traefik.yml` and
+   hardening -> firewall -> backup -> maintenance -> autoupdate -> runchecks ->
+   docker -> dedyn -> ldap -> raspberry (if Pi) -> symbios-ui). The `traefik.yml` and
    `authelia.yml` playbooks are kept commented out at install time - they
    require `base_domain` and are applied from the WebUI after configuration.
 5. On a Raspberry Pi, also apply `raspberry.yml` and the

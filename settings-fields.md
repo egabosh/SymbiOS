@@ -109,6 +109,13 @@ Slug: `mailserver`
 | `smtp_from` | text | Sender address | yes |  |  |
 | `smtp_tls` | select | Encryption |  |  |  |
 
+## `symbios-settings-maintenance`
+Slug: `maintenance`
+
+| Name | Type | Label | Required | Default | Secret |
+|------|------|-------|----------|---------|--------|
+| `maintenance_time` | text | Maintenance time (24h HH:MM) | yes | 00:05 |  |
+
 ## `symbios-settings-matrix`
 Slug: `matrix`
 

@@ -243,12 +243,23 @@ Groups; only empty shares can be deleted.
   for `home/<uid>` landing dirs)
 - Views: `webui/main/views_shares.py`
 
+### Maintenance (`/settings/maintenance/`)
+One configurable daily window for both maintenance phases: backup first
+(when enabled), then all update modules. One cron job starts
+`symbios-maintenance.sh`, so the phases can never overlap. The page shows
+the effective schedule, both last-run results and a run-now button.
+- Playbook: `base-services/maintenance.yml`
+- Scripts: `scripts/symbios-maintenance.sh`,
+  `scripts/symbios-settings-maintenance.sh`
+- Vars: `maintenance_time` (24h `HH:MM`, default `00:05`)
+
 ### Backup (`/settings/backup/`)
-Nightly restic snapshots of all data - always encrypted, in the local
+Daily restic snapshots of all data - always encrypted, in the local
 repository and/or on your own backup servers over SSH, with per-service
 scopes, excludes, snapshot browser, repository password handling, restore
 planner and a run-now button. Untested backups are none: restore is a
-first-class flow.
+first-class flow. The nightly run is the backup phase of the maintenance
+window (`Settings -> Maintenance`).
 - Playbook: `base-services/backup.yml`
 - Scripts: `scripts/symbios-backup.sh` + `backup.d/`,
   `scripts/symbios-backup-list.sh`, `scripts/symbios-restore.sh`
@@ -262,9 +273,10 @@ first-class flow.
 ## System
 
 ### Updates (`/settings/updates/`)
-Nightly unattended upgrades (OS, apps, SymbiOS itself) plus manual runs at
-any time (Debian/Docker/SymbiOS modules, up to 2 h exec-modal jobs).
-- Playbook: `base-services/autoupdate.yml`
+Daily unattended upgrades (OS, apps, SymbiOS itself) after the backup
+phase of the maintenance window, plus manual runs at any time
+(Debian/Docker/SymbiOS modules, up to 2 h exec-modal jobs).
+- Playbooks: `base-services/autoupdate.yml`, `base-services/maintenance.yml`
 - Scripts: `scripts/autoupdate.sh` + `autoupdate.d/`
 
 ### Language & Timezone (`/settings/localization/`)

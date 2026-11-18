@@ -135,6 +135,7 @@ f_run_playbook ${g_git_root}/base-services/symbios-ui.yml
 f_run_playbook ${g_git_root}/base-services/kvm.yml
 f_run_playbook ${g_git_root}/base-services/runchecks.yml
 f_run_playbook ${g_git_root}/base-services/backup.yml
+f_run_playbook ${g_git_root}/base-services/maintenance.yml
 
 
 # Report results

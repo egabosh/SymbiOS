@@ -124,6 +124,7 @@ urlpatterns = [
     path('settings/backup/ls/', views_settings.settings_backup_list_snapshot, name='settings_backup_list_snapshot'),
     path('settings/backup/restore-file/', views_settings.settings_backup_restore_file, name='settings_backup_restore_file'),
     path('settings/updates/', views_settings.settings_updates, name='settings_updates'),
+    path('settings/maintenance/', views_settings.settings_maintenance, name='settings_maintenance'),
     path('settings/disk/', views_settings.settings_disk, name='settings_disk'),
     path('settings/disk/list/', views_settings.settings_disk_list, name='settings_disk_list'),
     path('settings/disk/raid/', views_settings.settings_disk_raid, name='settings_disk_raid'),

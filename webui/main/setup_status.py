@@ -74,8 +74,9 @@ PAGE_EXPLAIN = {
         'Your data deserves protection: every night SymbiOS automatically '
         'saves a complete snapshot of all data - either only on this server '
         'or additionally on your own backup server (optionally encrypted). '
-        'If something breaks, you can restore individual services or the '
-        'whole system from any day.'
+        'The backup runs before the updates inside the daily maintenance '
+        'window (Settings -> Maintenance). If something breaks, you can '
+        'restore individual services or the whole system from any day.'
     ),
     'port-forwarding': (
         'For the server to be reachable from outside, ports 80 (HTTP) and '
@@ -117,9 +118,17 @@ PAGE_EXPLAIN = {
     'updates': (
         'SymbiOS keeps your server up to date automatically once a day: '
         'the operating system, your installed apps and SymbiOS itself. '
-        'On this page you can see whether that is active and start '
-        'updates manually at any time - for example right now, without '
-        'waiting for the nightly run.'
+        'Updates run after the backup inside the daily maintenance window '
+        '(Settings -> Maintenance). On this page you can see the status and '
+        'start updates manually at any time - for example right now, without '
+        'waiting for the daily run.'
+    ),
+    'maintenance': (
+        'Backup and updates share one daily maintenance window. The backup '
+        '(when enabled) always runs first, followed by all update modules, '
+        'so the two jobs can never overlap. Change the time here; the '
+        'individual settings and manual actions stay on the Backup and '
+        'Updates pages.'
     ),
     'ai': (
         'Here you can configure an OpenAI-compatible AI endpoint. The '

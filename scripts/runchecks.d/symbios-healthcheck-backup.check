@@ -1,9 +1,9 @@
 CHECK_CATEGORY="services"
 CHECK_TITLE="Backup"
 CHECK_DESC="Checks that backups ran recently and are not stored locally only."
-CHECK_DETAIL="Watches the success marker written by the nightly backup job.|Daily snapshots protect all data below /symbios (services, databases, configuration).|If this fails, no recent backup exists - check Settings -> Backup (it shows the restic error log of the last run).|Warns when no backup exists at all or the newest one is older than 7 days (limit configurable via backup_max_age_days in the inventory).|Also warns while only the local restic repository is configured: it shares the fate of the machine (fire, lightning, theft) - a remote backup server provides off-site protection.|Also warns when the local snapshot count or repository size grow past the configured retention (disk full prevention).|Also warns when the configuration backup of a registered OpenWrt system is missing or older than 2 days - an offline router fails silently otherwise."
+CHECK_DETAIL="Watches the success marker written by the backup phase of the daily maintenance window.|Daily snapshots protect all data below /symbios (services, databases, configuration).|If this fails, no recent backup exists - check Settings -> Backup (it shows the restic error log of the last run).|Warns when no backup exists at all or the newest one is older than 7 days (limit configurable via backup_max_age_days in the inventory).|Also warns while only the local restic repository is configured: it shares the fate of the machine (fire, lightning, theft) - a remote backup server provides off-site protection.|Also warns when the local snapshot count or repository size grow past the configured retention (disk full prevention).|Also warns when the configuration backup of a registered OpenWrt system is missing or older than 2 days - an offline router fails silently otherwise."
 
-# Healthcheck for the nightly backup job
+# Healthcheck for the backup phase of the daily maintenance window
 f_check_cache "symbios-healthcheck-backup" || return 2>/dev/null || true
 
 # The backup is optional (backup_enabled in the inventory, default off).
@@ -68,10 +68,10 @@ then
   fi
 fi
 
-# Cron entry must be active
-if ! grep -q "backup.sh" /etc/cron.d/backup_local 2>/dev/null
+# The single maintenance cron must be active - it runs backup before updates.
+if ! grep -q "symbios-maintenance.sh" /etc/cron.d/maintenance_local 2>/dev/null
 then
-  g_echo_error "Backup cron entry /etc/cron.d/backup_local is missing."
+  g_echo_error "Maintenance cron entry /etc/cron.d/maintenance_local is missing."
 fi
 
 # Snapshot count + repository size of the LOCAL restic repository as

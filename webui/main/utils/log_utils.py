@@ -47,6 +47,7 @@ ALLOWED_LOG_FILES = {
     "cron": "cron.log",
     "ansible": "ansible.log",
     "autoupdate": "/log/autoupdate.log",
+    "maintenance": "/log/maintenance.log",
     "dedyn": "/log/dedyn.log",
     "playbook-basics": "/log/playbook-basics.log",
     "playbook-symbios-ui": "/log/playbook-symbios-ui.log",
@@ -77,6 +78,7 @@ LOG_LABELS = {
     "cron": "Cron Jobs",
     "ansible": "Ansible",
     "autoupdate": "Updates (autoupdate)",
+    "maintenance": "Maintenance (backup + updates)",
 }
 
 

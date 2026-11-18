@@ -19,7 +19,7 @@
 #     - backup_enabled
 #   name: Backup
 #   short_description: Configure automated backups
-#   description: Installs a nightly backup job (cron) that dumps databases/LDAP and snapshots the whole /symbios data root into restic repositories - a local one and/or remote SSH/SFTP targets. Restic encrypts every repository, so no extra encryption option exists. The job is only installed while backup_enabled is true (default off). Restores are possible per service or for the whole system via the WebUI (Settings -> Backup).
+#   description: Installs the backup engine that dumps databases/LDAP and snapshots the whole /symbios data root into restic repositories - a local one and/or remote SSH/SFTP targets. Restic encrypts every repository, so no extra encryption option exists. The backup runs inside the single daily maintenance window (base-services/maintenance.yml) while backup_enabled is true (default off). Restores are possible per service or for the whole system via the WebUI (Settings -> Backup).
 #   author: Oliver Bohlen
 #   version: '3.0'
 #   license: GPLv3
@@ -31,18 +31,9 @@
 #     - '13'
 #   category: Backup
 #   service_control:
-#     services:
-#     - name: backup
-#       type: cron
-#       file: /etc/cron.d/backup_local
-#       status: test -f /etc/cron.d/backup_local || exit 2
 #     logs:
 #     - name: backup
 #       command: tail -F /var/log/syslog | grep backup
-#   actions:
-#     enable: sed -i 's/^#//' /etc/cron.d/backup_local
-#     disable: sed -i 's/^/#/' /etc/cron.d/backup_local
-#     run now: backup.sh
 
 ---
 - name: Backups
@@ -110,28 +101,9 @@
         state: directory
         mode: '0700'
 
-    # The nightly job only runs while the backup is enabled (Settings ->
-    # Backup). When it is switched off the cron file is removed, so the
-    # host does not fill up with snapshots nobody asked for.
-    - name: /etc/cron.d/backup_local
-      blockinfile:
-        path: /etc/cron.d/backup_local
-        create: yes
-        mode: 0644
-        owner: root
-        group: root
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          SHELL=/bin/bash
-          5 0 * * * root PATH={{ git_root }}/scripts:$PATH && [[ -s {{ git_root }}/scripts/backup.sh ]] && backup.sh
-        backup: yes
-      when: backup_enabled | default(false) | bool
-
-    - name: Remove the cron file when the backup is disabled
-      ansible.builtin.file:
-        path: /etc/cron.d/backup_local
-        state: absent
-      when: not (backup_enabled | default(false) | bool)
+    # Scheduling lives in base-services/maintenance.yml: one cron job runs
+    # backup.sh first, then autoupdate.sh. backup_enabled is read at runtime
+    # by symbios-maintenance.sh, so no cron file is managed here anymore.
 
     # The backup healthcheck lives in scripts/runchecks.d/ and is picked
     # up automatically (runchecks.sh scans the git tree).
