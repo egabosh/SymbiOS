@@ -96,8 +96,8 @@ do
       ;;
     *)
       echo "ERROR: Unknown option: $1"
-      f_usage
-      exit 1
+      f_usage >&2
+      exit 2
       ;;
   esac
 done

@@ -62,7 +62,7 @@ do
     *)
       g_echo_error "Unknown option: $1"
       f_usage >&2
-      exit 1
+      exit 2
       ;;
   esac
 done
@@ -71,7 +71,7 @@ if [[ -z "${f_action}" ]]
 then
   g_echo_error "Missing required option: --users or --groups"
   f_usage >&2
-  exit 1
+  exit 2
 fi
 
 # Read LDAP connection details from inventory

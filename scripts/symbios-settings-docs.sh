@@ -37,13 +37,13 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --write)
-      [[ $# -ge 2 ]] || { f_usage >&2; exit 1; }
+      [[ $# -ge 2 ]] || { f_usage >&2; exit 2; }
       f_mode="write"
       f_file="$2"
       shift 2
       ;;
     --check)
-      [[ $# -ge 2 ]] || { f_usage >&2; exit 1; }
+      [[ $# -ge 2 ]] || { f_usage >&2; exit 2; }
       f_mode="check"
       f_file="$2"
       shift 2
@@ -55,7 +55,7 @@ do
     *)
       echo "Unknown option: $1" >&2
       f_usage >&2
-      exit 1
+      exit 2
       ;;
   esac
 done

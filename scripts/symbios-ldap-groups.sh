@@ -103,7 +103,7 @@ do
     *)
       g_echo_error "Unknown option: $1"
       f_usage >&2
-      exit 1
+      exit 2
       ;;
   esac
 done
@@ -113,14 +113,14 @@ if [[ -z "${f_action}" ]]
 then
   g_echo_error "Missing required action (--create, --delete, --add-user, --remove-user, --list-members)"
   f_usage >&2
-  exit 1
+  exit 2
 fi
 
 if [[ -z "${f_name}" ]]
 then
   g_echo_error "Missing required argument: --name"
   f_usage >&2
-  exit 1
+  exit 2
 fi
 
 # Validate group name format

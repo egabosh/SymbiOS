@@ -126,7 +126,7 @@ do
     *)
       g_echo_error "Unknown option: $1"
       f_usage >&2
-      exit 1
+      exit 2
       ;;
   esac
 done
@@ -160,7 +160,7 @@ if [[ -z "${f_action}" ]]
 then
   g_echo_error "Missing required action (--create, --delete, --modify)"
   f_usage >&2
-  exit 1
+  exit 2
 fi
 
 # Validate uid
@@ -168,7 +168,7 @@ if [[ -z "${f_uid}" ]]
 then
   g_echo_error "Missing required argument: --uid"
   f_usage >&2
-  exit 1
+  exit 2
 fi
 
 if ! [[ "${f_uid}" =~ ^[a-z0-9._-]+$ ]]
@@ -196,14 +196,14 @@ if [[ "${f_action}" == "create" ]] && [[ -z "${f_password_file}" ]]
 then
   g_echo_error "Missing required argument: --password-file"
   f_usage >&2
-  exit 1
+  exit 2
 fi
 
 if [[ "${f_action}" == "modify" ]] && [[ -z "${f_password_file}" ]] && [[ -z "${f_email}" ]] && [[ ${#f_ssh_keys[@]} -eq 0 ]] && [[ "${f_clear_ssh_keys}" -eq 0 ]]
 then
   g_echo_error "Modify requires at least --password-file, --email, --ssh-key or --clear-ssh-keys"
   f_usage >&2
-  exit 1
+  exit 2
 fi
 
 # Validate SSH public key format (same key types as the WebUI check)

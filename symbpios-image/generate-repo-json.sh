@@ -123,8 +123,8 @@ do
             ;;
         *)
             echo "ERROR: Unknown option: $1"
-            f_usage
-            exit 1
+            f_usage >&2
+            exit 2
             ;;
     esac
 done
@@ -132,8 +132,8 @@ done
 if [ -z "${g_image_arg}" ]
 then
     echo "ERROR: --image is required"
-    f_usage
-    exit 1
+    f_usage >&2
+    exit 2
 fi
 
 # Resolve to absolute path

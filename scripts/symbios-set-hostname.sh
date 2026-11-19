@@ -50,7 +50,7 @@ do
     *)
       g_echo_error "Unknown option: $1" 2>/dev/null || echo "Unknown option: $1" >&2
       f_usage >&2
-      exit 1
+      exit 2
       ;;
   esac
   shift

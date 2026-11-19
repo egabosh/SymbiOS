@@ -45,12 +45,12 @@ while [[ $# -gt 0 ]]
 do
   case "$1" in
     --base)
-      [[ $# -ge 2 ]] || { f_usage >&2; exit 1; }
+      [[ $# -ge 2 ]] || { f_usage >&2; exit 2; }
       f_base="$2"
       shift 2
       ;;
     --slug)
-      [[ $# -ge 2 ]] || { f_usage >&2; exit 1; }
+      [[ $# -ge 2 ]] || { f_usage >&2; exit 2; }
       f_only="$2"
       shift 2
       ;;
@@ -61,7 +61,7 @@ do
     *)
       echo "Unknown option: $1" >&2
       f_usage >&2
-      exit 1
+      exit 2
       ;;
   esac
 done
