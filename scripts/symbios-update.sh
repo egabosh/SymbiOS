@@ -53,8 +53,38 @@ Options:
   -h, --help          Show this help message
   -d, --dry-run       Check for changes but do not apply them
 
-Pull latest changes from GitHub and run any updated playbooks.
+Pull latest changes from GitHub and run any updated playbooks. Playbooks
+newly listed in install.sh are installed once as well, so existing hosts
+receive new base services without a manual step.
 EOF
+}
+
+# Platform gate from the playbook docs header, mirroring the rule in
+# symbios-playbooks-for-vars.sh (that script parses arguments on source, so
+# it cannot be sourced here). Read the header from the target revision:
+# --dry-run never checks out the new tree. Unknown values never skip.
+function f_applies_here {
+  local f_pb="${1}" f_rev="${2}" f_when
+
+  f_when="$(git show "${f_rev}:${f_pb}" 2>/dev/null | awk '
+    /^# *applies_when: */ {
+      line = $0
+      sub(/^# *applies_when: */, "", line)
+      gsub(/^[ \t]+|[ \t]+$/, "", line)
+      gsub(/^["\x27]|["\x27]$/, "", line)
+      print line
+      exit
+    }
+  ')"
+
+  case "${f_when}" in
+    raspberry_pi)
+      [[ -f /proc/device-tree/model ]] && grep -qi "raspberry" /proc/device-tree/model
+      ;;
+    *)
+      true
+      ;;
+  esac
 }
 
 # Parse arguments
@@ -185,6 +215,42 @@ if echo "${g_changed_files}" | grep -q "^webui/"
 then
   g_echo_note "  webui source files changed"
   g_updated_playbooks+=("base-services/symbios-ui.yml")
+fi
+
+# A playbook newly added to install.sh is absent from every host's state file,
+# so the "installed and changed" check above cannot see it. Compare both
+# revisions and run the additions once - this is how installations we do not
+# know about receive new base services after an update.
+if echo "${g_changed_files}" | grep -q '^install.sh$'
+then
+  g_echo_note "  install.sh changed - checking for newly added base playbooks"
+  if git cat-file -e "${g_head_before}:install.sh" 2>/dev/null \
+     && git cat-file -e "${g_head_after}:install.sh" 2>/dev/null
+  then
+    g_old_pb_list="$(git show "${g_head_before}:install.sh" | grep 'f_run_playbook' | grep -oE 'base-services/[a-zA-Z0-9._-]+\.yml' | sort -u)"
+    g_new_pb_list="$(git show "${g_head_after}:install.sh" | grep 'f_run_playbook' | grep -oE 'base-services/[a-zA-Z0-9._-]+\.yml' | sort -u)"
+    g_added_pb_list="$(comm -13 <(printf '%s\n' "${g_old_pb_list}") <(printf '%s\n' "${g_new_pb_list}"))"
+
+    # Keep install.sh order instead of the alphabetical order of comm.
+    while read -r f_pb
+    do
+      [[ -n "${f_pb}" ]] || continue
+      printf '%s\n' "${g_added_pb_list}" | grep -Fxq "${f_pb}" || continue
+      if ! f_applies_here "${f_pb}" "${g_head_after}"
+      then
+        g_echo_note "    SKIP ${f_pb} (platform gate)"
+        continue
+      fi
+      g_echo_note "  ${f_pb} - newly added in install.sh"
+      g_updated_playbooks+=("${f_pb}")
+    done < <(git show "${g_head_after}:install.sh" | grep 'f_run_playbook' | grep -oE 'base-services/[a-zA-Z0-9._-]+\.yml' | awk '!seen[$0]++')
+  fi
+fi
+
+# A path can arrive twice (changed and newly added, or via the webui trigger).
+if [[ ${#g_updated_playbooks[@]} -gt 0 ]]
+then
+  mapfile -t g_updated_playbooks < <(printf '%s\n' "${g_updated_playbooks[@]}" | awk '!seen[$0]++')
 fi
 
 # Run changed playbooks
