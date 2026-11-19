@@ -21,7 +21,7 @@
     # the same names as extra vars (which take precedence).
     managed_id: "openwrt_autoupdate.yml"
     managed_playbook: "openwrt_autoupdate.yml"
-    managed_ref: "cron=30 3 * * *"
+    managed_ref: "cron={{ autoupdate_cron | default('30 3 * * *') }}"
     managed_resource_type: "autoupdate"
 
     # 03:30 is the only free slot: netboot 04:15, tor blocklist 05:15,

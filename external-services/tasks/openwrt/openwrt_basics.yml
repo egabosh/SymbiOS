@@ -384,9 +384,47 @@
       register: resolver_role
       changed_when: false
 
+    # /etc/resolv.conf is a symlink to /tmp/resolv.conf, which netifd replaces
+    # on every interface event (per-interface DNS, no search order). Write a
+    # static file instead: it is overlay backed and in /etc/sysupgrade.conf.
+    # This must happen before apk update: a fresh image still points at the
+    # loopback socket, which is intentionally unbound when several dnsmasq
+    # instances run, so package repository lookups would fail with EPERM.
+    - name: write a static /etc/resolv.conf
+      raw: |
+        # A resolver points at its own LAN address: dnsmasq listens there on
+        # every target, while 127.0.0.1 is not bound on targets with several
+        # dnsmasq instances (the loopback socket can only be owned once).
+        # Slaves ask the master configured on the LAN interface.
+        if [ "{{ resolver_role.stdout | trim }}" = "resolver" ]
+        then
+          ns={{ effective_ip }}
+        else
+          ns=$(uci -q get network.lan.dns)
+        fi
+        printf 'nameserver %s\nsearch {{ dns_search }}\n' "$ns" > /tmp/resolv.conf.new
+        if cmp -s /tmp/resolv.conf.new /etc/resolv.conf
+        then
+          echo unchanged
+        else
+          rm -f /etc/resolv.conf
+          mv /tmp/resolv.conf.new /etc/resolv.conf
+          chmod 644 /etc/resolv.conf
+          echo changed
+        fi
+        rm -f /tmp/resolv.conf.new
+      register: resolv_result
+      changed_when: "resolv_result.stdout | trim == 'changed'"
+
     # --- packages ----------------------------------------------------------
+    # The repository mirrors can briefly return stale indexes after the
+    # resolver was rewritten; retry before failing the run.
     - name: update apk db
       raw: apk update
+      register: apk_update_result
+      until: apk_update_result.rc == 0
+      retries: 3
+      delay: 5
       changed_when: false
 
     - name: upgrade packages
@@ -844,35 +882,6 @@
       when:
         - uci_set_result.changed
         - resolver_role.stdout | trim == 'resolver'
-
-    # /etc/resolv.conf is a symlink to /tmp/resolv.conf, which netifd replaces
-    # on every interface event (per-interface DNS, no search order). Write a
-    # static file instead: it is overlay backed and in /etc/sysupgrade.conf.
-    - name: write a static /etc/resolv.conf
-      raw: |
-        # A resolver points at its own LAN address: dnsmasq listens there on
-        # every target, while 127.0.0.1 is not bound on targets with several
-        # dnsmasq instances (the loopback socket can only be owned once).
-        # Slaves ask the master configured on the LAN interface.
-        if [ "{{ resolver_role.stdout | trim }}" = "resolver" ]
-        then
-          ns={{ effective_ip }}
-        else
-          ns=$(uci -q get network.lan.dns)
-        fi
-        printf 'nameserver %s\nsearch {{ dns_search }}\n' "$ns" > /tmp/resolv.conf.new
-        if cmp -s /tmp/resolv.conf.new /etc/resolv.conf
-        then
-          echo unchanged
-        else
-          rm -f /etc/resolv.conf
-          mv /tmp/resolv.conf.new /etc/resolv.conf
-          chmod 644 /etc/resolv.conf
-          echo changed
-        fi
-        rm -f /tmp/resolv.conf.new
-      register: resolv_result
-      changed_when: "resolv_result.stdout | trim == 'changed'"
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state

@@ -39,6 +39,9 @@
     openwrt_packages:
       - ddns-scripts
       - luci-app-ddns
+    # Digitalcourage DNS over port 53 here: ddns-scripts uses the address only
+    # for its public-IP lookup URL, not as a system resolver.
+    dns_server: "5.9.164.112"
 
     uci_delete_vars:
       - ddns.myddns_ipv4
@@ -58,69 +61,60 @@
       - { key: "ddns.dedyn_ipv4_{{ localhostname }}.ip_source", value: "web" }
       - { key: "ddns.dedyn_ipv4_{{ localhostname }}.interface", value: "wan" }
       - { key: "ddns.dedyn_ipv4_{{ localhostname }}.use_syslog", value: "1" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.dns_server", value: "45.54.76.1" }
+      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.dns_server", value: "{{ dns_server }}" }
       - { key: "ddns.dedyn_ipv4_{{ localhostname }}.ip_url", value: "https://checkipv4.dedyn.io" }
 
   pre_tasks:
     - name: Check required parameters
       ansible.builtin.assert:
         that:
-          - apikey is defined
-          - domainname is defined
-          - localhostname is defined
-        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+          - apikey is defined and (apikey | string | length) > 0
+          - domainname is defined and (domainname | string | length) > 0
+          - localhostname is defined and (localhostname | string | length) > 0
+          - localhostname is match('^[A-Za-z0-9_-]+$')
+        fail_msg: "Missing or invalid parameter(s). Pass them with -e <name>=<value>."
         quiet: true
 
   tasks:
 
-    - name: update opkg db
-      raw: opkg update
-      changed_when: false
-  
-    - name: check installed packages
-      raw: opkg list-installed
-      register: installed_packages
-      changed_when: false
+    - name: install ddns packages
+      ansible.builtin.include_tasks: packages.yml
 
-    - name: install packages if needed
-      raw: opkg install {{ item }}
-      loop: "{{ openwrt_packages }}"
-      when: item not in installed_packages.stdout
-
-    - name: detele config defaults
-      raw: |
-        # detele default config indices
+    - name: delete config defaults
+      ansible.builtin.raw: |
         while uci show | grep -q "^{{ item }}="
         do
-          echo "{{ item }}" >/tmp/x
           echo "changed"
           uci delete {{ item }}[0]
           uci delete {{ item }}
         done
       loop: "{{ uci_delete_vars }}"
       register: uci_delete_result
-      changed_when: "'changed' in uci_delete_result.stdout"
+      changed_when: "uci_delete_result.stdout | trim == 'changed'"
 
     - name: set uci values if needed
-      raw: |
+      ansible.builtin.raw: |
         current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired="{{ item.value }}"
+        desired='{{ item.value | replace("'", "'\\''") }}'
         if [ "$current" != "$desired" ]
         then
-          uci set {{ item.key }}="{{ item.value }}"
+          uci set {{ item.key }}='{{ item.value | replace("'", "'\\''") }}'
           echo "changed"
         else
           echo "unchanged"
         fi
       loop: "{{ uci_vars }}"
+      loop_control:
+        label: "{{ item.key }}"
       register: uci_set_result
       # A changed_when sees no register of its own loop, so the loop is
       # neutral and the aggregate decides whether a restart is needed.
       changed_when: false
+      no_log: true
 
     - name: Remember whether any uci value changed
       ansible.builtin.set_fact:
-        uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+        uci_changed: "{{ (uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0) or (uci_delete_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0) }}"
 
     - name: apply changes
       block:

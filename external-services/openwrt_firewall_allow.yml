@@ -1,0 +1,130 @@
+# docs:
+#   name: "OpenWrt - Firewall allow rule"
+#   short_description: "OpenWrt - Firewall allow rule"
+#   description: "Forward allow rule for the internet, LAN, IoT or Tor zone. Select the target zone with the profile parameter."
+#   category: "Security"
+#   type: OpenWrt
+#   icon: "bi-shield-check"
+#   params:
+#     - name: "profile"
+#       label: "Target zone (internet, lan, iot or tor)"
+#       type: "text"
+#       default: "internet"
+#     - name: "rule_name"
+#       label: "Rule name"
+#       type: "text"
+#       required: true
+#     - name: "src"
+#       label: "Source zone"
+#       type: "text"
+#     - name: "src_ip"
+#       label: "Source IP/network"
+#       type: "text"
+#       default: "*"
+#     - name: "dest_ip"
+#       label: "Destination IP"
+#       type: "text"
+#     - name: "dest_port"
+#       label: "Destination port"
+#       type: "text"
+#     - name: "proto"
+#       label: "Protocol"
+#       type: "text"
+#       default: "tcp"
+#   requires:
+#     - playbook: "openwrt_master.yml"
+#       reason: "Firewall zones"
+#   inventory:
+#     title: "Existing firewall allow rules"
+#     description: "Read live from the target, so rules created outside SymbiOS are listed as well."
+#     command: |
+#       for spec in \
+#         'internet rule_forward_internet' \
+#         'lan rule_forward_lan' \
+#         'iot rule_forward_iot' \
+#         'tor rule_forward_tor' \
+#         'tor rule_forward_lan'
+#       do
+#         set -- $spec
+#         profile=$1
+#         prefix=$2
+#         for n in $(uci -q show firewall | sed -n "s/^firewall\\.${prefix}_\\([^.=]*\\)=.*/\\1/p")
+#         do
+#           s="${prefix}_$n"
+#           # rule_forward_lan sections are LAN rules unless .dest says tor.
+#           if [ "$prefix" = "rule_forward_lan" ] \
+#             && [ "$(uci -q get "firewall.$s.dest" 2>/dev/null)" != "tor" ]
+#           then continue; fi
+#           printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$profile" "$n" \
+#             "$(uci -q get "firewall.$s.proto" 2>/dev/null)" \
+#             "$(uci -q get "firewall.$s.src" 2>/dev/null)" \
+#             "$(uci -q get "firewall.$s.dest_port" 2>/dev/null)" \
+#             "$(uci -q get "firewall.$s.dest_ip" 2>/dev/null)"
+#         done
+#       done
+#     columns:
+#       - key: "profile"
+#         label: "Zone"
+#       - key: "name"
+#         label: "Rule"
+#       - key: "proto"
+#         label: "Proto"
+#       - key: "src"
+#         label: "Source zone"
+#       - key: "dest_port"
+#         label: "Dest port"
+#       - key: "dest_ip"
+#         label: "Dest IP"
+#     actions:
+#       - name: "remove_internet"
+#         label: "Remove internet rule"
+#         class: "danger"
+#         confirm: "Delete this allow rule from the internet?"
+#         playbook: "openwrt_firewall_allow.yml"
+#         vars:
+#           profile: "profile"
+#           rule_name: "name"
+#         extra:
+#           state: "absent"
+#       - name: "remove_lan"
+#         label: "Remove LAN rule"
+#         class: "danger"
+#         confirm: "Delete this allow rule into the LAN segment?"
+#         playbook: "openwrt_firewall_allow.yml"
+#         vars:
+#           profile: "profile"
+#           rule_name: "name"
+#         extra:
+#           state: "absent"
+#       - name: "remove_iot"
+#         label: "Remove IoT rule"
+#         class: "danger"
+#         confirm: "Delete this allow rule into the IoT segment?"
+#         playbook: "openwrt_firewall_allow.yml"
+#         vars:
+#           profile: "profile"
+#           rule_name: "name"
+#         extra:
+#           state: "absent"
+#       - name: "remove_tor"
+#         label: "Remove Tor rule"
+#         class: "danger"
+#         confirm: "Delete this allow rule into the Tor segment?"
+#         playbook: "openwrt_firewall_allow.yml"
+#         vars:
+#           profile: "profile"
+#           rule_name: "name"
+#         extra:
+#           state: "absent"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_allow_internet.yml
+  when: profile | default('internet') == 'internet'
+- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_allow_to_lan.yml
+  when: profile | default('internet') == 'lan'
+- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_allow_to_iot.yml
+  when: profile | default('internet') == 'iot'
+- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_allow_to_tor.yml
+  when: profile | default('internet') == 'tor'

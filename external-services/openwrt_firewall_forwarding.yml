@@ -1,0 +1,133 @@
+# docs:
+#   name: "OpenWrt - Firewall forwarding"
+#   short_description: "OpenWrt - Firewall forwarding"
+#   description: "Connection hijack, IPv4 DNAT or IPv6 server rule. Select the rule type with the profile parameter."
+#   category: "Security"
+#   type: OpenWrt
+#   icon: "bi-signpost-split"
+#   params:
+#     - name: "profile"
+#       label: "Rule type (hijack, ipv4 or ipv6)"
+#       type: "text"
+#       default: "ipv4"
+#     - name: "redirect_name"
+#       label: "Rule name"
+#       type: "text"
+#       required: true
+#     - name: "src"
+#       label: "Source zone (hijack)"
+#       type: "text"
+#     - name: "proto"
+#       label: "Protocol"
+#       type: "text"
+#       default: "tcp"
+#     - name: "from_port"
+#       label: "From/external port"
+#       type: "text"
+#     - name: "to_port"
+#       label: "To/internal port"
+#       type: "text"
+#     - name: "target"
+#       label: "Redirect target (hijack) or internal host (ipv4)"
+#       type: "text"
+#     - name: "ports"
+#       label: "Ports, comma separated (ipv6)"
+#       type: "text"
+#     - name: "suffix"
+#       label: "Target address suffix (ipv6)"
+#       type: "text"
+#   requires:
+#     - playbook: "openwrt_master.yml"
+#       reason: "Firewall zones"
+#   inventory:
+#     title: "Existing firewall forwarding rules"
+#     description: "Read live from the target, so rules created outside SymbiOS are listed as well."
+#     command: |
+#       uci -q show firewall | sed -n 's/^firewall\.\(redirect_[^.=]*\)=.*/\1/p' | while read -r s
+#       do
+#         n=${s#redirect_}
+#         name=$(uci -q get "firewall.$s.name" 2>/dev/null)
+#         case "$name" in
+#           ansible_hijack_*)
+#             printf 'hijack\t%s\t%s\t%s\t%s\t%s\t%s\t\t\n' "$n" \
+#               "$(uci -q get "firewall.$s.src" 2>/dev/null)" \
+#               "$(uci -q get "firewall.$s.proto" 2>/dev/null)" \
+#               "$(uci -q get "firewall.$s.src_dport" 2>/dev/null)" \
+#               "$(uci -q get "firewall.$s.dest_port" 2>/dev/null)" \
+#               "$(uci -q get "firewall.$s.dest_ip" 2>/dev/null)"
+#             ;;
+#           *) printf 'ipv4\t%s\t%s\t%s\t%s\t%s\t%s\t\t\n' "$n" wan \
+#                "$(uci -q get "firewall.$s.proto" 2>/dev/null)" \
+#                "$(uci -q get "firewall.$s.src_dport" 2>/dev/null)" \
+#                "$(uci -q get "firewall.$s.dest_port" 2>/dev/null)" \
+#                "$(uci -q get "firewall.$s.dest_ip" 2>/dev/null)" ;;
+#         esac
+#       done
+#       uci -q show firewall | sed -n 's/^firewall\.\(rule_[^.=]*_ipv6_access\)=.*/\1/p' | while read -r s
+#       do
+#         n=${s%_ipv6_access}
+#         printf 'ipv6\t%s\t%s\t%s\t\t\t\t%s\t%s\n' "${n#rule_}" wan \
+#           "$(uci -q get "firewall.$s.proto" 2>/dev/null)" \
+#           "$(uci -q get "firewall.$s.dest_port" 2>/dev/null)" \
+#           "$(uci -q get "firewall.$s.dest_ip" 2>/dev/null)"
+#       done
+#     columns:
+#       - key: "profile"
+#         label: "Type"
+#       - key: "name"
+#         label: "Rule"
+#       - key: "src"
+#         label: "Source"
+#       - key: "proto"
+#         label: "Proto"
+#       - key: "from_port"
+#         label: "From port"
+#       - key: "to_port"
+#         label: "To port"
+#       - key: "target"
+#         label: "Target"
+#       - key: "ports"
+#         label: "Ports"
+#       - key: "suffix"
+#         label: "Suffix"
+#     actions:
+#       - name: "remove_hijack"
+#         label: "Remove hijack"
+#         class: "danger"
+#         confirm: "Delete this connection hijack?"
+#         playbook: "openwrt_firewall_forwarding.yml"
+#         vars:
+#           redirect_name: "name"
+#         extra:
+#           profile: "hijack"
+#           state: "absent"
+#       - name: "remove_ipv4"
+#         label: "Remove IPv4 DNAT"
+#         class: "danger"
+#         confirm: "Delete this IPv4 port forwarding?"
+#         playbook: "openwrt_firewall_forwarding.yml"
+#         vars:
+#           redirect_name: "name"
+#         extra:
+#           profile: "ipv4"
+#           state: "absent"
+#       - name: "remove_ipv6"
+#         label: "Remove IPv6 rule"
+#         class: "danger"
+#         confirm: "Delete this IPv6 server forwarding?"
+#         playbook: "openwrt_firewall_forwarding.yml"
+#         vars:
+#           redirect_name: "name"
+#         extra:
+#           profile: "ipv6"
+#           state: "absent"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_hijack_connections.yml
+  when: profile | default('ipv4') == 'hijack'
+- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_ipv4_server_portforwardings.yml
+  when: profile | default('ipv4') == 'ipv4'
+- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_ipv6_server_forward.yml
+  when: profile | default('ipv4') == 'ipv6'

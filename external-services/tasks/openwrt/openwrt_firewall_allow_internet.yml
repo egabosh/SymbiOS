@@ -1,7 +1,7 @@
 # docs:
-#   name: "OpenWrt - Firewall allow to LAN"
-#   short_description: "OpenWrt - Firewall allow to LAN"
-#   description: "Allow rule into the LAN segment."
+#   name: "OpenWrt - Firewall allow from internet"
+#   short_description: "OpenWrt - Firewall allow from internet"
+#   description: "Inbound allow rule from the internet to one internal host/port."
 #   category: "Security"
 #   type: OpenWrt
 #   icon: "bi-shield-check"
@@ -13,7 +13,7 @@
 #     - name: "src"
 #       label: "Source zone"
 #       type: "text"
-#       required: true
+#       default: "wan"
 #     - name: "src_ip"
 #       label: "Source IP/network"
 #       type: "text"
@@ -34,12 +34,12 @@
 #     - playbook: "openwrt_basics.yml"
 #       reason: "Firewall zones"
 #   inventory:
-#     title: "Existing allow rules to the LAN segment"
+#     title: "Existing allow rules from the internet"
 #     description: "Read live from the target, so rules created outside SymbiOS are listed as well."
 #     command: |
-#       for n in $(uci -q show firewall | sed -n 's/^firewall\.rule_forward_lan_\([^.=]*\)=.*/\1/p')
+#       for n in $(uci -q show firewall | sed -n 's/^firewall\.rule_forward_internet_\([^.=]*\)=.*/\1/p')
 #       do
-#         s="rule_forward_lan_$n"
+#         s="rule_forward_internet_$n"
 #         printf '%s\t%s\t%s\t%s\t%s\n' "$n" \
 #           "$(uci -q get "firewall.$s.proto" 2>/dev/null)" \
 #           "$(uci -q get "firewall.$s.src" 2>/dev/null)" \
@@ -61,8 +61,8 @@
 #       - name: "remove"
 #         label: "Remove"
 #         class: "danger"
-#         confirm: "Delete this allow rule (to the LAN segment) from the firewall?"
-#         playbook: "openwrt_firewall_allow_to_lan.yml"
+#         confirm: "Delete this allow rule (from the internet) from the firewall?"
+#         playbook: "openwrt_firewall_allow_internet.yml"
 #         vars:
 #           rule_name: "name"
 #         extra:
@@ -71,7 +71,7 @@
 #     __playbook__: Install/Update
 #
 ---
-- name: allow to lan
+- name: firewall-config Control outgoing traffic - forwarded to the internet (src=lan; dest=wan)
   hosts: all
   gather_facts: no
 
@@ -79,24 +79,25 @@
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
     state: "present"
-    managed_id: "openwrt_firewall_allow_to_lan.yml/{{ rule_name }}"
-    managed_playbook: "openwrt_firewall_allow_to_lan.yml"
+    managed_id: "openwrt_firewall_allow_internet.yml/{{ rule_name }}"
+    managed_playbook: "openwrt_firewall_allow_internet.yml"
     managed_ref: "rule_name={{ rule_name }} src={{ src | default('') }} src_ip={{ src_ip | default('') }} dest_ip={{ dest_ip | default('') }} dest_port={{ dest_port | default('') }} proto={{ proto }}"
-    managed_resource_type: "firewall_allow_to_lan"
+    managed_resource_type: "firewall_allow_internet"
     managed_remove_ids: []
     proto: "tcp"
+    src: "wan"
     src_ip: "*"
     uci_vars:
       ## rules
-      - { key: "firewall.rule_forward_lan_{{ rule_name }}",           value: "rule" }
-      - { key: "firewall.rule_forward_lan_{{ rule_name }}.src",       value: "{{ src | default('') }}" }
-      - { key: "firewall.rule_forward_lan_{{ rule_name }}.dest",      value: "lan" }
-      - { key: "firewall.rule_forward_lan_{{ rule_name }}.target",    value: "ACCEPT" }
-      - { key: "firewall.rule_forward_lan_{{ rule_name }}.proto",     value: "{{ proto }}" }
-      - { key: "firewall.rule_forward_lan_{{ rule_name }}.name",      value: "ansible_forward_lan_{{ rule_name }}" }
-      - { key: "firewall.rule_forward_lan_{{ rule_name }}.dest_port", value: "{{ dest_port | default('') }}" }
-      - { key: "firewall.rule_forward_lan_{{ rule_name }}.src_ip",      value: "{{ src_ip | default('') }}" }
-      - { key: "firewall.rule_forward_lan_{{ rule_name }}.dest_ip",     value: "{{ dest_ip | default('') }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}",           value: "rule" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.src",       value: "{{ src | default('') }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest",      value: "wan" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.target",    value: "ACCEPT" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.proto",     value: "{{ proto }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.name",      value: "ansible_forward_internet_{{ rule_name }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest_port", value: "{{ dest_port | default('') }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.src_ip",      value: "{{ src_ip | default('') }}" }
+      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest_ip",     value: "{{ dest_ip | default('') }}" }
 
   pre_tasks:
     - name: Check required parameters
@@ -109,7 +110,6 @@
           - rule_name is match('^[A-Za-z0-9._-]+$')
         fail_msg: "state must be present or absent; rule_name is required, dest_ip/dest_port only for state=present."
         quiet: true
-        quiet: true
 
   tasks:
     # --- absent: remove the rule ----------------------------------------
@@ -118,9 +118,9 @@
       block:
         - name: Delete the rule section
           ansible.builtin.raw: |
-            if uci -q show "firewall.rule_forward_lan_{{ rule_name }}" > /dev/null 2>&1
+            if uci -q show "firewall.rule_forward_internet_{{ rule_name }}" > /dev/null 2>&1
             then
-              uci delete "firewall.rule_forward_lan_{{ rule_name }}"
+              uci delete "firewall.rule_forward_internet_{{ rule_name }}"
               uci commit firewall
               echo changed
             else
@@ -139,7 +139,7 @@
           vars:
             managed_id: ""
             managed_remove_ids:
-              - "openwrt_firewall_allow_to_lan.yml/{{ rule_name }}"
+              - "openwrt_firewall_allow_internet.yml/{{ rule_name }}"
 
     # --- present: create or update the rule -----------------------------
     - name: Configure the allow rule

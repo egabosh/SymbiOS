@@ -37,10 +37,9 @@
     managed_playbook: "openwrt_wireless-iot.yml"
     managed_ref: "iot_wlandev={{ iot_wlandev }} iot_wlan_ssid={{ iot_wlan_ssid }}"
     managed_resource_type: "wireless_iot"
-    openwrt_packages:
-      - luci-app-openvpn
-      - luci-i18n-openvpn-de
-      - openvpn
+    # A WiFi SSID needs no extra package; the former OpenVPN list was a
+    # copy/paste error and installed unrelated packages on every run.
+    openwrt_packages: []
 
     uci_vars:
       - { key: "wireless.wifinet1", value: "wifi-iface" }
@@ -63,19 +62,8 @@
 
   tasks:
 
-    - name: update opkg db
-      raw: opkg update
-      changed_when: false
-
-    - name: check installed packages
-      raw: opkg list-installed
-      register: installed_packages
-      changed_when: false
-
-    - name: install packages if needed
-      raw: opkg install {{ item }}
-      loop: "{{ openwrt_packages }}"
-      when: item not in installed_packages.stdout
+    - name: install wireless packages
+      ansible.builtin.include_tasks: packages.yml
 
     - name: set uci values if needed
       raw: |
@@ -90,7 +78,11 @@
         fi
       loop: "{{ uci_vars }}"
       register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
+      changed_when: false
+
+    - name: Remember whether any uci value changed
+      ansible.builtin.set_fact:
+        uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
 
     - name: apply changes
       block:
@@ -99,7 +91,7 @@
           loop:
             - "uci commit"
             - "wifi reload"
-          when: uci_set_result.changed
+          when: uci_changed
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state

@@ -113,8 +113,8 @@ to know: title, description, available actions, status checks, and log streams.
 - **`requires`** - optional list of playbooks this one depends on. Shown on the detail page and checked per selected external target against the target's synced state (`config/external-systems/states/<target>.json`, filled from `/etc/symbios/managed.json`):
   ```yaml
   #   requires:
-  #     - playbook: openwrt_tor.yml
-  #       reason: Needs the Tor instance
+  #     - playbook: openwrt_master.yml
+  #       reason: Needs the base setup
   #     - playbook: openwrt_wireguard_tor.yml
   # ```
   Dependencies are never global: the same playbook may be applied on one target and missing on another.
@@ -198,13 +198,15 @@ to know: title, description, available actions, status checks, and log streams.
 ## External services (remote playbooks)
 
 Playbooks under `external-services/` target remote systems instead of the
-SymbiOS host. They are flat (no sub-directories), prefixed by target type
-(`openwrt_*.yml`) and run over SSH from the WebUI.
+SymbiOS host. Runnable playbooks stay flat and are prefixed by target type
+(`openwrt_*.yml`); their reusable implementation may live in a subdirectory
+that the catalog does not scan (`external-services/tasks/<type>/`). They run
+over SSH from the WebUI.
 
 | Rule | Detail |
 |------|--------|
-| Location | `external-services/<name>.yml`, no sub-directories |
-| Naming | `<type>_<topic>.yml` (e.g. `openwrt_dns_cname.yml`) |
+| Location | `external-services/<name>.yml` (runnable), `external-services/tasks/<type>/` (shared components) |
+| Naming | `<type>_<topic>.yml` (e.g. `openwrt_dns.yml`) |
 | Target type | `docs.type` (`OpenWrt`, `Linux`, ...) selects the matching external systems |
 | Execution | `scripts/symbios-run-remote-playbook.sh <target_id> <playbook> [--vars-stdin]` |
 | Inventory | Built on the fly from `config/external-systems.yml` (`host`, `port`, `user`) |
@@ -218,12 +220,21 @@ by a `pre_tasks:` guard, so a missing value produces one clear message instead
 of an `undefined variable` error.
 
 Foundation pattern: each target type has one foundation playbook that bundles
-everything a fresh device needs to work (for OpenWrt: `openwrt_basics.yml` =
-packages, system, LAN addressing, SSH, DHCP/DNS, mDNS and the base firewall).
-It is run once per target; all other playbooks are granular resources or
-features that declare it via `docs.requires`. When merging source playbooks
-into a foundation, check the UCI keys (or equivalent settings) for conflicts
-first - the merged result must stay idempotent.
+everything a fresh device needs to work. For OpenWrt, `openwrt_master.yml`
+bundles the resolver foundation (packages, system, LAN addressing, SSH,
+DHCP/DNS, mDNS, base firewall), IoT and Tor segments, remote logging and
+autoupdate. `openwrt_slave.yml` converts a secondary access point. Both import
+the former standalone plays from `external-services/tasks/openwrt/`, so the
+managed-state ids and UCI behaviour stay identical and physical routers can
+keep running the old playbooks untouched. Uplink, VPN, DDNS, DNSCrypt,
+FRITZ!Box, SMTP, Asterisk, netboot and port forwards remain separate playbooks.
+
+Resource playbooks that were consolidated use a `profile` parameter and import
+the matching hidden component: `openwrt_dns.yml`, `openwrt_firewall_allow.yml`,
+`openwrt_firewall_forwarding.yml`, `openwrt_ddns.yml` and
+`openwrt_wireless.yml`. When changing a bundle, check the UCI keys (or
+equivalent settings) for conflicts first - the merged result must stay
+idempotent.
 
 ### Saved variables for external targets
 
@@ -241,6 +252,12 @@ submitted on stdin with `--vars-stdin` override both. Secrets must stay on
 stdin - the save CLI reads JSON from stdin and no value ever appears in argv or
 in the exec audit log.
 
+When standalone playbooks were folded into a bundle or a profile playbook,
+`external-services/_playbook-compat.json` lists the old playbook names. The
+params CLI also reads those saved `playbook_vars` entries, so an existing target
+keeps its values after switching to the generic playbook. Precedence is
+host_vars, legacy playbook vars, current playbook vars, runtime stdin.
+
 The WebUI exposes the same storage through the **Vars** button on Settings ->
 External Systems (host vars) and the **Save** button on the playbook detail
 page (playbook vars). Password inputs are never submitted or saved.
@@ -249,8 +266,8 @@ When a saved host var uses a namespaced key because a generic name is already
 used by per-record playbooks, declare it as `alias` on the matching
 `docs.params` entry. The detail page then maps it onto the form field when
 loading saved values, while an explicitly saved playbook var keeps precedence.
-`openwrt_basics.yml` uses this for `ip`/`lan_ip`, `mask`/`lan_mask` and
-`ip6`/`lan_ip6`.
+`openwrt_master.yml` uses this for `ip`/`lan_ip`, `mask`/`lan_mask` and
+`ip6`/`lan_ip6`; `openwrt_slave.yml` uses it for `ip`/`lan_ip`.
 
 A successful remote run registers the playbook in
 `external-systems/installed-playbooks.yml` as
@@ -261,16 +278,17 @@ playbooks locally.
 
 ### OpenWrt segment parameters
 
-`openwrt_basics.yml`, `openwrt_iot.yml` and `openwrt_tor.yml` keep the physical
-routers' values as playbook defaults so standalone runs stay backward
-compatible. Targets with different addressing (for example the OpenWrt VM)
+The hidden component playbooks under `external-services/tasks/openwrt/` keep the
+physical routers' values as playbook defaults so standalone runs stay backward
+compatible. The generic `openwrt_master.yml` exposes the combined parameter set
+in the WebUI. Targets with different addressing (for example the OpenWrt VM)
 override them via saved host vars:
 
 | Playbook | Parameters (default) |
 |----------|----------------------|
-| `openwrt_basics.yml` | `lan_device` (`br-lan`), `ipv6_uplink` (`true`); `lan_ip`/`lan_mask`/`lan_ip6`/`upstream_dns` are required and supplied by the target's saved host vars (or runtime params) |
-| `openwrt_iot.yml` | `iot_device` (`br-iot`), `iot_ip` (`192.168.143.1`), `iot_netmask` (`255.255.255.0`), `iot_subnet` (`192.168.143.0/24`), `iot_v6` (`fd12:3456:143::1`), `iot_ip6` (`fd12:3456:143::1/64`), `iot_prefix` (`fd12:3456:143::/64`), `iot_upstream_dns` (`127.0.0.56`), `ipv6_uplink` (`true`) |
-| `openwrt_tor.yml` | `tor_device` (`br-tor`), `tor_ip` (`192.168.142.1`), `tor_netmask` (`255.255.255.0`), `tor_subnet` (`192.168.142.0/24`), `tor_v6` (`fd12:3456:142::1`), `tor_ip6` (`fd12:3456:142::1/64`), `tor_prefix` (`fd12:3456:142::/64`), `tor_dns` (`127.0.0.56`), `tor_upstream_dns` (`127.0.0.56`), `tor_printer_ip` (`192.168.143.10`), `ipv6_uplink` (`true`) |
+| `openwrt_master.yml` | `lan_device` (`br-lan`), `ipv6_uplink` (`true`); `lan_ip`/`lan_mask`/`lan_ip6`/`upstream_dns` are required and supplied by the target's saved host vars (or runtime params) |
+| `openwrt_master.yml` (IoT part) | `iot_device` (`br-iot`), `iot_ip` (`192.168.143.1`), `iot_netmask` (`255.255.255.0`), `iot_subnet` (`192.168.143.0/24`), `iot_v6` (`fd12:3456:143::1`), `iot_ip6` (`fd12:3456:143::1/64`), `iot_prefix` (`fd12:3456:143::/64`), `iot_upstream_dns` (`127.0.0.56`), `ipv6_uplink` (`true`) |
+| `openwrt_master.yml` (Tor part) | `tor_device` (`br-tor`), `tor_ip` (`192.168.142.1`), `tor_netmask` (`255.255.255.0`), `tor_subnet` (`192.168.142.0/24`), `tor_v6` (`fd12:3456:142::1`), `tor_ip6` (`fd12:3456:142::1/64`), `tor_prefix` (`fd12:3456:142::/64`), `tor_dns` (`127.0.0.56`), `tor_upstream_dns` (`127.0.0.56`), `tor_printer_ip` (`192.168.143.10`), `ipv6_uplink` (`true`) |
 | `openwrt_dhcp-hosts.yml` | `iot_net_prefix` (`192.168.143.`), `tor_net_prefix` (`192.168.142.`) for the dnsmasq instance inference |
 
 `openwrt_dhcp-hosts.yml` only needs the two prefixes when a target uses
@@ -316,8 +334,9 @@ entries with different ids:
 - `ref` is a short human readable summary of the applied values. Secret
   parameters (`type: password`) are never written to the target.
 - The write happens in the shared snippet `external-services/_managed-state.yml`
-  (`raw` shell only, no Python on the target) and is best effort: a missing or
-  read-only `/etc/symbios` never aborts the playbook run.
+  (copied to `external-services/tasks/openwrt/_managed-state.yml` for imported
+  components). It uses `raw` shell only, no Python on the target, and is best
+  effort: a missing or read-only `/etc/symbios` never aborts the playbook run.
 - A playbook that deletes resources sets `managed_remove_ids` (list of ids) and
   an empty `managed_id` for that run. The snippet then drops those entries
   instead of adding one:
@@ -346,7 +365,8 @@ contains what SymbiOS applied.
 list of the device: `/etc/sysupgrade.conf` plus `/lib/upgrade/keep.d/*`.
 
 Consequence for new playbooks: a file SymbiOS writes below `/etc` that is not
-listed in `/etc/sysupgrade.conf` (written by `external-services/openwrt_basics.yml`)
+listed in `/etc/sysupgrade.conf` (written by the basics component at
+`external-services/tasks/openwrt/openwrt_basics.yml`)
 is missing from the firmware upgrade **and** from the backup. Add it there.
 
 ### Home backup of Linux Mint systems
@@ -380,8 +400,10 @@ idle-suspend watchdog cannot suspend the machine mid-transfer.
 
 ### Package updates on the target
 
-`external-services/openwrt_autoupdate.yml` installs
-`/etc/scripts/package-upgrade.sh` plus a daily cron job (03:30 on the device).
+The autoupdate component at
+`external-services/tasks/openwrt/openwrt_autoupdate.yml` (imported by
+`openwrt_master.yml`) installs `/etc/scripts/package-upgrade.sh` plus a daily
+cron job (03:30 on the device).
 The script upgrades the userspace packages with `apk` and reports a pending
 release upgrade with `owut check`: one summary line per run goes to syslog
 (and therefore to the log server), the full output to

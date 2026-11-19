@@ -1,0 +1,111 @@
+# docs:
+#   name: "OpenWrt - DNS record"
+#   short_description: "OpenWrt - DNS record"
+#   description: "Local A, AAAA or CNAME record in dnsmasq. Select the record type with the profile parameter."
+#   category: "Network"
+#   type: OpenWrt
+#   icon: "bi-globe2"
+#   params:
+#     - name: "profile"
+#       label: "Record type (a, aaaa or cname)"
+#       type: "text"
+#       default: "a"
+#     - name: "host"
+#       label: "Hostname (A/AAAA)"
+#       type: "text"
+#       placeholder: "server.lan"
+#     - name: "ip"
+#       label: "IPv4 address"
+#       type: "text"
+#       placeholder: "192.168.45.10"
+#     - name: "ip6"
+#       label: "IPv6 address"
+#       type: "text"
+#       placeholder: "fdaa:a192:b168:cd45::10"
+#     - name: "cname"
+#       label: "CNAME name"
+#       type: "text"
+#       placeholder: "example.lan"
+#     - name: "target"
+#       label: "CNAME target"
+#       type: "text"
+#       placeholder: "server.lan"
+#   requires:
+#     - playbook: "openwrt_master.yml"
+#       reason: "DHCP/DNS configuration"
+#   inventory:
+#     title: "Existing DNS records"
+#     description: "Read live from the target, so records created outside SymbiOS are listed as well."
+#     command: |
+#       for s in $(uci -q show dhcp | sed -n 's/^dhcp\.\(host_[^.=]*\)=.*/\1/p')
+#       do
+#         name=$(uci -q get "dhcp.$s.name" 2>/dev/null)
+#         if [ -z "$name" ]; then name="${s#host_}"; fi
+#         ip=$(uci -q get "dhcp.$s.ip" 2>/dev/null)
+#         if [ -n "$ip" ]; then printf 'a\t%s\t%s\t\t\n' "${name%.}" "$ip"; fi
+#         ip6=$(uci -q get "dhcp.$s.ip6" 2>/dev/null)
+#         if [ -n "$ip6" ]; then printf 'aaaa\t%s\t\t%s\t\n' "${name%.}" "$ip6"; fi
+#       done
+#       for s in $(uci -q show dhcp | sed -n 's/^dhcp\.\(cname_[^.=]*\)=.*/\1/p')
+#       do
+#         name=$(uci -q get "dhcp.$s.cname" 2>/dev/null)
+#         if [ -z "$name" ]; then name="${s#cname_}"; fi
+#         printf 'cname\t%s\t\t\t%s\n' "${name%.}" "$(uci -q get "dhcp.$s.target" 2>/dev/null)"
+#       done
+#     columns:
+#       - key: "profile"
+#         label: "Type"
+#       - key: "name"
+#         label: "Name"
+#       - key: "ip"
+#         label: "IPv4"
+#       - key: "ip6"
+#         label: "IPv6"
+#       - key: "target"
+#         label: "Target"
+#     actions:
+#       - name: "remove_a"
+#         label: "Remove A"
+#         class: "danger"
+#         confirm: "Delete this IPv4 address from dnsmasq? An AAAA record of the same host is kept."
+#         playbook: "openwrt_dns.yml"
+#         vars:
+#           profile: "profile"
+#           host: "name"
+#           ip: "ip"
+#         extra:
+#           state: "absent"
+#       - name: "remove_aaaa"
+#         label: "Remove AAAA"
+#         class: "danger"
+#         confirm: "Delete this IPv6 address from dnsmasq? An A record of the same host is kept."
+#         playbook: "openwrt_dns.yml"
+#         vars:
+#           profile: "profile"
+#           host: "name"
+#           ip6: "ip6"
+#         extra:
+#           state: "absent"
+#       - name: "remove_cname"
+#         label: "Remove CNAME"
+#         class: "danger"
+#         confirm: "Delete this CNAME record from dnsmasq?"
+#         playbook: "openwrt_dns.yml"
+#         vars:
+#           profile: "profile"
+#           cname: "name"
+#           target: "target"
+#         extra:
+#           state: "absent"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+# Profile selection is static Ansible imports: skipped plays are cheap, and
+# each component keeps its original managed id for installed-state tracking.
+- ansible.builtin.import_playbook: tasks/openwrt/dns_a.yml
+  when: profile | default('a') == 'a'
+- ansible.builtin.import_playbook: tasks/openwrt/dns_aaaa.yml
+  when: profile | default('a') == 'aaaa'
+- ansible.builtin.import_playbook: tasks/openwrt/dns_cname.yml
+  when: profile | default('a') == 'cname'

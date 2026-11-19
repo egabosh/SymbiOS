@@ -1,0 +1,22 @@
+---
+# Shared OpenWrt 25.12 package step. All callers set openwrt_packages in their
+# own play vars; an empty list makes the tasks no-ops.
+# The repository mirrors can briefly return stale indexes after a previous
+# play changed firewall or resolver state; retry before failing the run.
+- name: update apk db
+  ansible.builtin.raw: apk update
+  register: apk_update_result
+  until: apk_update_result.rc == 0
+  retries: 3
+  delay: 5
+  changed_when: false
+
+- name: check installed packages
+  ansible.builtin.raw: apk info
+  register: installed_packages
+  changed_when: false
+
+- name: install packages if needed
+  ansible.builtin.raw: apk add {{ item }}
+  loop: "{{ openwrt_packages }}"
+  when: item not in installed_packages.stdout

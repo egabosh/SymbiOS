@@ -112,7 +112,6 @@
           - rule_name is match('^[A-Za-z0-9._-]+$')
         fail_msg: "state must be present or absent; rule_name is required, dest_ip/dest_port only for state=present."
         quiet: true
-        quiet: true
 
   tasks:
     # --- absent: remove the rule ----------------------------------------

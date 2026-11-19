@@ -23,13 +23,16 @@ Usage: $(basename "$0") get <target> [playbook] [--json]
        $(basename "$0") set <target> [playbook] --json-stdin
 
 Read or save Ansible extra vars for an external system. "get" prints the
-merged document (host_vars overlaid by playbook_vars) as JSON. "set" merges
-the JSON object read from stdin into the selected scope: with a playbook
-argument into playbook_vars, otherwise into host_vars.
+merged document (host_vars overlaid by legacy playbook_vars, then by the
+selected playbook_vars) as JSON. The legacy list comes from
+external-services/_playbook-compat.json, so values saved under playbooks that
+were merged into a generic one keep working. "set" merges the JSON object read
+from stdin into the selected scope: with a playbook argument into playbook_vars,
+otherwise into host_vars.
 
 Arguments:
   <target>        id of an entry in \${g_config_dir}/external-systems.yml
-  [playbook]      file name below external-services/ (e.g. openwrt_basics.yml)
+  [playbook]      file name below external-services/ (e.g. openwrt_master.yml)
 
 Options:
   --json          get: print JSON (default: human-readable JSON as well)
@@ -43,7 +46,7 @@ Storage (relative to the config dir):
 Examples:
   $(basename "$0") get openwrt-vm
   echo '{"ip":"172.18.0.1"}' | \\
-    $(basename "$0") set openwrt-vm openwrt_basics.yml --json-stdin
+    $(basename "$0") set openwrt-vm openwrt_master.yml --json-stdin
 
 Exit codes: 0 ok, 2 usage or validation error, 1 technical error.
 EOF
@@ -142,6 +145,28 @@ function f_read_doc {
   jq -c '.' <<< "${f_json}"
 }
 
+# Merge saved variables of playbooks that were folded into a generic one. The
+# mapping is data, not host-specific code: a new merge only needs one entry.
+function f_compat_vars_json {
+  local f_target="$1"
+  local f_playbook="$2"
+  local f_mapping="${g_git_root}/external-services/_playbook-compat.json"
+  local f_result='{}'
+  local f_legacy
+  [[ -f "${f_mapping}" ]] || {
+    printf '%s\n' "${f_result}"
+    return 0
+  }
+  while IFS= read -r f_legacy
+  do
+    [[ -n "${f_legacy}" ]] || continue
+    f_result=$(printf '%s\n%s\n' "${f_result}" \
+      "$(f_read_doc "external-systems/playbook_vars/${f_target}/${f_legacy}")" \
+      | jq -c -s '.[0] * .[1]')
+  done < <(jq -r --arg pb "${f_playbook}" '.[$pb] // [] | .[]' "${f_mapping}" 2>/dev/null || true)
+  printf '%s\n' "${f_result}"
+}
+
 # --- read -------------------------------------------------------------------
 if [[ "${g_action}" == "get" ]]
 then
@@ -151,7 +176,12 @@ then
   }
   g_host_json=$(f_read_doc "${g_rel_host}")
   g_pb_json='{}'
-  [[ -z "${g_playbook}" ]] || g_pb_json=$(f_read_doc "${g_rel_pb}")
+  if [[ -n "${g_playbook}" ]]
+  then
+    g_pb_json=$(printf '%s\n%s\n' \
+      "$(f_compat_vars_json "${g_target}" "${g_playbook}")" \
+      "$(f_read_doc "${g_rel_pb}")" | jq -c -s '.[0] * .[1]')
+  fi
   printf '%s\n%s\n' "${g_host_json}" "${g_pb_json}" | jq -c -s '.[0] * .[1]'
   exit 0
 fi

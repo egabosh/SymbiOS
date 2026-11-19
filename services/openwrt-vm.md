@@ -15,16 +15,21 @@ be applied as needed (per admin/user choice):
 
 | Topic | Playbook(s) |
 |-------|-------------|
-| System basics (timezone/NTP/hostname, packages, addressing, DHCP/DNS policy) | `openwrt_basics.yml` |
-| Remote syslog | `openwrt_logserver.yml` |
+| Master bundle (system basics, LAN/IoT/Tor segments, log forwarding, autoupdate) | `openwrt_master.yml` |
+| Secondary access point conversion | `openwrt_slave.yml` |
 | DNSCrypt/DoH resolver | `openwrt_dnscrypt-proxy.yml` |
-| Tor segment / transparent proxy | `openwrt_tor.yml` |
-| IoT segment policy | `openwrt_iot.yml` |
 | OpenVPN servers | `openwrt_openvpn-tor.yml`, `openwrt_openvpn-iot.yml`, `openwrt_openvpn-lan.yml` |
 | WireGuard servers/clients | `openwrt_wireguard-lan*.yml`, `openwrt_wireguard-tor*.yml` |
 | SMTP relay | `openwrt_smtp.yml` |
 | Netboot (PXE/TFTP) | `openwrt_netboot.yml` |
-| Firewall, DDNS, DNS records, wireless, ... | other `external-services/openwrt_*` playbooks |
+| Telekom uplink | `openwrt_internet_telekom_ftth.yml`, `openwrt_internet_telekom_vdsl.yml` |
+| DNS, DDNS, firewall rules, wireless | `openwrt_dns.yml`, `openwrt_ddns.yml`, `openwrt_firewall_allow.yml`, `openwrt_firewall_forwarding.yml`, `openwrt_wireless.yml` (select the variant with `profile`) |
+
+The former standalone foundation/segments playbooks now live under
+`external-services/tasks/openwrt/`. They are not listed in the catalog and are
+used only by the generic bundles. Physical routers are untouched by this
+reorganisation: their existing saved variables and managed-state ids are kept
+via `external-services/_playbook-compat.json`.
 
 The VM owns the `.1` / `::1` gateway on every internal segment; the host
 bridges are L2 switches that additionally take a DHCP address from the
@@ -91,8 +96,9 @@ ntp_server=172.23.0.220
 ```
 
 The namespaced `lan_*` keys avoid collisions with per-record playbooks that
-also use `ip`/`ip6`; `openwrt_basics.yml` accepts either spelling. Save
-playbook-specific values on the playbook detail page in the WebUI.
+also use `ip`/`ip6`; `openwrt_master.yml` and `openwrt_slave.yml` accept either
+spelling. Save playbook-specific values on the playbook detail page in the
+WebUI.
 
 ## Services / ports exposed (baseline)
 
@@ -116,9 +122,9 @@ internal segments use `172.18.x` / `fd00:18::` instead of the physical routers'
 
 | Playbooks | Use on the VM |
 |-----------|---------------|
-| `openwrt_basics.yml`, `openwrt_iot.yml`, `openwrt_tor.yml`, `openwrt_dns_a/aaaa/cname.yml`, `openwrt_dhcp-hosts.yml`, `openwrt_firewall_*.yml`, `openwrt_logserver.yml`, `openwrt_smtp.yml`, `openwrt_autoupdate.yml` | Compatible. These read the saved host vars below; their built-in defaults still target the physical routers. |
+| `openwrt_master.yml`, `openwrt_dns.yml`, `openwrt_dhcp-hosts.yml`, `openwrt_firewall_allow.yml`, `openwrt_firewall_forwarding.yml`, `openwrt_smtp.yml` | Compatible. These read the saved host vars below; their built-in defaults still target the physical routers. |
 | `openwrt_wireguard-*.yml`, `openvpn-*`, `openwrt_asterisk.yml` | Need their segment subnets/IPs passed as extra vars (defaults target the physical routers). |
-| `openwrt_basics-slave.yml`, `openwrt_fritzbox-ipv6.yml`, `openwrt_internet_telekom_*.yml`, `openwrt_wireless*.yml`, IPv6 DDNS/forwarding | Do not run: wrong hardware or uplink model (static WAN, no radios, no v6 uplink). |
+| `openwrt_slave.yml`, `openwrt_fritzbox-ipv6.yml`, `openwrt_internet_telekom_*.yml`, `openwrt_wireless.yml`, IPv6 DDNS/forwarding | Do not run: wrong hardware or uplink model (static WAN, no radios, no v6 uplink). `openwrt_slave.yml` is for secondary physical APs only. |
 
 Saved target-wide vars for `openwrt-vm` live in
 `external-systems/host_vars/openwrt-vm.yml` and currently are:
@@ -138,8 +144,8 @@ tor_prefix=fd00:18:2::/64   tor_dns=172.18.2.1       tor_upstream_dns=172.23.0.2
 tor_printer_ip=172.18.1.1   tor_net_prefix=172.18.2.
 ```
 
-`ipv6_uplink=false` keeps `openwrt_basics.yml`, `openwrt_iot.yml` and
-`openwrt_tor.yml` from advertising an IPv6 default route that the VM cannot
+`ipv6_uplink=false` keeps the foundation and segment components imported by
+`openwrt_master.yml` from advertising an IPv6 default route that the VM cannot
 provide; the default (`true`) is unchanged for physical routers. The segment
 defaults (`192.168.142/143`, `fd12:3456:142/143`) remain valid for physical
 routers; the VM host vars override them without touching those defaults.

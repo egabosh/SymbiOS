@@ -382,10 +382,12 @@ echo '{"feat": {"enabled": true}}' | symbios-config.py --file services/openwrt-v
 external-system playbook runs. Values go to `external-systems/host_vars/<target>.yml`
 or `external-systems/playbook_vars/<target>/<playbook>.yml` and are merged by
 `symbios-run-remote-playbook.sh` before runtime stdin values. The CLI accepts
-JSON on stdin only, so secrets never appear in argv or audit logs:
+JSON on stdin only, so secrets never appear in argv or audit logs. For a generic
+bundle/profile playbook it also reads the legacy playbook names declared in
+`external-services/_playbook-compat.json`:
 
 ```bash
-symbios-external-params.sh get openwrt-vm openwrt_basics.yml
+symbios-external-params.sh get openwrt-vm openwrt_master.yml
 echo '{"upstream_dns":"172.23.0.220"}' | symbios-external-params.sh set openwrt-vm --json-stdin
 ```
 

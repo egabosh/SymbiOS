@@ -116,7 +116,7 @@ def _get_installed_playbooks():
 
     Local services register in installed-playbooks.yml. External playbooks are
     registered per target in external-systems/installed-playbooks.yml with a
-    key like "external-services/openwrt_basics.yml @ openwrt-vm"; the target
+    key like "external-services/openwrt_master.yml @ openwrt-vm"; the target
     suffix is stripped here so the sidebar can match the catalog entry.
     """
     installed = set()

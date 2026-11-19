@@ -34,8 +34,12 @@
     # the same names as extra vars (which take precedence).
     managed_id: "openwrt_basics-slave.yml"
     managed_playbook: "openwrt_basics-slave.yml"
-    managed_ref: "ip={{ ip }} gw={{ gw }} dns={{ dns }}"
+    managed_ref: "ip={{ effective_ip }} gw={{ gw }} dns={{ dns }}"
     managed_resource_type: "basics_slave"
+
+    # The LAN address is owned by the foundation play; accept the namespaced
+    # saved key as well so a target saved for the generic bundles works.
+    effective_ip: "{{ ip if ip is defined and (ip | string | length) > 0 else lan_ip | default('') }}"
 
     uci_delete_vars:
       - 'network.wan'
@@ -51,15 +55,15 @@
     - name: Check required parameters
       ansible.builtin.assert:
         that:
-          - dns is defined
-          - gw is defined
-          - ip is defined
+          - dns is defined and (dns | string | length) > 0
+          - gw is defined and (gw | string | length) > 0
+          - effective_ip | length > 0
         fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
         quiet: true
 
   tasks:
 
-    - name: detele config defaults
+    - name: delete config defaults
       raw: |
         # detele default config indices
         while uci show | grep -q "^{{ item }}="
@@ -70,7 +74,7 @@
         done
       loop: "{{ uci_delete_vars }}"
       register: uci_delete_result
-      changed_when: "'changed' in uci_delete_result.stdout"
+      changed_when: "uci_delete_result.stdout | trim == 'changed'"
 
 
     - name: set uci values if needed
@@ -86,7 +90,7 @@
         fi
       loop: "{{ uci_vars }}"
       register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
+      changed_when: "uci_set_result.stdout | trim == 'changed'"
 
     - name: apply changes
       block:
@@ -100,6 +104,9 @@
         # A slave access point runs no DHCP/RA server at all; run on every
         # pass so the state is guaranteed even if something started the
         # services in between.
+        # OpenWrt's multi-instance init script tears named instances down
+        # asynchronously after a network reload. Give procd time to settle,
+        # then stop again so the first pass already leaves no resolver behind.
         - name: stop and disable dnsmasq and odhcpd
           raw: "{{ item }}"
           loop:
@@ -107,6 +114,9 @@
             - "/etc/init.d/dnsmasq disable"
             - "/etc/init.d/odhcpd stop"
             - "/etc/init.d/odhcpd disable"
+            - "sleep 5"
+            - "/etc/init.d/dnsmasq stop"
+            - "/etc/init.d/odhcpd stop"
           changed_when: false
 
     # Record this playbook's resources in /etc/symbios/managed.json.

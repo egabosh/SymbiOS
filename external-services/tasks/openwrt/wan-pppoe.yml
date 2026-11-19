@@ -1,0 +1,36 @@
+---
+# Shared Telekom PPPoE WAN configuration. The caller supplies managed_* values
+# and the profile-specific wan_uci_vars list. Credentials arrive as extra vars
+# from the WebUI runner's stdin JSON and are hidden from Ansible output.
+- name: Configure the PPPoE WAN settings
+  ansible.builtin.raw: |
+    current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
+    desired='{{ item.value | replace("'", "'\\''") }}'
+    if [ "$current" != "$desired" ]
+    then
+      uci set {{ item.key }}='{{ item.value | replace("'", "'\\''") }}'
+      echo "changed"
+    else
+      echo "unchanged"
+    fi
+  loop: "{{ wan_uci_vars }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: wan_uci_result
+  changed_when: false
+  no_log: true
+
+- name: Remember whether any WAN value changed
+  ansible.builtin.set_fact:
+    wan_uci_changed: "{{ wan_uci_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+
+- name: Apply the WAN configuration
+  block:
+    - name: Commit and reload the WAN services
+      ansible.builtin.raw: "{{ item }}"
+      loop:
+        - "uci commit"
+        - "/etc/init.d/network reload"
+        - "/etc/init.d/odhcpd restart"
+        - "/etc/init.d/odhcpd enable"
+      when: wan_uci_changed

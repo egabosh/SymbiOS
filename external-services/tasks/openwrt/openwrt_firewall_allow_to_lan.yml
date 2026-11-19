@@ -1,7 +1,7 @@
 # docs:
-#   name: "OpenWrt - Firewall allow to Tor"
-#   short_description: "OpenWrt - Firewall allow to Tor"
-#   description: "Allow rule from LAN to the Tor segment."
+#   name: "OpenWrt - Firewall allow to LAN"
+#   short_description: "OpenWrt - Firewall allow to LAN"
+#   description: "Allow rule into the LAN segment."
 #   category: "Security"
 #   type: OpenWrt
 #   icon: "bi-shield-check"
@@ -13,7 +13,7 @@
 #     - name: "src"
 #       label: "Source zone"
 #       type: "text"
-#       default: "lan"
+#       required: true
 #     - name: "src_ip"
 #       label: "Source IP/network"
 #       type: "text"
@@ -33,10 +33,8 @@
 #   requires:
 #     - playbook: "openwrt_basics.yml"
 #       reason: "Firewall zones"
-#     - playbook: "openwrt_tor.yml"
-#       reason: "Tor segment"
 #   inventory:
-#     title: "Existing allow rules to the Tor segment"
+#     title: "Existing allow rules to the LAN segment"
 #     description: "Read live from the target, so rules created outside SymbiOS are listed as well."
 #     command: |
 #       for n in $(uci -q show firewall | sed -n 's/^firewall\.rule_forward_lan_\([^.=]*\)=.*/\1/p')
@@ -63,8 +61,8 @@
 #       - name: "remove"
 #         label: "Remove"
 #         class: "danger"
-#         confirm: "Delete this allow rule (to the Tor segment) from the firewall?"
-#         playbook: "openwrt_firewall_allow_to_tor.yml"
+#         confirm: "Delete this allow rule (to the LAN segment) from the firewall?"
+#         playbook: "openwrt_firewall_allow_to_lan.yml"
 #         vars:
 #           rule_name: "name"
 #         extra:
@@ -73,7 +71,7 @@
 #     __playbook__: Install/Update
 #
 ---
-- name: allow to tor
+- name: allow to lan
   hosts: all
   gather_facts: no
 
@@ -81,19 +79,18 @@
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
     state: "present"
-    managed_id: "openwrt_firewall_allow_to_tor.yml/{{ rule_name }}"
-    managed_playbook: "openwrt_firewall_allow_to_tor.yml"
+    managed_id: "openwrt_firewall_allow_to_lan.yml/{{ rule_name }}"
+    managed_playbook: "openwrt_firewall_allow_to_lan.yml"
     managed_ref: "rule_name={{ rule_name }} src={{ src | default('') }} src_ip={{ src_ip | default('') }} dest_ip={{ dest_ip | default('') }} dest_port={{ dest_port | default('') }} proto={{ proto }}"
-    managed_resource_type: "firewall_allow_to_tor"
+    managed_resource_type: "firewall_allow_to_lan"
     managed_remove_ids: []
     proto: "tcp"
-    src: "lan"
     src_ip: "*"
     uci_vars:
       ## rules
       - { key: "firewall.rule_forward_lan_{{ rule_name }}",           value: "rule" }
       - { key: "firewall.rule_forward_lan_{{ rule_name }}.src",       value: "{{ src | default('') }}" }
-      - { key: "firewall.rule_forward_lan_{{ rule_name }}.dest",      value: "tor" }
+      - { key: "firewall.rule_forward_lan_{{ rule_name }}.dest",      value: "lan" }
       - { key: "firewall.rule_forward_lan_{{ rule_name }}.target",    value: "ACCEPT" }
       - { key: "firewall.rule_forward_lan_{{ rule_name }}.proto",     value: "{{ proto }}" }
       - { key: "firewall.rule_forward_lan_{{ rule_name }}.name",      value: "ansible_forward_lan_{{ rule_name }}" }
@@ -111,7 +108,6 @@
           # The name is embedded in shell commands on the target.
           - rule_name is match('^[A-Za-z0-9._-]+$')
         fail_msg: "state must be present or absent; rule_name is required, dest_ip/dest_port only for state=present."
-        quiet: true
         quiet: true
 
   tasks:
@@ -142,7 +138,7 @@
           vars:
             managed_id: ""
             managed_remove_ids:
-              - "openwrt_firewall_allow_to_tor.yml/{{ rule_name }}"
+              - "openwrt_firewall_allow_to_lan.yml/{{ rule_name }}"
 
     # --- present: create or update the rule -----------------------------
     - name: Configure the allow rule

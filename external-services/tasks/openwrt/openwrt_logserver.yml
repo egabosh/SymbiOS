@@ -42,7 +42,7 @@
     - name: Check required parameters
       ansible.builtin.assert:
         that:
-          - logserver is defined
+          - logserver is defined and (logserver | string | length) > 0
         fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
         quiet: true
 

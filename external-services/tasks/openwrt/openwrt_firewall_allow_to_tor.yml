@@ -1,7 +1,7 @@
 # docs:
-#   name: "OpenWrt - Firewall allow from internet"
-#   short_description: "OpenWrt - Firewall allow from internet"
-#   description: "Inbound allow rule from the internet to one internal host/port."
+#   name: "OpenWrt - Firewall allow to Tor"
+#   short_description: "OpenWrt - Firewall allow to Tor"
+#   description: "Allow rule from LAN to the Tor segment."
 #   category: "Security"
 #   type: OpenWrt
 #   icon: "bi-shield-check"
@@ -13,7 +13,7 @@
 #     - name: "src"
 #       label: "Source zone"
 #       type: "text"
-#       default: "wan"
+#       default: "lan"
 #     - name: "src_ip"
 #       label: "Source IP/network"
 #       type: "text"
@@ -33,13 +33,15 @@
 #   requires:
 #     - playbook: "openwrt_basics.yml"
 #       reason: "Firewall zones"
+#     - playbook: "openwrt_tor.yml"
+#       reason: "Tor segment"
 #   inventory:
-#     title: "Existing allow rules from the internet"
+#     title: "Existing allow rules to the Tor segment"
 #     description: "Read live from the target, so rules created outside SymbiOS are listed as well."
 #     command: |
-#       for n in $(uci -q show firewall | sed -n 's/^firewall\.rule_forward_internet_\([^.=]*\)=.*/\1/p')
+#       for n in $(uci -q show firewall | sed -n 's/^firewall\.rule_forward_lan_\([^.=]*\)=.*/\1/p')
 #       do
-#         s="rule_forward_internet_$n"
+#         s="rule_forward_lan_$n"
 #         printf '%s\t%s\t%s\t%s\t%s\n' "$n" \
 #           "$(uci -q get "firewall.$s.proto" 2>/dev/null)" \
 #           "$(uci -q get "firewall.$s.src" 2>/dev/null)" \
@@ -61,8 +63,8 @@
 #       - name: "remove"
 #         label: "Remove"
 #         class: "danger"
-#         confirm: "Delete this allow rule (from the internet) from the firewall?"
-#         playbook: "openwrt_firewall_allow_internet.yml"
+#         confirm: "Delete this allow rule (to the Tor segment) from the firewall?"
+#         playbook: "openwrt_firewall_allow_to_tor.yml"
 #         vars:
 #           rule_name: "name"
 #         extra:
@@ -71,7 +73,7 @@
 #     __playbook__: Install/Update
 #
 ---
-- name: firewall-config Control outgoing traffic - forwarded to the internet (src=lan; dest=wan)
+- name: allow to tor
   hosts: all
   gather_facts: no
 
@@ -79,25 +81,28 @@
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
     state: "present"
-    managed_id: "openwrt_firewall_allow_internet.yml/{{ rule_name }}"
-    managed_playbook: "openwrt_firewall_allow_internet.yml"
+    managed_id: "openwrt_firewall_allow_to_tor.yml/{{ rule_name }}"
+    managed_playbook: "openwrt_firewall_allow_to_tor.yml"
     managed_ref: "rule_name={{ rule_name }} src={{ src | default('') }} src_ip={{ src_ip | default('') }} dest_ip={{ dest_ip | default('') }} dest_port={{ dest_port | default('') }} proto={{ proto }}"
-    managed_resource_type: "firewall_allow_internet"
+    managed_resource_type: "firewall_allow_to_tor"
     managed_remove_ids: []
     proto: "tcp"
-    src: "wan"
+    src: "lan"
     src_ip: "*"
+    # Older revisions stored Tor rules in rule_forward_lan_*, colliding with
+    # LAN rules of the same name. New rules use their own prefix; the tasks
+    # below migrate legacy sections and still remove both on state=absent.
     uci_vars:
       ## rules
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}",           value: "rule" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.src",       value: "{{ src | default('') }}" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest",      value: "wan" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.target",    value: "ACCEPT" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.proto",     value: "{{ proto }}" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.name",      value: "ansible_forward_internet_{{ rule_name }}" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest_port", value: "{{ dest_port | default('') }}" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.src_ip",      value: "{{ src_ip | default('') }}" }
-      - { key: "firewall.rule_forward_internet_{{ rule_name }}.dest_ip",     value: "{{ dest_ip | default('') }}" }
+      - { key: "firewall.rule_forward_tor_{{ rule_name }}",           value: "rule" }
+      - { key: "firewall.rule_forward_tor_{{ rule_name }}.src",       value: "{{ src | default('') }}" }
+      - { key: "firewall.rule_forward_tor_{{ rule_name }}.dest",      value: "tor" }
+      - { key: "firewall.rule_forward_tor_{{ rule_name }}.target",    value: "ACCEPT" }
+      - { key: "firewall.rule_forward_tor_{{ rule_name }}.proto",     value: "{{ proto }}" }
+      - { key: "firewall.rule_forward_tor_{{ rule_name }}.name",      value: "ansible_forward_tor_{{ rule_name }}" }
+      - { key: "firewall.rule_forward_tor_{{ rule_name }}.dest_port", value: "{{ dest_port | default('') }}" }
+      - { key: "firewall.rule_forward_tor_{{ rule_name }}.src_ip",      value: "{{ src_ip | default('') }}" }
+      - { key: "firewall.rule_forward_tor_{{ rule_name }}.dest_ip",     value: "{{ dest_ip | default('') }}" }
 
   pre_tasks:
     - name: Check required parameters
@@ -110,7 +115,6 @@
           - rule_name is match('^[A-Za-z0-9._-]+$')
         fail_msg: "state must be present or absent; rule_name is required, dest_ip/dest_port only for state=present."
         quiet: true
-        quiet: true
 
   tasks:
     # --- absent: remove the rule ----------------------------------------
@@ -119,9 +123,18 @@
       block:
         - name: Delete the rule section
           ansible.builtin.raw: |
-            if uci -q show "firewall.rule_forward_internet_{{ rule_name }}" > /dev/null 2>&1
+            changed=0
+            for prefix in rule_forward_tor rule_forward_lan
+            do
+              section="firewall.${prefix}_{{ rule_name }}"
+              if uci -q show "$section" > /dev/null 2>&1
+              then
+                uci delete "$section"
+                changed=1
+              fi
+            done
+            if [ "$changed" = 1 ]
             then
-              uci delete "firewall.rule_forward_internet_{{ rule_name }}"
               uci commit firewall
               echo changed
             else
@@ -140,12 +153,32 @@
           vars:
             managed_id: ""
             managed_remove_ids:
-              - "openwrt_firewall_allow_internet.yml/{{ rule_name }}"
+              - "openwrt_firewall_allow_to_tor.yml/{{ rule_name }}"
 
     # --- present: create or update the rule -----------------------------
     - name: Configure the allow rule
       when: state != 'absent'
       block:
+        - name: Migrate a legacy rule_forward_lan Tor section
+          ansible.builtin.raw: |
+            legacy="firewall.rule_forward_lan_{{ rule_name }}"
+            current="firewall.rule_forward_tor_{{ rule_name }}"
+            if uci -q show "$legacy.dest" > /dev/null 2>&1 \
+              && [ "$(uci -q get "$legacy.dest")" = "tor" ]
+            then
+              if uci -q show "$current" > /dev/null 2>&1
+              then
+                uci delete "$legacy"
+              else
+                uci rename "$legacy=rule_forward_tor_{{ rule_name }}"
+              fi
+              echo changed
+            else
+              echo unchanged
+            fi
+          register: tor_migration_result
+          changed_when: "tor_migration_result.stdout | trim == 'changed'"
+
         - name: Set the uci values if needed
           ansible.builtin.raw: |
             current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
@@ -169,7 +202,7 @@
 
         - name: Remember whether any uci value changed
           ansible.builtin.set_fact:
-            uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+            uci_changed: "{{ (uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0) or tor_migration_result.changed }}"
 
         - name: Apply the changes
           ansible.builtin.raw: "{{ item }}"

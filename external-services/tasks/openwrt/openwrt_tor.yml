@@ -302,8 +302,14 @@
 
 
   tasks:
+    # A preceding play may have just reloaded the firewall or resolver, so
+    # the first mirror refresh can still see stale indexes; retry briefly.
     - name: update apk db
       raw: apk update
+      register: apk_update_result
+      until: apk_update_result.rc == 0
+      retries: 3
+      delay: 5
       changed_when: false
 
     - name: check installed packages

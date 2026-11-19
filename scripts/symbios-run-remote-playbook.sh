@@ -41,7 +41,7 @@ Options:
   -h, --help       Show this help and exit
 
 Examples:
-  $(basename "$0") openwrt openwrt_basics.yml
+  $(basename "$0") openwrt-vm openwrt_master.yml
   echo '{"cname":"nas.lan","target":"server.lan"}' | \\
     $(basename "$0") openwrt openwrt_dns_cname.yml --vars-stdin
 

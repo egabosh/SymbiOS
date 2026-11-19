@@ -1,0 +1,39 @@
+{
+  "openwrt_master.yml": [
+    "openwrt_autoupdate.yml",
+    "openwrt_logserver.yml",
+    "openwrt_tor.yml",
+    "openwrt_iot.yml",
+    "openwrt_basics.yml"
+  ],
+  "openwrt_slave.yml": [
+    "openwrt_basics-slave.yml",
+    "openwrt_basics.yml"
+  ],
+  "openwrt_dns.yml": [
+    "openwrt_dns_a.yml",
+    "openwrt_dns_aaaa.yml",
+    "openwrt_dns_cname.yml"
+  ],
+  "openwrt_firewall_allow.yml": [
+    "openwrt_firewall_allow_internet.yml",
+    "openwrt_firewall_allow_to_lan.yml",
+    "openwrt_firewall_allow_to_iot.yml",
+    "openwrt_firewall_allow_to_tor.yml"
+  ],
+  "openwrt_ddns.yml": [
+    "openwrt_ddns-ipv4.yml",
+    "openwrt_ddns-ipv6.yml",
+    "openwrt_ddns-ipv6-host.yml"
+  ],
+  "openwrt_wireless.yml": [
+    "openwrt_wireless.yml",
+    "openwrt_wireless-iot.yml",
+    "openwrt_wireless-tor.yml"
+  ],
+  "openwrt_firewall_forwarding.yml": [
+    "openwrt_firewall_hijack_connections.yml",
+    "openwrt_firewall_ipv4_server_portforwardings.yml",
+    "openwrt_firewall_ipv6_server_forward.yml"
+  ]
+}

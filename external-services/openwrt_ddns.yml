@@ -1,0 +1,43 @@
+# docs:
+#   name: "OpenWrt - DDNS"
+#   short_description: "OpenWrt - DDNS"
+#   description: "deSEC DynDNS updater. Select the record type with the profile parameter: ipv4, ipv6 or ipv6-host."
+#   category: "Network"
+#   type: OpenWrt
+#   icon: "bi-cloud-arrow-up"
+#   params:
+#     - name: "profile"
+#       label: "Record type (ipv4, ipv6 or ipv6-host)"
+#       type: "text"
+#       default: "ipv4"
+#     - name: "domainname"
+#       label: "Domain"
+#       type: "text"
+#       required: true
+#     - name: "localhostname"
+#       label: "Local host name"
+#       type: "text"
+#     - name: "apikey"
+#       label: "deSEC API key"
+#       type: "password"
+#       required: true
+#     - name: "dns_server"
+#       label: "Resolver for the IP lookup"
+#       type: "text"
+#       default: "5.9.164.112"
+#       help: "Digitalcourage DNS; leave empty to use the target's default resolver."
+#   requires:
+#     - playbook: "openwrt_master.yml"
+#       reason: "Base system setup"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+# Static imports retain the original managed ids so existing installed state
+# and saved parameters stay compatible.
+- ansible.builtin.import_playbook: tasks/openwrt/openwrt_ddns-ipv4.yml
+  when: profile | default('ipv4') == 'ipv4'
+- ansible.builtin.import_playbook: tasks/openwrt/openwrt_ddns-ipv6.yml
+  when: profile | default('ipv4') == 'ipv6'
+- ansible.builtin.import_playbook: tasks/openwrt/openwrt_ddns-ipv6-host.yml
+  when: profile | default('ipv4') == 'ipv6-host'
