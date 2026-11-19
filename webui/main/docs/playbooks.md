@@ -298,23 +298,32 @@ is missing from the firmware upgrade **and** from the backup. Add it there.
 
 ### Home backup of Linux Mint systems
 
-`external-services/linux-mint-home-backup.yml` installs
+`external-services/linux-mint-home-backup.yml` installs `restic` and
 `scripts/mint-home-backup.sh` as `/usr/local/sbin/mint-home-backup.sh` on every
 system registered as `type: linux-mint`. There is deliberately no cron job and
 no central trigger: the user runs the script on the Mint machine when it is on
 (`--dry-run` first, then the real run). It selects interactive users (UID
 1000..65533, home below `/home`, bash/zsh/fish shell), excludes caches and
-Trash, and streams a `tar.gz` over SSH to
-`${data_root}/backups/mint/<target-id>/<target-id>-<timestamp>.tar.gz`. A JSON
-sidecar holds SHA256, size and file count; seven archives are kept locally.
-The next nightly restic snapshot picks them up automatically.
+Trash, and writes an encrypted restic repository over SFTP on port 28 into the
+private home of the target's own LDAP backup user. Seven daily snapshots are
+kept. The next central restic snapshot picks the repository up with `/symbios`.
 
-One-time setup per target: the playbook generates a dedicated ed25519 key at
-`/etc/symbios/home-backup/id_ed25519` and prints its public half. Add that key
-to `/root/.ssh/authorized_keys` on the SymbiOS host via Settings -> SSH Keys
-before the first backup. The client sets a timestamped `/tmp/no-suspend` while
-it reads the homes so an idle-suspend watchdog cannot suspend the machine
-mid-transfer.
+Setup is per target and intentionally split in two steps:
+
+1. On the Mint system, install the client with `symbios_host` and a per-system
+   `restic_password`. The playbook generates an ed25519 key at
+   `/etc/symbios/home-backup/id_ed25519` and prints the public half.
+2. On the SymbiOS host, add that public key under the target id to
+   `<config>/services/sftp-share/backup-clients.yml` and run
+   `services/sftp-share.yml`. The helper `symbios-sftp-backup-users.sh` then
+   creates the LDAP user `backup-<id>`, its group `shared-backup-<id>`, the
+   0700 home below `${media_root}/home/`, and the matching password file
+   `<config>/services/sftp-share/backup-passwords/<id>`.
+
+Each system therefore has its own restic password and its own private SFTP
+directory: one Mint client cannot read or delete another system's repository.
+The client sets a timestamped `/tmp/no-suspend` while it reads the homes so an
+idle-suspend watchdog cannot suspend the machine mid-transfer.
 
 ### Package updates on the target
 

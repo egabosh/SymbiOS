@@ -33,6 +33,11 @@
 # ever see their own instances. The wordpress/ view dir itself is
 # traversable-but-not-listable (2710).
 #
+# Registered Linux Mint systems each get a dedicated LDAP user (backup-<id>)
+# in a shared-backup-<id> group. Its private 0700 home below media_root/home
+# is the only place its restic repository is stored, so one Mint client cannot
+# reach another system's backups. See symbios-sftp-backup-users.sh.
+#
 # The share directory defaults to the global media_root (see mediapaths.md)
 # and is always the chroot root inside the container. It must stay
 # root-owned without group/other write access (sshd requirement); the
@@ -474,6 +479,14 @@
     register: f_sftp_homes
     changed_when: "'ensured' in f_sftp_homes.stdout"
     failed_when: false
+
+  # Each registered Linux Mint system gets its own LDAP user, group and private
+  # SFTP home, so its restic repository cannot be read or deleted by another
+  # client. The helper is idempotent and prints one status line per system.
+  - name: Provision SFTP backup users for registered Linux Mint systems
+    ansible.builtin.command: "{{ git_root }}/scripts/symbios-sftp-backup-users.sh"
+    register: f_sftp_backup_users
+    changed_when: "'created' in f_sftp_backup_users.stdout"
 
   - name: Register playbook as installed
     include_tasks: ../shared-tasks/state-register.yml

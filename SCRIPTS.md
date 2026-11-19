@@ -479,6 +479,7 @@ texts opportunistically).
 | `symbios-ldap-list.sh` | LDAP users/groups as JSON for the WebUI | `--users\|--groups` |
 | `symbios-write-authorized-keys.sh` | Root `authorized_keys` from stdin (keeps the gateway key) | stdin, no args |
 | `symbios-sftp-share-homes.sh` | SFTP chroot home dirs for `media` / `shared-*` members | `[uid]` |
+| `symbios-sftp-backup-users.sh` | Provision one LDAP backup user, group, private home, password and SSH key per registered Linux Mint system (sftp-share.yml) | no args |
 
 ### 4.4 Network, router, VPN, bridges, DynDNS
 
@@ -512,7 +513,7 @@ texts opportunistically).
 | `autoupdate.sh` | Update dispatcher (runs `autoupdate.d/*.update`) | `[module ...]` |
 | `autoupdate.d/` | 6 update modules (debian, docker, reboot-threshold, symbios, ...) | via `autoupdate.sh` |
 | `autoupdate.d/reboot-threshold.update` | Schedules a reboot after the maximum uptime only when a reboot is actually pending (opt-in) | via `autoupdate.sh`, `SYMBIOS_REBOOT_DRY_RUN=1` for a test |
-| `mint-home-backup.sh` | Installed by `external-services/linux-mint-home-backup.yml` **on the Mint target**, not on the SymbiOS host: archives interactive users' homes and streams them to `/symbios/backups/mint/<id>/` | `--dry-run`, `--output <file>`, `--config <file>`, `--help` |
+| `mint-home-backup.sh` | Installed by `external-services/linux-mint-home-backup.yml` **on the Mint target**, not on the SymbiOS host: backs up interactive users' homes with restic over SFTP into the private repo of the target's LDAP backup user | `--dry-run`, `--config <file>`, `--help` |
 
 ### 4.6 Monitoring and health
 
