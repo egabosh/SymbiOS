@@ -37,6 +37,11 @@ EXTERNAL_STATES_DIR = os.environ.get(
     os.path.join(os.path.dirname(os.environ.get('CONFIG_PATH', '/config/inventory.yml')),
                  'external-systems', 'states'),
 )
+EXTERNAL_VARS_DIR = os.environ.get(
+    'EXTERNAL_VARS_DIR',
+    os.path.join(os.path.dirname(os.environ.get('CONFIG_PATH', '/config/inventory.yml')),
+                 'external-systems'),
+)
 
 
 def _load_systems():
@@ -255,6 +260,41 @@ def settings_external_system_inventory(request, system_id):
     except Exception:
         pass
     return JsonResponse(data)
+
+
+@login_required
+def settings_external_system_vars(request, system_id):
+    """Read or save host variables for one external system.
+
+    Host vars are available as Ansible extra vars to every external playbook
+    running on that target. Writes go through the host-side CLI so the WebUI
+    never mutates host files directly; passwords are never saved here.
+    """
+    system = _get_system(system_id)
+    if system is None:
+        return JsonResponse({'error': 'System not found'}, status=404)
+    from .utils.ssh_exec import run_command
+    import json as _json
+    if request.method == 'GET':
+        ok, stdout, stderr = run_command(
+            'symbios-external-params.sh get %s' % shlex.quote(system_id), timeout=15)
+        if not ok:
+            return JsonResponse({'error': stderr or 'Read failed'}, status=500)
+        return JsonResponse({'vars': _json.loads(stdout)})
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=400)
+    try:
+        values = _json.loads(request.POST.get('vars', '{}'))
+    except ValueError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    if not isinstance(values, dict):
+        return JsonResponse({'error': 'Expected a JSON object'}, status=400)
+    ok, stdout, stderr = run_command(
+        'symbios-external-params.sh %s set --json-stdin' % shlex.quote(system_id),
+        timeout=30, stdin_data=_json.dumps(values))
+    if not ok:
+        return JsonResponse({'error': (stderr or stdout or 'Save failed').strip()}, status=400)
+    return JsonResponse({'ok': True, 'message': 'Variables saved.'})
 
 
 @login_required

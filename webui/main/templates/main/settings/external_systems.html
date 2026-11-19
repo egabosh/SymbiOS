@@ -61,6 +61,9 @@
           <button class="btn btn-outline-secondary btn-sm" onclick="showInventory('{{ s.id }}', this)" title="Show managed inventory">
             <i class="bi bi-list-check"></i> Inventory
           </button>
+          <button class="btn btn-outline-primary btn-sm" onclick="editVars('{{ s.id }}')" title="Edit host variables (available to all playbooks on this target)">
+            <i class="bi bi-braces"></i> Vars
+          </button>
           <a href="{% url 'settings_external_system_edit' s.id %}" class="btn btn-outline-secondary btn-sm" title="Edit">
             <i class="bi bi-pencil"></i>
           </a>
@@ -99,7 +102,76 @@
   </div>
 </div>
 
+<div class="modal fade" id="varsModal" tabindex="-1" aria-labelledby="varsModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="varsModalLabel">Host variables</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">These values are passed as Ansible extra vars to every playbook running on this target. Playbook-specific values can be saved on the playbook page.</p>
+        <textarea id="varsText" class="form-control font-monospace" rows="10" spellcheck="false"></textarea>
+        <div id="varsStatus" class="text-danger small mt-2"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveVars()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
+let g_varsSystem = '';
+
+function varsUrl(systemId) {
+  return '{% url "settings_external_system_vars" "000" %}'.replace('000', systemId);
+}
+
+function editVars(systemId) {
+  g_varsSystem = systemId;
+  document.getElementById('varsStatus').textContent = '';
+  document.getElementById('varsText').value = 'Loading...';
+  const modal = new bootstrap.Modal(document.getElementById('varsModal'));
+  modal.show();
+  fetch(varsUrl(systemId), {credentials: 'same-origin'})
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { document.getElementById('varsText').value = ''; document.getElementById('varsStatus').textContent = d.error; return; }
+      document.getElementById('varsText').value = JSON.stringify(d.vars, null, 2);
+    })
+    .catch(e => { document.getElementById('varsText').value = ''; document.getElementById('varsStatus').textContent = String(e); });
+}
+
+function saveVars() {
+  const status = document.getElementById('varsStatus');
+  status.textContent = '';
+  let values;
+  try {
+    values = JSON.parse(document.getElementById('varsText').value);
+  } catch (e) {
+    status.textContent = 'Invalid JSON: ' + e;
+    return;
+  }
+  if (values === null || typeof values !== 'object' || Array.isArray(values)) {
+    status.textContent = 'Expected a JSON object.';
+    return;
+  }
+  const fd = new FormData();
+  fd.append('vars', JSON.stringify(values));
+  fetch(varsUrl(g_varsSystem), {
+    method: 'POST', credentials: 'same-origin',
+    headers: {'X-CSRFToken': getCsrfToken()}, body: fd
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.error) { status.textContent = d.error; return; }
+    bootstrap.Modal.getInstance(document.getElementById('varsModal')).hide();
+  })
+  .catch(e => { status.textContent = String(e); });
+}
+
 function testSSH(systemId, btn) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';

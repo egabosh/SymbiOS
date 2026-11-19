@@ -153,10 +153,16 @@
         <option value="{{ s.id }}">{{ s.name }} ({{ s.host }})</option>
         {% endfor %}
       </select>
+      {% if item.docs.params %}
+      <button class="btn btn-outline-secondary btn-sm" onclick="saveRemoteParams()" title="Save these values for this target and playbook">
+        <i class="bi bi-save"></i> Save
+      </button>
+      {% endif %}
       <button class="btn btn-outline-success btn-sm" onclick="runRemote()">
         <i class="bi bi-play-fill"></i> Run
       </button>
     </div>
+    <div class="text-muted small mb-2">Saved values are filled in when you change the target. Password fields are never saved.</div>
     {% else %}
     <div class="text-muted small">
       No external systems of type <code>{{ playbook_target_type }}</code> configured.
@@ -774,20 +780,62 @@ document.querySelectorAll('.feat-toggle').forEach(function(toggle) {
   if (cfg) detectFeatOptions(cfg, toggle.dataset.feature);
 });
 
-function runRemote() {
+function remoteSystemId() {
   const select = document.getElementById('external-target');
-  const systemId = select ? select.value : '';
-  if (!systemId) { SymbiOS.exec.showAlert('No external system selected', 'danger'); return; }
+  return select ? select.value : '';
+}
+
+function collectRemoteParams() {
   const params = {};
   document.querySelectorAll('.remote-param').forEach(el => {
     const name = el.dataset.name;
-    if (!name) return;
+    if (!name || el.type === 'password') return;
     if (el.type === 'checkbox') params[name] = el.checked;
     else params[name] = el.value;
   });
+  return params;
+}
+
+function applyRemoteParams(values) {
+  document.querySelectorAll('.remote-param').forEach(el => {
+    const name = el.dataset.name;
+    if (!name || el.type === 'password' || !(name in values)) return;
+    if (el.type === 'checkbox') el.checked = values[name] === true || values[name] === 'true';
+    else el.value = values[name];
+  });
+}
+
+function loadRemoteParams() {
+  const systemId = remoteSystemId();
+  if (!systemId) return;
+  fetch('/services/' + PLAYBOOK + '/external-params/?system_id=' + encodeURIComponent(systemId),
+        {credentials: 'same-origin'})
+    .then(r => r.json())
+    .then(d => { if (d.vars) applyRemoteParams(d.vars); })
+    .catch(() => {});
+}
+
+function saveRemoteParams() {
+  const systemId = remoteSystemId();
+  if (!systemId) { SymbiOS.exec.showAlert('No external system selected', 'danger'); return; }
   const fd = new FormData();
   fd.append('system_id', systemId);
-  fd.append('params', JSON.stringify(params));
+  fd.append('params', JSON.stringify(collectRemoteParams()));
+  fetch('/services/' + PLAYBOOK + '/external-params/', {
+    method: 'POST', body: fd, credentials: 'same-origin',
+    headers: {'X-CSRFToken': getCsrfToken()}
+  })
+  .then(r => r.json())
+  .then(d => SymbiOS.exec.showAlert(d.error || d.message || 'Parameters saved', d.error ? 'danger' : 'success'))
+  .catch(e => SymbiOS.exec.showAlert('Request failed: ' + e, 'danger'));
+}
+
+function runRemote() {
+  const systemId = remoteSystemId();
+  if (!systemId) { SymbiOS.exec.showAlert('No external system selected', 'danger'); return; }
+  const fd = new FormData();
+  fd.append('system_id', systemId);
+  fd.append('params', JSON.stringify(collectRemoteParams()));
   fetch('/services/' + PLAYBOOK + '/action-remote/', {method: 'POST', body: fd, credentials: 'same-origin', headers: {'X-CSRFToken': getCsrfToken()}})
     .then(r => r.json())
     .then(d => {
@@ -796,6 +844,12 @@ function runRemote() {
       SymbiOS.exec.start(d.job, 'Run on ' + systemId, d.command);
     })
     .catch(e => { SymbiOS.exec.showAlert('Request failed: ' + e, 'danger'); });
+}
+
+const extTargetSelect = document.getElementById('external-target');
+if (extTargetSelect) {
+  extTargetSelect.addEventListener('change', loadRemoteParams);
+  loadRemoteParams();
 }
 
 /* --- Generic inventory (docs.inventory) ---------------------------------

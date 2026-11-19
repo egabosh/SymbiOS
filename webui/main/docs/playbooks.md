@@ -206,9 +206,10 @@ SymbiOS host. They are flat (no sub-directories), prefixed by target type
 | Location | `external-services/<name>.yml`, no sub-directories |
 | Naming | `<type>_<topic>.yml` (e.g. `openwrt_dns_cname.yml`) |
 | Target type | `docs.type` (`OpenWrt`, `Linux`, ...) selects the matching external systems |
-| Execution | `scripts/symbios-run-remote-playbook.sh <target_id> <playbook> <extra_vars_json>` |
+| Execution | `scripts/symbios-run-remote-playbook.sh <target_id> <playbook> [--vars-stdin]` |
 | Inventory | Built on the fly from `config/external-systems.yml` (`host`, `port`, `user`) |
 | Facts | `gather_facts: no`; most targets are minimal images without Python |
+| Saved vars | `scripts/symbios-external-params.sh`, merged by the runner as host_vars, then playbook_vars, then runtime stdin |
 
 Standalone compatibility is mandatory: a playbook must keep working when run
 directly with `ansible-playbook -i <inventory> <playbook>.yml`, without the
@@ -223,6 +224,58 @@ It is run once per target; all other playbooks are granular resources or
 features that declare it via `docs.requires`. When merging source playbooks
 into a foundation, check the UCI keys (or equivalent settings) for conflicts
 first - the merged result must stay idempotent.
+
+### Saved variables for external targets
+
+Repeated runs should not require typing the same values again. The host-side
+CLI `symbios-external-params.sh` stores Ansible extra vars in the config dir:
+
+```
+external-systems/host_vars/<target>.yml
+external-systems/playbook_vars/<target>/<playbook>.yml
+```
+
+`host_vars` apply to every playbook on the target, `playbook_vars` only to one
+playbook. `symbios-run-remote-playbook.sh` merges them in that order; values
+submitted on stdin with `--vars-stdin` override both. Secrets must stay on
+stdin - the save CLI reads JSON from stdin and no value ever appears in argv or
+in the exec audit log.
+
+The WebUI exposes the same storage through the **Vars** button on Settings ->
+External Systems (host vars) and the **Save** button on the playbook detail
+page (playbook vars). Password inputs are never submitted or saved.
+
+When a saved host var uses a namespaced key because a generic name is already
+used by per-record playbooks, declare it as `alias` on the matching
+`docs.params` entry. The detail page then maps it onto the form field when
+loading saved values, while an explicitly saved playbook var keeps precedence.
+`openwrt_basics.yml` uses this for `ip`/`lan_ip`, `mask`/`lan_mask` and
+`ip6`/`lan_ip6`.
+
+A successful remote run registers the playbook in
+`external-systems/installed-playbooks.yml` as
+`external-services/<playbook> @ <target>`. The WebUI shows such playbooks as
+installed in the sidebar. This state is deliberately separate from
+`installed-playbooks.yml`, so a full reapply never tries to run remote
+playbooks locally.
+
+### OpenWrt segment parameters
+
+`openwrt_basics.yml`, `openwrt_iot.yml` and `openwrt_tor.yml` keep the physical
+routers' values as playbook defaults so standalone runs stay backward
+compatible. Targets with different addressing (for example the OpenWrt VM)
+override them via saved host vars:
+
+| Playbook | Parameters (default) |
+|----------|----------------------|
+| `openwrt_basics.yml` | `lan_device` (`br-lan`), `ipv6_uplink` (`true`); `lan_ip`/`lan_mask`/`lan_ip6`/`upstream_dns` are required and supplied by the target's saved host vars (or runtime params) |
+| `openwrt_iot.yml` | `iot_device` (`br-iot`), `iot_ip` (`192.168.143.1`), `iot_netmask` (`255.255.255.0`), `iot_subnet` (`192.168.143.0/24`), `iot_v6` (`fd12:3456:143::1`), `iot_ip6` (`fd12:3456:143::1/64`), `iot_prefix` (`fd12:3456:143::/64`), `iot_upstream_dns` (`127.0.0.56`), `ipv6_uplink` (`true`) |
+| `openwrt_tor.yml` | `tor_device` (`br-tor`), `tor_ip` (`192.168.142.1`), `tor_netmask` (`255.255.255.0`), `tor_subnet` (`192.168.142.0/24`), `tor_v6` (`fd12:3456:142::1`), `tor_ip6` (`fd12:3456:142::1/64`), `tor_prefix` (`fd12:3456:142::/64`), `tor_dns` (`127.0.0.56`), `tor_upstream_dns` (`127.0.0.56`), `tor_printer_ip` (`192.168.143.10`), `ipv6_uplink` (`true`) |
+| `openwrt_dhcp-hosts.yml` | `iot_net_prefix` (`192.168.143.`), `tor_net_prefix` (`192.168.142.`) for the dnsmasq instance inference |
+
+`openwrt_dhcp-hosts.yml` only needs the two prefixes when a target uses
+different segments; the runtime `ip` is otherwise unchanged. The defaults above
+are also documented in each playbook's `vars:` block.
 
 Adding a new external playbook:
 
@@ -436,6 +489,12 @@ allowed values.
 Layout, sharing and syntax rules for every playbook in `services/` and
 `base-services/` (mirrors the Ansible section of `AGENTS.md`):
 
+- **New base services must be listed in `install.sh`**: it is the single
+  source of truth for the default set. `symbios-update.sh` compares the old
+  and new revision and installs playbooks newly added there once, even on
+  hosts that never registered them. A playbook that exists only on disk
+  never reaches existing installations: updates otherwise run only
+  registered playbooks whose own files changed.
 - **Layout**: one play per file, `# docs:` header, `hosts: all`,
   `vars: service_name/service_domain`. Tasks in standard order:
   Guard -> Packages -> Directories -> Config -> LDAP -> Authelia -> Traefik

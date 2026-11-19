@@ -46,6 +46,20 @@
     managed_playbook: "openwrt_tor.yml"
     managed_ref: ""
     managed_resource_type: "tor"
+
+    # Segment parameters: the defaults match the physical routers. Saved host
+    # vars for the OpenWrt VM override them (extra vars beat playbook vars).
+    tor_device: "br-tor"
+    tor_ip: "192.168.142.1"
+    tor_netmask: "255.255.255.0"
+    tor_subnet: "192.168.142.0/24"
+    tor_v6: "fd12:3456:142::1"
+    tor_ip6: "fd12:3456:142::1/64"
+    tor_prefix: "fd12:3456:142::/64"
+    tor_dns: "127.0.0.56"
+    tor_upstream_dns: "127.0.0.56"
+    tor_printer_ip: "192.168.143.10"
+    ipv6_uplink: true
     openwrt_packages:
       - luci-app-tor
       - luci-app-privoxy
@@ -61,19 +75,19 @@
 
       # Bridge device for tor network
       - { key: "network.tor_dev", value: "device" }
-      - { key: "network.tor_dev.name", value: "br-tor" }
+      - { key: "network.tor_dev.name", value: "{{ tor_device }}" }
       - { key: "network.tor_dev.type", value: "bridge" }
       - { key: "network.tor_dev.bridge_empty", value: "0" }
 
       # tor network (uses br-tor device with static IP)
       - { key: "network.tor", value: "interface" }
-      - { key: "network.tor.device", value: "br-tor" }
+      - { key: "network.tor.device", value: "{{ tor_device }}" }
       - { key: "network.tor.ipv6", value: "1" }
       - { key: "network.tor.proto", value: "static" }
-      - { key: "network.tor.ipaddr", value: "192.168.142.1" }
-      - { key: "network.tor.netmask", value: "255.255.255.0" }
-      - { key: "network.tor.dns", value: "127.0.0.56" }
-      - { key: "network.tor.ip6addr", value: "fd12:3456:142::1/64" }
+      - { key: "network.tor.ipaddr", value: "{{ tor_ip }}" }
+      - { key: "network.tor.netmask", value: "{{ tor_netmask }}" }
+      - { key: "network.tor.dns", value: "{{ tor_dns }}" }
+      - { key: "network.tor.ip6addr", value: "{{ tor_ip6 }}" }
       - { key: 'network.tor.ip6assign', value: '64'}
 
       # dhcp for tor network
@@ -90,7 +104,7 @@
       # managed-config sets the M flag so clients use stateful DHCPv6
       - { key: "dhcp.tor.ra_flags", value: "managed-config" }
       # Only the resolver advertises a v6 default route, see openwrt_basics.yml.
-      - { key: "dhcp.tor.ra_default", value: "{{ '1' if resolver_role.stdout | trim == 'resolver' else '0' }}" }
+      - { key: "dhcp.tor.ra_default", value: "{{ '1' if resolver_role.stdout | trim == 'resolver' and (ipv6_uplink | bool) else '0' }}" }
       - { key: "dhcp.tor.ra_lifetime", value: '1800' }
       - { key: "dhcp.tor.force", value: "1" }
       - { key: "dhcp.tor.dhcp_option", value: "119,tor,lan" }
@@ -100,8 +114,8 @@
       - { key: "dhcp.tor_dnsmasq.domain", value: "tor" }
       - { key: "dhcp.tor_dnsmasq.resolvfile", value: "/etc/resolv.dnsmasq.tor" }
       - { key: "dhcp.tor_dnsmasq.leasefile", value: "/tmp/dhcp.tor.leases" }
-      - { key: "dhcp.tor_dnsmasq.listen_address", value: "192.168.142.1" }
-      - { key: "dhcp.tor_dnsmasq.listen_address", value: "fd12:3456:142::1" }
+      - { key: "dhcp.tor_dnsmasq.listen_address", value: "{{ tor_ip }}" }
+      - { key: "dhcp.tor_dnsmasq.listen_address", value: "{{ tor_v6 }}" }
       - { key: "dhcp.tor_dnsmasq.logqueries", value: "1" }
       - { key: "dhcp.tor_dnsmasq.authoritative", value: "1" }
       - { key: "dhcp.tor_dnsmasq.sequential_ip", value: "1" }
@@ -143,7 +157,7 @@
       - { key: "firewall.rule_forward_iot_print_from_tor.src", value: "tor" }
       - { key: "firewall.rule_forward_iot_print_from_tor.dest", value: "iot" }
       - { key: "firewall.rule_forward_iot_print_from_tor.proto", value: "tcp udp" }
-      - { key: "firewall.rule_forward_iot_print_from_tor.dest_ip", value: "192.168.143.10" }
+      - { key: "firewall.rule_forward_iot_print_from_tor.dest_ip", value: "{{ tor_printer_ip }}" }
       - { key: "firewall.rule_forward_iot_print_from_tor.dest_port", value: "161 631" }
       - { key: "firewall.rule_forward_iot_print_from_tor.target", value: "ACCEPT" }
 
@@ -162,8 +176,8 @@
       - { key: "firewall.rule_allow_dns_tor.proto",     value: "udp" }
       - { key: "firewall.rule_allow_dns_tor.dest_port", value: "53" }
       - { key: "firewall.rule_allow_dns_tor.target",    value: "ACCEPT" }
-      - { key: "firewall.rule_allow_dns_tor.src_ip",  value: "192.168.142.0/24" }
-      - { key: "firewall.rule_allow_dns_tor.dest_ip", value: "192.168.142.1" }
+      - { key: "firewall.rule_allow_dns_tor.src_ip",  value: "{{ tor_subnet }}" }
+      - { key: "firewall.rule_allow_dns_tor.dest_ip", value: "{{ tor_ip }}" }
 
       # Allow-DNS-TORLAN ipv6
       - { key: "firewall.rule_allow_dns_tor6",      value: "rule" }
@@ -172,8 +186,8 @@
       - { key: "firewall.rule_allow_dns_tor6.proto",     value: "udp" }
       - { key: "firewall.rule_allow_dns_tor6.dest_port", value: "53" }
       - { key: "firewall.rule_allow_dns_tor6.target",    value: "ACCEPT" }
-      - { key: "firewall.rule_allow_dns_tor6.src_ip",  value: "fd12:3456:142::/64" }
-      - { key: "firewall.rule_allow_dns_tor6.dest_ip", value: "fd12:3456:142::1" }
+      - { key: "firewall.rule_allow_dns_tor6.src_ip",  value: "{{ tor_prefix }}" }
+      - { key: "firewall.rule_allow_dns_tor6.dest_ip", value: "{{ tor_v6 }}" }
 
       # Allow-NTP-TORLAN
       - { key: "firewall.rule_allow_ntp_tor",      value: "rule" }
@@ -182,8 +196,8 @@
       - { key: "firewall.rule_allow_ntp_tor.proto",     value: "udp" }
       - { key: "firewall.rule_allow_ntp_tor.dest_port", value: "123" }
       - { key: "firewall.rule_allow_ntp_tor.target",    value: "ACCEPT" }
-      - { key: "firewall.rule_allow_ntp_tor.src_ip",  value: "192.168.142.0/24" }
-      - { key: "firewall.rule_allow_ntp_tor.dest_ip", value: "192.168.142.1" }
+      - { key: "firewall.rule_allow_ntp_tor.src_ip",  value: "{{ tor_subnet }}" }
+      - { key: "firewall.rule_allow_ntp_tor.dest_ip", value: "{{ tor_ip }}" }
 
       # Allow-NTPv6-TORLAN
       - { key: "firewall.rule_allow_ntpv6_tor",      value: "rule" }
@@ -191,8 +205,8 @@
       - { key: "firewall.rule_allow_ntpv6_tor.src",  value: "tor" }
       - { key: "firewall.rule_allow_ntpv6_tor.proto",value: "udp" }
       - { key: "firewall.rule_allow_ntpv6_tor.dest_port", value: "123" }
-      - { key: "firewall.rule_allow_ntpv6_tor.src_ip",   value: "fd12:3456:142::/64" }
-      - { key: "firewall.rule_allow_ntpv6_tor.dest_ip",  value: "fd12:3456:142::1" }
+      - { key: "firewall.rule_allow_ntpv6_tor.src_ip",   value: "{{ tor_prefix }}" }
+      - { key: "firewall.rule_allow_ntpv6_tor.dest_ip",  value: "{{ tor_v6 }}" }
       - { key: "firewall.rule_allow_ntpv6_tor.family",   value: "ipv6" }
       - { key: "firewall.rule_allow_ntpv6_tor.target",   value: "ACCEPT" }
 
@@ -212,8 +226,8 @@
       - { key: "firewall.rule_allow_icmp_ping_tor.proto",    value: "icmp" }
       - { key: "firewall.rule_allow_icmp_ping_tor.icmp_type",    value: "echo-request" }
       - { key: "firewall.rule_allow_icmp_ping_tor.name",     value: "ansible_allow_icmp_ping_tor" }
-      - { key: "firewall.rule_allow_icmp_ping_tor.src_ip",  value: "192.168.142.0/24" }
-      - { key: "firewall.rule_allow_icmp_ping_tor.dest_ip", value: "192.168.142.1" }
+      - { key: "firewall.rule_allow_icmp_ping_tor.src_ip",  value: "{{ tor_subnet }}" }
+      - { key: "firewall.rule_allow_icmp_ping_tor.dest_ip", value: "{{ tor_ip }}" }
 
       # ICML/ping6
       - { key: "firewall.rule_allow_icmpv6_ping_tor",           value: "rule" }
@@ -223,8 +237,8 @@
       - { key: "firewall.rule_allow_icmpv6_ping_tor.proto",     value: "icmp" }
       - { key: "firewall.rule_allow_icmpv6_ping_tor.icmp_type", value: "echo-request" }
       - { key: "firewall.rule_allow_icmpv6_ping_tor.target",    value: "ACCEPT" }
-      - { key: "firewall.rule_allow_icmpv6_ping_tor.src_ip",   value: "fd12:3456:142::/64" }
-      - { key: "firewall.rule_allow_icmpv6_ping_tor.dest_ip",  value: "fd12:3456:142::1" }
+      - { key: "firewall.rule_allow_icmpv6_ping_tor.src_ip",   value: "{{ tor_prefix }}" }
+      - { key: "firewall.rule_allow_icmpv6_ping_tor.dest_ip",  value: "{{ tor_v6 }}" }
 
       # allow forwarding for exceptions
       - { key: "firewall.rule_forwarding_exceptions_tor",      value: "rule" }
@@ -243,8 +257,8 @@
       #- { key: "firewall.rule_allow_dhcpv6_tor.src",  value: "tor" }
       #- { key: "firewall.rule_allow_dhcpv6_tor.proto",value: "udp" }
       #- { key: "firewall.rule_allow_dhcpv6_tor.dest_port", value: "546" }  # DHCPv6 Client-Port
-      #- { key: "firewall.rule_allow_dhcpv6_tor.src_ip",   value: "fd12:3456:142::/64" }
-      #- { key: "firewall.rule_allow_dhcpv6_tor.dest_ip",  value: "fd12:3456:142::1" }
+      #- { key: "firewall.rule_allow_dhcpv6_tor.src_ip",   value: "{{ tor_prefix }}" }
+      #- { key: "firewall.rule_allow_dhcpv6_tor.dest_ip",  value: "{{ tor_v6 }}" }
       #- { key: "firewall.rule_allow_dhcpv6_tor.family",   value: "ipv6" }
       #- { key: "firewall.rule_allow_dhcpv6_tor.target",   value: "ACCEPT" }
 
@@ -254,8 +268,8 @@
       #- { key: "firewall.rule_allow_dnsv6_tor.src",  value: "tor" }
       #- { key: "firewall.rule_allow_dnsv6_tor.proto",value: "udp" }
       #- { key: "firewall.rule_allow_dnsv6_tor.dest_port", value: "53" }
-      #- { key: "firewall.rule_allow_dnsv6_tor.src_ip",   value: "fd12:3456:142::/64" }
-      #- { key: "firewall.rule_allow_dnsv6_tor.dest_ip",  value: "fd12:3456:142::1" }
+      #- { key: "firewall.rule_allow_dnsv6_tor.src_ip",   value: "{{ tor_prefix }}" }
+      #- { key: "firewall.rule_allow_dnsv6_tor.dest_ip",  value: "{{ tor_v6 }}" }
       #- { key: "firewall.rule_allow_dnsv6_tor.family",   value: "ipv6" }
       #- { key: "firewall.rule_allow_dnsv6_tor.target",   value: "ACCEPT" }
 
@@ -264,8 +278,8 @@
       - { key: "firewall.rule_allow_tor_proxy.src",     value: "tor" }
       - { key: "firewall.rule_allow_tor_proxy.target",  value: "ACCEPT" }
       - { key: "firewall.rule_allow_tor_proxy.proto",   value: "tcp" }
-      - { key: "firewall.rule_allow_tor_proxy.src_ip",  value: "192.168.142.0/24" }
-      - { key: "firewall.rule_allow_tor_proxy.dest_ip", value: "192.168.142.1" }
+      - { key: "firewall.rule_allow_tor_proxy.src_ip",  value: "{{ tor_subnet }}" }
+      - { key: "firewall.rule_allow_tor_proxy.dest_ip", value: "{{ tor_ip }}" }
       - { key: "firewall.rule_allow_tor_proxy.dest_port", value: "9040" }
       - { key: "firewall.rule_allow_tor_proxy.name",    value: "ansible_allow_tor_proxy" }
 
@@ -274,8 +288,8 @@
       - { key: "firewall.rule_allow_tor_proxy_v6.src",     value: "tor" }
       - { key: "firewall.rule_allow_tor_proxy_v6.target",  value: "ACCEPT" }
       - { key: "firewall.rule_allow_tor_proxy_v6.proto",   value: "tcp" }
-      - { key: "firewall.rule_allow_tor_proxy_v6.src_ip",  value: "fd12:3456:142::/64" }
-      - { key: "firewall.rule_allow_tor_proxy_v6.dest_ip", value: "fd12:3456:142::1" }
+      - { key: "firewall.rule_allow_tor_proxy_v6.src_ip",  value: "{{ tor_prefix }}" }
+      - { key: "firewall.rule_allow_tor_proxy_v6.dest_ip", value: "{{ tor_v6 }}" }
       - { key: "firewall.rule_allow_tor_proxy_v6.dest_port", value: "9040" }
       - { key: "firewall.rule_allow_tor_proxy_v6.name",    value: "ansible_allow_tor_proxy_v6" }
       - { key: "firewall.rule_allow_tor_proxy_v6.family",  value: "ipv6" }
@@ -305,7 +319,7 @@
     - name: use local upstream dns
       raw: |
         cat << 'EOF' > /etc/resolv.dnsmasq.tor
-        nameserver 127.0.0.56
+        nameserver {{ tor_upstream_dns }}
         EOF
       changed_when: false
 
@@ -476,7 +490,7 @@
          sleep 0.1
         done
 
-        #[ -e /sys/class/net/br-tor ] || exit 0
+        #[ -e /sys/class/net/{{ tor_device }} ] || exit 0
 
         # check for chain and create if not exists
         nft list chain inet fw4 dstnat_tor >/dev/null 2>&1 || \
@@ -489,7 +503,7 @@
         # plus every interface named in /etc/nftables.d/tor_routing_ifaces/*.list
         # (one name per file). The WireGuard Tor server registers wg_tor there,
         # so its clients reach the internet through the transparent proxy.
-        tor_ifaces='{ "br-tor"'
+        tor_ifaces='{ "{{ tor_device }}"'
         for f in /etc/nftables.d/tor_routing_ifaces/*.list
         do
           [ -f "$f" ] || continue
@@ -512,17 +526,17 @@
         nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 daddr ff02::fb udp dport 5353 accept
 
         # hijack DNS and NTP / redirect to router
-        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol udp udp dport {123} dnat to 192.168.142.1:123
-        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr udp udp dport {123} dnat to [fd12:3456:142::1]:123
-        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol udp udp dport {53} dnat to 192.168.142.1:53
-        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr udp udp dport {53} dnat to [fd12:3456:142::1]:53
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol udp udp dport {123} dnat to {{ tor_ip }}:123
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr udp udp dport {123} dnat to [{{ tor_v6 }}]:123
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol udp udp dport {53} dnat to {{ tor_ip }}:53
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr udp udp dport {53} dnat to [{{ tor_v6 }}]:53
 
         # allow local traffic
         nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } accept
         nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 daddr { fc00::/7, fd00::/8 } accept
 
         # redirect ping
-        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol icmp icmp type echo-request dnat to 192.168.142.1
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol icmp icmp type echo-request dnat to {{ tor_ip }}
         nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr icmpv6 icmpv6 type echo-request dnat to "[::1]"
 
         # do not allow tor in tor
@@ -533,8 +547,8 @@
         nft list set inet fw4 tor_whitelist >/dev/null 2>&1 && nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol tcp ip daddr @tor_whitelist tcp dport 443 accept
 
         # send all tcp traffic but local IPs through tor
-        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol tcp ip daddr != {127.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 0.0.0.0/8, 240.0.0.0/4} dnat to 192.168.142.1:9040
-        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr tcp ip6 daddr != { fd00::/8, fc00::/7, ::1/128, fe80::/10, ff00::/8, 2001::/23, 2001:db8::/32, 2001:10::/28, 2002::/16 } dnat to [fd12:3456:142::1]:9040
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip protocol tcp ip daddr != {127.0.0.0/8, 100.64.0.0/10, 169.254.0.0/16, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 0.0.0.0/8, 240.0.0.0/4} dnat to {{ tor_ip }}:9040
+        nft add rule inet fw4 dstnat_tor iifname $tor_ifaces ip6 nexthdr tcp ip6 daddr != { fd00::/8, fc00::/7, ::1/128, fe80::/10, ff00::/8, 2001::/23, 2001:db8::/32, 2001:10::/28, 2002::/16 } dnat to [{{ tor_v6 }}]:9040
 
         # all the rest of network traffic will be dropped by policy drop 
         nft add rule inet fw4 dstnat_tor iifname $tor_ifaces log prefix "TOR_ROUTING_DROP" drop

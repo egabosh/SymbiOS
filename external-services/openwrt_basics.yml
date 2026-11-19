@@ -1,7 +1,7 @@
 # docs:
 #   name: "OpenWrt - Basics"
 #   short_description: "OpenWrt - Basics"
-#   description: "Foundation for every other OpenWrt playbook: base packages, system (timezone/NTP/hostname), LAN addressing, Dropbear SSH, DHCP/DNS, mDNS and the base firewall (zones + default rules). Run this first on every target."
+#   description: "Foundation for every other OpenWrt playbook: base packages, system (timezone/NTP/hostname), LAN addressing, Dropbear SSH, DHCP/DNS, mDNS and the base firewall (zones + default rules). Run this first on every target. Existing zones, rules and dnsmasq sections that this playbook does not own are preserved."
 #   category: "System"
 #   type: OpenWrt
 #   icon: "bi-gear"
@@ -11,15 +11,24 @@
 #       type: "text"
 #       required: true
 #       placeholder: "192.168.1.1"
+#       # Saved host vars use namespaced keys because per-record playbooks
+#       # also use "ip". The WebUI maps this alias when loading saved values.
+#       alias: "lan_ip"
 #     - name: "mask"
 #       label: "LAN netmask"
 #       type: "text"
 #       required: true
 #       placeholder: "255.255.0.0"
+#       alias: "lan_mask"
 #     - name: "ip6"
 #       label: "LAN IPv6 address"
 #       type: "text"
 #       placeholder: "fd00:1::1"
+#       alias: "lan_ip6"
+#     - name: "lan_device"
+#       label: "LAN bridge/device"
+#       type: "text"
+#       default: "br-lan"
 #     - name: "timezone"
 #       label: "Timezone"
 #       type: "text"
@@ -32,11 +41,12 @@
 #       label: "Upstream DNS server"
 #       type: "text"
 #       required: true
-#       placeholder: "9.9.9.9 or 2a01:4f8:251:554::2"
+#       placeholder: "5.9.164.112 or 2a01:4f8:251:554::2 (Digitalcourage)"
 #     - name: "ssh_trust_master"
-#       label: "SSH key of this master (optional)"
+#       label: "Master host/IP for SSH public key (optional)"
 #       type: "text"
 #       placeholder: "172.23.0.220"
+#       help: "The master's /root/.ssh/id_ed25519.pub is read over SSH and installed on the target. No private key is entered here."
 #     - name: "bridges"
 #       label: "Avahi interfaces (comma separated)"
 #       type: "text"
@@ -62,8 +72,22 @@
     # the same names as extra vars (which take precedence). Required
     # parameters (ip, ip6, mask, upstream_dns) have no default on
     # purpose: a playbook var would silently shadow an inventory group
-    # var of the same name and misconfigure the target. bridges has the
-    # same problem, so its fallback lives in the avahi task instead.
+    # var of the same name and misconfigure the target. Saved host vars
+    # may use namespaced keys instead, because per-record playbooks use
+    # ip/ip6 too; the effective_* aliases accept either spelling. bridges
+    # has the same precedence issue, so its fallback lives in the avahi
+    # task instead.
+    effective_ip: "{{ ip if ip is defined and (ip | string | length) > 0 else lan_ip | default('') }}"
+    effective_mask: "{{ mask if mask is defined and (mask | string | length) > 0 else lan_mask | default('') }}"
+    effective_ip6: "{{ ip6 if ip6 is defined and (ip6 | string | length) > 0 else lan_ip6 | default('') }}"
+    lan_device: "br-lan"
+    dns_search: "lan iot tor"
+    dhcp_domains: "lan iot tor wan"
+    flow_offloading: "1"
+    # A resolver advertises a v6 default route only when its WAN really has
+    # one. Physical routers keep the default (true); a ULA-only target such as
+    # the OpenWrt VM sets ipv6_uplink=false in its saved host vars.
+    ipv6_uplink: true
     timezone: "CET-1CEST,M3.5.0,M10.5.0/3"
     # A literal IP, not a pool name: the router has no RTC, so after a boot
     # its clock is minutes behind and busybox ntpd only steps it once the
@@ -120,13 +144,6 @@
       - avahi-dbus-daemon
       - avahi-utils
 
-    # Default UCI sections that are replaced explicitly below.
-    uci_default_vars:
-      - 'dhcp.@dnsmasq'
-      - 'firewall.@defaults'
-      - 'firewall.@zone'
-      - 'firewall.@forwarding'
-
     uci_vars:
       ## System (timezone, hostname, NTP, irqbalance)
       - { key: "system.@system[0].timezone", value: "{{ timezone }}" }
@@ -135,11 +152,14 @@
       - { key: "system.ntp.server", value: "{{ ntp_server }}" }
       - { key: "irqbalance.irqbalance.enabled", value: "1" }
 
-      ## LAN addressing (static IPv4 + IPv6/ULA)
+      ## LAN addressing (static IPv4 + IPv6/ULA). Setting the device makes
+      ## the playbook work on both physical routers and the VM, which use
+      ## br-lan as well, without hardcoding ports or bridge members here.
+      - { key: "network.lan.device", value: "{{ lan_device }}" }
       - { key: "network.lan.proto", value: "static" }
-      - { key: "network.lan.ipaddr", value: "{{ ip }}" }
-      - { key: "network.lan.netmask", value: "{{ mask }}" }
-      - { key: "network.lan.ip6addr", value: "{{ ip6 }}" }
+      - { key: "network.lan.ipaddr", value: "{{ effective_ip }}" }
+      - { key: "network.lan.netmask", value: "{{ effective_mask }}" }
+      - { key: "network.lan.ip6addr", value: "{{ effective_ip6 }}" }
       - { key: "network.lan.ip6assign", value: "64" }
 
       ## USB stick mount
@@ -184,10 +204,10 @@
       # odhcpd RA flags (dnsmasq's legacy ra_management is ignored since 24.10):
       # managed-config sets the M flag so clients use stateful DHCPv6
       - { key: "dhcp.lan.ra_flags", value: "managed-config" }
-      # Only the resolver (master) advertises a v6 default route; a slave must
-      # not, otherwise every client builds a multipath default route into
-      # routers without an IPv6 upstream and loses most of its flows.
-      - { key: "dhcp.lan.ra_default", value: "{{ '1' if resolver_role.stdout | trim == 'resolver' else '0' }}" }
+      # Only a resolver with a real IPv6 upstream advertises a v6 default
+      # route. A slave, or a ULA-only target like the OpenWrt VM, must not:
+      # clients would build a default route into a router that cannot route v6.
+      - { key: "dhcp.lan.ra_default", value: "{{ '1' if resolver_role.stdout | trim == 'resolver' and (ipv6_uplink | bool) else '0' }}" }
       - { key: "dhcp.lan.ra_lifetime", value: "1800" }
       - { key: "dhcp.lan.force", value: "1" }
       - { key: "dhcp.lan.dns", value: "$(uci get network.lan.ip6addr | cut -d/ -f1)" }
@@ -200,7 +220,7 @@
       - { key: "dhcp.lan_dnsmasq.authoritative", value: "1" }
       - { key: "dhcp.lan_dnsmasq.sequential_ip", value: "1" }
       - { key: "dhcp.lan_dnsmasq.readethers", value: "1" }
-      - { key: "dhcp.lan.dhcp_option", value: "119,lan,iot,tor,wan" }
+      - { key: "dhcp.lan.dhcp_option", value: "119,{{ dhcp_domains }}" }
       - { key: "dhcp.lan.dhcp_option", value: "6,$(uci get network.lan.ipaddr)" }
 
       ## Firewall defaults + LAN zone
@@ -210,7 +230,7 @@
       - { key: "firewall.defaults.forward", value: "DROP" }
       - { key: "firewall.defaults.synflood_protect", value: "1" }
       - { key: "firewall.defaults.drop_invalid", value: "1" }
-      - { key: "firewall.defaults.flow_offloading", value: "1" }
+      - { key: "firewall.defaults.flow_offloading", value: "{{ flow_offloading }}" }
       - { key: "firewall.zone_lan", value: "zone" }
       - { key: "firewall.zone_lan.name", value: "lan" }
       - { key: "firewall.zone_lan.network", value: "lan" }
@@ -342,11 +362,11 @@
     - name: Check required parameters
       ansible.builtin.assert:
         that:
-          - ip is defined
-          - ip6 is defined
-          - mask is defined
-          - upstream_dns is defined
-        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
+          - effective_ip | length > 0
+          - effective_mask | length > 0
+          - effective_ip6 | length > 0
+          - upstream_dns is defined and (upstream_dns | string | length) > 0
+        fail_msg: "Missing required parameter(s). Pass ip/mask/ip6 (or the saved lan_* equivalents) and upstream_dns."
         quiet: true
 
   tasks:
@@ -663,7 +683,16 @@
         chmod 700 /etc/scripts/firewall_port_forwards_from_wan_to_newzone.sh
       changed_when: false
 
+    # Only ipq40xx exposes the threaded sysfs knob. The VM and other targets
+    # must not receive a hardware-specific init script.
+    - name: detect ipqess napi support
+      raw: |
+        [ -w /sys/class/net/eth0/threaded ] && echo yes || echo no
+      register: ipqess_supported
+      changed_when: false
+
     - name: write ipqess napi init script
+      when: ipqess_supported.stdout | trim == 'yes'
       raw: |
         cat << 'EOF' > /etc/init.d/ipqess-napi
         #!/bin/sh /etc/rc.common
@@ -693,27 +722,22 @@
       changed_when: false
 
     - name: enable ipqess napi init script
+      when: ipqess_supported.stdout | trim == 'yes'
       raw: |
         [ -e /etc/rc.d/S99ipqess-napi ] || { /etc/init.d/ipqess-napi enable && echo changed; }
       register: ipqess_napi_enable_result
       changed_when: "'changed' in ipqess_napi_enable_result.stdout"
 
     - name: disable threaded napi on the ethernet cpu port
+      when: ipqess_supported.stdout | trim == 'yes'
       raw: /etc/init.d/ipqess-napi start
       changed_when: false
 
     # --- UCI ---------------------------------------------------------------
-    - name: delete config defaults
-      raw: |
-        # detele default config indices
-        while uci show | grep -q "^{{ item }}"
-        do
-          echo "changed"
-          uci delete {{ item }}[0]
-        done
-      loop: "{{ uci_default_vars }}"
-      register: uci_delete_result
-      changed_when: "'changed' in uci_delete_result.stdout"
+    # Only named sections owned by this playbook are set below. Foreign
+    # zones, forwardings, rules and dnsmasq instances are deliberately left
+    # alone; deleting them broke the router whenever another playbook had
+    # added a section.
 
     # Legacy configs may still carry ula_prefix, which makes netifd derive
     # an extra <prefix>::1/64 per interface and collides across routers.
@@ -779,23 +803,23 @@
     # netifd only picks up ipaddr/ip6addr changes when the interface is
     # re-applied; a plain uci commit leaves the old kernel addresses in
     # place. Compare desired vs. current and reload in the foreground: the
-    # brief br-lan flap (1-3 s) survives inside the SSH session, so no
+    # brief LAN bridge flap (1-3 s) survives inside the SSH session, so no
     # background process is needed. Verify afterwards that both addresses
     # are actually up, otherwise fail loudly instead of reporting success.
     - name: re-apply the LAN interface when its addressing changed
       raw: |
         v4_ok=1
         v6_ok=1
-        ip -4 addr show br-lan 2>/dev/null | grep -q "inet {{ ip }}/" || v4_ok=0
-        ip -6 addr show br-lan 2>/dev/null | grep -q "{{ ip6 }}" || v6_ok=0
+        ip -4 addr show {{ lan_device }} 2>/dev/null | grep -q "inet {{ effective_ip }}/" || v4_ok=0
+        ip -6 addr show {{ lan_device }} 2>/dev/null | grep -q "{{ effective_ip6 }}" || v6_ok=0
         if [ "$v4_ok" = 1 ] && [ "$v6_ok" = 1 ]
         then
           echo unchanged
         else
           /etc/init.d/network reload
           sleep 3
-          if ip -4 addr show br-lan 2>/dev/null | grep -q "inet {{ ip }}/" \
-             && ip -6 addr show br-lan 2>/dev/null | grep -q "{{ ip6 }}"
+          if ip -4 addr show {{ lan_device }} 2>/dev/null | grep -q "inet {{ effective_ip }}/" \
+             && ip -6 addr show {{ lan_device }} 2>/dev/null | grep -q "{{ effective_ip6 }}"
           then
             echo changed
           else
@@ -826,14 +850,17 @@
     # static file instead: it is overlay backed and in /etc/sysupgrade.conf.
     - name: write a static /etc/resolv.conf
       raw: |
-        # only a resolver host points at itself, slaves ask the master
+        # A resolver points at its own LAN address: dnsmasq listens there on
+        # every target, while 127.0.0.1 is not bound on targets with several
+        # dnsmasq instances (the loopback socket can only be owned once).
+        # Slaves ask the master configured on the LAN interface.
         if [ "{{ resolver_role.stdout | trim }}" = "resolver" ]
         then
-          ns=127.0.0.1
+          ns={{ effective_ip }}
         else
           ns=$(uci -q get network.lan.dns)
         fi
-        printf 'nameserver %s\nsearch lan iot tor\n' "$ns" > /tmp/resolv.conf.new
+        printf 'nameserver %s\nsearch {{ dns_search }}\n' "$ns" > /tmp/resolv.conf.new
         if cmp -s /tmp/resolv.conf.new /etc/resolv.conf
         then
           echo unchanged

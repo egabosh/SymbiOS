@@ -8,7 +8,9 @@
 #
 # Parameter values (WebUI input fields) are read as a JSON object from stdin,
 # never from the command line: they may contain secrets (API keys, passwords)
-# which must not show up in `ps` or in the exec audit log.
+# which must not show up in `ps` or in the exec audit log. Saved variables for
+# the target/playbook (symbios-external-params.sh) are loaded first; runtime
+# stdin values override them.
 #
 # Usage:
 #   symbios-run-remote-playbook.sh <target_id> <playbook> [--vars-stdin]
@@ -32,7 +34,8 @@ Arguments:
                    (e.g. openwrt_dns_cname.yml)
   --vars-stdin     read the extra vars as a JSON object from stdin. Use this
                    for values that must not appear in the process list or in
-                   the audit log (API keys, passwords).
+                   the audit log (API keys, passwords). Runtime values override
+                   saved host_vars/playbook_vars.
 
 Options:
   -h, --help       Show this help and exit
@@ -108,7 +111,7 @@ umask 077
 # Inventory for the single target (no facts: minimal images, no Python).
 cat > "${g_work_dir}/inventory.ini" << EOF
 [external]
-${g_target} ansible_host=${g_ext_host} ansible_port=${g_ext_port} ansible_user=${g_ext_user} ansible_connection=ssh ansible_ssh_common_args='-o StrictHostKeyChecking=accept-new' gather_facts=no
+${g_target} ansible_host=${g_ext_host} ansible_port=${g_ext_port} ansible_user=${g_ext_user} ansible_connection=ssh ansible_ssh_common_args='-o StrictHostKeyChecking=accept-new'
 EOF
 
 # Extra vars: empty object unless the caller pipes a JSON object in.
@@ -123,7 +126,46 @@ then
   fi
 fi
 
+# Saved variables: host_vars first, then playbook_vars. Runtime stdin values
+# are applied last so an explicit input always wins. Values are never printed.
+g_saved_json=$("${g_script_dir}/symbios-external-params.sh" get "${g_target}" "${g_playbook}" 2>/dev/null || printf '{}\n')
+if ! jq -e 'type == "object"' > /dev/null 2>&1 <<< "${g_saved_json}"
+then
+  g_saved_json='{}'
+fi
+g_saved_count=$(jq 'keys | length' <<< "${g_saved_json}")
+if [[ "${g_saved_count}" -gt 0 ]]
+then
+  g_echo_note "Using ${g_saved_count} saved variable(s) for ${g_target} / ${g_playbook}"
+  printf '%s\n%s\n' "${g_saved_json}" "$(cat "${g_vars_file}")" \
+    | jq -s '.[0] * .[1]' > "${g_vars_file}.merged"
+  mv "${g_vars_file}.merged" "${g_vars_file}"
+fi
+
 # --- run --------------------------------------------------------------------
 g_echo_note "Running ${g_playbook} on ${g_target} (${g_ext_user}@${g_ext_host}:${g_ext_port})"
 cd "${g_git_root}" || f_fail "Cannot change to ${g_git_root}"
 ansible-playbook -i "${g_work_dir}/inventory.ini" -e "@${g_vars_file}" "${g_playbook_path}"
+g_rc=$?
+
+# A successful remote run makes the playbook "installed" on this target. Keep
+# that state separate from installed-playbooks.yml: the local reapply must not
+# try to run external-services playbooks against the SymbiOS host.
+if (( g_rc == 0 ))
+then
+  g_state_json=$(jq -nc \
+    --arg key "external-services/${g_playbook} @ ${g_target}" \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{($key): $ts}')
+  if ! "${g_script_dir}/symbios-config.py" \
+      --file external-systems/installed-playbooks.yml merge \
+      <<< "${g_state_json}" > /dev/null 2>&1
+  then
+    g_echo_warn "Cannot record installed state for ${g_target} / ${g_playbook}"
+  else
+    # The WebUI container reads /config as uid 10000; this file has no secrets.
+    chmod 0644 "${g_config_dir}/external-systems/installed-playbooks.yml" 2>/dev/null || true
+  fi
+fi
+
+exit "${g_rc}"

@@ -112,20 +112,28 @@ def _order_catalog(catalog):
 
 
 def _get_installed_playbooks():
-    """Read the state file and return a set of installed playbook paths."""
-    state_file = '/config/installed-playbooks.yml'
+    """Return installed playbook paths from local and remote state files.
+
+    Local services register in installed-playbooks.yml. External playbooks are
+    registered per target in external-systems/installed-playbooks.yml with a
+    key like "external-services/openwrt_basics.yml @ openwrt-vm"; the target
+    suffix is stripped here so the sidebar can match the catalog entry.
+    """
     installed = set()
-    try:
-        with open(state_file) as fh:
-            for line in fh:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                path = line.split(':')[0].strip()
-                if path:
-                    installed.add(path)
-    except (FileNotFoundError, PermissionError):
-        pass
+    for state_file in ('/config/installed-playbooks.yml',
+                       '/config/external-systems/installed-playbooks.yml'):
+        try:
+            with open(state_file) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    path = line.split(':', 1)[0].strip()
+                    path = path.split(' @ ', 1)[0].strip()
+                    if path:
+                        installed.add(path)
+        except (FileNotFoundError, PermissionError):
+            pass
     return installed
 
 
@@ -150,8 +158,9 @@ def _get_healthcheck_status():
 def _sidebar_context(catalog):
     """Build context data for the sidebar: installed set and healthcheck status.
 
-    A playbook is considered installed if and only if it is registered in the
-    installed-playbooks.yml state file (managed by symbios-state.sh).
+    A playbook is considered installed when it is registered either in the
+    local installed-playbooks.yml state file or in the per-target external
+    systems state file after a successful remote run.
     """
     installed = _get_installed_playbooks()
     ordered = _order_catalog(catalog)
@@ -575,6 +584,60 @@ def services_action_remote(request, playbook):
 
 
 @login_required
+def services_external_params(request, playbook):
+    """Read or save stored variables for a (target, playbook) pair.
+
+    GET returns the merged host_vars + playbook_vars for the selected target.
+    POST saves the submitted values as playbook_vars (host vars are managed on
+    the External Systems page). Password fields are not submitted, so secrets
+    are never written to the config tree.
+    """
+    if not playbook.startswith('external-services/'):
+        return JsonResponse({'error': 'Not an external playbook'}, status=400)
+    item = get_playbook(playbook)
+    if item is None:
+        return JsonResponse({'error': 'Playbook not found'}, status=404)
+    system_id = (request.POST.get('system_id') or request.GET.get('system_id') or '').strip()
+    if not system_id:
+        return JsonResponse({'error': 'No system selected'}, status=400)
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', system_id):
+        return JsonResponse({'error': 'Invalid system id'}, status=400)
+    playbook_name = playbook.split('/')[-1]
+    if request.method == 'GET':
+        ok, stdout, stderr = run_command(
+            'symbios-external-params.sh get %s %s'
+            % (shlex.quote(system_id), shlex.quote(playbook_name)), timeout=15)
+        if not ok:
+            return JsonResponse({'error': stderr or 'Read failed'}, status=500)
+        values = json.loads(stdout)
+        # Saved host vars may use namespaced keys (for example lan_ip) because
+        # per-record playbooks also use generic names such as ip. Map them onto
+        # the form field names declared in docs.params; an explicit stored
+        # value always wins over its alias.
+        for param in (item.get('docs') or {}).get('params') or []:
+            f_alias = param.get('alias')
+            f_name = param.get('name')
+            if f_alias and f_name and f_name not in values and f_alias in values:
+                values[f_name] = values[f_alias]
+        return JsonResponse({'vars': values})
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=400)
+    try:
+        values = json.loads(request.POST.get('params', '{}'))
+    except ValueError:
+        return JsonResponse({'error': 'Invalid parameters'}, status=400)
+    if not isinstance(values, dict):
+        return JsonResponse({'error': 'Invalid parameters'}, status=400)
+    ok, stdout, stderr = run_command(
+        'symbios-external-params.sh set %s %s --json-stdin'
+        % (shlex.quote(system_id), shlex.quote(playbook_name)),
+        timeout=30, stdin_data=json.dumps(values))
+    if not ok:
+        return JsonResponse({'error': (stderr or stdout or 'Save failed').strip()}, status=400)
+    return JsonResponse({'ok': True, 'message': 'Parameters saved for %s.' % system_id})
+
+
+@login_required
 def services_inventory_remote(request, playbook):
     """List the resources an external playbook manages on a target.
 
@@ -930,15 +993,9 @@ def services_status(request, playbook):
     states = [s['state'] for s in out]
     overall = _aggregate_state(states)
 
-    # A service is "installed" if and only if it is registered in the
-    # installed-playbooks.yml state file (managed by symbios-state.sh).
-    installed = False
-    try:
-        from .utils.ssh_exec import run_command as _run_command
-        ok, _, _ = _run_command(f'symbios-state.sh is-installed {playbook}', timeout=5)
-        installed = ok
-    except Exception:
-        pass
+    # Use the same state source as the sidebar so a successfully installed
+    # external playbook is not shown as "not installed" on its detail page.
+    installed = playbook in _get_installed_playbooks()
 
     return JsonResponse({
         'services': out,

@@ -5,172 +5,146 @@
 
 ## What this service is
 
-Deploys an OpenWrt router as a QEMU/KVM virtual machine and **preconfigures** it
-on first boot so it behaves like the linux-setups OpenWrt router at
-`/data-crypt/share/github/linux-setups/openwrt/`, adapted to the VM context and
-to OpenWrt 25.x (apk package manager).
+Deploys an OpenWrt router as a QEMU/KVM virtual machine and applies a **minimal
+first-boot preconfiguration** so the VM is reachable over the network (SSH and
+HTTP/HTTPS via Traefik) and the host stays present in every internal segment.
+
+Service and router configuration beyond reachability is **not** baked in here.
+It is the responsibility of the `external-services/openwrt_*` playbooks and can
+be applied as needed (per admin/user choice):
+
+| Topic | Playbook(s) |
+|-------|-------------|
+| System basics (timezone/NTP/hostname, packages, addressing, DHCP/DNS policy) | `openwrt_basics.yml` |
+| Remote syslog | `openwrt_logserver.yml` |
+| DNSCrypt/DoH resolver | `openwrt_dnscrypt-proxy.yml` |
+| Tor segment / transparent proxy | `openwrt_tor.yml` |
+| IoT segment policy | `openwrt_iot.yml` |
+| OpenVPN servers | `openwrt_openvpn-tor.yml`, `openwrt_openvpn-iot.yml`, `openwrt_openvpn-lan.yml` |
+| WireGuard servers/clients | `openwrt_wireguard-lan*.yml`, `openwrt_wireguard-tor*.yml` |
+| SMTP relay | `openwrt_smtp.yml` |
+| Netboot (PXE/TFTP) | `openwrt_netboot.yml` |
+| Firewall, DDNS, DNS records, wireless, ... | other `external-services/openwrt_*` playbooks |
 
 The VM owns the `.1` / `::1` gateway on every internal segment; the host
 bridges are L2 switches that additionally take a DHCP address from the
 segment's dnsmasq, so the host is directly reachable inside every segment.
-This mirrors the linux-setups controller role where the OpenWrt box is the
-router for dedicated LAN/VLAN segments.
 
 ## Topology
 
 ```
 WAN   eth0  192.168.41.201/24   base-services bridge (same L2 as Docker/Traefik)
                                     gw 192.168.41.1 (host), NAT to uplink,
-                                    IPv6 GUA ::201/64 (host NDP-proxies ::1)
-LAN   eth1  172.18.0.1/24       openwrt-lan bridge (L2 + host DHCP)   ULA fd00:18:0::/64
+                                    IPv4 only (no bogus IPv6 default route)
+LAN   br-lan (port eth1) 172.18.0.1/24   openwrt-lan bridge (L2 + host DHCP)  ULA fd00:18::/64
 IOT   br-iot (port eth2) 172.18.1.1/24   openwrt-iot bridge (L2 + host DHCP)  ULA fd00:18:1::/64
 TOR   br-tor (port eth3) 172.18.2.1/24   openwrt-tor bridge (L2 + host DHCP)  ULA fd00:18:2::/64
 MISC  eth4  172.18.3.1/24       openwrt-misc bridge (L2 + host DHCP)  ULA fd00:18:3::/64
 ```
 
-- iot/tor are **bridged inside the VM** (`br-iot`/`br-tor` with `eth2`/`eth3` as
-  bridge ports) so the OpenVPN `tap1`/`tap2` devices can be attached - the same
-  layout as linux-setups. lan/misc use `eth1`/`eth4` directly.
-- Host bridges (`openwrt-lan/-iot/-tor/-misc`) use Deterministic MACs
-  (`02:ac:00:00:00:01`-`04`) and are managed by ifupdown in
-  `inet manual` / `inet6 manual` mode and persist across reboots. The v4 DHCP
-  lease comes from the segment's dnsmasq (host presence in every segment); a
-  systemd timer (`symbios-ow-bridge-dhcp.timer`) retries the lease while the
-  VM is still down after boot. The timer unit runs with `KillMode=process` so
-  the spawned `dhclient` daemons survive the oneshot unit's exit.
-- Clients on a segment use the VM as gateway + DHCP/DNS. All DNS is hijacked:
-  lan + misc go through the router's dnscrypt-proxy (+Tor), iot + tor through
-  dnscrypt-proxy-max (heavier blocklists).
+- lan/iot/tor are **bridged inside the VM** (`br-lan`/`br-iot`/`br-tor` with
+  `eth1`/`eth2`/`eth3` as bridge ports). This matches the physical OpenWrt
+  routers (`network.lan.device=br-lan`) and the device assumptions of the
+  `external-services/openwrt_*` playbooks; OpenVPN tap devices can be attached
+  to those bridges later. misc uses `eth4` directly.
+- Host bridges (`openwrt-lan/-iot/-tor/-misc`) use deterministic MACs
+  (`02:ac:00:00:00:01`-`04`) and are managed by ifupdown in `inet manual` /
+  `inet6 manual` mode and persist across reboots. The v4 DHCP lease comes from
+  the segment's dnsmasq (host presence in every segment); a systemd timer
+  (`symbios-ow-bridge-dhcp.timer`) retries the lease while the VM is still down
+  after boot.
+- Clients on a segment use the VM as gateway + DHCP/DNS.
 
 ## First-boot scripts (injected into the image)
 
-Three files are injected into the root filesystem at build time and run on the
-VM's first boot:
+Three files are injected into the root filesystem at build time and run once on
+the VM's first boot. Because they run only via uci-defaults, **rerunning the
+`openwrt-vm` playbook never overwrites settings applied by
+`external-services/openwrt_*` playbooks** (a rerun only updates the host/Traefik
+side and VM resources, not the VM's in-guest configuration).
 
 | File | Phase | What it does |
 |------|-------|--------------|
 | `/etc/uci-defaults/98-openwrt-network` | offline | WAN + internal interfaces/bridges, static IPv4 + IPv6, DAD off |
-| `/etc/uci-defaults/99-openwrt-preconfig` | offline | firewall (wan/lan/iot/tor zones + rules + redirects), DHCP/DNS (4 dnsmasq instances), dnscrypt-proxy(+max), Tor, privoxy, bridged OpenVPN + easy-rsa, WireGuard uci, SSH/dropbear, remote syslog, avahi, netboot, msmtp (if inventory SMTP set) |
-| `/etc/hotplug.d/iface/80-openwrt-postconfig` + `/etc/openwrt-postconfig.sh` | online (first `wan` ifup) | apk/opkg package install, WireGuard keys, `dh.pem` + easy-rsa PKI, service enable/restart, blocklist + netboot first-run |
+| `/etc/uci-defaults/99-openwrt-preconfig` | offline | firewall (wan/lan/iot/tor zones, lan->wan forwarding), WAN reachability (dropbear SSH 22 lan + 44 wan, HTTP/HTTPS 80/443), DHCP/DNS for all four segments (host-bridge presence), suppress LuCI attended-sysupgrade first-login prompt |
+| `/etc/hotplug.d/iface/80-openwrt-postconfig` + `/etc/openwrt-postconfig.sh` | online (first `wan` ifup) | minimal package install, baseline service enable/restart |
 
 Templates live in `services/openwrt-vm/templates/` and are rendered by the
-playbook from `ow_networks` + `openwrt_*`/`openwrt_*` variables.
+playbook from `ow_networks` + `openwrt_packages`.
 
-### linux-setups playbook mapping
+## External playbook parameters
 
-The preconfig script is the consolidated first-boot equivalent of the
-`/data-crypt/share/github/linux-setups/openwrt/` playbooks. Each section header
-names the playbook(s) it consolidates:
+The VM is registered as external system `openwrt-vm` (SSH port 44, key-only).
+Target-wide values are saved with `symbios-external-params.sh` in
+`external-systems/host_vars/openwrt-vm.yml` so the `external-services/openwrt_*`
+playbooks do not need them typed on every run:
 
-| linux-setups playbook | preconfig section |
-|-----------------------|-------------------|
-| `basics.yml` | §1 (timezone/hostname + `irqbalance`) |
-| `logserver.yml` | §2 (remote syslog to `{{ vm_gateway }}`) |
-| `ssh.yml` | §3 (dropbear lan 22 / wan 44, key-only) |
-| `firewall.yml` | §4 (zones, forwardings, wan exposes) |
-| `firewall_allow_internet.yml` | §4 (`rule_forward_internet_all`: lan->wan 1-65535) |
-| `firewall_hijack_connections.yml` | §4 (lan dns/ntp to self, iot/tor to their dnsmasq) |
-| `iot.yml` | §5 (br-iot 172.18.1.1, DHCP/DNS via 127.0.0.56) |
-| `tor.yml` | §6 + §13 (br-tor 172.18.2.1, Tor, privoxy, routing) |
-| `avahi.yml` | §7 (mDNS reflector eth1/br-iot/br-tor/eth4) |
-| `wireguard-lan.yml` + `wireguard-tor.yml` | §8 (wg_lan 192.168.44.1 / wg_tor 192.168.45.1) |
-| `openvpn-tor.yml` + `openvpn-iot.yml` | §9 + §16 (bridged VPN + easy-rsa + cron) |
-| `dhcp.yml` | §10 (lan + misc pools on the main dnsmasq instance) |
-| `netboot.yml` | §11 (netboot.xyz via dnsmasq tftp + cron update) |
-| `dnscrypt-proxy.yml` | §12 (6 DoH resolvers through Tor) |
-| `firewall.yml` (port-forward duplication) | §14 (dup wan redirects to iot/tor) |
-| `smtp.yml` | §15 (msmtp only when inventory SMTP set) |
+```
+lan_device=br-lan
+lan_ip=172.18.0.1
+lan_mask=255.255.255.0
+lan_ip6=fd00:18::1/64
+bridges=br-lan
+upstream_dns=172.23.0.220
+timezone=CET-1CEST,M3.5.0,M10.5.0/3
+ntp_server=172.23.0.220
+```
 
-### DNS design (adaptation to the VM)
+The namespaced `lan_*` keys avoid collisions with per-record playbooks that
+also use `ip`/`ip6`; `openwrt_basics.yml` accepts either spelling. Save
+playbook-specific values on the playbook detail page in the WebUI.
 
-The router mirrors linux-setups `dhcp.yml`: each dnsmasq instance uses its own
-resolver file. On the VM those are:
-
-| Resolver file | Upstream | Used by |
-|---------------|----------|---------|
-| `/etc/resolv.dnsmasq.lan` | `127.0.0.55` (dnscrypt-proxy via Tor) | lan + misc dnsmasq |
-| `/etc/resolv.dnsmasq.iot` / `.tor` | `127.0.0.56` (dnscrypt-proxy-max via Tor) | iot / tor dnsmasq |
-
-`openwrt_upstream_lan_dns` (default `127.0.0.55`) only drives the lan resolver
-file; the WAN interface resolver and the postconfig package-install bootstrap
-use `vm_dns` (`network.wan.dns` + the temporary `/etc/resolv.conf`), so the
-router itself never depends on its own Tor/DNSCrypt chain for the initial
-package install. `network.lan.dns` is intentionally left unset - netifd would
-otherwise merge it with `wan.dns` into `/etc/resolv.conf` on every boot.
-
-The postconfig only writes `/etc/openwrt-postconfig.done` when the package
-phase succeeded. On package errors it logs to `/var/log/openwrt-package-errors.log`
-and retries on the next `wan` ifup (`ifdown wan && ifup wan` or
-`ubus call network.interface.wan up` to force it).
-
-## Services / ports exposed
+## Services / ports exposed (baseline)
 
 | Service | Port | Scope |
 |---------|------|-------|
-| LuCI (Traefik, Authelia) | 80/443 | internet |
+| LuCI (Traefik, Authelia) | 80/443 | internet (via Traefik) |
 | dropbear SSH | 22 (lan) / 44 (wan) | key-only, root password auth disabled |
-| dnscrypt-proxy (lan/misc DNS) | 127.0.0.55:53 | router local |
-| dnscrypt-proxy-max (iot/tor DNS) | 127.0.0.56:53 | router local |
 | dnsmasq lan/misc | 53 + DHCP | lan + misc segments |
 | dnsmasq iot | 53 + DHCP on 172.18.1.x | iot segment |
 | dnsmasq tor | 53 + DHCP on 172.18.2.x | tor segment |
-| Tor | SOCKS 9050, TransPort 9040, DNS 9053 | router local |
-| privoxy | 8118 | tor segment |
-| OpenVPN torvpn | 1194 udp (wan) | bridged into br-tor (tap2) |
-| OpenVPN iotvpn | 1195 udp (wan) | bridged into br-iot (tap1) |
-| WireGuard wg_lan | 59666 udp (wan) | lan VPN |
-| WireGuard wg_tor | 59667 udp (wan) | tor VPN |
-| TFTP netboot (netboot.xyz) | 69 | lan segment |
-| avahi mDNS reflector | 5353 | between eth1, br-iot, br-tor, eth4 |
-| remote syslog | udp to 192.168.41.1 | VM -> host logserver |
 
-## Config files / directories inside the VM
+Additional ports and services (VPNs, DNSCrypt, Tor proxy, netboot, ...) are
+opened and configured by the respective `external-services/openwrt_*` playbooks.
 
-| Path | Purpose |
-|------|---------|
-| `/etc/dnscrypt-proxy2/dnscrypt-proxy.toml` (+ `-max.toml`) | DoH proxy configs (through Tor) |
-| `/etc/tor/torrc` | Tor relay/exit-policy config |
-| `/etc/nftables.d/10-tor_routing.sh` | fw4 transparent-proxy include for br-tor |
-| `/etc/scripts/dnscrypt-proxy-blocklist-update.sh` | blocklist updater (writes doh_/tor_ ipsets) |
-| `/etc/scripts/tor-nodes-blocklist-update.sh` | Tor node blocklist updater |
-| `/etc/scripts/tor_whitelist.sh` | destination whitelist for direct (non-Tor) access |
-| `/etc/scripts/netboot.sh` | downloads netboot.xyz images to /srv/tftp |
-| `/etc/scripts/firewall_port_forwards_from_wan_to_newzone.sh` | re-opens wan redirects for iot/tor |
-| `/etc/scripts/openvpn-{tor,iot}-easyrsa.sh` | PKI regeneration (restarts openvpn) |
-| `/etc/scripts/openvpn-{tor,iot}-tap-in-bridge.sh` | keeps tap devices in the bridges |
-| `/etc/wg_lan/` `/etc/wg_tor/` | WireGuard server keypairs (`server_privatekey`/`server_publickey`) |
-| `/etc/openvpn/{tor,iot}-dev2bridge.sh` | openvpn up-scripts attaching taps to br-tor/br-iot |
-| `/etc/openvpn/{tor,iot}-easy-rsa/` | easy-rsa PKI (CA + server + client certs) |
-| `/etc/msmtprc` | SMTP relay config (only when inventory SMTP is set) |
-| `/etc/avahi/avahi-daemon.conf` | mDNS reflector scope |
-| `/etc/scripts/*` | first-boot + cron helper scripts |
-| `/srv/tftp/` | netboot.xyz boot files |
+## External playbook compatibility
 
-## Cron jobs (root crontab)
+The VM is a resolver with a static RFC1918 WAN and no IPv6 uplink, and its
+internal segments use `172.18.x` / `fd00:18::` instead of the physical routers'
+`192.168.142/143` / `fd12:3456:...`. Compatibility with
+`external-services/openwrt_*` therefore falls into three groups:
 
-| Time | Job |
-|------|-----|
-| `15 4 * * *` | netboot.xyz update |
-| `15 5 * * *` | Tor node blocklist update |
-| `15 6 * * *` | dnscrypt blocklist update (+ ipsets) |
-| `1 4 * * *` / `1 5 * * *` | dup wan port-forwards to iot / tor zones |
-| `*/5 * * * *` | keep tap1/tap2 in br-iot/br-tor |
-| `*/15 * * * *` | tor whitelist ipset refresh |
-| `15 9 * * *` / `15 10 * * *` | easy-rsa PKI regeneration (tor / iot) |
+| Playbooks | Use on the VM |
+|-----------|---------------|
+| `openwrt_basics.yml`, `openwrt_iot.yml`, `openwrt_tor.yml`, `openwrt_dns_a/aaaa/cname.yml`, `openwrt_dhcp-hosts.yml`, `openwrt_firewall_*.yml`, `openwrt_logserver.yml`, `openwrt_smtp.yml`, `openwrt_autoupdate.yml` | Compatible. These read the saved host vars below; their built-in defaults still target the physical routers. |
+| `openwrt_wireguard-*.yml`, `openvpn-*`, `openwrt_asterisk.yml` | Need their segment subnets/IPs passed as extra vars (defaults target the physical routers). |
+| `openwrt_basics-slave.yml`, `openwrt_fritzbox-ipv6.yml`, `openwrt_internet_telekom_*.yml`, `openwrt_wireless*.yml`, IPv6 DDNS/forwarding | Do not run: wrong hardware or uplink model (static WAN, no radios, no v6 uplink). |
 
-## Firewall summary (preconfig)
+Saved target-wide vars for `openwrt-vm` live in
+`external-systems/host_vars/openwrt-vm.yml` and currently are:
 
-- Zones: `wan` (ACCEPT in, masq, no offload - virtio NIC), `lan` (+misc, ACCEPT),
-  `iot` (REJECT), `tor` (REJECT). Forwardings lan->wan, lan->iot, lan->tor.
-- Redirects hijack DNS (53) + NTP (123) from every zone to the router itself
-  (lan/misc) or to the iot/tor dnsmasq addresses.
-- wan exposed: 80/443, ssh 22 + 44, icmp, openvpn 1194/1195, wireguard 59666/59667.
-- `rule_forward_internet_all`: lan -> wan tcp/udp 1-65535 ACCEPT.
-- DOH server IPs and Tor node IPs are filled into `doh_ipv4/6` + `tor_ipv4/6`
-  nft sets by the blocklist cron scripts; `tor_whitelist` (from
-  `/etc/tor_whitelist`) bypasses Tor for whitelisted destinations.
-- `10-tor_routing.sh` transparently DNATs tor-segment TCP (except local ranges,
-  Tor nodes, whitelisted 443) to `172.18.2.1:9040`.
+```
+lan_device=br-lan           lan_ip=172.18.0.1        lan_mask=255.255.255.0
+lan_ip6=fd00:18::1/64       bridges=br-lan           upstream_dns=172.23.0.220
+timezone=CET-1CEST,M3.5.0,M10.5.0/3                  ntp_server=172.23.0.220
+ipv6_uplink=false
+iot_device=br-iot           iot_ip=172.18.1.1        iot_netmask=255.255.255.0
+iot_subnet=172.18.1.0/24    iot_v6=fd00:18:1::1      iot_ip6=fd00:18:1::1/64
+iot_prefix=fd00:18:1::/64   iot_upstream_dns=172.23.0.220
+iot_net_prefix=172.18.1.
+tor_device=br-tor           tor_ip=172.18.2.1        tor_netmask=255.255.255.0
+tor_subnet=172.18.2.0/24    tor_v6=fd00:18:2::1      tor_ip6=fd00:18:2::1/64
+tor_prefix=fd00:18:2::/64   tor_dns=172.18.2.1       tor_upstream_dns=172.23.0.220
+tor_printer_ip=172.18.1.1   tor_net_prefix=172.18.2.
+```
+
+`ipv6_uplink=false` keeps `openwrt_basics.yml`, `openwrt_iot.yml` and
+`openwrt_tor.yml` from advertising an IPv6 default route that the VM cannot
+provide; the default (`true`) is unchanged for physical routers. The segment
+defaults (`192.168.142/143`, `fd12:3456:142/143`) remain valid for physical
+routers; the VM host vars override them without touching those defaults.
+Values are saved with `symbios-external-params.sh` and merged by
+`symbios-run-remote-playbook.sh` before runtime stdin values.
 
 ## Fresh install / reset
 
@@ -181,30 +155,28 @@ and retries on the next `wan` ifup (`ifdown wan && ifup wan` or
   `virsh console openwrt`.
 - To rebuild from scratch: uninstall the service via the WebUI or remove
   `services_root/openwrt-vm/images/openwrt.qcow2` + `virsh undefine openwrt --nvram`
-  and re-run the playbook.
+  and re-run the playbook. A fresh image runs the minimal preconfig again on its
+  first boot.
 
 ## Notes and caveats
 
-- Package install uses `apk` on OpenWrt 25.x (opkg fallback); bootstrap DNS
-  temporarily points at `{{ vm_dns }}` and is restored right after.
-- Two package-install clobber cases are handled in the templates: the dnsmasq
-  package ships `/etc/config/dhcp` with `enabled`/factory defaults, so the
-  offline preconfig cannot rely on its own UCI values surviving apk; the
-  postconfig re-asserts `irqbalance.irqbalance.enabled='1'` after the package
-  phase (the preconfig commit is overwritten by the installed package config).
-  The DHCP/DNS reset (`while uci delete dhcp.@dnsmasq[0] / @dhcp[0]`) must run
-  *before* the iot/tor sections in the preconfig - placed at the start of §5.
+- The minimal postconfig only writes `/etc/openwrt-postconfig.done` when the
+  package phase succeeded. On package errors it logs to
+  `/var/log/openwrt-package-errors.log` and retries on the next `wan` ifup.
+- The DHCP/DNS reset (`while uci delete dhcp.@dnsmasq[0] / @dhcp[0]`) must run
+  before the segment sections in the preconfig so the iot/tor instances survive.
   Verify after a fresh build: `uci show dhcp | grep =dnsmasq` shows
-  `lan_dnsmasq`, `iot_dnsmasq`, `tor_dnsmasq`, and `ps w | grep 'dnsmasq -C'`
-  shows the three instances plus a running `irqbalance`.
-- `kmod-wireguard` may not exist on every target/version - failures are logged
-  and retried (WireGuard interfaces only come up once the kernel module exists).
-- `openwrt_timezone` defaults to the tzdb name (musl maps it directly); override
-  with a POSIX string for glibc images.
+  `lan_dnsmasq`, `iot_dnsmasq`, `tor_dnsmasq`.
+- The VM WAN deliberately has no IPv6 default route. The host may only have a
+  ULA prefix or a delegated prefix without a reachable `::1` gateway; a bogus
+  default route makes `wget` prefer IPv6 and fail with `Operation not
+  permitted`. Internal ULA segments still provide IPv6 for the external
+  OpenWrt playbooks.
+- The preconfig leaves timezone/NTP, remote syslog, upstream DNS policy, mDNS
+  reflection and advanced firewall policies to the external-services playbooks.
+  The main lan/misc resolver initially forwards via `vm_dns`
+  (`/etc/resolv.dnsmasq.lan`); `openwrt_dnscrypt-proxy.yml` repoints it to a
+  local DoH proxy when applied.
 - The remaining feature playbooks under `services/openwrt-vm/features/`
-  (`ddns-ipv6.yml`, `dhcp-hosts.yml`, `dns_a.yml`) cover only user-specific
-  DNS entries that are **not** baked into the build-time preconfig. The former
-  VM features (iot, wireless, wireguard, dnscrypt, ssh, logserver, smtp,
-  host-bridge/passthrough, DynDNS IPv4) were removed because the playbook now
-  bakes the network/router setup into the VM at build time or they are no
-  longer needed.
+  (`ddns-ipv6.yml`, `dhcp-hosts.yml`, `dns_a.yml`) cover user-specific DNS
+  entries. Configure them via the WebUI Features tab.

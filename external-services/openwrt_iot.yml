@@ -46,22 +46,34 @@
     managed_playbook: "openwrt_iot.yml"
     managed_ref: ""
     managed_resource_type: "iot"
+
+    # Segment parameters: the defaults match the physical routers. Saved host
+    # vars for the OpenWrt VM override them (extra vars beat playbook vars).
+    iot_device: "br-iot"
+    iot_ip: "192.168.143.1"
+    iot_netmask: "255.255.255.0"
+    iot_subnet: "192.168.143.0/24"
+    iot_v6: "fd12:3456:143::1"
+    iot_ip6: "fd12:3456:143::1/64"
+    iot_prefix: "fd12:3456:143::/64"
+    iot_upstream_dns: "127.0.0.56"
+    ipv6_uplink: true
     uci_vars:
       # Bridge device for iot network
       - { key: "network.iot_dev", value: "device" }
-      - { key: "network.iot_dev.name", value: "br-iot" }
+      - { key: "network.iot_dev.name", value: "{{ iot_device }}" }
       - { key: "network.iot_dev.type", value: "bridge" }
       - { key: "network.iot_dev.bridge_empty", value: "0" }
 
       # iot network (uses br-iot device with static IP)
       - { key: "network.iot", value: "interface" }
-      - { key: "network.iot.device", value: "br-iot" }
+      - { key: "network.iot.device", value: "{{ iot_device }}" }
       - { key: "network.iot.ipv6", value: "1" }
       - { key: "network.iot.proto", value: "static" }
-      - { key: "network.iot.ipaddr", value: "192.168.143.1" }
-      - { key: "network.iot.netmask", value: "255.255.255.0" }
-      - { key: "network.iot.dns", value: "192.168.143.1" }
-      - { key: "network.iot.ip6addr", value: "fd12:3456:143::1/64" }
+      - { key: "network.iot.ipaddr", value: "{{ iot_ip }}" }
+      - { key: "network.iot.netmask", value: "{{ iot_netmask }}" }
+      - { key: "network.iot.dns", value: "{{ iot_ip }}" }
+      - { key: "network.iot.ip6addr", value: "{{ iot_ip6 }}" }
 
       # dhcp for iot network
       - { key: "dhcp.iot", value: "dhcp" }
@@ -77,7 +89,7 @@
       # managed-config sets the M flag so clients use stateful DHCPv6
       - { key: "dhcp.iot.ra_flags", value: "managed-config" }
       # Only the resolver advertises a v6 default route, see openwrt_basics.yml.
-      - { key: "dhcp.iot.ra_default", value: "{{ '1' if resolver_role.stdout | trim == 'resolver' else '0' }}" }
+      - { key: "dhcp.iot.ra_default", value: "{{ '1' if resolver_role.stdout | trim == 'resolver' and (ipv6_uplink | bool) else '0' }}" }
       - { key: "dhcp.iot.ra_lifetime", value: '1800' }
       - { key: "dhcp.iot.force", value: "1" }
       - { key: "dhcp.iot.dhcp_option", value: "119,iot,lan" }
@@ -87,8 +99,8 @@
       - { key: "dhcp.iot_dnsmasq.domain", value: "iot" }
       - { key: "dhcp.iot_dnsmasq.resolvfile", value: "/etc/resolv.dnsmasq.iot" }
       - { key: "dhcp.iot_dnsmasq.leasefile", value: "/tmp/dhcp.iot.leases" }
-      - { key: "dhcp.iot_dnsmasq.listen_address", value: "192.168.143.1" }
-      - { key: "dhcp.iot_dnsmasq.listen_address", value: "fd12:3456:143::1" }
+      - { key: "dhcp.iot_dnsmasq.listen_address", value: "{{ iot_ip }}" }
+      - { key: "dhcp.iot_dnsmasq.listen_address", value: "{{ iot_v6 }}" }
       - { key: "dhcp.iot_dnsmasq.logqueries", value: "1" }
       - { key: "dhcp.iot_dnsmasq.authoritative", value: "1" }
       - { key: "dhcp.iot_dnsmasq.sequential_ip", value: "1" }
@@ -136,8 +148,8 @@
       - { key: "firewall.rule_allow_dns_iot.proto",     value: "udp" }
       - { key: "firewall.rule_allow_dns_iot.dest_port", value: "53" }
       - { key: "firewall.rule_allow_dns_iot.target",    value: "ACCEPT" }
-      - { key: "firewall.rule_allow_dns_iot.src_ip",  value: "192.168.143.0/24" }
-      - { key: "firewall.rule_allow_dns_iot.dest_ip", value: "192.168.143.1" }
+      - { key: "firewall.rule_allow_dns_iot.src_ip",  value: "{{ iot_subnet }}" }
+      - { key: "firewall.rule_allow_dns_iot.dest_ip", value: "{{ iot_ip }}" }
 
       # Allow-DNS-ITOLAN ipv6
       - { key: "firewall.rule_allow_dns_iot6",      value: "rule" }
@@ -146,8 +158,8 @@
       - { key: "firewall.rule_allow_dns_iot6.proto",     value: "udp" }
       - { key: "firewall.rule_allow_dns_iot6.dest_port", value: "53" }
       - { key: "firewall.rule_allow_dns_iot6.target",    value: "ACCEPT" }
-      - { key: "firewall.rule_allow_dns_iot6.src_ip",  value: "fd12:3456:143::/64" }
-      - { key: "firewall.rule_allow_dns_iot6.dest_ip", value: "fd12:3456:143::1" }
+      - { key: "firewall.rule_allow_dns_iot6.src_ip",  value: "{{ iot_prefix }}" }
+      - { key: "firewall.rule_allow_dns_iot6.dest_ip", value: "{{ iot_v6 }}" }
 
       # Allow-NTP-IOTLAN
       - { key: "firewall.rule_allow_ntp_iot",      value: "rule" }
@@ -156,8 +168,8 @@
       - { key: "firewall.rule_allow_ntp_iot.proto",     value: "udp" }
       - { key: "firewall.rule_allow_ntp_iot.dest_port", value: "123" }
       - { key: "firewall.rule_allow_ntp_iot.target",    value: "ACCEPT" }
-      - { key: "firewall.rule_allow_ntp_iot.src_ip",  value: "192.168.143.0/24" }
-      - { key: "firewall.rule_allow_ntp_iot.dest_ip", value: "192.168.143.1" }
+      - { key: "firewall.rule_allow_ntp_iot.src_ip",  value: "{{ iot_subnet }}" }
+      - { key: "firewall.rule_allow_ntp_iot.dest_ip", value: "{{ iot_ip }}" }
 
       # Allow-NTPv6-IOTLAN
       - { key: "firewall.rule_allow_ntpv6_iot",      value: "rule" }
@@ -165,8 +177,8 @@
       - { key: "firewall.rule_allow_ntpv6_iot.src",  value: "iot" }
       - { key: "firewall.rule_allow_ntpv6_iot.proto",value: "udp" }
       - { key: "firewall.rule_allow_ntpv6_iot.dest_port", value: "123" }
-      - { key: "firewall.rule_allow_ntpv6_iot.src_ip",   value: "fd12:3456:143::/64" }
-      - { key: "firewall.rule_allow_ntpv6_iot.dest_ip",  value: "fd12:3456:143::1" }
+      - { key: "firewall.rule_allow_ntpv6_iot.src_ip",   value: "{{ iot_prefix }}" }
+      - { key: "firewall.rule_allow_ntpv6_iot.dest_ip",  value: "{{ iot_v6 }}" }
       - { key: "firewall.rule_allow_ntpv6_iot.family",   value: "ipv6" }
       - { key: "firewall.rule_allow_ntpv6_iot.target",   value: "ACCEPT" }
 
@@ -187,8 +199,8 @@
       - { key: "firewall.rule_allow_icmp_ping_iot.proto",    value: "icmp" }
       - { key: "firewall.rule_allow_icmp_ping_iot.icmp_type",    value: "echo-request" }
       - { key: "firewall.rule_allow_icmp_ping_iot.name",     value: "ansible_allow_icmp_ping_iot" }
-      - { key: "firewall.rule_allow_icmp_ping_iot.src_ip",  value: "192.168.143.0/24" }
-      - { key: "firewall.rule_allow_icmp_ping_iot.dest_ip", value: "192.168.143.1" }
+      - { key: "firewall.rule_allow_icmp_ping_iot.src_ip",  value: "{{ iot_subnet }}" }
+      - { key: "firewall.rule_allow_icmp_ping_iot.dest_ip", value: "{{ iot_ip }}" }
 
       # ICML/ping6
       - { key: "firewall.rule_allow_icmpv6_ping_iot",           value: "rule" }
@@ -198,8 +210,8 @@
       - { key: "firewall.rule_allow_icmpv6_ping_iot.proto",     value: "icmp" }
       - { key: "firewall.rule_allow_icmpv6_ping_iot.icmp_type", value: "echo-request" }
       - { key: "firewall.rule_allow_icmpv6_ping_iot.target",    value: "ACCEPT" }
-      - { key: "firewall.rule_allow_icmpv6_ping_iot.src_ip",   value: "fd12:3456:143::/64" }
-      - { key: "firewall.rule_allow_icmpv6_ping_iot.dest_ip",  value: "fd12:3456:143::1" }
+      - { key: "firewall.rule_allow_icmpv6_ping_iot.src_ip",   value: "{{ iot_prefix }}" }
+      - { key: "firewall.rule_allow_icmpv6_ping_iot.dest_ip",  value: "{{ iot_v6 }}" }
 
 
   tasks:
@@ -207,7 +219,7 @@
     - name: use local upstream dns
       raw: |
         cat << 'EOF' > /etc/resolv.dnsmasq.iot
-        nameserver 127.0.0.56
+        nameserver {{ iot_upstream_dns }}
         EOF
       changed_when: false
 

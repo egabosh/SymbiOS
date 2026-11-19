@@ -18,10 +18,8 @@
 #   uses_vars:
 #     - acme_resolver
 #     - base_domain
-#     - timezone
-#     - twofa_enabled
 #   name: OpenWrt VM
-#   short_description: OpenWrt QEMU/KVM router VM with preconfigured routing, DNS, Tor and VPNs
+#   short_description: OpenWrt QEMU/KVM router VM (SSH + LuCI reachable, further config via external-services/openwrt_*)
 #   url: "https://openwrt.{{ base_domain }}"
 #   access:
 #     user_group: openwrt-vm
@@ -39,27 +37,34 @@
 #     Networks:
 #       WAN: base-services bridge (192.168.41.201/24) - same L2 as Docker
 #       Internal (4 host bridges, L2 + per-bridge DHCP for host presence, the VM owns the gateways):
-#         - openwrt-lan  (172.18.0.0/24):  VM eth1        = 172.18.0.1
-#         - openwrt-iot  (172.18.1.0/24):  VM br-iot      = 172.18.1.1 (bridged; port eth2, OpenVPN tap1 attaches here)
-#         - openwrt-tor  (172.18.2.0/24):  VM br-tor      = 172.18.2.1 (bridged; port eth3, OpenVPN tap2 attaches here)
+#         - openwrt-lan  (172.18.0.0/24):  VM br-lan      = 172.18.0.1 (bridged; port eth1)
+#         - openwrt-iot  (172.18.1.0/24):  VM br-iot      = 172.18.1.1 (bridged; port eth2)
+#         - openwrt-tor  (172.18.2.0/24):  VM br-tor      = 172.18.2.1 (bridged; port eth3)
 #         - openwrt-misc (172.18.3.0/24):  VM eth4        = 172.18.3.1
 #       Every internal segment runs its own dnsmasq/DHCP on the VM and gets a
 #       ULA /64 (fd00:18:<n>::/64). Clients set their gateway to 172.18.x.1.
 #
-#     Preconfiguration (mirrors the linux-setups/openwrt playbooks, adapted
-#     to the VM and to OpenWrt 25.x / apk). Three files are injected into the
-#     image and run on first boot:
+#     Preconfiguration (minimal, to reach the VM over the network). Three files
+#     are injected into the image and run once on first boot:
 #       - /etc/uci-defaults/98-openwrt-network:  WAN + internal interfaces
 #       - /etc/uci-defaults/99-openwrt-preconfig: firewall (wan/lan/iot/tor
-#         zones), DHCP/DNS (lan/misc/iot/tor dnsmasq instances, DoH hijack
-#         redirects), dnscrypt-proxy(+max) through Tor, Tor + privoxy,
-#         bridged OpenVPN servers (1194/1195) incl. easy-rsa + dev2bridge,
-#         WireGuard servers (59666/59667), SSH (dropbear 22 lan + 44 wan),
-#         remote syslog to the host, avahi mDNS reflector, netboot TFTP,
-#         and, when inventory SMTP is set, an msmtp relay.
+#         zones, lan->wan forwarding), WAN reachability (dropbear SSH 22 + 44
+#         key-only, HTTP 80 + HTTPS 443 for Traefik), DHCP/DNS for all four
+#         segments (host-bridge presence), and suppresses the LuCI
+#         attended-sysupgrade first-login prompt. No VPNs, no DNSCrypt/Tor, no
+#         logserver, no SMTP, no netboot - those are external-services.
 #       - /etc/hotplug.d/iface/80-openwrt-postconfig + /etc/openwrt-postconfig.sh:
-#         online part once the WAN is up (apk package install, WireGuard keys,
-#         dh.pem + PKI, service enable/restart, blocklist + netboot first-run).
+#         online part once the WAN is up (minimal package install, baseline
+#         service enable/restart). Completion marker
+#         /etc/openwrt-postconfig.done; on package errors it is retried on the
+#         next wan ifup.
+#
+#     Service and router configuration beyond reachability is the responsibility
+#     of the external-services/openwrt_* playbooks (basics, logserver, tor, iot,
+#     dnscrypt-proxy, openvpn-*/wireguard-*, smtp, netboot, ...). Run them
+#     against the VM as needed. The first-boot preconfig only runs once
+#     (uci-defaults), so rerunning this playbook never overwrites settings
+#     applied by external-services playbooks.
 #
 #     Access:
 #       Web interface (LuCI): https://openwrt.{{ base_domain }}
@@ -67,25 +72,16 @@
 #         - Credentials: root / password stored in env file
 #       Serial console: virsh console openwrt
 #       SSH: root@192.168.41.201 (dropbear, lan 22 / internet 44, keys only)
-#       OpenVPN: wan UDP 1194 (tor) / 1195 (iot) - bridged into br-tor/br-iot
-#       WireGuard: wan UDP 59666 (wg_lan) / 59667 (wg_tor)
 #       LAN clients: attach to openwrt-lan, gateway = 172.18.0.1 (VM)
 #
-#     First boot: 98 + 99 configure everything offline, the postconfig trigger
-#     installs packages when the WAN is up (completion marker
-#     /etc/openwrt-postconfig.done; on package errors it is retried on the
-#     next wan ifup). Blocklists + netboot refresh daily via cron.
 #     IPv6: WAN uses a host-detected GUA prefix (::201, gw ::1 via NDP proxy).
 #     Disk: {{ vm_disk_gb }} GB (sparse qcow2, rootfs grown at build time).
 #
 #     Features: This service exposes configurable features via the feature plugin
-#     system (services/openwrt-vm/plugin.yml). The remaining features cover only
-#     what the build-time preconfig does not hardcode: host-side interfaces/WiFi
-#     passthrough and user-specific DynDNS/DHCP/DNS entries. VM-side network
-#     features (iot, wireguard, dnscrypt, ssh, logserver, smtp) were removed -
-#     they are now baked into the VM at build time. Configure via the WebUI Features tab.
+#     system (services/openwrt-vm/plugin.yml) for user-specific DynDNS/DHCP/DNS
+#     entries. Configure via the WebUI Features tab.
 #   author: Oliver Bohlen
-#   version: '3.0'
+#   version: '3.1'
 #   license: GPLv3
 #   copyright: Copyright (c) 2026, Oliver Bohlen
 #   min_ansible_version: '2.11'
@@ -137,15 +133,21 @@
     # Internal networks: the VM owns the .1 / ::1 gateways (mirrors the
     # linux-setups router role). The host bridges are pure L2 (no IPs),
     # so there are no address conflicts between host and VM.
+    # LAN uses br-lan (port eth1) by default, matching the physical OpenWrt
+    # routers and the external-services/openwrt_* playbooks.
+    lan_device: "br-lan"
+    lan_ip: "172.18.0.1"
+    lan_ip6: "fd00:18::1/64"
     lan_netmask: "255.255.255.0"
     # VM root filesystem size (sparse qcow2, grown at image build time).
     vm_disk_gb: 5
-    # The four internal segments. device = interface inside the VM; the iot
-    # and tor segments are bridged (br-iot/br-tor with eth2/eth3 as bridge
-    # ports) so the OpenVPN tap devices can be attached later. ip/ip6 are the
-    # VM-side gateways; the host bridge carries the same name with no address.
-    # tor_ip/tor_ip6 must stay in sync with the tor entry above (used by the
-    # nftables tor-routing script).
+    # The four internal segments. device = L3 interface inside the VM; lan,
+    # iot and tor are bridges (br-lan/br-iot/br-tor with eth1/eth2/eth3 as
+    # bridge ports) so the OpenWrt VPN tap devices can be attached later and
+    # the device layout matches the physical routers. misc stays on eth4.
+    # ip/ip6 are the VM-side gateways; the host bridge carries the same name
+    # with no address. tor_ip/tor_ip6 must stay in sync with the tor entry
+    # below (used by the nftables tor-routing script).
     tor_ip: "172.18.2.1"
     tor_ip6: "fd00:18:2::1"
     # mac: deterministic, locally-administered hardware address for the host
@@ -155,77 +157,24 @@
     # port and re-sends to the port instead of the local stack - the host
     # never receives the OFFER. hwaddress below breaks that collision.
     ow_networks:
-      - { name: openwrt-lan, bridge: openwrt-lan, device: eth1, uci: lan, mac: "02:ac:00:00:00:01", ip: "172.18.0.1", ip6: "fd00:18:0::1/64" }
+      - { name: openwrt-lan, bridge: openwrt-lan, device: "{{ lan_device }}", bridge_ports: "eth1", uci: lan, mac: "02:ac:00:00:00:01", ip: "{{ lan_ip }}", ip6: "{{ lan_ip6 }}" }
       - { name: openwrt-iot, bridge: openwrt-iot, device: br-iot, bridge_ports: "eth2", uci: iot, mac: "02:ac:00:00:00:02", ip: "172.18.1.1", ip6: "fd00:18:1::1/64" }
       - { name: openwrt-tor, bridge: openwrt-tor, device: br-tor, bridge_ports: "eth3", uci: tor, mac: "02:ac:00:00:00:03", ip: "{{ tor_ip }}", ip6: "{{ tor_ip6 }}/64" }
       - { name: openwrt-misc, bridge: openwrt-misc, device: eth4, uci: misc, mac: "02:ac:00:00:00:04", ip: "172.18.3.1", ip6: "fd00:18:3::1/64" }
     # ── OpenWrt preconfiguration variables (rendered into the first-boot
     #    scripts, see services/openwrt-vm.md + templates/). ────────────────
-    openwrt_hostname: "openwrt"
-    # zonename = TZ database name; timezone is the POSIX form expected by UCI.
-    # The stock OpenWrt (musl) accepts the tzdb name in /etc/TZ too, so both
-    # default to the inventory timezone; override openwrt_timezone with a
-    # POSIX string (e.g. 'EST5EDT,M3.2.0,M11.1.0') for glibc images.
-    openwrt_zonename: "{{ timezone | default('UTC') }}"
-    openwrt_timezone: "{{ openwrt_zonename }}"
-    openwrt_ntp_servers: "0.openwrt.pool.ntp.org"
-    # Upstream resolver for the main lan/misc dnsmasq instance (mirror of the
-    # OpenWrt router's dhcp.yml `upstream_dns`): dnscrypt-proxy on 127.0.0.55,
-    # which resolves through Tor (socks5://127.0.0.1:9050). The WAN interface
-    # resolver and the online postconfig bootstrap use vm_dns instead
-    # (network.wan.dns + the temporary resolv.conf during the apk install).
-    openwrt_upstream_lan_dns: "127.0.0.55"
-    # remote syslog: the VM sends its logs to the host gateway (192.168.41.1)
-    openwrt_logserver_ip: "{{ vm_gateway }}"
-    # avahi mDNS reflector scope (lan + iot/tor bridges + misc)
-    openwrt_internal_interfaces: "eth1 br-iot br-tor eth4"
-    # OpenVPN client hostnames baked into the easy-rsa scripts (empty = none)
-    openvpn_tor_clients: []
-    openvpn_iot_clients: []
-    # packages installed by the postconfig via apk/opkg once the WAN is up.
-    # Adapted from linux-setups/openwrt (basics minus USB-stick packages,
-    # plus the per-service packages); MSMTP is appended when inventory SMTP
-    # is configured. kmod packages live in openwrt_kernel_packages because
-    # they may not exist on every target/version (soft-fail, logged).
+    # Minimal package baseline installed by the postconfig via apk/opkg once the
+    # WAN is up. dnsmasq + odhcpd are included as guards in case the image does
+    # not ship them. Additional packages (tools, DNSCrypt, Tor, VPNs, SMTP, ...)
+    # are installed by the external-services/openwrt_* playbooks as needed.
     openwrt_packages:
-      - strace
-      - rsync
-      - tmux
-      - htop
-      - diffutils
       - bash
-      - fdisk
-      - bind-host
-      - whois
-      - coreutils-date
-      - openssh-client
-      - openssh-keygen
-      - vim
-      - procps-ng-watch
-      - coreutils-nice
       - curl
-      - coreutils-df
       - tcpdump
-      - e2fsprogs
-      - irqbalance
-      - telnet-bsd
-      - coreutils-base64
-      - nano-full
-      - less
-      - blkid
-      - luci-mod-rpc
-      - dnscrypt-proxy2
-      - tor
-      - tor-geoip
-      - privoxy
-      - openvpn
-      - openvpn-easy-rsa
-      - avahi-daemon
-      - avahi-dbus-daemon
-      - avahi-utils
-      - wireguard-tools
-    openwrt_kernel_packages:
-      - kmod-wireguard
+      - openssh-client
+      - dnsmasq
+      - odhcpd
+
 
   tasks:
 
@@ -412,23 +361,30 @@
         - uplink_interface | default('') | length == 0
 
     # ── Detect IPv6 prefix from uplink ───────────────────────────────────
-    # Extract the first 4 groups of the host's global IPv6 address on the
-    # uplink in fully expanded form (every group with its leading zeros), so
-    # appending "::/64" always yields a valid prefix. The plain awk split
-    # breaks on compressed addresses (fd00::2ecf:67ff:... became
-    # "fd00::2ecf:67ff", producing the invalid "fd00::2ecf:67ff::/64").
+    # Use the first globally routable (non-ULA) address on the uplink. A ULA
+    # such as fd12:.../64 has no reachable ::1 gateway behind the VM bridge;
+    # handing it to the VM creates a dead IPv6 default route and wget then
+    # prefers IPv6 and fails with EPERM. Extract the first 4 groups in fully
+    # expanded form so appending "::/64" yields a valid prefix.
     - name: Detect IPv6 prefix
       ansible.builtin.shell: |
         set -e
-        A=$(ip -6 -o addr show dev {{ uplink_interface }} scope global 2>/dev/null \
-          | awk '{print $4}' | cut -d/ -f1 | head -1)
-        if [ -z "$A" ]
-        then
-          echo ""
-          exit 0
-        fi
-        printf '%s\n' "$A" \
-          | python3 -c 'import ipaddress,sys; ip=ipaddress.IPv6Interface(sys.stdin.read().strip()+"/64"); print(":".join(ip.network.network_address.exploded.split(":")[:4]))'
+        ip -6 -o addr show dev {{ uplink_interface }} scope global 2>/dev/null \
+          | awk '{print $4}' \
+          | cut -d/ -f1 \
+          | python3 -c '
+        import ipaddress
+        import sys
+        for line in sys.stdin:
+            addr = line.strip()
+            if not addr:
+                continue
+            ip = ipaddress.IPv6Address(addr)
+            if ip.is_global and not ip.is_private:
+                network = ipaddress.IPv6Network(str(ip) + "/64", strict=False)
+                print(":".join(network.network_address.exploded.split(":")[:4]))
+                break
+        '
       register: ipv6_prefix_result
       changed_when: false
       failed_when: false
@@ -454,6 +410,11 @@
     - name: Detect host DNS server
       ansible.builtin.shell: |
         set -e
+        # Never use a gateway from our own segments as upstream: the
+        # host bridges can list them in resolvectl once the VM is running,
+        # which would make the VM forward DNS to itself (REFUSED) and break
+        # package installation on first boot.
+        EXCLUDE="{% for net in ow_networks %}{{ net.ip }} {% endfor %}"
         # Get all DNS servers from resolvectl, prefer IPv4 on the host LAN
         CANDIDATES=$(resolvectl status 2>/dev/null \
           | grep "DNS Servers:" \
@@ -463,14 +424,32 @@
           | grep ':' --invert-match \
           | sort -u)
         for srv in $CANDIDATES; do
-          echo "$srv"
-          exit 0
+          skip=0
+          for ex in $EXCLUDE; do
+            if [ "$srv" = "$ex" ]; then
+              skip=1
+            fi
+          done
+          if [ "$skip" = "0" ]; then
+            echo "$srv"
+            exit 0
+          fi
         done
-        # Fallback: first DNS from any interface
-        resolvectl status 2>/dev/null \
+        # Fallback: first DNS from any interface that is not one of our own
+        for srv in $(resolvectl status 2>/dev/null \
           | grep "DNS Server" \
-          | awk '{print $NF}' \
-          | head -1
+          | awk '{print $NF}'); do
+          skip=0
+          for ex in $EXCLUDE; do
+            if [ "$srv" = "$ex" ]; then
+              skip=1
+            fi
+          done
+          if [ "$skip" = "0" ]; then
+            echo "$srv"
+            exit 0
+          fi
+        done
       register: dns_result
       changed_when: false
       failed_when: false
@@ -1091,6 +1070,36 @@
           fi
         backup: yes
         validate: /bin/bash -n %s
+      when: kvm_capable | bool
+
+    # ── Register as external system (for external-services/openwrt_* playbooks) ─
+    - name: Read external systems config
+      ansible.builtin.slurp:
+        src: "{{ inventory_dir }}/external-systems.yml"
+      register: ext_systems_slurp
+      failed_when: false
+      when: kvm_capable | bool
+
+    - name: Build external system entry for openwrt-vm
+      ansible.builtin.set_fact:
+        ow_ext_systems_list: "{{ ((ext_systems_slurp.content | default('') | b64decode | from_yaml) | default({'external_systems': []}, true)).external_systems | default([]) }}"
+        ow_ext_entry:
+          id: openwrt-vm
+          name: OpenWrt VM
+          host: "{{ vm_ip }}"
+          port: 44
+          user: root
+          type: OpenWrt
+          description: "OpenWrt router VM (managed by services/openwrt-vm.yml)"
+      when: kvm_capable | bool
+
+    - name: Register openwrt-vm as external system
+      ansible.builtin.copy:
+        dest: "{{ inventory_dir }}/external-systems.yml"
+        content: "{{ {'external_systems': (ow_ext_systems_list | rejectattr('id', 'equalto', 'openwrt-vm') | list) + [ow_ext_entry]} | to_nice_yaml }}"
+        mode: "0644"
+        owner: root
+        group: root
       when: kvm_capable | bool
 
     # ── Register playbook ────────────────────────────────────────────────

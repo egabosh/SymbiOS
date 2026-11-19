@@ -4,9 +4,10 @@
 # eth0 = WAN (static 192.168.41.201/24 on the base-services bridge)
 # eth1..eth4 = internal networks. The VM owns the .1 / ::1 gateway on each
 # segment; the host bridges (openwrt-lan/-iot/-tor/-misc) are pure L2.
-# iot + tor use an internal bridge (br-iot/br-tor, eth2/eth3 as member) so
-# the OpenVPN tap devices can be attached to those segments (mirrors the
-# linux-setups topology where br-tor/br-iot carry the switch ports).
+# lan + iot + tor use an internal bridge (br-lan/br-iot/br-tor, eth1/eth2/eth3
+# as members) so the OpenVPN tap devices can be attached to those segments
+# and the device names match the physical routers / external-services
+# playbooks. misc stays on eth4 directly.
 
 # Remove default bridge device and LAN interface
 while uci delete network.@device[0] 2>/dev/null
@@ -16,7 +17,7 @@ done
 uci delete network.lan 2>/dev/null
 uci delete network.wan6 2>/dev/null
 
-# WAN interface on eth0 (static IPv4, IPv6 added below with the host prefix)
+# WAN interface on eth0 (static IPv4 only; no bogus IPv6 default route)
 uci set network.wan=interface
 uci set network.wan.proto=static
 uci set network.wan.device=eth0
@@ -28,9 +29,9 @@ uci set network.wan.dns={{ vm_dns }}
 # Internal networks - the VM is the .1 gateway on each segment.
 {% for net in ow_networks %}
 # Always declare a device section so netifd/cfg80211 brings the interface up
-# and assigns its static IPv4/6. Without it, eth1/eth4 (no bridge) can come up
-# IPv6-only and the lan/misc dnsmasq DHCP sockets cannot bind ("Address not
-# available") - the host bridge then never gets a lease.
+# and assigns its static IPv4/6. Without it, an unbridged port such as eth4
+# can come up IPv6-only and the dnsmasq DHCP sockets cannot bind
+# ("Address not available") - the host bridge then never gets a lease.
 uci set network.{{ net.uci }}_dev=device
 uci set network.{{ net.uci }}_dev.name={{ net.device }}
 {% if net.bridge_ports is defined and net.bridge_ports %}
@@ -47,19 +48,12 @@ uci set network.{{ net.uci }}.netmask={{ lan_netmask }}
 uci set network.{{ net.uci }}.ip6addr={{ net.ip6 }}
 {% endfor %}
 
-# IPv6 static address + default route (host-detected GUA prefix)
-PREFIX="{{ host_ipv6_prefix | default('') }}"
-if [ -n "$PREFIX" ]
-then
-  uci set network.wan.ip6addr="${PREFIX}::201/64"
-  uci set network.wan.ip6gw="${PREFIX}::1"
-fi
-
-# Attended sysupgrade: only check for upgrades when logged in
-uci set attendedsysupgrade.client.login_check_for_upgrades='1'
+# No IPv6 default route on the VM WAN: the management bridge may only have a
+# ULA prefix or a delegated prefix without a reachable ::1 gateway. A bogus
+# default route makes wget prefer IPv6 and fail with EPERM. The internal
+# segments keep their ULA addresses for the external OpenWrt playbooks.
 
 uci commit network
-uci commit attendedsysupgrade
 
 # Disable DAD for IPv6 stability
 cat > /etc/sysctl.d/99-no-dad.conf << SYSCTLEOF

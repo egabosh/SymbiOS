@@ -87,7 +87,12 @@
       var el = collapses[i];
       var saved = state[el.id];
       var defaultClosed = el.getAttribute('data-default-collapsed') === 'true';
-      if (saved === true || (saved === undefined && defaultClosed)) {
+      if (saved === false) {
+        // A remembered expanded state must be restored, not just left alone:
+        // the markup renders these groups closed on every page load.
+        var inst = collapseInstance(el);
+        if (inst) inst.show();
+      } else if (saved === true || (saved === undefined && defaultClosed)) {
         var inst = collapseInstance(el);
         if (inst) inst.hide();
       }

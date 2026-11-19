@@ -73,7 +73,11 @@
     managed_ref: "host={{ host_norm }} ip={{ ip | default('') }} mac={{ mac | default('') }}"
     managed_resource_type: "dhcp_hosts"
     managed_remove_ids: []
-    network: "{{ 'tor' if (ip | default('')).startswith('192.168.142.') else ('iot' if (ip | default('')).startswith('192.168.143.') else 'lan') }}"
+    # Zone inference follows the segment prefixes; saved host vars for the
+    # OpenWrt VM point these at 172.18.2./172.18.1. so the same logic applies.
+    iot_net_prefix: "192.168.143."
+    tor_net_prefix: "192.168.142."
+    network: "{{ 'tor' if (ip | default('')).startswith(tor_net_prefix) else ('iot' if (ip | default('')).startswith(iot_net_prefix) else 'lan') }}"
     uci_vars:
       - { key: "dhcp.host_{{ host_norm }}",  value: "host" }
       - { key: "dhcp.host_{{ host_norm }}.name",  value: "{{ host_norm }}" }

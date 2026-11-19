@@ -378,6 +378,23 @@ echo '{"feat": {"enabled": true}}' | symbios-config.py --file services/openwrt-v
 | `write [--check]` | Replace the document with YAML from stdin (must parse); atomic + `.bak` |
 | `merge [--check]` | Deep-merge a stdin JSON object into a mapping (missing file starts `{}`) |
 
+`scripts/symbios-external-params.sh` uses that engine for saved variables of
+external-system playbook runs. Values go to `external-systems/host_vars/<target>.yml`
+or `external-systems/playbook_vars/<target>/<playbook>.yml` and are merged by
+`symbios-run-remote-playbook.sh` before runtime stdin values. The CLI accepts
+JSON on stdin only, so secrets never appear in argv or audit logs:
+
+```bash
+symbios-external-params.sh get openwrt-vm openwrt_basics.yml
+echo '{"upstream_dns":"172.23.0.220"}' | symbios-external-params.sh set openwrt-vm --json-stdin
+```
+
+After a successful remote run, the runner records
+`external-services/<playbook> @ <target>` in
+`external-systems/installed-playbooks.yml`. The WebUI uses it to list remote
+playbooks as installed in the sidebar; the local reapply deliberately ignores
+this separate state file.
+
 `scripts/symbios-instances.py` is schema-aware on top of it: it parses
 the service playbook's `# docs:` config block (same source the WebUI
 catalog reads), coerces stdin JSON rows (bool/number/list/text + patterns,
@@ -443,7 +460,7 @@ texts opportunistically).
 | `symbios-run-detached.sh` | Detached host jobs pollable by the WebUI | `start\|poll\|... <job-id> <command>` |
 | `symbios-state.sh` | `installed-playbooks.yml` state file manager | `set\|unset\|list\|is-installed <path>` |
 | `symbios-uninstall.sh` | Uninstall a service (full wipe or program-only, per `# docs:` block) | `<playbook> full\|program` |
-| `symbios-update.sh` | Git pull + run changed installed playbooks | no args |
+| `symbios-update.sh` | Git pull + run changed installed playbooks and base playbooks newly added to `install.sh` (once) | no args |
 | `symbios-settings-new.sh` | Scaffold a new settings CLI script + registry snippet | `<slug>` |
 | `symbios-settings-check.sh` | Convention checks (static repo greps / live contract) | `[--static [ROOT] \| [slug]]` |
 | `symbios-playbooks-for-vars.sh` | Resolve consuming playbooks for inventory keys (reads `uses_vars`, filters by install status, orders base-services then services) | `<VAR ...> \| --all` |
