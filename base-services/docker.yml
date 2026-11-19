@@ -51,6 +51,10 @@
 
 - name: docker
   hosts: all
+  vars:
+    # First /24 of this pool becomes docker0; its gateway is the first address.
+    docker_bridge_pool: "10.42.0.0/16"
+    docker_bridge_pool_size: 24
   tasks:
 
 ### Docker ###
@@ -206,15 +210,14 @@
         update_cache: yes
         install_recommends: no
 
-    - name: Discover docker0 gateway IP for container DNS
-      ansible.builtin.shell: ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
-      register: docker_bridge_ip
-      changed_when: false
-      failed_when: false
-      when: docker_stub_dns | default(false) | bool
+    # docker0 does not exist before the first daemon start, so derive its
+    # gateway from the configured pool instead of discovering it at runtime.
+    - name: Compute docker0 gateway for container DNS
+      ansible.builtin.set_fact:
+        docker_bridge_ip: "{{ (docker_bridge_pool.split('/')[0].split('.')[:-1] | join('.')) ~ '.1' }}"
 
-    # Keep the optional DNS block inline: building the tail as a Jinja string
-    # leaves "\n" literal in daemon.json and breaks dockerd on startup.
+    # Keep the DNS block inline: building the tail as a Jinja string leaves
+    # "\n" literal in daemon.json and breaks dockerd on startup.
     # https://github.com/nextcloud/docker/issues/1103
     # default-address-pools: hand out only a /24 (10.42.0.0/24, 10.42.1.0/24, ...)
     # per bridge network instead of a whole /16 per bridge.
@@ -227,13 +230,13 @@
           {
             "data-root": "{{ docker_root }}",
             "default-address-pools": [
-              {"base": "10.42.0.0/16", "size": 24}
+              {"base": "{{ docker_bridge_pool }}", "size": {{ docker_bridge_pool_size }}}
             ],
             "ipv6": true,
             "fixed-cidr-v6": "fdab::/64",
             "experimental": true,
-            "ip6tables": true{% if docker_stub_dns | default(false) | bool and (docker_bridge_ip.stdout | default('')) | length > 0 %},
-            "dns": ["{{ docker_bridge_ip.stdout }}", "127.0.0.2"]{% endif %}
+            "ip6tables": true,
+            "dns": ["{{ docker_bridge_ip }}", "127.0.0.2"]
           }
       register: daemon_json
 
@@ -271,9 +274,9 @@
         name: docker
         state: started
 
-    # Extra stub listeners so containers reach the host DNS stub
-    # (see discovery task above; 127.0.0.2 covers user-defined networks
-    # whose embedded DNS forwards from the host netns).
+    # Default-bridge/build containers query the daemon DNS directly, so the
+    # host stub must listen on docker0. 127.0.0.2 covers user-defined networks
+    # whose embedded DNS forwards from the host netns.
 
     - name: Extra stub listeners so containers reach the host DNS stub
       ansible.builtin.blockinfile:
@@ -286,10 +289,7 @@
         block: |
           [Resolve]
           DNSStubListenerExtra=127.0.0.2
-          DNSStubListenerExtra={{ docker_bridge_ip.stdout }}
-      when:
-        - docker_stub_dns | default(false) | bool
-        - docker_bridge_ip.stdout | default('') | length > 0
+          DNSStubListenerExtra={{ docker_bridge_ip }}
       notify: Restart systemd-resolved
 
 
