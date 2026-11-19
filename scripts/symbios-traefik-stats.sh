@@ -4,8 +4,9 @@
 # The WebUI must not parse the live log itself, so this script is called by a
 # cron job and writes ready-to-serve HTML reports plus a small index below
 # <log_dir>/traefik-stats/. The host list comes from the Traefik Host labels of
-# the installed services, filtered to the configured base domain. Both the
-# current log and the rotated logs are included. Lines are normalized with jq
+# the installed services, including custom domains such as WordPress instances.
+# Both the current log and the rotated logs are included. Lines are normalized
+# with jq
 # so old JSON records without the newly enabled User-Agent/Referer header
 # fields stay parseable.
 
@@ -102,18 +103,16 @@ mapfile -t f_hosts < <(
     | sort -u \
     | while read -r f_host
       do
-        # Only real host names below the configured base domain get a report.
+        # Only real host names get a report; all installed routes count, not
+        # just hosts below the base domain.
         [[ "$f_host" =~ ^[a-z0-9.-]+$ ]] || continue
         [[ "$f_host" != *"*"* ]] || continue
-        if [[ "$f_host" == "$g_base_domain" || "$f_host" == *".$g_base_domain" ]]
-        then
-          printf '%s\n' "$f_host"
-        fi
+        printf '%s\n' "$f_host"
       done
 )
 if (( ${#f_hosts[@]} == 0 ))
 then
-  g_echo_error "No installed Traefik host found for base domain $g_base_domain"
+  g_echo_error "No installed Traefik host found"
   exit 1
 fi
 
