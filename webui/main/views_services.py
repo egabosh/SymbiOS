@@ -21,6 +21,7 @@ import uuid
 import os
 import re
 import json
+import time
 import yaml
 import shlex
 
@@ -256,7 +257,48 @@ def _build_access_context(item):
     return {'groups': groups, 'users': all_users}
 
 
+REAPPLY_STATUS_FILE = '/log/reapply-status.json'
 
+
+def _reapply_age(seconds):
+    """Format an age in seconds for the reapply status banner."""
+    if seconds < 60:
+        return f'{seconds}s'
+    if seconds < 3600:
+        return f'{seconds // 60} min'
+    return f'{seconds // 3600} h'
+
+
+def _reapply_status():
+    """Read the reapply status the host writes to the log dir.
+
+    Returns None when there is nothing to show. The writer updates the file
+    per playbook, so a running marker older than an hour means the process is
+    gone. The marker lives on /run on the host and is simply absent after a
+    reboot; a short-lived 'done' marker is shown as the last result.
+    """
+    try:
+        with open(REAPPLY_STATUS_FILE) as fh:
+            data = json.load(fh)
+        updated = int(data.get('updated_at') or 0)
+        age = max(0, int(time.time()) - updated)
+    except (OSError, ValueError, TypeError):
+        return None
+    state = data.get('state') or ''
+    if state == 'running':
+        return {
+            'state': 'running' if age <= 3600 else 'stalled',
+            'progress': data.get('progress') or '',
+            'playbook': data.get('playbook') or '',
+            'age': _reapply_age(age),
+        }
+    if state == 'done' and age <= 900:
+        return {
+            'state': 'done',
+            'rc': data.get('rc'),
+            'age': _reapply_age(age),
+        }
+    return None
 
 
 @login_required
@@ -274,6 +316,7 @@ def services(request):
     return render(request, 'main/services.html', {
         'catalog': ordered,
         'docs_md': docs_md,
+        'reapply_status': _reapply_status(),
         **_sidebar_context(catalog),
     })
 

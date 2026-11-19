@@ -124,10 +124,22 @@ then
   exit 2
 fi
 
+# Keep the CLI marker in /run and mirror the status into the log dir: the
+# WebUI reads it from its /log mount without an SSH call (the exec gateway
+# may be busy with the reapply itself).
+function f_status_write {
+  local f_line="$1" f_state="$2" f_progress="$3" f_playbook="$4" f_rc="$5"
+  mkdir -p "$g_log_dir" 2>/dev/null || true
+  printf '%s\n' "$f_line" > "$g_status_file"
+  printf '{"state":"%s","progress":"%s","playbook":"%s","rc":%s,"pid":%s,"updated_at":%s}\n' \
+    "$f_state" "$f_progress" "$f_playbook" "${f_rc:-null}" "$$" "$(date +%s)" \
+    > "${g_log_dir}/reapply-status.json"
+}
+
 function f_cleanup {
   rm -f "$g_pid_file"
   echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") REAPPLY DONE (exit code: ${g_exit_code:-1})" >> "$g_log_file"
-  echo "done:${g_exit_code:-1}" > "$g_status_file"
+  f_status_write "done:${g_exit_code:-1}" done "${g_count:-0}/${g_total:-0}" "" "${g_exit_code:-1}"
 }
 
 function f_log {
@@ -166,7 +178,7 @@ fi
 g_exit_code=0
 echo "" >> "$g_log_file"
 f_log "=== REAPPLY START (only=${g_only_playbooks:-all}) ==="
-echo "running" > "$g_status_file"
+f_status_write "running" running "" "" ""
 
 # Build list of playbooks to re-run
 g_playbooks=""
@@ -240,7 +252,7 @@ do
   fi
 
   f_log "RUN [$g_count/$g_total] $g_playbook"
-  echo "running:${g_count}/${g_total} ${g_playbook}" > "$g_status_file"
+  f_status_write "running:${g_count}/${g_total} ${g_playbook}" running "${g_count}/${g_total}" "$g_playbook" ""
 
   g_tmp_log=$(mktemp)
   ansible-playbook --connection=local \

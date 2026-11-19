@@ -13,6 +13,33 @@
   {% endif %}
 </div>
 
+{# --- Reapply status: WebUI jobs stream in the exec modal, this covers background runs --- #}
+{% if reapply_status %}
+  {% if reapply_status.state == 'stalled' %}
+  <div class="alert alert-warning d-flex align-items-center gap-2" role="alert">
+    <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+    <span>Reapply has not reported progress for {{ reapply_status.age }} - probably interrupted.</span>
+    <a class="ms-auto" href="/logs/?log=reapply">Log</a>
+  </div>
+  {% elif reapply_status.state == 'running' %}
+  <div class="alert alert-info d-flex align-items-center gap-2" role="status">
+    <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+    <span>
+      Reapply running{% if reapply_status.progress %}: <strong>{{ reapply_status.progress }}</strong>{% endif %}
+      {% if reapply_status.playbook %}- <code>{{ reapply_status.playbook }}</code>{% endif %}
+      (updated {{ reapply_status.age }} ago)
+    </span>
+    <a class="ms-auto" href="/logs/?log=reapply">Log</a>
+  </div>
+  {% elif reapply_status.state == 'done' %}
+  <div class="alert {% if reapply_status.rc == 0 %}alert-success{% else %}alert-warning{% endif %} d-flex align-items-center gap-2" role="status">
+    <i class="bi bi-check-circle" aria-hidden="true"></i>
+    <span>Last reapply finished {{ reapply_status.age }} ago (exit {{ reapply_status.rc }}).</span>
+    <a class="ms-auto" href="/logs/?log=reapply">Log</a>
+  </div>
+  {% endif %}
+{% endif %}
+
 {# --- Available services (collapsed by default) --- #}
 {% if sidebar_available %}
 <div class="collapse mb-4" id="add-service-tiles">

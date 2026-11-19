@@ -49,6 +49,7 @@ ALLOWED_LOG_FILES = {
     "autoupdate": "/log/autoupdate.log",
     "maintenance": "/log/maintenance.log",
     "dedyn": "/log/dedyn.log",
+    "reapply": "/log/reapply.log",
     "playbook-basics": "/log/playbook-basics.log",
     "playbook-symbios-ui": "/log/playbook-symbios-ui.log",
     "playbook-traefik": "/log/playbook-traefik.log",

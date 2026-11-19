@@ -521,6 +521,13 @@ across the system.
   to match.
 - **Single-container services** only join `symbios_services` - no extra network needed.
 
+`docker.yml` always points the daemon DNS at the host stub: `docker0`'s gateway
+(first address of the configured pool) plus `127.0.0.2` for user-defined
+networks. `systemd-resolved` gets matching `DNSStubListenerExtra` entries and
+`firewall.yml` opens 53/tcp+udp only for the Docker pools. This is platform
+behaviour, not an opt-in: build and default-bridge containers have no embedded
+DNS and cannot use the host's loopback-only stub otherwise.
+
 ### Service names (Docker Compose)
 
 Keep the service name short (for DNS resolution) and set `container_name` to the
@@ -1075,7 +1082,9 @@ base-services/authelia.yml: "2025-07-21T12:30:05Z"
   exec modal. For a run started outside the WebUI (or after a page reload) the
   progress marker lives in `/run/symbios-reapply.status` (`running:<n>/<total>
   <playbook>` while running, `done:<exit code>` afterwards) and the per-playbook
-  history in `<log>/reapply.log`.
+  history in `<log>/reapply.log`. The same state is mirrored to
+  `<log>/reapply-status.json`; the Services page shows it as a banner (running,
+  interrupted or last result) on page load, without polling.
 
 ### Manual equivalents
 
