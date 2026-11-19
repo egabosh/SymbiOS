@@ -385,7 +385,7 @@ needs no WebUI change.
 | `command` | Shell snippet piped to `sh -s` on the target over SSH. Prints one record per line, fields tab separated, in column order. Use plain POSIX shell (targets often have no Python). |
 | `columns` | `key` is the JSON field name, `label` the table header. |
 | `actions` | One button per row. `playbook` is the playbook to run (defaults to none, so it must be set), `vars` maps variable names onto column keys, `extra` adds fixed values. |
-| `download` | Instead of a playbook run the action fetches a file: `command` (shell snippet, printed to stdout on the target), `filename` and `mime` for the browser. The command and the file name may use `{{ <var> }}` placeholders, which are filled from the action's `vars`. `display: inline` opens the file in a browser tab instead of downloading it. `qr: true` renders the fetched text as an SVG QR code on the SymbiOS host; the target needs no QR package. Meant for small text files such as a client `.conf`. |
+| `download` | Instead of a playbook run the action fetches a file: `command` (shell snippet, printed to stdout on the target), `filename` and `mime` for the browser. The command and the file name may use `{{ <var> }}` placeholders, which are filled from the action's `vars`. `display: inline` shows the file in an in-page preview modal instead of downloading it. `qr: true` renders the fetched text as an SVG QR code on the SymbiOS host; the target needs no QR package. Meant for small text files such as a client `.conf`. |
 | `class` | Bootstrap button color (`secondary` when omitted). |
 
 One action runs through the generic helper, which executes exactly what the

@@ -697,6 +697,27 @@ document.querySelectorAll('.feat-source-btn').forEach(btn => {
   });
 });
 </script>
+
+<!-- In-page preview for docs.inventory downloads with display:inline. -->
+<div class="modal fade" id="inventory-preview-modal" tabindex="-1" aria-labelledby="inventory-preview-title" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title" id="inventory-preview-title">Preview</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body text-center">
+        <img id="inventory-preview-image" class="img-fluid d-none" alt="File preview" style="max-height:65vh;">
+        <pre id="inventory-preview-text" class="text-start bg-light bg-opacity-10 p-3 mb-0 small d-none" style="max-height:65vh;overflow:auto;white-space:pre-wrap;word-break:break-word;"></pre>
+      </div>
+      <div class="modal-footer py-2">
+        <a id="inventory-preview-download" class="btn btn-outline-primary btn-sm" href="#" download><i class="bi bi-download me-1"></i>Download</a>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const PLAYBOOK = "{{ item.playbook }}";
 function loadStatus() {
@@ -866,7 +887,18 @@ function runInventoryAction(action, row) {
 
 /* Fetch the file a docs.inventory download action declares. The row travels
    in the POST body (values may be secrets), the file name comes back in the
-   Content-Disposition header. display:inline opens it in a tab instead. */
+   Content-Disposition header. display:inline shows an in-page preview. */
+const inventoryPreviewModal = document.getElementById('inventory-preview-modal');
+let inventoryPreviewUrl = null;
+if (inventoryPreviewModal) {
+  inventoryPreviewModal.addEventListener('hidden.bs.modal', () => {
+    if (inventoryPreviewUrl) {
+      URL.revokeObjectURL(inventoryPreviewUrl);
+      inventoryPreviewUrl = null;
+    }
+  });
+}
+
 function downloadInventoryFile(action, row, display) {
   const fd = new FormData();
   fd.append('system_id', inventoryTarget());
@@ -881,19 +913,40 @@ function downloadInventoryFile(action, row, display) {
       }
       return r.blob().then(blob => {
         const url = URL.createObjectURL(blob);
-        if (display === 'inline') {
-          window.open(url, '_blank');
-          /* The new tab still needs the blob URL after this function returns. */
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        const filename = match ? match[1] : action;
+        if (display !== 'inline') {
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(url);
           return;
         }
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = match ? match[1] : action;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
+        if (inventoryPreviewUrl) URL.revokeObjectURL(inventoryPreviewUrl);
+        inventoryPreviewUrl = url;
+        document.getElementById('inventory-preview-title').textContent = filename;
+        document.getElementById('inventory-preview-download').href = url;
+        document.getElementById('inventory-preview-download').download = filename;
+        const image = document.getElementById('inventory-preview-image');
+        const text = document.getElementById('inventory-preview-text');
+        if (blob.type.startsWith('image/')) {
+          image.src = url;
+          image.alt = filename;
+          image.classList.remove('d-none');
+          text.classList.add('d-none');
+          text.textContent = '';
+          bootstrap.Modal.getOrCreateInstance(inventoryPreviewModal).show();
+          return;
+        }
+        image.removeAttribute('src');
+        image.classList.add('d-none');
+        text.classList.remove('d-none');
+        return blob.text().then(content => {
+          text.textContent = content;
+          bootstrap.Modal.getOrCreateInstance(inventoryPreviewModal).show();
+        });
       });
     })
     .catch(e => { SymbiOS.exec.showAlert('Download failed: ' + e.message, 'danger'); });
