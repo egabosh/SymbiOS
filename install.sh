@@ -16,6 +16,28 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# The installer takes no arguments: a typo must never start a full install.
+function f_usage {
+  cat << EOF
+Usage: $(basename "$0")
+
+Runs the SymbiOS base playbooks in order. No arguments.
+  -h, --help   Show this help and exit
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]
+then
+  f_usage
+  exit 0
+fi
+
+if [[ $# -gt 0 ]]
+then
+  f_usage >&2
+  exit 2
+fi
+
 set -x
 
 # Track failed playbooks for final report
