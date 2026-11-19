@@ -226,8 +226,9 @@ DHCP/DNS, mDNS, base firewall), IoT and Tor segments, remote logging and
 autoupdate. `openwrt_slave.yml` converts a secondary access point. Both import
 the former standalone plays from `external-services/tasks/openwrt/`, so the
 managed-state ids and UCI behaviour stay identical and physical routers can
-keep running the old playbooks untouched. Uplink, VPN, DDNS, DNSCrypt,
-FRITZ!Box, SMTP, Asterisk, netboot and port forwards remain separate playbooks.
+keep running the old playbooks untouched. Optional system services are pulled
+into the master with its `services` parameter; uplink, DDNS, port forwards and
+per-resource playbooks remain separate.
 
 Resource playbooks that were consolidated use a `profile` parameter and import
 the matching hidden component: `openwrt_dns.yml`, `openwrt_firewall_allow.yml`,
@@ -239,6 +240,16 @@ the comma separated `services` parameter. Their saved variables are merged via
 `_playbook-compat.json`; a skipped service never runs its parameter asserts.
 When changing a bundle, check the UCI keys (or equivalent settings) for
 conflicts first - the merged result must stay idempotent.
+
+There is no standalone OpenVPN client playbook. The server playbooks on the
+master generate one inline `.ovpn` file per host named in `<segment>_clients`
+(`lan_clients`, `iot_clients`, `tor_clients`), copy it to that host over SSH and
+set its `openvpn.<segment>vpn` UCI section. The physical slaves therefore become
+IoT/Tor clients simply by being listed in `iot_clients` / `tor_clients` on the
+master; `openwrt_slave.yml` needs no client import. The LAN server currently
+pushes only to end devices, not to the slaves. To reproduce the client side on
+a fresh target, enable the matching server service in `services` and store the
+corresponding `*_clients` value on that playbook's WebUI page first.
 
 ### Saved variables for external targets
 

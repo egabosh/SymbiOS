@@ -146,7 +146,7 @@
 #       label: "Optional system services (comma separated)"
 #       type: "text"
 #       default: ""
-#       help: "Empty = base system only. Choose from: asterisk, smtp, netboot, dnscrypt, openvpn-lan, openvpn-iot, openvpn-tor, wireguard-lan, wireguard-tor, uplink-ftth, uplink-vdsl, fritzbox. Each service uses its own saved variables; configure them on the service playbook page first. Leave empty on a lab VM without WAN or radio hardware."
+#       help: "Empty = base system only. Choose from: asterisk, smtp, netboot, dnscrypt, openvpn-lan, openvpn-iot, openvpn-tor, wireguard-lan, wireguard-tor, uplink-ftth, uplink-vdsl, fritzbox. Each service uses its own saved variables; configure them on the service playbook page first. OpenVPN server services push their .ovpn clients to the hosts named in lan_clients/iot_clients/tor_clients; there is no separate client playbook. Leave empty on a lab VM without WAN or radio hardware."
 #   actions:
 #     __playbook__: Install/Update
 #

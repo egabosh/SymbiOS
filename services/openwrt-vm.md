@@ -31,6 +31,18 @@ master run. A skipped service never evaluates its required-parameter asserts.
 The service playbooks stay in the catalog because their WebUI forms are where
 those parameters are saved; they can also still be run individually.
 
+There is no standalone OpenVPN client playbook. `openwrt_openvpn-lan.yml`,
+`openwrt_openvpn-iot.yml` and `openwrt_openvpn-tor.yml` generate an inline
+`.ovpn` file for every host listed in `lan_clients`, `iot_clients` and
+`tor_clients`, copy it to that host over SSH and set its
+`openvpn.<segment>vpn` UCI section. The physical slaves are IoT/Tor clients
+because they are named in `iot_clients` / `tor_clients` on the master; the
+LAN server currently pushes only to end devices, not to the slaves.
+`openwrt_slave.yml` therefore needs no client import. To reproduce the client
+side, enable `openvpn-iot` / `openvpn-tor` in `services` and save the matching
+`*_clients` value on that playbook's WebUI page first. A fresh VM has no client
+certificate until the master server playbook runs.
+
 The foundation components live under `external-services/tasks/openwrt/` and are
 not listed in the catalog. They are used only by the bundles. Physical routers
 are untouched by this reorganisation: their existing saved variables and
