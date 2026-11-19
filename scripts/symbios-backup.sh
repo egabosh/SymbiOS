@@ -28,10 +28,10 @@
 #                                   repository ${data_root}/backup/restic
 #
 # Every repository is encrypted with the restic password file - there is no
-# unencrypted mode. Called by scripts/backup.sh (cron
-# /etc/cron.d/backup_local, nightly 00:05). The run status (including the
-# captured restic errors) is written to ${g_log_dir}/backup-status.json for
-# the WebUI and the backup healthcheck.
+# unencrypted mode. Called by scripts/backup.sh as the backup phase of the
+# daily maintenance window (/etc/cron.d/maintenance_local). The run status
+# (including the captured restic errors) is written to
+# ${g_log_dir}/backup-status.json for the WebUI and the backup healthcheck.
 
 function f_usage {
   echo "Usage: $(basename "$0") [command]"
@@ -48,8 +48,9 @@ function f_usage {
   echo "Every repository is encrypted with the restic password file - there"
   echo "is no unencrypted mode."
   echo ""
-  echo "Called by scripts/backup.sh (cron /etc/cron.d/backup_local, nightly"
-  echo "00:05). The run status including the captured restic errors is"
+  echo "Called by scripts/backup.sh as the backup phase of the daily"
+  echo "maintenance window (/etc/cron.d/maintenance_local). The run status"
+  echo "including the captured restic errors is"
   echo "written to <log>/backup-status.json for the WebUI."
   echo ""
   echo "Commands:"
