@@ -753,15 +753,17 @@
       until: autoconf_sync.rc == 0
 
     # Docker-based healthcheck (non-HTTP). Beyond "a container is up", it
-    # checks the two invariants whose loss caused the 2026-11-19 502: unbound
-    # must own 172.22.1.254 and nginx must resolve its peers by compose alias.
+    # checks the invariants whose loss caused the 2026-11-19 502 (unbound on
+    # 172.22.1.254, nginx resolving peers by compose alias) and the mail
+    # listeners that can break independently: SMTP submission on 587 and
+    # IMAPS with a valid TLS certificate on 993.
     # mailcow pins container_name, so these names are stable across recreates.
     - name: Deploy healthcheck
       include_tasks: ../shared-tasks/runcheck-docker.yml
       vars:
-        check_desc: "Verifies unbound's static IP 172.22.1.254 and nginx's resolution of php-fpm-mailcow."
-        check_command: 'docker exec mailcowdockerized-nginx-mailcow-1 getent hosts unbound-mailcow | grep -q "172.22.1.254" && docker exec mailcowdockerized-nginx-mailcow-1 getent hosts php-fpm-mailcow'
-        check_error: "Healthcheck failed for mailcow: unbound IP or container name resolution broken (WebUI Restart recreates the stack)"
+        check_desc: "Verifies unbound's static IP, nginx's name resolution and the SMTP/IMAP listeners."
+        check_command: 'docker exec mailcowdockerized-nginx-mailcow-1 getent hosts unbound-mailcow | grep -q "172.22.1.254" && docker exec mailcowdockerized-nginx-mailcow-1 getent hosts php-fpm-mailcow && timeout 5 nc -z -w3 127.0.0.1 587 && timeout 6 openssl s_client -connect 127.0.0.1:993 -brief </dev/null 2>&1 | grep -q "CONNECTION ESTABLISHED"'
+        check_error: "Healthcheck failed for mailcow: DNS, SMTP (587) or IMAPS (993) unreachable (WebUI Restart recreates the stack)"
 
     # Register playbook as installed in the state file
     - name: Register playbook as installed
