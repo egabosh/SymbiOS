@@ -213,13 +213,8 @@
       failed_when: false
       when: docker_stub_dns | default(false) | bool
 
-    # Compute the JSON tail once: the old end-of-line Jinja tag swallowed the
-    # newline before "}", so the closing brace stays in the rendered line.
-    - name: Compute optional daemon.json DNS tail
-      ansible.builtin.set_fact:
-        daemon_json_tail: >-
-          {{ (',\n  "dns": ["' ~ docker_bridge_ip.stdout | default('') ~ '", "127.0.0.2"]}') if (docker_stub_dns | default(false) | bool) and (docker_bridge_ip.stdout | default('')) | length > 0 else '}' }}
-
+    # Keep the optional DNS block inline: building the tail as a Jinja string
+    # leaves "\n" literal in daemon.json and breaks dockerd on startup.
     # https://github.com/nextcloud/docker/issues/1103
     # default-address-pools: hand out only a /24 (10.42.0.0/24, 10.42.1.0/24, ...)
     # per bridge network instead of a whole /16 per bridge.
@@ -227,6 +222,7 @@
     - name: writing daemon.json (ipv6 settings + data-root + /24 bridge pools)
       ansible.builtin.copy:
         dest: "/etc/docker/daemon.json"
+        validate: python3 -c 'import json,sys; json.load(open(sys.argv[1]))' %s
         content: |
           {
             "data-root": "{{ docker_root }}",
@@ -236,7 +232,9 @@
             "ipv6": true,
             "fixed-cidr-v6": "fdab::/64",
             "experimental": true,
-            "ip6tables": true{{ daemon_json_tail }}
+            "ip6tables": true{% if docker_stub_dns | default(false) | bool and (docker_bridge_ip.stdout | default('')) | length > 0 %},
+            "dns": ["{{ docker_bridge_ip.stdout }}", "127.0.0.2"]{% endif %}
+          }
       register: daemon_json
 
     - name: Write containerd config.toml (data root)
