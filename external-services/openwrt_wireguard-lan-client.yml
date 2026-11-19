@@ -79,24 +79,22 @@
 #       - name: "qr"
 #         label: "QR code"
 #         class: "secondary"
-#         # SVG stays text on the download path. The hooks are ignored by
-#         # mobile apps and only make the code denser, so drop them here.
+#         # Only the config comes from the router; the QR is rendered on the
+#         # SymbiOS host. Mobile apps ignore the Linux hooks and they make the
+#         # code needlessly dense, so drop them here.
 #         download:
 #           filename: "{{ client_name }}.svg"
 #           mime: "image/svg+xml"
 #           display: inline
+#           qr: true
 #           command: |
-#             command -v qrencode >/dev/null || {
-#               echo "qrencode is missing - re-run openwrt_wireguard-lan.yml first." >&2
-#               exit 1
-#             }
 #             conf="/etc/wg_lan/{{ client_name }}.conf"
 #             if [ ! -f "$conf" ]
 #             then
 #               echo "No $conf on the target - run Install/Update for this client first." >&2
 #               exit 1
 #             fi
-#             grep -v -e '^PostUp = ' -e '^PreDown = ' "$conf" | qrencode -t SVG -o -
+#             grep -v -e '^PostUp = ' -e '^PreDown = ' "$conf"
 #         vars:
 #           client_name: "name"
 #   actions:

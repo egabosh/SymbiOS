@@ -709,6 +709,16 @@ def services_inventory_download(request, playbook):
     if not ok:
         return HttpResponse((stderr or stdout or 'Download failed').strip()[:2000],
                             status=502, content_type='text/plain')
+    if download.get('qr'):
+        # The target only sends the config. Rendering happens on the SymbiOS
+        # host so routers need no extra package and keep their flash usage.
+        ok, qr_stdout, qr_stderr = run_command(
+            'symbios-text-qr.sh', timeout=30, stdin_data=stdout)
+        if not ok:
+            return HttpResponse(
+                (qr_stderr or qr_stdout or 'QR generation failed').strip()[:2000],
+                status=502, content_type='text/plain')
+        stdout = qr_stdout
     values = _inventory_action_values(action, row)
     response = HttpResponse(
         stdout, content_type=download.get('mime') or 'text/plain; charset=utf-8')

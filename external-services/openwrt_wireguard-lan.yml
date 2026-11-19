@@ -51,8 +51,6 @@
     openwrt_packages:
       - luci-proto-wireguard
       - kmod-wireguard
-      # The QR action of the client playbooks encodes the .conf on the router.
-      - qrencode
 
     # Access policy of the tunnel (WebUI params). Empty = keep the value
     # stored on the target in /etc/wg_lan/access.conf; the client playbooks

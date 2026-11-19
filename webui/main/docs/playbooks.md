@@ -385,7 +385,7 @@ needs no WebUI change.
 | `command` | Shell snippet piped to `sh -s` on the target over SSH. Prints one record per line, fields tab separated, in column order. Use plain POSIX shell (targets often have no Python). |
 | `columns` | `key` is the JSON field name, `label` the table header. |
 | `actions` | One button per row. `playbook` is the playbook to run (defaults to none, so it must be set), `vars` maps variable names onto column keys, `extra` adds fixed values. |
-| `download` | Instead of a playbook run the action fetches a file: `command` (shell snippet, printed to stdout on the target), `filename` and `mime` for the browser. The command and the file name may use `{{ <var> }}` placeholders, which are filled from the action's `vars`. `display: inline` opens the file in a browser tab instead of downloading it. Meant for small text files such as a client `.conf` or an SVG QR code. |
+| `download` | Instead of a playbook run the action fetches a file: `command` (shell snippet, printed to stdout on the target), `filename` and `mime` for the browser. The command and the file name may use `{{ <var> }}` placeholders, which are filled from the action's `vars`. `display: inline` opens the file in a browser tab instead of downloading it. `qr: true` renders the fetched text as an SVG QR code on the SymbiOS host; the target needs no QR package. Meant for small text files such as a client `.conf`. |
 | `class` | Bootstrap button color (`secondary` when omitted). |
 
 One action runs through the generic helper, which executes exactly what the
@@ -404,13 +404,14 @@ download command (an unknown placeholder is an error) and streams the file
 content. The WebUI view holds no knowledge about the target's operating
 system, the command language or the resource itself.
 
-The WireGuard client playbooks add a second download action that encodes the
-client `.conf` as an SVG QR code on the router (`qrencode`, installed by the
-tunnel's server playbook). The Linux-only `PostUp`/`PreDown` hooks are filtered
-out because mobile clients ignore them and they make the code needlessly dense.
-OpenVPN profiles embed CA, certificate and key (roughly 4-6 KB), which exceeds
-the capacity of a single QR code (~2.9 KB), so those playbooks deliberately
-offer no QR action.
+The WireGuard client playbooks add a second download action with `qr: true`:
+the target sends only the filtered client `.conf`, and the WebUI renders it to
+SVG through `symbios-text-qr.sh` on the SymbiOS host (`qrencode`, installed by
+`basics.yml`). Routers therefore need no additional package. The Linux-only
+`PostUp`/`PreDown` hooks are filtered out because mobile clients ignore them and
+they make the code needlessly dense. OpenVPN profiles embed CA, certificate and
+key (roughly 4-6 KB), which exceeds the capacity of a single QR code (~2.9 KB),
+so those playbooks deliberately offer no QR action.
 
 Removal is therefore a normal playbook run with `state: absent`: the playbook
 itself deletes the resource (`uci delete` for OpenWrt) and records the removal

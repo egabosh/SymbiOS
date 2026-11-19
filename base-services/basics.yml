@@ -302,6 +302,8 @@
           - postgresql-client
           - ntpsec-ntpdate
           - systemd-resolved
+          # Renders VPN client configs into QR codes for the WebUI.
+          - qrencode
         install_recommends: no
         update_cache: yes
         cache_valid_time: 3600
