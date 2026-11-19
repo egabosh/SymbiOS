@@ -16,6 +16,7 @@
 
 import yaml
 import json
+import re
 import shlex
 from django.shortcuts import render, redirect
 from django.http import HttpResponse
@@ -222,33 +223,79 @@ def health_data(request):
     return JsonResponse(run_all())
 
 
-@login_required
-def stats(request):
-    """Show the pre-generated GoAccess report for the Traefik access log."""
+def _stats_index():
+    """Read the generated host index without exposing raw filesystem paths."""
+    try:
+        with open('/log/traefik-stats/index.json', 'r') as index_file:
+            data = json.load(index_file)
+    except (OSError, ValueError):
+        return {'generated_at': '', 'domains': []}
+    if not isinstance(data, dict):
+        return {'generated_at': '', 'domains': []}
+    domains = [
+        domain for domain in data.get('domains', [])
+        if isinstance(domain, dict)
+        and isinstance(domain.get('host'), str)
+        and re.fullmatch(r'[A-Za-z0-9.-]+', domain['host'])
+    ]
+    return {
+        'generated_at': data.get('generated_at', ''),
+        'domains': domains,
+    }
+
+
+def _stats_base_context():
+    """Share the setup banner context between the stats pages."""
     from .setup_status import setup_steps, is_setup_complete
     config = _get_inventory_config()
     vars_ = config.get('all', {}).get('vars', {})
     ldap_users = _get_ldap_users()
     steps = setup_steps(vars_, ldap_users=ldap_users)
     pending = [s for s in steps if not s['optional'] and s['status'] != 'done']
-    report_status = {}
-    try:
-        with open('/log/traefik-stats/status.json', 'r') as status_file:
-            report_status = json.load(status_file)
-    except (OSError, ValueError):
-        pass
-    return render(request, 'main/stats.html', {
+    return {
         'setup_incomplete': not is_setup_complete(vars_, ldap_users=ldap_users),
         'setup_pending': len(pending),
-        'generated_at': report_status.get('generated_at', ''),
-        'invalid_requests': report_status.get('invalid_requests', 0),
-    })
+    }
 
 
 @login_required
-def stats_report(request):
-    """Serve the generated HTML report from the /log volume mount."""
-    report_path = '/log/traefik-stats/report.html'
+def stats(request):
+    """List the installed hosts that have a generated GoAccess report."""
+    index = _stats_index()
+    context = _stats_base_context()
+    context.update({
+        'domains': index['domains'],
+        'generated_at': index['generated_at'],
+        'invalid_total': sum(int(d.get('invalid_requests', 0) or 0) for d in index['domains']),
+    })
+    return render(request, 'main/stats.html', context)
+
+
+@login_required
+def stats_domain(request, host):
+    """Show the report for one installed host."""
+    index = _stats_index()
+    domain = next((d for d in index['domains'] if d.get('host') == host), None)
+    if domain is None:
+        return HttpResponse('Unknown statistics host.', status=404)
+    context = _stats_base_context()
+    context.update({
+        'host': host,
+        'generated_at': index['generated_at'],
+        'invalid_requests': int(domain.get('invalid_requests', 0) or 0),
+    })
+    return render(request, 'main/stats_domain.html', context)
+
+
+@login_required
+def stats_report(request, host):
+    """Serve one generated HTML report from the /log volume mount."""
+    index = _stats_index()
+    if not re.fullmatch(r'[A-Za-z0-9.-]+', host):
+        return HttpResponse('Invalid statistics host.', status=404)
+    if not any(d.get('host') == host for d in index['domains']):
+        return HttpResponse('Unknown statistics host.', status=404)
+    report_path = f'/log/traefik-stats/reports/{host}.html'
     try:
         with open(report_path, 'rb') as report_file:
             return HttpResponse(report_file.read(), content_type='text/html; charset=utf-8')

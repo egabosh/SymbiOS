@@ -1,36 +1,39 @@
 #!/bin/bash
-# SymbiOS - Build a static GoAccess report from the Traefik access log.
+# SymbiOS - Build static GoAccess reports for the installed Traefik hosts.
 #
 # The WebUI must not parse the live log itself, so this script is called by a
-# cron job and writes a ready-to-serve HTML report plus a small status file
-# below <log_dir>/traefik-stats/. Both the current log and the rotated logs are
-# included. Lines are normalized with jq so old JSON records without the newly
-# enabled User-Agent/Referer header fields stay parseable.
+# cron job and writes ready-to-serve HTML reports plus a small index below
+# <log_dir>/traefik-stats/. The host list comes from the Traefik Host labels of
+# the installed services, filtered to the configured base domain. Both the
+# current log and the rotated logs are included. Lines are normalized with jq
+# so old JSON records without the newly enabled User-Agent/Referer header
+# fields stay parseable.
 
 function f_usage {
   cat << EOF
 Usage: $(basename "$0")
 
-Build a static GoAccess HTML report from the current and rotated Traefik
-access logs so the SymbiOS WebUI can show web statistics without parsing the
-log on page load. No arguments.
+Build one static GoAccess HTML report per installed host in the Traefik access
+log so the SymbiOS WebUI can show web statistics without parsing the log on
+page load. No arguments.
 
 Reads:
   <base_services_root>/traefik/log/access.log
   <base_services_root>/traefik/log/access.log.1
   <base_services_root>/traefik/log/access.log.*.gz
+  Traefik Host labels from the installed services (via symbios-lib.sh)
 
 Writes:
-  <log_dir>/traefik-stats/report.html       static GoAccess report
-  <log_dir>/traefik-stats/status.json       generation time and parse status
-  <log_dir>/traefik-stats/invalid-requests.log  lines GoAccess could not parse
+  <log_dir>/traefik-stats/index.json                   generated_at + host list
+  <log_dir>/traefik-stats/reports/<host>.html          one report per host
+  <log_dir>/traefik-stats/invalid/<host>.log           lines GoAccess skipped
 
 Options:
   -h, --help          Show this help and exit
 
 Exit codes:
-  0                   Report generated
-  1                   Technical error (missing tool or no access log)
+  0                   Reports generated
+  1                   Technical error (missing tool, log or installed host)
   2                   Unknown argument
 EOF
 }
@@ -54,8 +57,8 @@ g_lockfile
 g_nice
 set -o pipefail
 
-# Required tools. jq is used to normalize the JSON records into the exact
-# field order expected by the GoAccess format string below.
+# Required tools. jq normalizes the JSON records into the exact field order
+# expected by the GoAccess format string below.
 for f_tool in goaccess jq zcat
 do
   if ! command -v "$f_tool" >/dev/null 2>&1
@@ -89,15 +92,36 @@ then
   exit 1
 fi
 
+# Derive the report hosts from the installed Traefik routes. The shared helper
+# already skips disabled service directories, so no second inventory is needed.
+mapfile -t f_hosts < <(
+  f_symbios_traefik_hosts
+  grep -o 'Host(`[^`]*`)' "$g_tmp/hosts" \
+    | sed -e 's/^Host(`//' -e 's/`)$//' \
+    | tr '[:upper:]' '[:lower:]' \
+    | sort -u \
+    | while read -r f_host
+      do
+        # Only real host names below the configured base domain get a report.
+        [[ "$f_host" =~ ^[a-z0-9.-]+$ ]] || continue
+        [[ "$f_host" != *"*"* ]] || continue
+        if [[ "$f_host" == "$g_base_domain" || "$f_host" == *".$g_base_domain" ]]
+        then
+          printf '%s\n' "$f_host"
+        fi
+      done
+)
+if (( ${#f_hosts[@]} == 0 ))
+then
+  g_echo_error "No installed Traefik host found for base domain $g_base_domain"
+  exit 1
+fi
+
 f_report_dir="${g_log_dir}/traefik-stats"
-f_report="${f_report_dir}/report.html"
-# GoAccess insists on a .html/.json/.csv output extension, so the temporary
-# file also ends in .html before it is moved into place.
-f_report_tmp="${f_report_dir}/report.tmp.html"
-f_status_tmp="${f_report_dir}/status.json.tmp"
-f_invalid="${f_report_dir}/invalid-requests.log"
+f_staging="${f_report_dir}/.build.$$"
 mkdir -p "$f_report_dir" || exit 1
-: >"$f_invalid" || exit 1
+rm -rf "$f_staging"
+mkdir -p "$f_staging/reports" "$f_staging/invalid" || exit 1
 
 # Old records have no header fields; add empty placeholders so one format
 # string parses the whole rotation. The key order here must match f_log_format.
@@ -109,45 +133,81 @@ f_jq_filter='{ClientHost: (.ClientHost // "-"), ClientUsername: (.ClientUsername
 # the panel set deterministic regardless of /etc/goaccess/goaccess.conf.
 f_log_format='{"ClientHost":"%h","ClientUsername":"%e","DownstreamContentSize":"%b","DownstreamStatus":"%s","Duration":"%n","RequestHost":"%v","RequestMethod":"%m","RequestPath":"%U","RequestProtocol":"%H","request_Referer":"%R","request_User-Agent":"%u","time":"%dT%t"}'
 
+# Normalize once, then filter the same records for every host report. The
+# normalized field order is fixed, so a literal grep is enough and much faster
+# than running jq over the whole file once per host.
+f_normalized="$f_staging/normalized.json"
 f_log_size="$(du -cb "${f_inputs[@]}" | tail -n 1 | cut -f1)"
-if zcat -f "${f_inputs[@]}" \
-  | jq -c "$f_jq_filter" \
-  | goaccess - \
-      --no-global-config \
-      --log-format="$f_log_format" \
-      --date-format='%Y-%m-%d' \
-      --time-format='%T%z' \
-      --log-size="$f_log_size" \
-      --no-query-string \
-      --no-strict-status \
-      --no-progress \
-      --invalid-requests="$f_invalid" \
-      -o "$f_report_tmp"
+if ! zcat -f "${f_inputs[@]}" | jq -c "$f_jq_filter" >"$f_normalized"
 then
-  mv -f "$f_report_tmp" "$f_report" || exit 1
-else
-  rm -f "$f_report_tmp"
-  g_echo_error "GoAccess failed to parse the Traefik access log"
+  rm -rf "$f_staging"
+  g_echo_error "Failed to normalize the Traefik access log"
   exit 1
 fi
 
-# Status metadata lets the WebUI show the report age without reading the HTML.
-f_invalid_lines="$(wc -l <"$f_invalid")"
-if jq -n \
+# Build one report per installed host and record its parse status.
+: >"$f_staging/domains.jsonl" || exit 1
+for f_host in "${f_hosts[@]}"
+do
+  f_host_report="$f_staging/reports/${f_host}.html"
+  f_host_invalid="$f_staging/invalid/${f_host}.log"
+  : >"$f_host_invalid"
+  if ! grep -F "\"RequestHost\":\"$f_host\"" "$f_normalized" \
+    | goaccess - \
+        --no-global-config \
+        --log-format="$f_log_format" \
+        --date-format='%Y-%m-%d' \
+        --time-format='%T%z' \
+        --log-size="$f_log_size" \
+        --no-query-string \
+        --no-strict-status \
+        --no-progress \
+        --invalid-requests="$f_host_invalid" \
+        -o "$f_host_report"
+  then
+    rm -rf "$f_staging"
+    g_echo_error "GoAccess failed to parse the Traefik log for $f_host"
+    exit 1
+  fi
+  f_invalid_lines="$(wc -l <"$f_host_invalid")"
+  if ! jq -n \
+    --arg host "$f_host" \
+    --argjson invalid "$f_invalid_lines" \
+    '{host: $host, invalid_requests: $invalid}' >>"$f_staging/domains.jsonl"
+  then
+    rm -rf "$f_staging"
+    g_echo_error "Failed to record the report status for $f_host"
+    exit 1
+  fi
+done
+
+# The index is the WebUI's only source of installed hosts and report ages.
+if ! jq -n \
   --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --argjson invalid "$f_invalid_lines" \
-  --argjson files "${#f_inputs[@]}" \
-  '{generated_at: $generated, invalid_requests: $invalid, input_files: $files}' >"$f_status_tmp"
+  --slurpfile domains "$f_staging/domains.jsonl" \
+  '{generated_at: $generated, domains: $domains}' >"$f_staging/index.json"
 then
-  mv -f "$f_status_tmp" "${f_report_dir}/status.json" || exit 1
-else
-  rm -f "$f_status_tmp"
+  rm -rf "$f_staging"
+  g_echo_error "Failed to write the Traefik statistics index"
+  exit 1
 fi
 
-if (( f_invalid_lines > 0 ))
+# Swap the finished set into place so the WebUI never sees a partial report.
+rm -rf "${f_report_dir}/reports" "${f_report_dir}/invalid"
+mv "$f_staging/reports" "${f_report_dir}/reports" || exit 1
+mv "$f_staging/invalid" "${f_report_dir}/invalid" || exit 1
+mv "$f_staging/index.json" "${f_report_dir}/index.json" || exit 1
+rm -rf "$f_staging"
+
+# Remove artifacts of the previous single-report implementation.
+rm -f "${f_report_dir}/report.html" "${f_report_dir}/status.json" \
+  "${f_report_dir}/invalid-requests.log"
+
+f_invalid_total="$(jq -r '[.domains[].invalid_requests] | add // 0' "${f_report_dir}/index.json")"
+if (( f_invalid_total > 0 ))
 then
-  g_echo_warn "$f_invalid_lines log lines could not be parsed; see $f_invalid"
+  g_echo_warn "$f_invalid_total line(s) could not be parsed; see $f_report_dir/invalid/"
 fi
 
-g_echo_note "Traefik statistics report written to $f_report"
+g_echo_note "Traefik statistics reports written for ${#f_hosts[@]} host(s) to ${f_report_dir}/reports"
 exit 0

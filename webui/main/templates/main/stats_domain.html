@@ -1,0 +1,43 @@
+{% extends "main/base.html" %}
+{% block title %}{{ host }} - Web Statistics - SymbiOS WebUI{% endblock %}
+{% block sidebar %}{% endblock %}
+{% block sidebar_col_class %}d-none{% endblock %}
+{% block content %}
+{% if setup_incomplete %}
+<div class="alert alert-warning d-flex align-items-center gap-3 mb-3">
+  <i class="bi bi-magic fs-4"></i>
+  <div class="flex-grow-1">
+    <strong>Your server is not fully set up yet.</strong>
+    <span class="small text-muted">{{ setup_pending }} step{{ setup_pending|pluralize }} remaining &mdash; reachable in a few minutes.</span>
+  </div>
+  <a href="/setup/" class="btn btn-warning btn-sm">
+    <i class="bi bi-arrow-right-circle"></i> Set up now
+  </a>
+</div>
+{% endif %}
+
+<nav aria-label="breadcrumb" class="mb-2">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="/stats/"><i class="bi bi-bar-chart-line"></i> Web Statistics</a></li>
+    <li class="breadcrumb-item active" aria-current="page">{{ host }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+  <div>
+    <h2 class="mb-0"><i class="bi bi-globe2"></i> {{ host }}</h2>
+    <small class="text-muted">
+      Generated from the Traefik access log.
+      {% if generated_at %}Last generation: {{ generated_at }}.{% endif %}
+      {% if invalid_requests %}{{ invalid_requests }} line{{ invalid_requests|pluralize }} could not be parsed.{% endif %}
+    </small>
+  </div>
+  <button type="button" class="btn btn-outline-secondary btn-sm" onclick="document.getElementById('stats-report').src='/stats/{{ host|urlencode }}/report/?t=' + Date.now()">
+    <i class="bi bi-arrow-clockwise"></i> Reload report
+  </button>
+</div>
+
+<iframe id="stats-report" src="/stats/{{ host|urlencode }}/report/" title="GoAccess web statistics for {{ host }}"
+        class="w-100 border rounded bg-white"
+        style="height: calc(100vh - 220px); min-height: 600px;"></iframe>
+{% endblock %}

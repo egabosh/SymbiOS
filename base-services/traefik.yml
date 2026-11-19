@@ -353,7 +353,7 @@
       # deployment so the WebUI page is populated immediately.
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-traefik-stats.sh"
       args:
-        creates: "{{ base_services_root }}/symbios-ui/log/traefik-stats/report.html"
+        creates: "{{ base_services_root }}/symbios-ui/log/traefik-stats/index.json"
 
     - name: Ensure ACME account directories exist
       ansible.builtin.file:
