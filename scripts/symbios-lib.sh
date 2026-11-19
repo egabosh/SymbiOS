@@ -471,8 +471,11 @@ function f_ldap_ldif {
 }
 
 # Collect Traefik Host labels from all service compose files and the traefik
-# providers. Writes the raw label lines to ${g_tmp}/hosts.
+# providers. Writes the raw label lines to ${g_tmp}/hosts. Match the complete
+# Host(`...`) rule: a plain "grep Host" also catches comments, which would
+# become bogus hostnames in the checker and /etc/hosts.
 function f_symbios_traefik_hosts {
+  local f_host_rule='Host\(`[^`]+`\)'
   >"$g_tmp/hosts"
   find "${g_base_services_root}" "${g_services_root}" -maxdepth 1 -mindepth 1 -type d | grep -E -v "\.del$|\.bak$|\.old$|var-lib-docker$" | while read f_dir
   do
@@ -481,16 +484,16 @@ function f_symbios_traefik_hosts {
     then
       continue
     fi
-    # Extract Host labels from docker-compose files
-    if grep -q Host "$f_dir/docker-compose.override.yml" >/dev/null 2>&1
+    # Extract Host rules from docker-compose files
+    if grep -qE "$f_host_rule" "$f_dir/docker-compose.override.yml" >/dev/null 2>&1
     then
-      grep Host "$f_dir/docker-compose.override.yml" >>"$g_tmp/hosts"
+      grep -E "$f_host_rule" "$f_dir/docker-compose.override.yml" >>"$g_tmp/hosts"
     elif [[ -f "$f_dir/docker-compose.yml" ]]
     then
-      grep Host "$f_dir/docker-compose.yml" >>"$g_tmp/hosts"
+      grep -E "$f_host_rule" "$f_dir/docker-compose.yml" >>"$g_tmp/hosts"
     fi
   done
-  grep Host "${g_base_services_root}/traefik/providers/"*.yml >>"$g_tmp/hosts" 2>/dev/null
+  grep -E "$f_host_rule" "${g_base_services_root}/traefik/providers/"*.yml >>"$g_tmp/hosts" 2>/dev/null
 }
 
 # Run all LDAP group-change hooks from ${g_data_root}/ldap-groups.d/.

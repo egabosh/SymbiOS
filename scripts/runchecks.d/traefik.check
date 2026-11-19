@@ -3,18 +3,17 @@ CHECK_TITLE="Reverse Proxy"
 CHECK_DESC="Checks if all websites behind Traefik are reachable."
 CHECK_DETAIL="Collects all hostnames from Docker Compose Traefik labels.|Adds missing hosts to /etc/hosts (指向 Traefik).|Verifies each host via HTTP wget with retries.|Tracks persistent 502 errors (warns after 15 minutes).|401/403 responses are expected (Authelia protection).|API-only backends (flagged per forward) answer 501/404 on / without a web UI - any HTTP response counts as alive.|Routes of sleeping WoL targets are skipped via the asleep list."
 
+# The daemon runs this check every 5 minutes; no per-host timestamp files are
+# needed. The old "find -mmin -5 /tmp/$f_host" guards never matched (options
+# before the path) and no code ever wrote those stamps.
+
 # Healthcheck for traefik host reachability
 # Collect all hostnames from docker-compose files
 f_symbios_traefik_hosts
 
 # Ensure each host has a local /etc/hosts entry
-cat "$g_tmp/hosts" | cut -d '`' -f2 | sort -u | while read f_host
+cat "$g_tmp/hosts" | cut -s -d '`' -f2 | sort -u | while read f_host
 do
-  # Skip hosts checked within the last 5 minutes
-  if find -mmin -5 "/tmp/$f_host" >/dev/null 2>&1 | grep -q "$f_host"
-  then
-    continue
-  fi
   # Add host to /etc/hosts if not already present
   if ! grep -E -q "192.168.41.1  $f_host" /etc/hosts
   then
@@ -27,11 +26,6 @@ done
 # set by g_echo_error is visible to runchecks.sh (a plain pipeline would lose it)
 while read f_host
 do
-  # Skip hosts checked within the last 5 minutes
-  if find -mmin -5 "/tmp/$f_host" >/dev/null 2>&1 | grep -q "$f_host"
-  then
-    continue
-  fi
   # Skip routes of sleeping WoL targets (suspend writes their hostnames to
   # the asleep list; expected 502s while sleeping must not alert). The idle
   # watcher removes them once the target is reachable again.
@@ -75,19 +69,23 @@ $(cat ${g_tmp}/traefik-wget-check)"
         rm "${g_tmp}/$f_host-502"
       fi
     fi
-    # Track persistent 502 errors
+    # Track persistent 502 errors. Keep the timestamp of the first one:
+    # refreshing it on every hit would never reach the 15-minute threshold.
+    f_502_stamp="${g_tmp}/${f_host}-502"
     if grep -E -q "502 Bad Gateway" "${g_tmp}/traefik-wget-check"
     then
-      if [[ -s "${g_tmp}/$f_host-502" ]] && find "${g_tmp}/$f_host-502" | grep "$f_host-502" -mmin +15
+      if [[ -s "$f_502_stamp" ]] && find "$f_502_stamp" -mmin +15 | grep -q .
       then
         g_echo_error "Error while connecting ${f_host} with wget:
 $(cat ${g_tmp}/traefik-wget-check)"
-      else
-        date >"${g_tmp}/$f_host-502"
       fi
+      [[ -s "$f_502_stamp" ]] || date >"$f_502_stamp"
     fi
+  else
+    # A recovered host must not inherit an old 502 history on its next hiccup.
+    rm -f "${g_tmp}/${f_host}-502"
   fi
-done < <(cat "$g_tmp/hosts" | grep -v tcp | cut -d '`' -f2 | sort -u)
+done < <(cat "$g_tmp/hosts" | grep -v tcp | cut -s -d '`' -f2 | sort -u)
 
 if [[ "${g_skipped:-0}" -gt 0 ]]
 then
