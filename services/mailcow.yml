@@ -72,7 +72,7 @@
 #   actions:
 #     start: docker compose -f /symbios/services/mailcow/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/mailcow/docker-compose.yml down
-#     restart: docker compose -f /symbios/services/mailcow/docker-compose.yml restart
+#     restart: docker compose -f /symbios/services/mailcow/docker-compose.yml up -d --force-recreate
 #     reload: docker compose -f /symbios/services/mailcow/docker-compose.yml up -d
 #     show_admin_pw: cat /symbios/services/mailcow/.adminpw
 #
@@ -752,11 +752,16 @@
       delay: 6
       until: autoconf_sync.rc == 0
 
-    # Docker-based healthcheck (non-HTTP; probes a core mailcow container)
+    # Docker-based healthcheck (non-HTTP). Beyond "a container is up", it
+    # checks the two invariants whose loss caused the 2026-11-19 502: unbound
+    # must own 172.22.1.254 and nginx must resolve its peers by compose alias.
+    # mailcow pins container_name, so these names are stable across recreates.
     - name: Deploy healthcheck
       include_tasks: ../shared-tasks/runcheck-docker.yml
       vars:
-        check_desc: "Verifies that the mailcow mail server containers are listed in docker ps."
+        check_desc: "Verifies unbound's static IP 172.22.1.254 and nginx's resolution of php-fpm-mailcow."
+        check_command: 'docker exec mailcowdockerized-nginx-mailcow-1 getent hosts unbound-mailcow | grep -q "172.22.1.254" && docker exec mailcowdockerized-nginx-mailcow-1 getent hosts php-fpm-mailcow'
+        check_error: "Healthcheck failed for mailcow: unbound IP or container name resolution broken (WebUI Restart recreates the stack)"
 
     # Register playbook as installed in the state file
     - name: Register playbook as installed
