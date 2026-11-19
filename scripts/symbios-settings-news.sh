@@ -21,7 +21,7 @@ Commands:
                                   apply consuming playbooks unless --no-apply
                                   is given. Options left out keep their current
                                   value. An empty --url restores the default
-                                  releases feed. --markers is a comma-separated
+                                  commit feed. --markers is a comma-separated
                                   list of severity markers (security, critical,
                                   ...). --check changes nothing.
   schema                          Print the field description as JSON
@@ -42,7 +42,7 @@ EOF
 
 # Inventory keys read live by the feed scripts (no playbook consumer).
 f_managed_vars=""
-g_news_url_default="https://github.com/egabosh/SymbiOS/releases.atom"
+g_news_url_default="https://github.com/egabosh/SymbiOS/commits/main.atom"
 g_news_markers_default="security,critical"
 
 source /etc/bash/gaboshlib.include

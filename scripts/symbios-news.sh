@@ -38,7 +38,7 @@ g_lockfile
 
 g_news_snapshot="${g_log_dir}/news.json"
 g_news_seen="${g_config_dir}/news/seen.json"
-g_news_url_default="https://github.com/egabosh/SymbiOS/releases.atom"
+g_news_url_default="https://github.com/egabosh/SymbiOS/commits/main.atom"
 g_news_markers_default="security,critical"
 
 function f_now {
@@ -101,7 +101,7 @@ function f_refresh {
     f_enabled="false"
   fi
   f_url="$(f_symbios_var news_feed_url "")"
-  # A cleared or missing URL still uses the built-in releases feed, so a
+  # A cleared or missing URL still uses the built-in commit feed, so a
   # settings save that only flips the switch cannot disable the feed by accident.
   [[ -n "${f_url}" ]] || f_url="${g_news_url_default}"
 
