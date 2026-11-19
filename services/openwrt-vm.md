@@ -15,21 +15,26 @@ be applied as needed (per admin/user choice):
 
 | Topic | Playbook(s) |
 |-------|-------------|
-| Master bundle (system basics, LAN/IoT/Tor segments, log forwarding, autoupdate) | `openwrt_master.yml` |
+| Master bundle (system basics, LAN/IoT/Tor segments, log forwarding, autoupdate and optional system services) | `openwrt_master.yml` |
 | Secondary access point conversion | `openwrt_slave.yml` |
-| DNSCrypt/DoH resolver | `openwrt_dnscrypt-proxy.yml` |
-| OpenVPN servers | `openwrt_openvpn-tor.yml`, `openwrt_openvpn-iot.yml`, `openwrt_openvpn-lan.yml` |
-| WireGuard servers/clients | `openwrt_wireguard-lan*.yml`, `openwrt_wireguard-tor*.yml` |
-| SMTP relay | `openwrt_smtp.yml` |
-| Netboot (PXE/TFTP) | `openwrt_netboot.yml` |
-| Telekom uplink | `openwrt_internet_telekom_ftth.yml`, `openwrt_internet_telekom_vdsl.yml` |
 | DNS, DDNS, firewall rules, wireless | `openwrt_dns.yml`, `openwrt_ddns.yml`, `openwrt_firewall_allow.yml`, `openwrt_firewall_forwarding.yml`, `openwrt_wireless.yml` (select the variant with `profile`) |
 
-The former standalone foundation/segments playbooks now live under
-`external-services/tasks/openwrt/`. They are not listed in the catalog and are
-used only by the generic bundles. Physical routers are untouched by this
-reorganisation: their existing saved variables and managed-state ids are kept
-via `external-services/_playbook-compat.json`.
+`openwrt_master.yml` installs the foundation in every run and can optionally
+include the system services via its `services` parameter (comma separated):
+`asterisk`, `smtp`, `netboot`, `dnscrypt`, `openvpn-lan`, `openvpn-iot`,
+`openvpn-tor`, `wireguard-lan`, `wireguard-tor`, `uplink-ftth`, `uplink-vdsl`,
+`fritzbox`. An empty value (the default, and the right choice for the lab VM)
+runs only the foundation. Each service keeps its own saved variables: configure
+them on the corresponding `openwrt_*` playbook page first, then enable the
+service in the master; `_playbook-compat.json` merges those values into the
+master run. A skipped service never evaluates its required-parameter asserts.
+The service playbooks stay in the catalog because their WebUI forms are where
+those parameters are saved; they can also still be run individually.
+
+The foundation components live under `external-services/tasks/openwrt/` and are
+not listed in the catalog. They are used only by the bundles. Physical routers
+are untouched by this reorganisation: their existing saved variables and
+managed-state ids are kept via `external-services/_playbook-compat.json`.
 
 The VM owns the `.1` / `::1` gateway on every internal segment; the host
 bridges are L2 switches that additionally take a DHCP address from the

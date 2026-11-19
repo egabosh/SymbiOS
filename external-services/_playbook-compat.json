@@ -4,7 +4,19 @@
     "openwrt_logserver.yml",
     "openwrt_tor.yml",
     "openwrt_iot.yml",
-    "openwrt_basics.yml"
+    "openwrt_basics.yml",
+    "openwrt_asterisk.yml",
+    "openwrt_smtp.yml",
+    "openwrt_netboot.yml",
+    "openwrt_dnscrypt-proxy.yml",
+    "openwrt_openvpn-lan.yml",
+    "openwrt_openvpn-iot.yml",
+    "openwrt_openvpn-tor.yml",
+    "openwrt_wireguard-lan.yml",
+    "openwrt_wireguard-tor.yml",
+    "openwrt_internet_telekom_ftth.yml",
+    "openwrt_internet_telekom_vdsl.yml",
+    "openwrt_fritzbox-ipv6.yml"
   ],
   "openwrt_slave.yml": [
     "openwrt_basics-slave.yml",

@@ -232,9 +232,13 @@ FRITZ!Box, SMTP, Asterisk, netboot and port forwards remain separate playbooks.
 Resource playbooks that were consolidated use a `profile` parameter and import
 the matching hidden component: `openwrt_dns.yml`, `openwrt_firewall_allow.yml`,
 `openwrt_firewall_forwarding.yml`, `openwrt_ddns.yml` and
-`openwrt_wireless.yml`. When changing a bundle, check the UCI keys (or
-equivalent settings) for conflicts first - the merged result must stay
-idempotent.
+`openwrt_wireless.yml`. `openwrt_master.yml` additionally imports the optional
+system services (`asterisk`, `smtp`, `netboot`, `dnscrypt`, OpenVPN/WireGuard
+servers, Telekom uplinks, FRITZ!Box) from their top-level playbooks, selected by
+the comma separated `services` parameter. Their saved variables are merged via
+`_playbook-compat.json`; a skipped service never runs its parameter asserts.
+When changing a bundle, check the UCI keys (or equivalent settings) for
+conflicts first - the merged result must stay idempotent.
 
 ### Saved variables for external targets
 

@@ -1,7 +1,7 @@
 # docs:
 #   name: "OpenWrt - Master bundle"
 #   short_description: "OpenWrt - Master bundle"
-#   description: "One run for a resolver/master router: foundation (packages, system, LAN, Dropbear, DHCP/DNS, Avahi, base firewall), IoT and Tor segments, log forwarding and package autoupdate. Uplink, VPN, DDNS, DNSCrypt, FRITZ!Box helper, SMTP, Asterisk and port forwards stay separate playbooks."
+#   description: "One run for a resolver/master router: foundation (packages, system, LAN, Dropbear, DHCP/DNS, Avahi, base firewall), IoT and Tor segments, log forwarding, package autoupdate, plus optional system services selected by the 'services' parameter (Asterisk, SMTP, Netboot, DNSCrypt, OpenVPN/WireGuard servers, Telekom uplink, FRITZ!Box). Resource playbooks (DNS records, DDNS, firewall rules, wireless, DHCP hosts, VPN clients) stay separate because they run per item."
 #   category: "System"
 #   type: OpenWrt
 #   icon: "bi-diagram-3"
@@ -142,6 +142,11 @@
 #       label: "Package autoupdate cron schedule"
 #       type: "text"
 #       default: "30 3 * * *"
+#     - name: "services"
+#       label: "Optional system services (comma separated)"
+#       type: "text"
+#       default: ""
+#       help: "Empty = base system only. Choose from: asterisk, smtp, netboot, dnscrypt, openvpn-lan, openvpn-iot, openvpn-tor, wireguard-lan, wireguard-tor, uplink-ftth, uplink-vdsl, fritzbox. Each service uses its own saved variables; configure them on the service playbook page first. Leave empty on a lab VM without WAN or radio hardware."
 #   actions:
 #     __playbook__: Install/Update
 #
@@ -154,3 +159,31 @@
 - ansible.builtin.import_playbook: tasks/openwrt/tor.yml
 - ansible.builtin.import_playbook: tasks/openwrt/logserver.yml
 - ansible.builtin.import_playbook: tasks/openwrt/autoupdate.yml
+
+# Optional system services. Static imports keep the component's own guards,
+# managed ids and saved-variable scope. Selection is a trimmed, comma separated
+# list so a skipped service never evaluates its required-parameter asserts.
+- ansible.builtin.import_playbook: openwrt_asterisk.yml
+  when: "'asterisk' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: openwrt_smtp.yml
+  when: "'smtp' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: openwrt_netboot.yml
+  when: "'netboot' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: openwrt_dnscrypt-proxy.yml
+  when: "'dnscrypt' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: openwrt_openvpn-lan.yml
+  when: "'openvpn-lan' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: openwrt_openvpn-iot.yml
+  when: "'openvpn-iot' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: openwrt_openvpn-tor.yml
+  when: "'openvpn-tor' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: openwrt_wireguard-lan.yml
+  when: "'wireguard-lan' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: openwrt_wireguard-tor.yml
+  when: "'wireguard-tor' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: openwrt_internet_telekom_ftth.yml
+  when: "'uplink-ftth' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: openwrt_internet_telekom_vdsl.yml
+  when: "'uplink-vdsl' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: openwrt_fritzbox-ipv6.yml
+  when: "'fritzbox' in (services | default('') | split(',') | map('trim') | list)"
