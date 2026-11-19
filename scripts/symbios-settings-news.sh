@@ -20,8 +20,9 @@ Commands:
                                   Validate and write to inventory.yml, then
                                   apply consuming playbooks unless --no-apply
                                   is given. Options left out keep their current
-                                  value. --markers is a comma-separated list
-                                  of severity markers (security, critical,
+                                  value. An empty --url restores the default
+                                  releases feed. --markers is a comma-separated
+                                  list of severity markers (security, critical,
                                   ...). --check changes nothing.
   schema                          Print the field description as JSON
                                   (for generic WebUI form rendering)
@@ -41,6 +42,8 @@ EOF
 
 # Inventory keys read live by the feed scripts (no playbook consumer).
 f_managed_vars=""
+g_news_url_default="https://github.com/egabosh/SymbiOS/releases.atom"
+g_news_markers_default="security,critical"
 
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -70,15 +73,15 @@ fi
 
 if [[ "${f_command}" == "schema" ]]
 then
-  cat << 'EOF'
+  cat << EOF
 [
   {"name": "news_enabled", "type": "bool", "label": "Show SymbiOS news",
    "required": false, "default": false, "secret": false},
   {"name": "news_feed_url", "type": "text", "label": "RSS/Atom feed URL",
-   "required": false, "default": "https://github.com/egabosh/SymbiOS/releases.atom", "secret": false,
-   "note": "RSS 2.0 or Atom. GitHub releases, commits and tags all provide an Atom feed."},
+   "required": false, "default": "${g_news_url_default}", "secret": false,
+   "note": "RSS 2.0 or Atom. Leave empty to use the default. GitHub releases, commits and tags all provide an Atom feed."},
   {"name": "news_severity_markers", "type": "text", "label": "Severity markers",
-   "required": false, "default": "security,critical", "secret": false,
+   "required": false, "default": "${g_news_markers_default}", "secret": false,
    "note": "Comma-separated. A feed category or title containing one of these words (case-insensitive) is highlighted and raises a health warning until marked as read."}
 ]
 EOF
@@ -93,7 +96,9 @@ else
   f_cur_enabled="false"
 fi
 f_cur_url="$(f_symbios_var news_feed_url "")"
+[[ -n "${f_cur_url}" ]] || f_cur_url="${g_news_url_default}"
 f_cur_markers="$(f_symbios_var news_severity_markers "")"
+[[ -n "${f_cur_markers}" ]] || f_cur_markers="${g_news_markers_default}"
 
 if [[ "${f_command}" == "get" ]]
 then
