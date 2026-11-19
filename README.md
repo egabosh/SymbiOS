@@ -181,7 +181,7 @@ concern and is idempotent, so it is safe to re-run any of them.
 | `localization.yml`   | Timezone, keyboard layout and system locale.                            |
 | `hardening.yml`      | SSHd hardening, kernel/sysctl and permission hardening.                 |
 | `firewall.yml`       | `ufw` firewall; opens SSH (port 33), and the ports services need.      |
-| `backup.yml`         | Installs `rsync` and `/symbios/backup.d/` backup hooks.                  |
+| `backup.yml`         | Restic backup engine and `/symbios/backup.d/` pre-run hooks.            |
 | `autoupdate.yml`     | Unattended upgrades via `/symbios/autoupdate.d/`.                       |
 | `maintenance.yml`    | Single daily cron window: backup first, then updates (`maintenance_time`). |
 | `runchecks.yml`      | Health/SMART/mdadm checks in `/symbios/runchecks.d/`.                   |

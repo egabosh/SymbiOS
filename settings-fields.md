@@ -68,7 +68,7 @@ Slug: `backup`
 | `backup_keep_daily` | number | Keep daily snapshots |  | 7 |  |
 | `backup_keep_weekly` | number | Keep weekly snapshots |  | 4 |  |
 | `backup_keep_monthly` | number | Keep monthly snapshots |  | 9999 |  |
-| `backup_exclude` | multiline | Exclude patterns |  | `[]` |  |
+| `backup_exclude` | multiline | Extra exclude patterns |  | `[]` |  |
 
 ## `symbios-settings-dns`
 Slug: `dns`

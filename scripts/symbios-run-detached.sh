@@ -83,6 +83,10 @@ g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
 
 g_jobs_dir="/var/log/symbios/jobs"
+# Finished job files are pruned on each new start. Active jobs are never
+# touched: a .done file exists only after the command exited. Pollers keep
+# byte offsets into .log, so truncating a live log would corrupt the stream.
+g_job_retention_days=7
 g_action="${1:-}"
 g_job_id="${2:-}"
 
@@ -102,6 +106,16 @@ f_start() {
 
   mkdir -p "${g_jobs_dir}" 2>/dev/null || f_json_error "Cannot create ${g_jobs_dir}"
   [[ -w "${g_jobs_dir}" ]] || f_json_error "${g_jobs_dir} is not writable"
+
+  # Prune old finished jobs. The .done marker guarantees the command exited;
+  # the poller's byte offsets stay valid for every still-live log.
+  local f_done f_base
+  while IFS= read -r -d '' f_done
+  do
+    f_base="${f_done%.done}"
+    rm -f "${f_done}" "${f_base}.log" "${f_base}.pid" "${f_base}.input" 2>/dev/null || true
+  done < <(find "${g_jobs_dir}" -maxdepth 1 -type f -name '*.done' \
+    -mtime "+${g_job_retention_days}" -print0 2>/dev/null)
 
   # Capture the stdin payload (LUKS passphrase, SSH keys) before detaching.
   # Written by the WebUI's SSH call; nothing ever reaches the command line.
