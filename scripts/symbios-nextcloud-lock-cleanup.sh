@@ -8,6 +8,8 @@
 # permanently locked by another user and blocks editing and syncing.
 #
 # Only files older than the threshold are touched, every removal is logged.
+# The nightly clean leaves its report in a small cache file; the 5-minute
+# healthcheck reads that cache instead of rescanning the whole data tree.
 
 set -o pipefail
 
@@ -26,8 +28,9 @@ Usage: $(basename "$0") <report|clean> [--older-than DAYS] [--dry-run]
 Report or remove stale LibreOffice/Collabora lock files in Nextcloud data.
 
 Actions:
-  report                List stale locks as "user | age-days | path"
-  clean                 Remove stale locks (one log line per file)
+  report                Show cached stale locks ("user | age-days | path");
+                        scans once if no cache exists yet
+  clean                 Remove stale locks, refresh the report cache
 Options:
   --older-than DAYS     Age threshold in days (default: 7)
   --dry-run             With clean: show candidates without deleting
@@ -99,17 +102,8 @@ then
   exit 2
 fi
 
-# Collect only .~lock.*# files inside user files trees, older than the limit.
-g_nc_data_dir="${g_services_root}/nextcloud/nextcloud-data/data"
-f_minutes=$((f_days * 1440))
-f_candidates=()
-if [[ -d "${g_nc_data_dir}" ]]
-then
-  while IFS= read -r -d '' f_file
-  do
-    f_candidates+=("$f_file")
-  done < <(find "${g_nc_data_dir}" -type f -name '.~lock.*#' -path '*/files/*' -mmin "+${f_minutes}" -print0 2>/dev/null)
-fi
+# Cache file for the healthcheck: rescanning 463 GB every 5 min is too slow.
+g_lock_report_cache="${g_log_dir}/nextcloud-locks-report.txt"
 
 # Print one line per candidate with the owning uid and its age in days.
 function f_report_line {
@@ -122,9 +116,59 @@ function f_report_line {
   printf '%s | %s | %s\n' "$f_user" "$f_age" "$f_file"
 }
 
-# Remove only the selected files and log every removal for auditability.
+# Collect only .~lock.*# files inside user files trees, older than the limit.
+function f_collect_candidates {
+  g_nc_data_dir="${g_services_root}/nextcloud/nextcloud-data/data"
+  local f_minutes=$((f_days * 1440))
+  local f_file
+  f_candidates=()
+  if [[ -d "${g_nc_data_dir}" ]]
+  then
+    while IFS= read -r -d '' f_file
+    do
+      f_candidates+=("$f_file")
+    done < <(find "${g_nc_data_dir}" -type f -name '.~lock.*#' -path '*/files/*' -mmin "+${f_minutes}" -print0 2>/dev/null)
+  fi
+}
+
+# Replace the cache atomically so the healthcheck never reads a partial report.
+function f_write_report_cache {
+  local f_tmp f_file
+  mkdir -p "${g_log_dir}" 2>/dev/null || true
+  f_tmp="$(mktemp "${g_lock_report_cache}.XXXXXX")" || return 1
+  for f_file in "$@"
+  do
+    f_report_line "$f_file"
+  done >"$f_tmp"
+  mv -f -- "$f_tmp" "$g_lock_report_cache"
+}
+
+# The healthcheck reads the cached report; only a missing cache triggers a
+# live scan (first run after install or after the log dir was cleared).
+if [[ "${f_action}" == "report" ]]
+then
+  if [[ -r "${g_lock_report_cache}" ]]
+  then
+    cat -- "${g_lock_report_cache}"
+    exit 0
+  fi
+  f_collect_candidates
+  f_write_report_cache "${f_candidates[@]}" || true
+  for f_file in "${f_candidates[@]}"
+  do
+    f_report_line "$f_file"
+  done
+  exit 0
+fi
+
+f_collect_candidates
+
+# Remove only the selected files, log every removal and refresh the cache so
+# deleted locks disappear from the healthcheck immediately.
 function f_clean {
   local f_file
+  local f_failed=0
+  local -a f_remaining=()
   local f_log="${g_log_dir}/nextcloud-lock-cleanup.log"
   mkdir -p "${g_log_dir}" 2>/dev/null || true
   for f_file in "${f_candidates[@]}"
@@ -137,20 +181,18 @@ function f_clean {
     if ! rm -f -- "$f_file"
     then
       g_echo_error "Could not remove lock: $f_file"
-      return 1
+      f_remaining+=("$f_file")
+      f_failed=1
+      continue
     fi
     printf '%s removed stale lock: %s\n' "$(date --iso-8601=seconds)" "$f_file" >>"$f_log"
     g_echo_note "Removed stale lock: $f_file"
   done
+  if [[ "${f_dry_run}" -eq 0 ]]
+  then
+    f_write_report_cache "${f_remaining[@]}" || f_failed=1
+  fi
+  return "${f_failed}"
 }
-
-if [[ "${f_action}" == "report" ]]
-then
-  for f_file in "${f_candidates[@]}"
-  do
-    f_report_line "$f_file"
-  done
-  exit 0
-fi
 
 f_clean

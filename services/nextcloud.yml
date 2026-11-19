@@ -840,7 +840,8 @@
       include_tasks: ../shared-tasks/runcheck.yml
 
     # The HTTP healthcheck cannot see file locks; a stale one blocks editing
-    # and syncing. Report it as a warning - the nightly update removes it.
+    # and syncing. The nightly update removes them and leaves a small report
+    # cache; this check only reads it instead of rescanning the data tree.
     - name: Deploy stale lock file check
       ansible.builtin.blockinfile:
         path: "{{ data_root }}/runchecks.d/symbios-healthcheck-nextcloud-locks.check"
@@ -853,11 +854,29 @@
           CHECK_CATEGORY="services"
           CHECK_TITLE="Nextcloud locks"
           CHECK_DESC="Warns about stale LibreOffice/Collabora lock files in Nextcloud user data."
-          CHECK_DETAIL="Scans */files/ for .~lock.<file># files older than 7 days.|A stale lock makes a file look permanently locked by another user and blocks editing/sync.|The nightly nextcloud.update removes them via symbios-nextcloud-lock-cleanup.sh clean --older-than 7.|Only old lock files are reported - active locks are never touched."
-          g_lock_report="$("{{ git_root }}/scripts/symbios-nextcloud-lock-cleanup.sh" report --older-than 7 2>/dev/null)"
-          if [ -n "$g_lock_report" ]
+          CHECK_DETAIL="Reads the cached report written by the nightly nextcloud.update (symbios-nextcloud-lock-cleanup.sh clean --older-than 7).|A stale lock makes a file look permanently locked by another user and blocks editing/sync.|Only old lock files are reported - active locks are never touched.|Warns when the report is older than 36h or missing, so a skipped nightly cleanup cannot go unnoticed."
+          g_lock_cache="{{ data_root }}/base-services/symbios-ui/log/nextcloud-locks-report.txt"
+          g_lock_report=""
+          if [[ -r "${g_lock_cache}" ]]
           then
-            g_echo_warn "Stale Nextcloud lock files: $g_lock_report"
+            g_lock_age=$(( ($(date +%s) - $(stat -c %Y "${g_lock_cache}" 2>/dev/null || echo 0)) / 3600 ))
+            if [[ "${g_lock_age}" -gt 36 ]]
+            then
+              g_echo_warn "Nextcloud lock report is ${g_lock_age}h old - nightly cleanup may not have run"
+            fi
+            while IFS= read -r g_lock_line
+            do
+              [[ -n "${g_lock_line}" ]] || continue
+              g_lock_path="${g_lock_line#* | * | }"
+              [[ -e "${g_lock_path}" ]] || continue
+              g_lock_report="${g_lock_report}${g_lock_line}"
+            done < "${g_lock_cache}"
+          else
+            g_echo_warn "Nextcloud lock report is missing - run symbios-nextcloud-lock-cleanup.sh clean --older-than 7"
+          fi
+          if [[ -n "${g_lock_report}" ]]
+          then
+            g_echo_warn "Stale Nextcloud lock files: ${g_lock_report}"
           fi
         backup: yes
         validate: /bin/bash -n %s
