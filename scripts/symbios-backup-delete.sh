@@ -32,6 +32,9 @@ Usage: $(basename "$0") <delete <YYYY-MM-DD>|all> [--yes]
 Delete restic snapshots from the local repository and all configured remote
 repositories. A date deletes every snapshot of that day in every repository;
 "all" deletes every snapshot. Without --yes only a JSON plan is printed.
+Repositories that have never been initialized are skipped with a note: the
+backup engine creates them on first use, so a missing restic config is not a
+deletion error.
 
 Commands:
   delete <YYYY-MM-DD>   Select all snapshots of one day (all repositories)
@@ -44,6 +47,7 @@ Options:
 Output:
   Dry run: {"ok":true,"mode":"date|all","dry_run":true,"total":N,
             "targets":[{"target":"<name>","count":N,"snapshots":["<id>",...]},
+                       {"target":"<name>","count":0,"snapshots":[],"skipped":"..."},
                        {"target":"<name>","error":"..."}]}
   Execute: human-readable progress in the WebUI job log.
 
@@ -155,6 +159,9 @@ function f_collect_targets {
 # Usage: f_snapshot_ids <repo> <sshargs|''> [<YYYY-MM-DD>]
 function f_snapshot_ids {
   local f_repo="$1" f_ssh="$2" f_date="${3:-}" f_json
+  # Every target gets a fresh error file, otherwise a dry run could report the
+  # previous repository's failure (f_delete_snapshots used to do this too).
+  : > "$g_bk_err_file"
   f_json="$(f_bk_restic "$f_repo" "$f_ssh" snapshots --json 2>/dev/null)" || return 1
   printf '%s\n' "$f_json" | jq -r --arg d "$f_date" '
     .[]? | select($d == "" or (.time // "")[0:10] == $d)
@@ -162,8 +169,18 @@ function f_snapshot_ids {
   ' 2>/dev/null | grep -E '^[a-fA-F0-9]{8,64}$' || true
 }
 
-# Print the JSON dry-run plan. Every target reports either its snapshot ids or
-# an error, so an unreachable repository cannot look like "nothing selected".
+# True when restic reported a repository that has never been initialized. The
+# engine creates repositories on first use, so an empty local directory (the
+# backup playbook always creates it) or a new remote target before its first
+# backup is a normal state, not a deletion failure. Used by both the dry run
+# and the real deletion.
+function f_repo_missing {
+  f_bk_err_tail | grep -qiE 'does not exist|unable to open config file|no such file or directory'
+}
+
+# Print the JSON dry-run plan. Every target reports its snapshot ids, a
+# "skipped" marker for a missing repository, or an error, so an unreachable
+# repository cannot look like "nothing selected".
 function f_print_plan {
   local f_entry f_label f_repo f_ssh f_ids f_sids_json f_first=1 f_count
   local f_plan=""
@@ -184,23 +201,33 @@ function f_print_plan {
       f_sids_json="$(f_bk_lines_json ${f_arr[@]+"${f_arr[@]}"})"
       f_plan="$f_plan{\"target\":$(printf '%s' "$f_label" | f_json_escape),\"count\":$f_count,\"snapshots\":$f_sids_json}"
     else
-      f_plan="$f_plan{\"target\":$(printf '%s' "$f_label" | f_json_escape),\"error\":$(printf '%s' "$(f_bk_err_tail | tail -n 1)" | f_json_escape)}"
+      if f_repo_missing
+      then
+        f_plan="$f_plan{\"target\":$(printf '%s' "$f_label" | f_json_escape),\"count\":0,\"snapshots\":[],\"skipped\":\"repository does not exist\"}"
+      else
+        f_plan="$f_plan{\"target\":$(printf '%s' "$f_label" | f_json_escape),\"error\":$(printf '%s' "$(f_bk_err_tail | tail -n 1)" | f_json_escape)}"
+      fi
     fi
   done
   printf '{"ok":true,"mode":"%s","dry_run":true,"total":%s,"targets":[%s]}\n' \
     "$([[ "$g_cmd" == "all" ]] && echo all || echo date)" "$g_total" "$f_plan"
 }
 
-# Delete the selected snapshots on each target. A failed repository must not
-# stop the others, but the exit code reports the partial failure.
+# Delete the selected snapshots on each target. A missing repository is only
+# noted and skipped; a real failure must not stop the others, but the exit
+# code reports the partial failure.
 function f_delete_snapshots {
   local f_entry f_label f_repo f_ssh f_ids f_id f_arr=() f_failed=""
   for f_entry in ${g_delete_targets[@]+"${g_delete_targets[@]}"}
   do
     IFS='|' read -r f_label f_repo f_ssh <<< "$f_entry"
-    : > "$g_bk_err_file"
     if ! f_ids="$(f_snapshot_ids "$f_repo" "$f_ssh" "$g_date")"
     then
+      if f_repo_missing
+      then
+        g_echo_note "No restic repository on $f_label - skipping"
+        continue
+      fi
       g_echo_error "Cannot list snapshots on $f_label - $(f_bk_err_tail | tail -n 1)"
       f_failed="${f_failed}${f_failed:+, }$f_label"
       continue
