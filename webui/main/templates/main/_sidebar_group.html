@@ -1,0 +1,22 @@
+{% comment %}
+Shared sidebar group header, used by both the settings and the services menu.
+
+Expected context:
+  group_key         - id of the collapsible list (rendered as "sb-<key>" by the caller)
+  group_title       - visible group label
+  group_icon        - Bootstrap icon class without the "bi bi-" prefix
+  group_collapsible - true: toggle with chevron, false: plain label
+  group_expanded    - initial aria-expanded value (default: true)
+{% endcomment %}
+<li class="svc-group-header p-0">
+  {% if group_collapsible %}
+  <a class="svc-group-toggle" data-bs-toggle="collapse" href="#sb-{{ group_key }}"
+     role="button" aria-expanded="{% if not group_expanded %}false{% else %}true{% endif %}"
+     aria-controls="sb-{{ group_key }}">
+    <i class="bi {{ group_icon }}"></i> {{ group_title }}
+    <i class="bi bi-chevron-down svc-chevron ms-auto"></i>
+  </a>
+  {% else %}
+  <span class="svc-group-plain"><i class="bi {{ group_icon }}"></i> {{ group_title }}</span>
+  {% endif %}
+</li>

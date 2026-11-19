@@ -205,6 +205,16 @@
 .svc-item .svc-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .svc-item .svc-badges { display: flex; gap: 0.25rem; flex-shrink: 0; }
 .svc-item .svc-badges i { font-size: 0.6rem; }
+/* Shared sidebar: plain group labels, active page marker, expert mode */
+.svc-group-plain { display: block; }
+.svc-item.active {
+  background: rgba(var(--bs-primary-rgb), 0.10);
+  border-left-color: var(--bs-primary);
+  font-weight: 600;
+}
+/* Expert items are opt-in; sidebar.js toggles .sb-expert on <body>. */
+body:not(.sb-expert) [data-level="expert"] { display: none !important; }
+#sidebarExpertToggle { font-size: 0.75rem; }
 
 /* Shared card base (used by .svc-tile, .check-card, .summary-card) */
 .svc-base-card {

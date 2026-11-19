@@ -5,7 +5,7 @@
      href="#sidebar-add-services" role="button" aria-expanded="false" aria-controls="sidebar-add-services">
     <i class="bi bi-plus-lg"></i> Add Service
   </a>
-  <div class="collapse mt-1" id="sidebar-add-services">
+  <div class="collapse mt-1" id="sidebar-add-services" data-default-collapsed="true">
     <ul class="list-unstyled mb-0">
       {% regroup sidebar_available by group as avail_groups %}
       {% for g in avail_groups %}
@@ -33,29 +33,33 @@
 <ul class="nav flex-column mb-2">
   {% for g in groups %}
     {% if g.grouper == 'user-playbooks' %}
-      <li class="svc-group-header"><i class="bi bi-journal-plus"></i> Custom User Services</li>
-      {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
-
-    {% elif g.grouper == 'services' %}
-      <li class="svc-group-header"><i class="bi bi-box-seam"></i> Services</li>
-      {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
-
-    {% elif g.grouper == 'external-services' %}
-      <li class="svc-group-header"><i class="bi bi-hdd-network"></i> External Services</li>
-      {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
-
-    {% elif g.grouper == 'base-services' %}
-      <li class="svc-group-header p-0">
-        <a class="svc-group-toggle" data-bs-toggle="collapse" href="#sidebar-base-services"
-           role="button" aria-expanded="false" aria-controls="sidebar-base-services">
-          <i class="bi bi-gear-wide-connected"></i> Base Services
-          <i class="bi bi-chevron-down svc-chevron ms-auto"></i>
-        </a>
+      <li class="sidebar-group">
+        {% include "main/_sidebar_group.html" with group_key=g.grouper group_title="Custom User Services" group_icon="bi-journal-plus" group_collapsible=False %}
+        <ul class="list-unstyled mb-0">
+          {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
+        </ul>
       </li>
-      <ul class="collapse list-unstyled mb-0" id="sidebar-base-services">
-        {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
-      </ul>
-
+    {% elif g.grouper == 'services' %}
+      <li class="sidebar-group">
+        {% include "main/_sidebar_group.html" with group_key=g.grouper group_title="Services" group_icon="bi-box-seam" group_collapsible=False %}
+        <ul class="list-unstyled mb-0">
+          {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
+        </ul>
+      </li>
+    {% elif g.grouper == 'external-services' %}
+      <li class="sidebar-group">
+        {% include "main/_sidebar_group.html" with group_key=g.grouper group_title="External Services" group_icon="bi-hdd-network" group_collapsible=False %}
+        <ul class="list-unstyled mb-0">
+          {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
+        </ul>
+      </li>
+    {% elif g.grouper == 'base-services' %}
+      <li class="sidebar-group">
+        {% include "main/_sidebar_group.html" with group_key="sidebar-base-services" group_title="Base Services" group_icon="bi-gear-wide-connected" group_collapsible=True group_expanded=False %}
+        <ul class="collapse list-unstyled mb-0" id="sb-sidebar-base-services" data-default-collapsed="true">
+          {% for svc in g.list %}{% include "main/sidebar_service_item.html" %}{% endfor %}
+        </ul>
+      </li>
     {% endif %}
   {% empty %}
     <li class="px-3"><small class="text-muted">No services available</small></li>

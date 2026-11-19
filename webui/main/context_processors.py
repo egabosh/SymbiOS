@@ -16,8 +16,15 @@
 
 """Template context processors for the DB-free WebUI."""
 
+from .settings_menu import SETTINGS_MENU
+
 
 def user(request):
     # Expose request.user to templates the same way the removed
     # django.contrib.auth context processor used to.
     return {'user': request.user}
+
+
+def settings_menu(request):
+    # Static menu data for the settings sidebar (see settings_menu.py).
+    return {'settings_menu': SETTINGS_MENU}

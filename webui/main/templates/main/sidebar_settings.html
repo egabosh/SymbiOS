@@ -1,291 +1,32 @@
-<div class='small text-muted text-uppercase fw-semibold mt-3 mb-2 px-3'>Basic Services</div>
-<ul class='nav flex-column'>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/dns/'>
-            <i class='bi bi-globe fs-5'></i>
-            <div>
-                <strong>DNS</strong>
-                <div class='small text-muted fw-normal'>Public reachability configuration</div>
-            </div>
+{% comment %}
+Settings sidebar. Groups and items come from settings_menu.py via the
+settings_menu context processor; sidebar.js handles the expert-mode toggle,
+collapse state and active-page highlighting.
+{% endcomment %}
+<ul class="nav flex-column">
+  {% for group in settings_menu %}
+  <li class="sidebar-group">
+    {% include "main/_sidebar_group.html" with group_key=group.key group_title=group.title group_icon=group.icon group_collapsible=True group_expanded=True %}
+    <ul class="collapse show list-unstyled mb-0" id="sb-{{ group.key }}">
+      {% for item in group.items %}
+      <li>
+        <a class="svc-item" href="{{ item.url }}" data-level="{{ item.level }}"
+           title="{{ item.desc }}">
+          <i class="bi {{ item.icon }} svc-icon"></i>
+          <span class="svc-label">{{ item.title }}</span>
         </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/mailserver/'>
-            <i class='bi bi-envelope fs-5'></i>
-            <div>
-                <strong>Mailserver (SMTP)</strong>
-                <div class='small text-muted fw-normal'>Outgoing email for 2FA notifications</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/notifications/'>
-            <i class='bi bi-bell fs-5'></i>
-            <div>
-                <strong>Notifications</strong>
-                <div class='small text-muted fw-normal'>Health alerts by mail and matrix</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/news/'>
-            <i class='bi bi-newspaper fs-5'></i>
-            <div>
-                <strong>News Feed</strong>
-                <div class='small text-muted fw-normal'>Release notes and security notices</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/matrix/'>
-            <i class='bi bi-chat-dots fs-5'></i>
-            <div>
-                <strong>Matrix Account</strong>
-                <div class='small text-muted fw-normal'>Sender account for matrix notifications</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/auth/'>
-            <i class='bi bi-shield-lock fs-5'></i>
-            <div>
-                <strong>Auth</strong>
-                <div class='small text-muted fw-normal'>2FA / Authelia authentication</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/security/'>
-            <i class='bi bi-shield-check fs-5'></i>
-            <div>
-                <strong>Security</strong>
-                <div class='small text-muted fw-normal'>Password policy configuration</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/acme/'>
-            <i class='bi bi-patch-check fs-5'></i>
-            <div>
-                <strong>ACME / TLS</strong>
-                <div class='small text-muted fw-normal'>Certificate authority configuration</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/ssh-keys/'>
-            <i class='bi bi-key fs-5'></i>
-            <div>
-                <strong>SSH Keys</strong>
-                <div class='small text-muted fw-normal'>Manage authorized_keys for root</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/maintenance/'>
-            <i class='bi bi-clock fs-5'></i>
-            <div>
-                <strong>Maintenance</strong>
-                <div class='small text-muted fw-normal'>Daily backup &amp; update window</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/backup/'>
-            <i class='bi bi-cloud-arrow-up fs-5'></i>
-            <div>
-                <strong>Backup</strong>
-                <div class='small text-muted fw-normal'>Daily snapshots &amp; restore</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/updates/'>
-            <i class='bi bi-arrow-repeat fs-5'></i>
-            <div>
-                <strong>Updates</strong>
-                <div class='small text-muted fw-normal'>Keep system and apps up to date</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/localization/'>
-            <i class='bi bi-globe2 fs-5'></i>
-            <div>
-                <strong>Localization</strong>
-                <div class='small text-muted fw-normal'>Timezone, keyboard, locale settings</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/ai/'>
-            <i class='bi bi-cpu fs-5'></i>
-            <div>
-                <strong>AI</strong>
-                <div class='small text-muted fw-normal'>OpenAI-compatible server configuration</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/ai-speech/'>
-            <i class='bi bi-mic fs-5'></i>
-            <div>
-                <strong>AI Speech</strong>
-                <div class='small text-muted fw-normal'>Speech-to-text and text-to-speech endpoints</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/ai-image/'>
-            <i class='bi bi-image fs-5'></i>
-            <div>
-                <strong>AI Image</strong>
-                <div class='small text-muted fw-normal'>ComfyUI image generation and edit</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/ai-search/'>
-            <i class='bi bi-search fs-5'></i>
-            <div>
-                <strong>AI Search &amp; RAG</strong>
-                <div class='small text-muted fw-normal'>Tika document extraction and SearXNG web search</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/port-forwarding/'>
-            <i class='bi bi-diagram-3 fs-5'></i>
-            <div>
-                <strong>Port Forwarding</strong>
-                <div class='small text-muted fw-normal'>Open ports on the router automatically</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/reverse-proxy/'>
-            <i class='bi bi-arrow-left-right fs-5'></i>
-            <div>
-                <strong>Reverse Proxy</strong>
-                <div class='small text-muted fw-normal'>Publish external targets under public hostnames</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/wlan-accesspoint/'>
-            <i class='bi bi-wifi fs-5'></i>
-            <div>
-                <strong>WLAN Access Point</strong>
-                <div class='small text-muted fw-normal'>Wireless LAN access point via hostapd</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/network-bridges/'>
-            <i class='bi bi-diagram-3 fs-5'></i>
-            <div>
-                <strong>Network Bridges</strong>
-                <div class='small text-muted fw-normal'>Assign unused interfaces to bridges</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/openvpn/'>
-            <i class='bi bi-hdd-network fs-5'></i>
-            <div>
-                <strong>OpenVPN Client</strong>
-                <div class='small text-muted fw-normal'>Tunnels to remote networks</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/wireguard/'>
-            <i class='bi bi-shield-lock fs-5'></i>
-            <div>
-                <strong>WireGuard Client</strong>
-                <div class='small text-muted fw-normal'>Tunnels to remote peers</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/external-systems/'>
-            <i class='bi bi-hdd-stack fs-5'></i>
-            <div>
-                <strong>External Systems</strong>
-                <div class='small text-muted fw-normal'>Manage remote hosts</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/suspend/'>
-            <i class='bi bi-moon fs-5'></i>
-            <div>
-                <strong>Suspend</strong>
-                <div class='small text-muted fw-normal'>Suspend idle hosts over SSH</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/wake-on-lan/'>
-            <i class='bi bi-lightning-charge fs-5'></i>
-            <div>
-                <strong>Wake-on-LAN</strong>
-                <div class='small text-muted fw-normal'>Wake sleeping hosts on request</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/disk/'>
-            <i class='bi bi-device-hdd fs-5'></i>
-            <div>
-                <strong>Data Disk</strong>
-                <div class='small text-muted fw-normal'>Move data to a separate disk</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/raid-md/'>
-            <i class='bi bi-hdd-stack fs-5'></i>
-            <div>
-                <strong>RAID (mdadm)</strong>
-                <div class='small text-muted fw-normal'>Classic RAID incl. RAID5</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/raid-btrfs/'>
-            <i class='bi bi-hdd-stack-fill fs-5'></i>
-            <div>
-                <strong>RAID (btrfs)</strong>
-                <div class='small text-muted fw-normal'>Multi-device filesystems</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/media/'>
-            <i class='bi bi-collection-play fs-5'></i>
-            <div>
-                <strong>Media</strong>
-                <div class='small text-muted fw-normal'>Shared media directories</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/shares/'>
-            <i class='bi bi-folder-symlink fs-5'></i>
-            <div>
-                <strong>Shares</strong>
-                <div class='small text-muted fw-normal'>Group directories on the media root</div>
-            </div>
-        </a>
-    </li>
-    <li class='nav-item mb-2'>
-        <a class='nav-link d-flex align-items-center gap-2' href='/settings/config/'>
-            <i class='bi bi-file-earmark-code fs-5'></i>
-            <div>
-                <strong>Config Editor</strong>
-                <div class='small text-muted fw-normal'>Edit inventory.yml directly</div>
-            </div>
-        </a>
-    </li>
+      </li>
+      {% endfor %}
+    </ul>
+  </li>
+  {% endfor %}
+  <li class="px-3 pt-2">
+    <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="sidebarExpertToggle"
+            aria-pressed="false" title="Show or hide expert-only settings">
+      <i class="bi bi-sliders2 me-1"></i>
+      <span data-sidebar-mode
+            data-expand-label="Show all options (expert mode)"
+            data-collapse-label="Show basic options only">Show all options (expert mode)</span>
+    </button>
+  </li>
 </ul>

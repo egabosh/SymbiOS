@@ -60,6 +60,7 @@ TEMPLATES = [
                 'django.template.context_processors.debug',
                 'django.template.context_processors.request',
                 'main.context_processors.user',
+                'main.context_processors.settings_menu',
                 'django.contrib.messages.context_processors.messages',
             ],
         },
