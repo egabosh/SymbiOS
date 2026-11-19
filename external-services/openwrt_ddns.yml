@@ -35,9 +35,9 @@
 ---
 # Static imports retain the original managed ids so existing installed state
 # and saved parameters stay compatible.
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_ddns-ipv4.yml
+- ansible.builtin.import_playbook: tasks/openwrt/ddns-ipv4.yml
   when: profile | default('ipv4') == 'ipv4'
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_ddns-ipv6.yml
+- ansible.builtin.import_playbook: tasks/openwrt/ddns-ipv6.yml
   when: profile | default('ipv4') == 'ipv6'
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_ddns-ipv6-host.yml
+- ansible.builtin.import_playbook: tasks/openwrt/ddns-ipv6-host.yml
   when: profile | default('ipv4') == 'ipv6-host'

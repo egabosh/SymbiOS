@@ -366,7 +366,7 @@ list of the device: `/etc/sysupgrade.conf` plus `/lib/upgrade/keep.d/*`.
 
 Consequence for new playbooks: a file SymbiOS writes below `/etc` that is not
 listed in `/etc/sysupgrade.conf` (written by the basics component at
-`external-services/tasks/openwrt/openwrt_basics.yml`)
+`external-services/tasks/openwrt/basics.yml`)
 is missing from the firmware upgrade **and** from the backup. Add it there.
 
 ### Home backup of Linux Mint systems
@@ -401,7 +401,7 @@ idle-suspend watchdog cannot suspend the machine mid-transfer.
 ### Package updates on the target
 
 The autoupdate component at
-`external-services/tasks/openwrt/openwrt_autoupdate.yml` (imported by
+`external-services/tasks/openwrt/autoupdate.yml` (imported by
 `openwrt_master.yml`) installs `/etc/scripts/package-upgrade.sh` plus a daily
 cron job (03:30 on the device).
 The script upgrades the userspace packages with `apk` and reports a pending

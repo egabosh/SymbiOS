@@ -53,9 +53,9 @@
 ---
 # Static imports retain the original managed ids so existing installed state
 # and saved parameters stay compatible.
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_wireless.yml
+- ansible.builtin.import_playbook: tasks/openwrt/wireless.yml
   when: profile | default('lan') == 'lan'
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_wireless-iot.yml
+- ansible.builtin.import_playbook: tasks/openwrt/wireless-iot.yml
   when: profile | default('lan') == 'iot'
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_wireless-tor.yml
+- ansible.builtin.import_playbook: tasks/openwrt/wireless-tor.yml
   when: profile | default('lan') == 'tor'

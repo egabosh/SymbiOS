@@ -125,9 +125,9 @@
 #     __playbook__: Install/Update
 #
 ---
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_hijack_connections.yml
+- ansible.builtin.import_playbook: tasks/openwrt/firewall-hijack-connections.yml
   when: profile | default('ipv4') == 'hijack'
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_ipv4_server_portforwardings.yml
+- ansible.builtin.import_playbook: tasks/openwrt/firewall-forwarding-ipv4.yml
   when: profile | default('ipv4') == 'ipv4'
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_ipv6_server_forward.yml
+- ansible.builtin.import_playbook: tasks/openwrt/firewall-forwarding-ipv6.yml
   when: profile | default('ipv4') == 'ipv6'

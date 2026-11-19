@@ -135,7 +135,7 @@
         # underscores to dashes in the stored name - drop every spelling the
         # row may carry (the list is deduplicated).
         - name: Record managed state
-          ansible.builtin.include_tasks: _managed-state.yml
+          ansible.builtin.include_tasks: ../../_managed-state.yml
           vars:
             managed_id: ""
             managed_remove_ids: "{{ ['openwrt_dns_aaaa.yml/' ~ host_norm, 'openwrt_dns_aaaa.yml/' ~ (host_norm | replace('_', '-')), 'openwrt_dns_aaaa.yml/' ~ (host_norm | replace('-', '_'))] | unique }}"
@@ -178,4 +178,4 @@
 
         # Record this playbook's resources in /etc/symbios/managed.json.
         - name: Record managed state
-          ansible.builtin.include_tasks: _managed-state.yml
+          ansible.builtin.include_tasks: ../../_managed-state.yml

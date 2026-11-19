@@ -1,17 +1,13 @@
 # docs:
-#   name: "OpenWrt - DDNS IPv4"
-#   short_description: "OpenWrt - DDNS IPv4"
-#   description: "deSEC DynDNS updater for the IPv4 address."
+#   name: "OpenWrt - DDNS IPv6"
+#   short_description: "OpenWrt - DDNS IPv6"
+#   description: "deSEC DynDNS updater for the IPv6 prefix."
 #   category: "Network"
 #   type: OpenWrt
 #   icon: "bi-cloud-arrow-up"
 #   params:
 #     - name: "domainname"
 #       label: "Domain"
-#       type: "text"
-#       required: true
-#     - name: "localhostname"
-#       label: "Local host name"
 #       type: "text"
 #       required: true
 #     - name: "apikey"
@@ -25,44 +21,39 @@
 #     __playbook__: Install/Update
 #
 ---
-- name: ddns ipv4 desec.io
+- name: ddns ipv6 desec.io
   hosts: all
   gather_facts: no
 
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
-    managed_id: "openwrt_ddns-ipv4.yml"
-    managed_playbook: "openwrt_ddns-ipv4.yml"
-    managed_ref: "domainname={{ domainname }} localhostname={{ localhostname }}"
-    managed_resource_type: "ddns_ipv4"
+    managed_id: "openwrt_ddns-ipv6.yml"
+    managed_playbook: "openwrt_ddns-ipv6.yml"
+    managed_ref: "domainname={{ domainname }}"
+    managed_resource_type: "ddns_ipv6"
     openwrt_packages:
       - ddns-scripts
       - luci-app-ddns
-    # Digitalcourage DNS over port 53 here: ddns-scripts uses the address only
-    # for its public-IP lookup URL, not as a system resolver.
-    dns_server: "5.9.164.112"
 
     uci_delete_vars:
       - ddns.myddns_ipv4
       - ddns.myddns_ipv6 
 
     uci_vars:
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}", value: "service" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.service_name", value: "desec.io" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.use_ipv6", value: "0" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.enabled", value: "1" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.lookup_host", value: "{{ domainname }}" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.domain", value: "{{ domainname }}" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.username", value: "{{ domainname }}" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.password", value: "{{ apikey }}" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.use_https", value: "1" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.cacert", value: "/etc/ssl/certs" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.ip_source", value: "web" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.interface", value: "wan" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.use_syslog", value: "1" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.dns_server", value: "{{ dns_server }}" }
-      - { key: "ddns.dedyn_ipv4_{{ localhostname }}.ip_url", value: "https://checkipv4.dedyn.io" }
+      - { key: "ddns.dedyn_ipv6_openwrt", value: "service" }
+      - { key: "ddns.dedyn_ipv6_openwrt.service_name", value: "desec.io" }
+      - { key: "ddns.dedyn_ipv6_openwrt.use_ipv6", value: "1" }
+      - { key: "ddns.dedyn_ipv6_openwrt.enabled", value: "1" }
+      - { key: "ddns.dedyn_ipv6_openwrt.lookup_host", value: "{{ domainname }}" }
+      - { key: "ddns.dedyn_ipv6_openwrt.domain", value: "{{ domainname }}" }
+      - { key: "ddns.dedyn_ipv6_openwrt.username", value: "{{ domainname }}" }
+      - { key: "ddns.dedyn_ipv6_openwrt.password", value: "{{ apikey }}" }
+      - { key: "ddns.dedyn_ipv6_openwrt.use_https", value: "1" }
+      - { key: "ddns.dedyn_ipv6_openwrt.cacert", value: "/etc/ssl/certs" }
+      - { key: "ddns.dedyn_ipv6_openwrt.ip_source", value: "interface" }
+      - { key: "ddns.dedyn_ipv6_openwrt.interface", value: "wan" }
+      - { key: "ddns.dedyn_ipv6_openwrt.use_syslog", value: "1" }
 
   pre_tasks:
     - name: Check required parameters
@@ -70,9 +61,7 @@
         that:
           - apikey is defined and (apikey | string | length) > 0
           - domainname is defined and (domainname | string | length) > 0
-          - localhostname is defined and (localhostname | string | length) > 0
-          - localhostname is match('^[A-Za-z0-9_-]+$')
-        fail_msg: "Missing or invalid parameter(s). Pass them with -e <name>=<value>."
+        fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
         quiet: true
 
   tasks:
@@ -127,4 +116,4 @@
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state
-      ansible.builtin.include_tasks: _managed-state.yml
+      ansible.builtin.include_tasks: ../../_managed-state.yml

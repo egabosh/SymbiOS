@@ -103,9 +103,9 @@
 ---
 # Profile selection is static Ansible imports: skipped plays are cheap, and
 # each component keeps its original managed id for installed-state tracking.
-- ansible.builtin.import_playbook: tasks/openwrt/dns_a.yml
+- ansible.builtin.import_playbook: tasks/openwrt/dns-a.yml
   when: profile | default('a') == 'a'
-- ansible.builtin.import_playbook: tasks/openwrt/dns_aaaa.yml
+- ansible.builtin.import_playbook: tasks/openwrt/dns-aaaa.yml
   when: profile | default('a') == 'aaaa'
-- ansible.builtin.import_playbook: tasks/openwrt/dns_cname.yml
+- ansible.builtin.import_playbook: tasks/openwrt/dns-cname.yml
   when: profile | default('a') == 'cname'

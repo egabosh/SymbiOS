@@ -149,8 +149,8 @@
 # The component plays stay under tasks/openwrt/ so the catalog stays flat.
 # Importing whole plays keeps their guards, managed-state ids and service
 # reload behavior identical to running the former standalone playbooks.
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_basics.yml
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_iot.yml
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_tor.yml
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_logserver.yml
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_autoupdate.yml
+- ansible.builtin.import_playbook: tasks/openwrt/basics.yml
+- ansible.builtin.import_playbook: tasks/openwrt/iot.yml
+- ansible.builtin.import_playbook: tasks/openwrt/tor.yml
+- ansible.builtin.import_playbook: tasks/openwrt/logserver.yml
+- ansible.builtin.import_playbook: tasks/openwrt/autoupdate.yml

@@ -120,11 +120,11 @@
 #     __playbook__: Install/Update
 #
 ---
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_allow_internet.yml
+- ansible.builtin.import_playbook: tasks/openwrt/firewall-allow-internet.yml
   when: profile | default('internet') == 'internet'
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_allow_to_lan.yml
+- ansible.builtin.import_playbook: tasks/openwrt/firewall-allow-to-lan.yml
   when: profile | default('internet') == 'lan'
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_allow_to_iot.yml
+- ansible.builtin.import_playbook: tasks/openwrt/firewall-allow-to-iot.yml
   when: profile | default('internet') == 'iot'
-- ansible.builtin.import_playbook: tasks/openwrt/openwrt_firewall_allow_to_tor.yml
+- ansible.builtin.import_playbook: tasks/openwrt/firewall-allow-to-tor.yml
   when: profile | default('internet') == 'tor'
