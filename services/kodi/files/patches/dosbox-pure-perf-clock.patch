@@ -1,0 +1,35 @@
+Subject: [PATCH] Keep the core clock when the frontend perf clock does not tick
+
+Kodi's game.libretro answers RETRO_ENVIRONMENT_GET_PERF_INTERFACE with a
+callback that always returns 0. DOSBox Pure hands that callback to time_cb and
+derives DBP_GetTicks() from it, so the tick counter stays at 0 for the whole
+session under Kodi.
+
+Every tick based timeout of the core depends on it: the start menu timer
+(dosbox_pure_menu_time), the "exit emulator after the auto started game ends"
+auto shutdown, and the 500 ms guard that tells a real game run from a crashed
+one. With the frozen counter the guard never passes, so a game that ends drops
+back into the start menu instead of closing the player and returning to Kodi.
+
+Probe the callback once and keep the core's own monotonic clock when the
+frontend one returns 0. A frontend with a working perf clock is unaffected.
+
+diff --git a/dosbox_pure_libretro.cpp b/dosbox_pure_libretro.cpp
+index ea24d45..6d496ee 100644
+--- a/dosbox_pure_libretro.cpp
++++ b/dosbox_pure_libretro.cpp
+@@ -3063,8 +3063,13 @@ void retro_init(void) //#3
+ 	void DBP_Network_SetCallbacks(retro_environment_t envcb);
+ 	DBP_Network_SetCallbacks(environ_cb);
+ 
++	// Some frontends answer the perf interface with a stub that always returns 0
++	// (Kodi's game.libretro does). Accepting it freezes DBP_GetTicks(), and with it
++	// every tick based timeout: the start menu timer, the auto shutdown after a game
++	// and the menu input debounce. Probe the callback and keep the core's own
++	// monotonic clock when the frontend one does not tick.
+ 	struct retro_perf_callback perf;
+-	if (environ_cb(RETRO_ENVIRONMENT_GET_PERF_INTERFACE, &perf) && perf.get_time_usec) time_cb = perf.get_time_usec;
++	if (environ_cb(RETRO_ENVIRONMENT_GET_PERF_INTERFACE, &perf) && perf.get_time_usec && perf.get_time_usec()) time_cb = perf.get_time_usec;
+ 
+ 	// Set default port modes
+ 	dbp_port_mode[0] = dbp_port_mode[1] = dbp_port_mode[2] = dbp_port_mode[3] = DBP_PadMapping::MODE_MAPPER;

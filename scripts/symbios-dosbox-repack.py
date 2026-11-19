@@ -29,10 +29,12 @@ The pick is a heuristic: a file whose name matches the game title wins, then a
 generic launcher name (start, game, play, ...), then any other program, and
 installers, unpackers, driver stubs and diagnostic tools lose. An archive whose
 candidates all look like tools (a game distributed as an installer, Doom for
-example) keeps the menu, because the game has to be installed first. So does a
-start file whose name is not a plain 8.3 DOS name: the core runs the marker
-before it sets up the drive, and a long name with a space breaks the command
-line it builds. Those games still boot into the menu.
+example) keeps the menu, because the game has to be installed first.
+
+A zip entry keeps its long name, but the DOS layer of the core has no long name
+support: the drive stores a short name per entry and truncates any longer name
+before it looks it up, so the marker names the short form the drive reports
+(first four and last four characters of the base name).
 
 Subcommands:
   pack       write one <game>.dosz per game folder and move the verified
@@ -68,22 +70,33 @@ RUN_EXTENSIONS = (".exe", ".com", ".bat")
 # Name of the marker file the core reads on boot and writes from its menu.
 MARKER_NAME = "AUTOBOOT.DBP"
 
+# Characters a DOS name may carry, as the bit table of the core
+# (DOS_ValidCharBits): letters, digits and _$~!#%&'()-{}@^`. Everything else is
+# rejected by the DOS layer, so the drive replaces it in the short name.
+DOS_VALID_CHARS = (
+    0, 0, 0, 0, 250, 43, 255, 3, 255, 255, 255, 199, 1, 0, 0, 232,
+    1, 192, 5, 254, 224, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+)
+
 # File names that never start a game: installers, unpackers, driver stubs,
 # diagnostics. Matched as a prefix so "install2" and "setupcd" count as well;
 # every entry is specific enough not to hit a game title ("set" would hit
-# "settlers", "dig" would hit "digger", so those stay out).
+# "settlers", "dig" would hit "digger", so those stay out). A packed game
+# (tatou.com) and a program named after the game (command.exe in Xenon 2) are
+# start files, so neither name is on the list.
 NOT_A_GAME = (
     "install", "instal", "setup", "uninst", "dosinst", "patch", "crack",
     "config", "setsound", "sndsetup", "sndset", "dxsetup", "gsetup",
     "vinstall", "vset", "detect", "readme", "readnote", "file_id", "info",
-    "intro", "order", "register", "help", "mpscopy", "copyfil", "tatou",
+    "intro", "order", "register", "help", "mpscopy", "copyfil",
     "wizpat", "teledisk", "catalog", "edit", "serial", "trainer", "bootdisk",
     "_mstest", "basica", "gwbasic", "winstall", "ckit", "mkgame", "appendf",
-    "uncmp", "decomp", "deice", "dearj", "unzip", "pkunzj", "arj", "lha",
-    "lharc", "rar", "unrar", "unp", "extract", "dos4gw", "dos32a", "cwsdpmi",
+    "uncmp", "decomp", "deice", "dearj", "unzip", "pkzip", "pkunz", "pkz",
+    "arj", "lha", "lharc", "rar", "unrar", "unp", "extract", "lzexe",
+    "exepack", "pklite", "pksmart", "dos4gw", "dos32a", "cwsdpmi",
     "cwsparam", "dpmi16bi", "pmode", "dosx", "dos16m", "wdosx", "stub",
     "scidhuv", "sierradg", "graphics", "doskey", "mscdex", "emm386", "himem",
-    "smartdrv", "mouse", "chkdsk", "fdisk", "format", "command",
+    "smartdrv", "mouse", "chkdsk", "fdisk", "format",
 )
 
 # Programs that start the game in one fixed video or sound mode: usable, but a
@@ -181,20 +194,72 @@ def f_start_rank(f_name, f_norm_game):
     return 2
 
 
-def f_is_dos_name(f_name):
-    """Return True when every path component is a plain 8.3 DOS name.
+def f_dos_byte(f_char):
+    """Return the byte the DOS layer sees for one character of an archive name.
 
-    The core reads the marker before it sets up the content drive, so the name
-    has to be the one the drive reports; long names are only reachable through
-    the menu (and a space would split the command line the core builds).
+    The DOS layer of the core has no Unicode: it converts an entry name to the
+    DOS code page (CP437) and then filters the bytes. A name read as UTF-8 or
+    as CP437 therefore has to be mapped back before it can be compared.
     """
-    for f_part in f_name.split("/"):
-        f_base, f_ext = os.path.splitext(f_part)
-        if len(f_base) > 8 or len(f_ext) > 4:
-            return False
-        if not re.fullmatch(r"[A-Za-z0-9_$~!#%&'()\-{}@^`]+", f_base):
-            return False
-    return True
+    f_code = ord(f_char)
+    if f_code <= 0xFF:
+        return f_code
+    try:
+        return f_char.encode("cp437")[0]
+    except UnicodeEncodeError:
+        # The code page conversion of the core turns an unmappable character
+        # into a question mark, which the name filter then rejects.
+        return ord("?")
+
+
+def f_dos_char(f_char):
+    """Return the character the core keeps of a name (DOS_ToUpperAndFilter)."""
+    f_code = f_dos_byte(f_char)
+    if DOS_VALID_CHARS[f_code // 8] & (1 << (f_code % 8)):
+        return f_char
+    if "a" <= f_char <= "z":
+        return chr(f_code & 0x5F)
+    if f_code < 0x80:
+        return "-"
+    return bytes([f_code]).decode("cp437").upper()
+
+
+def f_dos_filter(f_text):
+    """Return a name part with every character the core rejects replaced."""
+    return "".join(f_dos_char(f_char) for f_char in f_text)
+
+
+def f_dos_component(f_part):
+    """Return the 8.3 name the core stores for one path component of a zip.
+
+    A zip entry keeps its long name, but the core has no long name support in
+    its DOS layer: the drive tree stores a short name per entry and that is the
+    only name a DOS program (or the start marker) can address. Short names stay
+    as they are; everything else becomes the first four and the last four
+    characters of the base name plus three characters of the extension.
+    """
+    f_dot = f_part.rfind(".")
+    # The core treats a dot in the first position as "no extension".
+    if f_dot <= 0:
+        f_base, f_ext = f_part, ""
+    else:
+        f_base, f_ext = f_part[:f_dot], f_part[f_dot + 1:]
+    if len(f_base) <= 8 and len(f_ext) <= 3 and "." not in f_base:
+        # Already a short name; only a rejected character forces a rewrite.
+        f_short = f_base + ("" if not f_ext else "." + f_ext)
+        if f_dos_filter(f_short) == f_short:
+            return f_short
+    f_left = f_base[:4] if len(f_base) > 8 else f_base
+    f_right = f_base[-4:] if len(f_base) > 8 else ""
+    f_short = f_dos_filter(f_left + f_right)
+    if f_ext:
+        f_short += "." + f_dos_filter(f_ext[:3])
+    return f_short
+
+
+def f_dos_path(f_name):
+    """Return the path the core addresses for an archive entry."""
+    return "/".join(f_dos_component(f_part) for f_part in f_name.split("/"))
 
 
 def f_pick_start(f_game, f_files):
@@ -202,7 +267,7 @@ def f_pick_start(f_game, f_files):
 
     f_files holds (archive name, size) of every file in the game. reason is
     "picked" when a start file was found, otherwise it says why the game keeps
-    the menu: "no candidate", "tool only" or "long name".
+    the menu: "no candidate", "tool only" or "name clash".
     """
     f_norm_game = f_norm(os.path.splitext(f_game)[0])
     f_pool = []
@@ -219,16 +284,26 @@ def f_pick_start(f_game, f_files):
     f_rank, _, _, f_name = min(f_pool)
     if f_rank >= 4:
         return None, "tool only"
-    if not f_is_dos_name(f_name):
-        return None, "long name"
+    # Two entries can end up with the same short name (zaxxon.sound.1984.com and
+    # zaxxon.nosound.1984.com both become ZAXX1984.COM). The drive keeps one of
+    # them under that name, so the marker would start whichever won - the menu
+    # lets the player pick, and it names the full entry.
+    f_dos_name = f_dos_path(f_name)
+    if any(f_other != f_name and f_dos_path(f_other) == f_dos_name
+           for f_other, _ in f_files):
+        return None, "name clash"
     return f_name, "picked"
 
 
 def f_marker_data(f_name):
     """Return (entry name, data) of the start marker for a program in the archive."""
     # The core builds "C:\\<program>" from line 1 and changes to that directory
-    # before it runs it; CRLF is what its own menu writes.
-    return MARKER_NAME, ("C:\\" + f_name.replace("/", "\\")).upper().encode("ascii") + b"\r\n"
+    # before it runs it; CRLF is what its own menu writes. The name has to be
+    # the short name the drive reports (f_dos_path): the DOS layer truncates
+    # anything longer before it looks it up, and a space would split the
+    # command line the core builds.
+    f_dos_name = f_dos_path(f_name)
+    return MARKER_NAME, ("C:\\" + f_dos_name.replace("/", "\\")).upper().encode("ascii") + b"\r\n"
 
 
 def f_write_zip(f_target, f_entries, f_marker):
@@ -277,7 +352,7 @@ def f_verify(f_target, f_entries, f_marker):
 
 
 def f_rewrite_marker(f_target, f_marker):
-    """Rewrite an existing archive with the start marker added or replaced."""
+    """Rewrite an existing archive with the start marker added, replaced or dropped."""
     f_tmp = f_target + ".part"
     with zipfile.ZipFile(f_target) as f_in, \
             zipfile.ZipFile(f_tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as f_out:
@@ -287,7 +362,8 @@ def f_rewrite_marker(f_target, f_marker):
             # Streaming keeps a large disk image out of memory.
             with f_in.open(f_info) as f_src, f_out.open(f_info, "w") as f_dst:
                 shutil.copyfileobj(f_src, f_dst, 1 << 20)
-        f_out.writestr(f_marker[0], f_marker[1])
+        if f_marker:
+            f_out.writestr(f_marker[0], f_marker[1])
     os.replace(f_tmp, f_target)
 
 
@@ -297,6 +373,13 @@ def f_read_marker(f_zip):
         if f_info.filename.rsplit("/", 1)[-1].upper() == MARKER_NAME:
             return f_zip.read(f_info)
     return None
+
+
+def f_marker_is_helper(f_data):
+    """Return True when a marker names a helper instead of a game."""
+    f_line = f_data.split(b"\r")[0].split(b"\n")[0].decode("cp437", "replace").strip()
+    f_base = os.path.splitext(f_line.replace("\\", "/").rsplit("/", 1)[-1])[0].lower()
+    return any(f_base.startswith(f_helper) for f_helper in NOT_A_GAME)
 
 
 def f_archive_files(f_zip):
@@ -409,8 +492,8 @@ def f_mode_autostart(f_args, f_roms):
         return 1
     print(f"archives: {len(f_games)} in {f_roms}")
 
-    f_counts = {"marked": 0, "unchanged": 0, "kept": 0, "failed": 0,
-                "no candidate": 0, "tool only": 0, "long name": 0}
+    f_counts = {"marked": 0, "unmarked": 0, "unchanged": 0, "kept": 0, "failed": 0,
+                "no candidate": 0, "tool only": 0, "name clash": 0}
     for f_game in f_games:
         f_target = os.path.join(f_roms, f_game)
         try:
@@ -422,12 +505,40 @@ def f_mode_autostart(f_args, f_roms):
             f_counts["failed"] += 1
             continue
 
+        # A marker that names a helper never starts the game: it is the stale
+        # pick of an older version of the helper list (a packer prints its usage
+        # and quits at once) or a wrong choice. It counts as absent, so the
+        # decision below writes the right marker or drops it for good.
+        if f_existing is not None and f_marker_is_helper(f_existing):
+            f_existing = None
+            f_helper_marker = True
+        else:
+            f_helper_marker = False
+
         if f_name is None:
             # The menu stays: it is the only way to install a game that ships
-            # as an installer, and a long name cannot be named by the marker.
+            # as an installer (the game does not exist yet).
             f_counts["kept"] += 1
             f_counts[f_reason] = f_counts.get(f_reason, 0) + 1
             print(f"menu kept ({f_reason}): {f_game}")
+            # A marker that names one of two entries sharing a short name
+            # starts whichever entry the drive happened to keep, so it cannot
+            # be trusted either.
+            if f_helper_marker or (f_existing is not None and f_reason == "name clash"):
+                f_counts["unmarked"] += 1
+                if not f_args.apply:
+                    print(f"would unmark ({f_reason}): {f_game}")
+                    continue
+                try:
+                    f_rewrite_marker(f_target, None)
+                    with zipfile.ZipFile(f_target) as f_zip:
+                        if f_read_marker(f_zip) is not None:
+                            raise OSError("marker still present after rewrite")
+                except (OSError, zipfile.BadZipFile) as f_err:
+                    print(f"error: {f_game}: {f_err}", file=sys.stderr)
+                    f_counts["failed"] += 1
+                    continue
+                print(f"unmarked ({f_reason}): {f_game}")
             continue
 
         f_marker = f_marker_data(f_name)
@@ -456,10 +567,12 @@ def f_mode_autostart(f_args, f_roms):
         print(f"marked: {f_game} -> {f_marker[1].decode().strip()}")
 
     print(f"archives: {len(f_games)}, marked: {f_counts['marked']}, "
+          f"unmarked: {f_counts['unmarked']}, "
           f"unchanged: {f_counts['unchanged']}, menu kept: {f_counts['kept']} "
           f"(no candidate: {f_counts['no candidate']}, "
           f"tool only: {f_counts['tool only']}, "
-          f"long name: {f_counts['long name']}), failed: {f_counts['failed']}")
+          f"name clash: {f_counts['name clash']}), "
+          f"failed: {f_counts['failed']}")
     return 1 if f_counts["failed"] else 0
 
 
@@ -490,7 +603,13 @@ def f_main():
                         help="leave the start menu in place (no AUTOBOOT.DBP)")
 
     f_auto = f_sub.add_parser(
-        "autostart", help="add the start marker to archives that already exist")
+        "autostart",
+        help="add the start marker to archives that already exist",
+        description="Add the start marker (AUTOBOOT.DBP) to archives that already "
+                    "exist, so the core starts the game instead of its menu. A "
+                    "game without a usable start file keeps the menu; a marker "
+                    "that names a helper (packer, installer) or one of two "
+                    "entries that share a short name is dropped again.")
     f_auto.add_argument("--roms", required=True,
                         help="directory holding the .dosz archives")
     f_auto.add_argument("--force", action="store_true",

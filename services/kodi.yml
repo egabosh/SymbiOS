@@ -67,7 +67,13 @@
 #     wrapper of the DOS core leaves out every extension another installed
 #     core already covers (zip/iso/chd/cue/m3u), so every file maps to exactly
 #     one client. Only DOS is covered - DOSBox Pure emulates DOS, so a Windows
-#     game does not start from here. N64
+#     game does not start from here. A game that asks for its CD, or whose data
+#     does not match its executable (a Doom wad whose built-in demos come from
+#     another version stops with "Demo is from a different game version"),
+#     quits to the DOS shell and the emulator closes the player again: the
+#     archive is the problem, not the core. A start marker that names a packer
+#     (pkunzip) or one of two entries that share a short name is dropped again,
+#     because such a program quits at once instead of starting a game. N64
 #     games render with the angrylion software RDP (set as an addon user
 #     setting): Kodi 21 has no HW framebuffer game stream, so the default
 #     GLideN64 OpenGL renderer cannot load. Angrylion in turn forces the
@@ -469,10 +475,17 @@
       # reason the wrapper drops every extension another installed core
       # already claims (zip/iso/chd/cue/m3u belong to the arcade and Mega
       # Drive cores); what stays is DOS specific.
+      # The core measures every timeout with the clock of the perf interface,
+      # and Kodi answers that request with a callback that always returns 0 -
+      # DBP_GetTicks() stays frozen, so the start menu timer and the "exit the
+      # emulator when the auto started game ends" option never fire and a
+      # finished game drops back into the start menu. The source patch keeps
+      # the core's own monotonic clock when the frontend one does not tick.
       - addon: game.libretro.dosbox-pure
         build: schelling/dosbox-pure
         url: https://codeberg.org/schelling/dosbox-pure
         core: dosbox_pure_libretro.so
+        patch: dosbox-pure-perf-clock.patch
         local: true
         extensions: dosz|exe|com|bat|conf|ins|img|ima|vhd|jrc
         controllers: [game.controller.keyboard, game.controller.mouse]
@@ -625,11 +638,16 @@
     # left alone, so a re-run changes nothing. A newly applied patch deletes
     # the built .so, otherwise the build task below would skip through its
     # "creates" guard and the add-on would keep running the unpatched core.
+    # A fresh host has no tree yet, so the clone moves in front of the apply
+    # (the build task keeps its own guard for a tree that is already there).
     - name: Apply the source patches of the built libretro cores
       ansible.builtin.shell: |
         set -e
         src=/symbios/services/kodi/src/{{ (item.build | split('/'))[-1] }}
         patch={{ playbook_dir }}/kodi/files/patches/{{ item.patch }}
+        if [[ ! -d $src ]]; then
+          git clone --depth 1 {{ '--recurse-submodules ' if item.submodules | default(false) else '' }}"{{ item.url | default('https://github.com/' ~ item.build) }}" "$src"
+        fi
         if git -C "$src" apply --reverse --check "$patch" 2>/dev/null; then
           exit 0
         fi
@@ -1285,26 +1303,16 @@
 
     # Kodi reads sources.xml at start (or when the UI adds a source) and loads
     # the skin XML once, so a changed file only reaches the running session
-    # after a restart. The switcher is stopped for it: a Kodi it does not see
-    # would look like "the user left Kodi" and the next loop turn would fall
-    # back to the desktop.
-    - name: Check whether a Kodi session is running (source update)
-      ansible.builtin.command: systemctl is-active kodi-standalone.service
-      register: kodi_sources_running
-      changed_when: false
-      failed_when: false
-      when: kodi_sources is changed or kodi_skin_games_widget is changed or kodi_skin_thumb_var is changed
-
+    # after a restart. The script also stops the switcher around it: a Kodi it
+    # does not see would look like "the user left Kodi" and the next loop turn
+    # would fall back to the desktop. It refuses to restart while something is
+    # playing (a restart would end the playback), so the change waits for the
+    # next run.
     - name: Restart the Kodi session to apply the new sources and skin
-      ansible.builtin.shell: |
-        systemctl stop switch-kodi-desk.service
-        systemctl stop kodi-standalone.service
-        systemctl start kodi-standalone.service
-        systemctl start switch-kodi-desk.service
-      changed_when: true
-      when:
-        - kodi_sources is changed or kodi_skin_games_widget is changed or kodi_skin_thumb_var is changed
-        - kodi_sources_running.stdout | trim == 'active'
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-kodi-restart.sh"
+      register: kodi_restart_sources
+      changed_when: "'kodi-session-restarted' in kodi_restart_sources.stdout"
+      when: kodi_sources is changed or kodi_skin_games_widget is changed or kodi_skin_thumb_var is changed
 
     # Automatic addon installation on first run: fetch the latest version from
     # the mirrors.kodi.tv omega repository index (the last listed zip is the
@@ -1345,24 +1353,13 @@
 
     # Kodi reads the addon list at start, so a freshly generated wrapper only
     # reaches the Games window after a restart (switch-kodi-desk enables it on
-    # the same start through f_enable_addons).
-    - name: Check whether a Kodi session is running (new game addon)
-      ansible.builtin.command: systemctl is-active kodi-standalone.service
-      register: kodi_game_addon_running
-      changed_when: false
-      failed_when: false
-      when: kodi_game_addon_result is changed or kodi_game_addon_build_result is changed
-
+    # the same start through f_enable_addons). The restart script skips the
+    # restart while a game or a video is playing.
     - name: Restart the Kodi session to register the new game addon
-      ansible.builtin.shell: |
-        systemctl stop switch-kodi-desk.service
-        systemctl stop kodi-standalone.service
-        systemctl start kodi-standalone.service
-        systemctl start switch-kodi-desk.service
-      changed_when: true
-      when:
-        - kodi_game_addon_result is changed or kodi_game_addon_build_result is changed
-        - kodi_game_addon_running.stdout | trim == 'active'
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-kodi-restart.sh"
+      register: kodi_restart_game_addon
+      changed_when: "'kodi-session-restarted' in kodi_restart_game_addon.stdout"
+      when: kodi_game_addon_result is changed or kodi_game_addon_build_result is changed
 
     # Mupen64Plus-Next's default RDP (GLideN64) renders through OpenGL, which
     # needs the HW framebuffer game stream - missing in Kodi 21.3, so the core
@@ -1383,6 +1380,47 @@
       when:
         - kodi_roms_configured
         - kodi_game_cores_available | selectattr('addon', 'equalto', 'game.libretro.mupen64plus-nx') | list | length > 0
+
+    # DOSBox Pure ends a finished game in its own start menu and waits there,
+    # but that menu can only be driven by a gamepad or by a mouse with absolute
+    # pointer coordinates, and Kodi hands out a relative one. Value 0 quits the
+    # emulator as soon as an auto started game ends, so the player lands back in
+    # the Kodi games window instead of a dead menu. The option only works with
+    # the perf-clock source patch of the catalog entry above: without it Kodi's
+    # frozen clock never lets the core's "the game really ran" guard pass. The
+    # setting has no JSON-RPC method in Kodi 21 (addon settings are not part of
+    # the settings API), so it is written to the addon profile; the wrapper
+    # reads it as a core option on the next start. The file is created empty
+    # first so a profile that already holds other options keeps them. No block
+    # markers: Kodi 21.3 segfaults when it starts a game with an XML comment in
+    # this file (its addon settings loader walks the comment nodes), so the line
+    # is managed by lineinfile.
+    - name: Create the DOSBox Pure addon settings file
+      ansible.builtin.copy:
+        dest: /home/kodi/.kodi/userdata/addon_data/game.libretro.dosbox-pure/settings.xml
+        content: |
+          <settings version="2">
+          </settings>
+        force: false
+        owner: kodi
+        group: kodi
+        mode: '0600'
+      when:
+        - kodi_roms_configured
+        - kodi_game_cores_available | selectattr('addon', 'equalto', 'game.libretro.dosbox-pure') | list | length > 0
+
+    - name: Return to Kodi when a DOS game ends
+      ansible.builtin.lineinfile:
+        path: /home/kodi/.kodi/userdata/addon_data/game.libretro.dosbox-pure/settings.xml
+        regexp: '^\s*<setting id="dosbox_pure_menu_time">.*</setting>\s*$'
+        line: '    <setting id="dosbox_pure_menu_time">0</setting>'
+        insertbefore: '</settings>'
+        owner: kodi
+        group: kodi
+        mode: '0600'
+      when:
+        - kodi_roms_configured
+        - kodi_game_cores_available | selectattr('addon', 'equalto', 'game.libretro.dosbox-pure') | list | length > 0
 
     # The language addon matches the system locale. Not every locale has a Kodi
     # language pack (en_gb is built in), so the mirror index is asked first and
