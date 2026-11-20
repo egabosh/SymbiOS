@@ -758,11 +758,13 @@
     # listeners that can break independently: SMTP submission on 587 and
     # IMAPS with a valid TLS certificate on 993.
     # mailcow pins container_name, so these names are stable across recreates.
+    # getent hosts returns only the AAAA record when IPv6 is enabled; ahosts
+    # lists both families so the static IPv4 alias stays verifiable.
     - name: Deploy healthcheck
       include_tasks: ../shared-tasks/runcheck-docker.yml
       vars:
         check_desc: "Verifies unbound's static IP, nginx's name resolution and the SMTP/IMAP listeners."
-        check_command: 'docker exec mailcowdockerized-nginx-mailcow-1 getent hosts unbound-mailcow | grep -q "172.22.1.254" && docker exec mailcowdockerized-nginx-mailcow-1 getent hosts php-fpm-mailcow && timeout 5 nc -z -w3 127.0.0.1 587 && timeout 6 openssl s_client -connect 127.0.0.1:993 -brief </dev/null 2>&1 | grep -q "CONNECTION ESTABLISHED"'
+        check_command: 'docker exec mailcowdockerized-nginx-mailcow-1 getent ahosts unbound-mailcow | grep -q "172.22.1.254" && docker exec mailcowdockerized-nginx-mailcow-1 getent hosts php-fpm-mailcow && timeout 5 nc -z -w3 127.0.0.1 587 && timeout 6 openssl s_client -connect 127.0.0.1:993 -brief </dev/null 2>&1 | grep -q "CONNECTION ESTABLISHED"'
         check_error: "Healthcheck failed for mailcow: DNS, SMTP (587) or IMAPS (993) unreachable (WebUI Restart recreates the stack)"
 
     # Register playbook as installed in the state file

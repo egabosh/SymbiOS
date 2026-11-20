@@ -302,15 +302,15 @@
       block:
 
        - name: "{{ service_path }}/authelia-data/configuration.yml mail notifier"
+         # smtp_password is a plain inventory value, so Ansible cannot mask
+         # it automatically: -vvv/--diff would otherwise print it.
+         no_log: true
          blockinfile:
            path: "{{ service_path }}/authelia-data/configuration.yml"
            mode: "0600"
            owner: root
            group: root
            create: yes
-           # smtp_password is a plain inventory value, so Ansible cannot mask
-           # it automatically: -vvv/--diff would otherwise print it.
-           no_log: true
            marker: "# {mark} ANSIBLE MANAGED BLOCK NOTIFICATION"
            block: |
              notifier:

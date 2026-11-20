@@ -1,7 +1,7 @@
 CHECK_CATEGORY="services"
 CHECK_TITLE="External Targets"
 CHECK_DESC="Checks if configured external systems are reachable via SSH."
-CHECK_DETAIL="Reads host: entries from external-systems.yml and tests TCP port 22.|Without a configuration file there is nothing to check (status ok)."
+CHECK_DETAIL="Reads host:/port: entries from external-systems.yml and tests the configured TCP port (default 22).|Without a configuration file there is nothing to check (status ok)."
 
 # IMPORTANT: This file is SOURCED by runchecks.sh. Never call exit here -
 # an exit would terminate the whole health daemon mid-loop.
@@ -18,10 +18,9 @@ then
   return 2>/dev/null || true
 fi
 
-# Count systems and check connectivity (TCP port 22, 2s timeout per host)
-g_total=0
-g_reachable=0
-g_unreachable=0
+# Collect hosts with their configured port (default 22), then probe each one
+g_hosts=()
+g_ports=()
 while IFS= read -r g_line
 do
   if [[ "$g_line" =~ host:\ (.+) ]]
@@ -29,15 +28,26 @@ do
     g_host="${BASH_REMATCH[1]}"
     g_host="${g_host//\"/}"
     g_host="${g_host//\'}"
-    g_total=$((g_total + 1))
-    if timeout 2 bash -c "echo >/dev/tcp/${g_host}/22" 2>/dev/null
-    then
-      g_reachable=$((g_reachable + 1))
-    else
-      g_unreachable=$((g_unreachable + 1))
-    fi
+    g_hosts+=("$g_host")
+    g_ports+=(22)
+  elif [[ "$g_line" =~ port:\ ([0-9]+) ]] && [[ ${#g_hosts[@]} -gt 0 ]]
+  then
+    g_ports[$(( ${#g_hosts[@]} - 1 ))]="${BASH_REMATCH[1]}"
   fi
 done < "$g_external_config"
+
+g_total=${#g_hosts[@]}
+g_reachable=0
+g_unreachable=0
+for g_index in "${!g_hosts[@]}"
+do
+  if timeout 2 bash -c "echo >/dev/tcp/${g_hosts[$g_index]}/${g_ports[$g_index]}" 2>/dev/null
+  then
+    g_reachable=$((g_reachable + 1))
+  else
+    g_unreachable=$((g_unreachable + 1))
+  fi
+done
 
 # Report result via gaboshlib (g_echo_error marks the check as failed)
 if [[ "$g_total" -eq 0 ]]
