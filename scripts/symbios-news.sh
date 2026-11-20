@@ -4,6 +4,7 @@
 # Reads news_enabled, news_feed_url and news_severity_markers from
 # inventory.yml (live, no playbook reapply needed), fetches the feed with
 # curl, parses it with symbios-news.py and writes <log>/news.json atomically.
+# Missing values mean enabled with the built-in commit feed.
 # The WebUI and the news healthcheck only read that snapshot.
 
 function f_usage {
@@ -93,7 +94,7 @@ function f_write_snapshot {
 # never sends a message by itself.
 function f_refresh {
   local f_enabled f_url f_markers f_feed_tmp f_items_tmp f_error f_items f_ids
-  f_enabled="$(f_symbios_var news_enabled "false")"
+  f_enabled="$(f_symbios_var news_enabled "true")"
   if [[ "${f_enabled}" == "True" || "${f_enabled}" == "true" ]]
   then
     f_enabled="true"

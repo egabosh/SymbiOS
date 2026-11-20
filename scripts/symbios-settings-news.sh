@@ -4,7 +4,8 @@
 # Settings CLI-first architecture: /settings/news/ is a thin wrapper around
 # this script. The feed values are read live by symbios-news.sh (cron and
 # healthcheck), so no playbook bakes them into state and f_managed_vars is
-# intentionally empty.
+# intentionally empty. Missing values default to enabled with the built-in
+# commit feed.
 
 function f_usage {
   cat << EOF
@@ -76,7 +77,8 @@ then
   cat << EOF
 [
   {"name": "news_enabled", "type": "bool", "label": "Show SymbiOS news",
-   "required": false, "default": false, "secret": false},
+   "required": false, "default": true, "secret": false,
+   "note": "Enabled by default. Set to false to opt out."},
   {"name": "news_feed_url", "type": "text", "label": "RSS/Atom feed URL",
    "required": false, "default": "${g_news_url_default}", "secret": false,
    "note": "RSS 2.0 or Atom. Leave empty to use the default. GitHub releases, commits and tags all provide an Atom feed."},
@@ -88,7 +90,7 @@ EOF
   exit 0
 fi
 
-f_cur_enabled="$(f_symbios_var news_enabled "")"
+f_cur_enabled="$(f_symbios_var news_enabled "true")"
 if [[ "${f_cur_enabled}" == "True" || "${f_cur_enabled}" == "true" ]]
 then
   f_cur_enabled="true"
