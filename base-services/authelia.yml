@@ -446,6 +446,8 @@
       no_log: true
 
     - name: write OIDC config in configuration.yml
+      # The block contains the OIDC private key; keep it out of -vvv/--diff.
+      no_log: true
       ansible.builtin.blockinfile:
         path: "{{ service_path }}/authelia-data/configuration.yml"
         marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC"
@@ -496,6 +498,8 @@
       notify: Restart authelia
 
     - name: write OIDC clients config in configuration.yml
+      # The block contains the dummy client secret; keep it out of -vvv/--diff.
+      no_log: true
       ansible.builtin.blockinfile:
         path: "{{ service_path }}/authelia-data/configuration.yml"
         marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC CLIENTS"

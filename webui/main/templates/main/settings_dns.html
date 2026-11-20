@@ -560,15 +560,22 @@ function checkHostStatus() {
   if (ipv6Match) currentIpv6 = ipv6Match[1];
 
   var ipv6Mode = document.getElementById('ddns_ipv6').value;
-  var params = new URLSearchParams({
-    hostname: hostname,
-    api_key: apiKey,
-    current_ipv4: currentIpv4,
-    current_ipv6: currentIpv6,
-    ipv6_mode: ipv6Mode,
-  });
+  // Keep the API key out of the request URL (and therefore out of proxy logs
+  // and browser history); POST body + CSRF token like testApiKey() below.
+  var formData = new FormData();
+  formData.append('hostname', hostname);
+  formData.append('api_key', apiKey);
+  formData.append('current_ipv4', currentIpv4);
+  formData.append('current_ipv6', currentIpv6);
+  formData.append('ipv6_mode', ipv6Mode);
+  formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
 
-  fetch('{% url "settings_dns_host_status" %}?' + params.toString())
+  fetch('{% url "settings_dns_host_status" %}', {
+    method: 'POST',
+    body: formData,
+    credentials: 'same-origin',
+    headers: { 'X-CSRFToken': getCsrfToken() }
+  })
     .then(r => r.json())
     .then(data => {
       var html = '';

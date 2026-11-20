@@ -12,7 +12,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     ldap-utils \
     openssl \
-    sshpass \
     && rm -rf /var/lib/apt/lists/*
 
 COPY webui/requirements.txt .

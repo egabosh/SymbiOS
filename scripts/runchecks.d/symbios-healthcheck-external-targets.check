@@ -1,7 +1,7 @@
 CHECK_CATEGORY="services"
 CHECK_TITLE="External Targets"
 CHECK_DESC="Checks if configured external systems are reachable via SSH."
-CHECK_DETAIL="Reads host:/port: entries from external-systems.yml and tests the configured TCP port (default 22).|Without a configuration file there is nothing to check (status ok)."
+CHECK_DETAIL="Reads host:/port: entries from external-systems.yml and tests the configured TCP port (default 22).|Hosts are validated before probing.|Without a configuration file there is nothing to check (status ok)."
 
 # IMPORTANT: This file is SOURCED by runchecks.sh. Never call exit here -
 # an exit would terminate the whole health daemon mid-loop.
@@ -41,7 +41,11 @@ g_reachable=0
 g_unreachable=0
 for g_index in "${!g_hosts[@]}"
 do
-  if timeout 2 bash -c "echo >/dev/tcp/${g_hosts[$g_index]}/${g_ports[$g_index]}" 2>/dev/null
+  # Never let config content become shell source: validate the host and pass
+  # both values as positional parameters to the inner shell.
+  if [[ "${g_hosts[$g_index]}" =~ ^[A-Za-z0-9._:-]+$ ]] && \
+     timeout 2 bash -c 'echo >/dev/tcp/$1/$2' _ \
+       "${g_hosts[$g_index]}" "${g_ports[$g_index]}" 2>/dev/null
   then
     g_reachable=$((g_reachable + 1))
   else

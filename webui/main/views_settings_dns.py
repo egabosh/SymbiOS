@@ -176,11 +176,18 @@ def settings_dns_check_domain(request):
 
 @login_required
 def settings_dns_host_status(request):
-    hostname = request.GET.get('hostname', '')
-    api_key = request.GET.get('api_key', '')
-    current_ipv4 = request.GET.get('current_ipv4', '')
-    current_ipv6 = request.GET.get('current_ipv6', '')
-    ipv6_mode = request.GET.get('ipv6_mode', '')
+    # The API key travels in the POST body: a GET query string would end up in
+    # the Traefik access log and in the browser history.
+    if request.method != 'POST':
+        response = JsonResponse({'error': 'POST required'}, status=405)
+        response['Cache-Control'] = 'no-store'
+        return response
+
+    hostname = request.POST.get('hostname', '')
+    api_key = request.POST.get('api_key', '')
+    current_ipv4 = request.POST.get('current_ipv4', '')
+    current_ipv6 = request.POST.get('current_ipv6', '')
+    ipv6_mode = request.POST.get('ipv6_mode', '')
 
     # Append .dedyn.io suffix if not present
     if hostname and not hostname.endswith('.dedyn.io'):
@@ -200,7 +207,9 @@ def settings_dns_host_status(request):
 
     if not hostname:
         result['error'] = 'No hostname provided'
-        return JsonResponse(result)
+        response = JsonResponse(result)
+        response['Cache-Control'] = 'no-store'
+        return response
 
     # Check domain existence via desec API
     if api_key:
@@ -287,7 +296,9 @@ def settings_dns_host_status(request):
         result['ipv6_match'] = True
         result['ipv6_skip'] = True
 
-    return JsonResponse(result)
+    response = JsonResponse(result)
+    response['Cache-Control'] = 'no-store'
+    return response
 
 @login_required
 def settings_dns_test_api(request):

@@ -146,19 +146,15 @@ function f_log {
   echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $*" >> "$g_log_file"
 }
 
-# Prevent concurrent runs
-if [[ -f "$g_pid_file" ]]
+# Prevent concurrent runs atomically. The PID file is informational; an flock
+# is authoritative because a check-then-write on the PID file has a race.
+exec 9>"${g_pid_file}.lock"
+if ! flock -n 9
 then
-  g_old_pid=$(cat "$g_pid_file")
-  if kill -0 "$g_old_pid" 2>/dev/null
-  then
-    g_echo_warn "REAPPLY already running (PID $g_old_pid). Exiting."
-    exit 0
-  fi
-  # Stale PID file
-  rm -f "$g_pid_file"
+  g_echo_warn "REAPPLY already running. Exiting."
+  exit 0
 fi
-
+rm -f "$g_pid_file"
 echo $$ > "$g_pid_file"
 # Chained with the gaboshlib EXIT trap (rm -r $g_tmp) so the $g_tmp dir is
 # not leaked (a plain trap f_cleanup EXIT would replace it).

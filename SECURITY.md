@@ -20,8 +20,12 @@ the WebUI manages the host.
 **Mitigations**:
 - Host key pinning via fingerprint verification (`ssh_exec.py`)
 - Audit logging of all WebUI commands and direct CLI mutations (see below)
-- SSH key is only accessible to the WebUI container (chmod 600)
-- The exec gateway only accepts connections from the WebUI container
+- The key is `0640 root:10000`, readable by root and the WebUI container
+  (uid 10000)
+
+The authorized_keys entry has no `from=` restriction and the gateway has no
+source-IP check; any key holder can connect from any source allowed by the
+firewall.
 
 ### H3: ALLOWED_HOSTS = ['*']
 
@@ -42,20 +46,24 @@ system.
 
 ### C3: Admin Password Forced Change
 
-**Status**: Implemented for Authelia-forwarded admin logins, with one
-documented exception
+**Status**: Implemented for Authelia-forwarded admin logins and for the LAN
+break-glass login, with one documented exception
 
-The `AutheliaMiddleware` enforces password change on a forwarded first login
-with the default "admin" password:
-1. Checks if admin bind with password "admin" succeeds
-2. If yes: sets `force_password_change` session flag
+The `AutheliaMiddleware` enforces a password change while the default "admin"
+password still works:
+1. Checks if an admin bind with password "admin" succeeds
+2. If yes: sets the `force_password_change` session flag
 3. Redirects all non-bypass requests to `/change-password/`
-4. Only clears flag after successful LDAP bind with new password
+4. Clears the flag once the default password no longer binds or the password
+   change succeeds
+
+The LAN break-glass login at `http://<local-ip>:8080` authenticates against
+LDAP and sets the same flag when the default password still works
+(`webui/main/views.py:83-110`).
 
 **Exception - host-local break-glass:** for trusted source addresses the
 middleware grants an implicit local `admin` session without setting
-`force_password_change` (`webui/main/middleware.py:145-149`). The flag is set
-only for a forwarded `remote_user == 'admin'` (`:170-172`). The WebUI is
+`force_password_change` (`webui/main/middleware.py:145-149`). The WebUI is
 reachable on `127.0.0.1:8080` without Traefik/Authelia by design, so the
 forced-change guarantee does not apply to that path. For all other requests
 the middleware check runs before any view.
@@ -66,9 +74,12 @@ the middleware check runs before any view.
 
 The `uid=admin` user gets password "admin" during initial setup. This is
 acceptable because:
-- The password is forced to change on first login (C3)
+- A forwarded or LAN break-glass login forces a password change while the
+  default password still works (C3)
 - The LDAP bind DN (`cn=head-of-ldap`) uses a randomly generated password
-- The init password is only valid until first successful login
+- Login alone does not rotate the password: it stays valid until the admin
+  actually changes it. Reapply does not reset it once `.admin_initialized`
+  exists; the forwarded login only sets a session flag.
 
 ---
 
@@ -89,9 +100,9 @@ either fixed in the owning playbook or added here with a rationale.
 | CIS ID | Control | SymbiOS decision | Rationale | Compensating control |
 |--------|---------|------------------|-----------|----------------------|
 | 3.2.1 | IP forwarding disabled | Not applied | Docker requires `net.ipv4.ip_forward=1` for bridge and NAT networking. | Containers run on an isolated bridge network; UFW default deny limits exposure. |
-| 5.1.10 | SSH root login disabled | Partially applied | Management needs direct root access; `PermitRootLogin prohibit-password` allows keys only. | `PasswordAuthentication` is disabled, ed25519 keys are required, fail2ban is active and SSH listens on non-standard ports. |
+| 5.1.10 | SSH root login disabled | Partially applied | Management needs direct root access; `PermitRootLogin prohibit-password` allows keys only. | SSH listens on ports 22 and 33, ed25519 keys are required and fail2ban is active. Password auth for other local accounts is not centrally disabled. |
 | 6.1.1 | auditd enabled | Not applied | auditd adds little value for a single-admin appliance and would duplicate the existing audit trail. | All state-changing WebUI and CLI operations are recorded in `<data_root>/log/symbios-audit.log`; health checks and systemd logs cover host events. |
-| 7.2.1 | Password aging for local accounts | Not applicable | Users are managed in LDAP through the WebUI; local accounts are maintenance-only. | The configurable password policy under Settings -> Security and forced first-login password change apply to all LDAP users. |
+| 7.2.1 | Password aging for local accounts | Not applicable | Users are managed in LDAP through the WebUI; local accounts are maintenance-only. | The configurable password policy under Settings -> Security applies to LDAP users; the forced first-login change applies only to the initial admin while the default password works (see C3). |
 
 ---
 
@@ -162,7 +173,8 @@ historical data; it is no longer written.
 
 ### M2: Signed Cookies (not encrypted)
 - Session data is stored in signed cookies (HMAC), not encrypted.
-- Only authorization flags (is_staff, force_password_change) are stored.
+- Only the authorization flags `force_password_change` and `lan_admin` are
+  stored; `is_staff` lives on the user object.
 - No secrets or passwords in session data.
 
 ### M8: WebUI Port 0.0.0.0:8080
@@ -170,12 +182,15 @@ historical data; it is no longer written.
 - Required for break-glass access via SSH tunnel.
 
 ### M9: SSH Port from All Sources
-- Non-standard SSH port (33). Key-based auth enforced.
-- UFW default deny policy limits exposure.
+- SSH listens on ports 22 and 33; port 33 is open from all sources. UFW default
+  deny limits exposure to the other ports.
+- Root login is key-only (`PermitRootLogin prohibit-password`); SymbiOS does not
+  centrally disable password auth for other local accounts.
 
 ### M11: No Docker Content Trust
-- DCT adoption limited in home server ecosystem.
-- Registry-level verification provides sufficient integrity.
+- DCT adoption is limited in the home server ecosystem.
+- No digest pinning or signature verification is configured; integrity relies
+  on the registry and the administrator's choice of images.
 
 ### M12: Passwords in Environment Variables
 - Same trust boundary as Docker socket access.
@@ -186,8 +201,10 @@ historical data; it is no longer written.
 - Required for cross-UID read access (root + WebUI container).
 
 ### M16: sshpass in WebUI Container
-- Only used for initial SSH key deployment.
-- Removed from PATH after setup completes.
+- No longer installed in the WebUI image. Initial SSH key deployment runs on
+  the host via `symbios-remote-install-key.sh`, which uses `sshpass -e` with
+  the password on stdin.
+- Existing containers need an image rebuild before the removal takes effect.
 
 ### M18: Collabora SYS_ADMIN Capability
 - Required by Collabora for document conversion sandbox.
@@ -206,8 +223,8 @@ otherwise legitimate values can corrupt UCI configuration.
 
 The safe fix is to convert the affected tasks to `ansible.builtin.command` with
 an argv list and to validate parameters per documented type. That touches
-roughly 204 tasks in many files and needs its own test cycle on the routers,
-so it is deliberately not bundled with this hardening pass.
+204 tasks in 34 files and needs its own test cycle on the routers, so it is
+deliberately not bundled with this hardening pass.
 
 Mitigations for now: WebUI access is admin-only, the exec audit log records
 target and playbook name, and stored parameters can only be changed through
@@ -231,20 +248,25 @@ Mitigations for now: the processes only run for a few seconds, SymbiOS hosts
 are single-admin appliances, and the exec audit log never records values.
 
 ### L4: SSH StrictHostKeyChecking
-- Test scripts use StrictHostKeyChecking=no for dev environments.
-- Production SSH uses key-based auth with known hosts.
+- Test scripts use `StrictHostKeyChecking=no` for dev environments.
+- Production automation uses `no` in several callers (for example WoL,
+  Home Assistant and the external-systems test) and `accept-new` in others;
+  pinned `known_hosts` are not used consistently.
 
 ### L8: Interactive Shell on Install Error
 - Installer-only feature for debugging playbook failures.
 - No security exposure after installation completes.
 
 ### L9: TOCTOU Race in PID File Locking
-- Extremely narrow race window (microseconds).
-- Worst case: duplicate playbook runs (operational, not security).
+- Fixed: `symbios-reapply.sh` holds a non-blocking `flock` on
+  `/run/symbios-reapply.pid.lock`; the PID file is informational only.
+- Previously the worst case was duplicate playbook runs (operational, not
+  security).
 
 ### L10: No set -euo pipefail
-- Explicit error handling throughout scripts.
-- Deliberate architectural choice per coding standards.
+- Strict mode is used in a few scripts; most scripts rely on explicit error
+  handling.
+- The coding standards do not forbid strict mode.
 
 ---
 
@@ -257,14 +279,16 @@ as `password_policy`. Five levels:
 
 | Level | Requirements |
 |-------|-------------|
-| none | No requirements |
+| none | Min 1 character |
 | low | Min 8 characters |
-| medium | Min 8 chars + letters + digits |
-| high | Min 12 chars + mixed case + digits + special chars |
-| paranoid | Min 16 chars + mixed case + digits + special + no common patterns |
+| medium | Min 10 chars + letter + digit + special char |
+| high | Min 16 chars + letter + digit + special char |
+| paranoid | Min 32 chars + letter + digit + special char |
+
+There is no mixed-case requirement and no common-pattern check.
 
 Enforced at all password change points:
-- Initial admin password change (forced on first login)
+- Initial admin password change (forced while the default password works)
 - User creation via WebUI
 - Admin password reset via WebUI
 - `symbios-ldap-user.sh` CLI script
@@ -276,8 +300,9 @@ Stored in `inventory.yml` as `webui_public_access` (default: `false`).
 
 When `false` (default):
 - Traefik applies `allowlocalipsonly@file` middleware to the WebUI router
-- Only RFC1918 private IP ranges (10.x, 172.16-31.x, 192.168.x) and
-  localhost can reach the WebUI via Traefik
+- Only RFC1918 private IP ranges (10.x, 172.16-31.x, 192.168.x), IPv6 ULA
+  (`fc00::/7`), IPv6 link-local (`fe80::/10`) and loopback
+  (`127.0.0.1/32`, `::1/128`) can reach the WebUI via Traefik
 - The break-glass endpoint at localhost:8080 is unaffected
 
 When `true`:
