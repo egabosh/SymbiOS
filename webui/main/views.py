@@ -244,6 +244,55 @@ def _stats_index():
     }
 
 
+def _stats_bytes(size):
+    """Return a compact human-readable byte count for the stats summary."""
+    try:
+        value = float(size)
+    except (TypeError, ValueError):
+        return '-'
+    for unit in ('B', 'KiB', 'MiB', 'GiB', 'TiB'):
+        if value < 1024 or unit == 'TiB':
+            return f'{value:.1f} {unit}'
+        value /= 1024
+    return '-'
+
+
+def _stats_summary(host):
+    """Read the generated summary for one host from the /log volume mount."""
+    if not re.fullmatch(r'[A-Za-z0-9.-]+', host):
+        return None
+    try:
+        with open(f'/log/traefik-stats/summaries/{host}.json', 'r') as summary_file:
+            data = json.load(summary_file)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    totals = data.get('totals')
+    if not isinstance(totals, dict):
+        totals = {}
+        data['totals'] = totals
+    totals['bytes_display'] = _stats_bytes(totals.get('bytes', 0))
+    for key in ('daily', 'pages', 'assets', 'not_found_paths', 'referring_sites',
+                'clients', 'browsers', 'operating_systems'):
+        rows = data.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, dict):
+                row['bytes_display'] = _stats_bytes(row.get('bytes', 0))
+    period = data.get('period')
+    if not isinstance(period, dict):
+        period = {}
+    start = str(period.get('from', ''))[:10]
+    end = str(period.get('to', ''))[:10]
+    if start and end and start != end:
+        data['period_display'] = f'{start} - {end}'
+    else:
+        data['period_display'] = start or end or '-'
+    return data
+
+
 def _stats_base_context():
     """Share the setup banner context between the stats pages."""
     from .setup_status import setup_steps, is_setup_complete
@@ -283,6 +332,7 @@ def stats_domain(request, host):
         'host': host,
         'generated_at': index['generated_at'],
         'invalid_requests': int(domain.get('invalid_requests', 0) or 0),
+        'summary': _stats_summary(host),
     })
     return render(request, 'main/stats_domain.html', context)
 

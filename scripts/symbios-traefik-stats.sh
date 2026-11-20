@@ -27,6 +27,7 @@ Reads:
 Writes:
   <log_dir>/traefik-stats/index.json                   generated_at + host list
   <log_dir>/traefik-stats/reports/<host>.html          one report per host
+  <log_dir>/traefik-stats/summaries/<host>.json        compact tables for the WebUI
   <log_dir>/traefik-stats/invalid/<host>.log           lines GoAccess skipped
 
 Options:
@@ -120,7 +121,8 @@ f_report_dir="${g_log_dir}/traefik-stats"
 f_staging="${f_report_dir}/.build.$$"
 mkdir -p "$f_report_dir" || exit 1
 rm -rf "$f_staging"
-mkdir -p "$f_staging/reports" "$f_staging/invalid" || exit 1
+mkdir -p "$f_staging/hosts" "$f_staging/reports" "$f_staging/summaries" \
+  "$f_staging/invalid" || exit 1
 
 # Old records have no header fields; add empty placeholders so one format
 # string parses the whole rotation. The key order here must match f_log_format.
@@ -131,6 +133,139 @@ f_jq_filter='{ClientHost: (.ClientHost // "-"), ClientUsername: (.ClientUsername
 # GoAccess matches JSON logs by literal field order. --no-global-config keeps
 # the panel set deterministic regardless of /etc/goaccess/goaccess.conf.
 f_log_format='{"ClientHost":"%h","ClientUsername":"%e","DownstreamContentSize":"%b","DownstreamStatus":"%s","Duration":"%n","RequestHost":"%v","RequestMethod":"%m","RequestPath":"%U","RequestProtocol":"%H","request_Referer":"%R","request_User-Agent":"%u","time":"%dT%t"}'
+
+# The WebUI summary is built from the same normalized records, not from a
+# second GoAccess run. Keep the filter in a file so its structure stays readable.
+cat >"$f_staging/summary.jq" <<'SUMMARY_JQ'
+def static_path:
+  test("\\.(css|js|mjs|json|xml|txt|map|jpg|jpeg|png|gif|svg|webp|ico|woff2?|ttf|eot|pdf|zip|gz|mp[34]|webm|ogg|wav|flac)$"; "i");
+
+def browser_group:
+  if test("googlebot"; "i") then "Googlebot"
+  elif test("bingbot"; "i") then "Bingbot"
+  elif test("bot|crawler|spider|slurp|bingpreview|facebookexternalhit"; "i") then "Other bots"
+  elif test("curl"; "i") then "curl"
+  elif test("wget"; "i") then "Wget"
+  elif test("python|httpie|postman|go-http-client"; "i") then "Other clients"
+  elif test("edg/|edgios|edga"; "i") then "Edge"
+  elif test("firefox|fxios"; "i") then "Firefox"
+  elif test("chrome|crios"; "i") then "Chrome"
+  elif test("safari"; "i") then "Safari"
+  else "Other" end;
+
+def os_group:
+  if test("windows"; "i") then "Windows"
+  elif test("android"; "i") then "Android"
+  elif test("iphone|ipad|ipod|cpu os"; "i") then "iOS"
+  elif test("mac os x|macintosh"; "i") then "macOS"
+  elif test("linux"; "i") then "Linux"
+  else "Other" end;
+
+def ref_host:
+  if . == "-" or . == "" then empty
+  elif test("://") then (split("://")[1] | split("/")[0] | split(":")[0])
+  else (split("/")[0] | split(":")[0]) end;
+
+# GoAccess counts a visitor once per IP, day and user agent, but excludes 4xx
+# responses unless --4xx-to-unique-count is set. Mirror that here so the
+# summary and the detailed report show the same number.
+def unique_visitors:
+  map(select(.DownstreamStatus < 400 or .DownstreamStatus >= 500)
+      | [.ClientHost, .time[0:10], .["request_User-Agent"]])
+  | unique | length;
+
+def top_group($key; $limit):
+  group_by(.[$key])
+  | map({
+      value: (.[0][$key] // "-"),
+      requests: length,
+      visitors: unique_visitors,
+      bytes: (map(.DownstreamContentSize) | add // 0)
+    })
+  | sort_by(-.requests, .value)
+  | .[:$limit];
+
+. as $records
+| ($records | length) as $total
+| def pct($n): if $total == 0 then 0 else ((($n * 1000 / $total) | round) / 10) end;
+{
+  host: $host,
+  generated_at: $generated,
+  period: {
+    from: ($records | map(.time) | min // ""),
+    to: ($records | map(.time) | max // "")
+  },
+  totals: {
+    requests: $total,
+    visitors: ($records | unique_visitors),
+    bytes: ($records | map(.DownstreamContentSize) | add // 0),
+    not_found: ($records | map(select(.DownstreamStatus == 404)) | length),
+    unique_files: ($records | map(.RequestPath) | unique | length),
+    unique_referrers: ($records | map(.request_Referer | select(. != "-" and . != "")) | unique | length)
+  },
+  daily: (
+    $records
+    | map({date: .time[0:10], ip: .ClientHost, ua: .["request_User-Agent"],
+           bytes: .DownstreamContentSize,
+           counted: (.DownstreamStatus < 400 or .DownstreamStatus >= 500)})
+    | group_by(.date)
+    | map({
+        date: .[0].date,
+        requests: length,
+        visitors: (map(select(.counted) | [.ip, .ua]) | unique | length),
+        bytes: (map(.bytes) | add // 0)
+      })
+    | sort_by(.date)
+  ),
+  hourly: (
+    $records
+    | group_by(.time[11:13])
+    | map({hour: .[0].time[11:13], requests: length})
+    | sort_by(.hour)
+  ),
+  status_codes: (
+    $records
+    | group_by(.DownstreamStatus)
+    | map({status: (.[0].DownstreamStatus // 0), requests: length, percent: pct(length)})
+    | sort_by(-.requests, .status)
+  ),
+  pages: (
+    $records
+    | map(select((.RequestPath | static_path) | not))
+    | top_group("RequestPath"; 15)
+  ),
+  assets: (
+    $records
+    | map(select(.RequestPath | static_path))
+    | top_group("RequestPath"; 10)
+  ),
+  not_found_paths: (
+    $records
+    | map(select(.DownstreamStatus == 404))
+    | top_group("RequestPath"; 10)
+  ),
+  referring_sites: (
+    $records
+    | map({site: (.request_Referer | ref_host), ClientHost: .ClientHost, time: .time, "request_User-Agent": .["request_User-Agent"], DownstreamContentSize: .DownstreamContentSize})
+    | map(select(.site != null))
+    | top_group("site"; 10)
+  ),
+  clients: (
+    $records
+    | top_group("ClientHost"; 10)
+  ),
+  browsers: (
+    $records
+    | map(. + {browser: (.["request_User-Agent"] | browser_group)})
+    | top_group("browser"; 10)
+  ),
+  operating_systems: (
+    $records
+    | map(. + {os: (.["request_User-Agent"] | os_group)})
+    | top_group("os"; 10)
+  )
+}
+SUMMARY_JQ
 
 # Normalize once, then filter the same records for every host report. The
 # normalized field order is fixed, so a literal grep is enough and much faster
@@ -144,28 +279,42 @@ then
   exit 1
 fi
 
-# Build one report per installed host and record its parse status.
+# Build one report and one summary per installed host, then record its status.
 : >"$f_staging/domains.jsonl" || exit 1
+f_generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 for f_host in "${f_hosts[@]}"
 do
+  f_host_log="$f_staging/hosts/${f_host}.json"
+  f_host_summary="$f_staging/summaries/${f_host}.json"
   f_host_report="$f_staging/reports/${f_host}.html"
   f_host_invalid="$f_staging/invalid/${f_host}.log"
   : >"$f_host_invalid"
-  if ! grep -F "\"RequestHost\":\"$f_host\"" "$f_normalized" \
-    | goaccess - \
-        --no-global-config \
-        --log-format="$f_log_format" \
-        --date-format='%Y-%m-%d' \
-        --time-format='%T%z' \
-        --log-size="$f_log_size" \
-        --no-query-string \
-        --no-strict-status \
-        --no-progress \
-        --invalid-requests="$f_host_invalid" \
-        -o "$f_host_report"
+
+  # A host with no requests is valid; grep returns 1 for an empty result.
+  grep -F "\"RequestHost\":\"$f_host\"" "$f_normalized" >"$f_host_log" || true
+  if ! goaccess "$f_host_log" \
+      --no-global-config \
+      --log-format="$f_log_format" \
+      --date-format='%Y-%m-%d' \
+      --time-format='%T%z' \
+      --log-size="$f_log_size" \
+      --no-query-string \
+      --no-strict-status \
+      --no-progress \
+      --invalid-requests="$f_host_invalid" \
+      -o "$f_host_report"
   then
     rm -rf "$f_staging"
     g_echo_error "GoAccess failed to parse the Traefik log for $f_host"
+    exit 1
+  fi
+  if ! jq -s -f "$f_staging/summary.jq" \
+    --arg host "$f_host" \
+    --arg generated "$f_generated_at" \
+    "$f_host_log" >"$f_host_summary"
+  then
+    rm -rf "$f_staging"
+    g_echo_error "Failed to build the statistics summary for $f_host"
     exit 1
   fi
   f_invalid_lines="$(wc -l <"$f_host_invalid")"
@@ -182,7 +331,7 @@ done
 
 # The index is the WebUI's only source of installed hosts and report ages.
 if ! jq -n \
-  --arg generated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg generated "$f_generated_at" \
   --slurpfile domains "$f_staging/domains.jsonl" \
   '{generated_at: $generated, domains: $domains}' >"$f_staging/index.json"
 then
@@ -192,8 +341,9 @@ then
 fi
 
 # Swap the finished set into place so the WebUI never sees a partial report.
-rm -rf "${f_report_dir}/reports" "${f_report_dir}/invalid"
+rm -rf "${f_report_dir}/reports" "${f_report_dir}/summaries" "${f_report_dir}/invalid"
 mv "$f_staging/reports" "${f_report_dir}/reports" || exit 1
+mv "$f_staging/summaries" "${f_report_dir}/summaries" || exit 1
 mv "$f_staging/invalid" "${f_report_dir}/invalid" || exit 1
 mv "$f_staging/index.json" "${f_report_dir}/index.json" || exit 1
 rm -rf "$f_staging"
@@ -208,5 +358,5 @@ then
   g_echo_warn "$f_invalid_total line(s) could not be parsed; see $f_report_dir/invalid/"
 fi
 
-g_echo_note "Traefik statistics reports written for ${#f_hosts[@]} host(s) to ${f_report_dir}/reports"
+g_echo_note "Traefik statistics reports and summaries written for ${#f_hosts[@]} host(s) to ${f_report_dir}"
 exit 0
