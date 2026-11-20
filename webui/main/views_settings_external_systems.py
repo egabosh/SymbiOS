@@ -186,10 +186,25 @@ def settings_external_system_edit(request, system_id):
 def settings_external_system_delete(request, system_id):
     if request.method != 'POST':
         return redirect('settings_external_systems')
-    systems = _load_systems()
-    systems = [s for s in systems if s.get('id') != system_id]
-    _save_systems(systems)
-    flash_messages.success(request, 'External system deleted.')
+    from .utils.ssh_exec import run_command
+    cmd = 'symbios-external-system-cleanup.sh %s' % shlex.quote(system_id)
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        from .utils.jobs import create_job
+        job_id = create_job(cmd, timeout=30)
+        return JsonResponse({
+            'ok': True,
+            'job': job_id,
+            'title': 'Deleting external system...',
+            'message': 'Removing the target and its saved state.',
+            'redirect': '/settings/external-systems/',
+        })
+    ok, stdout, stderr = run_command(cmd, timeout=30)
+    if ok:
+        flash_messages.success(request, 'External system deleted.')
+    else:
+        flash_messages.error(
+            request,
+            'External system deletion failed: %s' % (stderr or stdout or 'unknown error'))
     return redirect('settings_external_systems')
 
 

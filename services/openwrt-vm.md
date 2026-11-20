@@ -48,6 +48,11 @@ not listed in the catalog. They are used only by the bundles. Physical routers
 are untouched by this reorganisation: their existing saved variables and
 managed-state ids are kept via `external-services/_playbook-compat.json`.
 
+A full uninstall of this service also removes the `openwrt-vm` entry from
+external systems and all `... @ openwrt-vm` install markers, so the master and
+slave bundles stop showing as installed. `Uninstall (keep data)` deliberately
+keeps saved variables and remote-run state.
+
 The VM owns the `.1` / `::1` gateway on every internal segment; the host
 bridges are L2 switches that additionally take a DHCP address from the
 segment's dnsmasq, so the host is directly reachable inside every segment.

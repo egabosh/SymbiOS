@@ -289,7 +289,9 @@ A successful remote run registers the playbook in
 `external-services/<playbook> @ <target>`. The WebUI shows such playbooks as
 installed in the sidebar. This state is deliberately separate from
 `installed-playbooks.yml`, so a full reapply never tries to run remote
-playbooks locally.
+playbooks locally. Deleting an external system (or fully uninstalling the
+OpenWrt VM service) removes its markers together with the target entry via
+`symbios-external-system-cleanup.sh`.
 
 ### OpenWrt segment parameters
 

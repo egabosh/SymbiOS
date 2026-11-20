@@ -397,6 +397,13 @@ After a successful remote run, the runner records
 playbooks as installed in the sidebar; the local reapply deliberately ignores
 this separate state file.
 
+`scripts/symbios-external-system-cleanup.sh <target>` removes the whole local
+footprint of a target: its `external-systems.yml` entry, install markers ending
+in ` @ <target>`, saved host/playbook vars and the remote-sync state file. The
+remote system is not contacted. The External Systems delete view and
+`symbios-openwrt-cleanup.sh` (OpenWrt VM uninstall) call it, so a deleted VM no
+longer leaves its external target or bundle install markers behind.
+
 `scripts/symbios-instances.py` is schema-aware on top of it: it parses
 the service playbook's `# docs:` config block (same source the WebUI
 catalog reads), coerces stdin JSON rows (bool/number/list/text + patterns,
@@ -547,7 +554,7 @@ texts opportunistically).
 | `symbios-top-procs.sh` | Top processes by CPU/mem/IO as JSON (delta-based I/O) | `[top_n]` |
 | `symbios-docker-stats.sh` | `docker stats` snapshot JSON (normalized units) | `[timeout]` |
 | `symbios-dashboard-snapshot.sh` | Minutely dashboard snapshot + 7-day history (cron) | no args |
-| `symbios-traefik-stats.sh` | Build hourly GoAccess reports per installed host from the Traefik access log | no args |
+| `symbios-traefik-stats.sh` | Build hourly GoAccess reports and WebUI summaries per installed host from the Traefik access log | no args |
 | `traefik-qualys-ssl-labs-check.sh` | TLS grades via Qualys SSL Labs API | no args |
 
 ### 4.7 Service admin sync and maintenance
