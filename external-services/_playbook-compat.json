@@ -20,7 +20,11 @@
   ],
   "openwrt_slave.yml": [
     "openwrt_basics-slave.yml",
-    "openwrt_basics.yml"
+    "openwrt_basics.yml",
+    "openwrt_iot.yml",
+    "openwrt_tor.yml",
+    "openwrt_logserver.yml",
+    "openwrt_autoupdate.yml"
   ],
   "openwrt_dns.yml": [
     "openwrt_dns_a.yml",

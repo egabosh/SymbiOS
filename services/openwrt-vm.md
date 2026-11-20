@@ -10,38 +10,43 @@ first-boot preconfiguration** so the VM is reachable over the network (SSH and
 HTTP/HTTPS via Traefik) and the host stays present in every internal segment.
 
 Service and router configuration beyond reachability is **not** baked in here.
-It is the responsibility of the `external-services/openwrt_*` playbooks and can
-be applied as needed (per admin/user choice):
+The WebUI offers only two playbooks for it:
 
-| Topic | Playbook(s) |
-|-------|-------------|
-| Master bundle (system basics, LAN/IoT/Tor segments, log forwarding, autoupdate and optional system services) | `openwrt_master.yml` |
-| Secondary access point conversion | `openwrt_slave.yml` |
-| DNS, DDNS, firewall rules, wireless | `openwrt_dns.yml`, `openwrt_ddns.yml`, `openwrt_firewall_allow.yml`, `openwrt_firewall_forwarding.yml`, `openwrt_wireless.yml` (select the variant with `profile`) |
+| Topic | Playbook |
+|-------|----------|
+| Master router, like `openwrt-og` | `external-services/openwrt_master.yml` |
+| Secondary access point, like `openwrt-ab` | `external-services/openwrt_slave.yml` |
+
+All other OpenWrt playbooks are hidden from the catalog. The reusable component
+plays live under `external-services/tasks/openwrt/`, and the remaining per-item
+tools (DNS records, DHCP hosts, DDNS, firewall rules, wireless, WireGuard
+clients) stay runnable via `symbios-run-remote-playbook.sh` on the CLI.
 
 `openwrt_master.yml` installs the foundation in every run and can optionally
 include the system services via its `services` parameter (comma separated):
 `asterisk`, `smtp`, `netboot`, `dnscrypt`, `openvpn-lan`, `openvpn-iot`,
 `openvpn-tor`, `wireguard-lan`, `wireguard-tor`, `uplink-ftth`, `uplink-vdsl`,
 `fritzbox`. An empty value (the default, and the right choice for the lab VM)
-runs only the foundation. Each service keeps its own saved variables: configure
-them on the corresponding `openwrt_*` playbook page first, then enable the
-service in the master; `_playbook-compat.json` merges those values into the
-master run. A skipped service never evaluates its required-parameter asserts.
-The service playbooks stay in the catalog because their WebUI forms are where
-those parameters are saved; they can also still be run individually.
+runs only the foundation. The fields for every service are part of the master
+form; a skipped service never evaluates its required-parameter asserts. Values
+saved under the old playbook names are still merged via `_playbook-compat.json`.
 
-There is no standalone OpenVPN client playbook. `openwrt_openvpn-lan.yml`,
-`openwrt_openvpn-iot.yml` and `openwrt_openvpn-tor.yml` generate an inline
+`openwrt_slave.yml` bundles the same foundation, IoT/Tor segments, log
+forwarding and autoupdate as the master, then converts the router into a dumb
+access point (gateway, DNS, no WAN, no local DHCP/DNS). Its form carries the
+parameters of all those components.
+
+There is no standalone OpenVPN client playbook. The OpenVPN server components
+under `external-services/tasks/openwrt/` generate an inline
 `.ovpn` file for every host listed in `lan_clients`, `iot_clients` and
 `tor_clients`, copy it to that host over SSH and set its
 `openvpn.<segment>vpn` UCI section. The physical slaves are IoT/Tor clients
 because they are named in `iot_clients` / `tor_clients` on the master; the
 LAN server currently pushes only to end devices, not to the slaves.
 `openwrt_slave.yml` therefore needs no client import. To reproduce the client
-side, enable `openvpn-iot` / `openvpn-tor` in `services` and save the matching
-`*_clients` value on that playbook's WebUI page first. A fresh VM has no client
-certificate until the master server playbook runs.
+side, enable `openvpn-iot` / `openvpn-tor` in `services` and fill in the
+matching `iot_clients` / `tor_clients` field of the master form. A fresh VM has
+no client certificate until the master server playbook runs.
 
 The foundation components live under `external-services/tasks/openwrt/` and are
 not listed in the catalog. They are used only by the bundles. Physical routers
@@ -144,9 +149,9 @@ internal segments use `172.18.x` / `fd00:18::` instead of the physical routers'
 
 | Playbooks | Use on the VM |
 |-----------|---------------|
-| `openwrt_master.yml`, `openwrt_dns.yml`, `openwrt_dhcp-hosts.yml`, `openwrt_firewall_allow.yml`, `openwrt_firewall_forwarding.yml`, `openwrt_smtp.yml` | Compatible. These read the saved host vars below; their built-in defaults still target the physical routers. |
-| `openwrt_wireguard-*.yml`, `openvpn-*`, `openwrt_asterisk.yml` | Need their segment subnets/IPs passed as extra vars (defaults target the physical routers). |
-| `openwrt_slave.yml`, `openwrt_fritzbox-ipv6.yml`, `openwrt_internet_telekom_*.yml`, `openwrt_wireless.yml`, IPv6 DDNS/forwarding | Do not run: wrong hardware or uplink model (static WAN, no radios, no v6 uplink). `openwrt_slave.yml` is for secondary physical APs only. |
+| `openwrt_master.yml` (foundation), and the per-item tools for DNS records, DHCP hosts and firewall rules | Compatible. They read the saved host vars below; their built-in defaults still target the physical routers. |
+| `openwrt_master.yml` with `smtp` or `asterisk` | Need their segment subnets/IPs passed as extra vars (defaults target the physical routers). |
+| `openwrt_slave.yml`, the wireless tool, IPv6 DDNS/forwarding, and the `fritzbox`, `uplink-*` and WireGuard services of `openwrt_master.yml` | Do not run: wrong hardware or uplink model (static WAN, no radios, no v6 uplink). `openwrt_slave.yml` is for secondary physical APs only. |
 
 Saved target-wide vars for `openwrt-vm` live in
 `external-systems/host_vars/openwrt-vm.yml` and currently are:
@@ -203,8 +208,8 @@ Values are saved with `symbios-external-params.sh` and merged by
 - The preconfig leaves timezone/NTP, remote syslog, upstream DNS policy, mDNS
   reflection and advanced firewall policies to the external-services playbooks.
   The main lan/misc resolver initially forwards via `vm_dns`
-  (`/etc/resolv.dnsmasq.lan`); `openwrt_dnscrypt-proxy.yml` repoints it to a
-  local DoH proxy when applied.
+  (`/etc/resolv.dnsmasq.lan`); the `dnscrypt` component of
+  `openwrt_master.yml` repoints it to a local DoH proxy when selected.
 - The remaining feature playbooks under `services/openwrt-vm/features/`
   (`ddns-ipv6.yml`, `dhcp-hosts.yml`, `dns_a.yml`) cover user-specific DNS
   entries. Configure them via the WebUI Features tab.

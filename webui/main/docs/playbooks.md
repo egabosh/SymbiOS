@@ -223,21 +223,22 @@ Foundation pattern: each target type has one foundation playbook that bundles
 everything a fresh device needs to work. For OpenWrt, `openwrt_master.yml`
 bundles the resolver foundation (packages, system, LAN addressing, SSH,
 DHCP/DNS, mDNS, base firewall), IoT and Tor segments, remote logging and
-autoupdate. `openwrt_slave.yml` converts a secondary access point. Both import
-the former standalone plays from `external-services/tasks/openwrt/`, so the
-managed-state ids and UCI behaviour stay identical and physical routers can
-keep running the old playbooks untouched. Optional system services are pulled
-into the master with its `services` parameter; uplink, DDNS, port forwards and
-per-resource playbooks remain separate.
+autoupdate. `openwrt_slave.yml` bundles the same components and then converts a
+secondary access point (gateway, DNS, no WAN, no local DHCP/DNS), matching
+`openwrt-ab`. All reusable components live in `external-services/tasks/openwrt/`,
+so the managed-state ids and UCI behaviour stay identical and physical routers
+can keep running the old playbooks untouched. Only the two bundles are visible
+in the WebUI; their forms carry the options of the components they import.
 
-Resource playbooks that were consolidated use a `profile` parameter and import
-the matching hidden component: `openwrt_dns.yml`, `openwrt_firewall_allow.yml`,
-`openwrt_firewall_forwarding.yml`, `openwrt_ddns.yml` and
-`openwrt_wireless.yml`. `openwrt_master.yml` additionally imports the optional
-system services (`asterisk`, `smtp`, `netboot`, `dnscrypt`, OpenVPN/WireGuard
-servers, Telekom uplinks, FRITZ!Box) from their top-level playbooks, selected by
-the comma separated `services` parameter. Their saved variables are merged via
-`_playbook-compat.json`; a skipped service never runs its parameter asserts.
+The optional system services of the master (`asterisk`, `smtp`, `netboot`,
+`dnscrypt`, OpenVPN/WireGuard servers, Telekom uplinks, FRITZ!Box) are selected
+by the comma separated `services` parameter; the matching fields are part of
+the master form, and a skipped service never runs its parameter asserts. The
+per-item tools (`openwrt_dns.yml`, `openwrt_firewall_allow.yml`,
+`openwrt_firewall_forwarding.yml`, `openwrt_ddns.yml`, `openwrt_wireless.yml`,
+`openwrt_dhcp-hosts.yml`, WireGuard clients) carry `hidden: true` in their docs
+block: they stay runnable from the CLI, but have no WebUI tile or form. Values
+saved under the old playbook names are still merged via `_playbook-compat.json`.
 When changing a bundle, check the UCI keys (or equivalent settings) for
 conflicts first - the merged result must stay idempotent.
 
@@ -248,8 +249,8 @@ set its `openvpn.<segment>vpn` UCI section. The physical slaves therefore become
 IoT/Tor clients simply by being listed in `iot_clients` / `tor_clients` on the
 master; `openwrt_slave.yml` needs no client import. The LAN server currently
 pushes only to end devices, not to the slaves. To reproduce the client side on
-a fresh target, enable the matching server service in `services` and store the
-corresponding `*_clients` value on that playbook's WebUI page first.
+a fresh target, enable the matching server service in `services` and fill in
+the corresponding `*_clients` field of the master form.
 
 ### Saved variables for external targets
 

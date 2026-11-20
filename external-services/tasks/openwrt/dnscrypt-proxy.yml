@@ -19,6 +19,7 @@
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
+    # Keep the legacy id: it keys managed.json and saved playbook vars.
     managed_id: "openwrt_dnscrypt-proxy.yml"
     managed_playbook: "openwrt_dnscrypt-proxy.yml"
     managed_ref: ""
@@ -31,17 +32,17 @@
   
   tasks:
 
-    - name: update opkg db
-      raw: opkg update
+    - name: update apk db
+      raw: apk update
       changed_when: false
 
     - name: check installed packages
-      raw: opkg list-installed
+      raw: apk info
       register: installed_packages
       changed_when: false
 
     - name: install packages if needed
-      raw: opkg install {{ item }}
+      raw: apk add {{ item }}
       loop: "{{ openwrt_packages }}"
       when: item not in installed_packages.stdout
 
@@ -382,4 +383,4 @@
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state
-      ansible.builtin.include_tasks: _managed-state.yml
+      ansible.builtin.include_tasks: ../../_managed-state.yml

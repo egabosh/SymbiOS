@@ -5,6 +5,7 @@
 #   category: "Network"
 #   type: OpenWrt
 #   icon: "bi-wifi"
+#   hidden: true   # Component tool: run via CLI, not shown in the WebUI catalog.
 #   params:
 #     - name: "profile"
 #       label: "Segment (lan, iot or tor)"

@@ -5,6 +5,7 @@
 #   category: "Network"
 #   type: OpenWrt
 #   icon: "bi-pc-display"
+#   hidden: true   # Component tool: run via CLI, not shown in the WebUI catalog.
 #   params:
 #     - name: "host"
 #       label: "Hostname"

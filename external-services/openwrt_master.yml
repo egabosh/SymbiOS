@@ -1,7 +1,7 @@
 # docs:
 #   name: "OpenWrt - Master bundle"
 #   short_description: "OpenWrt - Master bundle"
-#   description: "One run for a resolver/master router: foundation (packages, system, LAN, Dropbear, DHCP/DNS, Avahi, base firewall), IoT and Tor segments, log forwarding, package autoupdate, plus optional system services selected by the 'services' parameter (Asterisk, SMTP, Netboot, DNSCrypt, OpenVPN/WireGuard servers, Telekom uplink, FRITZ!Box). Resource playbooks (DNS records, DDNS, firewall rules, wireless, DHCP hosts, VPN clients) stay separate because they run per item."
+#   description: "One run for a resolver/master router: foundation (packages, system, LAN, Dropbear, DHCP/DNS, Avahi, base firewall), IoT and Tor segments, log forwarding, package autoupdate, plus optional system services selected by the 'services' parameter (Asterisk, SMTP, Netboot, DNSCrypt, OpenVPN/WireGuard servers, Telekom uplink, FRITZ!Box). Those services are reusable plays under tasks/openwrt/; their options are fields of this form and only affect the services you select. Resource playbooks (DNS records, DDNS, firewall rules, wireless, DHCP hosts, VPN clients) stay separate because they run per item."
 #   category: "System"
 #   type: OpenWrt
 #   icon: "bi-diagram-3"
@@ -146,7 +146,84 @@
 #       label: "Optional system services (comma separated)"
 #       type: "text"
 #       default: ""
-#       help: "Empty = base system only. Choose from: asterisk, smtp, netboot, dnscrypt, openvpn-lan, openvpn-iot, openvpn-tor, wireguard-lan, wireguard-tor, uplink-ftth, uplink-vdsl, fritzbox. Each service uses its own saved variables; configure them on the service playbook page first. OpenVPN server services push their .ovpn clients to the hosts named in lan_clients/iot_clients/tor_clients; there is no separate client playbook. Leave empty on a lab VM without WAN or radio hardware."
+#       help: "Empty = base system only. Choose from: asterisk, smtp, netboot, dnscrypt, openvpn-lan, openvpn-iot, openvpn-tor, wireguard-lan, wireguard-tor, uplink-ftth, uplink-vdsl, fritzbox. Fill in the matching fields below for the services you select; unused fields are ignored. OpenVPN server services push their .ovpn clients to the hosts named in lan_clients/iot_clients/tor_clients. Leave empty on a lab VM without WAN or radio hardware."
+#     - name: "sip_provider_name"
+#       label: "Asterisk: SIP provider name"
+#       type: "text"
+#       help: "Only used when 'asterisk' is selected."
+#     - name: "sip_server_hostname"
+#       label: "Asterisk: SIP server hostname"
+#       type: "text"
+#     - name: "sip_server_realm"
+#       label: "Asterisk: SIP realm"
+#       type: "text"
+#     - name: "from_mail"
+#       label: "Asterisk: From mail address"
+#       type: "text"
+#     - name: "local_phone_pw"
+#       label: "Asterisk: local phone password"
+#       type: "password"
+#       help: "Applied at run time, never saved."
+#     - name: "accounts"
+#       label: "Asterisk: accounts (comma separated)"
+#       type: "text"
+#     - name: "mailserver"
+#       label: "SMTP: mail server"
+#       type: "text"
+#       help: "Only used when 'smtp' is selected."
+#     - name: "mailserver_port"
+#       label: "SMTP: port"
+#       type: "text"
+#       default: "587"
+#     - name: "username"
+#       label: "SMTP: username"
+#       type: "text"
+#     - name: "password"
+#       label: "SMTP: password"
+#       type: "password"
+#       help: "Applied at run time, never saved."
+#     - name: "lan_clients"
+#       label: "OpenVPN LAN: clients"
+#       type: "text"
+#       help: "Comma separated host names. Only used when 'openvpn-lan' is selected."
+#     - name: "iot_clients"
+#       label: "OpenVPN IoT: clients"
+#       type: "text"
+#       help: "Comma separated host names. Only used when 'openvpn-iot' is selected."
+#     - name: "iot_bridge_port"
+#       label: "OpenVPN IoT: bridge port"
+#       type: "text"
+#       default: "tap1"
+#     - name: "tor_clients"
+#       label: "OpenVPN Tor: clients"
+#       type: "text"
+#       help: "Comma separated host names. Only used when 'openvpn-tor' is selected."
+#     - name: "tor_bridge_port"
+#       label: "OpenVPN Tor: bridge port"
+#       type: "text"
+#       default: "tap2"
+#     - name: "wg_lan_allowed_networks"
+#       label: "WireGuard LAN: allowed networks"
+#       type: "text"
+#       help: "Comma separated IPv4 networks. Only used when 'wireguard-lan' is selected. Empty keeps the stored policy."
+#     - name: "wg_lan_internet"
+#       label: "WireGuard LAN: internet access (yes/no)"
+#       type: "text"
+#     - name: "wg_tor_allowed_networks"
+#       label: "WireGuard Tor: allowed networks"
+#       type: "text"
+#       help: "Comma separated IPv4 networks. Only used when 'wireguard-tor' is selected. Empty keeps the stored policy."
+#     - name: "wg_tor_internet"
+#       label: "WireGuard Tor: internet access (yes/no)"
+#       type: "text"
+#     - name: "pppoe_user"
+#       label: "Telekom uplink: PPPoE user"
+#       type: "text"
+#       help: "Used by 'uplink-ftth' and 'uplink-vdsl'."
+#     - name: "pppoe_pw"
+#       label: "Telekom uplink: PPPoE password"
+#       type: "password"
+#       help: "Applied at run time, never saved."
 #   actions:
 #     __playbook__: Install/Update
 #
@@ -163,27 +240,27 @@
 # Optional system services. Static imports keep the component's own guards,
 # managed ids and saved-variable scope. Selection is a trimmed, comma separated
 # list so a skipped service never evaluates its required-parameter asserts.
-- ansible.builtin.import_playbook: openwrt_asterisk.yml
+- ansible.builtin.import_playbook: tasks/openwrt/asterisk.yml
   when: "'asterisk' in (services | default('') | split(',') | map('trim') | list)"
-- ansible.builtin.import_playbook: openwrt_smtp.yml
+- ansible.builtin.import_playbook: tasks/openwrt/smtp.yml
   when: "'smtp' in (services | default('') | split(',') | map('trim') | list)"
-- ansible.builtin.import_playbook: openwrt_netboot.yml
+- ansible.builtin.import_playbook: tasks/openwrt/netboot.yml
   when: "'netboot' in (services | default('') | split(',') | map('trim') | list)"
-- ansible.builtin.import_playbook: openwrt_dnscrypt-proxy.yml
+- ansible.builtin.import_playbook: tasks/openwrt/dnscrypt-proxy.yml
   when: "'dnscrypt' in (services | default('') | split(',') | map('trim') | list)"
-- ansible.builtin.import_playbook: openwrt_openvpn-lan.yml
+- ansible.builtin.import_playbook: tasks/openwrt/openvpn-lan.yml
   when: "'openvpn-lan' in (services | default('') | split(',') | map('trim') | list)"
-- ansible.builtin.import_playbook: openwrt_openvpn-iot.yml
+- ansible.builtin.import_playbook: tasks/openwrt/openvpn-iot.yml
   when: "'openvpn-iot' in (services | default('') | split(',') | map('trim') | list)"
-- ansible.builtin.import_playbook: openwrt_openvpn-tor.yml
+- ansible.builtin.import_playbook: tasks/openwrt/openvpn-tor.yml
   when: "'openvpn-tor' in (services | default('') | split(',') | map('trim') | list)"
-- ansible.builtin.import_playbook: openwrt_wireguard-lan.yml
+- ansible.builtin.import_playbook: tasks/openwrt/wireguard-lan.yml
   when: "'wireguard-lan' in (services | default('') | split(',') | map('trim') | list)"
-- ansible.builtin.import_playbook: openwrt_wireguard-tor.yml
+- ansible.builtin.import_playbook: tasks/openwrt/wireguard-tor.yml
   when: "'wireguard-tor' in (services | default('') | split(',') | map('trim') | list)"
-- ansible.builtin.import_playbook: openwrt_internet_telekom_ftth.yml
+- ansible.builtin.import_playbook: tasks/openwrt/uplink-ftth.yml
   when: "'uplink-ftth' in (services | default('') | split(',') | map('trim') | list)"
-- ansible.builtin.import_playbook: openwrt_internet_telekom_vdsl.yml
+- ansible.builtin.import_playbook: tasks/openwrt/uplink-vdsl.yml
   when: "'uplink-vdsl' in (services | default('') | split(',') | map('trim') | list)"
-- ansible.builtin.import_playbook: openwrt_fritzbox-ipv6.yml
+- ansible.builtin.import_playbook: tasks/openwrt/fritzbox-ipv6.yml
   when: "'fritzbox' in (services | default('') | split(',') | map('trim') | list)"

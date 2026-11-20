@@ -26,6 +26,7 @@
   gather_facts: no
 
   vars:
+    # Keep the legacy id: it keys managed.json and saved playbook vars.
     managed_id: "openwrt_internet_telekom_vdsl.yml"
     managed_playbook: "openwrt_internet_telekom_vdsl.yml"
     managed_ref: "pppoe_user={{ pppoe_user }}"
@@ -51,8 +52,8 @@
 
   tasks:
     - name: Configure Telekom VDSL WAN
-      ansible.builtin.include_tasks: tasks/openwrt/wan-pppoe.yml
+      ansible.builtin.include_tasks: wan-pppoe.yml
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state
-      ansible.builtin.include_tasks: _managed-state.yml
+      ansible.builtin.include_tasks: ../../_managed-state.yml

@@ -105,7 +105,7 @@ def _scan_dir(group, base, d):
         if not fn.endswith(".yml") or fn in EXCLUDE_PLAYBOOKS:
             continue
         docs = parse_docs(os.path.join(d, fn))
-        if not docs:
+        if not docs or docs.get("hidden"):
             continue
         results.append({
             "group": group,

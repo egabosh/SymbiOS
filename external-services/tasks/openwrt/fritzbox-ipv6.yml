@@ -19,6 +19,7 @@
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
+    # Keep the legacy id: it keys managed.json and saved playbook vars.
     managed_id: "openwrt_fritzbox-ipv6.yml"
     managed_playbook: "openwrt_fritzbox-ipv6.yml"
     managed_ref: ""
@@ -214,4 +215,4 @@
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state
-      ansible.builtin.include_tasks: _managed-state.yml
+      ansible.builtin.include_tasks: ../../_managed-state.yml

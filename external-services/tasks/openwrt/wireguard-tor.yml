@@ -44,6 +44,7 @@
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
+    # Keep the legacy id: it keys managed.json and saved playbook vars.
     managed_id: "openwrt_wireguard-tor.yml"
     managed_playbook: "openwrt_wireguard-tor.yml"
     managed_ref: ""
@@ -57,6 +58,10 @@
     # read that file when they generate their .conf.
     allowed_networks: ""
     internet: ""
+    # The master form uses service-specific field names because the LAN tunnel
+    # has its own policy. Fall back to the legacy names for standalone runs.
+    wg_tor_networks_input: "{{ wg_tor_allowed_networks | default(allowed_networks | default('')) }}"
+    wg_tor_internet_input: "{{ wg_tor_internet | default(internet | default('')) }}"
     # Resolved policy, see the tasks below.
     access_networks_resolved: ""
     access_internet_resolved: ""
@@ -145,8 +150,8 @@
     - name: Validate the given access policy
       ansible.builtin.assert:
         that:
-          - allowed_networks is match('^[0-9./, ]*$')
-          - internet | lower in ['', 'yes', 'no']
+          - wg_tor_networks_input is match('^[0-9./, ]*$')
+          - wg_tor_internet_input | lower in ['', 'yes', 'no']
         fail_msg: "allowed_networks takes IPv4 addresses/networks separated by commas; internet takes yes or no (empty keeps the stored value)."
         quiet: true
 
@@ -162,11 +167,11 @@
     - name: Resolve the access policy
       ansible.builtin.set_fact:
         access_networks_resolved: >-
-          {{ (allowed_networks | replace(' ', '') | trim)
+          {{ (wg_tor_networks_input | replace(' ', '') | trim)
              or (access_conf.stdout | regex_findall('(?m)^allowed_networks=(.*)$') | first | default('') | replace(' ', '') | trim)
              or (lan_network.stdout | trim) }}
         access_internet_resolved: >-
-          {{ (internet | lower | trim)
+          {{ (wg_tor_internet_input | lower | trim)
              or ((access_conf.stdout | regex_findall('(?m)^internet=(.*)$') | first | default('')) | lower | trim)
              or 'no' }}
 
@@ -362,4 +367,4 @@
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state
-      ansible.builtin.include_tasks: _managed-state.yml
+      ansible.builtin.include_tasks: ../../_managed-state.yml

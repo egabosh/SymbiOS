@@ -1,10 +1,11 @@
 # docs:
 #   name: "OpenWrt - WireGuard Tor client"
 #   short_description: "OpenWrt - WireGuard Tor client"
-#   description: "WireGuard peer on the Tor server plus its DNS/DHCP record. AllowedIPs come from the tunnel's access policy (openwrt_wireguard-tor.yml); the per-client internet parameter decides whether this client also routes all traffic through Tor."
+#   description: "WireGuard peer on the Tor server plus its DNS/DHCP record. AllowedIPs come from the tunnel's access policy (the wireguard-tor service of openwrt_master.yml); the per-client internet parameter decides whether this client also routes all traffic through Tor."
 #   category: "VPN"
 #   type: OpenWrt
 #   icon: "bi-vpn"
+#   hidden: true   # Component tool: run via CLI, not shown in the WebUI catalog.
 #   params:
 #     - name: "client_name"
 #       label: "Client name"
@@ -24,8 +25,8 @@
 #       required: false
 #       help: "yes = the client routes all IPv4 traffic (including DNS) through the tunnel to the Tor proxy. no/empty = only the networks allowed by the tunnel policy. The tunnel itself needs internet=yes."
 #   requires:
-#     - playbook: "openwrt_wireguard-tor.yml"
-#       reason: "WireGuard Tor server"
+#     - playbook: "openwrt_master.yml"
+#       reason: "WireGuard Tor server (enable 'wireguard-tor' in services)"
 #     - playbook: "openwrt_tor.yml"
 #       reason: "Tor segment"
 #   inventory:
@@ -118,7 +119,7 @@
     # Per-client internet mode of this client's .conf (see pre_tasks). The
     # variable name matches the docs parameter, so the WebUI extra var
     # overrides this default. The tunnel's own policy stays in
-    # openwrt_wireguard-tor.yml.
+    # the wireguard-tor service of openwrt_master.yml.
     internet: ""
     client_internet_resolved: false
     managed_id: "openwrt_wireguard-tor-client.yml/{{ client_name }}"
@@ -263,7 +264,7 @@
       ansible.builtin.assert:
         that:
           - not client_internet_resolved or client_access_internet
-        fail_msg: "This client wants internet via Tor, but the tunnel policy has internet=no - set internet=yes in openwrt_wireguard-tor.yml first."
+        fail_msg: "This client wants internet via Tor, but the tunnel policy has internet=no - set internet=yes in the wireguard-tor service of openwrt_master.yml first."
         quiet: true
       when: state != 'absent'
 
@@ -290,7 +291,7 @@
         that:
           - client_allowed_ips | length > 0
           - "'' not in (client_allowed_ips | split(','))"
-        fail_msg: "No usable AllowedIPs - set the allowed networks in openwrt_wireguard-tor.yml or give the router a static LAN address."
+        fail_msg: "No usable AllowedIPs - set the allowed networks in the wireguard-tor service of openwrt_master.yml or give the router a static LAN address."
         quiet: true
       when: state != 'absent'
 
