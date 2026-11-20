@@ -32,11 +32,21 @@ g_path="${1:-}"
 g_offset="${2:-0}"
 g_limit="${3:-500}"
 
-if [[ -z "$g_path" || ! -f "$g_path" ]]
+# This script is called through the root exec gateway. Reject anything that
+# is not a plain file below /var/log, including symlinks out of that tree and
+# ../ traversal: the WebUI passes a log name, never an arbitrary path.
+g_real_path="$(realpath -m -- "$g_path" 2>/dev/null || true)"
+if [[ -z "$g_real_path" || "$g_real_path" != /var/log/* || ! -f "$g_real_path" ]]
 then
   echo "0"
   exit 0
 fi
+g_path="$g_real_path"
+
+# Numeric arguments end up in arithmetic expressions; never trust their text.
+[[ "$g_offset" =~ ^[0-9]+$ ]] || g_offset=0
+[[ "$g_limit" =~ ^[0-9]+$ ]] || g_limit=500
+(( g_limit > 0 && g_limit <= 10000 )) || g_limit=500
 
 # Get total line count
 g_total=$(wc -l < "$g_path" 2>/dev/null || echo 0)

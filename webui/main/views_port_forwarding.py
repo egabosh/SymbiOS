@@ -402,7 +402,9 @@ def settings_port_forwarding(request):
                     messages.error(request, 'Port number required.')
                     return redirect(request.get_full_path())
 
-                args = f'delete {ext_port} {protocol}'
+                # Same quoting as the add action above: both values come
+                # straight from the POST body and reach a root host command.
+                args = f'delete {shlex.quote(ext_port)} {shlex.quote(protocol)}'
                 if is_ajax:
                     from .utils.jobs import create_job
                     job_id = create_job(

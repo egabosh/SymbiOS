@@ -377,8 +377,6 @@ def settings_backup(request):
         'backup_servers_view': servers_view,
         'status': _backup_status(),
         'data': data,
-        'snapshots_json': json.dumps(data.get('snapshots') or []),
-        'services_json': json.dumps(data.get('services') or []),
     })
 
 
@@ -594,6 +592,7 @@ def settings_backup_delete(request):
     })
 
 
+@login_required
 def settings_backup_find_files(request):
     """AJAX POST - search a restic snapshot for files matching a pattern."""
     if request.method != 'POST':
@@ -620,6 +619,7 @@ def settings_backup_find_files(request):
     return JsonResponse({'ok': True, 'matches': matches})
 
 
+@login_required
 def settings_backup_list_snapshot(request):
     """AJAX POST - list a directory inside a restic snapshot."""
     if request.method != 'POST':
@@ -634,6 +634,7 @@ def settings_backup_list_snapshot(request):
     return JsonResponse({'ok': ok, 'output': stdout, 'error': stderr})
 
 
+@login_required
 def settings_backup_restore_file(request):
     """AJAX POST - restore a single file/directory from a restic snapshot."""
     if request.method != 'POST':
@@ -871,7 +872,8 @@ def settings_disk_setup(request):
 
     if not device:
         return JsonResponse({'ok': False, 'error': 'No device selected'})
-    if not device.startswith('/dev/'):
+    # Device names reach a root host command: allow block device paths only.
+    if not re.match(r'^/dev/[A-Za-z0-9/_.-]+$', device):
         return JsonResponse({'ok': False, 'error': 'Invalid device path'})
     if encrypt == 'yes' and not password:
         return JsonResponse({'ok': False, 'error': 'Password required for LUKS encryption'})
@@ -879,9 +881,10 @@ def settings_disk_setup(request):
     f_pw_file = None
     if encrypt == 'yes':
         f_pw_file = f_write_secret('luks-passphrase', password)
-        cmd_parts = [f'{script} setup', device, encrypt, f_pw_file]
+        cmd_parts = [f'{script} setup', shlex.quote(device), encrypt,
+                     shlex.quote(f_pw_file)]
     else:
-        cmd_parts = [f'{script} setup', device, encrypt]
+        cmd_parts = [f'{script} setup', shlex.quote(device), encrypt]
     cmd = ' '.join(cmd_parts)
 
     is_ajax = is_ajax_request(request)
@@ -1183,7 +1186,8 @@ def settings_disk_adopt(request):
 
     if not device:
         return JsonResponse({'ok': False, 'error': 'No device selected'})
-    if not device.startswith('/dev/'):
+    # Device names reach a root host command: allow block device paths only.
+    if not re.match(r'^/dev/[A-Za-z0-9/_.-]+$', device):
         return JsonResponse({'ok': False, 'error': 'Invalid device path'})
 
     script = _volume_script(request)
@@ -1243,7 +1247,8 @@ def settings_disk_prepare_member(request):
 
     if not device:
         return JsonResponse({'ok': False, 'error': 'No device selected'})
-    if not device.startswith('/dev/'):
+    # Device names reach a root host command: allow block device paths only.
+    if not re.match(r'^/dev/[A-Za-z0-9/_.-]+$', device):
         return JsonResponse({'ok': False, 'error': 'Invalid device path'})
 
     cmd = f'{_MEDIA_PART_SCRIPT} prepare-member {shlex.quote(device)}'

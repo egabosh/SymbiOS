@@ -420,8 +420,10 @@
           done
         done
         #EOF
-        chmod 644 /etc/asterisk/pjsip.conf
+        chmod 640 /etc/asterisk/pjsip.conf
+        chown root:asterisk /etc/asterisk/pjsip.conf
       changed_when: false
+      no_log: true
 
     - name: write /etc/asterisk/voicemail.conf
       raw: |

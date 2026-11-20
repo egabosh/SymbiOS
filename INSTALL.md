@@ -149,9 +149,11 @@ what is still open.
 - **The name must really point to your machine.** A domain you do not own will
   not work. The setup guide checks this for you and tells you if it does not
   match.
-- **Backups start out local.** Until you enter a backup server under
-  Settings -> Backup, snapshots are written to the machine itself. That protects
-  you against mistakes, but not against a defect of the machine or the disk.
+- **Backups are off by default.** The nightly backup phase is opt-in via
+  `backup_enabled` (Settings -> Backup). Enable it only after configuring a
+  target: a local snapshot needs roughly the size of the data root, and an
+  off-site target stores encrypted restic snapshots over SSH. Until then no
+  nightly snapshot is created; a manual backup can still be started any time.
 - **If something looks wrong**, the web interface has a **Logs** page that shows
   what the system is doing. During the installation itself, the log is
   `/var/log/symbios-boot.log` on the Raspberry Pi.

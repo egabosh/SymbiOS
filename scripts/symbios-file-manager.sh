@@ -54,13 +54,57 @@ source "$g_symbios_dir/symbios-lib.sh"
 
 # ------------------------------------------------------------------ helpers
 
-# Reject empty, relative and newline-containing paths.
+# The only trees the WebUI may touch: the inventory-driven data root, the host-
+# managed links under /etc/symbios and the configurable file_manager_root
+# (mirrors _allowed_roots() in views_filemanager.py).
+g_fm_roots=( "${g_data_root:-/symbios}" /etc/symbios )
+g_fm_custom_root="$(f_symbios_var file_manager_root '' 2>/dev/null || true)"
+if [[ -n "$g_fm_custom_root" && "$g_fm_custom_root" == /* ]]
+then
+  g_fm_roots+=( "$g_fm_custom_root" )
+fi
+
+function f_path_in_roots {
+  local f_path="$1" f_root
+  for f_root in "${g_fm_roots[@]}"
+  do
+    f_root="${f_root%/}"
+    [[ -n "$f_root" ]] || continue
+    if [[ "$f_path" == "$f_root" || "$f_path" == "$f_root/"* ]]
+    then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# True for an allowed root itself (never a child) - used to protect the roots
+# from delete/rename, not to reject browsing them.
+function f_path_is_root {
+  local f_path="$1" f_root
+  for f_root in "${g_fm_roots[@]}"
+  do
+    f_root="${f_root%/}"
+    [[ -n "$f_root" ]] || continue
+    if [[ "$f_path" == "$f_root" ]]
+    then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Reject empty, relative, malformed and out-of-sandbox paths. realpath -m also
+# canonicalizes a symlink as the final component, so a link inside the data
+# root cannot be used to reach /etc/shadow or /root/.ssh.
 function f_path_valid {
-  local f_path="$1"
+  local f_path="$1" f_real
   [[ -n "$f_path" ]] || return 1
   [[ "${f_path:0:1}" == "/" ]] || return 1
   [[ "$f_path" != *$'\n'* ]] || return 1
   [[ "$f_path" != *$'\t'* ]] || return 1
+  f_real="$(realpath -m -- "$f_path" 2>/dev/null)" || return 1
+  f_path_in_roots "$f_real" || return 1
   return 0
 }
 
@@ -352,6 +396,10 @@ function f_delete {
     f_path_valid "$f_p" || f_json_error "Invalid path: $f_p"
     f_check="${f_p%/}"
     [[ "$f_check" != "/" ]] || f_json_error "Refusing to delete /"
+    if f_path_is_root "$f_check"
+    then
+      f_json_error "Refusing to delete a SymbiOS root directory: $f_check"
+    fi
   done
   rm -rf -- "$@" || f_json_error "Cannot delete"
 }

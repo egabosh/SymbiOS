@@ -475,6 +475,8 @@
 
 
 {% block scripts %}
+{{ scripts|json_script:"fm-scripts" }}
+{{ default_path|json_script:"fm-default-path" }}
 <script>
 (function () {
   'use strict';
@@ -978,8 +980,13 @@
     const url = new URL(API, window.location.origin);
     form.action = url.pathname + url.search;
     form.method = 'POST';
-    form.innerHTML = '<input type="hidden" name="action" value="delete">' +
-      '<input type="hidden" name="paths" value="' + escapeHtml(JSON.stringify(paths)) + '">';
+    form.innerHTML = '<input type="hidden" name="action" value="delete">';
+    // Assign via the DOM: path names may contain quotes or HTML markup.
+    const pathsInput = document.createElement('input');
+    pathsInput.type = 'hidden';
+    pathsInput.name = 'paths';
+    pathsInput.value = JSON.stringify(paths);
+    form.appendChild(pathsInput);
     document.body.appendChild(form);
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     setTimeout(function () { form.remove(); }, 5000);
@@ -1217,7 +1224,7 @@
   });
 
   /* ---------------- init ---------------- */
-  state.scripts = ({{ scripts_json|safe }}) || [];
+  state.scripts = JSON.parse(document.getElementById('fm-scripts').textContent) || [];
   renderScripts();
 
   /* The ?path= query param (set by syncUrl) takes precedence over the
@@ -1227,7 +1234,7 @@
   const urlPath = new URLSearchParams(window.location.search).get('path');
   const initial = (urlPath != null && urlPath !== '')
     ? urlPath
-    : (sessionKey().getItem(STORE_PATH) || ({{ default_path_json|safe }} || '/'));
+    : (sessionKey().getItem(STORE_PATH) || (JSON.parse(document.getElementById('fm-default-path').textContent) || '/'));
   loadPath(initial, true);
 
   /* reopen the editor if a save/creation left the editor open */

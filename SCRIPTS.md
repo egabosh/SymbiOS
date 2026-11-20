@@ -619,7 +619,7 @@ texts opportunistically).
 | `symbios-feature-apply.sh` | Feature executor (plugin.yml params -> playbook) | `<service> <feature>` |
 | `symbios-feature-detect.sh` | Feature param detect script (`{value,label}` JSON) | `<service> <feature> <param>` |
 | `symbios-boot-unlock/` | Pre-mount boot-unlock helpers (3 files; hardcode paths by design) | boot-time only |
-| `symbios-dev-check-all.sh` | End-to-end service test incl. Authelia login/group checks | `[--service <name>] [--list-services]` |
+| `symbios-dev-check-all.sh` | **DESTRUCTIVE - `symbios-dev` ONLY.** Per service it uninstalls, wipes the service dir including userdata, and removes Traefik providers, healthchecks, LDAP groups and Authelia blocks. `--service <name>` is NOT a safe partial test. Only `--help` and `--list-services` are read-only and allowed on other hosts (see `AGENTS.md`). | `[--service <name>] [--list-services]` - destructive phases dev host only |
 
 ### 4.10 Libraries (sourced, never executed)
 

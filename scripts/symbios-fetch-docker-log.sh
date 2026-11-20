@@ -35,6 +35,11 @@ g_offset="${2:-0}"
 g_limit="${3:-500}"
 g_log_base="${g_docker_root}/containers"
 
+# Numeric arguments end up in arithmetic expressions; never trust their text.
+[[ "$g_offset" =~ ^[0-9]+$ ]] || g_offset=0
+[[ "$g_limit" =~ ^[0-9]+$ ]] || g_limit=500
+(( g_limit > 0 && g_limit <= 10000 )) || g_limit=500
+
 if [[ -z "$g_container" ]]
 then
   echo "0"

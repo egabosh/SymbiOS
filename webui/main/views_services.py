@@ -42,7 +42,7 @@ from .utils.ssh_exec import (
     build_action_command,
     build_log_command,
 )
-from .utils.jobs import create_job, _JOBS, _JOBS_LOCK
+from .utils.jobs import create_job, _JOBS, _JOBS_LOCK, _JOB_ID_RE
 
 def _get_base_domain():
     """Read base_domain from inventory.yml."""
@@ -840,8 +840,11 @@ def services_log_tail(request, playbook):
         offset = int(request.GET.get('offset', '0'))
     except ValueError:
         offset = 0
-    if not job_id:
-        return JsonResponse({'error': 'Missing job id'}, status=400)
+    # Job ids arrive from the browser and are interpolated into a host shell
+    # command below when the in-memory registry was recycled. Only the uuid
+    # hex format produced by create_job may pass (same guard as _reattach_job).
+    if not job_id or not _JOB_ID_RE.match(job_id):
+        return JsonResponse({'error': 'Invalid job id'}, status=400)
     if job_id in _JOBS:
         job = _JOBS[job_id]
         with job['lock']:

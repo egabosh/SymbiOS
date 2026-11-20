@@ -239,6 +239,9 @@
       ansible.builtin.set_fact:
         opencode_base_url_line: "{{ '\"baseURL\": \"' + ai_server + '\",' if ai_server | default('', true) else '' }}"
         opencode_api_key_line: "{{ '\"apiKey\": \"' + ai_apikey + '\",' if (ai_server | default('', true)) and (ai_apikey | default('', true)) else '' }}"
+      # ai_apikey is a plain inventory value: set_fact would echo it under
+      # -vvv even though the consuming copy task already uses no_log.
+      no_log: true
 
     # OpenCode 2 native config shape: providers (not provider), package (not
     # npm), settings/body (not options/parameters), capabilities (not

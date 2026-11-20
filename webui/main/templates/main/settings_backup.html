@@ -469,6 +469,8 @@
 {% endblock %}
 
 {% block scripts %}
+{{ data.snapshots|json_script:"bk-snapshots" }}
+{{ data.services|json_script:"bk-services" }}
 <script>
 /* Toggle between local-only and remote backup target */
 function toggleTarget() {
@@ -738,6 +740,15 @@ function doRestore() {
     });
 }
 
+// Delegate restore selection through a data attribute: file names from a
+// snapshot may contain quotes, so they must not be embedded in inline JS.
+document.addEventListener('click', function (ev) {
+  var link = ev.target.closest('[data-restore-file]');
+  if (!link) return;
+  ev.preventDefault();
+  selectRestoreFile(link.dataset.restoreFile);
+});
+
 function searchFiles() {
   var dateStr = document.getElementById('file-restore-date').value;
   var pattern = document.getElementById('file-search-pattern').value;
@@ -756,7 +767,7 @@ function searchFiles() {
       if (matches.length === 0) { div.innerHTML = '<div class="text-muted small">No matches found</div>'; return; }
       var html = '<div class="list-group">';
       matches.slice(0, 100).forEach(function(m) {
-        html += '<a href="#" class="list-group-item list-group-item-action py-1" onclick="selectRestoreFile(\'' + m.replace(/'/g, "\\'") + '\'); return false;">' + escapeHtml(m) + '</a>';
+        html += '<a href="#" class="list-group-item list-group-item-action py-1" data-restore-file="' + escapeHtml(m) + '">' + escapeHtml(m) + '</a>';
       });
       html += '</div>';
       div.innerHTML = html;
@@ -835,7 +846,7 @@ function removeBackupServer(btn) {
 
 /* Initial state */
 toggleTarget();
-renderSnapshots({{ snapshots_json|safe }}, {{ services_json|safe }});
+renderSnapshots(JSON.parse(document.getElementById('bk-snapshots').textContent), JSON.parse(document.getElementById('bk-services').textContent));
 /* Also populate file restore date selector */
 (function(){
   var src = document.getElementById('restore-date');

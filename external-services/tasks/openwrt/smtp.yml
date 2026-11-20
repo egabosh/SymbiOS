@@ -90,9 +90,10 @@
 
         account default : mail
         EOF
-        chmod 644 /etc/msmtprc
+        chmod 600 /etc/msmtprc
         chown root:root /etc/msmtprc
       changed_when: false
+      no_log: true
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state

@@ -76,16 +76,36 @@ def _q(text):
     return shlex.quote(text)
 
 
-def _norm_path(raw, default='/'):
-    """Normalize a file manager path (absolute, no trailing slash tricks)."""
+def _allowed_roots():
+    """The same allowlist the host script enforces with realpath()."""
+    roots = ['/symbios', '/etc/symbios']
+    try:
+        custom = (_get_inventory_config().get('all', {}).get('vars', {})
+                  .get('file_manager_root'))
+        if isinstance(custom, str) and custom.startswith('/') and custom != '/':
+            roots.append(custom)
+    except Exception:
+        pass
+    return roots
+
+
+def _norm_path(raw, default='/symbios'):
+    """Normalize a FileManager path and reject anything outside the roots."""
     path = (raw or '').strip()
     if not path:
-        return default
+        path = default
     if not path.startswith('/'):
         raise ValueError('Path must be absolute.')
-    if '\x00' in path or '\n' in path:
+    if '\x00' in path or '\n' in path or '\t' in path:
         raise ValueError('Path contains invalid characters.')
-    return path
+    path = os.path.normpath(path)
+    # Defense in depth: the host script repeats this check after resolving
+    # symlinks, so a link to /etc/shadow cannot escape either.
+    for root in _allowed_roots():
+        root = os.path.normpath(root).rstrip('/')
+        if path == root or path.startswith(root + '/'):
+            return path
+    raise ValueError('Path is outside the allowed SymbiOS directories.')
 
 
 def _load_scripts():
@@ -149,7 +169,6 @@ def filemanager(request):
     scripts = _load_scripts()
     return render(request, 'main/filemanager.html', {
         'scripts': scripts,
-        'scripts_json': json.dumps(scripts),
         'ph': {
             'path': '{{path}}',
             'dir': '{{dir}}',
@@ -158,7 +177,6 @@ def filemanager(request):
         },
         'root': root,
         'default_path': default_path,
-        'default_path_json': json.dumps(default_path),
         'page_key': 'filemanager',
         'page_icon': 'bi-folder2-open',
         'page_title': 'FileManager',

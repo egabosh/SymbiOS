@@ -8,8 +8,9 @@
 #
 # Required vars:  service_name, service_domain, authelia_subjects (list)
 # Optional vars:  authelia_policy (default follows the central twofa_enabled
-#                  flag from inventory.yml; set explicitly only to exempt a
-#                  service, e.g. native app clients that cannot do 2FA)
+#                  flag plus the admin-mail state persisted by authelia.yml;
+#                  set explicitly only to exempt a service, e.g. native app
+#                  clients that cannot do 2FA)
 # Optional vars:  authelia_bypass_resources (list of regex patterns matched
 #                  against the request path). Matching paths skip Authelia
 #                  entirely and reach the backend unauthenticated; the
@@ -32,13 +33,29 @@
   when: (authelia_bypass_resources | default([]) | length > 0)
   notify: Restart authelia
 
+# The admin-mail check is a runtime fact inside authelia.yml, not an inventory
+# key. Without it a service playbook would silently fall back to one_factor
+# and downgrade every service whenever 2FA is enabled. authelia.yml persists
+# the result before services run (symbios-playbooks-for-vars.sh ordering).
+- name: Read the admin-mail state persisted by authelia.yml
+  ansible.builtin.slurp:
+    src: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/authelia-admin-has-mail"
+  register: authelia_admin_mail_state
+  changed_when: false
+  failed_when: false
+
+- name: Determine the effective Authelia policy for {{ service_name }}
+  ansible.builtin.set_fact:
+    authelia_effective_policy: >-
+      {{ authelia_policy | default('two_factor' if (twofa_enabled | default(false) | bool and (((authelia_admin_mail_state | default({})).content | default('')) | b64decode | trim == 'true')) else 'one_factor') }}
+
 - name: "write Authelia access_control for {{ service_name }} group restriction"
   ansible.builtin.blockinfile:
     path: /symbios/base-services/authelia/authelia-data/configuration.yml
     marker: "# {mark} ANSIBLE MANAGED BLOCK {{ service_name }} ACCESS CONTROL"
     block: |2
           - domain: "{{ service_domain }}"
-            policy: {{ authelia_policy | default("two_factor" if (twofa_enabled | default(false) | bool) else "one_factor") }}
+            policy: {{ authelia_effective_policy }}
             subject: {{ authelia_subjects | to_json }}
           - domain: "{{ service_domain }}"
             policy: deny

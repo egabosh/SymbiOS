@@ -42,15 +42,23 @@ system.
 
 ### C3: Admin Password Forced Change
 
-**Status**: Already implemented correctly
+**Status**: Implemented for Authelia-forwarded admin logins, with one
+documented exception
 
-The `AutheliaMiddleware` enforces password change on first login:
+The `AutheliaMiddleware` enforces password change on a forwarded first login
+with the default "admin" password:
 1. Checks if admin bind with password "admin" succeeds
 2. If yes: sets `force_password_change` session flag
 3. Redirects all non-bypass requests to `/change-password/`
 4. Only clears flag after successful LDAP bind with new password
 
-**Cannot be bypassed** - the check runs in middleware before any view.
+**Exception - host-local break-glass:** for trusted source addresses the
+middleware grants an implicit local `admin` session without setting
+`force_password_change` (`webui/main/middleware.py:145-149`). The flag is set
+only for a forwarded `remote_user == 'admin'` (`:170-172`). The WebUI is
+reachable on `127.0.0.1:8080` without Traefik/Authelia by design, so the
+forced-change guarantee does not apply to that path. For all other requests
+the middleware check runs before any view.
 
 ### C4: LDAP Admin Password "admin"
 
@@ -184,6 +192,43 @@ historical data; it is no longer written.
 ### M18: Collabora SYS_ADMIN Capability
 - Required by Collabora for document conversion sandbox.
 - Contained within Docker network.
+
+### M19: WebUI parameters in OpenWrt `raw` tasks
+
+**Status**: Known risk - scheduled for a separate refactor
+
+The playbooks under `external-services/tasks/openwrt/` configure routers mostly
+with Ansible's `raw` module. WebUI-supplied values (SSID, WPA key, SIP accounts,
+hostnames, firewall comments) reach the playbook as JSON on stdin and are
+interpolated into shell strings executed as root on the target. A value with
+shell metacharacters can therefore execute commands on that router; quotes in
+otherwise legitimate values can corrupt UCI configuration.
+
+The safe fix is to convert the affected tasks to `ansible.builtin.command` with
+an argv list and to validate parameters per documented type. That touches
+roughly 204 tasks in many files and needs its own test cycle on the routers,
+so it is deliberately not bundled with this hardening pass.
+
+Mitigations for now: WebUI access is admin-only, the exec audit log records
+target and playbook name, and stored parameters can only be changed through
+the WebUI.
+
+### M20: Passwords in client argv
+
+**Status**: Known risk - scheduled for a separate refactor
+
+Several LDAP, database and Matrix clients receive their password as an
+argument (`ldapsearch -w`, `mariadb -p`, `docker run --password`). `no_log: true`
+hides the values from Ansible output, but any local user can read them from
+`/proc/<pid>/cmdline` during the short execution window.
+
+The fix requires switching every affected client to stdin or a 0600 password
+file across many playbooks and scripts (including `symbios-ldap-groups.sh`,
+`symbios-ldap-user.sh` and the Matrix stacks). That is a dedicated
+credential-handling refactor with its own test cycle.
+
+Mitigations for now: the processes only run for a few seconds, SymbiOS hosts
+are single-admin appliances, and the exec audit log never records values.
 
 ### L4: SSH StrictHostKeyChecking
 - Test scripts use StrictHostKeyChecking=no for dev environments.

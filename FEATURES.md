@@ -197,9 +197,10 @@ a suspend, without suspending.
   `scripts/symbios-wol-watch-idle.sh` (5-minute loop, systemd instance
   `wol-idle@<name>`), `scripts/symbios-wol-common.sh` (shared checks)
 - Data: `<config>/power/targets.yml` (shared)
-- Boot model: the watchers are systemd-enabled; scripts, SSH key and access
-  log all live under `/symbios`, so the scripts wait for those paths (late
-  LUKS unlock) instead of failing at boot.
+- Boot model: the watchers are **not** systemd-enabled. `wol-tail@<name>` and
+  `wol-idle@<name>` need paths below `/symbios` (scripts, SSH key, access log),
+  so they are registered as after-mount units and started by
+  `symbios-after-mount.sh` after LUKS unlock, never at boot.
 - Sleeping targets pause their Traefik monitoring: on suspend the target's
   hostnames land in `<config>/power/asleep` (skipped by the `traefik`
   healthcheck instead of erroring on expected 502s); the idle watcher

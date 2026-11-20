@@ -171,6 +171,15 @@
         admin_has_mail: "{{ admin_mail_check.rc == 0 }}"
       changed_when: false
 
+    # Service playbooks include shared-tasks/authelia-acl.yml in separate runs,
+    # where set_fact is gone. Persist the result so their ACL policy matches
+    # the central one (2FA without an admin mail cannot be enrolled).
+    - name: Persist admin-mail state for service access policies
+      ansible.builtin.copy:
+        content: "{{ 'true' if admin_has_mail | bool else 'false' }}\n"
+        dest: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/authelia-admin-has-mail"
+        mode: '0644'
+
     - name: Ensure no2fa LDAP group exists
       # Members of this group skip the second factor from anywhere (see
       # the no2fa rules in authelia-access-control.j2 and
@@ -299,6 +308,9 @@
            owner: root
            group: root
            create: yes
+           # smtp_password is a plain inventory value, so Ansible cannot mask
+           # it automatically: -vvv/--diff would otherwise print it.
+           no_log: true
            marker: "# {mark} ANSIBLE MANAGED BLOCK NOTIFICATION"
            block: |
              notifier:

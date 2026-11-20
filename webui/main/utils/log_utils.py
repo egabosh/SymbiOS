@@ -22,6 +22,8 @@ not through Docker volume mounts.
 
 import os
 import json
+import re
+import shlex
 import subprocess
 from django.http import JsonResponse, HttpResponseBadRequest
 from ..decorators import login_required
@@ -61,6 +63,17 @@ ALLOWED_LOG_FILES = {
     "runchecks": "/log/runchecks-results.json",
 }
 
+# Only the bare filenames below are read from the host. Every other log is a
+# local /log mount file and must be looked up in ALLOWED_LOG_FILES as well:
+# a request-supplied log name must never become a host path or shell argument.
+HOST_LOG_NAMES = frozenset(
+    name for name, path in ALLOWED_LOG_FILES.items()
+    if not path.startswith('/')
+)
+
+# Container ids in the WebUI are the full 64-hex Docker ids from CONTAINER_INDEX.
+DOCKER_ID_RE = re.compile(r'^[a-f0-9]{64}$')
+
 LOG_LABELS = {
     "messages": "System Messages",
     "syslog": "Syslog",
@@ -85,29 +98,41 @@ LOG_LABELS = {
 
 def _is_host_log(log_name):
     """Check if this log lives on the host (not in /log mount)."""
-    path = ALLOWED_LOG_FILES.get(log_name, "")
-    # Host logs are bare filenames (messages, syslog, docker.log, …)
-    # Local logs have /log/ prefix or are absolute paths under /log.
-    return not path.startswith("/log/") and not path.startswith("/")
+    return log_name in HOST_LOG_NAMES
 
 
 def _resolve_local_log_path(log_name):
-    """Resolve a log name to a path inside the container (/log/ mount)."""
-    if log_name in ALLOWED_LOG_FILES:
-        return ALLOWED_LOG_FILES[log_name]
-    # Fallback: allow reading arbitrary files under /log
-    candidate = os.path.normpath(os.path.join(LOCAL_LOG_BASE, log_name))
-    if os.path.commonpath([candidate, LOCAL_LOG_BASE]) == LOCAL_LOG_BASE:
-        return candidate
-    return None
+    """Resolve a log name to a registered path inside the /log mount."""
+    path = ALLOWED_LOG_FILES.get(log_name, "")
+    return path if path.startswith(LOCAL_LOG_BASE + "/") else None
+
+
+def _container_ids():
+    """Full Docker ids currently listed in the container index."""
+    ids = set()
+    try:
+        with open(CONTAINER_INDEX) as f:
+            for line in f:
+                parts = line.strip().split("\t")
+                if parts:
+                    ids.add(parts[0])
+    except FileNotFoundError:
+        pass
+    return ids
 
 
 def _fetch_host_log(log_name, offset=0, limit=500):
-    """Fetch a system log from the host via symbios-exec.sh."""
-    host_path = f"{HOST_LOG_DIR}/{log_name}"
-    # Single script call: outputs count on first line, then log content
+    """Fetch a registered system log from the host via symbios-exec.sh."""
+    filename = ALLOWED_LOG_FILES.get(log_name, "")
+    if not filename or filename.startswith('/'):
+        return [], 0
+    host_path = f"{HOST_LOG_DIR}/{filename}"
+    # Single script call: outputs count on first line, then log content.
+    # The name came from the allowlist, but quote it anyway: symbios-exec.sh
+    # runs the inner command through a root shell.
     ok, stdout, _ = run_command(
-        f"symbios-fetch-log.sh {host_path} {offset} {limit}", timeout=15
+        "symbios-fetch-log.sh %s %d %d" % (shlex.quote(host_path), offset, limit),
+        timeout=15,
     )
     if not ok or not stdout:
         return [], 0
@@ -128,7 +153,8 @@ def _fetch_host_docker_log(container_id, offset=0, limit=500):
     """Fetch a Docker container JSON log from the host via symbios-exec.sh."""
     # Single script call: outputs count on first line, then extracted log messages
     ok, stdout, _ = run_command(
-        f"symbios-fetch-docker-log.sh {container_id} {offset} {limit}", timeout=15
+        "symbios-fetch-docker-log.sh %s %d %d" % (shlex.quote(container_id), offset, limit),
+        timeout=15,
     )
     if not ok or not stdout:
         return [], 0, container_id
@@ -181,9 +207,12 @@ def logs_stream(request):
     except ValueError:
         return HttpResponseBadRequest("Invalid offset parameter")
 
-    # Docker container log
+    # Docker container log: only full ids from the local container index are
+    # accepted, so a crafted name cannot reach the root host shell or path.
     if log_name.startswith("docker:"):
         container_id = log_name.split(":", 1)[1]
+        if not DOCKER_ID_RE.match(container_id) or container_id not in _container_ids():
+            return HttpResponseBadRequest("Unknown container")
         return _docker_logs_stream(container_id, offset)
 
     if _is_host_log(log_name):
