@@ -316,6 +316,11 @@
           SOGO_EXPIRE_SESSION=480
           WEBAUTHN_ONLY_TRUSTED_VENDORS=n
         backup: yes
+      # Network-related values live here (IPV4_NETWORK, ENABLE_IPV6, ports).
+      # Compose recreates the network when they change, which drops the
+      # static IPAM assignments of the running containers - recreate the
+      # stack so the addresses from docker-compose.yml are applied again.
+      notify: Restart mailcow
 
     # Docker Compose reads the project configuration from .env.
     - name: Symlink .env to mailcow.conf
@@ -595,7 +600,9 @@
       args:
         chdir: "{{ mailcow_root }}"
       register: mailcow_start
-      changed_when: "'Created' in mailcow_start.stdout or 'Started' in mailcow_start.stdout or 'Recreated' in mailcow_start.stdout"
+      # Compose reports present and past tense depending on version and TTY;
+      # either means containers or networks were actually touched.
+      changed_when: mailcow_start.stdout is search('Creating|Created|Recreating|Recreated|Starting|Started|Removing|Removed')
       notify: Restart mailcow
 
     # The admin password helper needs a working dovecot + mysql container.
