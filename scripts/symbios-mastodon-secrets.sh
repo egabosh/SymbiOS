@@ -130,7 +130,9 @@ do
     exit 2
   fi
 
-  f_domain=$(yq eval -r --arg name "$f_name" '.[] | select(.name == $name) | .domain' "$g_instances_file" 2>/dev/null | head -n1)
+  # mikefarah/yq has no --arg flag; pass the validated instance name as an
+  # environment variable and read it with strenv() instead.
+  f_domain=$(f_name="$f_name" yq -r '.[] | select(.name == strenv(f_name)) | .domain' "$g_instances_file" 2>/dev/null | head -n1)
   if [[ -z "$f_domain" || "$f_domain" == "null" ]]
   then
     g_echo_error "No domain configured for Mastodon instance $f_name"

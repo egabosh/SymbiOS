@@ -85,7 +85,7 @@ function f_run_tootctl {
 
   # A user added to the LDAP group before the first OIDC login has no local
   # Mastodon account yet. That is expected and must not fail the group change.
-  if grep -Eqi 'not found|does not exist|could not find' <<<"$f_output"
+  if grep -Eqi 'not found|does not exist|could not find|no user with such username' <<<"$f_output"
   then
     g_echo_note "$f_instance: no Mastodon account for $f_uid yet (created on first login)"
     return 0

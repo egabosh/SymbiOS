@@ -4,9 +4,10 @@ name: symbios-mastodon
 networks:
   symbios_services:
     external: true
+  # A normal bridge (not internal) is required: Sidekiq resolves the Authelia
+  # issuer and Mastodon needs outbound access for federation and media fetch.
   mastodon-internal:
     driver: bridge
-    internal: true
 
 volumes:
 {% for mastodon in mastodon_instances | default([]) %}

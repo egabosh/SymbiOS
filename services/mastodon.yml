@@ -354,8 +354,8 @@
       changed_when: false
       when: mastodon_instances | length > 0
 
-    - name: Run Mastodon database migrations
-      ansible.builtin.shell: docker compose run --rm --no-deps mastodon-{{ item.name }}-web bundle exec rails db:migrate
+    - name: Create database and run Mastodon migrations
+      ansible.builtin.shell: docker compose run --rm mastodon-{{ item.name }}-web bundle exec rails db:create db:migrate
       args:
         chdir: "{{ mastodon_service_root }}"
       loop: "{{ mastodon_instances }}"
@@ -380,8 +380,9 @@
         label: "{{ item.name }}"
       register: mastodon_registrations
       until: mastodon_registrations.rc == 0
-      retries: 10
+      retries: 6
       delay: 10
+      timeout: 30
       changed_when: false
 
     - name: Reconcile Mastodon admin roles from LDAP
