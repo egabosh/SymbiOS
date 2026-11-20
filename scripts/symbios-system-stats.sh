@@ -7,8 +7,9 @@ Usage: $(basename "$0")
 
 Report host system statistics for the dashboard WebUI. Output: one JSON line
 with CPU %, load average, memory, swap, uptime and disk I/O (read/write
-throughput and %util), sampled over 1 second. Pure /proc based - no sysstat
-or any other package is required. No arguments.
+throughput and %util), sampled over 1 second. CPU, memory and I/O values are
+pure /proc based - no sysstat required. On Raspberry Pi hosts the optional
+"throttled" field carries the vcgencmd get_throttled bitmask. No arguments.
 
 Options:
   -h, --help          Show this help and exit
@@ -22,8 +23,9 @@ then
 fi
 
 # Output: one JSON line with CPU %, load average, memory, swap, uptime and
-# disk I/O (read/write throughput and %util) sampled over 1 second.
-# Pure /proc based - no sysstat or any other package is required.
+# disk I/O (read/write throughput and %util) sampled over 1 second. CPU,
+# memory and I/O are pure /proc based - no sysstat required. "throttled" is
+# read from vcgencmd on Pi hosts and stays empty everywhere else.
 
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -201,6 +203,17 @@ f_uptime+="$(printf '%02d:%02d' "${f_up_hours}" "${f_up_minutes}")"
 
 f_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+# Raspberry Pi power/thermal history. vcgencmd is absent on non-Pi hosts; an
+# empty value keeps the JSON schema identical everywhere. The "has occurred"
+# bits (16-19) are sticky until reboot, so the last snapshot before a reset
+# still records the events of that boot.
+f_throttled=""
+if command -v vcgencmd >/dev/null 2>&1
+then
+  f_throttled="$(vcgencmd get_throttled 2>/dev/null | head -n 1)"
+  f_throttled="${f_throttled#throttled=}"
+fi
+
 # Primary interface (default route), its MAC and its DHCPv6 client DUID
 # (empty when NetworkManager is absent or no v6 lease is active).
 f_iface="$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')"
@@ -227,7 +240,7 @@ printf '"mem_total_mb":%d,"mem_used_mb":%d,"mem_percent":%d,' \
   "${f_mem_total_mb}" "${f_mem_used_mb}" "${f_mem_percent}"
 printf '"swap_total_mb":%d,"swap_used_mb":%d,"swap_percent":%d,' \
   "${f_swap_total_mb}" "${f_swap_used_mb}" "${f_swap_percent}"
-printf '"uptime":"%s",' "${f_uptime}"
+printf '"uptime":"%s","throttled":"%s",' "${f_uptime}" "${f_throttled}"
 printf '"io_read_kbs":%s,"io_write_kbs":%s,"io_util_percent":%.1f,"io_devices":[' \
   "${f_io_rkbs}" "${f_io_wkbs}" "${f_io_util}"
 f_first=1
