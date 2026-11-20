@@ -1,6 +1,6 @@
 # SymbiOS Scripts Handbook (SCRIPTS.md)
 
-User and admin reference for everything in `scripts/`. These scripts are the
+User and admin reference for the documented scripts in `scripts/`. These scripts are the
 executable layer of SymbiOS: the WebUI calls them on the host via
 `run_command()` -> `symbios-exec.sh`, and admins call them directly over SSH.
 If a task can be done in the WebUI, the same script behind the button does it
@@ -49,7 +49,7 @@ rsync -e "ssh -p44" scripts/<file> root@symbios-dev.dedyn.io:/symbios/git/SymbiO
 
 - `--help` / `-h`: **every** script answers with purpose, subcommands,
   options, examples, output format and exit codes (AGENTS.md `--help`
-  rule). Unknown options print usage to stderr and exit `1`.
+  rule). Unknown options print usage to stderr and exit `2`.
   `symbios-set-hostname.sh` (`f_usage`) is the model. Libraries answer
   `--help` via the `BASH_SOURCE == $0` guard instead of executing.
 - Exit codes: `0` = ok / nothing to do, `2` = usage or validation error,
@@ -97,7 +97,7 @@ write live here. Contract per script: `get [--json]`, `set ... [--check]`,
 
 The ONLY host-side writer of `inventory.yml` (domain scripts delegate to
 it; it knows no domains). Atomic write (tmp + `fsync` + `os.replace`) with
-`.bak` backup, same guarantees as the WebUI `_save_inventory_config`.
+`.bak` backup; all WebUI writes delegate to this writer.
 
 ```bash
 symbios-inventory.py get timezone
@@ -531,7 +531,7 @@ texts opportunistically).
 |--------|---------|-------|
 | `symbios-maintenance.sh` | Maintenance dispatcher: backup first, then updates (single cron entry) | no args |
 | `backup.sh` | Backup dispatcher (runs `backup.d/*.backup`) | no args |
-| `backup.d/` | 2 backup modules (docker DBs, LDAP) | via `backup.sh` |
+| `backup.d/` | 3 backup modules (docker DBs, LDAP, OpenWrt configs) | via `backup.sh` |
 | `symbios-backup.sh` | Backup engine: restic snapshot, local or SFTP targets | `backup` (default, cron), `get-restic-password`, `gen-restic-password` |
 | `symbios-backup-list.sh` | Backup snapshots as JSON (WebUI backup page) | no args |
 | `symbios-backup-delete.sh` | Delete snapshots in the local and all remote repositories (JSON plan without `--yes`) | `delete <YYYY-MM-DD> [--yes]`, `all [--yes]` |

@@ -172,16 +172,6 @@
     return 'dot-secondary';
   }
 
-  // Encode quotes as well: values also land in quoted HTML attributes.
-  function escapeHtml(text) {
-    return String(text == null ? '' : text)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   function formatTimestamp(iso) {
     if (!iso || iso === 'unknown') return 'never';
     try {

@@ -1058,7 +1058,7 @@ The directory `/symbios/ldap-groups.d/` is created by `base-services/ldap.yml`.
 ### Non-web services (Docker containers)
 
 Services without a web UI deploy a `docker ps` based healthcheck. Use the
-shared task `tasks/runcheck-docker.yml`:
+shared task `shared-tasks/runcheck-docker.yml`:
 
 ```yaml
     - name: Deploy healthcheck

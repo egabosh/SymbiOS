@@ -10,8 +10,9 @@ Docker application services (Nextcloud, Home Assistant, Matrix, …) are
 and documented in the WebUI under **Services**.
 
 Conventions used below: all host operations run through `symbios-exec.sh`
-(the WebUI never touches host files directly); changing a setting always
-re-applies the owning playbook (live output in the exec modal); secrets are
+(the WebUI never touches host files directly); a real inventory change
+triggers a `uses_vars`-driven playbook apply (live output in the exec modal),
+while unchanged, check-only and no-playbook settings do not; secrets are
 passed via stdin, never on the command line. Companion: SCRIPTS.md
 describes the same domains from the CLI side
 (`symbios-settings-<slug>.sh`); documentation index: DOCS.md. The
@@ -25,8 +26,8 @@ machine-readable field reference is generated
 ### DNS (`/settings/dns/`)
 Public name of the server (e.g. `my-server.dedyn.io`), via deSEC DynDNS or a
 self-managed domain. Prerequisite for Traefik routing and Let's Encrypt.
-- Playbooks: `base-services/dedyn.yml` (deSEC mode only), then
-  `base-services/traefik.yml` + `base-services/authelia.yml` (forced, `--force`)
+- Playbooks: `base-services/dedyn.yml` (deSEC mode only), then the normal
+  `uses_vars`-driven apply of `traefik.yml` and `authelia.yml` (no `--force`)
 - Vars: `dns_mode` (`desec`|`self-managed`), `ddns_apikey`, `ddns_host`,
   `ddns_ipv6`, `base_domain`, `dns_configured`
 

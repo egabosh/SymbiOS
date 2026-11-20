@@ -7,8 +7,8 @@ Usage: $(basename "$0") <playbook_path>
 
 Run an Ansible playbook with the standard SymbiOS flags
 (--connection=local, --limit localhost, inventory from the WebUI config).
-On success the playbook output is streamed to stdout; on failure a JSON
-error is printed to stderr.
+Ansible output and exit status are passed through. JSON errors on stderr
+are emitted only for a missing or invalid playbook path.
 
 Arguments:
   <playbook_path>   path relative to the SymbiOS repo

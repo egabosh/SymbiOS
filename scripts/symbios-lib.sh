@@ -228,8 +228,7 @@ function f_symbios_var_json {
 # Usage: f_symbios_var_set <key> <value>
 # The write is atomic (tmp file + rename) so concurrent readers always see
 # a valid file. Delegates to symbios-inventory.py, the single host-side
-# writer - no inline YAML parsing here. The WebUI writes its own copy via
-# _save_inventory_config (same effect, no locking either).
+# writer - no inline YAML parsing here.
 function f_symbios_var_set {
   local f_key="$1" f_value="$2"
   local f_dir

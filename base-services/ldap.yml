@@ -572,7 +572,6 @@
       register: ldap_container_up
       changed_when: "'Started' in (ldap_container_up.stdout + ldap_container_up.stderr) or 'Created' in (ldap_container_up.stdout + ldap_container_up.stderr) or 'Recreated' in (ldap_container_up.stdout + ldap_container_up.stderr) or 'Built' in (ldap_container_up.stdout + ldap_container_up.stderr)"
 
-# ADMIN_PASSWORD_TASKS_MARKER
     # Wait for LDAP container to respond to authentication queries.
     # The container is guaranteed running by the ensure-task above, so
     # this loop only covers slapd startup, not image builds. Five minutes

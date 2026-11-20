@@ -335,7 +335,7 @@ nameserver.
 When enabled, the following **user-configurable** connections are made:
 
 - **SMTP relay** (`smtp_server`) - sends notification mails.
-- **Backup server** (`backup_server_host`) - `rsync`/SSH off-site backups.
+- **Backup server** (`backup_server_host`) - encrypted restic snapshots over SFTP.
 - **deSEC API token** (`ddns_apikey`) - required for DynDNS updates.
 
 Services installed via `services/` are free to contact their own external
@@ -415,11 +415,10 @@ http:
 Because the directory is watched, dropping/updating such a file reconfigures
 Traefik with no restart.
 
-> Note: the example service `services/nextcloud.yml` still carries legacy
-> `traefik.*` Docker labels. Those labels are inert now (the Docker provider is
-> disabled). `services/home-assistant.yml` shows the current, correct pattern
-> (write a provider snippet). New services should follow the file-provider
-> pattern.
+> Services write Traefik provider snippets into
+> `/symbios/base-services/traefik/providers/`. `services/home-assistant.yml` and
+> `services/nextcloud.yml` both show the current file-provider pattern; the
+> Traefik Docker provider is disabled.
 
 ---
 
@@ -450,12 +449,12 @@ sudo bash install.sh
 3. Create `/symbios/base-services/symbios-ui/config/inventory.yml` from the bundled
    template on first run.
 4. Run the base-services playbooks in order (basics -> localization ->
-   hardening -> firewall -> backup -> maintenance -> autoupdate -> runchecks ->
-   docker -> dedyn -> ldap -> raspberry (if Pi) -> symbios-ui). The `traefik.yml` and
-   `authelia.yml` playbooks are kept commented out at install time - they
-   require `base_domain` and are applied from the WebUI after configuration.
-5. On a Raspberry Pi, also apply `raspberry.yml` and the
-   `base-services/firefox.yml` desktop playbook.
+   hardening -> firewall -> autoupdate -> docker -> dedyn -> ldap ->
+   media-volume -> media -> symbios-ui -> kvm -> runchecks -> backup ->
+   maintenance). On a Raspberry Pi, `raspberry.yml` and `firefox.yml` run
+   between `media.yml` and `symbios-ui.yml`.
+5. Apply `traefik.yml` and `authelia.yml` from the WebUI after `base_domain`
+   is configured; `install.sh` does not run them.
 
 After install, edit the inventory to set `base_domain` and
 (optionally) deSEC credentials, then apply them via the WebUI (which runs the

@@ -295,3 +295,6 @@ else
 fi
 
 g_echo_note "Update completed at $(date)"
+# The autoupdate dispatcher sources this script via a module, so the last
+# command must carry the failure status of the playbook runs above.
+[[ -z "${g_failed}" ]]

@@ -211,7 +211,9 @@
         path: /symbios/base-services/authelia/authelia-data/configuration.yml
         marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC POLICY mastodon-{{ item.name }}"
         block: "{{ lookup('template', git_root + '/services/mastodon/templates/authelia-policy.yml.j2') }}"
-        insertbefore: "^    clients:"
+        # Insert between the base OIDC block and its clients block: the base
+        # block is rewritten by authelia.yml and would drop these policies.
+        insertbefore: "^# BEGIN ANSIBLE MANAGED BLOCK OIDC CLIENTS$"
         backup: yes
       loop: "{{ mastodon_instances }}"
       loop_control:

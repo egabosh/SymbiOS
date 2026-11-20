@@ -10,17 +10,18 @@ first-boot preconfiguration** so the VM is reachable over the network (SSH and
 HTTP/HTTPS via Traefik) and the host stays present in every internal segment.
 
 Service and router configuration beyond reachability is **not** baked in here.
-The WebUI offers only two playbooks for it:
+The WebUI offers two playbooks for it:
 
 | Topic | Playbook |
 |-------|----------|
 | Master router, like `openwrt-og` | `external-services/openwrt_master.yml` |
 | Secondary access point, like `openwrt-ab` | `external-services/openwrt_slave.yml` |
 
-All other OpenWrt playbooks are hidden from the catalog. The reusable component
-plays live under `external-services/tasks/openwrt/`, and the remaining per-item
-tools (DNS records, DHCP hosts, DDNS, firewall rules, wireless, WireGuard
-clients) stay runnable via `symbios-run-remote-playbook.sh` on the CLI.
+The WebUI also exposes feature playbooks for DDNS, DHCP hosts and DNS records
+(`services/openwrt-vm/plugin.yml`). The reusable component plays live under
+`external-services/tasks/openwrt/`; the remaining per-item tools (firewall
+rules, wireless, WireGuard clients) stay runnable via
+`symbios-run-remote-playbook.sh` on the CLI.
 
 `openwrt_master.yml` installs the foundation in every run and can optionally
 include the system services via its `services` parameter (comma separated):

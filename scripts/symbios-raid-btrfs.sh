@@ -73,23 +73,6 @@ set -euo pipefail
 g_lib="$(dirname "$(readlink -f "$0")")/symbios-lib.sh"
 [[ -r "${g_lib}" ]] && source "${g_lib}"
 
-function f_json_escape {
-  local f_s
-  IFS= read -r f_s
-  f_s="${f_s//\\/\\\\}"
-  f_s="${f_s//\"/\\\"}"
-  f_s="${f_s//$'\t'/\\t}"
-  f_s="${f_s//$'\n'/\\n}"
-  f_s="${f_s//$'\r'/\\r}"
-  printf '"%s"' "$f_s"
-}
-
-function f_json_error {
-  local f_msg="$1"
-  printf '{"ok":false,"error":%s}\n' "$(echo "$f_msg" | f_json_escape)"
-  exit 1
-}
-
 function f_json_ok {
   local f_data="$1"
   printf '{"ok":true,%s}\n' "$f_data"

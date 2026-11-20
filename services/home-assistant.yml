@@ -521,8 +521,7 @@
           docker compose exec -ti home-assistant wget -O - https://get.hacs.xyz | bash - >>/symbios/services/home-assistant/home-assistant.init.log 2>&1
         backup: yes
         validate: /bin/bash -n %s
-      #notify: run home-assistant.init
-    
+
     - name: Run home-assistant.init after install
       ansible.builtin.shell: bash /symbios/services/home-assistant/home-assistant.init.sh
       args:
@@ -691,9 +690,6 @@
       args:
         chdir: /symbios/services/home-assistant
       notify: Restart home-assistant
-
-    #- name: run home-assistant.init
-    #  ansible.builtin.shell: bash /symbios/services/home-assistant/home-assistant.init.sh
 
     - name: Restart home-assistant
       include_tasks: ../shared-tasks/compose-recreate.yml

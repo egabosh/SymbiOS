@@ -1,9 +1,9 @@
 CHECK_CATEGORY="network"
 CHECK_TITLE="Remote SSH"
 CHECK_DESC="Checks if the SSH key and remote host are reachable."
-CHECK_DETAIL="Verifies the SSH key exists at config/.ssh/id_symbios.|Tests TCP connectivity to 192.168.41.1 on port 22|with a 3-second timeout.|Used by the WebUI to execute commands on the host."
+CHECK_DETAIL="Verifies the SSH key exists at config/.ssh/id_symbios.|Tests TCP connectivity to 192.168.41.1 on port 33|with a 3-second timeout.|Used by the WebUI to execute commands on the host."
 
-# Check: Verify remote SSH key exists and host 192.168.41.1 is reachable on port 22
+# Check: Verify remote SSH key exists and host 192.168.41.1 is reachable on port 33
 f_check_cache "symbios-healthcheck-remote-ssh" || return 2>/dev/null || true
 
 # The exec-gateway key is read by the WebUI container (uid 10000), so it is
@@ -15,7 +15,7 @@ then
   g_echo_error "Remote SSH exec key missing at $g_ssh_key"
 fi
 
-if ! timeout 3 bash -c 'echo > /dev/tcp/192.168.41.1/22' >/dev/null 2>&1
+if ! timeout 3 bash -c 'echo > /dev/tcp/192.168.41.1/33' >/dev/null 2>&1
 then
-  g_echo_error "Cannot reach host SSH on 192.168.41.1:22"
+  g_echo_error "Cannot reach host SSH on 192.168.41.1:33"
 fi

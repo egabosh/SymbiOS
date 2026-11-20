@@ -108,6 +108,7 @@ done
 # status summary written at the end reflects them.
 g_ran_json=""
 g_failed_json=""
+g_rc=0
 for g_update in $(find /usr/local/sbin/autoupdate.d ${g_data_root}/autoupdate.d ${g_git_root}/scripts/autoupdate.d -name "*.update" -type f 2>/dev/null | sort)
 do
   g_module="$(basename "${g_update}" .update)"
@@ -121,6 +122,7 @@ do
   if ! . "$g_update"
   then
     g_echo_error "Module ${g_module} reported an error"
+    g_rc=1
     [[ -n "${g_failed_json}" ]] && g_failed_json="${g_failed_json}, "
     g_failed_json="${g_failed_json}\"${g_module}\""
   fi
@@ -130,6 +132,7 @@ done
 if [[ "${g_only// /}" != "" ]] && [[ -z "${g_ran_json}" ]]
 then
   g_echo_error "No update module matched:${g_only}"
+  g_rc=1
 fi
 
 # Write a small status JSON for the WebUI Updates page (read via /log mount)

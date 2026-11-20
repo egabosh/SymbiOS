@@ -109,55 +109,6 @@
         - config
         - cache
 
-#    - name: /symbios/services/jellyfin/genpw.sh (generate Random PW for Semaphore and DB)
-#      blockinfile:
-#        path: /symbios/services/jellyfin/genpw.sh
-#        create: yes
-#        mode: 0550
-#        owner: root
-#        group: docker
-#        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-#        block: |
-#          cd /symbios/services/jellyfin
-#
-#          mysqluser=$(pwgen -s 32 1)
-#          mysqlpassword=$(pwgen -s 32 1)
-#          wpadminpassword=$(pwgen -s 32 1)
-#
-#          [ -f env ] || echo "WORDPRESS_DB_USER=!MYSQLUSER!
-#          WORDPRESS_DB_PASSWORD=!MYSQLPASSWORD!
-#          WORDPRESS_ADMIN_PASSWORD=!WPADMINPASSWD!
-#          " >env
-#
-#          [ -f env.db ] || echo "MARIADB_USER=!MYSQLUSER!
-#          MARIADB_PASSWORD=!MYSQLPASSWORD!
-#          " >env.db
-#
-#          [ -f env.phpmyadmin ] || echo "PMA_USER=!MYSQLUSER!
-#          PMA_PASSWORD=!MYSQLPASSWORD!
-#          " >env.phpmyadmin
-#
-#          chmod 440 env env.db env.phpmyadmin
-#          chown root:docker env env.db env.phpmyadmin
-#          sed -i "s/\!MYSQLUSER\!/$mysqluser/g" env env.db env.phpmyadmin
-#          sed -i "s/\!MYSQLPASSWORD\!/$mysqlpassword/g" env env.db env.phpmyadmin
-#          sed -i "s/\!WPADMINPASSWD\!/$wpadminpassword/g" env
-#        backup: yes
-#        validate: /bin/bash -n %s
-#      notify: run genpw.sh
-#
-#    - name: /symbios/services/jellyfin/genpw.sh shebang
-#      lineinfile:
-#        path: /symbios/services/jellyfin/genpw.sh
-#        insertbefore: BOF
-#        line: "#!/bin/bash -e"
-#
-#    - name: Gen initial passwords if not exists
-#      ansible.builtin.shell: ./genpw.sh
-#      args:
-#        chdir: /symbios/services/jellyfin
-#        creates: /symbios/services/jellyfin/env
-
     - name: /symbios/services/jellyfin/docker-compose.yml Container Configuration
       blockinfile:
         path: /symbios/services/jellyfin/docker-compose.yml
@@ -237,60 +188,10 @@
     - name: Deploy healthcheck
       include_tasks: ../shared-tasks/runcheck.yml
 
-#        creates: /symbios/services/jellyfin/db-data/sys/db.opt
-
-#    - name: Wait until jellyfin install is finished
-#      wait_for:
-#        path: /symbios/services/jellyfin/wp-data/index.php
-#
-#    - name: /symbios/services/jellyfin/jellyfin.init.sh
-#      blockinfile:
-#        path: /symbios/services/jellyfin/jellyfin.init.sh
-#        mode: "0500"
-#        owner: root
-#        group: root
-#        create: yes
-#        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-#        block: |
-#          # install jellyfin Login URL: https://jellyfin.{{ base_domain }}/wp-login.php
-#          cd /symbios/services/jellyfin
-#          if ! docker-compose run jellyfin.{{ base_domain }}--cli wp core is-installed
-#          then
-#            until wget -t1 --timeout=15 https://jellyfin.{{ base_domain }} >/dev/null 2>&1
-#            do 
-#             sleep 5
-#            done
-#            cat env | egrep "^WORDPRESS_ADMIN_PASSWORD=" >env.tmp
-#            . env.tmp
-#            rm -f env.tmp
-#            docker-compose run jellyfin.{{ base_domain }}--cli wp core install --url="https://jellyfin.{{ base_domain }}" --title="jellyfin.{{ base_domain }}" --admin_name=wpadmin --admin_password=${WORDPRESS_ADMIN_PASSWORD} --admin_email='admin@{{ base_domain }}'
-#          fi
-#        backup: yes
-#        validate: /bin/bash -n %s
-#      notify: run jellyfin.init
-#
-#    - name: Run jellyfin.init after install
-#      ansible.builtin.shell: bash /symbios/services/jellyfin/jellyfin.init.sh
-#      args:
-#        chdir: /symbios/services/jellyfin
-#        creates: /symbios/services/jellyfin/jellyfin.init.log
-
-
-
     - name: Register playbook as installed
       include_tasks: ../shared-tasks/state-register.yml
 
   handlers:
-
-#    - name: run genpw.sh
-#      ansible.builtin.shell: ./genpw.sh
-#      args:
-#        chdir: /symbios/services/jellyfin
-#      notify: Restart jellyfin
-
-#    - name: run jellyfin.init
-#      ansible.builtin.shell: bash /symbios/services/jellyfin/jellyfin.init.sh
-
     - name: Restart jellyfin
       include_tasks: ../shared-tasks/compose-recreate.yml
 

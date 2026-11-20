@@ -488,12 +488,21 @@
                   - "userinfo"
                 allowed_origins_from_client_redirect_uris: true
               {{ lookup('template', git_root + '/base-services/authelia-oidc-policy.j2') }}
-              clients:
-                # dummy client because authelia forces at least one client to work
-                - client_id: 'dummy'
-                  client_name: 'dummy'
-                  client_secret: '{{ oidc_client_secret.stdout }}'
+        # Keep the clients list in its own managed block: service playbooks
+        # write named authorization policies between the OIDC base block and
+        # this one. A plain authelia reapply must not delete them.
         insertbefore: "^# BEGIN ANSIBLE MANAGED BLOCK ACCESS CONTROL"
+        backup: yes
+      notify: Restart authelia
+
+    - name: write OIDC clients config in configuration.yml
+      ansible.builtin.blockinfile:
+        path: "{{ service_path }}/authelia-data/configuration.yml"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC CLIENTS"
+        # blockinfile strips the indentation of a block scalar; use explicit
+        # newlines to keep 'clients:' below 'oidc:' in the rendered YAML.
+        block: "    clients:\n      # dummy client because authelia forces at least one client to work\n      - client_id: 'dummy'\n        client_name: 'dummy'\n        client_secret: '{{ oidc_client_secret.stdout }}'\n"
+        insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC$"
         backup: yes
       notify: Restart authelia
 
@@ -540,7 +549,6 @@
           grep "^Digest:" "$g_tmp/output" | cut -d" " -f2 >"$f_client_digest_file"
         backup: yes
         validate: /bin/bash -n %s
-      notify: 
 
     - name: "gen-oidc-client-secret.sh shebang"
       lineinfile:

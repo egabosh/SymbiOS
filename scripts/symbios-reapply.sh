@@ -204,15 +204,18 @@ else
   fi
 fi
 
-# Also include any user-playbooks (always re-run all)
-g_user_dir="${g_config_dir}/user-playbooks"
-if [[ -d "$g_user_dir" ]]
+# User playbooks are part of the full reapply only; --only stays selective.
+if [[ -z "${g_only_playbooks}" ]]
 then
-  for g_user_file in "$g_user_dir"/*.yml
-  do
-    [[ -f "$g_user_file" ]] || continue
-    g_playbooks=$(printf '%s\n' "$g_playbooks" "user-playbooks/$(basename "$g_user_file")")
-  done
+  g_user_dir="${g_config_dir}/user-playbooks"
+  if [[ -d "$g_user_dir" ]]
+  then
+    for g_user_file in "$g_user_dir"/*.yml
+    do
+      [[ -f "$g_user_file" ]] || continue
+      g_playbooks=$(printf '%s\n' "$g_playbooks" "user-playbooks/$(basename "$g_user_file")")
+    done
+  fi
 fi
 
 if [[ -z "$g_playbooks" ]]

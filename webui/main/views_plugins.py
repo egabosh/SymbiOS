@@ -20,15 +20,13 @@ API endpoints for toggling, saving, applying, and detecting feature parameters.
 Features are rendered inline in services_detail.html.
 """
 import json
+import shlex
 import threading
 
 from django.http import JsonResponse
 
 from .decorators import login_required
-from .plugin_catalog import (
-    get_plugin,
-    load_plugin_state,
-)
+from .plugin_catalog import load_plugin_state
 from .utils.ssh_exec import run_command
 from .utils.jobs import create_job
 
@@ -102,7 +100,7 @@ def plugin_feature_apply(request, service, feature_id):
     if request.method != "POST":
         return JsonResponse({"ok": False, "error": "POST required"}, status=405)
 
-    cmd = "symbios-feature-apply.sh %s %s" % (shlex_quote(service), shlex_quote(feature_id))
+    cmd = "symbios-feature-apply.sh %s %s" % (shlex.quote(service), shlex.quote(feature_id))
     job_id = create_job(cmd, timeout=600)
 
     # Optimistically update state (atomic host-side write).
@@ -188,7 +186,7 @@ def plugin_feature_detect(request, service, feature_id, param_name):
     # host repo copy instead of a container-local /repo path that does not exist
     # on the host.
     cmd = "symbios-feature-detect.sh %s %s %s" % (
-        shlex_quote(service), shlex_quote(feature_id), shlex_quote(param_name)
+        shlex.quote(service), shlex.quote(feature_id), shlex.quote(param_name)
     )
     ok, stdout, stderr = run_command(cmd, timeout=15)
 
@@ -208,9 +206,3 @@ def plugin_feature_status(request, service):
     """Return the current feature states as JSON (for polling after apply)."""
     state = load_plugin_state(service)
     return JsonResponse({"ok": True, "state": state})
-
-
-def shlex_quote(s):
-    """Minimal shell quoting (avoids importing shlex in the view)."""
-    import re as _re
-    return "'" + _re.sub(r"'", "'\\''", str(s)) + "'"

@@ -88,10 +88,13 @@ do
 done
 
 # Main snapshot of the whole data root into the restic repositories
+g_backup_rc=0
 if [[ -x "${g_git_root}/scripts/symbios-backup.sh" ]]
 then
-  "${g_git_root}/scripts/symbios-backup.sh"
+  "${g_git_root}/scripts/symbios-backup.sh" || g_backup_rc=$?
 else
   g_echo_error "symbios-backup.sh not found - no main snapshot created"
+  g_backup_rc=1
 fi
 g_echo "Backup script finished"
+exit "${g_backup_rc}"

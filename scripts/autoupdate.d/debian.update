@@ -27,7 +27,7 @@ then
   if ! egrep -q "^0.+, 0 .+, 0 .+ 0 .+\." $g_tmp/sys-updatelist
   then
     g_echo_warn "Systemupdate will be installed: $(cat $g_tmp/sys-updatelist)"
-    apt-get -yy dist-upgrade | sed -e "s/'/'\\\\''/g; 1s/^/'/; \$s/\$/'/" | tee $g_tmp/sys-update || g_echo_error "apt-get -yy dist-upgrade failed $($g_tmp/sys-update)"
+    apt-get -yy dist-upgrade | sed -e "s/'/'\\\\''/g; 1s/^/'/; \$s/\$/'/" | tee $g_tmp/sys-update || g_echo_error "apt-get -yy dist-upgrade failed $(cat "$g_tmp/sys-update")"
     needrestart -b -r a | egrep -q "^NEEDRESTART-KSTA: [2|3]" && g_echo_warn "System reboot needed"
     g_echo_warn $(apt-get -yy --purge autoremove 2>&1 | egrep -A10 "^The following packages will be REMOVED:")
     apt-get -yy autoclean

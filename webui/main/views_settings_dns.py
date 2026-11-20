@@ -156,12 +156,13 @@ def settings_dns_check_domain(request):
         except socket.gaierror:
             pass
 
-        # Fallback: probe deSEC API without auth - a 404 means free, 200/409 means taken.
+        # Fallback: probe deSEC API without auth - a 404 means free,
+        # any successful response means the name is taken.
         req = urllib.request.Request(
             f'https://desec.io/api/v1/domains/{hostname}.dedyn.io/')
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                return JsonResponse({'available': resp.status == 200 and False,
+            with urllib.request.urlopen(req, timeout=10):
+                return JsonResponse({'available': False,
                                      'hostname': hostname})
         except urllib.error.HTTPError as e:
             if e.code == 404:

@@ -148,6 +148,15 @@ Slug: `network-bridges`
 |------|------|-------|----------|---------|--------|
 | `assignments` | map | Interface assignments |  | `{}` |  |
 
+## `symbios-settings-news`
+Slug: `news`
+
+| Name | Type | Label | Required | Default | Secret |
+|------|------|-------|----------|---------|--------|
+| `news_enabled` | bool | Show SymbiOS news |  | true |  |
+| `news_feed_url` | text | RSS/Atom feed URL |  | https://github.com/egabosh/SymbiOS/commits/main.atom |  |
+| `news_severity_markers` | text | Severity markers |  | security,critical |  |
+
 ## `symbios-settings-notifications`
 Slug: `notifications`
 
@@ -187,6 +196,8 @@ Slug: `security`
 |------|------|-------|----------|---------|--------|
 | `password_policy` | select | Password policy |  | medium |  |
 | `webui_public_access` | bool | WebUI public (internet) access |  | false |  |
+| `reboot_max_days` | number | Uptime in days after which a pending reboot may be applied automatically |  | 0 |  |
+| `reboot_auto` | bool | Automatic reboot in the daily maintenance window |  | false |  |
 
 ## `symbios-settings-setup`
 Slug: `setup`

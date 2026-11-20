@@ -66,8 +66,8 @@
     path: /symbios/base-services/authelia/authelia-data/configuration.yml
     marker: "# {mark} ANSIBLE MANAGED BLOCK OIDC {{ service_name }}"
     block: "      # {{ oidc_client_name | default(service_name) }}\n      - client_id: '{{ service_name }}'\n        client_name: '{{ oidc_client_name | default(service_name) }}'\n{{ oidc_client_auth_lines }}        require_pkce: {{ oidc_require_pkce | default(true) | lower }}\n        pkce_challenge_method: '{{ oidc_pkce_challenge_method | default('S256') }}'\n        authorization_policy: '{{ oidc_authorization_policy | default('default') }}'\n        consent_mode: '{{ oidc_consent_mode | default('implicit') }}'\n{{ oidc_claims_policy_line }}        redirect_uris:\n          - '{{ oidc_redirect_uris | first }}'\n        scopes:\n          - 'openid'\n          - 'profile'\n          - 'email'\n          - 'groups'\n        response_types:\n          - 'code'\n        grant_types:\n          - 'authorization_code'\n        access_token_signed_response_alg: 'none'\n        userinfo_signed_response_alg: 'none'\n        token_endpoint_auth_method: '{{ oidc_token_endpoint_auth_method | default('none' if (oidc_public_client | default(false) | bool) else 'client_secret_post') }}'"
-    # Anchor the exact OIDC block end: named policies use markers like
-    # "OIDC POLICY mastodon-<name>" and must not attract new client blocks.
-    insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC$"
+    # Anchor the exact OIDC clients block end: named policies use markers
+    # like "OIDC POLICY mastodon-<name>" and must not attract client blocks.
+    insertafter: "^# END ANSIBLE MANAGED BLOCK OIDC CLIENTS$"
     backup: yes
   notify: Restart authelia

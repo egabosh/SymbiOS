@@ -7,7 +7,7 @@ do not duplicate content across files - link instead.
 
 - **Install and use**: README.md (overview) -> INSTALL.md (install
   steps) -> FEATURES.md (what each settings page does).
-- **Operate and debug**: SCRIPTS.md (every `scripts/` entry with usage)
+- **Operate and debug**: SCRIPTS.md (documented `scripts/` entries with usage)
   -> `scripts/<name>.sh --help` on the host (authoritative detail).
 - **Develop playbooks**: playbooks.md (the `# docs:` contract) ->
   services.md (service concept) -> mediapaths.md (media rules).
@@ -25,7 +25,7 @@ do not duplicate content across files - link instead.
 | services.md | Service authors | Service concept (base vs user vs custom playbooks) | `# docs:` contract (playbooks.md) |
 | playbooks.md | Playbook authors | Service playbook authoring, `# docs:` reference | Service concept (services.md) |
 | mediapaths.md | Service authors | Media locations and mount semantics (single source of truth) | Per-service media vars (use the globals) |
-| SCRIPTS.md | Admins/developers | Every `scripts/` entry: purpose, arguments, conventions | Feature behavior (FEATURES.md), per-script `--help` detail |
+| SCRIPTS.md | Admins/developers | Documented `scripts/` entries: purpose, arguments, conventions | Feature behavior (FEATURES.md), per-script `--help` detail |
 | settings-fields.md | Admins/developers | GENERATED field tables per settings script (do not edit; run `symbios-settings-docs.sh --write`, gate with `--check`) | Hand-written prose (FEATURES.md) |
 | AGENTS.md | Developers/AI | Architecture, coding standards, CLI-first contract, roadmap | Untracked by design (local working doc, never committed) |
 

@@ -356,11 +356,6 @@
         enabled: yes
       when: is_kvm_guest
 
-    - name: check if this is a Mint system
-      stat: 
-        path: /etc/linuxmint/mintSystem.conf
-      register: mint
-
     - name: Remove Raspberry Pi OS SSH rename_user banner if present
       ansible.builtin.file:
         path: /etc/ssh/sshd_config.d/rename_user.conf

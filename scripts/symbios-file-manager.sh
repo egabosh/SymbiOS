@@ -251,23 +251,25 @@ read/write/edit/upload/management operations that a normal container
 cannot perform through volume mounts alone. Every action returns JSON.
 
 Actions:
-  list <dir>                  list directory entries
-  stat <path>                 stat a single file/dir
-  read <file>                 read a file's contents
-  download <dir>              return archive download metadata for a dir
-  write <file> <content>      write a file (creates parent dirs, 0644)
-  upload <dir>                start an upload (returns upload_id)
-  upload-start/-part/-finish/-abort <upload_id> ...
-                              chunked upload protocol
-  mkdir <dir>                 create a directory (0755)
-  delete <paths...>           delete files/dirs (recursively)
-  rename <src> <dst>          rename/move a file or dir
-  move <src> <dst>            move a file or dir
-  copy <src> <dst>            copy a file or dir
-  chmod <mode> <paths...>     change permissions
-  chown <user:group> <paths...>  change ownership
-  users                       list user/group names for chown dropdown
-  run-script <template> <paths...>  run user-provided bash per path
+  list <path>                 JSON directory listing
+  stat <path>                 JSON metadata of a single path
+  read <path>                 JSON {binary,size,content_b64} of a file
+  download <path>             raw file bytes on stdout
+  write <path>                write base64(stdin) to <path> (truncate)
+  upload <dir> <name>         write base64(stdin) to <dir>/<name> (single shot)
+  upload-start <dir> <name>   create staged temp file, print JSON {"tmp":...}
+  upload-part <tmp>           append base64(stdin) to the staged temp file
+  upload-finish <dir> <name> <tmp>   atomically move staged file into place
+  upload-abort <tmp>          discard a staged temp file
+  mkdir <path>                create a directory (parents as needed)
+  delete <path>...            remove files/directories (recursive for dirs)
+  rename <src> <dst>          move/rename a single path
+  move <dest> <path>...       move multiple paths into <dest>
+  copy <dest> <path>...       copy multiple paths into <dest> (dirs deep)
+  chmod <mode> <recursive> <path>...
+  chown <owner> <group> <recursive> <path>...
+  users                       JSON {"users":[...],"groups":[...]}
+  run-script '<template>' <path>...
 
 Options:
   -h, --help          Show this help and exit

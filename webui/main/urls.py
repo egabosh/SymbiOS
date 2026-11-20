@@ -170,7 +170,6 @@ urlpatterns = [
     path('settings/port-forwarding/', views_port_forwarding.settings_port_forwarding, name='settings_port_forwarding'),
     path('settings/port-forwarding/detect/', views_port_forwarding.settings_port_forwarding_detect, name='settings_port_forwarding_detect'),
     path('settings/port-forwarding/list/', views_port_forwarding.settings_port_forwarding_list, name='settings_port_forwarding_list'),
-    path('settings/port-forwarding/config/', views_port_forwarding.settings_port_forwarding_config, name='settings_port_forwarding_config'),
     path('settings/reverse-proxy/', views_reverse_proxy.settings_reverse_proxy, name='settings_reverse_proxy'),
     path('settings/reverse-proxy/save/', views_reverse_proxy.settings_reverse_proxy_save, name='settings_reverse_proxy_save'),
     path('settings/reverse-proxy/delete/<str:name>/', views_reverse_proxy.settings_reverse_proxy_delete, name='settings_reverse_proxy_delete'),
