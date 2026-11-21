@@ -228,6 +228,14 @@ function f_owui_sync_speech {
   [[ -n "${OWUI_STT_URL:-}" ]] && f_changed="${f_changed}$(f_owui_sync_kv audio.stt.openai.api_base_url "\"${OWUI_STT_URL}\"")"
   [[ -n "${OWUI_STT_KEY:-}" ]] && f_changed="${f_changed}$(f_owui_sync_kv audio.stt.openai.api_key "\"${OWUI_STT_KEY}\"")"
   [[ -n "${OWUI_STT_MODEL:-}" ]] && f_changed="${f_changed}$(f_owui_sync_kv audio.stt.model "\"${OWUI_STT_MODEL}\"")"
+  # OpenWebUI falls back to local Whisper when audio.stt.engine is empty.
+  # Point it at the configured OpenAI-compatible STT endpoint instead.
+  if [[ -n "${OWUI_STT_URL:-}" ]]
+  then
+    f_changed="${f_changed}$(f_owui_sync_kv audio.stt.engine '"openai"')"
+  else
+    f_changed="${f_changed}$(f_owui_sync_kv audio.stt.engine '""')"
+  fi
   [[ -n "${OWUI_TTS_URL:-}" ]] && f_changed="${f_changed}$(f_owui_sync_kv audio.tts.openai.api_base_url "\"${OWUI_TTS_URL}\"")"
   [[ -n "${OWUI_TTS_KEY:-}" ]] && f_changed="${f_changed}$(f_owui_sync_kv audio.tts.openai.api_key "\"${OWUI_TTS_KEY}\"")"
   [[ -n "${OWUI_TTS_MODEL:-}" ]] && f_changed="${f_changed}$(f_owui_sync_kv audio.tts.model "\"${OWUI_TTS_MODEL}\"")"

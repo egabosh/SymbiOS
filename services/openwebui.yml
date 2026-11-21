@@ -157,6 +157,15 @@
       changed_when: false
       failed_when: false
 
+    - name: Deploy OpenWebUI start wrapper (chat waits for transcription)
+      ansible.builtin.copy:
+        src: openwebui/files/openwebui-start.sh
+        dest: /symbios/services/openwebui/openwebui-start.sh
+        mode: '0644'
+        owner: root
+        group: root
+      notify: Restart openwebui
+
     # Rendered AFTER the secret exists, so OAUTH_CLIENT_SECRET always holds
     # the real password (rendering before generation baked "placeholder" in).
     - name: /symbios/services/openwebui/docker-compose.yml Container Configuration

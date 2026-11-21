@@ -6,6 +6,11 @@ services:
     image: ghcr.io/open-webui/open-webui
     container_name: openwebui
     restart: unless-stopped
+    # Wrapper makes chat requests wait for pending transcriptions.
+    entrypoint:
+      - /bin/bash
+      - /usr/local/bin/openwebui-start.sh
+    command: []
     environment:
       # Global
       - GLOBAL_LOG_LEVEL=WARNING
@@ -103,9 +108,13 @@ services:
       - IMAGE_EDIT_MODEL={{ ai_image_edit_model | default('', true) or ai_image_model | default('', true) or 'sd15.safetensors' }}
       - IMAGES_EDIT_COMFYUI_BASE_URL={{ ai_image_edit_url | default('', true) or ai_image_url | default('', true) or 'http://' + ai_host + ':8188' }}
       # Speech-to-Text (Whisper server from Settings -> AI Speech)
-      - STT_WHISPER_API_BASE_URL={{ ai_stt_url | default('', true) or 'http://' + ai_host + ':8082/v1' }}
-      - STT_WHISPER_API_KEY={{ ai_stt_key | default('', true) or ai_apikey | default('', true) }}
-      - STT_WHISPER_MODEL={{ ai_stt_model | default('', true) or 'ggml-large-v3-turbo.bin' }}
+      # OpenWebUI only reads AUDIO_STT_*; STT_WHISPER_* was from an old release.
+      - AUDIO_STT_ENGINE=openai
+      - AUDIO_STT_OPENAI_API_BASE_URL={{ ai_stt_url | default('', true) or 'http://' + ai_host + ':8082/v1' }}
+      - AUDIO_STT_OPENAI_API_KEY={{ ai_stt_key | default('', true) or ai_apikey | default('', true) }}
+      - AUDIO_STT_MODEL={{ ai_stt_model | default('', true) or 'ggml-large-v3-turbo.bin' }}
+      # CPU transcription of long recordings exceeds aiohttp's 300 s default.
+      - AIOHTTP_CLIENT_TIMEOUT=1800
       # Text-to-Speech (server from Settings -> AI Speech)
       - AUDIO_TTS_ENGINE=openai
       - AUDIO_TTS_OPENAI_API_BASE_URL={{ ai_tts_url | default('', true) or 'http://' + ai_host + ':8083/v1' }}
@@ -116,6 +125,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./openwebui-data:/app/backend/data
+      - ./openwebui-start.sh:/usr/local/bin/openwebui-start.sh:ro
     networks:
       openwebui--network: {}
       symbios_services: null

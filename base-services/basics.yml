@@ -431,6 +431,38 @@
         sysctl_file: /etc/sysctl.d/90-symbios.conf
       when: nocontainer.stat.exists == true
 
+    # Hang diagnostics without unplanned reboots: a full CPU backtrace in
+    # dmesg is enough to analyse a stuck task. hung_task_panic=1 would turn
+    # every slow disk or backup into a reboot, so keep the kernel default (0)
+    # and let kernel.panic handle genuine panics only.
+    - ansible.posix.sysctl:
+        name: kernel.hung_task_all_cpu_backtrace
+        value: '1'
+        state: present
+        sysctl_file: /etc/sysctl.d/90-symbios.conf
+      when: nocontainer.stat.exists == true
+
+    - ansible.posix.sysctl:
+        name: kernel.hung_task_panic
+        value: '0'
+        state: present
+        sysctl_file: /etc/sysctl.d/90-symbios.conf
+      when: nocontainer.stat.exists == true
+
+    - ansible.posix.sysctl:
+        name: kernel.hung_task_timeout_secs
+        value: '120'
+        state: present
+        sysctl_file: /etc/sysctl.d/90-symbios.conf
+      when: nocontainer.stat.exists == true
+
+    - ansible.posix.sysctl:
+        name: kernel.panic
+        value: '5'
+        state: present
+        sysctl_file: /etc/sysctl.d/90-symbios.conf
+      when: nocontainer.stat.exists == true
+
     - name: shell profile
       blockinfile:
         path: /etc/profile.d/settings-from-ansible.sh
