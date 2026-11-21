@@ -45,6 +45,8 @@ get_admin_token() {
     g_echo_error "Failed to retrieve admin token"
     exit 1
   fi
+  # Keep the short-lived token out of curl's argv (visible in ps).
+  f_bearer_curl_config "$TOKEN" || { g_echo_error "Failed to create curl auth config"; exit 1; }
 }
 
 api() {
@@ -55,12 +57,12 @@ api() {
   if [[ -n "$body" ]]
   then
     curl -s --max-time 60 -X "$method" "${SYNAPSE_URL}${path}" \
-      --header "Authorization: Bearer ${TOKEN}" \
+      --config "${g_curl_cfg_path}" \
       --header 'Content-Type: application/json' \
       --data "$body"
   else
     curl -s --max-time 60 -X "$method" "${SYNAPSE_URL}${path}" \
-      --header "Authorization: Bearer ${TOKEN}"
+      --config "${g_curl_cfg_path}"
   fi
 }
 

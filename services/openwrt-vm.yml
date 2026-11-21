@@ -507,7 +507,10 @@
       no_log: true
 
     - name: Compute SHA-512 hash of OpenWrt root password
-      ansible.builtin.shell: openssl passwd -6 -salt "$(openssl rand -hex 16)" "{{ openwrt_root_password_raw.stdout }}"
+      # Read from the env file through a pipe and use -stdin so the password
+      # never appears in any command line (including the shell's own argv).
+      ansible.builtin.shell:
+        cmd: grep '^OPENWRT_ROOT_PASSWORD=' /symbios/services/openwrt-vm/env | cut -d= -f2- | openssl passwd -6 -salt "$(openssl rand -hex 16)" -stdin
       register: openwrt_root_password_hash
       changed_when: false
       no_log: true

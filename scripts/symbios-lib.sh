@@ -62,6 +62,9 @@
 #   f_check_cache <name>            skip a check that ran within 5 min
 #   f_symbios_ldap_init             set f_ldap_uri/f_base_dn/f_admin_pw/f_bind_dn
 #   f_ldap_exec / f_ldap_ldif       run LDAP in the webui container
+#   f_secret_get_to_file <name>     read <name> from the central secret store
+#                                   into a transient 0600 file (path in
+#                                   g_secret_file_path, shredded on exit)
 #   f_symbios_traefik_hosts         write Traefik Host labels to $g_tmp/hosts
 #
 #   f_media_quota <projid> <dir> <limit_gib>  apply an ext4 project
@@ -449,24 +452,155 @@ function f_reboot_needed {
   return 1
 }
 
+# Transient secret files shared by the credential-handling helpers. Every
+# path written here is shredded on exit (see f_secret_cleanup_register).
+declare -ag g_secret_files=()
+
+# Shred all transient secret files registered during this process.
+function f_cleanup_secret_files {
+  local f_file
+  for f_file in "${g_secret_files[@]:-}"
+  do
+    if [[ -n "${f_file}" && -f "${f_file}" ]]
+    then
+      shred -u "${f_file}" 2>/dev/null || rm -f "${f_file}"
+    fi
+  done
+  g_secret_files=()
+}
+
+# Append secret cleanup to an existing EXIT trap instead of replacing it.
+function f_secret_cleanup_register {
+  local f_line f_body
+  f_line=$(trap -p EXIT 2>/dev/null || true)
+  [[ "${f_line}" == *f_cleanup_secret_files* ]] && return 0
+  if [[ -z "${f_line}" ]]
+  then
+    trap 'f_cleanup_secret_files' EXIT
+    return 0
+  fi
+  # Extract the body of the existing trap (single or double quoted).
+  f_body="${f_line#*\'}"
+  f_body="${f_body%\'*}"
+  if [[ "${f_body}" == "${f_line}" ]]
+  then
+    f_body="${f_line#trap -- }"
+    f_body="${f_body% EXIT}"
+    f_body="${f_body#\"}"
+    f_body="${f_body%\"}"
+  fi
+  trap -- "${f_body}; f_cleanup_secret_files" EXIT
+}
+
+# Write a secret to a transient 0600 file and set g_secret_file_path to its
+# path. The value is read from stdin so it never appears in argv. Call this
+# function directly, NOT inside $(...): f_secret_cleanup_register modifies the
+# EXIT trap, and a command-substitution subshell would fire that trap on exit
+# and shred the file before the caller can use it.
+function f_write_secret_file {
+  local f_type="${1:-secret}"
+  local f_path
+  g_secret_file_path=""
+  [[ -n "${g_config_dir:-}" && -d "${g_config_dir}" ]] || return 1
+  f_path=$(mktemp "${g_config_dir}/.secret-${f_type}-XXXXXX") || return 1
+  chmod 0600 "${f_path}" || return 1
+  # ldapsearch -y (and similar clients) reject a password file with a trailing
+  # newline; command substitution strips trailing newlines from the value.
+  local f_value
+  f_value=$(cat) || return 1
+  printf '%s' "${f_value}" > "${f_path}" || return 1
+  g_secret_files+=("${f_path}")
+  f_secret_cleanup_register
+  g_secret_file_path="${f_path}"
+}
+
+# Read a secret from the central store into a transient 0600 file. The path is
+# returned in g_secret_file_path and shredded when the CALLING process exits.
+# Call directly (not in $(...)): f_secret_cleanup_register changes the trap.
+function f_secret_get_to_file {
+  local f_name="${1:-}" f_path f_lib_dir
+  g_secret_file_path=""
+  [[ -n "${f_name}" ]] || return 2
+  [[ -n "${g_config_dir:-}" && -d "${g_config_dir}" ]] || return 1
+  f_path=$(mktemp "${g_config_dir}/.secret-store-XXXXXX") || return 1
+  chmod 0600 "${f_path}" || return 1
+  f_lib_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+  if ! "${f_lib_dir}/symbios-secret.sh" get "${f_name}" --path "${f_path}" >/dev/null 2>&1
+  then
+    shred -u "${f_path}" 2>/dev/null || rm -f "${f_path}"
+    return 1
+  fi
+  g_secret_files+=("${f_path}")
+  f_secret_cleanup_register
+  g_secret_file_path="${f_path}"
+}
+
+# Read a secret by name for use in command substitution. The central store is
+# authoritative; a legacy plaintext inventory value is a migration fallback
+# (a `secret:` reference is never returned as a credential). Prints the value
+# to stdout - callers capture it, it is never logged or passed as argv.
+function f_secret_var {
+  local f_name="${1:-}" f_fallback="${2:-}" f_val
+  [[ -n "${f_name}" ]] || return 2
+  if f_secret_get_to_file "${f_name}"
+  then
+    cat "${g_secret_file_path}"
+    return 0
+  fi
+  f_val="$(f_symbios_var "${f_name}" "${f_fallback}")"
+  [[ "${f_val}" == secret:* ]] && f_val=""
+  printf '%s' "${f_val}"
+}
+
+# Write a curl config containing an Authorization: Bearer header to a
+# transient 0600 file. The path is returned via g_curl_cfg_path and shredded
+# on exit, so the token never appears in curl's argv or the process list.
+# Call directly (not in $(...)); f_secret_cleanup_register changes the trap.
+function f_bearer_curl_config {
+  local f_token="${1:-}"
+  g_curl_cfg_path=""
+  [[ -n "${g_config_dir:-}" && -d "${g_config_dir}" ]] || return 1
+  g_curl_cfg_path=$(mktemp "${g_config_dir}/.curl-bearer-XXXXXX") || return 1
+  chmod 0600 "${g_curl_cfg_path}" || return 1
+  printf 'header = "Authorization: Bearer %s"\n' "${f_token}" > "${g_curl_cfg_path}" || return 1
+  g_secret_files+=("${g_curl_cfg_path}")
+  f_secret_cleanup_register
+}
+
 # Set up LDAP connection details for host-side scripts. Reads the base DN
-# from inventory and the admin password from ${g_config_dir}/.ldap_admin_pw.
-# Sets f_ldap_uri, f_base_dn, f_admin_pw, f_bind_dn.
+# from inventory and the admin password from the central secret store, with a
+# fallback to ${g_config_dir}/.ldap_admin_pw during migration. Sets f_ldap_uri,
+# f_base_dn, f_admin_pw, f_bind_dn and f_ldap_pw_file (path to a transient 0600
+# file for `ldap* -y`, so the bind secret stays out of argv).
 function f_symbios_ldap_init {
-  f_ldap_uri="${LDAP_URI:-ldap://symbios-base-ldap}"
+  # LDAP publishes 127.0.0.1:389 on the host, so host ldap-utils can be used
+  # directly. All f_ldap_exec/f_ldap_ldif callers pass -H "${f_ldap_uri}".
+  f_ldap_uri="${LDAP_URI:-ldap://127.0.0.1:389}"
   f_base_dn="$(f_symbios_var ldap_basedn "dc=openldap,dc=local")"
-  f_admin_pw="$(cat "${g_config_dir}/.ldap_admin_pw" 2>/dev/null || echo 'changeme')"
   f_bind_dn="cn=head-of-ldap,${f_base_dn}"
+  # Prefer the encrypted store; the plaintext file is a migration fallback
+  # for hosts where ldap.yml has not seeded the store yet.
+  if f_secret_get_to_file ldap_admin_password
+  then
+    f_ldap_pw_file="${g_secret_file_path}"
+    f_admin_pw="$(<"${f_ldap_pw_file}")"
+  else
+    f_admin_pw="$(cat "${g_config_dir}/.ldap_admin_pw" 2>/dev/null || echo 'changeme')"
+    f_write_secret_file ldap <<< "${f_admin_pw}" || f_ldap_pw_file=""
+    f_ldap_pw_file="${g_secret_file_path}"
+  fi
 }
 
-# Run an LDAP command inside the webui container (has network access to openldap)
+# Run an LDAP command on the host (ldap-utils installed by ldap.yml). Using
+# 127.0.0.1 avoids a docker exec wrapper and lets the password stay in a file.
 function f_ldap_exec {
-  docker exec symbios-base-webui "$@"
+  "$@"
 }
 
-# Run an LDAP command inside the webui container with LDIF on stdin
+# Run an LDAP command with LDIF on stdin. Kept as a separate function so all
+# callers work unchanged; stdin is passed straight through to the client.
 function f_ldap_ldif {
-  docker exec -i symbios-base-webui "$@"
+  "$@"
 }
 
 # Collect Traefik Host labels from all service compose files and the traefik

@@ -51,6 +51,17 @@ dedynpw="$(f_symbios_var ddns_apikey '')"
 dedynhosts="$(f_symbios_var ddns_host '')"
 doipv6="$(f_symbios_var ddns_ipv6 '')"
 
+# Keep the token out of curl's argv: -K reads the Authorization header from a
+# transient 0600 config file, shredded on exit with the other secret files.
+if [[ -n "${dedynpw}" ]]
+then
+  g_dedyn_curl_cfg=$(mktemp "${g_config_dir}/.dedyn-curl-XXXXXX") || exit 1
+  chmod 0600 "${g_dedyn_curl_cfg}" || exit 1
+  printf 'header = "Authorization: Token %s"\n' "${dedynpw}" > "${g_dedyn_curl_cfg}" || exit 1
+  g_secret_files+=("${g_dedyn_curl_cfg}")
+  f_secret_cleanup_register
+fi
+
 # Skip silently when no DDNS host is configured yet
 if [[ -z "${dedynhosts}" ]]
 then
@@ -73,7 +84,7 @@ function f_ensure_domain {
   # Check if domain already exists
   f_exists=$(curl -s -o /dev/null -w "%{http_code}" \
     "https://desec.io/api/v1/domains/${f_domain}/" \
-    --header "Authorization: Token ${dedynpw}")
+    --config "${g_dedyn_curl_cfg}")
   if [[ "${f_exists}" == "404" ]]
   then
     # Domain does not exist, create it
@@ -81,7 +92,7 @@ function f_ensure_domain {
     local f_create
     f_create=$(curl -s -o /dev/null -w "%{http_code}" \
       -X POST "https://desec.io/api/v1/domains/" \
-      --header "Authorization: Token ${dedynpw}" \
+      --config "${g_dedyn_curl_cfg}" \
       --header "Content-Type: application/json" \
       --data "{\"name\": \"${f_domain}\"}")
     if [[ "${f_create}" == "201" ]]
@@ -170,7 +181,7 @@ do
       g_echo_note "Updating DynDNS IP ${g_ip} for ${g_dynaddr}..."
       g_response=$(curl -s -o /dev/null -w "%{http_code}" \
         "https://${g_updatesrv}/?hostname=${g_dynaddr}&${g_updatestring}" \
-        --header "Authorization: Token ${dedynpw}")
+        --config "${g_dedyn_curl_cfg}")
       if [[ "${g_response}" == "200" ]] || [[ "${g_response}" == "204" ]]
       then
         g_echo_ok "DynDNS IP ${g_ip} for ${g_dynaddr} renewed"
@@ -195,13 +206,13 @@ do
   then
     g_current_dns_check=$(curl -s -X GET \
       "https://desec.io/api/v1/domains/${g_dynaddr}/rrsets/" \
-      --header "Authorization: Token ${dedynpw}")
+      --config "${g_dedyn_curl_cfg}")
     # Check if A record exists and delete it
     if echo "${g_current_dns_check}" | jq -r '.[] | select(.subname=="" and .type=="A") | .records[]' 2>/dev/null | grep -q .
     then
       g_echo_note "Deleting A record (IPv6-only mode)..."
       curl -s -X DELETE "https://desec.io/api/v1/domains/${g_dynaddr}/rrsets/%40/A/" \
-        --header "Authorization: Token ${dedynpw}"
+        --config "${g_dedyn_curl_cfg}"
       g_echo_ok "A record deleted"
       g_changed=1
     fi
@@ -213,12 +224,12 @@ do
     # Ensure wildcard CNAME record exists
     g_current_dns=$(curl -s -X GET \
       "https://desec.io/api/v1/domains/${g_dynaddr}/rrsets/" \
-      --header "Authorization: Token ${dedynpw}")
+      --config "${g_dedyn_curl_cfg}")
     if ! echo "${g_current_dns}" | jq -r '.[] | select(.subname=="*" and .type=="CNAME") | .records[]' 2>/dev/null | grep -q "^${g_dynaddr}\.$"
     then
       g_echo_ok "Creating wildcard CNAME for ${g_dynaddr}"
       curl -s -X POST "https://desec.io/api/v1/domains/${g_dynaddr}/rrsets/" \
-        --header "Authorization: Token ${dedynpw}" \
+        --config "${g_dedyn_curl_cfg}" \
         --header "Content-Type: application/json" \
         --data "{\"subname\": \"*\", \"type\": \"CNAME\", \"ttl\": 3600, \"records\": [\"${g_dynaddr}.\"]}" >/dev/null
     fi
@@ -227,7 +238,7 @@ do
     then
       g_echo_ok "Creating CAA record for Let's Encrypt"
       curl -s -X POST "https://desec.io/api/v1/domains/${g_dynaddr}/rrsets/" \
-        --header "Authorization: Token ${dedynpw}" \
+        --config "${g_dedyn_curl_cfg}" \
         --header "Content-Type: application/json" \
         --data "{\"subname\": \"\", \"type\": \"CAA\", \"ttl\": 3600, \"records\": [\"128 issue \\\"letsencrypt.org\\\"\"]}" >/dev/null
     fi

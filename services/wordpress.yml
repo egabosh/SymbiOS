@@ -458,8 +458,10 @@
     - name: Grant instance LDAP group access for SFTP instances
       ansible.builtin.shell: |
         set -e
-        GID=$(docker exec symbios-base-ldap ldapsearch -x -H ldap://localhost \
-          -D "cn=head-of-ldap,{{ ldap_basedn }}" -w "$LDAP_ADMIN_PW" \
+        # Bind via a 0600 password file so the admin secret never enters
+        # argv (the container copy of this task used to pass it with -w).
+        GID=$(ldapsearch -x -H ldap://127.0.0.1:389 \
+          -D "cn=head-of-ldap,{{ ldap_basedn }}" -y "$LDAP_ADMIN_PW_FILE" \
           -b "cn=wordpress-{{ item.name }},ou=groups,{{ ldap_basedn }}" gidNumber 2>/dev/null \
           | sed -n 's/^gidNumber: //p' | head -1)
         [ -n "$GID" ] || { echo "no GID for wordpress-{{ item.name }}"; exit 1; }
@@ -471,7 +473,7 @@
         setfacl -R -d -m "g:${GID}:rwx" -m m::rwx -m o::--- "/symbios/services/wordpress/{{ item.name }}-data"
         touch "/symbios/services/wordpress/.sftp-acl-{{ item.name }}"
       environment:
-        LDAP_ADMIN_PW: "{{ lookup('file', (config_dir | default('/symbios/base-services/symbios-ui/config')) + '/.ldap_admin_pw') }}"
+        LDAP_ADMIN_PW_FILE: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/.ldap_admin_pw"
       loop: "{{ wordpress_instances | default([]) }}"
       when: item.sftp | default(false) | bool
       no_log: true
@@ -603,16 +605,20 @@
             then
               g_echo_error "WordPress backup skipped: symbios-wordpress-db not running"
             else
-              g_pw_file=$(mktemp /tmp/symbios-db-pw.XXXXXX)
-              chmod 600 "$g_pw_file"
-              echo "$WORDPRESS_DB_ROOT_PASSWORD" > "$g_pw_file"
-              unset WORDPRESS_DB_ROOT_PASSWORD
               g_timestamp=$(date +"%Y%m%d%H%M")
-              if ! docker exec symbios-wordpress-db /usr/bin/mariadb-dump --no-tablespaces -uroot --password="$(cat $g_pw_file)" --single-transaction --quick --routines --triggers --events --all-databases 2>${g_tmp}/dberr | gzip > $g_backupdir/symbios-wordpress-db-all-$g_timestamp.sql.gz
+              # Write a 0600 client defaults file inside the container via
+              # stdin so the DB root password never enters argv.
+              printf '[client]\npassword=%s\n' "$WORDPRESS_DB_ROOT_PASSWORD" \
+                | docker exec -i symbios-wordpress-db sh -c \
+                    'umask 077; cat > /tmp/.symbios-db.cnf'
+              unset WORDPRESS_DB_ROOT_PASSWORD
+              if ! docker exec symbios-wordpress-db sh -c \
+                    'exec /usr/bin/mariadb-dump --no-tablespaces --defaults-extra-file=/tmp/.symbios-db.cnf -uroot --single-transaction --quick --routines --triggers --events --all-databases' \
+                    2>${g_tmp}/dberr | gzip > $g_backupdir/symbios-wordpress-db-all-$g_timestamp.sql.gz
               then
                 g_echo_error "WordPress DB backup failed: $(cat ${g_tmp}/dberr)"
               fi
-              rm -f "$g_pw_file"
+              docker exec symbios-wordpress-db rm -f /tmp/.symbios-db.cnf
               g_old_backups=$(ls -1 $g_backupdir/symbios-wordpress-db-*.gz 2>/dev/null | wc -l)
               if [[ $g_old_backups -gt $g_days ]]
               then

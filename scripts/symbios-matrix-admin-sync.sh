@@ -61,7 +61,7 @@ f_no_args "$@"
 
 function f_matrix_admin_sync {
   local f_mx_dir="${g_services_root}/matrix"
-  local f_env_db f_db_user f_db_pass f_pw f_domain
+  local f_env_db f_db_user f_db_pass f_domain
   local f_ldap_out f_ldap_rc f_desired f_current f_uid f_local f_in_ldap
   local f_changed=0 f_rc=0
 
@@ -95,8 +95,9 @@ function f_matrix_admin_sync {
   fi
 
   # LDAP admin password is mandatory
-  f_pw=$(cat "${g_config_dir}/.ldap_admin_pw" 2>/dev/null)
-  if [[ -z "$f_pw" ]]
+  # LDAP admin bind via a transient password file (never in argv).
+  f_symbios_ldap_init
+  if [[ -z "${f_ldap_pw_file}" ]]
   then
     g_echo_error "No LDAP admin password found in ${g_config_dir}/.ldap_admin_pw"
     return 1
@@ -107,8 +108,10 @@ function f_matrix_admin_sync {
   # psql inside the database container against the MAS database; -t -A prints
   # one bare value per line
   f_psql_mas() {
-    docker exec -e PGPASSWORD="${f_db_pass}" matrix-db \
-      psql -h 127.0.0.1 -U "${f_db_user}" -d mas -t -A -c "$1" 2>/dev/null
+    # The password stays in the container env; only fixed args enter argv.
+    docker exec matrix-db sh -c \
+      'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -h 127.0.0.1 -U "$1" -d mas -t -A -c "$2"' \
+      sh "${f_db_user}" "$1" 2>/dev/null
   }
 
   # mas-cli inside the MAS container (distroless image, so the CLI is the only
@@ -121,8 +124,8 @@ function f_matrix_admin_sync {
   # Desired admins: members of LDAP group matrix-admins. A missing group
   # (deleted event) means nobody is admin via LDAP; an unreachable LDAP is an
   # error - never demote anyone when the group could not be read.
-  f_ldap_out=$(docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-    -D "cn=head-of-ldap,${g_ldap_basedn}" -w "$f_pw" \
+  f_ldap_out=$(ldapsearch -x -H ldap://127.0.0.1:389 \
+    -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "cn=matrix-admins,ou=groups,${g_ldap_basedn}" memberUid 2>&1)
   f_ldap_rc=$?
   case "${f_ldap_rc}" in
@@ -183,8 +186,8 @@ function f_matrix_admin_sync {
     then
       continue
     fi
-    f_in_ldap=$(docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-      -D "cn=head-of-ldap,${g_ldap_basedn}" -w "$f_pw" \
+    f_in_ldap=$(ldapsearch -x -H ldap://127.0.0.1:389 \
+      -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
       -b "ou=users,${g_ldap_basedn}" "(uid=${f_local})" dn 2>/dev/null \
       | grep -c "^dn: uid=")
     if [[ "${f_in_ldap:-0}" -gt 0 ]]

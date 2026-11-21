@@ -97,10 +97,11 @@ function f_run_tootctl {
 
 function f_ldap_admins {
   local f_instance="$1"
-  local f_pw f_output
+  local f_output
 
-  f_pw=$(cat "${g_config_dir}/.ldap_admin_pw" 2>/dev/null)
-  if [[ -z "$f_pw" ]]
+  # LDAP admin bind via a transient password file (never in argv).
+  f_symbios_ldap_init
+  if [[ -z "${f_ldap_pw_file}" ]]
   then
     g_echo_error "No LDAP admin password found in ${g_config_dir}/.ldap_admin_pw"
     return 1
@@ -108,8 +109,8 @@ function f_ldap_admins {
 
   # Distinguish an empty group from an unreadable one: an LDAP failure must
   # never demote every Mastodon admin during reconcile.
-  f_output=$(docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-    -D "cn=head-of-ldap,${g_ldap_basedn}" -w "$f_pw" \
+  f_output=$(ldapsearch -x -H ldap://127.0.0.1:389 \
+    -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "cn=mastodon-${f_instance}-admins,ou=groups,${g_ldap_basedn}" memberUid 2>/dev/null) || return 1
   printf '%s\n' "$f_output" | sed -n 's/^memberUid: //p' | sort -u
 }

@@ -17,8 +17,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # Manage LDAP groups: create, delete, add/remove users, list members.
-# Runs LDAP commands inside the webui container via docker exec,
-# which has direct network access to the OpenLDAP service.
+# Runs LDAP commands on the host against the LDAP service published on
+# 127.0.0.1:389, using a transient password file so the bind secret stays
+# out of argv.
 #
 # Usage:
 #   symbios-ldap-groups.sh --create --name <group> [--gid <number>]
@@ -159,7 +160,7 @@ cn: ${f_name}
 gidNumber: ${f_gid}
 "
 
-    echo "${f_ldif}" | f_ldap_ldif ldapadd -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}"
+    echo "${f_ldif}" | f_ldap_ldif ldapadd -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}"
     f_rc=$?
 
     if [[ ${f_rc} -eq 0 ]]
@@ -185,7 +186,7 @@ gidNumber: ${f_gid}
     g_echo_note "Deleting group: ${f_name}"
 
     # Remove all members first
-    f_members="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+    f_members="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
       -b "${f_group_dn}" "(objectClass=posixGroup)" memberUid 2>/dev/null \
       | grep '^memberUid:' | awk '{print $2}' || true)"
 
@@ -196,12 +197,12 @@ changetype: modify
 delete: memberUid
 memberUid: ${f_member}
 "
-      echo "${f_member_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" 2>/dev/null
+      echo "${f_member_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" 2>/dev/null
       g_echo_note "Removed '${f_member}' from group"
     done
 
     # Delete the group
-    f_ldap_exec ldapdelete -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" "${f_group_dn}" 2>&1
+    f_ldap_exec ldapdelete -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" "${f_group_dn}" 2>&1
     f_rc=$?
 
     if [[ ${f_rc} -eq 0 ]]
@@ -231,7 +232,7 @@ add: memberUid
 memberUid: ${f_uid}
 "
 
-    echo "${f_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}"
+    echo "${f_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}"
     f_rc=$?
 
     if [[ ${f_rc} -eq 0 ]]
@@ -261,7 +262,7 @@ delete: memberUid
 memberUid: ${f_uid}
 "
 
-    echo "${f_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}"
+    echo "${f_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}"
     f_rc=$?
 
     if [[ ${f_rc} -eq 0 ]]
@@ -279,7 +280,7 @@ memberUid: ${f_uid}
   list-members)
     g_echo_note "Members of group '${f_name}':"
 
-    f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+    f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
       -b "${f_group_dn}" "(objectClass=posixGroup)" memberUid 2>/dev/null \
       | grep '^memberUid:' | awk '{print $2}' || true
     ;;

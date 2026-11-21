@@ -51,7 +51,7 @@ function f_ldap_attr {
   local f_attr="$2"
   f_symbios_ldap_init
   f_ldap_exec ldapsearch -x -o ldif-wrap=no -H "${f_ldap_uri}" \
-    -D "${f_bind_dn}" -w "${f_admin_pw}" \
+    -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "ou=users,${f_base_dn}" "${f_filter}" "${f_attr}" 2>/dev/null \
     | sed -n "s/^${f_attr}: //p" | head -1
 }
@@ -59,14 +59,14 @@ function f_ldap_attr {
 function f_ldap_group_exists {
   f_symbios_ldap_init
   f_ldap_exec ldapsearch -x -o ldif-wrap=no -H "${f_ldap_uri}" \
-    -D "${f_bind_dn}" -w "${f_admin_pw}" \
+    -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "ou=groups,${f_base_dn}" "(cn=${1})" cn 2>/dev/null | grep -q '^cn:'
 }
 
 function f_ldap_group_has_user {
   f_symbios_ldap_init
   f_ldap_exec ldapsearch -x -o ldif-wrap=no -H "${f_ldap_uri}" \
-    -D "${f_bind_dn}" -w "${f_admin_pw}" \
+    -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "cn=${1},ou=groups,${f_base_dn}" "(objectClass=posixGroup)" memberUid 2>/dev/null \
     | sed -n 's/^memberUid: //p' | grep -qx "${2}"
 }

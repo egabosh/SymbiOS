@@ -41,7 +41,7 @@ source "${g_script_dir}/symbios-lib.sh"
 f_no_args "$@"
 
 function f_ha_admin_sync {
-  local f_pw f_desired f_desired_users f_current_groups
+  local f_desired f_desired_users f_current_groups
   local f_ha_storage="${g_services_root}/home-assistant/config/.storage/auth"
   local f_container="home-assistant"
   local f_ha_dir="${g_services_root}/home-assistant"
@@ -59,23 +59,23 @@ function f_ha_admin_sync {
     return 0
   fi
 
-  # LDAP admin password is mandatory
-  f_pw=$(cat "${g_config_dir}/.ldap_admin_pw" 2>/dev/null)
-  if [[ -z "$f_pw" ]]
+  # LDAP admin bind via a transient password file (never in argv).
+  f_symbios_ldap_init
+  if [[ -z "${f_ldap_pw_file}" ]]
   then
     g_echo_error "No LDAP admin password found in ${g_config_dir}/.ldap_admin_pw"
     return 1
   fi
 
   # Desired admins: members of LDAP group home-assistant-admins
-  f_desired=$(docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-    -D "cn=head-of-ldap,${g_ldap_basedn}" -w "$f_pw" \
+  f_desired=$(ldapsearch -x -H ldap://127.0.0.1:389 \
+    -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "cn=home-assistant-admins,ou=groups,${g_ldap_basedn}" memberUid 2>/dev/null \
     | sed -n "s/^memberUid: //p" | sort -u)
 
   # Desired regular users: members of LDAP group home-assistant-users
-  f_desired_users=$(docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-    -D "cn=head-of-ldap,${g_ldap_basedn}" -w "$f_pw" \
+  f_desired_users=$(ldapsearch -x -H ldap://127.0.0.1:389 \
+    -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "cn=home-assistant-users,ou=groups,${g_ldap_basedn}" memberUid 2>/dev/null \
     | sed -n "s/^memberUid: //p" | sort -u)
 

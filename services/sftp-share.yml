@@ -303,10 +303,11 @@
         f_binddn="$(sed -n 's/^binddn //p' /etc/nslcd.conf | head -1)"
         f_bindpw="$(sed -n 's/^bindpw //p' /etc/nslcd.conf | head -1)"
         [[ -n "${f_base}" && -n "${f_binddn}" && -n "${f_bindpw}" ]] || exit 0
+        # Read the bind password from stdin (-W) so it never enters argv.
         ldapsearch -x -LLL -o ldif-wrap=no -H ldap://symbios-base-ldap \
-          -D "${f_binddn}" -w "${f_bindpw}" \
+          -D "${f_binddn}" -W \
           -b "ou=users,${f_base}" "(uid=${f_uid})" sshPublicKey 2>/dev/null \
-          | sed -n 's/^sshPublicKey: //p'
+          <<< "${f_bindpw}" | sed -n 's/^sshPublicKey: //p'
       backup: yes
       validate: /bin/bash -n %s
     notify:

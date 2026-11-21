@@ -159,7 +159,7 @@
           g_s3password=$(pwgen -s 32 1)
 
           # Write the htpasswd entry (bcrypt) into the repository root
-          htpasswd -B -b -c data/.htpasswd "{{ s3_initial_user }}" "$g_s3password"
+          printf '%s' "$g_s3password" | htpasswd -B -i -c data/.htpasswd "{{ s3_initial_user }}"
           chmod 640 data/.htpasswd
           chown root:docker data/.htpasswd
 
@@ -238,7 +238,7 @@
                 echo "User ${f_user} already exists, use 'passwd' to change it." >&2
                 exit 1
               fi
-              htpasswd -B -b "$f_htpasswd" "$f_user" "$f_pass"
+              printf '%s' "$f_pass" | htpasswd -B -i "$f_htpasswd" "$f_user"
               echo "S3_USER=${f_user}"
               echo "S3_PASSWORD=${f_pass}"
               echo "S3_URL=https://{{ service_domain }}"
@@ -250,7 +250,7 @@
                 echo "User ${f_user} does not exist." >&2
                 exit 1
               fi
-              htpasswd -B -b "$f_htpasswd" "$f_user" "$f_pass"
+              printf '%s' "$f_pass" | htpasswd -B -i "$f_htpasswd" "$f_user"
               echo "S3_USER=${f_user}"
               echo "S3_PASSWORD=${f_pass}"
               echo "S3_URL=https://{{ service_domain }}"

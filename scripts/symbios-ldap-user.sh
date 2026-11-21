@@ -17,9 +17,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # Manage LDAP users: create, delete, modify.
-# Runs LDAP commands inside the webui container via docker exec,
-# which has direct network access to the OpenLDAP service.
-# Passwords are passed via a secret file (chmod 600) for security.
+# Runs LDAP commands on the host against the LDAP service published on
+# 127.0.0.1:389. Bind credentials and new passwords are passed via transient
+# 0600 files so they never appear in argv.
 #
 # Usage:
 #   symbios-ldap-user.sh --create --uid <name> --password-file <path> [options]
@@ -361,7 +361,7 @@ case "${f_action}" in
     fi
 
     # Get next available UID number
-    f_next_uid="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+    f_next_uid="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
       -b "ou=users,${f_base_dn}" "(objectClass=posixAccount)" uidNumber 2>/dev/null \
       | grep '^uidNumber:' | awk '{print $2}' | sort -n | tail -1)"
 
@@ -405,7 +405,7 @@ sshPublicKey: ${f_key}"
     f_ldif="${f_ldif}
 "
 
-    echo "${f_ldif}" | f_ldap_ldif ldapadd -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}"
+    echo "${f_ldif}" | f_ldap_ldif ldapadd -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}"
     f_rc=$?
 
     if [[ ${f_rc} -ne 0 ]]
@@ -425,7 +425,7 @@ add: memberUid
 memberUid: ${f_uid}
 "
 
-      echo "${f_group_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}"
+      echo "${f_group_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}"
       if [[ $? -eq 0 ]]
       then
         g_echo_note "User '${f_uid}' added to group '${f_group}'"
@@ -449,7 +449,7 @@ memberUid: ${f_uid}
     g_echo_note "Deleting user: ${f_uid}"
 
     # Remove user from all groups first
-    f_groups_output="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+    f_groups_output="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
       -b "ou=groups,${f_base_dn}" "(memberUid=${f_uid})" cn 2>/dev/null \
       | grep '^cn:' | awk '{print $2}' || true)"
 
@@ -460,14 +460,14 @@ changetype: modify
 delete: memberUid
 memberUid: ${f_uid}
 "
-      echo "${f_group_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" 2>/dev/null
+      echo "${f_group_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" 2>/dev/null
       g_echo_note "Removed from group '${f_group}'"
       # Fire member-removed so service hooks deprovision (e.g. S3 entry)
       f_ldap_groups_hooks "member-removed" "${f_group}" "${f_uid}"
     done
 
     # Delete the user entry
-    f_ldap_exec ldapdelete -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" "${f_user_dn}" 2>&1
+    f_ldap_exec ldapdelete -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" "${f_user_dn}" 2>&1
     f_rc=$?
 
     if [[ ${f_rc} -eq 0 ]]
@@ -511,7 +511,7 @@ userPassword: ${f_password_hash}"
     f_ldif="${f_ldif}
 "
 
-    echo "${f_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}"
+    echo "${f_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}"
     f_rc=$?
 
     if [[ ${f_rc} -eq 0 ]]
@@ -544,7 +544,7 @@ changetype: modify
 add: objectClass
 objectClass: ldapPublicKey
 "
-      echo "${f_key_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" >/dev/null 2>&1 || true
+      echo "${f_key_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" >/dev/null 2>&1 || true
 
       if [[ "${f_clear_ssh_keys}" -eq 1 ]]
       then
@@ -565,7 +565,7 @@ sshPublicKey: ${f_key}"
 "
       fi
 
-      echo "${f_key_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}"
+      echo "${f_key_ldif}" | f_ldap_ldif ldapmodify -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}"
       f_rc=$?
 
       if [[ ${f_rc} -eq 0 ]]

@@ -146,13 +146,13 @@
             . {{ base_services_root }}/_defaults/mariadb/envroot.db
             
             echo "grant all privileges on *.* TO '${db_user}'@'%' identified by '${db_user_pw}';" \
-             | mariadb -u root -h $db_host --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD}
+             | MYSQL_PWD="${MARIADB_ROOT_PASSWORD}" mariadb -u root -h $db_host --ssl --ssl-verify-server-cert -P 3307
             echo "flush privileges;" \
-             | mariadb -u root -h $db_host --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD}
+             | MYSQL_PWD="${MARIADB_ROOT_PASSWORD}" mariadb -u root -h $db_host --ssl --ssl-verify-server-cert -P 3307
             echo "ALTER USER '${db_user}'@'%' REQUIRE SSL;" \
-             | mariadb -u root -h $db_host --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD}
+             | MYSQL_PWD="${MARIADB_ROOT_PASSWORD}" mariadb -u root -h $db_host --ssl --ssl-verify-server-cert -P 3307
             
-            echo 'show databases;' | mariadb -u $db_user -h $db_host --ssl --ssl-verify-server-cert -P 3307 -p${db_user_pw}
+            echo 'show databases;' | MYSQL_PWD="${db_user_pw}" mariadb -u $db_user -h $db_host --ssl --ssl-verify-server-cert -P 3307
 
             echo "<advancedsettings>
             <videodatabase>
@@ -308,9 +308,9 @@
           g_timestamp=$(date +"%Y%m%d%H%M")
           mkdir -p $g_backupdir
 
-          for i in $(echo "show databases" | mariadb -u root -h localhost --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD} | egrep -v "^Database$|^performance_schema$|^information_schema$")
+          for i in $(echo "show databases" | MYSQL_PWD="${MARIADB_ROOT_PASSWORD}" mariadb -u root -h localhost --ssl --ssl-verify-server-cert -P 3307 | egrep -v "^Database$|^performance_schema$|^information_schema$")
           do
-            if mariadb-dump  -u root -h localhost --ssl --ssl-verify-server-cert -P 3307 -p${MARIADB_ROOT_PASSWORD} $i 2>${g_tmp}/dberr >$g_backupdir/KODIDB-$i-$g_timestamp.sql
+            if MYSQL_PWD="${MARIADB_ROOT_PASSWORD}" mariadb-dump -u root -h localhost --ssl --ssl-verify-server-cert -P 3307 $i 2>${g_tmp}/dberr >$g_backupdir/KODIDB-$i-$g_timestamp.sql
             then
               gzip $g_backupdir/KODIDB-$i-$g_timestamp.sql
             else

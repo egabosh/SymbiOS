@@ -84,7 +84,7 @@ g_acme_resolver="$(f_symbios_var acme_resolver 2>/dev/null || echo "")"
 g_domains_raw=""
 if docker ps --format '{{.Names}}' | grep -q '^mailcowdockerized-mysql-mailcow-1$'; then
   g_domains_raw="$(docker exec mailcowdockerized-mysql-mailcow-1 sh -c \
-    'mariadb -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE" -N -e "SELECT domain FROM domain WHERE active=1 AND backupmx=0 ORDER BY domain;"' 2>/dev/null || echo "")"
+    'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mariadb -uroot "$MYSQL_DATABASE" -N -e "SELECT domain FROM domain WHERE active=1 AND backupmx=0 ORDER BY domain;"' 2>/dev/null || echo "")"
 fi
 
 if [[ -z "$g_domains_raw" ]]; then

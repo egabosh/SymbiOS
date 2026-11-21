@@ -13,7 +13,7 @@ then
 elif [[ -z "${f_admin_pw}" || "${f_admin_pw}" == "changeme" ]]
 then
   g_echo_error "Healthcheck failed for ldap: admin password file missing"
-elif ! ldapwhoami -x -H "ldap://${g_ldap_ip}" -D "${f_bind_dn}" -w "${f_admin_pw}" >/dev/null 2>&1
+elif ! ldapwhoami -x -H "ldap://${g_ldap_ip}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" >/dev/null 2>&1
 then
   g_echo_error "Healthcheck failed for ldap: LDAP bind test failed"
 fi

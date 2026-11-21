@@ -22,7 +22,7 @@ source "${g_script_dir}/symbios-lib.sh"
 function f_group_gid {
   local f_group="$1"
   f_symbios_ldap_init
-  f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+  f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "cn=${f_group},ou=groups,${f_base_dn}" gidNumber 2>/dev/null \
     | sed -n "s/^gidNumber: //p" | head -1
 }

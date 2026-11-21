@@ -495,7 +495,7 @@ function f_import_db_dumps {
     then
       g_echo "Importing MySQL/MariaDB dump $f_newest into $f_container"
       f_cat_dump "$f_newest" | docker exec -i "$f_container" sh -c \
-        'if [ -n "$MARIADB_DATABASE" ]; then C=mariadb; U=$MARIADB_USER; P=$MARIADB_PASSWORD; D=$MARIADB_DATABASE; else C=mysql; U=$MYSQL_USER; P=$MYSQL_PASSWORD; D=$MYSQL_DATABASE; fi; exec "$C" -u "$U" -p"$P" "$D"' \
+        'if [ -n "$MARIADB_DATABASE" ]; then C=mariadb; U=$MARIADB_USER; P=$MARIADB_PASSWORD; D=$MARIADB_DATABASE; else C=mysql; U=$MYSQL_USER; P=$MYSQL_PASSWORD; D=$MYSQL_DATABASE; fi; MYSQL_PWD="$P" exec "$C" -u "$U" "$D"' \
         && g_echo_ok "Database import finished ($f_container)" \
         || g_echo_error "Database import had errors ($f_container)"
     else

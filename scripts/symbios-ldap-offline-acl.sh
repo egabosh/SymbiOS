@@ -7,8 +7,8 @@
 #   rewrite    patch olcDatabase={1}mdb.ldif (prints CHANGED|UNCHANGED)
 #   add-reader create the sftp-reader bind account (idempotent, ignores
 #              "already exists" - the playbook gates on the ldapsearch
-#              check anyway). Admin password via LDAP_ADMIN_PW env (never
-#              argv); the task keeps no_log: true.
+#              check anyway). The admin bind uses a transient 0600 password
+#              file so the secret never enters argv.
 
 function f_usage {
   cat << EOF
@@ -21,7 +21,7 @@ Usage: $(basename "$0") <rewrite|add-reader> [options]
   add-reader --basedn DN --pw-file FILE
       Create cn=sftp-reader (generates FILE with a 32-char password when
       missing, like the ansible password lookup). Admin password via
-      LDAP_ADMIN_PW environment. Must run in the LDAP compose dir.
+      password file in the config dir. Must run in the LDAP compose dir.
 
 Options:
   -h, --help          Show this help and exit
@@ -108,9 +108,11 @@ function f_ldap_add_reader {
     g_echo_error "add-reader needs --basedn/--pw-file"
     return 1
   fi
-  if [[ -z "${LDAP_ADMIN_PW:-}" ]]
+  # Bind via a transient password file so the admin secret never enters argv.
+  f_symbios_ldap_init
+  if [[ -z "${f_ldap_pw_file}" ]]
   then
-    g_echo_error "LDAP_ADMIN_PW environment missing"
+    g_echo_error "No LDAP admin password found in ${g_config_dir}/.ldap_admin_pw"
     return 1
   fi
   if [[ ! -f "${f_pwfile}" ]]
@@ -140,8 +142,8 @@ function f_ldap_add_reader {
     g_echo_error "Could not hash the sftp-reader password (slappasswd failed)"
     return 1
   fi
-  docker compose exec -T openldap ldapadd -x -H ldap://localhost \
-    -D "cn=head-of-ldap,${f_base}" -w "${LDAP_ADMIN_PW}" << EOF
+  ldapadd -x -H ldap://127.0.0.1:389 \
+    -D "${f_bind_dn}" -y "${f_ldap_pw_file}" << EOF
 dn: cn=sftp-reader,${f_base}
 objectClass: simpleSecurityObject
 objectClass: organizationalRole

@@ -36,9 +36,10 @@ source /repo/scripts/symbios-lib.sh 2>/dev/null || source "$g_symbios_dir/symbio
 # Read LDAP connection details from inventory and password file
 function f_read_ldap_vars {
   f_symbios_ldap_init
-  g_ldap_uri="${f_ldap_uri}"
+  # This wrapper runs inside the WebUI container: LDAP is a sibling container,
+  # not on 127.0.0.1. Keep the compose network name for this caller.
+  g_ldap_uri="ldap://symbios-base-ldap"
   g_base_dn="${f_base_dn}"
-  g_admin_pw="${f_admin_pw}"
   g_bind_dn="${f_bind_dn}"
 }
 
@@ -52,7 +53,7 @@ function f_cmd_search {
 
   local f_search_base="${f_base:-ou=users,${g_base_dn}}"
 
-  local f_cmd=(ldapsearch -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -w "${g_admin_pw}" -b "${f_search_base}")
+  local f_cmd=(ldapsearch -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -y "${f_ldap_pw_file}" -b "${f_search_base}")
   if [[ -n "${f_filter}" ]]
   then
     f_cmd+=("${f_filter}")
@@ -68,26 +69,26 @@ function f_cmd_search {
 # Add LDAP entry from LDIF on stdin
 function f_cmd_add {
   f_read_ldap_vars
-  ldapadd -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -w "${g_admin_pw}" 2>&1
+  ldapadd -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -y "${f_ldap_pw_file}" 2>&1
 }
 
 # Modify LDAP entry from LDIF on stdin
 function f_cmd_modify {
   f_read_ldap_vars
-  ldapmodify -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -w "${g_admin_pw}" 2>&1
+  ldapmodify -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -y "${f_ldap_pw_file}" 2>&1
 }
 
 # Delete LDAP entry by DN
 function f_cmd_delete {
   local f_dn="$1"
   f_read_ldap_vars
-  ldapdelete -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -w "${g_admin_pw}" "${f_dn}" 2>&1
+  ldapdelete -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -y "${f_ldap_pw_file}" "${f_dn}" 2>&1
 }
 
 # List all user UIDs
 function f_cmd_list_users {
   f_read_ldap_vars
-  ldapsearch -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -w "${g_admin_pw}" \
+  ldapsearch -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "ou=users,${g_base_dn}" "(objectClass=posixAccount)" uid cn mail 2>/dev/null \
   | grep -E '^(uid|cn|mail):' || true
 }
@@ -95,7 +96,7 @@ function f_cmd_list_users {
 # List all group names
 function f_cmd_list_groups {
   f_read_ldap_vars
-  ldapsearch -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -w "${g_admin_pw}" \
+  ldapsearch -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "ou=groups,${g_base_dn}" "(objectClass=posixGroup)" cn 2>/dev/null \
   | grep '^cn:' | awk '{print $2}' || true
 }
@@ -105,7 +106,7 @@ function f_cmd_next_uid {
   f_read_ldap_vars
   f_max_uid=19999
 
-  f_output="$(ldapsearch -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -w "${g_admin_pw}" \
+  f_output="$(ldapsearch -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "ou=users,${g_base_dn}" "(objectClass=posixAccount)" uidNumber 2>/dev/null \
     | grep '^uidNumber:' | awk '{print $2}' || true)"
 
@@ -131,7 +132,7 @@ changetype: modify
 add: memberUid
 memberUid: ${f_uid}"
 
-  echo "${f_ldif}" | ldapmodify -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -w "${g_admin_pw}" 2>&1
+  echo "${f_ldif}" | ldapmodify -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -y "${f_ldap_pw_file}" 2>&1
 }
 
 # Remove user from group
@@ -145,7 +146,7 @@ changetype: modify
 delete: memberUid
 memberUid: ${f_uid}"
 
-  echo "${f_ldif}" | ldapmodify -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -w "${g_admin_pw}" 2>&1
+  echo "${f_ldif}" | ldapmodify -x -H "${g_ldap_uri}" -D "${g_bind_dn}" -y "${f_ldap_pw_file}" 2>&1
 }
 
 function f_usage {

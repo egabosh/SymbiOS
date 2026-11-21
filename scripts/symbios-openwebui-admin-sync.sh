@@ -45,7 +45,7 @@ source "${g_script_dir}/symbios-lib.sh"
 f_no_args "$@"
 
 function f_openwebui_admin_sync {
-  local f_pw f_desired f_current f_uid f_in_ldap f_db
+  local f_desired f_current f_uid f_in_ldap f_db
   local f_openwebui_dir="${g_services_root}/openwebui"
 
   # Skip silently when OpenWebUI is not installed
@@ -59,9 +59,9 @@ function f_openwebui_admin_sync {
     return 0
   fi
 
-  # LDAP admin password is mandatory
-  f_pw=$(cat "${g_config_dir}/.ldap_admin_pw" 2>/dev/null)
-  if [[ -z "$f_pw" ]]
+  # LDAP admin bind via a transient password file (never in argv).
+  f_symbios_ldap_init
+  if [[ -z "${f_ldap_pw_file}" ]]
   then
     g_echo_error "No LDAP admin password found in ${g_config_dir}/.ldap_admin_pw"
     return 1
@@ -70,8 +70,8 @@ function f_openwebui_admin_sync {
   # Desired admins: members of LDAP group openwebui-admins.
   # OpenWebUI matches the OIDC account by username (preferred_username),
   # which equals the LDAP uid, so memberUid maps 1:1 to user.name.
-  f_desired=$(docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-    -D "cn=head-of-ldap,${g_ldap_basedn}" -w "$f_pw" \
+  f_desired=$(ldapsearch -x -H ldap://127.0.0.1:389 \
+    -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "cn=openwebui-admins,ou=groups,${g_ldap_basedn}" memberUid 2>/dev/null \
     | sed -n "s/^memberUid: //p" | sort -u)
 
@@ -117,8 +117,8 @@ function f_openwebui_admin_sync {
     then
       continue
     fi
-    f_in_ldap=$(docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-      -D "cn=head-of-ldap,${g_ldap_basedn}" -w "$f_pw" \
+    f_in_ldap=$(ldapsearch -x -H ldap://127.0.0.1:389 \
+      -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
       -b "ou=users,${g_ldap_basedn}" "(uid=$f_uid)" dn 2>/dev/null \
       | grep -c "^dn: uid=")
     if [[ "${f_in_ldap:-0}" -gt 0 ]]

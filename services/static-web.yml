@@ -201,8 +201,10 @@
     - name: Grant nginx and SFTP access on the document roots
       ansible.builtin.shell: |
         set -e
-        GID=$(docker exec symbios-base-ldap ldapsearch -x -H ldap://localhost \
-          -D "cn=head-of-ldap,{{ ldap_basedn }}" -w "$LDAP_ADMIN_PW" \
+        # Bind via a 0600 password file so the admin secret never enters
+        # argv (the container copy of this task used to pass it with -w).
+        GID=$(ldapsearch -x -H ldap://127.0.0.1:389 \
+          -D "cn=head-of-ldap,{{ ldap_basedn }}" -y "$LDAP_ADMIN_PW_FILE" \
           -b "cn=static-web-{{ item.name }},ou=groups,{{ ldap_basedn }}" gidNumber 2>/dev/null \
           | sed -n 's/^gidNumber: //p' | head -1)
         [ -n "$GID" ] || { echo "no GID for static-web-{{ item.name }}"; exit 1; }
@@ -211,7 +213,7 @@
         setfacl -R -m "u:101:rX" -m "g:${GID}:rwx" -m m::rwx "/symbios/services/{{ service_name }}/htdocs/{{ item.name }}"
         setfacl -R -d -m "u:101:rX" -m "g:${GID}:rwx" -m m::rwx "/symbios/services/{{ service_name }}/htdocs/{{ item.name }}"
       environment:
-        LDAP_ADMIN_PW: "{{ lookup('file', (config_dir | default('/symbios/base-services/symbios-ui/config')) + '/.ldap_admin_pw') }}"
+        LDAP_ADMIN_PW_FILE: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/.ldap_admin_pw"
       loop: "{{ static_web_instances | default([]) }}"
       changed_when: false
       no_log: true

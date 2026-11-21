@@ -242,20 +242,35 @@ router-side testing.
 
 ### M20: Passwords in client argv
 
-**Status**: Known risk - scheduled for a separate refactor
+**Status**: Mitigated - secret files / stdin across clients (2026-11-20)
 
-Several LDAP, database and Matrix clients receive their password as an
-argument (`ldapsearch -w`, `mariadb -p`, `docker run --password`). `no_log: true`
-hides the values from Ansible output, but any local user can read them from
-`/proc/<pid>/cmdline` during the short execution window.
+Several clients used to receive their password as an argument, exposing it via
+`/proc/<pid>/cmdline`. `no_log: true` only masked Ansible output.
 
-The fix requires switching every affected client to stdin or a 0600 password
-file across many playbooks and scripts (including `symbios-ldap-groups.sh`,
-`symbios-ldap-user.sh` and the Matrix stacks). That is a dedicated
-credential-handling refactor with its own test cycle.
+Mitigations now in place:
 
-Mitigations for now: the processes only run for a few seconds, SymbiOS hosts
-are single-admin appliances, and the exec audit log never records values.
+- LDAP: `symbios-lib.sh` writes a transient 0600 password file
+  (`f_write_secret_file`, shredded on exit via `f_cleanup_secret_files`) and all
+  `ldap*` clients use `-y` or `-W` with stdin. No `ldap* -w` sites remain.
+- Database clients: `MYSQL_PWD`, `--defaults-extra-file` with a 0600 file, or
+  `PGPASSWORD` inside the container's own `sh -c` (never passed to `docker exec
+  -e`). This covers backup, restore, Nextcloud, KodiDB, WordPress, Mastodon and
+  Matrix helpers.
+- `htpasswd` uses `-i` (stdin), `authelia crypto hash generate` uses `--random`
+  instead of `--password`, and `openssl passwd` uses `-stdin`.
+- Secrets are never passed as argv to settings scripts; `no_log` remains on
+  playbook tasks that handle credentials.
+
+Residual exceptions (documented, not fixed here):
+
+- `mas-cli` (Matrix Authentication Service) has no stdin password option and
+  its image is distroless; the break-glass registration in `services/matrix.yml`
+  and the password-sync hook still pass `--password` as an argument. The calls
+  are short-lived and root-only.
+- `matrix-commander` in `base-services/matrix-client.yml` still receives
+  `--password` at device login; the CLI offers no non-argv login password.
+- `services/mailcow.yml` was not modified by this hardening pass and still uses
+  `mysql -p${DBPASS}` in its initialization tasks.
 
 ### L4: SSH StrictHostKeyChecking
 - Test scripts use `StrictHostKeyChecking=no` for dev environments.

@@ -24,11 +24,11 @@ function f_ldap_members {
   local f_group
   f_symbios_ldap_init
   # Every group that grants SFTP access: media plus all shared-* groups.
-  for f_group in media $(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+  for f_group in media $(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "ou=groups,${f_base_dn}" "(cn=shared-*)" cn 2>/dev/null \
     | sed -n "s/^cn: //p" | sort -u)
   do
-    f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+    f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
       -b "cn=${f_group},ou=groups,${f_base_dn}" memberUid 2>/dev/null \
       | sed -n "s/^memberUid: //p"
   done | sort -u
@@ -37,7 +37,7 @@ function f_ldap_members {
 function f_ldap_uidnumber {
   local f_want="$1"
   f_symbios_ldap_init
-  f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+  f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "ou=users,${f_base_dn}" "(uid=${f_want})" uidNumber 2>/dev/null \
     | sed -n "s/^uidNumber: //p" | head -1
 }
@@ -53,7 +53,7 @@ then
   # Only accept the empty result when LDAP itself answers, otherwise a
   # broken connection would silently skip everyone.
   f_symbios_ldap_init
-  if ! f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+  if ! f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "ou=groups,${f_base_dn}" dn >/dev/null 2>&1
   then
     g_echo_error "LDAP groups not readable, keeping current home dirs"

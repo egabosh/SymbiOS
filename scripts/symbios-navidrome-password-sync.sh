@@ -52,7 +52,7 @@ function f_navidrome_password_sync {
   local f_event="${1:-}"
   local f_uid="${2:-}"
   local f_pwfile="${3:-}"
-  local f_admin_pw f_members f_pw f_domain
+  local f_members f_pw f_domain
 
   if [[ "${f_event}" != "password-set" ]]
   then
@@ -82,9 +82,9 @@ function f_navidrome_password_sync {
     return 0
   fi
 
-  # LDAP admin password is needed for the membership check
-  f_admin_pw=$(cat "${g_config_dir}/.ldap_admin_pw" 2>/dev/null)
-  if [[ -z "${f_admin_pw}" ]]
+  # LDAP admin bind via a transient password file (never in argv).
+  f_symbios_ldap_init
+  if [[ -z "${f_ldap_pw_file}" ]]
   then
     g_echo_error "No LDAP admin password found in ${g_config_dir}/.ldap_admin_pw"
     return 1
@@ -93,8 +93,8 @@ function f_navidrome_password_sync {
   # Current members of both navidrome groups (empty when group missing)
   f_members=$(for f_group in navidrome-users navidrome-admins
   do
-    docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-      -D "cn=head-of-ldap,${g_ldap_basedn}" -w "${f_admin_pw}" \
+    ldapsearch -x -H ldap://127.0.0.1:389 \
+      -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
       -b "cn=${f_group},ou=groups,${g_ldap_basedn}" memberUid 2>/dev/null \
       | sed -n "s/^memberUid: //p"
   done | sort -u)
@@ -127,12 +127,17 @@ function f_navidrome_password_sync {
   }
 
   # Verify through the real path (Traefik + /rest bypass). The Subsonic
-  # protocol carries the password in the query string by design, same as
-  # every client request; nothing extra is logged here.
+  # protocol carries the password in the query string by design; keep the URL
+  # in a transient 0600 curl config so it never appears in curl's argv.
   f_domain="navidrome.${g_base_domain}"
-  if curl -sk --resolve "${f_domain}:443:127.0.0.1" \
-      "https://${f_domain}/rest/ping.view?v=1.16.1&c=pw-sync&u=${f_uid}&p=${f_pw}" \
-      2>/dev/null | grep -q 'status="ok"'
+  local f_curl_cfg
+  f_curl_cfg=$(mktemp "${g_config_dir}/.navidrome-curl-XXXXXX") || return 1
+  chmod 0600 "${f_curl_cfg}" || return 1
+  printf 'resolve = "%s:443:127.0.0.1"\nurl = "https://%s/rest/ping.view?v=1.16.1&c=pw-sync&u=%s&p=%s"\n' \
+    "${f_domain}" "${f_domain}" "${f_uid}" "${f_pw}" > "${f_curl_cfg}" || return 1
+  g_secret_files+=("${f_curl_cfg}")
+  f_secret_cleanup_register
+  if curl -sk --config "${f_curl_cfg}" 2>/dev/null | grep -q 'status="ok"'
   then
     g_echo_note "Navidrome password for '${f_uid}' synced"
     return 0

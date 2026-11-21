@@ -519,20 +519,17 @@
       changed_when: false
       no_log: true
 
-    # Write admin password to ldapscripts without trailing newline
+    # Write admin password to ldapscripts without trailing newline. Using the
+    # copy module (content: via Ansible transport) keeps the secret out of the
+    # shell command line; no_log masks it from output.
     - name: Write /etc/ldapscripts/ldapscripts.passwd without newline
-      shell: "printf '%s' '{{ ldap_admin_password.stdout }}' > /etc/ldapscripts/ldapscripts.passwd"
-      changed_when: false
-      no_log: true
-
-    - name: Set ownership and permissions for /etc/ldapscripts/ldapscripts.passwd
-      ansible.builtin.file:
-        path: /etc/ldapscripts/ldapscripts.passwd
+      ansible.builtin.copy:
+        dest: /etc/ldapscripts/ldapscripts.passwd
+        content: "{{ ldap_admin_password.stdout }}"
         owner: root
         group: root
         mode: '0400'
-        state: file
-      become: true
+      no_log: true
 
     - name: Create LDAP configuration file
       copy:
@@ -580,7 +577,7 @@
     - name: Wait for LDAP to be ready
       ansible.builtin.shell:
         cmd: |
-          echo '{{ ldap_admin_password.stdout }}' | docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn }} -W
+          ldapwhoami -x -H ldap://127.0.0.1:389 -D cn=head-of-ldap,{{ldap_basedn }} -y /etc/ldapscripts/ldapscripts.passwd
       args:
         chdir: "{{ docker_path }}"
       register: ldap_ready
@@ -598,7 +595,7 @@
 
     - name: Check if the openssh-lpk schema is loaded (functional probe)
       ansible.builtin.shell: |
-        echo '{{ ldap_admin_password.stdout }}' | docker compose exec -T openldap ldapsearch -x -H ldap://localhost -D "cn=head-of-ldap,{{ ldap_basedn }}" -W -b "ou=users,{{ ldap_basedn }}" "(objectClass=ldapPublicKey)" dn
+        ldapsearch -x -H ldap://127.0.0.1:389 -D "cn=head-of-ldap,{{ ldap_basedn }}" -y /etc/ldapscripts/ldapscripts.passwd -b "ou=users,{{ ldap_basedn }}" "(objectClass=ldapPublicKey)" dn
       args:
         chdir: "{{ docker_path }}"
       register: lpk_schema_check
@@ -630,7 +627,7 @@
         - name: Wait for LDAP to be ready after the schema import
           ansible.builtin.shell:
             cmd: |
-              echo '{{ ldap_admin_password.stdout }}' | docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn }} -W
+              ldapwhoami -x -H ldap://127.0.0.1:389 -D cn=head-of-ldap,{{ldap_basedn }} -y /etc/ldapscripts/ldapscripts.passwd
           args:
             chdir: "{{ docker_path }}"
           register: ldap_ready_lpk
@@ -651,7 +648,7 @@
     # lookup); if that file is ever lost, delete the LDAP entry too and
     # reapply so both are recreated together.
     - name: Check if the sftp-reader bind account exists
-      ansible.builtin.shell: docker compose exec -T openldap ldapsearch -x -H ldap://localhost -D "cn=head-of-ldap,{{ ldap_basedn }}" -w "{{ ldap_admin_password.stdout }}" -b "cn=sftp-reader,{{ ldap_basedn }}" dn
+      ansible.builtin.shell: ldapsearch -x -H ldap://127.0.0.1:389 -D "cn=head-of-ldap,{{ ldap_basedn }}" -y /etc/ldapscripts/ldapscripts.passwd -b "cn=sftp-reader,{{ ldap_basedn }}" dn
       args:
         chdir: "{{ docker_path }}"
       register: sftp_reader_check
@@ -682,7 +679,7 @@
         - name: Wait for LDAP to be ready after the ACL import
           ansible.builtin.shell:
             cmd: |
-              echo '{{ ldap_admin_password.stdout }}' | docker compose exec -T openldap ldapwhoami -x -H ldap://localhost -D cn=head-of-ldap,{{ldap_basedn }} -W
+              ldapwhoami -x -H ldap://127.0.0.1:389 -D cn=head-of-ldap,{{ldap_basedn }} -y /etc/ldapscripts/ldapscripts.passwd
           args:
             chdir: "{{ docker_path }}"
           register: ldap_ready_acl
@@ -696,8 +693,6 @@
           ansible.builtin.shell: "{{ git_root }}/scripts/symbios-ldap-offline-acl.sh add-reader --basedn {{ ldap_basedn }} --pw-file {{ docker_path }}/sftp-reader.pw"
           args:
             chdir: "{{ docker_path }}"
-          environment:
-            LDAP_ADMIN_PW: "{{ ldap_admin_password.stdout }}"
           register: sftp_reader_add
           changed_when: sftp_reader_add.rc == 0
           failed_when: false
@@ -705,7 +700,7 @@
 
     - name: Ensure admin user password is admin in LDAP
       ansible.builtin.shell: |
-                      echo '{{ ldap_admin_password.stdout }}' | docker compose exec -T openldap ldappasswd -x -H ldap://localhost -D "cn=head-of-ldap,{{ldap_basedn}}" -W -s admin "uid=admin,ou=users,{{ldap_basedn}}"
+                      ldappasswd -x -H ldap://127.0.0.1:389 -D "cn=head-of-ldap,{{ldap_basedn}}" -y /etc/ldapscripts/ldapscripts.passwd -s admin "uid=admin,ou=users,{{ldap_basedn}}"
       args:
         chdir: "{{ docker_path }}"
       no_log: true

@@ -48,14 +48,16 @@ get_admin_token() {
     g_echo_error "Failed to retrieve admin token"
     exit 1
   fi
+  # Keep the short-lived token out of curl's argv (visible in ps).
+  f_bearer_curl_config "$TOKEN" || { g_echo_error "Failed to create curl auth config"; exit 1; }
 }
 
 db_query() {
-  docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -t -A -h localhost --dbname=$POSTGRES_DB --user=$POSTGRES_USER --command="$1" 2>/dev/null | grep -v "^$"
+  docker compose exec -T matrix-db sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -t -A -h localhost --dbname="$1" --user="$2" --command="$3"' sh "$POSTGRES_DB" "$POSTGRES_USER" "$1" 2>/dev/null | grep -v "^$"
 }
 
 db_exec() {
-  docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -h localhost --dbname=$POSTGRES_DB --user=$POSTGRES_USER -c "$1" >/dev/null 2>&1
+  docker compose exec -T matrix-db sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -h localhost --dbname="$1" --user="$2" -c "$3"' sh "$POSTGRES_DB" "$POSTGRES_USER" "$1" >/dev/null 2>&1
 }
 
 purge_empty_rooms() {
@@ -87,7 +89,7 @@ purge_empty_rooms() {
 
     local http_code
     http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 300 \
-      --header "Authorization: Bearer $TOKEN" \
+      --config "${g_curl_cfg_path}" \
       -X DELETE --header 'Content-Type: application/json' \
       --data '{ "purge": true, "force": true }' \
       "${SYNAPSE_URL}/_synapse/admin/v1/rooms/${encoded_room}")
@@ -155,7 +157,7 @@ cleanup_non_whitelisted() {
       encoded_room=$(echo "$ROOM_ID" | sed 's/:/%3A/g')
       local http_code
       http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 300 \
-        --header "Authorization: Bearer $TOKEN" \
+        --config "${g_curl_cfg_path}" \
         -X DELETE --header 'Content-Type: application/json' \
         --data '{ "purge": true, "force": true }' \
         "${SYNAPSE_URL}/_synapse/admin/v1/rooms/${encoded_room}")
@@ -180,7 +182,7 @@ cleanup_non_whitelisted() {
         encoded_user=$(echo "$user_id" | sed 's/:/%3A/g')
         local http_code
         http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 300 \
-          --header "Authorization: Bearer $TOKEN" \
+          --config "${g_curl_cfg_path}" \
           -X POST --header 'Content-Type: application/json' \
           --data "{ \"reason\": \"Non-whitelisted federation server\" }" \
           "${SYNAPSE_URL}/_synapse/admin/v1/rooms/${encoded_room}/kick/${encoded_user}")
@@ -222,7 +224,7 @@ cleanup_orphaned_state() {
   g_echo_note "Cleaning up orphaned state_groups..."
 
   local result
-  result=$(docker compose exec -e PGPASSWORD=${POSTGRES_PASSWORD} matrix-db psql -t -A -h localhost --dbname=$POSTGRES_DB --user=$POSTGRES_USER -c "
+  result=$(docker compose exec -T matrix-db sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -t -A -h localhost --dbname="$1" --user="$2" -c "$3"' sh "$POSTGRES_DB" "$POSTGRES_USER" "
     CREATE TEMPORARY TABLE orphaned_state_groups AS
     SELECT sg.id FROM state_groups sg
     WHERE NOT EXISTS (SELECT 1 FROM event_to_state_groups etsg WHERE etsg.state_group = sg.id);

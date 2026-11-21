@@ -94,7 +94,7 @@
           # Load credentials and generate htpasswd entry for basic auth
           . default-basic-auth-env
           mkdir -p providers
-          htpasswd -nb "$USER" "$PASSWORD" >providers/default-basic-auth.usersfile
+          printf '%s' "$PASSWORD" | htpasswd -in "$USER" >providers/default-basic-auth.usersfile
 
         backup: yes
         validate: /bin/bash -n %s

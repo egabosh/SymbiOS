@@ -17,8 +17,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # List LDAP users and groups as JSON for the WebUI.
-# Runs ldapsearch inside the webui container via docker exec,
-# which has direct network access to the OpenLDAP service.
+# Runs ldapsearch on the host against the LDAP service published on
+# 127.0.0.1:389, using a transient password file so the bind secret stays
+# out of argv.
 #
 # Usage:
 #   symbios-ldap-list.sh --users     # JSON array of users with groups
@@ -80,7 +81,7 @@ f_symbios_ldap_init
 if [[ "${f_action}" == "groups" ]]
 then
   # List all groups as JSON array
-  f_groups="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+  f_groups="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "ou=groups,${f_base_dn}" "(objectClass=posixGroup)" cn 2>/dev/null \
     | grep '^cn:' | awk '{print $2}' || true)"
 
@@ -103,12 +104,12 @@ then
 elif [[ "${f_action}" == "users" ]]
 then
   # Get all groups with their members (for membership lookup)
-  f_groups_raw="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+  f_groups_raw="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "ou=groups,${f_base_dn}" "(objectClass=posixGroup)" cn memberUid 2>/dev/null || true)"
 
   # Get all users with basic attributes (sshPublicKey values are unfolded
   # in the parser below because ldapsearch wraps long lines)
-  f_users_raw="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+  f_users_raw="$(f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "ou=users,${f_base_dn}" "(objectClass=posixAccount)" uid cn mail sshPublicKey 2>/dev/null || true)"
 
   # Parse everything into JSON using Python

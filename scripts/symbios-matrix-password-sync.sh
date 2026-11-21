@@ -68,7 +68,7 @@ function f_matrix_password_sync {
   local f_uid="${2:-}"
   local f_pwfile="${3:-}"
   local f_mx_dir="${g_services_root}/matrix"
-  local f_admin_pw f_ldap_out f_ldap_rc f_members
+  local f_ldap_out f_ldap_rc f_members
   local f_pw f_out f_rc f_domain f_body f_resp f_token
 
   # Only password changes are interesting here
@@ -95,9 +95,9 @@ function f_matrix_password_sync {
     return 0
   fi
 
-  # LDAP admin password is needed for the membership check
-  f_admin_pw=$(cat "${g_config_dir}/.ldap_admin_pw" 2>/dev/null)
-  if [[ -z "${f_admin_pw}" ]]
+  # LDAP admin bind via a transient password file (never in argv).
+  f_symbios_ldap_init
+  if [[ -z "${f_ldap_pw_file}" ]]
   then
     g_echo_error "No LDAP admin password found in ${g_config_dir}/.ldap_admin_pw"
     return 1
@@ -105,8 +105,8 @@ function f_matrix_password_sync {
 
   # Members of matrix-bots. A missing group (rc 32) means nobody is a technical
   # account; an unreachable LDAP is an error - never guess here.
-  f_ldap_out=$(docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-    -D "cn=head-of-ldap,${g_ldap_basedn}" -w "${f_admin_pw}" \
+  f_ldap_out=$(ldapsearch -x -H ldap://127.0.0.1:389 \
+    -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "cn=matrix-bots,ou=groups,${g_ldap_basedn}" memberUid 2>&1)
   f_ldap_rc=$?
   case "${f_ldap_rc}" in
@@ -184,8 +184,10 @@ function f_matrix_password_sync {
   # Drop the verification session again so no device piles up per password change
   f_token="${f_resp#*\"access_token\":\"}"
   f_token="${f_token%%\"*}"
+  # Keep the bearer token out of curl's argv via a transient 0600 config.
+  f_bearer_curl_config "${f_token}" || return 1
   curl -s -o /dev/null --max-time 20 --resolve "${f_domain}:443:127.0.0.1" \
-    -X POST -H "Authorization: Bearer ${f_token}" \
+    -X POST --config "${g_curl_cfg_path}" \
     "https://${f_domain}/_matrix/client/v3/logout"
 
   g_echo_note "Matrix password for '@${f_uid}:${f_domain}' synced from LDAP"

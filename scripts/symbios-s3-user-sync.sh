@@ -59,7 +59,7 @@ function f_s3_user_sync {
   local f_uid="${2:-}"
   local f_pwfile="${3:-}"
   local f_htpasswd="${g_services_root}/s3/data/.htpasswd"
-  local f_pw f_admin_pw f_members
+  local f_pw f_members
 
   if [[ -z "${f_event}" ]] || [[ -z "${f_uid}" ]]
   then
@@ -74,17 +74,17 @@ function f_s3_user_sync {
   fi
   command -v htpasswd >/dev/null 2>&1 || return 0
 
-  # LDAP admin password is needed for the membership check
-  f_admin_pw=$(cat "${g_config_dir}/.ldap_admin_pw" 2>/dev/null)
-  if [[ -z "${f_admin_pw}" ]]
+  # LDAP admin bind via a transient password file (never in argv).
+  f_symbios_ldap_init
+  if [[ -z "${f_ldap_pw_file}" ]]
   then
     g_echo_error "No LDAP admin password found in ${g_config_dir}/.ldap_admin_pw"
     return 1
   fi
 
   # Current members of s3-users (empty when the group does not exist yet)
-  f_members=$(docker exec symbios-base-webui ldapsearch -x -H ldap://symbios-base-ldap \
-    -D "cn=head-of-ldap,${g_ldap_basedn}" -w "${f_admin_pw}" \
+  f_members=$(ldapsearch -x -H ldap://127.0.0.1:389 \
+    -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "cn=s3-users,ou=groups,${g_ldap_basedn}" memberUid 2>/dev/null \
     | sed -n "s/^memberUid: //p" | sort -u)
 
@@ -97,7 +97,7 @@ function f_s3_user_sync {
       fi
       # Random password until the real one arrives via password-set
       f_pw=$(pwgen -s 32 1)
-      htpasswd -B -b "${f_htpasswd}" "${f_uid}" "${f_pw}" 2>/dev/null
+      printf '%s' "${f_pw}" | htpasswd -B -i "${f_htpasswd}" "${f_uid}" 2>/dev/null
       chmod 640 "${f_htpasswd}"
       chown root:docker "${f_htpasswd}"
       f_s3_restart

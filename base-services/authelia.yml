@@ -432,7 +432,9 @@
       ansible.builtin.shell: |
         if ! grep -q '^oidc_client_secret=' "{{ service_path }}/env"
         then
-          f_digest=$(docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --password "$(pwgen -s 32 1)" | awk '{print $NF}')
+          # --random keeps the generated secret inside the CLI; no password
+          # appears in argv. Only the digest line is stored as the client secret.
+          f_digest=$(docker run --rm authelia/authelia:latest authelia crypto hash generate argon2 --random --random.length 32 --no-confirm | awk '/^Digest: / {print $NF}')
           echo "oidc_client_secret=${f_digest}" >> "{{ service_path }}/env"
         fi
       changed_when: false

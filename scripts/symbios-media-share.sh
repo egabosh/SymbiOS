@@ -37,7 +37,7 @@ EOF
 function f_ldap_gid {
   local f_group="$1"
   f_symbios_ldap_init
-  f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+  f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "cn=${f_group},ou=groups,${f_base_dn}" gidNumber 2>/dev/null \
     | sed -n "s/^gidNumber: //p" | head -1
 }
@@ -50,7 +50,7 @@ function f_ldap_group_exists {
 function f_ldap_members {
   local f_group="$1"
   f_symbios_ldap_init
-  f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -w "${f_admin_pw}" \
+  f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
     -b "cn=${f_group},ou=groups,${f_base_dn}" memberUid 2>/dev/null \
     | sed -n "s/^memberUid: //p" | sort -u | tr '\n' ' '
 }
