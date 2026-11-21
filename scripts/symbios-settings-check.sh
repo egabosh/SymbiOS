@@ -12,7 +12,8 @@
 # no direct inventory writes in WebUI views, every settings script sources
 # the shared lib and dispatches get/set/schema/apply, declares
 # f_managed_vars, every managed var has a uses_vars consumer, no secret
-# travels as argv.
+# travels as argv, and every base-service is either in install.sh or marked
+# with an explicit install_mode exception.
 
 function f_usage {
   cat << EOF
@@ -23,7 +24,9 @@ Convention checks for the settings CLI-first architecture.
   --static [ROOT]   Static repo checks (default ROOT: git repo auto-detect).
                     Fails on: direct inventory writes in webui views,
                     settings scripts without the shared lib, missing
-                    get/set/schema dispatch, secrets as CLI flags.
+                    get/set/schema dispatch, secrets as CLI flags, and
+                    base-services missing from install.sh without an
+                    install_mode exception.
   [slug]            Live contract check for one settings script
                     (symbios-settings-<slug>.sh), or all when omitted.
                     Fails on: --help/get non-zero, schema not JSON,
@@ -370,6 +373,40 @@ then
     g_echo "PASS: central secret store contract" 2>/dev/null || echo "PASS: central secret store contract"
   else
     f_failures=$((f_failures + 1))
+  fi
+
+  # 12. Every baseline base-service must be reachable on fresh installs.
+  # Intentional exceptions declare install_mode in their docs header.
+  f_base_missing=()
+  f_base_invalid=()
+  f_install_list="$(grep -oE 'base-services/[a-zA-Z0-9._-]+\.yml' "${f_root}/install.sh" 2>/dev/null | sort -u)"
+  while IFS= read -r f_pb
+  do
+    f_rel="${f_pb#"${f_root}/"}"
+    if grep -qxF "${f_rel}" <<< "${f_install_list}"
+    then
+      continue
+    fi
+    f_mode="$(sed -n 's/^#   install_mode:[[:space:]]*\([^[:space:]]*\).*/\1/p' "${f_pb}" | head -n 1)"
+    case "${f_mode}" in
+      deferred|settings|optional|repair)
+        ;;
+      "")
+        f_base_missing+=("${f_rel}")
+        ;;
+      *)
+        f_base_invalid+=("${f_rel} (${f_mode})")
+        ;;
+    esac
+  done < <(find "${f_root}/base-services" -maxdepth 1 -type f -name '*.yml' | sort)
+  if [[ ${#f_base_missing[@]} -gt 0 || ${#f_base_invalid[@]} -gt 0 ]]
+  then
+    echo "FAIL: base-services install.sh coverage" >&2
+    [[ ${#f_base_missing[@]} -gt 0 ]] && printf '  missing: %s\n' "${f_base_missing[@]}" >&2
+    [[ ${#f_base_invalid[@]} -gt 0 ]] && printf '  invalid install_mode: %s\n' "${f_base_invalid[@]}" >&2
+    f_failures=$((f_failures + 1))
+  else
+    g_echo "PASS: base-services install.sh coverage" 2>/dev/null || echo "PASS: base-services install.sh coverage"
   fi
 
   if [[ "${f_failures}" -gt 0 ]]

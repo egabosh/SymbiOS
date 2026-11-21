@@ -507,7 +507,7 @@ texts opportunistically).
 | `symbios-uninstall.sh` | Uninstall a service (full wipe or program-only, per `# docs:` block) | `<playbook> full\|program` |
 | `symbios-update.sh` | Git pull + run changed installed playbooks and base playbooks newly added to `install.sh` (once) | no args |
 | `symbios-settings-new.sh` | Scaffold a new settings CLI script + registry snippet | `<slug>` |
-| `symbios-settings-check.sh` | Convention checks (static repo greps / live contract) | `[--static [ROOT] \| [slug]]` |
+| `symbios-settings-check.sh` | Convention checks (static repo greps incl. base-service `install.sh` coverage / live contract) | `[--static [ROOT] \| [slug]]` |
 | `symbios-playbooks-for-vars.sh` | Resolve consuming playbooks for inventory keys (reads `uses_vars`, filters by install status, orders base-services then services) | `<VAR ...> \| --all` |
 | `symbios-playbook-refs.py` | Mechanical audit: which inventory keys playbooks actually use (tasks/templates/`when:`) | `[--map]` |
 

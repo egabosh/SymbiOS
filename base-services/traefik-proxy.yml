@@ -30,6 +30,7 @@
 #     versions:
 #     - '13'
 #   category: Reverse proxy
+#   install_mode: settings
 
 ---
 - name: traefik-proxy

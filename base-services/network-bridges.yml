@@ -30,6 +30,7 @@
 #     versions:
 #     - '13'
 #   category: Network
+#   install_mode: settings
 #   service_control:
 #     services: []
 #     logs: []

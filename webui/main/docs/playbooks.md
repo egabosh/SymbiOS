@@ -51,6 +51,7 @@ to know: title, description, available actions, status checks, and log streams.
 - **`access`** - LDAP groups that may use the service: `admin_group`, `user_group` (or a single `user_group`). Use `none:` with an explanatory text when the service manages its own users. The user portal at `portal.<base_domain>` uses these groups to filter tiles; keep them in sync with the playbook's Authelia ACL subjects.
 - **`icon`** - optional Bootstrap icon class (e.g. `bi-cloud`) for the portal tile; defaults to `bi-box-seam`.
 - **`author`, `version`, `license`, `copyright`, `min_ansible_version`, `platforms`, `category`** - informational metadata.
+- **`install_mode`** - base-services only. Required when a base playbook is intentionally **not** listed in `install.sh`. Allowed values: `deferred` (applied later from the WebUI after prerequisites such as `base_domain`), `settings` (installed only when its settings or targets are configured), `optional` (explicit opt-in feature) and `repair` (re-asserts state created by another playbook). `symbios-settings-check.sh --static` fails on any `base-services/*.yml` that is neither in `install.sh` nor marked here.
 - **`service_control.services[]`** - one entry per container:
   - **`name`** - container/service name
   - **`type: docker`** - service type
@@ -118,6 +119,13 @@ to know: title, description, available actions, status checks, and log streams.
   #     - playbook: openwrt_wireguard_tor.yml
   # ```
   Dependencies are never global: the same playbook may be applied on one target and missing on another.
+
+Base-service playbooks that are part of the platform baseline must be added to
+`install.sh` in the right order. `symbios-update.sh` only installs newly added
+base playbooks once when they appear in `install.sh`; a baseline playbook that
+is missing there never reaches existing installations. Intentional exceptions
+must carry `install_mode` in the `# docs:` block so the static check can tell
+them apart from an oversight.
 
 ### 3. The Ansible tasks
 

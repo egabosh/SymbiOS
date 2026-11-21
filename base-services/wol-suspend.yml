@@ -29,6 +29,7 @@
 #     versions:
 #     - '13'
 #   category: Power management
+#   install_mode: settings
 
 ---
 - name: power

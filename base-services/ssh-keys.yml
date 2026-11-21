@@ -29,6 +29,7 @@
 #     versions:
 #     - '13'
 #   category: SSH / Access
+#   install_mode: repair
 #   service_control:
 #     services:
 #     - name: ssh

@@ -154,6 +154,12 @@ then
 fi
 
 f_run_playbook ${g_git_root}/base-services/symbios-ui.yml
+# notify.sh is a gaboshlib/runchecks dependency, so install it before the
+# health daemon starts sending alerts. Delivery targets may stay disabled.
+f_run_playbook ${g_git_root}/base-services/notifications.yml
+# The CIS audit cron feeds the Health page card, so install it before the
+# health daemon picks up its check script.
+f_run_playbook ${g_git_root}/base-services/cis-audit.yml
 f_run_playbook ${g_git_root}/base-services/kvm.yml
 f_run_playbook ${g_git_root}/base-services/runchecks.yml
 f_run_playbook ${g_git_root}/base-services/backup.yml

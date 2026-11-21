@@ -40,6 +40,7 @@
 #     versions:
 #     - '13'
 #   category: Authentication
+#   install_mode: deferred
 #   service_control:
 #     services:
 #     - name: authelia

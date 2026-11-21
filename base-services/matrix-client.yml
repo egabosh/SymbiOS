@@ -35,6 +35,7 @@
 #     versions:
 #     - '13'
 #   category: Notifications
+#   install_mode: settings
 #   service_control:
 #     services:
 #     - name: matrix-notify
