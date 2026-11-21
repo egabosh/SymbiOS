@@ -247,10 +247,27 @@ then
   fi
 fi
 
-# A path can arrive twice (changed and newly added, or via the webui trigger).
+# Sort playbooks into the canonical run order: base-services as listed in
+# install.sh, then the rest alphabetically. State-file order is install time,
+# not dependency order - basics.yml seeds the secret store and must run before
+# its consumers (nextcloud, ldap, ...) on hosts where it was installed late.
+# This mirrors symbios-playbooks-for-vars.sh. Also drops duplicate paths that
+# can arrive twice (changed and newly added, or via the webui trigger).
+function f_order_playbooks {
+  local f_wanted f_pb
+  f_wanted="$(printf '%s\n' "$@" | awk '!seen[$0]++')"
+  {
+    grep -oE 'base-services/[a-zA-Z0-9._-]+\.yml' install.sh 2>/dev/null | awk '!seen[$0]++'
+    printf '%s\n' "${f_wanted}" | sort
+  } | awk '!seen[$0]++' | while read -r f_pb
+  do
+    printf '%s\n' "${f_wanted}" | grep -Fxq "${f_pb}" && printf '%s\n' "${f_pb}"
+  done
+}
+
 if [[ ${#g_updated_playbooks[@]} -gt 0 ]]
 then
-  mapfile -t g_updated_playbooks < <(printf '%s\n' "${g_updated_playbooks[@]}" | awk '!seen[$0]++')
+  mapfile -t g_updated_playbooks < <(f_order_playbooks "${g_updated_playbooks[@]}")
 fi
 
 # Run changed playbooks

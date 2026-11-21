@@ -82,7 +82,13 @@ g_clients_file="${g_sftp_config}/backup-clients.yml"
 g_password_dir="${g_sftp_config}/backup-passwords"
 g_registry="${g_config_dir}/external-systems.yml"
 
-[[ -r "${g_registry}" ]] || f_fail "Registry not readable: ${g_registry}"
+# Hosts without registered external systems have no registry file yet. That
+# is the same as an empty list, not a failed playbook.
+if [[ ! -r "${g_registry}" ]]
+then
+  g_echo_note "No external systems registry at ${g_registry} - nothing to do"
+  exit 0
+fi
 command -v yq > /dev/null || f_fail "yq is required to read ${g_registry}"
 
 g_ids="$(yq -r '.external_systems[] | select(.type == "linux-mint") | .id' \
