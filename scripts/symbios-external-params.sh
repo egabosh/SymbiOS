@@ -204,6 +204,16 @@ then
   f_fail "Invalid JSON on stdin (expected an object)" 2
 fi
 
+# Reject shell-unsafe values before persisting them. The remote runner checks
+# again, but failing early gives a clearer error and keeps bad values out of
+# the saved host_vars/playbook_vars in the first place.
+if ! g_unsafe_keys=$("${g_script_dir}/symbios-external-params-validate.sh" --json-stdin < "${g_work_file}")
+then
+  g_echo_error "Refusing to save: parameter(s) contain shell-unsafe characters:"
+  printf '  %s\n' "${g_unsafe_keys}" >&2
+  exit 2
+fi
+
 if [[ -n "${g_playbook}" ]]
 then
   symbios-config.py --file "${g_rel_pb}" merge < "${g_work_file}" || f_fail "Cannot save playbook vars"

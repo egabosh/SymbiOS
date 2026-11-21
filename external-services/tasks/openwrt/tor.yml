@@ -363,19 +363,23 @@
       changed_when: false
 
 
+    - name: Validate UCI keys and values
+      ansible.builtin.include_tasks: uci-validate.yml
+
     - name: set uci values if needed
       raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired="{{ item.value }}"
+        k={{ item.key | quote }}
+        current=$(uci get "$k" 2>/dev/null || echo "NOT_SET")
+        desired={{ item.value | quote }}
 
         #if [ "$current" != "$desired" ]
-        if ! echo "$current" | grep "$desired"
+        if ! echo "$current" | grep -qF -- "$desired"
         then
-          if echo "{{ item.key }}" | egrep -q "dhcp\...._dnsmasq.listen_address|dhcp\...._dnsmasq.server|dhcp\....\.dhcp_option|dhcp\....\.ra_flags"
+          if echo "$k" | egrep -q "dhcp\...._dnsmasq.listen_address|dhcp\...._dnsmasq.server|dhcp\....\.dhcp_option|dhcp\....\.ra_flags"
           then
-            uci add_list {{ item.key }}="{{ item.value }}"
+            uci add_list "$k=$desired"
           else
-            uci set {{ item.key }}="{{ item.value }}"
+            uci set "$k=$desired"
           fi
           echo "changed"
         else

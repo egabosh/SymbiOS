@@ -47,21 +47,8 @@
         quiet: true
 
   tasks:
-    - name: set uci values if needed
-      raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired="{{ item.value }}"
-        if [ "$current" != "$desired" ]
-        then
-          uci set {{ item.key }}="{{ item.value }}"
-          echo "changed"
-        else
-          echo "unchanged"
-        fi
-      loop: "{{ uci_vars }}"
-      register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
-
+    - name: Set UCI values (shell-safe)
+      ansible.builtin.include_tasks: uci-set.yml
     - name: commit enable and restart
       raw: "{{ item }}"
       loop:
@@ -70,7 +57,7 @@
         # only takes effect after a cron restart
         - "/etc/init.d/cron restart"
         - "/etc/init.d/log restart"
-      when: uci_set_result.changed
+      when: uci_changed
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state

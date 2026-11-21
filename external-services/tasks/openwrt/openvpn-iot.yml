@@ -371,21 +371,8 @@
 
 
 
-    - name: set uci values if needed
-      raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired="{{ item.value }}"
-        if [ "$current" != "$desired" ]
-        then
-          uci set {{ item.key }}="{{ item.value }}"
-          echo "changed"
-        else
-          echo "unchanged"
-        fi
-      loop: "{{ uci_vars }}"
-      register: uci_set_result
-      changed_when: "not 'unchanged' in uci_set_result.stdout"
-
+    - name: Set UCI values (shell-safe)
+      ansible.builtin.include_tasks: uci-set.yml
     - name: apply changes
       block:
         - name: commit enable and restart
@@ -395,7 +382,7 @@
             # restart only the managed instance, a full restart drops the
             # other VPN tunnels on this host as well
             - "/etc/init.d/openvpn restart iotvpn"
-          when: uci_set_result.changed
+          when: uci_changed
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state

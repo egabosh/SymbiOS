@@ -67,25 +67,8 @@
     - name: install wireless packages
       ansible.builtin.include_tasks: packages.yml
 
-    - name: set uci values if needed
-      raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired="{{ item.value }}"
-        if [ "$current" != "$desired" ]
-        then
-          uci set {{ item.key }}="{{ item.value }}"
-          echo "changed"
-        else
-          echo "unchanged"
-        fi
-      loop: "{{ uci_vars }}"
-      register: uci_set_result
-      changed_when: false
-
-    - name: Remember whether any uci value changed
-      ansible.builtin.set_fact:
-        uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
-
+    - name: Set UCI values (shell-safe)
+      ansible.builtin.include_tasks: uci-set.yml
     - name: apply changes
       block:
         - name: commit enable and restart

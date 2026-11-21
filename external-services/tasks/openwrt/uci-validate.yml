@@ -1,0 +1,20 @@
+---
+# Reject UCI input that could break out of a shell word or inject extra lines.
+# Included by uci-set.yml and by task files that keep a custom setter because
+# they need list handling or key/value transforms. Expects `uci_vars` (list of
+# {key, value}) and optional `uci_secret` from the caller. No Python needed.
+
+- name: Validate UCI keys and values
+  ansible.builtin.assert:
+    that:
+      - item.key is match('^[A-Za-z0-9_.@-]+$')
+      - item.value is string
+      - item.value is not search('[\r\n\x00]')
+    fail_msg: >-
+      Unsafe UCI input: a key may only contain letters, digits, '.', '_', '@'
+      and '-'; a value must be a single-line string without control characters.
+    quiet: true
+  loop: "{{ uci_vars }}"
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: "{{ uci_secret | default(false) | bool }}"

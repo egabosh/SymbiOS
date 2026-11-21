@@ -212,23 +212,33 @@ historical data; it is no longer written.
 
 ### M19: WebUI parameters in OpenWrt `raw` tasks
 
-**Status**: Known risk - scheduled for a separate refactor
+**Status**: Mitigated - central validation on save and run (2026-11-20)
 
 The playbooks under `external-services/tasks/openwrt/` configure routers mostly
-with Ansible's `raw` module. WebUI-supplied values (SSID, WPA key, SIP accounts,
-hostnames, firewall comments) reach the playbook as JSON on stdin and are
-interpolated into shell strings executed as root on the target. A value with
-shell metacharacters can therefore execute commands on that router; quotes in
-otherwise legitimate values can corrupt UCI configuration.
+with Ansible's `raw` module (the targets are Python-less OpenWrt images). All
+parameter values reach the router as shell text, so a value containing
+`$(...)`, backticks or shell operators could execute commands as root on that
+router; quotes could corrupt UCI configuration.
 
-The safe fix is to convert the affected tasks to `ansible.builtin.command` with
-an argv list and to validate parameters per documented type. That touches
-204 tasks in 34 files and needs its own test cycle on the routers, so it is
-deliberately not bundled with this hardening pass.
+Mitigations now in place:
 
-Mitigations for now: WebUI access is admin-only, the exec audit log records
-target and playbook name, and stored parameters can only be changed through
-the WebUI.
+- `symbios-external-params-validate.sh` checks every string value at both
+  entry points: when `symbios-external-params.sh set` persists values and again
+  when `symbios-run-remote-playbook.sh` runs a playbook. Values containing
+  CR/LF/NUL, backticks, `;`, `|`, `&`, `\`, `$(` or `${` are rejected with
+  exit code 2. This also covers values loaded from saved host/playbook vars.
+- The shared setter `external-services/tasks/openwrt/uci-set.yml` quotes every
+  value with `| quote` and includes the reusable validation task
+  `uci-validate.yml`; 15 simple setter files now use it.
+- Quotes, spaces and non-ASCII text remain allowed because the UCI setters
+  quote them. WebUI access is admin-only and the exec audit log records the
+  target and playbook name.
+
+Residual risk: the remaining `raw:` tasks outside the shared setter still
+interpolate values directly; an allowed value with spaces or quotes can
+corrupt a configuration line there (integrity, not command execution). A full
+conversion to `ansible.builtin.command` argv lists is still pending and needs
+router-side testing.
 
 ### M20: Passwords in client argv
 

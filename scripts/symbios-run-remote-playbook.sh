@@ -142,6 +142,17 @@ then
   mv "${g_vars_file}.merged" "${g_vars_file}"
 fi
 
+# --- validate external parameters (shell-injection guard) --------------------
+# All values reach Python-less routers as shell text in `raw` tasks, including
+# values loaded from saved host_vars/playbook_vars and from CLI calls. Refuse
+# anything that could start a command substitution or inject extra config lines.
+if ! g_unsafe_keys=$("${g_script_dir}/symbios-external-params-validate.sh" --json-stdin < "${g_vars_file}")
+then
+  g_echo_error "Refusing to run ${g_playbook}: parameter(s) contain shell-unsafe characters:"
+  printf '  %s\n' "${g_unsafe_keys}" >&2
+  exit 2
+fi
+
 # --- run --------------------------------------------------------------------
 g_echo_note "Running ${g_playbook} on ${g_target} (${g_ext_user}@${g_ext_host}:${g_ext_port})"
 cd "${g_git_root}" || f_fail "Cannot change to ${g_git_root}"

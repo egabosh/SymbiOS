@@ -382,9 +382,13 @@ echo '{"feat": {"enabled": true}}' | symbios-config.py --file services/openwrt-v
 external-system playbook runs. Values go to `external-systems/host_vars/<target>.yml`
 or `external-systems/playbook_vars/<target>/<playbook>.yml` and are merged by
 `symbios-run-remote-playbook.sh` before runtime stdin values. The CLI accepts
-JSON on stdin only, so secrets never appear in argv or audit logs. For a generic
-bundle/profile playbook it also reads the legacy playbook names declared in
-`external-services/_playbook-compat.json`:
+JSON on stdin only, so secrets never appear in argv or audit logs. Both the
+save path and `symbios-run-remote-playbook.sh` pipe the values through
+`symbios-external-params-validate.sh --json-stdin` before using them: it rejects
+shell metacharacters (`$(`, `${`, backticks, `;`, `|`, `&`, `\`, CR/LF/NUL) that
+would otherwise be dangerous in the `raw` shell tasks on Python-less routers.
+For a generic bundle/profile playbook it also reads the legacy playbook names
+declared in `external-services/_playbook-compat.json`:
 
 ```bash
 symbios-external-params.sh get openwrt-vm openwrt_master.yml
@@ -465,6 +469,7 @@ texts opportunistically).
 |--------|---------|-------|
 | `symbios-exec.sh` | SSH exec gateway: audit-logs and runs WebUI host commands | `<command>` |
 | `symbios-run-playbook.sh` | Run one Ansible playbook (local connection, host inventory) | `<playbook_path>` |
+| `symbios-external-params-validate.sh` | Reject shell-unsafe parameter values (JSON on stdin) before saving or running external playbooks | `--json-stdin` |
 | `symbios-reapply.sh` | Re-run installed playbooks in background (from state file) | `[--only [--force] <playbook> ...]` |
 | `symbios-run-detached.sh` | Detached host jobs pollable by the WebUI | `start\|poll\|... <job-id> <command>` |
 | `symbios-state.sh` | `installed-playbooks.yml` state file manager | `set\|unset\|list\|is-installed <path>` |

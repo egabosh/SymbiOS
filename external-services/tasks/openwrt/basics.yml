@@ -796,20 +796,24 @@
       # the substring "changed" and would always test true otherwise
       changed_when: "ula_cleanup_result.stdout | trim == 'changed'"
 
+    - name: Validate UCI keys and values
+      ansible.builtin.include_tasks: uci-validate.yml
+
     - name: set uci values if needed
       raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired="{{ item.value }}"
+        k={{ item.key | quote }}
+        current=$(uci get "$k" 2>/dev/null || echo "NOT_SET")
+        desired={{ item.value | quote }}
 
         # List-valued UCI options (zone networks, dnsmasq listen_address /
         # dhcp_option) must be appended, not overwritten.
         if ! echo "$current" | grep -qF -- "$desired"
         then
-          if echo "{{ item.key }}" | egrep -q "firewall\..+\.network|dhcp\.[a-z0-9_]+_dnsmasq\.(listen_address|server)|dhcp\.[a-z0-9_]+\.dhcp_option|dhcp\.[a-z0-9_]+\.ra_flags"
+          if echo "$k" | egrep -q "firewall\..+\.network|dhcp\.[a-z0-9_]+_dnsmasq\.(listen_address|server)|dhcp\.[a-z0-9_]+\.dhcp_option|dhcp\.[a-z0-9_]+\.ra_flags"
           then
-            uci add_list {{ item.key }}="{{ item.value }}"
+            uci add_list "$k=$desired"
           else
-            uci set {{ item.key }}="{{ item.value }}"
+            uci set "$k=$desired"
           fi
           echo "changed"
         else

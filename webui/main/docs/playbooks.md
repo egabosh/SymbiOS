@@ -212,6 +212,7 @@ over SSH from the WebUI.
 | Inventory | Built on the fly from `config/external-systems.yml` (`host`, `port`, `user`) |
 | Facts | `gather_facts: no`; most targets are minimal images without Python |
 | Saved vars | `scripts/symbios-external-params.sh`, merged by the runner as host_vars, then playbook_vars, then runtime stdin |
+| Value validation | `scripts/symbios-external-params-validate.sh --json-stdin` runs on save and on every remote run; shell metacharacters are rejected |
 
 Standalone compatibility is mandatory: a playbook must keep working when run
 directly with `ansible-playbook -i <inventory> <playbook>.yml`, without the
@@ -267,6 +268,13 @@ playbook. `symbios-run-remote-playbook.sh` merges them in that order; values
 submitted on stdin with `--vars-stdin` override both. Secrets must stay on
 stdin - the save CLI reads JSON from stdin and no value ever appears in argv or
 in the exec audit log.
+
+Before saving or running, both CLIs pipe the merged values through
+`symbios-external-params-validate.sh`. It rejects values containing command
+substitutions, backticks, shell operators or control characters, because the
+target playbooks use `raw` shell tasks (no Python on the routers). New shared
+setters should use `external-services/tasks/openwrt/uci-set.yml`, which quotes
+values with `| quote` and includes the reusable validation task.
 
 When standalone playbooks were folded into a bundle or a profile playbook,
 `external-services/_playbook-compat.json` lists the old playbook names. The

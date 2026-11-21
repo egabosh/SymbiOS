@@ -225,13 +225,17 @@
       register: access_rules_result
       changed_when: "access_rules_result.stdout | trim == 'changed'"
 
+    - name: Validate UCI keys and values
+      ansible.builtin.include_tasks: uci-validate.yml
+
     - name: set uci values if needed
       raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired="{{ item.value }}"
+        k={{ item.key | quote }}
+        current=$(uci get "$k" 2>/dev/null || echo "NOT_SET")
+        desired={{ item.value | quote }}
 
         # gen server keypair if not exist
-        if [[ {{ item.key }} = network.wg_lan.proto ]]
+        if [[ "$k" = network.wg_lan.proto ]]
         then
           if ! uci get network.wg_lan.private_key
           then
@@ -242,13 +246,13 @@
           fi
         fi
 
-        if ! echo "$current" | grep "$desired"
+        if ! echo "$current" | grep -qF -- "$desired"
         then
-          if echo "{{ item.key }}" | egrep -q "listen_address|\.addresses|\.allowed_ips|firewall\..+\.network"
+          if echo "$k" | egrep -q "listen_address|\.addresses|\.allowed_ips|firewall\..+\.network"
           then
-            uci add_list {{ item.key }}="{{ item.value }}"
+            uci add_list "$k=$desired"
           else
-            uci set {{ item.key }}="{{ item.value }}"
+            uci set "$k=$desired"
           fi
           echo "changed"
         else

@@ -69,42 +69,10 @@
     - name: install ddns packages
       ansible.builtin.include_tasks: packages.yml
 
-    - name: delete config defaults
-      ansible.builtin.raw: |
-        while uci show | grep -q "^{{ item }}="
-        do
-          echo "changed"
-          uci delete {{ item }}[0]
-          uci delete {{ item }}
-        done
-      loop: "{{ uci_delete_vars }}"
-      register: uci_delete_result
-      changed_when: "uci_delete_result.stdout | trim == 'changed'"
-
-    - name: set uci values if needed
-      ansible.builtin.raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired='{{ item.value | replace("'", "'\\''") }}'
-        if [ "$current" != "$desired" ]
-        then
-          uci set {{ item.key }}='{{ item.value | replace("'", "'\\''") }}'
-          echo "changed"
-        else
-          echo "unchanged"
-        fi
-      loop: "{{ uci_vars }}"
-      loop_control:
-        label: "{{ item.key }}"
-      register: uci_set_result
-      # A changed_when sees no register of its own loop, so the loop is
-      # neutral and the aggregate decides whether a restart is needed.
-      changed_when: false
-      no_log: true
-
-    - name: Remember whether any uci value changed
-      ansible.builtin.set_fact:
-        uci_changed: "{{ (uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0) or (uci_delete_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0) }}"
-
+    - name: Set UCI values (shell-safe)
+      ansible.builtin.include_tasks: uci-set.yml
+      vars:
+        uci_secret: true
     - name: apply changes
       block:
         - name: commit enable and restart

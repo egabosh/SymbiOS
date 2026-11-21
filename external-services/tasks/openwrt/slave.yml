@@ -63,35 +63,8 @@
 
   tasks:
 
-    - name: delete config defaults
-      raw: |
-        # detele default config indices
-        while uci show | grep -q "^{{ item }}="
-        do
-          echo "changed"
-          uci delete {{ item }}[0]
-          uci delete {{ item }}
-        done
-      loop: "{{ uci_delete_vars }}"
-      register: uci_delete_result
-      changed_when: "uci_delete_result.stdout | trim == 'changed'"
-
-
-    - name: set uci values if needed
-      raw: |
-        current=$(uci get {{ item.key }} 2>/dev/null || echo "NOT_SET")
-        desired="{{ item.value }}"
-        if [ "$current" != "$desired" ]
-        then
-          uci set {{ item.key }}="{{ item.value }}"
-          echo "changed"
-        else
-          echo "unchanged"
-        fi
-      loop: "{{ uci_vars }}"
-      register: uci_set_result
-      changed_when: "uci_set_result.stdout | trim == 'changed'"
-
+    - name: Set UCI values (shell-safe)
+      ansible.builtin.include_tasks: uci-set.yml
     - name: apply changes
       block:
         - name: commit and reload network
@@ -99,7 +72,7 @@
           loop:
             - "uci commit"
             - "/etc/init.d/network reload"
-          when: uci_set_result.changed or uci_delete_result.changed
+          when: uci_changed or uci_delete_result.changed
 
         # A slave access point runs no DHCP/RA server at all; run on every
         # pass so the state is guaranteed even if something started the

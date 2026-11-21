@@ -1,0 +1,76 @@
+---
+# Generic, shell-safe UCI setter for Python-less OpenWrt targets.
+#
+# Included by the OpenWrt task files with a path relative to the including
+# file, for example `ansible.builtin.include_tasks: uci-set.yml`.
+#
+# Expected variables from the caller:
+#   uci_vars        list of {key, value} mappings to set (required)
+#   uci_delete_vars list of option names to delete before setting (optional)
+#   uci_secret      bool: mask task output with no_log (optional, default false)
+#
+# After the include the following are available in the parent play:
+#   uci_set_result    registered result of the set loop
+#   uci_delete_result registered result of the delete loop (when used)
+#   uci_changed       bool: true when at least one value changed
+#
+# Why raw + `| quote` instead of `command` argv: the routers run minimal
+# images without Python, so command/shell/lineinfile cannot execute there.
+# Quoting every value at the shell token position and rejecting control
+# characters is the Python-less equivalent of passing argv elements.
+# `| quote` uses POSIX single-quote escaping, so $(), backticks, ;, quotes and
+# spaces all become ordinary characters of one shell word.
+
+# Reject anything that could break out of a shell word or inject extra UCI
+# lines before any shell command runs (single source of truth in the validator).
+- name: Validate UCI keys and values
+  ansible.builtin.include_tasks: uci-validate.yml
+
+# Remove stale options (e.g. old ddns section names) before setting new ones.
+- name: Delete stale UCI options if needed
+  ansible.builtin.raw: |
+    k={{ item | quote }}
+    while uci show | grep -qF -- "$k="
+    do
+      echo "changed"
+      uci delete "$k"[0]
+      uci delete "$k"
+    done
+  loop: "{{ uci_delete_vars | default([]) }}"
+  register: uci_delete_result
+  changed_when: "uci_delete_result.stdout | trim == 'changed'"
+  when: uci_delete_vars is defined and (uci_delete_vars | length) > 0
+  no_log: "{{ uci_secret | default(false) | bool }}"
+
+# Set each option, comparing first so the play stays idempotent. The value is
+# assigned to a shell variable with `| quote`, then passed to `uci set` as a
+# single "$k=$v" argument, so no part of it is ever re-parsed by the shell.
+- name: Set UCI values if needed
+  ansible.builtin.raw: |
+    k={{ item.key | quote }}
+    v={{ item.value | quote }}
+    current=$(uci get "$k" 2>/dev/null || echo "NOT_SET")
+    if [ "$current" != "$v" ]
+    then
+      uci set "$k=$v"
+      echo "changed"
+    else
+      echo "unchanged"
+    fi
+  loop: "{{ uci_vars }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: uci_set_result
+  changed_when: false
+  no_log: "{{ uci_secret | default(false) | bool }}"
+
+# The set loop is neutral (changed_when: false); aggregate its stdout here so
+# callers can trigger commits/reloads with a single boolean.
+- name: Remember whether any UCI value changed
+  ansible.builtin.set_fact:
+    uci_changed: >-
+      {{ (uci_set_result.results | map(attribute='stdout') | map('trim')
+          | select('equalto', 'changed') | list | length > 0)
+         or ((uci_delete_result.results | default([]) | map(attribute='stdout')
+              | map('trim') | select('equalto', 'changed') | list | length > 0)
+             if uci_delete_result is defined else false) }}
