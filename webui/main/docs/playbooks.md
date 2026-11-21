@@ -768,6 +768,16 @@ Some checks belong to the platform instead of a service and live directly in
 the Git tree (`scripts/runchecks.d/`), so they are active on every host
 without a playbook:
 
+- `eeprom-update.check` - reports a Raspberry Pi bootloader EEPROM update that
+  upstream considers necessary. It calls `rpi-eeprom-update` without `-a`
+  (read-only) **once per day** and caches the status in
+  `/run/symbios-eeprom-status.json`, so the read-only call is cheap; every
+  runchecks cycle re-evaluates the cache so a warning stays visible. It warns
+  only when `CURRENT` is older than `LATEST` **and** below
+  `BOOTLOADER_AUTO_UPDATE_MIN_VERSION`, the threshold up to which the
+  distribution installs automatically. Newer releases that upstream does not
+  consider necessary stay unreported. Installation remains a manual decision.
+  The check stays quiet on non-Pi hosts and without the `rpi-eeprom` package.
 - `symbios-healthcheck-network-watchdog.check` - the uplink watchdog. It
   probes the default gateway and, when the uplink is stuck (RX still works,
   but the TX path is dead - the `NETDEV WATCHDOG: transmit queue 0 timed

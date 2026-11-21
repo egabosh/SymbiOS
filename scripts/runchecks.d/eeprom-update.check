@@ -1,0 +1,51 @@
+CHECK_CATEGORY="system"
+CHECK_TITLE="Bootloader EEPROM Update (RPi)"
+CHECK_DESC="Reports a Raspberry Pi bootloader EEPROM update upstream considers necessary."
+CHECK_DETAIL="Only runs on Raspberry Pi: /proc/device-tree/model must report a Raspberry Pi and rpi-eeprom-update must be installed.|Calls rpi-eeprom-update once a day and caches the status in /run/symbios-eeprom-status.json.|Every runchecks cycle re-evaluates the cached status, so a warning stays visible instead of vanishing after five minutes.|Reports only when CURRENT is older than LATEST and below BOOTLOADER_AUTO_UPDATE_MIN_VERSION, the threshold up to which upstream installs automatically.|Stays quiet for updates upstream does not consider necessary.|Only reports: installation stays a manual decision (rpi-eeprom-update -a)."
+
+# rpi-eeprom ships with Raspberry Pi OS only. Stay quiet on other platforms
+# and when the package is absent, just like measuretemp.check does.
+if [[ -r /proc/device-tree/model ]] && command -v rpi-eeprom-update >/dev/null 2>&1
+then
+  g_eeprom_model="$(tr -d '\000' < /proc/device-tree/model 2>/dev/null)"
+  if [[ "${g_eeprom_model,,}" == *"raspberry pi"* ]]
+  then
+    g_eeprom_cache="/run/symbios-eeprom-status.json"
+    g_eeprom_stamp="/run/symbios-eeprom-status.day"
+    g_eeprom_today="$(date +%F)"
+
+    # Refresh the tool output once per day. runchecks re-evaluates the cached
+    # status every cycle; skipping the check entirely would clear the warning
+    # again after five minutes.
+    if [[ "$(cat "${g_eeprom_stamp}" 2>/dev/null)" != "${g_eeprom_today}" ]]
+    then
+      g_eeprom_status="$(mktemp)"
+      # -j/-m writes a status file. Exit 1 means "update available", which is
+      # exactly the case to inspect, so the return code is deliberately ignored.
+      rpi-eeprom-update -j -m "${g_eeprom_status}" >/dev/null 2>&1 || true
+      if jq -e . "${g_eeprom_status}" >/dev/null 2>&1
+      then
+        install -m 0644 "${g_eeprom_status}" "${g_eeprom_cache}"
+        printf '%s\n' "${g_eeprom_today}" > "${g_eeprom_stamp}"
+      fi
+      rm -f "${g_eeprom_status}"
+    fi
+
+    if [[ -r "${g_eeprom_cache}" ]] && jq -e . "${g_eeprom_cache}" >/dev/null 2>&1
+    then
+      g_eeprom_current="$(jq -r '.BOOTLOADER_CURRENT // 0' "${g_eeprom_cache}")"
+      g_eeprom_latest="$(jq -r '.BOOTLOADER_LATEST // 0' "${g_eeprom_cache}")"
+      g_eeprom_min="$(jq -r '.BOOTLOADER_AUTO_UPDATE_MIN_VERSION // 0' "${g_eeprom_cache}")"
+
+      if [[ "${g_eeprom_current}" =~ ^[0-9]+$ && "${g_eeprom_latest}" =~ ^[0-9]+$ && "${g_eeprom_min}" =~ ^[0-9]+$ ]]
+      then
+        if [[ "${g_eeprom_latest}" -gt "${g_eeprom_current}" && "${g_eeprom_current}" -lt "${g_eeprom_min}" ]]
+        then
+          g_eeprom_current_date="$(date -u -d "@${g_eeprom_current}" +%Y-%m-%d 2>/dev/null)"
+          g_eeprom_latest_date="$(date -u -d "@${g_eeprom_latest}" +%Y-%m-%d 2>/dev/null)"
+          g_echo_warn "Bootloader EEPROM update needed: current ${g_eeprom_current_date} (${g_eeprom_current}), latest ${g_eeprom_latest_date} (${g_eeprom_latest}), upstream minimum ${g_eeprom_min}. The distro would install this at boot; manual install: 'rpi-eeprom-update -a'."
+        fi
+      fi
+    fi
+  fi
+fi
