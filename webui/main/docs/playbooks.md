@@ -276,6 +276,12 @@ target playbooks use `raw` shell tasks (no Python on the routers). New shared
 setters should use `external-services/tasks/openwrt/uci-set.yml`, which quotes
 values with `| quote` and includes the reusable validation task.
 
+Host-side credentials for external systems can be kept in the central store
+(`symbios-secret.sh`); use `f_secret_get_to_file <name>` from `symbios-lib.sh`
+to pass them to clients without argv or stdout exposure. Saved remote-run
+parameters themselves stay in `external-systems/` (see `SECURITY.md` for the
+store's threat model and residual risks).
+
 When standalone playbooks were folded into a bundle or a profile playbook,
 `external-services/_playbook-compat.json` lists the old playbook names. The
 params CLI also reads those saved `playbook_vars` entries, so an existing target

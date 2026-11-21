@@ -185,6 +185,21 @@
       vars:
         service_name: nextcloud
 
+    # The generated env files stay plaintext (Compose env_file: requires it),
+    # but the central store becomes their source of truth: first run imports
+    # the generated values, later runs regenerate from the store.
+    - name: Bind generated env files to the secret store
+      ansible.builtin.include_tasks: ../shared-tasks/secret-env.yml
+      vars:
+        secret_env_notify: ['Restart nextcloud']
+        secret_env_files:
+          - path: /symbios/services/nextcloud/env
+            prefix: nextcloud/env
+          - path: /symbios/services/nextcloud/env.db
+            prefix: nextcloud/env.db
+          - path: /symbios/services/nextcloud/env.phpmyadmin
+            prefix: nextcloud/env.phpmyadmin
+
     - name: /symbios/services/nextcloud/fulldockerfile.sh (Download full Dockerfile)
       blockinfile:
         path: /symbios/services/nextcloud/fulldockerfile.sh

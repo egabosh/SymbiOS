@@ -80,6 +80,13 @@
     paperless_consume_path: "{{ media_inbox | default('/symbios/media/inbox') }}/paperless"
     # UIDs paperless writes with (must match USERMAP_UID below).
     paperless_uid: 998
+    secret_vars:
+      - ai_apikey
+
+  pre_tasks:
+    - name: Resolve secrets from the central store
+      ansible.builtin.include_tasks: ../shared-tasks/secret-resolve.yml
+
   tasks:
 
     - name: Create /symbios/services/paperless dir

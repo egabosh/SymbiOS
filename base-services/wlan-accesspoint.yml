@@ -60,6 +60,13 @@
     # an Ansible template recursion loop.
     ap_conf_dir: "{{ base_services_root }}/wlan-accesspoint"
     ap_conf_file: "{{ ap_conf_dir }}/hostapd.conf"
+    secret_vars:
+      - ap_passphrase
+
+  pre_tasks:
+    - name: Resolve secrets from the central store
+      ansible.builtin.include_tasks: ../shared-tasks/secret-resolve.yml
+
   tasks:
     - name: Install hostapd and iw
       ansible.builtin.apt:

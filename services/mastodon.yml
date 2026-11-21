@@ -113,6 +113,13 @@
     mastodon_smtp_from: "{{ smtp_from | default('') }}"
     mastodon_smtp_tls: "{{ smtp_tls | default('') }}"
     mastodon_smtp_login: "{{ (smtp_from | default('')) if (smtp_user | default('') == '%EMAILADDRESS%') else (smtp_user | default('')) }}"
+    secret_vars:
+      - smtp_password
+
+  pre_tasks:
+    - name: Resolve secrets from the central store
+      ansible.builtin.include_tasks: ../shared-tasks/secret-resolve.yml
+
   tasks:
 
     # Load the instance list from the WebUI-managed config file. When the file

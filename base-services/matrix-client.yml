@@ -53,6 +53,13 @@
     matrix_client_fifo: /usr/local/share/matrix-room-notify.fifo
     matrix_client_device: "symbios-notify-{{ inventory_hostname | regex_replace('[^A-Za-z0-9._=-]', '-') }}"
     matrix_client_image: matrixcommander/matrix-commander:7.5
+    secret_vars:
+      - matrix_password
+      - matrix_token
+
+  pre_tasks:
+    - name: Resolve secrets from the central store
+      ansible.builtin.include_tasks: ../shared-tasks/secret-resolve.yml
 
   tasks:
     - name: Resolve matrix client state

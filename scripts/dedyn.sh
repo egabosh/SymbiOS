@@ -18,9 +18,10 @@ function f_usage {
   cat << EOF
 Usage: $(basename "$0")
 
-SymbiOS deSEC DynDNS updater. Reads ddns_apikey, ddns_host and ddns_ipv6
-from inventory.yml, ensures the domain exists on desec.io and updates the
-DNS record(s) to the current public IPv4 (and IPv6 if enabled) address.
+SymbiOS deSEC DynDNS updater. Reads the API token from the central secret
+store and ddns_host/ddns_ipv6 from inventory.yml, ensures the domain exists on
+desec.io and updates the DNS record(s) to the current public IPv4 (and IPv6
+if enabled) address.
 Runs from cron; no arguments. Logs to <log>/dedyn.log.
 
 Options:
@@ -45,9 +46,21 @@ g_lockfile
 g_dedyn_log="${g_log_dir}/dedyn.log"
 exec > >(tee -a "$g_dedyn_log") 2>&1
 
-# deDyn/deSEC-Settings - read from the central inventory.yml (via
-# symbios-lib.sh) so the API key is only stored under /symbios (LUKS).
-dedynpw="$(f_symbios_var ddns_apikey '')"
+# deDyn/deSEC-Settings: the API token comes from the central secret store.
+# ddns_host and ddns_ipv6 stay in inventory (they are not secrets).
+dedynpw=""
+if f_secret_get_to_file ddns_apikey
+then
+  dedynpw="$(<"${g_secret_file_path}")"
+else
+  # Migration fallback: read a legacy plaintext inventory value. New installs
+  # always use the store (settings script writes only a reference there).
+  dedynpw="$(f_symbios_var ddns_apikey '')"
+  if [[ "${dedynpw}" == secret:* ]]
+  then
+    dedynpw=""
+  fi
+fi
 dedynhosts="$(f_symbios_var ddns_host '')"
 doipv6="$(f_symbios_var ddns_ipv6 '')"
 
@@ -73,7 +86,7 @@ g_dedyndns="ns2.desec.org. ns1.desec.io."
 # Validate config
 if [[ -z "${dedynpw}" ]]
 then
-  g_echo_error "ddns_apikey not set in inventory.yml"
+  g_echo_error "ddns_apikey not set in the secret store or inventory.yml"
   exit 1
 fi
 

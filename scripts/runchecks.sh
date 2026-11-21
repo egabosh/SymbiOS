@@ -157,6 +157,14 @@ do
       logger -t runchecks "ERROR: $g_current_check_error"
     fi
 
+    # Checks resolve secrets into transient 0600 files. The helper only cleans
+    # them on process exit, but this daemon runs for weeks, so a plain EXIT trap
+    # would leave a plaintext credential on disk after every 5-minute cycle.
+    if declare -F f_cleanup_secret_files >/dev/null
+    then
+      f_cleanup_secret_files
+    fi
+
     g_check_name=$(basename "$g_check" .check | sed 's/^symbios-healthcheck-//')
     # JSON-escape: backslash first, then double quotes (ps output contains \_)
     g_check_msg=$(echo "$g_current_check_error" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')

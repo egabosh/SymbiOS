@@ -11,13 +11,21 @@ g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
 UPNP_CONFIG_DIR="${g_config_dir}"
 
-# Router credentials. Primary source of truth is inventory.yml (all.vars
-# router_upnp_user / router_upnp_password, written by 'config' or the WebUI).
-# A legacy router-upnp.conf (pre-inventory storage) is honoured as a fallback
-# and removed by 'config save/remove'.
+# Router credentials. The password lives in the central secret store; the
+# username stays in inventory (all.vars router_upnp_user). A legacy plaintext
+# inventory value or router-upnp.conf is honoured as a migration fallback.
 UPNP_CONFIG_FILE="${UPNP_CONFIG_DIR}/router-upnp.conf"
 ROUTER_UPNP_USER="${ROUTER_UPNP_USER:-$(f_symbios_var router_upnp_user '')}"
-ROUTER_UPNP_PASS="${ROUTER_UPNP_PASS:-$(f_symbios_var router_upnp_password '')}"
+if [[ -n "${ROUTER_UPNP_PASS:-}" ]]
+then
+  : # explicit environment override (manual invocations)
+elif f_secret_get_to_file router_upnp_password
+then
+  ROUTER_UPNP_PASS="$(<"${g_secret_file_path}")"
+else
+  ROUTER_UPNP_PASS="$(f_symbios_var router_upnp_password '')"
+  [[ "${ROUTER_UPNP_PASS}" == secret:* ]] && ROUTER_UPNP_PASS=""
+fi
 if [[ -z "$ROUTER_UPNP_USER" ]] && [[ -f "$UPNP_CONFIG_FILE" ]]
 then
   source "$UPNP_CONFIG_FILE"
@@ -249,6 +257,7 @@ case "$ACTION" in
     # json.loads) - inventory writes go via merge on stdin and stay quiet.
     if [[ "$1" == "remove" ]]
     then
+      "${g_symbios_dir}/symbios-secret.sh" delete router_upnp_password >/dev/null 2>&1 || true
       if ! printf '{"router_upnp_user": "", "router_upnp_password": ""}' \
         | "${g_symbios_dir}/symbios-inventory.py" --inventory "${g_inventory}" merge >/dev/null 2>&1
       then
@@ -299,18 +308,27 @@ case "$ACTION" in
       rm -f "$f_pw_file" 2>/dev/null
     fi
 
-    # Save credentials. Both fields may be empty (many routers, e.g. generic
-    # UPnP, require no login); only 'config remove' and a bare 'config'
-    # (status) are the no-write invocations.
+    # Save credentials. The password goes to the central store (stdin only);
+    # inventory keeps only a reference. Both fields may be empty (many routers,
+    # e.g. generic UPnP, require no login).
     # NOTE: stdout must stay a single JSON line - the merge stays quiet and
-    # the password travels via stdin JSON, never as argv nor in output.
+    # the password never appears as argv nor in output.
     if [[ -n "$f_pw_file" ]] || [[ $f_pos_count -ge 2 ]]
     then
+      if [[ -n "$f_config_password" ]]
+      then
+        printf '%s' "$f_config_password" \
+          | "${g_symbios_dir}/symbios-secret.sh" put router_upnp_password >/dev/null 2>&1 \
+          || { echo '{"ok":false,"error":"Failed to store router password."}'; exit 1; }
+        f_pw_ref="secret:router_upnp_password"
+      else
+        "${g_symbios_dir}/symbios-secret.sh" delete router_upnp_password >/dev/null 2>&1 || true
+        f_pw_ref=""
+      fi
+      f_config_password=""
       f_merge_json="$(printf '{"router_upnp_user": %s, "router_upnp_password": %s}' \
         "$(printf '%s' "${f_config_user}" | f_json_escape)" \
-        "$(printf '%s' "${f_config_password}" | f_json_escape)")"
-      # Clear the plaintext password from memory as soon as it is serialized.
-      f_config_password=""
+        "$(printf '%s' "${f_pw_ref}" | f_json_escape)")"
       if ! printf '%s' "${f_merge_json}" \
         | "${g_symbios_dir}/symbios-inventory.py" --inventory "${g_inventory}" merge >/dev/null 2>&1
       then
@@ -487,7 +505,7 @@ Router types:
     Uses TR-064 SOAP (AddPortMapping/DeletePortMapping)
     No authentication needed; config is optional
 
-Credentials stored in: ${g_inventory} (all.vars router_upnp_user/router_upnp_password)
+Credentials: password in the central secret store, username in ${g_inventory} (all.vars router_upnp_user)
 Environment: ROUTER_UPNP_USER, ROUTER_UPNP_PASS
 EOHELP
     exit 0

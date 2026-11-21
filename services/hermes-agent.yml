@@ -77,6 +77,13 @@
     # Settings -> AI (ai_server/ai_apikey); overridable per host in inventory.
     hermes_llm_provider: "local-llm"
     hermes_llm_model: "llamacpp-default"
+    secret_vars:
+      - ai_apikey
+
+  pre_tasks:
+    - name: Resolve secrets from the central store
+      ansible.builtin.include_tasks: ../shared-tasks/secret-resolve.yml
+
   tasks:
 
     - name: Create /symbios/services/hermes-agent dir

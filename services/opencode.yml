@@ -70,6 +70,13 @@
   vars:
     service_name: opencode
     service_domain: "{{ service_name }}.{{ base_domain }}"
+    secret_vars:
+      - ai_apikey
+
+  pre_tasks:
+    - name: Resolve secrets from the central store
+      ansible.builtin.include_tasks: ../shared-tasks/secret-resolve.yml
+
   tasks:
 
     - name: Create /symbios/services/opencode dir

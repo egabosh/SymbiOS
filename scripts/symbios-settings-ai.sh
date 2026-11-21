@@ -199,7 +199,7 @@ fi
 f_merge="{"
 f_merge_first="yes"
 f_ss_merge_add "ai_server" "${f_new_server}" "${f_given_server}"
-f_ss_merge_add "ai_apikey" "${f_new_key}" "${f_given_key}"
+f_ss_secret_merge_add "ai_apikey" "${f_new_key}" "${f_given_key}" "${f_check}"
 f_merge="${f_merge}}"
 
 f_ss_merge "${f_merge}" "ai" "${f_check}"

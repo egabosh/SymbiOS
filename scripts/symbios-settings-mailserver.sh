@@ -351,10 +351,7 @@ f_merge="$(printf '{"smtp_server": %s, "smtp_port": %s, "smtp_user": %s, "smtp_f
   "$(printf '%s' "${f_user}" | f_json_escape)" \
   "$(printf '%s' "${f_from}" | f_json_escape)" \
   "$(printf '%s' "${f_tls}" | f_json_escape)")"
-if [[ "${f_given_pw}" == "yes" ]]
-then
-  f_merge="${f_merge}, \"smtp_password\": $(printf '%s' "${f_new_pw}" | f_json_escape)"
-fi
+f_ss_secret_merge_add "smtp_password" "${f_new_pw}" "${f_given_pw}" "${f_check}"
 f_merge="${f_merge}}"
 
 f_ss_merge "${f_merge}" "mailserver" "${f_check}"

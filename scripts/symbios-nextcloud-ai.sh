@@ -238,12 +238,12 @@ function f_nextcloud_ai {
 
   # Inventory values (read on the host, never passed as argv)
   f_ai_server=$(f_symbios_var ai_server)
-  f_ai_apikey=$(f_symbios_var ai_apikey)
+  f_ai_apikey=$(f_secret_var ai_apikey)
   f_stt_url=$(f_symbios_var ai_stt_url)
-  f_stt_key=$(f_symbios_var ai_stt_key)
+  f_stt_key=$(f_secret_var ai_stt_key)
   f_stt_model=$(f_symbios_var ai_stt_model)
   f_tts_url=$(f_symbios_var ai_tts_url)
-  f_tts_key=$(f_symbios_var ai_tts_key)
+  f_tts_key=$(f_secret_var ai_tts_key)
   f_tts_model=$(f_symbios_var ai_tts_model)
 
   # Speech keys have no fallback to api_key inside the app

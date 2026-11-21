@@ -272,6 +272,58 @@ Residual exceptions (documented, not fixed here):
 - `services/mailcow.yml` was not modified by this hardening pass and still uses
   `mysql -p${DBPASS}` in its initialization tasks.
 
+### Central Secret Store (symbios-secret.sh)
+
+**Status**: Introduced 2026-11-20. Migration of existing secrets is staged.
+
+SymbiOS now has a generic encrypted secret store. `symbios-secret.sh` uses
+`age` (X25519 + ChaCha20-Poly1305, authenticated encryption) with these paths:
+
+- identity: `<data_root>/.keys/symbios-secret.age.key` (0600 root, outside the
+  WebUI container mounts)
+- recipient: `<data_root>/.keys/symbios-secret.age.pub`
+- ciphertext: `<config_dir>/secrets/<name>.age` (0600, directory 0700)
+
+Values are read from stdin and written to 0600 files; neither the value nor
+the identity is ever passed in argv. Only secret **names** are written to the
+audit log. `f_secret_get_to_file` in `symbios-lib.sh` gives callers a transient
+file with automatic shred-on-exit.
+
+What this mitigates:
+
+- plaintext copies of secrets in hand-edited files, playbook logs and backups
+  (only ciphertext is stored in the generic store),
+- uncontrolled distribution of credentials across service directories,
+- missing rotation and missing audit trail for secret access.
+
+What it does **not** mitigate - residual risks:
+
+- A process with root on the live host can read the identity and every secret.
+  No software-only store on a single host can prevent this; the WebUI exec
+  gateway is already root-equivalent (see C1).
+- On hosts without LUKS on `/symbios` the identity itself is plaintext on
+  disk. There is no TPM on the current hosts, so there is no sealed key.
+- Generated `env` files remain plaintext because Docker Compose `env_file:`
+  requires it (see M12). They are now derived artifacts, regenerated from the
+  store, not the source of truth. `shred` on SSD/CoW filesystems is best-effort.
+- Existing secrets in `inventory.yml`, service env files and rootfs paths are
+  migrated gradually; until then both storage models coexist.
+
+Rotating a secret:
+
+1. For credentials that an application owns (LDAP users, Matrix accounts,
+   database roles), change the value in the application first. The store is a
+   copy, not the authoritative credential database, so an unrelated `rotate`
+   would make the store diverge from the service.
+2. Store the new value via stdin (`read -rsp 'New value: ' f_value` and
+   `printf '%s' "$f_value" | symbios-secret.sh put <name>`), or for a generated
+   token use `symbios-secret.sh rotate <name>` and pass the printed 0600 file on
+   to the service setup. Never pass a value as an argument or echo it to a log.
+3. For env-bound services (Nextcloud, Matrix), reapply the service playbook.
+   `shared-tasks/secret-env.yml` regenerates the env file from the store and
+   notifies the compose restart handler, so running containers pick up the new
+   value. Other consumers read the store at runtime and need no reapply.
+
 ### L4: SSH StrictHostKeyChecking
 - Test scripts use `StrictHostKeyChecking=no` for dev environments.
 - Production automation uses `no` in several callers (for example WoL,

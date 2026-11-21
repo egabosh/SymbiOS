@@ -64,10 +64,15 @@
     service_domain: "{{ authelia_domain }}"
     service_path: "{{ base_services_root }}/{{ service_name }}"
     ldap_service_path: "{{ base_services_root }}/ldap"
+    secret_vars:
+      - smtp_password
 
   pre_tasks:
     - name: Fail if base_domain is not configured
       include_tasks: ../shared-tasks/base-domain-guard.yml
+
+    - name: Resolve secrets from the central store
+      ansible.builtin.include_tasks: ../shared-tasks/secret-resolve.yml
 
   tasks:
 

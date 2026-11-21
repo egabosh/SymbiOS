@@ -479,6 +479,19 @@
       vars:
         service_name: matrix
 
+    # Bind the generated env files to the central store (see nextcloud.yml).
+    - name: Bind generated env files to the secret store
+      ansible.builtin.include_tasks: ../shared-tasks/secret-env.yml
+      vars:
+        secret_env_notify: ['Restart matrix']
+        secret_env_files:
+          - path: /symbios/services/matrix/env
+            prefix: matrix/env
+          - path: /symbios/services/matrix/env.db
+            prefix: matrix/env.db
+          - path: /symbios/services/matrix/env.user
+            prefix: matrix/env.user
+
     - name: /symbios/services/matrix/nginx-matrix.conf
       blockinfile:
         path: /symbios/services/matrix/nginx-matrix.conf

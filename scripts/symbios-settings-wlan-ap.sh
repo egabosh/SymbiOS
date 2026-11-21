@@ -309,10 +309,7 @@ f_merge="$(printf '{"ap_interface": %s, "ap_name": %s, "ap_country": %s, "ap_ena
   "$(printf '%s' "${f_name}" | f_json_escape)" \
   "$(printf '%s' "${f_country}" | f_json_escape)" \
   "${f_enabled}")"
-if [[ "${f_given_pw}" == "yes" ]]
-then
-  f_merge="${f_merge}, \"ap_passphrase\": $(printf '%s' "${f_new_pw}" | f_json_escape)"
-fi
+f_ss_secret_merge_add "ap_passphrase" "${f_new_pw}" "${f_given_pw}" "${f_check}"
 f_merge="${f_merge}}"
 
 f_ss_merge "${f_merge}" "wlan-accesspoint" "${f_check}"

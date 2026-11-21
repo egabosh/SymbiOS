@@ -309,10 +309,7 @@ else
       f_merge="$(printf '{"dns_mode": "desec", "ddns_host": %s, "base_domain": %s, "dns_configured": true' \
         "$(printf '%s' "${f_host}" | f_json_escape)" \
         "$(printf '%s' "${f_host}" | f_json_escape)")"
-      if [[ "${f_given_key}" == "yes" ]]
-      then
-        f_merge="${f_merge}, \"ddns_apikey\": $(printf '%s' "${f_new_key}" | f_json_escape)"
-      fi
+      f_ss_secret_merge_add "ddns_apikey" "${f_new_key}" "${f_given_key}" "${f_check}"
       if [[ "${f_given_ipv6}" == "yes" ]]
       then
         f_merge="${f_merge}, \"ddns_ipv6\": $(printf '%s' "${f_ipv6}" | f_json_escape)"
@@ -336,6 +333,11 @@ else
       fi
       f_merge="$(printf '{"dns_mode": "self-managed", "ddns_apikey": "", "ddns_host": "", "ddns_ipv6": "", "base_domain": %s, "dns_configured": true}' \
         "$(printf '%s' "${f_domain}" | f_json_escape)")"
+      # Leaving deSEC mode drops any stored API token.
+      if [[ "${f_check}" != "yes" ]]
+      then
+        "${g_ss_dir}/symbios-secret.sh" delete ddns_apikey >/dev/null 2>&1 || true
+      fi
       ;;
     *)
       f_ss_fail_validation "Invalid --mode: ${f_mode} (expected desec|self-managed)"

@@ -428,6 +428,37 @@ policy, key format checks) stay Python by design. Note the inherited
 checkbox quirk: an absent/empty bool coerces to True, so round-trips can
 add a missing bool key (playbooks default missing bools to false).
 
+### 3.x Central secret store
+
+`scripts/symbios-secret.sh` is the generic place for credentials that must be
+kept out of `inventory.yml` and hand-edited env files. It uses `age`
+(X25519/ChaCha20-Poly1305): the identity is
+`<data_root>/.keys/symbios-secret.age.key` (0600, outside the WebUI container
+mounts), the recipient is next to it, and ciphertext lives in
+`<config_dir>/secrets/<name>.age` (0600, directory 0700).
+
+Contract:
+
+- `put <name>` reads the value from **stdin** (trailing newlines stripped),
+  `get <name> [--path <file>]` decrypts into a 0600 file and prints only the
+  path. Values never appear in argv or on stdout.
+- `list` prints names only. `rotate <name>` generates a new 64-hex value and
+  prints the path of a 0600 file holding it. `delete <name>` shreds a value.
+- `import-env <file> --prefix <prefix>` stores every `KEY=value` as
+  `<prefix>/<KEY>`, verifies the roundtrip, then replaces the env file with a
+  generated one carrying a `# secret-prefix:` header. `export-env <file>`
+  regenerates it from the store. Only comments, blank lines and `KEY=value`
+  are accepted; anything else aborts before the file is touched.
+- `cleanup <file>` shreds a transient file below `<config_dir>`; callers that
+  source `symbios-lib.sh` can use `f_secret_get_to_file <name>`, which sets
+  `g_secret_file_path` and registers shred-on-exit in the **calling** process.
+- Every mutation and every read writes one audit event with the secret **name**
+  only (`f_audit_event secret <action> <name>`).
+
+Generated env files remain plaintext because Docker Compose `env_file:` needs
+it - they are derived artifacts, not the source of truth. See `SECURITY.md`
+("Central Secret Store") for the threat model and residual risks.
+
 ---
 
 ## 4. Script catalog
@@ -485,6 +516,7 @@ texts opportunistically).
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | `symbios-set-hostname.sh` | Hostname from `base_domain`, idempotent, `--check` mode (template model) | `[--check]` |
+| `symbios-secret.sh` | Central encrypted secret store: age identity in `<data_root>/.keys`, ciphertext in `<config_dir>/secrets`, env-file import/export | `init\|put\|get\|list\|rotate\|import-env\|export-env\|cleanup` |
 | `symbios-power.sh` | Reboot / shutdown the host (WebUI, exec-modal notice) | `reboot\|shutdown` |
 | `symbios-data-partition.sh` | `/symbios` data partition incl. LUKS setup/mount/rollback and `wipe` (erase a disk for reuse; `--unmount` releases leftover mounts). Label-based explicit mounts (no fstab), exact label match only | `list\|status\|setup\|wipe\|rollback` |
 | `symbios-media-partition.sh` | Optional `SYMBIOS_MEDIA` volume (labels `SYMBIOS_MEDIA` / `CRYPT_LUKS_SYMBIOS_MEDIA`) incl. setup/adopt/rollback, no reboot; `prepare-member` turns a replacement disk into an encrypted member (LUKS + boot keyfile, opened) for a btrfs replace (`--force` overwrites foreign signatures, `--unmount` releases leftover mounts) | `status\|setup\|adopt\|prepare-member\|rollback` |

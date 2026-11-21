@@ -350,6 +350,28 @@ then
     g_echo "PASS: rc.local blocks have SymbiOS markers" 2>/dev/null || echo "PASS: rc.local blocks have SymbiOS markers"
   fi
 
+  # 11. Central secret store: age CLI, identity outside the config dir,
+  # audit events and the shared library read helper must be present.
+  f_store="${f_root}/scripts/symbios-secret.sh"
+  f_store_fail=0
+  if [[ ! -x "${f_store}" ]] \
+    || ! grep -q 'age -e -R' "${f_store}" \
+    || ! grep -q 'age -d -i' "${f_store}" \
+    || ! grep -q '${g_data_root}/.keys/symbios-secret.age.key' "${f_store}" \
+    || ! grep -q '${g_data_root}/.keys/symbios-secret.age.pub' "${f_store}" \
+    || ! grep -q 'f_audit_event secret' "${f_store}" \
+    || ! grep -q 'f_secret_get_to_file' "${f_root}/scripts/symbios-lib.sh"
+  then
+    echo "FAIL: central secret store contract" >&2
+    f_store_fail=1
+  fi
+  if [[ "${f_store_fail}" -eq 0 ]]
+  then
+    g_echo "PASS: central secret store contract" 2>/dev/null || echo "PASS: central secret store contract"
+  else
+    f_failures=$((f_failures + 1))
+  fi
+
   if [[ "${f_failures}" -gt 0 ]]
   then
     echo "${f_failures} static check(s) failed" >&2
@@ -418,6 +440,12 @@ do
     fi
   fi
 done
+
+# The secret store CLI shares the --help contract but is not a settings script.
+if [[ -x "${g_symbios_dir}/symbios-secret.sh" ]]
+then
+  f_check "symbios-secret.sh --help" "${g_symbios_dir}/symbios-secret.sh" --help
+fi
 
 if [[ "${f_failures}" -gt 0 ]]
 then

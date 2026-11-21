@@ -322,24 +322,8 @@ f_merge="$(printf '{"matrix_homeserver": %s, "matrix_user": %s, "matrix_room": %
   "$(printf '%s' "${f_server}" | f_json_escape)" \
   "$(printf '%s' "${f_user}" | f_json_escape)" \
   "$(printf '%s' "${f_room}" | f_json_escape)")"
-if [[ "${f_given_pw}" == "yes" ]]
-then
-  if [[ -n "${f_new_pw}" ]]
-  then
-    f_merge="${f_merge}, \"matrix_password\": $(printf '%s' "${f_new_pw}" | f_json_escape)"
-  else
-    f_merge="${f_merge}, \"matrix_password\": null"
-  fi
-fi
-if [[ "${f_given_token}" == "yes" ]]
-then
-  if [[ -n "${f_new_token}" ]]
-  then
-    f_merge="${f_merge}, \"matrix_token\": $(printf '%s' "${f_new_token}" | f_json_escape)"
-  else
-    f_merge="${f_merge}, \"matrix_token\": null"
-  fi
-fi
+f_ss_secret_merge_add "matrix_password" "${f_new_pw}" "${f_given_pw}" "${f_check}"
+f_ss_secret_merge_add "matrix_token" "${f_new_token}" "${f_given_token}" "${f_check}"
 f_merge="${f_merge}}"
 
 f_ss_merge "${f_merge}" "matrix" "${f_check}"

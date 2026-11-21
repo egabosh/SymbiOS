@@ -277,6 +277,7 @@
           - sqlite3
           - openssh-server
           - gpg
+          - age
           - rblcheck
           - crudini
           - kpartx
@@ -1003,6 +1004,23 @@
             daemon_reload: true
           when: nocontainer.stat.exists == true
       when: nocontainer.stat.exists == true
+
+    - name: Initialize the central secret store
+      # age is installed above; init is idempotent and guarded by creates so
+      # an existing identity is never replaced (that would orphan every secret).
+      ansible.builtin.command:
+        cmd: "{{ git_root }}/scripts/symbios-secret.sh init"
+        creates: "{{ data_root }}/.keys/symbios-secret.age.key"
+
+    # Move legacy plaintext inventory secrets into the store on the first
+    # run of the new code. symbios-update.sh runs basics.yml before the
+    # credential-consuming playbooks, so their resolver finds seeded values.
+    # The helper is idempotent and never overwrites an existing store entry.
+    - name: Migrate plaintext inventory secrets into the central store
+      ansible.builtin.command:
+        cmd: "{{ git_root }}/scripts/symbios-secret-migrate-inventory.sh"
+      register: f_secret_migration
+      changed_when: "'migrated:' in f_secret_migration.stdout"
 
     - name: Register playbook as installed
       include_tasks: ../shared-tasks/state-register.yml

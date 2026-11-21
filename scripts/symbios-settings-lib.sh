@@ -156,6 +156,39 @@ function f_ss_merge_add {
   fi
 }
 
+# Store a secret in the central store and append a `secret:<name>` reference
+# to the pending inventory merge. This makes the store the single source of
+# truth: inventory keeps only the reference, never the plaintext. The value is
+# piped to symbios-secret.sh on stdin, so it never appears in argv. An empty
+# value deletes the store entry and clears the inventory key. In --check mode
+# nothing is written; only the intent is reported.
+#
+# Arguments: <name> <value> <given(yes|no)> <check(yes|no)>.
+# Uses the caller's f_merge / f_merge_first globals via f_ss_merge_add.
+function f_ss_secret_merge_add {
+  local f_name="$1" f_value="$2" f_given="$3" f_check="$4"
+  [[ "${f_given}" == "yes" ]] || return 0
+  if [[ "${f_check}" == "yes" ]]
+  then
+    if [[ -n "${f_value}" ]]
+    then
+      g_echo_note "would store secret ${f_name}"
+    else
+      g_echo_note "would delete secret ${f_name}"
+    fi
+  else
+    if [[ -n "${f_value}" ]]
+    then
+      printf '%s' "${f_value}" | "${g_ss_dir}/symbios-secret.sh" put "${f_name}" >/dev/null \
+        || f_ss_fail_technical "cannot store secret ${f_name}"
+    else
+      "${g_ss_dir}/symbios-secret.sh" delete "${f_name}" >/dev/null 2>&1 || true
+    fi
+  fi
+  # The reference is not a secret; f_ss_merge_add handles the JSON quoting.
+  f_ss_merge_add "${f_name}" "${f_value:+secret:${f_name}}" "yes"
+}
+
 # Resolve host playbooks consuming inventory vars (stdout, one per line;
 # stderr carries skip notes). Thin wrapper over symbios-playbooks-for-vars.sh.
 function f_ss_playbooks_for_vars {

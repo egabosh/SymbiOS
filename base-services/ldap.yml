@@ -723,6 +723,17 @@
         group: "10000"
       no_log: true
 
+    # The store is authoritative for host scripts (f_symbios_ldap_init). The
+    # plaintext .ldap_admin_pw remains for the WebUI container, which has no
+    # access to the store identity. creates: keeps a re-run from overwriting
+    # the stored value (that would break every LDAP password hook).
+    - name: Seed LDAP admin password into the central secret store
+      ansible.builtin.shell:
+        cmd: '"{{ git_root }}/scripts/symbios-secret.sh" init >/dev/null && cat "{{ base_services_root }}/symbios-ui/config/.ldap_admin_pw" | "{{ git_root }}/scripts/symbios-secret.sh" put ldap_admin_password'
+        creates: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/secrets/ldap_admin_password.age"
+      changed_when: true
+      no_log: true
+
 
     # Boot policy (AGENTS.md): host nslcd must not autostart. /home and /root
     # are symlinks below /symbios (basics.yml), so its mount namespace setup

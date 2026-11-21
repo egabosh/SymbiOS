@@ -82,6 +82,15 @@
     service_name: openwebui
     service_domain: "openwebui.{{ base_domain }}"
     ai_host: "ai.lan"
+    secret_vars:
+      - ai_apikey
+      - ai_stt_key
+      - ai_tts_key
+
+  pre_tasks:
+    - name: Resolve secrets from the central store
+      ansible.builtin.include_tasks: ../shared-tasks/secret-resolve.yml
+
   tasks:
 
     - name: Create /symbios/services/openwebui dir
