@@ -12,6 +12,16 @@ then
   f_failed="$(docker logs --since "${f_window}" sftp-share 2>&1 | grep -c 'Failed password')"
   if [[ "${f_failed}" -gt "${f_max_failed}" ]]
   then
+    # Record the same event in the central audit trail. --audit-only avoids a
+    # second notification: this check already has the flap-protected path in
+    # runchecks.sh. The offending address is the one with most failures.
+    f_top_ip="$(docker logs --since "${f_window}" sftp-share 2>&1 \
+      | grep 'Failed password' \
+      | grep -oE 'from [0-9A-Fa-f:.]+' \
+      | awk '{print $2}' \
+      | sort | uniq -c | sort -rn | head -1 | awk '{print $2}')"
+    [[ -n "${f_top_ip}" ]] || f_top_ip="-"
+    symbios-auth-report.sh --audit-only sftp-auth "${f_top_ip}" "${f_failed}" >/dev/null 2>&1 || true
     g_echo_error "SFTP brute-force pattern: ${f_failed} failed passwords in ${f_window}"
   fi
 fi

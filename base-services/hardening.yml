@@ -93,14 +93,37 @@
       - Restart sshd
       when: nocontainer.stat.exists == true
 
-    - name: Install fail2ban for SSH brute-force protection (host sshd, ports 22/33)
+    - name: Install fail2ban for SSH brute-force reporting (host sshd, ports 22/33)
       ansible.builtin.apt:
         name: fail2ban
         update_cache: no
         install_recommends: no
       when: nocontainer.stat.exists == true
 
-    - name: Configure fail2ban sshd jail (5 failures in 10 minutes -> 30 minutes ban)
+    # fail2ban is boot-enabled, so its reporter must live on the rootfs and
+    # must not depend on the (late-mounted) /symbios tree. Same pattern as
+    # /usr/local/bin/notify.sh, deployed as a real file, not a symlink.
+    - name: Deploy auth reporter for fail2ban
+      ansible.builtin.copy:
+        src: "{{ git_root }}/scripts/symbios-auth-report.sh"
+        dest: /usr/local/sbin/symbios-auth-report.sh
+        mode: "0755"
+        owner: root
+        group: root
+      when: nocontainer.stat.exists == true
+
+    - name: Deploy report-only fail2ban action
+      ansible.builtin.copy:
+        src: "{{ git_root }}/base-services/fail2ban/action.d/symbios-report.conf"
+        dest: /etc/fail2ban/action.d/symbios-report.conf
+        mode: "0444"
+        owner: root
+        group: root
+      notify:
+      - Restart fail2ban
+      when: nocontainer.stat.exists == true
+
+    - name: Configure report-only fail2ban sshd jail (5 failures in 10 minutes)
       ansible.builtin.blockinfile:
         path: /etc/fail2ban/jail.local
         mode: "0444"
@@ -110,15 +133,18 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           [DEFAULT]
-          bantime = 30m
+          # Report-only: banaction overrides the Debian default (nftables).
+          # No jail creates a firewall rule, including sshd.
+          banaction = symbios-report
+          banaction_allports = symbios-report
+          bantime = 1m
           findtime = 10m
           maxretry = 5
           backend = systemd
-          # Never ban local addresses: loopback, all RFC1918 LANs and
-          # IPv6 link-local/ULA. Internet attackers are still banned.
-          # (A ban of the LAN gateway/NAT IP once locked the admin out
-          # of his own fresh-migrated host.)
-          ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fe80::/10 fd00::/8
+          # bantime is only a report cooldown: fail2ban fires the action once
+          # per "ban". Nothing is blocked, so loopback is the only exception;
+          # brute force from the LAN is reported as well.
+          ignoreip = 127.0.0.1/8 ::1
           [sshd]
           enabled = true
           port = 22,33

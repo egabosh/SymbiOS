@@ -100,7 +100,7 @@ either fixed in the owning playbook or added here with a rationale.
 | CIS ID | Control | SymbiOS decision | Rationale | Compensating control |
 |--------|---------|------------------|-----------|----------------------|
 | 3.2.1 | IP forwarding disabled | Not applied | Docker requires `net.ipv4.ip_forward=1` for bridge and NAT networking. | Containers run on an isolated bridge network; UFW default deny limits exposure. |
-| 5.1.10 | SSH root login disabled | Partially applied | Management needs direct root access; `PermitRootLogin prohibit-password` allows keys only. | SSH listens on ports 22 and 33, ed25519 keys are required and fail2ban is active. Password auth for other local accounts is not centrally disabled. |
+| 5.1.10 | SSH root login disabled | Partially applied | Management needs direct root access; `PermitRootLogin prohibit-password` allows keys only. | SSH listens on ports 22 and 33, ed25519 keys are required and fail2ban reports auth failures without banning. Password auth for other local accounts is not centrally disabled. |
 | 6.1.1 | auditd enabled | Not applied | auditd adds little value for a single-admin appliance and would duplicate the existing audit trail. | All state-changing WebUI and CLI operations are recorded in `<data_root>/log/symbios-audit.log`; health checks and systemd logs cover host events. |
 | 7.2.1 | Password aging for local accounts | Not applicable | Users are managed in LDAP through the WebUI; local accounts are maintenance-only. | The configurable password policy under Settings -> Security applies to LDAP users; the forced first-login change applies only to the initial admin while the default password works (see C3). |
 
@@ -161,6 +161,37 @@ Callers log key names and object names only, never values or secrets. Writing
 an event is best effort: a failed write warns but never aborts the operation
 that triggered it. The legacy `/var/log/symbios-exec.log` is left untouched as
 historical data; it is no longer written.
+
+`source=security` is used for authentication failure patterns. The detail
+contains source, address, failure count and user name only - never a password,
+token, cookie or raw log line.
+
+---
+
+## Auth Attack Reporting (report only)
+
+fail2ban is used purely as a detector. `banaction = symbios-report` replaces
+the Debian nftables default for **every** jail: the action only calls
+`symbios-auth-report.sh`, creates no firewall rule, and `bantime = 1m` is a
+report cooldown rather than a lockout. No address is blocked by SymbiOS,
+including the host `sshd` jail on ports 22/33. Only loopback is ignored, so
+brute force from the LAN is reported too.
+
+The reporter writes one `security/auth-failure` audit event and, unless called
+with `--audit-only`, one notification per source and address per 15 minutes.
+The auth healthchecks (`sftp-auth`, `auth-patterns`) use `--audit-only`: they
+share the audit trail but keep their existing flap-protected notification, so
+one event never produces two alerts.
+
+Coverage is deliberately narrow and stated openly:
+
+- host sshd (22/33): fail2ban jail on the systemd journal
+- SFTP (28): healthcheck on the container's authentication log
+- Traefik/Authelia: JSON access log, 401/403 per client IP and distinct source
+  IPs per `Remote-User`; the configured bypasses (Paperless `^/api/`, Forgejo
+  `\.git(/|$)`) are counted separately
+- other services: no usable authentication failure log source today; they are
+  not silently claimed as covered
 
 ---
 

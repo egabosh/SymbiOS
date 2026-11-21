@@ -1,0 +1,56 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="Auth Patterns"
+CHECK_DESC="Detects auth brute force and account abuse in the Traefik access log."
+CHECK_DETAIL="Counts 401/403 responses per client IP in the last 15 minutes.|Counts distinct source IPs per authenticated user in the same window.|The configured Authelia bypasses (Paperless API, Forgejo git) are reported separately.|Silent when the access log is missing."
+
+# Both thresholds are per 15-minute window. The Traefik JSON access log keeps
+# Remote-User (deployed by base-services/traefik.yml) as request_Remote-User.
+f_auth_window=900
+f_auth_max_fail=10
+f_auth_max_ips=5
+f_auth_log="${g_base_services_root}/traefik/log/access.log"
+
+if [[ -r "${f_auth_log}" ]]
+then
+  f_auth_cutoff=$(( $(date +%s) - f_auth_window ))
+  f_auth_rows=$(jq -r --argjson cutoff "${f_auth_cutoff}" '
+    select((.StartUTC // "") | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 | . >= $cutoff)
+    | [ (.ClientHost // "-"), ((.DownstreamStatus // 0) | tostring),
+        (.["request_Remote-User"] // "-"), (.RequestPath // "-") ]
+    | @tsv
+  ' "${f_auth_log}" 2>/dev/null)
+
+  f_auth_alerts=$(printf '%s\n' "${f_auth_rows}" | awk -F '\t' \
+    -v max_fail="${f_auth_max_fail}" -v max_ips="${f_auth_max_ips}" '
+    ($2 == "401" || $2 == "403") {
+      if ($4 ~ /^\/api\// || $4 ~ /\.git(\/|$)/) { bypass[$1]++; next }
+      fail[$1]++
+    }
+    $3 != "-" && $3 != "" { users[$3 SUBSEP $1] = 1; seen[$3] = 1 }
+    END {
+      for (ip in fail)
+        if (fail[ip] >= max_fail) printf "fail %s %d %d\n", ip, fail[ip], bypass[ip] + 0
+      for (u in seen) {
+        n = 0
+        for (k in users) { split(k, a, SUBSEP); if (a[1] == u) n++ }
+        if (n >= max_ips) printf "spread %s %d\n", u, n
+      }
+    }
+  ')
+
+  # Both branches only audit here; the flap-protected check notification is
+  # owned by runchecks.sh, so there is no duplicate mail or Matrix post.
+  while read -r f_auth_kind f_auth_a f_auth_b f_auth_c
+  do
+    case "${f_auth_kind}" in
+      fail)
+        symbios-auth-report.sh --audit-only traefik-auth "${f_auth_a}" "${f_auth_b}" >/dev/null 2>&1 || true
+        g_echo_error "Traefik auth failures: ${f_auth_b} x 401/403 from ${f_auth_a} (${f_auth_c:-0} on bypass paths) in ${f_auth_window}s"
+        ;;
+      spread)
+        symbios-auth-report.sh --audit-only traefik-user "-" "${f_auth_b}" "${f_auth_a}" >/dev/null 2>&1 || true
+        g_echo_error "Traefik account spread: user ${f_auth_a} seen from ${f_auth_b} IPs in ${f_auth_window}s"
+        ;;
+    esac
+  done <<< "${f_auth_alerts}"
+fi

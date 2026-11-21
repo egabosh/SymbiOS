@@ -154,12 +154,15 @@
                 # log
                 - --accesslog.filepath=/log/access.log
                 - --accesslog.format=json
-                # Keep only the two headers needed for GoAccess browser/referrer
-                # stats. The default drops headers, so no other sensitive header
-                # reaches the log.
+                # Keep only the headers needed for GoAccess browser/referrer
+                # stats and for correlating auth failures per account. The
+                # default drops headers, so no other sensitive header reaches
+                # the log. Remote-User is a username, never a credential;
+                # Remote-Email/-Groups/-Name stay dropped.
                 - --accesslog.fields.headers.defaultmode=drop
                 - --accesslog.fields.headers.names.User-Agent=keep
                 - --accesslog.fields.headers.names.Referer=keep
+                - --accesslog.fields.headers.names.Remote-User=keep
               container_name: symbios-base-traefik
               restart: unless-stopped
               security_opt:
