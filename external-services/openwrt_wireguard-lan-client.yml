@@ -5,7 +5,6 @@
 #   category: "VPN"
 #   type: OpenWrt
 #   icon: "bi-vpn"
-#   hidden: true   # Component tool: run via CLI, not shown in the WebUI catalog.
 #   params:
 #     - name: "client_name"
 #       label: "Client name"

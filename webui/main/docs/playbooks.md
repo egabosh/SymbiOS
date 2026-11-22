@@ -236,8 +236,9 @@ autoupdate. `openwrt_slave.yml` bundles the same components and then converts a
 secondary access point (gateway, DNS, no WAN, no local DHCP/DNS), matching
 `openwrt-ab`. All reusable components live in `external-services/tasks/openwrt/`,
 so the managed-state ids and UCI behaviour stay identical and physical routers
-can keep running the old playbooks untouched. Only the two bundles are visible
-in the WebUI; their forms carry the options of the components they import.
+can keep running the old playbooks untouched. The two bundles are the primary
+WebUI entries; their forms carry the options of the components they import,
+while the per-item tools remain available as separate tiles.
 
 The optional system services of the master (`asterisk`, `smtp`, `netboot`,
 `dnscrypt`, OpenVPN/WireGuard servers, Telekom uplinks, FRITZ!Box) are selected
@@ -245,9 +246,9 @@ by the comma separated `services` parameter; the matching fields are part of
 the master form, and a skipped service never runs its parameter asserts. The
 per-item tools (`openwrt_dns.yml`, `openwrt_firewall_allow.yml`,
 `openwrt_firewall_forwarding.yml`, `openwrt_ddns.yml`, `openwrt_wireless.yml`,
-`openwrt_dhcp-hosts.yml`, WireGuard clients) carry `hidden: true` in their docs
-block: they stay runnable from the CLI, but have no WebUI tile or form. Values
-saved under the old playbook names are still merged via `_playbook-compat.json`.
+`openwrt_dhcp-hosts.yml`, WireGuard clients) remain separate WebUI tiles and
+CLI playbooks. Values saved under the old playbook names are still merged via
+`_playbook-compat.json`.
 When changing a bundle, check the UCI keys (or equivalent settings) for
 conflicts first - the merged result must stay idempotent.
 
@@ -318,7 +319,7 @@ OpenWrt VM service) removes its markers together with the target entry via
 
 ### OpenWrt segment parameters
 
-The hidden component playbooks under `external-services/tasks/openwrt/` keep the
+The reusable component playbooks under `external-services/tasks/openwrt/` keep the
 physical routers' values as playbook defaults so standalone runs stay backward
 compatible. The generic `openwrt_master.yml` exposes the combined parameter set
 in the WebUI. Targets with different addressing (for example the OpenWrt VM)

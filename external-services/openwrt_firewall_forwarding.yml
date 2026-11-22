@@ -5,7 +5,6 @@
 #   category: "Security"
 #   type: OpenWrt
 #   icon: "bi-signpost-split"
-#   hidden: true   # Component tool: run via CLI, not shown in the WebUI catalog.
 #   params:
 #     - name: "profile"
 #       label: "Rule type (hijack, ipv4 or ipv6)"

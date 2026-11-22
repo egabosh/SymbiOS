@@ -5,7 +5,6 @@
 #   category: "Network"
 #   type: OpenWrt
 #   icon: "bi-globe2"
-#   hidden: true   # Component tool: run via CLI, not shown in the WebUI catalog.
 #   params:
 #     - name: "profile"
 #       label: "Record type (a, aaaa or cname)"

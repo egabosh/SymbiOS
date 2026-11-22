@@ -5,7 +5,6 @@
 #   category: "Security"
 #   type: OpenWrt
 #   icon: "bi-shield-check"
-#   hidden: true   # Component tool: run via CLI, not shown in the WebUI catalog.
 #   params:
 #     - name: "profile"
 #       label: "Target zone (internet, lan, iot or tor)"
