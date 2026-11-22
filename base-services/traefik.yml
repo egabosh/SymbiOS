@@ -352,13 +352,6 @@
           0 * * * * root PATH={{ git_root }}/scripts:$PATH && [[ -x {{ git_root }}/scripts/symbios-traefik-stats.sh ]] && symbios-traefik-stats.sh
         backup: yes
 
-    - name: Generate initial Traefik access statistics report
-      # The cron job refreshes the report hourly; create the first one during
-      # deployment so the WebUI page is populated immediately.
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-traefik-stats.sh"
-      args:
-        creates: "{{ base_services_root }}/symbios-ui/log/traefik-stats/index.json"
-
     - name: Ensure ACME account directories exist
       ansible.builtin.file:
         path: "{{ item }}"
@@ -396,6 +389,15 @@
         docker compose up -d || { docker compose down; docker compose up -d; }
       args:
         chdir: "{{ docker_path }}"
+      register: traefik_compose_up
+      changed_when: "'Started' in (traefik_compose_up.stdout + traefik_compose_up.stderr) or 'Created' in (traefik_compose_up.stdout + traefik_compose_up.stderr) or 'Recreated' in (traefik_compose_up.stdout + traefik_compose_up.stderr)"
+
+    - name: Generate initial Traefik access statistics report
+      # The access log is created by the container, so this must run after
+      # "Ensure traefik is running". The cron job refreshes it hourly.
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-traefik-stats.sh"
+      args:
+        creates: "{{ base_services_root }}/symbios-ui/log/traefik-stats/index.json"
 
     - name: Register playbook as installed
       include_tasks: ../shared-tasks/state-register.yml

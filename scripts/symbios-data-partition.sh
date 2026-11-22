@@ -648,7 +648,7 @@ function f_main {
     local f_data_device="" f_data_fstype="" f_data_size=""
     local f_data_used="" f_data_avail=""
     local f_luks_name="" f_luks_device="" f_luks_open="false"
-    local f_needs_unlock="false" f_can_rollback="false"
+    local f_needs_unlock="false" f_can_rollback="false" f_data_on_root="false"
 
     [[ -f "${f_state_file}" ]] && f_can_rollback="true"
 
@@ -687,8 +687,24 @@ function f_main {
       ls /dev/mapper/ 2>/dev/null | grep -qE 'symbios|luks' && f_luks_open="true"
     fi
 
+    # Compare the actual mount sources instead of guessing from device names:
+    # df reports /dev/root on many Pi images, which is a symlink to the SD
+    # card partition. An unmounted /symbios is by definition still on rootfs.
+    local f_root_source f_data_source f_root_canon f_data_canon
+    f_root_source=$(findmnt -n -o SOURCE / 2>/dev/null || true)
+    f_data_source=$(findmnt -n -o SOURCE "${g_mountpoint}" 2>/dev/null || true)
+    if [[ -z "$f_data_source" ]]
+    then
+      f_data_on_root="true"
+    else
+      [[ "$f_data_source" == "$f_root_source" ]] && f_data_on_root="true"
+      f_root_canon=$(readlink -f "$f_root_source" 2>/dev/null || true)
+      f_data_canon=$(readlink -f "$f_data_source" 2>/dev/null || true)
+      [[ -n "$f_root_canon" && "$f_data_canon" == "$f_root_canon" ]] && f_data_on_root="true"
+    fi
+
     cat <<EOF
-{"ok":true,"data_device":"$f_data_device","data_fstype":"$f_data_fstype","data_size":"$f_data_size","data_used":"$f_data_used","data_avail":"$f_data_avail","luks_name":"$f_luks_name","luks_device":"$f_luks_device","luks_open":$f_luks_open,"needs_unlock":$f_needs_unlock,"can_rollback":$f_can_rollback}
+{"ok":true,"data_device":"$f_data_device","data_fstype":"$f_data_fstype","data_size":"$f_data_size","data_used":"$f_data_used","data_avail":"$f_data_avail","luks_name":"$f_luks_name","luks_device":"$f_luks_device","luks_open":$f_luks_open,"needs_unlock":$f_needs_unlock,"can_rollback":$f_can_rollback,"data_on_root":$f_data_on_root}
 EOF
     ;;
 
@@ -826,14 +842,14 @@ EOF
       f_old_home_fstype=$(findmnt -n -o FSTYPE "${g_mountpoint}" 2>/dev/null || echo "")
     fi
 
-    f_save_state "$f_old_home_device" "$f_old_fstype" "$f_device" \
+    f_save_state "$f_old_home_device" "$f_old_home_fstype" "$f_device" \
       "$f_encrypt" ${g_mapper_name}
     f_log_ok "State saved (can rollback later)"
 
     # A previous LUKS mapper as migration source is not supported: its
     # labels cannot be retired while it is open, and the mapper name is
     # taken. Retire the old disk manually first.
-    if [[ "${f_old_fstype}" != "rootfs" ]] && [[ "${f_old_home_device}" == /dev/mapper/* ]]
+    if [[ "${f_old_home_fstype}" != "rootfs" ]] && [[ "${f_old_home_device}" == /dev/mapper/* ]]
     then
       f_clear_state
       f_json_error "Previous ${g_mountpoint} is a LUKS mapper (${f_old_home_device}). Second migrations from an encrypted volume need manual label handling - retire the old disk first."
@@ -994,7 +1010,7 @@ EOF
     # Re-save the rollback state onto the NEW disk: the old copy was
     # excluded from rsync and deleted with the old location, so without
     # this no rollback survives the migration (seen live on valiant).
-    f_save_state "$f_old_home_device" "$f_old_fstype" "$f_device" \
+    f_save_state "$f_old_home_device" "$f_old_home_fstype" "$f_device" \
       "$f_encrypt" ${g_mapper_name}
     f_log_ok "Rollback state re-saved on new disk"
 
@@ -1002,9 +1018,9 @@ EOF
     # mount can never pick the old disk while both are attached. Rootfs
     # data (first migration) has nothing to retire; mapper sources were
     # refused above.
-    if [[ "${f_old_fstype}" != "rootfs" ]]
+    if [[ "${f_old_home_fstype}" != "rootfs" ]]
     then
-      if f_retire_old_labels "${f_old_home_device}" "${f_old_fstype}"
+      if f_retire_old_labels "${f_old_home_device}" "${f_old_home_fstype}"
       then
         f_log_ok "Labels retired on previous device ${f_old_home_device}"
       else
@@ -1278,7 +1294,7 @@ EOF
     fi
     # Save rollback state, then switch to the adopted device (explicit
     # mount, no fstab entry - the boot mounts by label).
-    f_save_state "${f_old_home_device}" "${f_old_fstype}" "${f_device}" \
+    f_save_state "${f_old_home_device}" "${f_old_home_fstype}" "${f_device}" \
       "no" ""
     f_log_ok "State saved (can rollback later)"
     if [[ "${f_copy}" == "yes" ]]
@@ -1324,7 +1340,7 @@ EOF
       if [[ "${f_old_home_device}" == /dev/mapper/* ]]
       then
         f_log_error "Previous ${g_mountpoint} is a LUKS mapper (${f_old_home_device}) - retire its labels manually (duplicate labels confuse the boot mount)."
-      elif f_retire_old_labels "${f_old_home_device}" "${f_old_fstype}"
+      elif f_retire_old_labels "${f_old_home_device}" "${f_old_home_fstype}"
       then
         f_log_ok "Labels retired on previous device ${f_old_home_device}"
       else

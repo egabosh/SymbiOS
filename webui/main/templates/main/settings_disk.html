@@ -592,10 +592,13 @@ function dataStatusHtml(data) {
   if (data.data_device) {
     window._dataSize = data.data_size;
 
-    /* Determine if data is on the system disk or a separate disk */
-    var isOnRoot = data.data_device.indexOf('mmcblk') !== -1 ||
-                   data.data_device.indexOf('nvme0n1') !== -1 ||
-                   data.data_fstype === 'rootfs';
+    /* Prefer the explicit mount-source comparison from the script; the name
+       heuristic stays only for hosts with an older script version. */
+    var isOnRoot = (typeof data.data_on_root === 'boolean')
+      ? data.data_on_root
+      : data.data_device.indexOf('mmcblk') !== -1 ||
+        data.data_device.indexOf('nvme0n1') !== -1 ||
+        data.data_fstype === 'rootfs';
     var model = findModelForDevice(data.data_device);
 
     var html = '<div class="d-flex align-items-center gap-3">';

@@ -426,6 +426,8 @@
         path: "{{ docker_path }}/docker-entrypoint.sh"
         insertbefore: BOF
         line: "#!/bin/bash"
+      notify:
+      - Restart ldap
 
     - name: "{{ docker_path }}/docker-compose.yml Container Configuration"
       blockinfile:
@@ -444,6 +446,10 @@
               build:
                 context: .
                 dockerfile: Dockerfile
+                # Build-time apt must use the host resolver. During first boot
+                # the Docker stub listeners may not be ready yet, which left a
+                # cached image with an unusable entrypoint (exec format error).
+                network: host
               container_name: symbios-base-ldap
               ports:
                 - "127.0.0.1:389:389"
@@ -552,6 +558,30 @@
 
     - name: Flush handlers to ensure LDAP container is started
       ansible.builtin.meta: flush_handlers
+
+    # A failed build can leave a stale image tagged with the compose image
+    # name. Later runs see the generated files as unchanged, skip the build
+    # handler and start that image, whose entrypoint may be empty or missing
+    # its shebang (exec format error). Detect this before starting the
+    # container and rebuild without cache only when the image is broken.
+    - name: Check LDAP image entrypoint
+      ansible.builtin.shell: |
+        image="$(docker compose config --images | head -n1)"
+        test -n "$image" || exit 1
+        docker image inspect "$image" >/dev/null 2>&1 || exit 1
+        docker run --rm --entrypoint /bin/sh "$image" -c 'test -s /docker-entrypoint.sh && head -n1 /docker-entrypoint.sh | grep -qx "#!/bin/bash"'
+      args:
+        chdir: "{{ docker_path }}"
+      register: ldap_image_check
+      changed_when: false
+      failed_when: false
+
+    - name: Rebuild LDAP image when its entrypoint is invalid
+      ansible.builtin.shell: docker compose build --no-cache
+      args:
+        chdir: "{{ docker_path }}"
+      changed_when: true
+      when: ldap_image_check.rc != 0
 
     # Start (or recreate) the container explicitly. The restart handler
     # above only fires when one of three files changed, so a missing or
@@ -725,13 +755,18 @@
 
     # The store is authoritative for host scripts (f_symbios_ldap_init). The
     # plaintext .ldap_admin_pw remains for the WebUI container, which has no
-    # access to the store identity. creates: keeps a re-run from overwriting
-    # the stored value (that would break every LDAP password hook).
+    # access to the store identity. The stat guard keeps a re-run from
+    # overwriting the stored value (that would break every LDAP password hook).
+    - name: Check LDAP admin password in the central secret store
+      ansible.builtin.stat:
+        path: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/secrets/ldap_admin_password.age"
+      register: ldap_admin_secret_stat
+
     - name: Seed LDAP admin password into the central secret store
       ansible.builtin.shell:
         cmd: '"{{ git_root }}/scripts/symbios-secret.sh" init >/dev/null && cat "{{ base_services_root }}/symbios-ui/config/.ldap_admin_pw" | "{{ git_root }}/scripts/symbios-secret.sh" put ldap_admin_password'
-        creates: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/secrets/ldap_admin_password.age"
       changed_when: true
+      when: not ldap_admin_secret_stat.stat.exists
       no_log: true
 
 
