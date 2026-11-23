@@ -25,7 +25,7 @@
 #     - twofa_enabled
 #   name: OpenCode
 #   short_description: Deploy the OpenCode coding assistant
-#   description: Deploys OpenCode 2, a coding assistant web interface. Exposed via Traefik; a generated server password (stored at /symbios/services/opencode/.server-password) is injected by Traefik, so only the Authelia login is required.
+#   description: Deploys OpenCode 2, a coding assistant web interface. The browser route is exposed via Traefik with Authelia; a generated server password (stored at /symbios/services/opencode/.server-password) is injected by Traefik, so only the Authelia login is required. A second LAN-only route at opencode-api.<base_domain> accepts the client-supplied Basic auth header without Authelia for native clients such as AndCode; it is restricted to RFC1918/ULA source addresses by the shared allowlocalipsonly@file middleware.
 #   url: "https://opencode.{{ base_domain }}"
 #   author: Oliver Bohlen
 #   version: '2.0'
@@ -72,6 +72,7 @@
   vars:
     service_name: opencode
     service_domain: "{{ service_name }}.{{ base_domain }}"
+    opencode_api_domain: "opencode-api.{{ base_domain }}"
     secret_vars:
       - ai_apikey
 
@@ -185,6 +186,18 @@
           {{ opencode_access_block }}
                   - "authelia@file"
                   - "opencode-auth@file"
+              # Native clients cannot complete an Authelia login. This route
+              # passes their Basic auth through to OpenCode and stays LAN/WG-only.
+              opencode-api:
+                rule: "Host(`{{ opencode_api_domain }}`)"
+                service: opencode
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "secHeaders@file"
+                  - "allowlocalipsonly@file"
             services:
               opencode:
                 loadBalancer:
