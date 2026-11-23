@@ -339,6 +339,10 @@ What it does **not** mitigate - residual risks:
   store, not the source of truth. `shred` on SSD/CoW filesystems is best-effort.
 - Existing secrets in `inventory.yml`, service env files and rootfs paths are
   migrated gradually; until then both storage models coexist.
+- The SFTP share's LDAP readuser bind password is store-backed as
+  `sftp-share/ldap_bindpw`. `nslcd.conf` stays a root-only derived file because
+  nslcd cannot read the age identity; reapply `services/sftp-share.yml` after
+  rotating it.
 
 Rotating a secret:
 
@@ -354,6 +358,23 @@ Rotating a secret:
    `shared-tasks/secret-env.yml` regenerates the env file from the store and
    notifies the compose restart handler, so running containers pick up the new
    value. Other consumers read the store at runtime and need no reapply.
+
+There is no scheduled rotation; rotation is event-driven. The primitive is
+`rotate --plan` (dry run), `rotate --apply` (store change plus propagation) and
+`rollback` (one previous ciphertext). Metadata lives in
+`<config_dir>/secrets/meta/` and records type, policy, consumers, last rotation
+and rollback time, but never a value. A propagation hook under
+`scripts/secret-rotation.d/` receives the new and old values as two transient
+0600 files; if it exits non-zero, the previous ciphertext is restored
+automatically. A failed hook therefore consumes the rollback copy because the
+store is already back to the old value. Generated secrets may be rotated in the
+store; application-owned credentials must be changed in the application first
+and then written back with `put`.
+
+The `secret-store` healthcheck validates identity and directory permissions,
+resolves every `secret:` reference from `inventory.yml`, flags stale transient
+plaintext files, and warns about known credential keys that are still stored in
+plaintext. It reports names only, never values.
 
 ### L4: SSH StrictHostKeyChecking
 - Test scripts use `StrictHostKeyChecking=no` for dev environments.

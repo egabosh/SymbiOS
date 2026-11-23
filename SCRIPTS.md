@@ -444,6 +444,16 @@ Contract:
   path. Values never appear in argv or on stdout.
 - `list` prints names only. `rotate <name>` generates a new 64-hex value and
   prints the path of a 0600 file holding it. `delete <name>` shreds a value.
+- Rotation control: `rotate <name> --plan` prints the intended action and
+  metadata without changing anything. `rotate <name> --apply` keeps one
+  previous ciphertext (`<name>.age.prev`), runs the optional hook
+  `scripts/secret-rotation.d/<name-with-slashes-as-__>.sh` with
+  `<name> <new-file> <old-file>` (both 0600), and restores the previous
+  ciphertext if the hook fails. `status <name>` shows type, policy, consumers,
+  last rotation and hook; `rollback <name>` restores the previous ciphertext.
+  A failed hook consumes the rollback copy because the store is already back
+  to the old value. Application-owned secrets must be changed in the
+  application first and written back with `put`.
 - `import-env <file> --prefix <prefix>` stores every `KEY=value` as
   `<prefix>/<KEY>`, verifies the roundtrip, then replaces the env file with a
   generated one carrying a `# secret-prefix:` header. `export-env <file>`
@@ -516,7 +526,7 @@ texts opportunistically).
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | `symbios-set-hostname.sh` | Hostname from `base_domain`, idempotent, `--check` mode (template model) | `[--check]` |
-| `symbios-secret.sh` | Central encrypted secret store: age identity in `<data_root>/.keys`, ciphertext in `<config_dir>/secrets`, env-file import/export | `init\|put\|get\|list\|rotate\|import-env\|export-env\|cleanup` |
+| `symbios-secret.sh` | Central encrypted secret store: age identity in `<data_root>/.keys`, ciphertext in `<config_dir>/secrets`, env-file import/export and event-driven rotation | `init\|put\|get\|list\|rotate\|status\|rollback\|import-env\|export-env\|cleanup` |
 | `symbios-power.sh` | Reboot / shutdown the host (WebUI, exec-modal notice) | `reboot\|shutdown` |
 | `symbios-data-partition.sh` | `/symbios` data partition incl. LUKS setup/mount/rollback and `wipe` (erase a disk for reuse; `--unmount` releases leftover mounts). Label-based explicit mounts (no fstab), exact label match only | `list\|status\|setup\|wipe\|rollback` |
 | `symbios-media-partition.sh` | Optional `SYMBIOS_MEDIA` volume (labels `SYMBIOS_MEDIA` / `CRYPT_LUKS_SYMBIOS_MEDIA`) incl. setup/adopt/rollback, no reboot; `prepare-member` turns a replacement disk into an encrypted member (LUKS + boot keyfile, opened) for a btrfs replace (`--force` overwrites foreign signatures, `--unmount` releases leftover mounts) | `status\|setup\|adopt\|prepare-member\|rollback` |

@@ -113,6 +113,54 @@
     # document roots are mounted below /sftp-share/static-web/<name>; run
     # static-web.yml first so the dirs and their ACLs exist.
     static_web_instances_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/static-web/instances.yml"
+  pre_tasks:
+    # The bind password is authoritative in the central store. On hosts that
+    # still have the legacy plaintext value, seed it once (the stat guard keeps
+    # a rotation from being overwritten on the next run).
+    - name: Check whether the SFTP bind password is already stored
+      ansible.builtin.stat:
+        path: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/secrets/sftp-share/ldap_bindpw.age"
+      register: sftp_bindpw_stored
+
+    - name: Seed the SFTP LDAP bind password into the central secret store
+      ansible.builtin.shell:
+        cmd: '"{{ git_root }}/scripts/symbios-secret.sh" init >/dev/null && grep "^LDAP_READUSER_PASSWORD=" "{{ base_services_root }}/ldap/env.openldap" | cut -d= -f2- | "{{ git_root }}/scripts/symbios-secret.sh" put sftp-share/ldap_bindpw'
+      when: not sftp_bindpw_stored.stat.exists
+      changed_when: true
+      no_log: true
+
+    - name: Read the SFTP LDAP bind password into a transient file
+      ansible.builtin.command:
+        argv:
+          - "{{ git_root }}/scripts/symbios-secret.sh"
+          - get
+          - sftp-share/ldap_bindpw
+      register: sftp_bindpw_get
+      changed_when: false
+      no_log: true
+
+    - name: Load the SFTP LDAP bind password and remove the transient file
+      block:
+        - name: Load the transient bind password
+          ansible.builtin.slurp:
+            src: "{{ sftp_bindpw_get.stdout | trim }}"
+          register: sftp_bindpw_bundle
+          changed_when: false
+          no_log: true
+
+        - name: Set the resolved bind password fact
+          ansible.builtin.set_fact:
+            sftp_ldap_readpw_value: "{{ sftp_bindpw_bundle.content | b64decode | trim }}"
+          no_log: true
+      always:
+        - name: Remove the transient bind password file
+          ansible.builtin.command:
+            argv:
+              - "{{ git_root }}/scripts/symbios-secret.sh"
+              - cleanup
+              - "{{ sftp_bindpw_get.stdout | trim }}"
+          changed_when: false
+
   tasks:
 
   - name: Read WordPress instance list for SFTP auto-exposure
@@ -237,12 +285,8 @@
     notify:
     - Restart sftp-share
 
-  - name: Read LDAP readuser password for the container nslcd.conf
-    ansible.builtin.shell: grep ^LDAP_READUSER_PASSWORD= /symbios/base-services/ldap/env.openldap | cut -d= -f2-
-    register: sftp_ldap_readpw
-    changed_when: false
-    no_log: true
-
+  # nslcd.conf stays plaintext because nslcd cannot read the age identity.
+  # It is a root-only derived artifact of the store value resolved above.
   - name: /symbios/services/sftp-share/nslcd.conf (LDAP user/group resolution)
     blockinfile:
       path: /symbios/services/sftp-share/nslcd.conf
@@ -264,7 +308,7 @@
         timelimit 3
         reconnect_retrytime 1
         binddn cn=readuser,{{ ldap_basedn }}
-        bindpw {{ sftp_ldap_readpw.stdout }}
+        bindpw {{ sftp_ldap_readpw_value }}
       backup: yes
     no_log: true
     notify:

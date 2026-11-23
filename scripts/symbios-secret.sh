@@ -27,7 +27,9 @@
 #   symbios-secret.sh put <name>
 #   symbios-secret.sh get <name> [--path <file>]
 #   symbios-secret.sh list
-#   symbios-secret.sh rotate <name>
+#   symbios-secret.sh rotate <name> [--plan|--apply|--no-apply]
+#   symbios-secret.sh status <name>
+#   symbios-secret.sh rollback <name>
 #   symbios-secret.sh import-env <file> --prefix <prefix> [--dry-run]
 #   symbios-secret.sh export-env <file>
 #   symbios-secret.sh cleanup <file>
@@ -62,8 +64,14 @@ Commands:
                              Without --path a transient file is created. The
                              caller SHREDs it after use (see cleanup).
   list                       List stored secret names (never values).
-  rotate <name>              Generate a new 64-hex-character value, store it
-                             and print the path of a 0600 file holding it.
+  rotate <name> [--plan|--apply|--no-apply]
+                             Generate a new 64-hex-character value. Without a
+                             flag (or with --no-apply) only the store changes;
+                             --apply also runs the matching propagation hook
+                             and keeps one previous ciphertext for rollback.
+                             --plan prints the intended actions only.
+  status <name>              Show rotation metadata (never the value).
+  rollback <name>            Restore the previous ciphertext if present.
   delete <name>              Shred a stored value (audit-logged by name).
   import-env <file> --prefix <prefix> [--dry-run]
                              Store every KEY=value of an env file as
@@ -157,6 +165,8 @@ function f_store_paths {
 function f_require_tools {
   command -v age >/dev/null 2>&1 || f_fail "age is not installed"
   command -v age-keygen >/dev/null 2>&1 || f_fail "age-keygen is not installed"
+  command -v flock >/dev/null 2>&1 || f_fail "flock is not installed"
+  command -v openssl >/dev/null 2>&1 || f_fail "openssl is not installed"
   [[ -n "${g_config_dir:-}" && -d "${g_config_dir}" ]] || f_fail "config directory not available: ${g_config_dir:-unset}"
 }
 
@@ -321,21 +331,200 @@ function f_cmd_list {
   f_audit_event secret list "store"
 }
 
-function f_cmd_rotate {
-  local f_name="${1:-}" f_value f_value_file f_out
-  [[ -n "${f_name}" ]] || f_usage_error "rotate needs a secret name"
+# Rotation metadata is intentionally a flat key=value file per secret: it
+# holds no values, needs no extra parser, and can be written atomically.
+function f_meta_file {
+  local f_name="$1" f_safe
+  f_safe="${f_name//\//__}"
+  printf '%s\n' "${g_secret_dir}/meta/${f_safe}.meta"
+}
+
+function f_meta_get {
+  local f_name="$1" f_key="$2" f_file f_line
+  f_file="$(f_meta_file "${f_name}")"
+  [[ -f "${f_file}" ]] || return 0
+  f_line="$(grep -F "${f_key}=" "${f_file}" | head -1)"
+  printf '%s' "${f_line#*=}"
+}
+
+function f_meta_set {
+  local f_name="$1" f_key="$2" f_value="$3" f_file f_tmp
+  f_file="$(f_meta_file "${f_name}")"
+  mkdir -p "$(dirname "${f_file}")" || f_fail "cannot create secret metadata dir"
+  chmod 0700 "$(dirname "${f_file}")" || true
+  f_tmp=$(mktemp "${g_secret_dir}/.meta-XXXXXX") || f_fail "cannot create secret metadata temp file"
+  f_scratch_register "${f_tmp}"
+  if [[ -f "${f_file}" ]]
+  then
+    grep -v -F "${f_key}=" "${f_file}" > "${f_tmp}" || true
+  fi
+  printf '%s=%s\n' "${f_key}" "${f_value}" >> "${f_tmp}" || f_fail "cannot write secret metadata"
+  chmod 0600 "${f_tmp}" || true
+  mv -f "${f_tmp}" "${f_file}" || f_fail "cannot replace secret metadata"
+  f_scratch_untrack "${f_tmp}"
+}
+
+# A hook receives <name> <new-value-file> <old-value-file>, both 0600 and
+# transient. It must exit non-zero if propagation failed so the store can be
+# rolled back. Hook names mirror the secret name with slashes replaced.
+function f_hook_path {
+  local f_name="$1" f_safe
+  f_safe="${f_name//\//__}"
+  printf '%s\n' "${g_script_dir}/secret-rotation.d/${f_safe}.sh"
+}
+
+function f_rotation_lock {
+  exec 9>"${g_secret_dir}/.rotation.lock" || f_fail "cannot open rotation lock"
+  flock -w 30 9 || f_fail "another secret rotation is running"
+}
+
+function f_cmd_status {
+  local f_name="${1:-}" f_file f_hook f_type f_policy
+  [[ -n "${f_name}" ]] || f_usage_error "status needs a secret name"
+  f_validate_name "${f_name}"
   f_require_initialized
+  f_file="$(f_secret_file "${f_name}")"
+  [[ -f "${f_file}" ]] || f_fail "secret not found: ${f_name}"
+  f_hook="$(f_hook_path "${f_name}")"
+  f_type="$(f_meta_get "${f_name}" type)"
+  [[ -n "${f_type}" ]] || f_type="generated"
+  f_policy="$(f_meta_get "${f_name}" policy)"
+  [[ -n "${f_policy}" ]] || f_policy="manual"
+  printf 'name=%s\n' "${f_name}"
+  printf 'type=%s\n' "${f_type}"
+  printf 'policy=%s\n' "${f_policy}"
+  printf 'consumers=%s\n' "$(f_meta_get "${f_name}" consumers)"
+  printf 'last_rotated=%s\n' "$(f_meta_get "${f_name}" last_rotated)"
+  if [[ -x "${f_hook}" ]]
+  then
+    printf 'hook=%s\n' "${f_hook}"
+  else
+    printf 'hook=none\n'
+  fi
+  if [[ -f "${f_file}.prev" ]]
+  then
+    printf 'previous-ciphertext=%s\n' "${f_file}.prev"
+  else
+    printf 'previous-ciphertext=none\n'
+  fi
+}
+
+function f_cmd_rotate {
+  local f_name="${1:-}" f_mode="plain" f_value f_value_file f_out f_old_file
+  local f_hook f_source f_prev f_type f_policy f_consumers
+  shift || true
+  while [[ $# -gt 0 ]]
+  do
+    case "$1" in
+      --plan) f_mode="plan" ;;
+      --apply) f_mode="apply" ;;
+      --no-apply) f_mode="no-apply" ;;
+      *) f_usage_error "unknown rotate option: $1" ;;
+    esac
+    shift
+  done
+  [[ -n "${f_name}" ]] || f_usage_error "rotate needs a secret name"
+  f_validate_name "${f_name}"
+  f_require_initialized
+
+  f_source="$(f_secret_file "${f_name}")"
+  [[ -f "${f_source}" ]] || f_fail "secret not found: ${f_name}"
+  f_prev="${f_source}.prev"
+  f_hook="$(f_hook_path "${f_name}")"
+  f_type="$(f_meta_get "${f_name}" type)"
+  [[ -n "${f_type}" ]] || f_type="generated"
+  f_policy="$(f_meta_get "${f_name}" policy)"
+  [[ -n "${f_policy}" ]] || f_policy="manual"
+  f_consumers="$(f_meta_get "${f_name}" consumers)"
+
+  if [[ "${f_mode}" == "plan" ]]
+  then
+    printf 'rotate %s\n' "${f_name}"
+    printf 'type=%s policy=%s\n' "${f_type}" "${f_policy}"
+    printf 'consumers=%s\n' "${f_consumers:-none}"
+    if [[ -x "${f_hook}" ]]
+    then
+      printf 'hook=%s\n' "${f_hook}"
+    else
+      printf 'hook=none\n'
+    fi
+    if [[ -f "${f_prev}" ]]
+    then
+      printf 'previous-ciphertext=%s\n' "${f_prev}"
+    else
+      printf 'previous-ciphertext=none\n'
+    fi
+    return 0
+  fi
+
+  # An application-owned credential has to be changed in the application
+  # first; use `put` afterwards. Rotating it here would only desynchronise.
+  [[ "${f_type}" == "generated" ]] \
+    || f_fail "secret ${f_name} is app-owned; change it in the application and use put"
+
+  f_rotation_lock
+  f_old_file=$(mktemp "${g_config_dir}/.secret-old-XXXXXX") || f_fail "cannot create rotation temp file"
+  f_scratch_register "${f_old_file}"
+  f_store_get "${f_name}" "${f_old_file}"
   f_value=$(openssl rand -hex 32) || f_fail "cannot generate a new value"
   f_value_file=$(f_value_to_file "${f_value}")
   f_scratch_register "${f_value_file}"
+
+  if [[ "${f_mode}" == "apply" ]]
+  then
+    cp -a "${f_source}" "${f_prev}" || f_fail "cannot create rollback copy"
+    chmod 0600 "${f_prev}" || true
+  fi
+
   f_store_put rotate "${f_name}" "${f_value_file}"
+
+  if [[ "${f_mode}" == "apply" && -x "${f_hook}" ]]
+  then
+    if ! "${f_hook}" "${f_name}" "${f_value_file}" "${f_old_file}"
+    then
+      mv -f "${f_prev}" "${f_source}" || f_fail "hook failed and rollback could not be restored"
+      f_fail "propagation hook failed for ${f_name}; store rolled back"
+    fi
+  fi
+
+  f_meta_set "${f_name}" type "${f_type}"
+  f_meta_set "${f_name}" policy "$([[ "${f_mode}" == "apply" ]] && printf event || printf manual)"
+  f_meta_set "${f_name}" last_rotated "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  [[ -z "${f_consumers}" ]] || f_meta_set "${f_name}" consumers "${f_consumers}"
+
+  if [[ "${f_mode}" == "apply" ]]
+  then
+    if [[ -x "${f_hook}" ]]
+    then
+      g_echo_note "rotated ${f_name}, propagated by ${f_hook}"
+    else
+      g_echo_note "rotated ${f_name} (no propagation hook)"
+    fi
+    return 0
+  fi
+
   f_out=$(mktemp "${g_config_dir}/.secret-rotated-XXXXXX") || f_fail "cannot create temp file"
   f_scratch_register "${f_out}"
   printf '%s' "${f_value}" > "${f_out}" || f_fail "cannot write temp file"
   chmod 0600 "${f_out}" || f_fail "cannot chmod temp file"
-  shred -u "${f_value_file}" 2>/dev/null || rm -f "${f_value_file}"
   f_scratch_untrack "${f_out}"
   printf '%s\n' "${f_out}"
+}
+
+function f_cmd_rollback {
+  local f_name="${1:-}" f_source f_prev
+  [[ -n "${f_name}" ]] || f_usage_error "rollback needs a secret name"
+  f_validate_name "${f_name}"
+  f_require_initialized
+  f_source="$(f_secret_file "${f_name}")"
+  f_prev="${f_source}.prev"
+  [[ -f "${f_prev}" ]] || f_fail "no previous ciphertext for ${f_name}"
+  f_rotation_lock
+  mv -f "${f_prev}" "${f_source}" || f_fail "cannot restore previous ciphertext"
+  chmod 0600 "${f_source}" || true
+  f_meta_set "${f_name}" rolled_back "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  f_audit_event secret rollback "${f_name}"
+  g_echo_note "rolled back ${f_name}; reapply consumers to propagate"
 }
 
 function f_cmd_import_env {
@@ -484,6 +673,8 @@ case "${1:-}" in
   get) f_require_tools; shift; f_cmd_get "$@" ;;
   list) f_require_tools; shift; [[ $# -eq 0 ]] || f_usage_error "list takes no arguments"; f_cmd_list ;;
   rotate) f_require_tools; shift; f_cmd_rotate "$@" ;;
+  status) f_require_tools; shift; [[ $# -eq 1 ]] || f_usage_error "status needs exactly one name"; f_cmd_status "$1" ;;
+  rollback) f_require_tools; shift; [[ $# -eq 1 ]] || f_usage_error "rollback needs exactly one name"; f_cmd_rollback "$1" ;;
   delete) shift; f_cmd_delete "$@" ;;
   import-env) f_require_tools; shift; f_cmd_import_env "$@" ;;
   export-env) f_require_tools; shift; f_cmd_export_env "$@" ;;
