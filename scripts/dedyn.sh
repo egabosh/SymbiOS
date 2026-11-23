@@ -46,6 +46,18 @@ g_lockfile
 g_dedyn_log="${g_log_dir}/dedyn.log"
 exec > >(tee -a "$g_dedyn_log") 2>&1
 
+# Skip silently when DDNS is not used on this host. This must happen before
+# touching the secret store: self-managed hosts have no ddns_apikey, and a
+# failed lookup would notify on every cron tick (g_echo_error -> notify.sh).
+# Only an explicit "self-managed" skips; legacy hosts with an empty dns_mode
+# but a configured ddns_host keep working as before.
+dedynhosts="$(f_symbios_var ddns_host '')"
+doipv6="$(f_symbios_var ddns_ipv6 '')"
+if [[ "$(f_symbios_var dns_mode '')" == "self-managed" || -z "${dedynhosts}" ]]
+then
+  exit 0
+fi
+
 # deDyn/deSEC-Settings: the API token comes from the central secret store.
 # ddns_host and ddns_ipv6 stay in inventory (they are not secrets).
 dedynpw=""
@@ -61,8 +73,6 @@ else
     dedynpw=""
   fi
 fi
-dedynhosts="$(f_symbios_var ddns_host '')"
-doipv6="$(f_symbios_var ddns_ipv6 '')"
 
 # Keep the token out of curl's argv: -K reads the Authorization header from a
 # transient 0600 config file, shredded on exit with the other secret files.
@@ -73,12 +83,6 @@ then
   printf 'header = "Authorization: Token %s"\n' "${dedynpw}" > "${g_dedyn_curl_cfg}" || exit 1
   g_secret_files+=("${g_dedyn_curl_cfg}")
   f_secret_cleanup_register
-fi
-
-# Skip silently when no DDNS host is configured yet
-if [[ -z "${dedynhosts}" ]]
-then
-  exit 0
 fi
 
 g_dedyndns="ns2.desec.org. ns1.desec.io."
