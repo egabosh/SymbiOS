@@ -6,11 +6,16 @@
 #
 # Required vars:  service_name, service_domain, traefik_backend_url
 # Optional vars:  traefik_middlewares (list; default: ["secHeaders@file", "authelia@file"])
+# Optional vars:  traefik_access_force_local (bool; default: false) always adds
+#   allowlocalipsonly@file, e.g. for a deliberately LAN-only extra router.
 #   Rendered via a single-line map/join expression (no {% for %} in block:).
+
+- name: Resolve Traefik host access for {{ service_name }}
+  ansible.builtin.include_tasks: traefik-access.yml
 
 - name: Render Traefik middlewares block
   ansible.builtin.set_fact:
-    traefik_middlewares_block: "{{ (traefik_middlewares | default(['secHeaders@file', 'authelia@file'])) | map('regex_replace', '^(.*)$', '        - \"\\1\"') | join('\n') }}"
+    traefik_middlewares_block: "{{ ((traefik_middlewares | default(['secHeaders@file', 'authelia@file'])) + traefik_access_middlewares + (['allowlocalipsonly@file'] if (traefik_access_force_local | default(false) | bool) else [])) | unique | map('regex_replace', '^(.*)$', '        - \"\\1\"') | join('\n') }}"
 
 - name: "/symbios/base-services/traefik/providers/{{ service_name }}.yml Routing Configuration"
   ansible.builtin.blockinfile:

@@ -17,6 +17,8 @@
 #   uses_vars:
 #     - acme_resolver
 #     - base_domain
+#     - traefik_default_access
+#     - traefik_service_access
 #     - twofa_enabled
 #   name: Matrix
 #   short_description: Deploy the Matrix communication server
@@ -788,6 +790,15 @@
         backup: yes
       notify: Restart matrix
 
+    # Federation, Synapse and MAS auth hosts stay reachable from the internet
+    # in every mode; only the browser/admin hosts follow the host access mode.
+    - name: Resolve Traefik host access for matrix
+      ansible.builtin.include_tasks: ../shared-tasks/traefik-access.yml
+
+    - name: Render Traefik access middlewares for matrix
+      ansible.builtin.set_fact:
+        matrix_access_block: "{{ traefik_access_middlewares | map('regex_replace', '^(.*)$', '        - \"\\1\"') | join('\n') }}"
+
     - name: /symbios/base-services/traefik/providers/matrix.yml Matrix<->Traefik provider
       blockinfile:
         path: /symbios/base-services/traefik/providers/matrix.yml
@@ -840,6 +851,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+          {{ matrix_access_block }}
                   - "authelia@file"
 
               matrix-web:
@@ -851,6 +863,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+          {{ matrix_access_block }}
                   - "authelia@file"
 
             services:

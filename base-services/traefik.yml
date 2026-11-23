@@ -19,6 +19,8 @@
 #     - acme_resolver
 #     - acme_server
 #     - base_domain
+#     - traefik_default_access
+#     - traefik_service_access
 #     - webui_public_access
 #   name: Traefik
 #   short_description: Deploy and configure the Traefik reverse proxy
@@ -272,6 +274,28 @@
                       ipv6Subnet: 64
 
       notify: Restart traefik
+
+    - name: Validate stored Traefik host access modes
+      ansible.builtin.assert:
+        that:
+          - (traefik_default_access | default('internal')) in ['internal', 'internet']
+          - (traefik_service_access | default({})).get('symbios-ui', 'default') in ['default', 'internal', 'internet']
+          - (traefik_service_access | default({})).get('traefik-dashboard', 'default') in ['default', 'internal', 'internet']
+        fail_msg: >-
+          Invalid Traefik host access mode. Allowed values are default,
+          internal, internet for traefik_default_access and the
+          symbios-ui / traefik-dashboard keys of traefik_service_access.
+        quiet: true
+
+    # The WebUI keeps the legacy webui_public_access switch only as a fallback:
+    # an explicit traefik_service_access['symbios-ui'] always wins.
+    - name: Resolve WebUI Traefik host access mode
+      ansible.builtin.set_fact:
+        traefik_ui_access_mode: "{{ (traefik_service_access | default({})).get('symbios-ui', 'default') if ((traefik_service_access | default({})).get('symbios-ui', 'default') != 'default') else ('internet' if (webui_public_access | default(false) | bool) else (traefik_default_access | default('internal'))) }}"
+
+    - name: Resolve Traefik dashboard host access mode
+      ansible.builtin.set_fact:
+        traefik_dashboard_access_mode: "{{ (traefik_service_access | default({})).get('traefik-dashboard', 'default') if ((traefik_service_access | default({})).get('traefik-dashboard', 'default') != 'default') else (traefik_default_access | default('internal')) }}"
 
     - name: "{{ docker_path }}/providers/symbios-services.yml Routing Configuration"
       ansible.builtin.template:

@@ -55,6 +55,39 @@ def _get_base_domain():
         return ''
 
 
+def _network_access_context(item, playbook):
+    """Build the per-service Traefik network access selector, if supported.
+
+    Only user-service playbooks declaring one of the access vars in
+    docs.uses_vars can deploy an override. Base services (Traefik, WebUI)
+    are configured on Settings -> Access, not by a service-name override.
+    """
+    if not playbook.startswith('services/'):
+        return None
+    uses_vars = (item.get('docs') or {}).get('uses_vars') or []
+    if not any(v in ('traefik_default_access', 'traefik_service_access')
+               for v in uses_vars):
+        return None
+    config_path = os.environ.get('CONFIG_PATH', '/config/inventory.yml')
+    try:
+        with open(config_path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+        vars_ = cfg.get('all', {}).get('vars', {}) or {}
+    except Exception:
+        vars_ = {}
+    stored_default = vars_.get('traefik_default_access')
+    default = stored_default if stored_default in ('internal', 'internet') else 'internal'
+    overrides = vars_.get('traefik_service_access')
+    service = get_service_name(playbook)
+    override = overrides.get(service) if isinstance(overrides, dict) else None
+    if override in ('internal', 'internet'):
+        mode, source = override, 'override'
+    else:
+        mode, source = default, 'default'
+    return {'service': service, 'mode': mode, 'source': source,
+            'default': default}
+
+
 def _get_inventory_vars():
     """Read scalar vars from inventory.yml (all.vars).
 
@@ -392,6 +425,7 @@ def services_detail(request, playbook):
     all_catalog = get_catalog()
     # Build access groups context from the playbook's docs.access config.
     access_ctx = _build_access_context(item)
+    network_access = _network_access_context(item, playbook)
     # External systems: show compatible systems for this playbook's type (remote if in external-services)
     is_external = playbook.startswith('external-services/')
     playbook_target_type = docs_target_type(item.get('docs'))
@@ -479,6 +513,7 @@ def services_detail(request, playbook):
         'service_description': service_description,
         'access_groups': access_ctx['groups'],
         'all_ldap_users': access_ctx['users'],
+        'network_access': network_access,
         'compatible_systems': compatible_systems,
         'playbook_target_type': playbook_target_type,
         'is_external': is_external,
@@ -1052,6 +1087,41 @@ def services_access(request, playbook):
         flash_messages.success(request, f'"{uid}" {"added to" if action == "add" else "removed from"} "{group}".')
     else:
         flash_messages.error(request, f'Error: {output}')
+    return redirect(f'/services/{playbook}/')
+
+
+@login_required
+def services_network_access(request, playbook):
+    """Set a service's Traefik network access override via the settings CLI.
+
+    POST parameter: mode (default|internal|internet). The CLI owns validation
+    and inventory writes; this view only checks that the playbook supports the
+    override and starts one job (AJAX) or runs it synchronously (fallback).
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Invalid request'}, status=400)
+    item = get_playbook(playbook)
+    if item is None:
+        return JsonResponse({'error': 'Playbook not found'}, status=404)
+    if _network_access_context(item, playbook) is None:
+        return JsonResponse({'error': 'Playbook has no Traefik access support'}, status=400)
+    mode = request.POST.get('mode', '').strip()
+    if mode not in ('default', 'internal', 'internet'):
+        return JsonResponse({'error': 'Invalid access mode'}, status=400)
+    service = get_service_name(playbook)
+    cmd = 'symbios-settings-access.sh set --service {} --mode {}'.format(
+        shlex.quote(service), shlex.quote(mode))
+    from .utils.http import is_ajax_request
+    if is_ajax_request(request):
+        job_id = create_job(cmd, timeout=300)
+        return JsonResponse({'ok': True, 'job': job_id,
+                             'title': f'Saving network access for {service}...',
+                             'command': cmd})
+    ok, stdout, stderr = run_command(cmd, timeout=30)
+    if ok:
+        flash_messages.success(request, f'Network access for {service} saved.')
+    else:
+        flash_messages.error(request, f'Error: {(stderr or stdout).strip()}')
     return redirect(f'/services/{playbook}/')
 
 

@@ -19,6 +19,8 @@
 #     - base_domain
 #     - locale
 #     - traefik_network_gateway
+#     - traefik_default_access
+#     - traefik_service_access
 #     - twofa_enabled
 #   boot_units: kodi-standalone.service switch-kodi-desk.service
 #   name: Kodi

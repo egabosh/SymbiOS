@@ -17,6 +17,8 @@
 #   uses_vars:
 #     - acme_resolver
 #     - base_domain
+#     - traefik_default_access
+#     - traefik_service_access
 #     - twofa_enabled
 #   name: Forgejo
 #   short_description: Deploy the Forgejo git server

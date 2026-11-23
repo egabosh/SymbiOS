@@ -24,6 +24,8 @@
 # docs:
 #   uses_vars:
 #     - acme_resolver
+#     - traefik_default_access
+#     - traefik_service_access
 #   name: Redirects
 #   short_description: Redirect domains to other sites
 #   description: >-
@@ -103,6 +105,9 @@
       ansible.builtin.set_fact:
         redirect_instances: "{{ (redirect_instances_slurp.content | default('') | b64decode) | from_yaml | default([]) }}"
       when: redirect_instances_slurp.content | default('') | length > 0
+
+    - name: Resolve Traefik host access for redirects
+      ansible.builtin.include_tasks: ../shared-tasks/traefik-access.yml
 
     # One router per instance, redirecting to the target of the instance.
     # Traefik watches the providers directory, so no reload is required.

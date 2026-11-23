@@ -600,8 +600,12 @@ Layout, sharing and syntax rules for every playbook in `services/` and
   `set_fact` above the task.
 - **Traefik routing**: `shared-tasks/traefik-provider.yml` for the standard
   single-router case; inline `blockinfile` only for multi-router/special
-  setups. The reverse-proxy WebUI (`symbios-traefik-proxy-apply.sh`) is
-  independent of this task.
+  setups. Every playbook rendering a provider snippet must also resolve the
+  host's network access mode via `shared-tasks/traefik-access.yml` and declare
+  `uses_vars: traefik_default_access traefik_service_access` (alongside its
+  other Traefik keys) so an Access settings change re-runs it. The
+  reverse-proxy WebUI (`symbios-traefik-proxy-apply.sh`) is independent of
+  this task.
 - **Healthcheck + state**: every service deploys `runcheck.yml` (HTTP) or
   `runcheck-docker.yml` and ends with `state-register.yml` via include.
 - **Comments**: WHY not WHAT. Temporary migrations carry
@@ -977,6 +981,36 @@ still write `blockinfile` directly in the playbook.
         service_domain: "{{ service_domain }}"
         traefik_backend_url: "http://symbios-dabo-django:80"
 ```
+
+### `shared-tasks/traefik-access.yml` - per-host network access mode
+
+Resolves whether a service host accepts internal traffic only or also internet
+traffic. It reads `traefik_default_access` and `traefik_service_access` from
+`inventory.yml` (a missing entry or `default` follows the global default) and
+outputs:
+
+- `traefik_access_mode`: effective mode, `internal` or `internet`
+- `traefik_access_middlewares`: list for the HTTPS router
+  (`allowlocalipsonly@file` for `internal`, empty for `internet`)
+
+The firewall still opens ports 80/443 globally: the mode is a layer-7 decision
+on the hostname router and is independent of Authelia. Routers that must stay
+local (Home Assistant Matter) or public (Matrix federation, ACME/TURN,
+Authelia) keep their deliberate exposure.
+
+```yaml
+    # Required vars: service_name
+    # Reads inventory: traefik_default_access, traefik_service_access
+    # Outputs: traefik_access_mode, traefik_access_middlewares
+    - name: Resolve Traefik host access
+      include_tasks: ../shared-tasks/traefik-access.yml
+```
+
+Any playbook that renders a Traefik provider snippet must declare both
+`traefik_default_access` and `traefik_service_access` in its `# docs:`
+`uses_vars:` (together with its existing Traefik keys). Otherwise a save in
+Settings -> Access will not re-run the playbook and its router snippet keeps
+the old middleware set.
 
 ### `shared-tasks/base-domain-guard.yml` - fail without base_domain
 

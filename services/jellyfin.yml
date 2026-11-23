@@ -21,6 +21,8 @@
 #     - media_gid
 #     - media_images
 #     - media_videos
+#     - traefik_default_access
+#     - traefik_service_access
 #   name: Jellyfin
 #   short_description: Deploy the Jellyfin media server
 #   description: Deploys Jellyfin, a free and open-source media server, exposed via Traefik.
@@ -182,7 +184,6 @@
         traefik_backend_url: "http://jellyfin:8096"
         traefik_middlewares:
           - "secHeaders@file"
-          - "allowlocalipsonly@file"
 
     # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
     - name: Deploy healthcheck

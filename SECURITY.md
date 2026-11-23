@@ -433,20 +433,34 @@ Enforced at all password change points:
 - Admin password reset via WebUI
 - `symbios-ldap-user.sh` CLI script
 
-### WebUI Internet Access Control
+### Traefik Host Access Control
 
-Configurable in the WebUI under Settings > Security (Network Access toggle).
-Stored in `inventory.yml` as `webui_public_access` (default: `false`).
+Configurable in the WebUI under Settings -> Access, with a "Network access"
+selector on supported service detail pages. Stored in `inventory.yml` as
+`traefik_default_access` (`internal` by default) and `traefik_service_access`
+(a service name -> `default|internal|internet` map; a missing entry or
+`default` follows the global value).
 
-When `false` (default):
-- Traefik applies `allowlocalipsonly@file` middleware to the WebUI router
-- Only RFC1918 private IP ranges (10.x, 172.16-31.x, 192.168.x), IPv6 ULA
-  (`fc00::/7`), IPv6 link-local (`fe80::/10`) and loopback
-  (`127.0.0.1/32`, `::1/128`) can reach the WebUI via Traefik
-- The break-glass endpoint at localhost:8080 is unaffected
+| Mode | Effect on the host's HTTPS router |
+|------|-----------------------------------|
+| `internal` | Traefik adds the existing `allowlocalipsonly@file` middleware (RFC1918 private ranges 10.x, 172.16-31.x, 192.168.x, IPv6 ULA `fc00::/7`, IPv6 link-local `fe80::/10`, loopback `127.0.0.1/32` and `::1/128`) |
+| `internet` | No network restriction middleware is added |
 
-When `true`:
-- WebUI is reachable from the public internet (still requires Authelia auth)
+The firewall still opens ports 80/443 globally: exposure is decided per
+hostname at layer 7, not by a firewall rule. Authelia stays independent -
+`internal` restricts the source network, it does not remove the login
+requirement. Routers that must stay local (for example Home Assistant Matter)
+and routers that must stay reachable from the internet (Mastodon federation
+and WebFinger, Matrix federation, ACME and TURN challenges, Authelia itself)
+keep their deliberate exposure. Forwards from Settings -> Reverse Proxy follow
+the global default as well; their own `open|local|authelia` choice remains a
+separate decision about authentication.
+
+`webui_public_access` from Settings -> Security is deprecated and no longer
+shown there. It is honoured only as a fallback for the WebUI router, so
+existing installations keep their current exposure until the Settings ->
+Access page is used. The break-glass endpoint at localhost:8080 is unaffected
+by either setting.
 
 ### Reboot Policy
 

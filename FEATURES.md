@@ -70,11 +70,30 @@ every system; membership is managed in the WebUI under Users & Groups. The
 rules take effect from the next login, no Authelia restart needed.
 
 ### Security (`/settings/security/`)
-Global password policy (`none`…`paranoid`) for admin/user passwords, plus the
-WebUI public-access switch (Traefik re-apply only when the switch changes).
-- Playbooks: none for the policy (enforced by the WebUI/LDAP tooling),
-  `base-services/traefik.yml` for the public-access switch
-- Vars: `password_policy`, `webui_public_access`
+Global password policy (`none`…`paranoid`) for admin/user passwords. Network
+exposure of web hosts moved to Settings -> Access; `webui_public_access` is
+still honoured as an upgrade fallback for the WebUI router only.
+- Playbook: none for the policy (enforced by the WebUI/LDAP tooling)
+- Vars: `password_policy`
+
+### Network Access (`/settings/access/`)
+Decides per Traefik host whether it accepts only internal traffic
+(LAN/VPN/loopback) or also internet traffic. `internal` adds the existing
+`allowlocalipsonly@file` middleware to the host's HTTPS router (RFC1918,
+IPv6 ULA, link-local, loopback); `internet` adds no network middleware. Ports
+80/443 stay open globally, so this is a layer-7 decision per hostname, and
+Authelia still applies independently. Deliberately local routers (Home
+Assistant Matter) and deliberately public ones (Mastodon federation and
+WebFinger, Matrix federation, ACME/TURN challenges, Authelia itself) keep
+their intended exposure. The global default can be overridden per service,
+including from the "Network access" selector on supported service detail pages.
+Reverse-proxy forwards follow the global default too; their `open|local|authelia`
+choice stays independent of network exposure.
+- Playbooks: `base-services/traefik.yml` and every playbook rendering a
+  Traefik provider snippet (via `shared-tasks/traefik-access.yml`)
+- Script: `scripts/symbios-settings-access.sh` (single source of truth)
+- Vars: `traefik_default_access` (`internal`|`internet`, default `internal`),
+  `traefik_service_access` (service name -> `default`|`internal`|`internet`)
 
 ### Security Certificates / TLS (`/settings/acme/`)
 Which ACME server issues the Let's Encrypt certificates Traefik serves and

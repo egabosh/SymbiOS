@@ -22,6 +22,8 @@
 #     - media_documents
 #     - media_gid
 #     - media_inbox
+#     - traefik_default_access
+#     - traefik_service_access
 #     - twofa_enabled
 #   name: Paperless-ngx
 #   short_description: Deploy the Paperless-ngx document management system

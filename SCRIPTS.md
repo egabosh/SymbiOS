@@ -294,6 +294,10 @@ caller from old vs new values.
 symbios-settings-security.sh set --policy high --public-access true [--check]
 ```
 
+The WebUI public-access flag (`webui_public_access`) is deprecated: new
+installations configure host exposure with `symbios-settings-access.sh` under
+Settings -> Access. The flag stays as the WebUI-router fallback for upgrades.
+
 ### 3.14 `symbios-settings-media.sh`
 
 The 8 standard media paths (all required, all absolute). Flags mirror the
@@ -359,6 +363,27 @@ and `ufw-add/ufw-remove --port --proto` (canonicalized entries via
 Companion CLIs for non-`/settings/` endpoints that still own inventory
 state: file manager custom scripts (validated name/command list) and the
 setup wizard connection type (`home|root|airgapped`).
+
+### 3.22 `symbios-settings-access.sh`
+
+Traefik host access for Settings -> Access: the global default and the
+per-service overrides (`traefik_default_access`, `traefik_service_access`).
+Both keys are written in one `inventory.yml` merge; a real change triggers
+one `apply` run resolved from `uses_vars`.
+
+```bash
+symbios-settings-access.sh get [--json] [--service NAME]
+symbios-settings-access.sh set --default internal|internet [--check] [--no-apply]
+symbios-settings-access.sh set --service NAME --mode default|internal|internet [--check] [--no-apply]
+echo '{"traefik_default_access":"internal"}' | symbios-settings-access.sh set --json-stdin
+symbios-settings-access.sh schema
+symbios-settings-access.sh apply [--dry-run]
+```
+
+`get --service NAME --json` reports the effective mode and whether it comes
+from the global default or a service override. `default` (or a missing map
+entry) follows `traefik_default_access`. There are no secrets; the WebUI starts one `set`
+job and adds no explicit apply call.
 
 ## 3b. Config-file engine (Phase 4: beyond settings)
 
@@ -496,6 +521,7 @@ texts opportunistically).
 | `symbios-settings-ai.sh`, `-ai-speech.sh`, `-ai-image.sh`, `-ai-search.sh` | `/settings/ai*/` |
 | `symbios-settings-auth.sh` | `/settings/auth/` |
 | `symbios-settings-acme.sh` | `/settings/acme/` |
+| `symbios-settings-access.sh` | `/settings/access/` |
 | `symbios-settings-ssh-keys.sh` | `/settings/ssh-keys/` |
 | `symbios-settings-backup.sh` | `/settings/backup/` |
 | `symbios-settings-maintenance.sh` | `/settings/maintenance/` |

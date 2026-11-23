@@ -19,6 +19,8 @@
 #     - acme_resolver
 #     - authelia_cookie_domains
 #     - base_domain
+#     - traefik_default_access
+#     - traefik_service_access
 #     - twofa_enabled
 #   name: WordPress
 #   short_description: Deploy multiple WordPress instances
@@ -403,6 +405,9 @@
         - item.phpmyadmin | default(false) | bool
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Resolve Traefik host access for wordpress
+      ansible.builtin.include_tasks: ../shared-tasks/traefik-access.yml
 
     # Render the single Traefik file-provider snippet for all instances.
     # Traefik watches the providers directory, so no reload is required.

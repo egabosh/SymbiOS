@@ -124,6 +124,13 @@ PAGE_EXPLAIN = {
         'button can show one value in the browser on demand. Rotations are '
         'event-driven and can be rolled back once.'
     ),
+    'access': (
+        'Decide whether the Traefik hosts of your services accept traffic '
+        'from the internet or only from internal networks (LAN/VPN). Internal '
+        'hosts get the same source-IP restriction as the former LAN-only '
+        'WebUI; Authelia logins still work as before. Individual services can '
+        'override the global default on their detail page.'
+    ),
     'updates': (
         'SymbiOS keeps your server up to date automatically once a day: '
         'the operating system, your installed apps and SymbiOS itself. '

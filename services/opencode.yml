@@ -20,6 +20,8 @@
 #     - ai_apikey
 #     - ai_server
 #     - base_domain
+#     - traefik_default_access
+#     - traefik_service_access
 #     - twofa_enabled
 #   name: OpenCode
 #   short_description: Deploy the OpenCode coding assistant
@@ -145,6 +147,13 @@
       no_log: true
       notify: Restart opencode
 
+    - name: Resolve Traefik host access for opencode
+      ansible.builtin.include_tasks: ../shared-tasks/traefik-access.yml
+
+    - name: Render Traefik access middlewares for opencode
+      ansible.builtin.set_fact:
+        opencode_access_block: "{{ traefik_access_middlewares | map('regex_replace', '^(.*)$', '        - \"\\1\"') | join('\n') }}"
+
     # Authelia guards the public route; the OpenCode server itself also requires
     # basic auth in v2. Inject the same generated password here so the browser
     # does not get a second login prompt. Username is the server default.
@@ -173,6 +182,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+          {{ opencode_access_block }}
                   - "authelia@file"
                   - "opencode-auth@file"
             services:

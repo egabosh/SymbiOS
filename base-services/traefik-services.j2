@@ -16,7 +16,7 @@ http:
         - https
       middlewares:
         - secHeaders@file
-{% if webui_public_access is defined and webui_public_access|string|lower == 'false' %}
+{% if traefik_ui_access_mode == 'internal' %}
         - allowlocalipsonly@file
 {% endif %}
         - authelia@file
@@ -41,6 +41,9 @@ http:
         - https
       middlewares:
         - secHeaders@file
+{% if traefik_dashboard_access_mode == 'internal' %}
+        - allowlocalipsonly@file
+{% endif %}
         - authelia@file
       service: api@internal
       tls:

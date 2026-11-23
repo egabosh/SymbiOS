@@ -14,6 +14,9 @@ http:
         certResolver: {{ acme_resolver }}
       middlewares:
         - "secHeaders@file"
+{% if traefik_access_mode == 'internal' %}
+        - "allowlocalipsonly@file"
+{% endif %}
 {% if not (site.public | default(false) | bool) %}
         - "authelia@file"
 {% endif %}

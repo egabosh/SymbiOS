@@ -31,7 +31,9 @@
 #     - media_gid
 #     - media_images
 #     - media_videos
+#     - traefik_default_access
 #     - traefik_ip
+#     - traefik_service_access
 #   name: Nextcloud
 #   short_description: Deploy the Nextcloud service
 #   description: Deploys Nextcloud (file sync/collaboration) together with its database and storage, exposed via Traefik. The AI apps (assistant, integration_openai) use the SymbiOS AI endpoints from Settings -> AI and AI Speech (ai_server, ai_stt_url, ai_tts_url); each provider stays off while its endpoint is empty.
@@ -563,6 +565,13 @@
         chdir: /symbios/services/nextcloud
       changed_when: false
 
+    - name: Resolve Traefik host access for nextcloud
+      ansible.builtin.include_tasks: ../shared-tasks/traefik-access.yml
+
+    - name: Render Traefik access middlewares for nextcloud
+      ansible.builtin.set_fact:
+        nextcloud_access_block: "{{ traefik_access_middlewares | map('regex_replace', '^(.*)$', '        - \"\\1\"') | join('\n') }}"
+
     - name: /symbios/base-services/traefik/providers/nextcloud.yml Routing Configuration
       blockinfile:
         path: /symbios/base-services/traefik/providers/nextcloud.yml
@@ -583,6 +592,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+          {{ nextcloud_access_block }}
                   - "nextcloud-dav"
               nextcloud-phpmyadmin:
                 rule: "Host(`nextcloud-phpmyadmin.{{ base_domain }}`)"
@@ -593,6 +603,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+          {{ nextcloud_access_block }}
                   - "default-basic-auth@file"
               nextcloud-collabora:
                 rule: "Host(`office.{{ base_domain }}`)"
@@ -603,6 +614,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+          {{ nextcloud_access_block }}
             middlewares:
               nextcloud-dav:
                 redirectRegex:

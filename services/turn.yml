@@ -30,6 +30,8 @@
 #   uses_vars:
 #     - acme_resolver
 #     - base_domain
+#     - traefik_default_access
+#     - traefik_service_access
 #   name: TURN
 #   short_description: Deploy the coturn TURN/STUN NAT traversal server
 #   description: Deploys coturn as a generic TURN/STUN server for VoIP and WebRTC media relay. Uses the static-auth-secret (TURN REST API) mechanism, because the TURN protocol cannot carry OIDC or LDAP forward-auth.
@@ -381,6 +383,12 @@
               external: true
         backup: yes
       notify: Restart turn
+
+    # Resolve the configured mode for validation. The ACME-only router below
+    # deliberately stays open: external TURN clients depend on its certificate
+    # and never reach the HTTP backend.
+    - name: Resolve Traefik host access for turn
+      ansible.builtin.include_tasks: ../shared-tasks/traefik-access.yml
 
     # /symbios/base-services/traefik/providers/turn.yml Traefik File Provider
     - name: /symbios/base-services/traefik/providers/turn.yml Traefik File Provider

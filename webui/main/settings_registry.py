@@ -99,6 +99,13 @@ SETTINGS = {
         'explain': 'security',
         'message': 'Security settings saved.',
     },
+    'access': {
+        'script': 'symbios-settings-access.sh',
+        'title': 'Access',
+        'icon': 'bi-globe2',
+        'explain': 'access',
+        'message': 'Traefik access settings saved.',
+    },
     'media': {
         'script': 'symbios-settings-media.sh',
         'title': 'Media',

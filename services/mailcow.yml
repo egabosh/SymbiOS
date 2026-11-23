@@ -19,6 +19,8 @@
 #     - base_domain
 #     - timezone
 #     - traefik_network_gateway
+#     - traefik_default_access
+#     - traefik_service_access
 #     - twofa_enabled
 #   name: Mailcow
 #   short_description: Deploy the Mailcow mail server (mailcow-dockerized)
@@ -469,6 +471,13 @@
 
     # Traefik file-provider for the mailcow Web UI. Mailcow manages its
     # own users and runs its own login; there is no Authelia forward-auth.
+    - name: Resolve Traefik host access for mailcow
+      ansible.builtin.include_tasks: ../shared-tasks/traefik-access.yml
+
+    - name: Render Traefik access middlewares for mailcow
+      ansible.builtin.set_fact:
+        mailcow_access_block: "{{ traefik_access_middlewares | map('regex_replace', '^(.*)$', '        - \"\\1\"') | join('\n') }}"
+
     - name: "/symbios/base-services/traefik/providers/mailcow.yml Routing Configuration"
       blockinfile:
         path: /symbios/base-services/traefik/providers/mailcow.yml
@@ -489,6 +498,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+          {{ mailcow_access_block }}
             services:
               mailcow:
                 loadBalancer:

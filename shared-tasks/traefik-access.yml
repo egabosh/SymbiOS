@@ -1,0 +1,34 @@
+# Shared task: resolve the effective host access mode for a service router.
+#
+# Required vars:  service_name (key used in traefik_service_access)
+# Optional vars:  traefik_service_access (dict; default: {}),
+#                  traefik_default_access (internal|internet; default: internal)
+#
+# Outputs (facts):
+#   traefik_access_mode        - effective mode: internal or internet
+#   traefik_access_middlewares - ['allowlocalipsonly@file'] for internal, [] for internet
+#
+# A per-service value of 'default' (or a missing entry) falls back to the
+# global default. Callers with a deliberately-local router can add
+# 'allowlocalipsonly@file' independently via traefik_access_force_local
+# where the router is rendered; this task only reflects the configured mode.
+
+- name: Validate stored Traefik access modes for {{ service_name }}
+  ansible.builtin.assert:
+    that:
+      - (traefik_default_access | default('internal')) in ['internal', 'internet']
+      - (traefik_service_access | default({})).get(service_name, 'default') in ['default', 'internal', 'internet']
+    fail_msg: >-
+      Invalid Traefik access mode for {{ service_name }}:
+      traefik_default_access={{ traefik_default_access | default('internal') }},
+      traefik_service_access[{{ service_name }}]={{ (traefik_service_access | default({})).get(service_name, 'default') }}.
+      Allowed values are default, internal, internet.
+    quiet: true
+
+- name: Resolve effective Traefik access mode for {{ service_name }}
+  ansible.builtin.set_fact:
+    traefik_access_mode: "{{ (traefik_default_access | default('internal')) if ((traefik_service_access | default({})).get(service_name, 'default') == 'default') else ((traefik_service_access | default({})).get(service_name)) }}"
+
+- name: Resolve Traefik access middlewares for {{ service_name }}
+  ansible.builtin.set_fact:
+    traefik_access_middlewares: "{{ ['allowlocalipsonly@file'] if (traefik_access_mode == 'internal') else [] }}"

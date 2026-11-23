@@ -17,9 +17,11 @@
 # docs:
 #   uses_vars:
 #     - base_domain
+#     - traefik_default_access
+#     - traefik_service_access
 #   name: Reverse Proxy
 #   short_description: Publish external targets through Traefik
-#   description: Renders one Traefik file-provider snippet per configured forward (proxy-<name>.yml) from the data file <config>/traefik/forwards.yml (managed in the WebUI at /settings/reverse-proxy/). Each forward maps one public hostname to one backend (http/https + host/IP + port) with optional access control (open, local-only, Authelia). Traefik watches the providers directory, so no restart is needed.
+#   description: Renders one Traefik file-provider snippet per configured forward (proxy-<name>.yml) from the data file <config>/traefik/forwards.yml (managed in the WebUI at /settings/reverse-proxy/). Each forward maps one public hostname to one backend (http/https + host/IP + port) with optional access control (open, local-only, Authelia). Network exposure follows traefik_default_access from Settings -> Access; the forward's access choice stays about authentication. Traefik watches the providers directory, so no restart is needed.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -108,6 +110,17 @@
       ansible.builtin.set_fact:
         traefik_proxy_active: "{{ traefik_proxy_forwards | selectattr('enabled', 'defined') | selectattr('enabled') | map(attribute='name') | list + traefik_proxy_forwards | rejectattr('enabled', 'defined') | map(attribute='name') | list }}"
 
+    # Network exposure follows the global access default; the forward's own
+    # access choice stays about authentication (open/local/authelia).
+    - name: Resolve Traefik host access for proxy forwards
+      ansible.builtin.include_tasks: ../shared-tasks/traefik-access.yml
+      vars:
+        service_name: "traefik-proxy"
+
+    - name: Render access middlewares for forwards without explicit local-only access
+      ansible.builtin.set_fact:
+        traefik_proxy_access_block: "{{ traefik_access_middlewares | map('regex_replace', '^(.*)$', '- \"\\1\"') | join('\n        ') }}"
+
     - name: Render provider snippet per active forward
       ansible.builtin.copy:
         dest: "{{ traefik_providers_dir }}/proxy-{{ item.name }}.yml"
@@ -126,7 +139,7 @@
                   certresolver: letsencrypt
                 middlewares:
                   - "secHeaders@file"
-                  {{ '- "allowlocalipsonly@file"' if item.access | default('open') == 'local' else '' }}
+                  {{ ('- "allowlocalipsonly@file"' if item.access | default('open') == 'local' else traefik_proxy_access_block) }}
                   {{ '- "authelia@file"' if item.access | default('open') == 'authelia' else '' }}
             services:
               proxy-{{ item.name }}:

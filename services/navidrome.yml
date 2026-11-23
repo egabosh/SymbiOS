@@ -19,6 +19,8 @@
 #     - base_domain
 #     - media_audio
 #     - media_gid
+#     - traefik_default_access
+#     - traefik_service_access
 #     - twofa_enabled
 #   name: Navidrome
 #   short_description: Deploy the Navidrome music streaming server
@@ -192,6 +194,16 @@
         owner: root
         group: root
 
+    # The /rest/* router below bypasses Authelia for Subsonic clients and stays
+    # internet-reachable in every mode; only the browser router follows the
+    # configured host access mode.
+    - name: Resolve Traefik host access for navidrome
+      ansible.builtin.include_tasks: ../shared-tasks/traefik-access.yml
+
+    - name: Render Traefik access middlewares for navidrome
+      ansible.builtin.set_fact:
+        navidrome_access_block: "{{ traefik_access_middlewares | map('regex_replace', '^(.*)$', '        - \"\\1\"') | join('\n') }}"
+
     - name: /symbios/base-services/traefik/providers/navidrome.yml Navidrome<->Traefik provider
       blockinfile:
         path: /symbios/base-services/traefik/providers/navidrome.yml
@@ -212,6 +224,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
+          {{ navidrome_access_block }}
                   - "authelia@file"
               # Subsonic API (Supersonic, DSub, Feishin, ...) cannot do the
               # browser SSO flow, so /rest/* bypasses Authelia forward-auth

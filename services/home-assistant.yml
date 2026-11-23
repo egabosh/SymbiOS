@@ -23,6 +23,8 @@
 #     - media_videos
 #     - traefik_ip
 #     - traefik_network_gateway
+#     - traefik_default_access
+#     - traefik_service_access
 #     - twofa_enabled
 #   boot_units: ha_pingcheck.service
 #   name: Home Assistant
@@ -322,6 +324,21 @@
         backup: yes
       notify: Restart home-assistant
 
+    - name: Resolve Traefik host access for home-assistant
+      ansible.builtin.include_tasks: ../shared-tasks/traefik-access.yml
+
+    - name: Render Traefik access middlewares for home-assistant
+      ansible.builtin.set_fact:
+        home_assistant_access_block: "{{ traefik_access_middlewares | map('regex_replace', '^(.*)$', '        - \"\\1\"') | join('\n') }}"
+
+    # The Matter router is deliberately LAN-only (native clients cannot do an
+    # SSO login), independent of the configured host access mode.
+    - name: Render LAN-only middlewares for the matter router
+      ansible.builtin.set_fact:
+        ha_matter_access_block: "{{ (traefik_access_middlewares + (['allowlocalipsonly@file'] if (traefik_access_force_local | default(false) | bool) else [])) | unique | map('regex_replace', '^(.*)$', '        - \"\\1\"') | join('\n') }}"
+      vars:
+        traefik_access_force_local: true
+
     - name: /symbios/base-services/traefik/providers/home-assistant.yml Home-Assistant<->Traefik provider
       blockinfile:
         path: /symbios/base-services/traefik/providers/home-assistant.yml
@@ -362,6 +379,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeadersHA@file"
+          {{ home_assistant_access_block }}
 
               matter:
                 rule: "Host(`matter.{{ base_domain }}`)"
@@ -372,7 +390,7 @@
                   certResolver: {{ acme_resolver }}
                 middlewares:
                   - "secHeaders@file"
-                  - "allowlocalipsonly"
+          {{ ha_matter_access_block }}
 
             services:
               home-assistant:

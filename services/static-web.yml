@@ -37,6 +37,8 @@
 #     - acme_resolver
 #     - authelia_cookie_domains
 #     - base_domain
+#     - traefik_default_access
+#     - traefik_service_access
 #   name: Static Web
 #   short_description: Serve static web content from plain directories
 #   description: >-
@@ -276,6 +278,9 @@
         group: docker
         backup: yes
       notify: Restart static-web
+
+    - name: Resolve Traefik host access for static-web
+      ansible.builtin.include_tasks: ../shared-tasks/traefik-access.yml
 
     # /symbios/base-services/traefik/providers/static-web.yml Traefik File Provider
     - name: /symbios/base-services/traefik/providers/static-web.yml Traefik File Provider

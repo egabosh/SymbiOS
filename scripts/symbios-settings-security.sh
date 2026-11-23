@@ -16,11 +16,13 @@ function f_usage {
   cat << EOF
 Usage: $(basename "$0") <command> [options]
 
-Manage SymbiOS security settings (password policy, WebUI access, reboot
-policy). The reboot keys are read at runtime by the healthcheck and the
-maintenance module, so saving them needs no playbook apply. A reboot is only
-warned about or scheduled when one is actually pending (apt marker or newer
-installed kernel); uptime alone never triggers it.
+Manage SymbiOS security settings (password policy, reboot policy and the
+deprecated webui_public_access fallback). Network exposure is configured by
+symbios-settings-access.sh and no longer shown on this page. The reboot keys
+are read at runtime by the healthcheck and the maintenance module, so saving
+them needs no playbook apply. A reboot is only warned about or scheduled when
+one is actually pending (apt marker or newer installed kernel); uptime alone
+never triggers it.
 
 Commands:
   get [--json]                    Print current values (key=value lines,
@@ -93,8 +95,6 @@ then
    "required": false, "default": "medium", "secret": false,
    "options": ["none", "low", "medium", "high", "paranoid"],
    "note": "Levels: none (1+ characters), low (8+), medium (10+ with letter, digit and special character), high (16+, same mix), paranoid (32+, same mix). Enforced for LDAP user passwords."},
-  {"name": "webui_public_access", "type": "bool", "label": "WebUI public (internet) access",
-   "required": false, "default": false, "secret": false},
   {"name": "reboot_max_days", "type": "number", "label": "Uptime in days after which a pending reboot may be applied automatically",
    "required": false, "default": 0, "secret": false, "pattern": "^[0-9]+$",
    "note": "0 disables the reboot policy. Otherwise the healthcheck warns as soon as a reboot is pending; this value only limits when the automatic reboot may happen."},

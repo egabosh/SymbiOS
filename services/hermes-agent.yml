@@ -20,6 +20,8 @@
 #     - ai_apikey
 #     - ai_server
 #     - base_domain
+#     - traefik_default_access
+#     - traefik_service_access
 #     - twofa_enabled
 #   name: Hermes Agent
 #   short_description: Deploy the Nous Research Hermes Agent with web dashboard
