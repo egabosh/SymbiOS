@@ -117,6 +117,13 @@ PAGE_EXPLAIN = {
         'reboot warns immediately on the Health page, and if enabled the host '
         'reboots in the daily maintenance window once that uptime is reached.'
     ),
+    'secrets': (
+        'SymbiOS stores credentials encrypted with age instead of keeping '
+        'them in plain text in inventory files or service directories. '
+        'The list shows names and rotation metadata only. An explicit reveal '
+        'button can show one value in the browser on demand. Rotations are '
+        'event-driven and can be rolled back once.'
+    ),
     'updates': (
         'SymbiOS keeps your server up to date automatically once a day: '
         'the operating system, your installed apps and SymbiOS itself. '

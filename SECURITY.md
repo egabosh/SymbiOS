@@ -369,12 +369,23 @@ and rollback time, but never a value. A propagation hook under
 automatically. A failed hook therefore consumes the rollback copy because the
 store is already back to the old value. Generated secrets may be rotated in the
 store; application-owned credentials must be changed in the application first
-and then written back with `put`.
+and then written back with `put`. `delete` removes the ciphertext together with
+its rollback copy and metadata so no unlisted credential is left behind.
 
 The `secret-store` healthcheck validates identity and directory permissions,
 resolves every `secret:` reference from `inventory.yml`, flags stale transient
 plaintext files, and warns about known credential keys that are still stored in
 plaintext. It reports names only, never values.
+
+The WebUI page under Settings -> Security -> Secrets lists the same names and
+metadata via `symbios-secrets-list.sh`. Its rotate, rollback and delete buttons
+run the host scripts through the exec gateway and their output contains names
+only. An explicit reveal button calls `symbios-secret.sh show --actor <user>`
+synchronously and places the value in a masked dialog in the current browser
+session; it is not stored in the page, a job or a log. The host audit records
+`action=reveal secret=<name> actor=<user>` with a timestamp, so it is traceable
+who revealed which credential, but the value itself is never logged. This is a
+deliberate residual risk of on-demand display.
 
 ### L4: SSH StrictHostKeyChecking
 - Test scripts use `StrictHostKeyChecking=no` for dev environments.

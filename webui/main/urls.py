@@ -17,6 +17,7 @@
 from django.urls import path, re_path
 from . import views
 from . import views_settings
+from . import views_secrets
 from . import views_settings_dns
 from . import views_settings_ai
 from . import views_settings_generic
@@ -110,6 +111,17 @@ urlpatterns = [
          {'slug': 'auth'}, name='settings_auth'),
     path('settings/security/', views_settings_generic.settings_generic,
          {'slug': 'security'}, name='settings_security'),
+    path('settings/secrets/', views_secrets.settings_secrets, name='settings_secrets'),
+    path('settings/secrets/reveal/', views_secrets.settings_secrets_reveal,
+         name='settings_secrets_reveal'),
+    path('settings/secrets/rotate/plan/', views_secrets.settings_secrets_plan,
+         name='settings_secrets_plan'),
+    path('settings/secrets/rotate/apply/', views_secrets.settings_secrets_rotate,
+         name='settings_secrets_rotate'),
+    path('settings/secrets/rollback/', views_secrets.settings_secrets_rollback,
+         name='settings_secrets_rollback'),
+    path('settings/secrets/delete/', views_secrets.settings_secrets_delete,
+         name='settings_secrets_delete'),
     path('settings/acme/', views_settings_generic.settings_generic,
          {'slug': 'acme'}, name='settings_acme'),
     path('settings/ssh-keys/', views_settings.settings_ssh_keys, name='settings_ssh_keys'),

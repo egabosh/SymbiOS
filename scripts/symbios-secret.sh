@@ -26,6 +26,7 @@
 #   symbios-secret.sh init
 #   symbios-secret.sh put <name>
 #   symbios-secret.sh get <name> [--path <file>]
+#   symbios-secret.sh show <name> [--actor <user>]
 #   symbios-secret.sh list
 #   symbios-secret.sh rotate <name> [--plan|--apply|--no-apply]
 #   symbios-secret.sh status <name>
@@ -63,6 +64,11 @@ Commands:
   get <name> [--path <file>] Decrypt into a 0600 file and print its path.
                              Without --path a transient file is created. The
                              caller SHREDs it after use (see cleanup).
+  show <name> [--actor <user>]
+                              Print the current value once on stdout for an
+                              explicit WebUI reveal. Never use in jobs or logs.
+                              With --actor the audit records who revealed which
+                              secret; without it only the name is recorded.
   list                       List stored secret names (never values).
   rotate <name> [--plan|--apply|--no-apply]
                              Generate a new 64-hex-character value. Without a
@@ -93,7 +99,8 @@ Examples:
 
 Output:
   get/rotate print one file path on stdout; all other commands print status
-  text. Values are never printed to stdout and never appear in argv.
+  text. show is the only command that prints a value, and only for the explicit
+  WebUI reveal. Value bytes never appear in argv, job output, logs or audit.
 
 Exit codes:
   0 success, 1 technical error, 2 usage error.
@@ -206,14 +213,19 @@ function f_store_put {
 
 # Decrypt a value from the store into a caller-provided 0600 file.
 function f_store_get {
-  local f_name="$1" f_out="$2" f_source
+  local f_name="$1" f_out="$2" f_action="${3:-get}" f_detail="${4:-}" f_source
   f_validate_name "${f_name}"
   f_source="$(f_secret_file "${f_name}")"
   [[ -f "${f_source}" ]] || f_fail "secret not found: ${f_name}"
   chmod 0600 "${f_out}" || f_fail "cannot chmod output file"
   age -d -i "${g_secret_key}" -o "${f_out}" "${f_source}" 2>/dev/null \
     || f_fail "decryption failed for ${f_name}"
-  f_audit_event secret get "${f_name}"
+  if [[ -n "${f_detail}" ]]
+  then
+    f_audit_event secret "${f_action}" "${f_detail}"
+  else
+    f_audit_event secret "${f_action}" "${f_name}"
+  fi
 }
 
 # Write a shell value to a transient 0600 file without exposing it in argv.
@@ -314,12 +326,54 @@ function f_cmd_get {
   printf '%s\n' "${f_path}"
 }
 
+# One-shot value output for the explicit WebUI reveal. The caller must not
+# create a job from this command: stdout is the secret itself. The transient
+# 0600 file is shredded by the global scratch trap when this process exits.
+function f_cmd_show {
+  local f_name="${1:-}" f_actor="" f_action="show" f_detail="" f_file
+  shift || true
+  while [[ $# -gt 0 ]]
+  do
+    case "$1" in
+      --actor)
+        f_actor="${2:-}"
+        [[ -n "${f_actor}" ]] || f_usage_error "--actor needs a user"
+        shift 2
+        ;;
+      *) f_usage_error "unknown show option: $1" ;;
+    esac
+  done
+  [[ -n "${f_name}" ]] || f_usage_error "show needs a secret name"
+  f_require_initialized
+  f_file=$(mktemp "${g_config_dir}/.secret-show-XXXXXX") || f_fail "cannot create temp file"
+  f_scratch_register "${f_file}"
+  chmod 0600 "${f_file}" || f_fail "cannot chmod temp file"
+  if [[ -n "${f_actor}" ]]
+  then
+    # The actor is audit data, never a credential. Sanitize it so a malformed
+    # username cannot inject extra fields or newlines into the audit line.
+    f_actor="${f_actor//[^A-Za-z0-9._@-]/_}"
+    f_actor="${f_actor:0:128}"
+    f_action="reveal"
+    f_detail="secret=${f_name} actor=${f_actor}"
+  fi
+  f_store_get "${f_name}" "${f_file}" "${f_action}" "${f_detail}"
+  cat "${f_file}"
+}
+
 function f_cmd_delete {
-  local f_name="${1:-}" f_target
+  local f_name="${1:-}" f_target f_meta
   [[ -n "${f_name}" ]] || f_usage_error "delete needs a secret name"
   f_target="$(f_secret_file "${f_name}")"
   [[ -f "${f_target}" ]] || f_fail "secret not found: ${f_name}"
+  f_meta="$(f_meta_file "${f_name}")"
   shred -u "${f_target}" 2>/dev/null || rm -f "${f_target}"
+  # A rollback copy would survive as an unlisted old credential after delete.
+  if [[ -f "${f_target}.prev" ]]
+  then
+    shred -u "${f_target}.prev" 2>/dev/null || rm -f "${f_target}.prev"
+  fi
+  [[ ! -f "${f_meta}" ]] || rm -f "${f_meta}"
   f_audit_event secret delete "${f_name}"
   g_echo_note "deleted: ${f_name}"
 }
@@ -671,6 +725,7 @@ case "${1:-}" in
     ;;
   put) f_require_tools; shift; f_cmd_put "$@" ;;
   get) f_require_tools; shift; f_cmd_get "$@" ;;
+  show) f_require_tools; shift; [[ $# -ge 1 ]] || f_usage_error "show needs a secret name"; f_cmd_show "$@" ;;
   list) f_require_tools; shift; [[ $# -eq 0 ]] || f_usage_error "list takes no arguments"; f_cmd_list ;;
   rotate) f_require_tools; shift; f_cmd_rotate "$@" ;;
   status) f_require_tools; shift; [[ $# -eq 1 ]] || f_usage_error "status needs exactly one name"; f_cmd_status "$1" ;;

@@ -465,6 +465,15 @@ Contract:
 - Every mutation and every read writes one audit event with the secret **name**
   only (`f_audit_event secret <action> <name>`).
 
+`symbios-secrets-list.sh` exposes the store to the WebUI as JSON. It reads
+names and rotation metadata only, never values, and returns
+`{"initialized":bool,"secrets":[...]}` even when the store is not set up yet.
+It backs the admin-only page under Settings -> Security -> Secrets, whose
+rotate, rollback and delete actions call `symbios-secret.sh` through the exec
+gateway. The on-demand reveal uses `symbios-secret.sh show --actor <user>`
+synchronously so the value never enters a job stream; the host audit records the
+requesting user and secret name, never the value.
+
 Generated env files remain plaintext because Docker Compose `env_file:` needs
 it - they are derived artifacts, not the source of truth. See `SECURITY.md`
 ("Central Secret Store") for the threat model and residual risks.
@@ -526,7 +535,8 @@ texts opportunistically).
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | `symbios-set-hostname.sh` | Hostname from `base_domain`, idempotent, `--check` mode (template model) | `[--check]` |
-| `symbios-secret.sh` | Central encrypted secret store: age identity in `<data_root>/.keys`, ciphertext in `<config_dir>/secrets`, env-file import/export and event-driven rotation | `init\|put\|get\|list\|rotate\|status\|rollback\|import-env\|export-env\|cleanup` |
+| `symbios-secret.sh` | Central encrypted secret store: age identity in `<data_root>/.keys`, ciphertext in `<config_dir>/secrets`, env-file import/export and event-driven rotation | `init\|put\|get\|show\|list\|status\|rotate\|rollback\|delete\|import-env\|export-env\|cleanup` |
+| `symbios-secrets-list.sh` | JSON store inventory (names and rotation metadata only) for the WebUI | `[--json]` |
 | `symbios-power.sh` | Reboot / shutdown the host (WebUI, exec-modal notice) | `reboot\|shutdown` |
 | `symbios-data-partition.sh` | `/symbios` data partition incl. LUKS setup/mount/rollback and `wipe` (erase a disk for reuse; `--unmount` releases leftover mounts). Label-based explicit mounts (no fstab), exact label match only | `list\|status\|setup\|wipe\|rollback` |
 | `symbios-media-partition.sh` | Optional `SYMBIOS_MEDIA` volume (labels `SYMBIOS_MEDIA` / `CRYPT_LUKS_SYMBIOS_MEDIA`) incl. setup/adopt/rollback, no reboot; `prepare-member` turns a replacement disk into an encrypted member (LUKS + boot keyfile, opened) for a btrfs replace (`--force` overwrites foreign signatures, `--unmount` releases leftover mounts) | `status\|setup\|adopt\|prepare-member\|rollback` |

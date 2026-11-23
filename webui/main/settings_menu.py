@@ -137,6 +137,9 @@ SETTINGS_MENU = [
             {'url': '/settings/security/', 'title': 'Security',
              'icon': 'bi-shield-check', 'desc': 'Password policy configuration',
              'level': 'basic'},
+            {'url': '/settings/secrets/', 'title': 'Secrets',
+             'icon': 'bi-key', 'desc': 'Central encrypted secret store',
+             'level': 'expert'},
         ],
     },
     {
