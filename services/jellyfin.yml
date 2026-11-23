@@ -23,12 +23,14 @@
 #     - media_videos
 #     - traefik_default_access
 #     - traefik_service_access
+#     - twofa_enabled
 #   name: Jellyfin
 #   short_description: Deploy the Jellyfin media server
 #   description: Deploys Jellyfin, a free and open-source media server, exposed via Traefik.
 #   url: "https://jellyfin.{{ base_domain }}"
 #   access:
-#     none: Jellyfin manages its own users, the route is LAN-only (no Authelia)
+#     user_group: jellyfin-users
+#     admin_group: jellyfin-admins
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -53,7 +55,14 @@
 #     program_paths:
 #       - /symbios/services/jellyfin/
 #       - /symbios/base-services/traefik/providers/jellyfin.yml
+#       - /symbios/base-services/traefik/providers/jellyfin-sso.yml
 #       - /symbios/runchecks.d/symbios-healthcheck-jellyfin.check
+#     ldap_groups:
+#       - jellyfin-users
+#       - jellyfin-admins
+#     authelia_blocks:
+#       - "OIDC jellyfin"
+#       - "jellyfin ACCESS CONTROL"
 #   actions:
 #     start: docker compose -f /symbios/services/jellyfin/docker-compose.yml up -d
 #     stop: docker compose -f /symbios/services/jellyfin/docker-compose.yml down
@@ -66,15 +75,35 @@
   vars:
     service_name: jellyfin
     service_domain: "jellyfin.{{ base_domain }}"
+    jellyfin_service_dir: /symbios/services/jellyfin
+    jellyfin_config_root: /symbios/services/jellyfin/data/config
     # Local service user for the container (non-root, see mediapaths.md).
     jellyfin_uid: 992
     # Supplementary group for read-only media access (fixed media GID).
     jellyfin_gid: "{{ media_gid | default('') }}"
     # Standard media libraries, mounted read-only (see mediapaths.md).
     # The media_* vars are guaranteed by base-services/media.yml.
-    jellyfin_videos_path: "{{ media_videos | default('/symbios/media/videos') }}"
+    # Movies and TV Shows live below the shared video tree. They are writable
+    # because the Mediathek plugin stores downloaded media directly in them.
+    jellyfin_movies_path: "{{ media_videos | default('/symbios/media/videos') }}/movies"
+    jellyfin_tvshows_path: "{{ media_videos | default('/symbios/media/videos') }}/tvshows"
+    jellyfin_downloads_path: "{{ media_videos | default('/symbios/media/videos') }}/downloads"
     jellyfin_audio_path: "{{ media_audio | default('/symbios/media/audio') }}"
     jellyfin_images_path: "{{ media_images | default('/symbios/media/images') }}"
+    # Third-party OIDC client. Pinned and checksum-verified because it runs
+    # inside the media server and handles the Authelia client secret.
+    jellyfin_sso_plugin_version: '4.0.0.4'
+    jellyfin_sso_plugin_zip: 'sso-authentication_4.0.0.4.zip'
+    jellyfin_sso_plugin_checksum: 'sha256:c09f16ba31059a434ddd7f811e4f9608d4b4c4514cc80a5bf1ca33bee61e1107'
+    jellyfin_sso_plugin_url: "https://github.com/9p4/jellyfin-plugin-sso/releases/download/v{{ jellyfin_sso_plugin_version }}/{{ jellyfin_sso_plugin_zip }}"
+    jellyfin_sso_provider: authelia
+    # Public-broadcaster Mediathek search and subscription downloads. Pinned
+    # because it writes into the media tree and runs with Jellyfin privileges.
+    jellyfin_mediathek_plugin_version: '0.8.4.0'
+    jellyfin_mediathek_plugin_zip: 'mediathek-downloader_0.8.4.0.zip'
+    jellyfin_mediathek_plugin_checksum: 'sha256:b51aab2531c9b634fba9473a40560561519e1dd51364694954f2daccc323a3be'
+    jellyfin_mediathek_plugin_url: "https://github.com/CatNoir2006/jellyfin-plugin-MediathekViewDL/releases/download/v{{ jellyfin_mediathek_plugin_version }}/{{ jellyfin_mediathek_plugin_zip }}"
+    jellyfin_bootstrap_admin: symbios-admin
   tasks:
 
     - name: Ensure the media LDAP group exists (fixed GID for library access)
@@ -111,6 +140,147 @@
         - config
         - cache
 
+    # The split libraries and the plugin's temporary download area must exist
+    # before Docker mounts them. Setgid keeps new downloads in the media group.
+    - name: Create the Jellyfin movie, series and download directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: root
+        group: "{{ media_gid | default(31000) }}"
+        state: directory
+        mode: '2770'
+      loop:
+        - "{{ jellyfin_movies_path }}"
+        - "{{ jellyfin_tvshows_path }}"
+        - "{{ jellyfin_downloads_path }}"
+
+    # The OIDC client secret and the local bootstrap password are generated
+    # once and reused on later runs. gen-oidc-client-secret.sh writes both the
+    # plaintext (for the plugin) and the Authelia digest.
+    - name: Generate Jellyfin OIDC client secret
+      ansible.builtin.command: "{{ base_services_root | default('/symbios/base-services') }}/authelia/gen-oidc-client-secret.sh {{ jellyfin_service_dir }}"
+      args:
+        creates: "{{ jellyfin_service_dir }}/oidc_password"
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Generate Jellyfin bootstrap admin password
+      ansible.builtin.shell: |
+        umask 077
+        printf '%s' "$(openssl rand -hex 32)" > "{{ jellyfin_service_dir }}/jellyfin_admin_password"
+      args:
+        creates: "{{ jellyfin_service_dir }}/jellyfin_admin_password"
+      changed_when: false
+      no_log: true
+
+    - name: Restrict the Jellyfin bootstrap password file
+      ansible.builtin.file:
+        path: "{{ jellyfin_service_dir }}/jellyfin_admin_password"
+        owner: root
+        group: root
+        mode: '0400'
+
+    # Pin the plugin by version and verify the downloaded archive before it is
+    # unpacked into Jellyfin's plugin directory.
+    - name: Record the deployed SSO-Auth plugin version
+      ansible.builtin.copy:
+        content: "{{ jellyfin_sso_plugin_version }}\n"
+        dest: "{{ jellyfin_config_root }}/plugins/.symbios-sso-version"
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0400'
+      register: jellyfin_sso_version
+      notify: Restart jellyfin
+
+    - name: Remove the previous SSO-Auth plugin after a version change
+      ansible.builtin.file:
+        path: "{{ jellyfin_config_root }}/plugins/SSO-Auth"
+        state: absent
+      when: jellyfin_sso_version.changed
+
+    - name: Create the SSO-Auth plugin cache directory
+      ansible.builtin.file:
+        path: "{{ jellyfin_config_root }}/plugins/.cache"
+        state: directory
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0550'
+
+    - name: Download the checksum-verified SSO-Auth plugin
+      ansible.builtin.get_url:
+        url: "{{ jellyfin_sso_plugin_url }}"
+        dest: "{{ jellyfin_config_root }}/plugins/.cache/{{ jellyfin_sso_plugin_zip }}"
+        checksum: "{{ jellyfin_sso_plugin_checksum }}"
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0400'
+
+    - name: Create the SSO-Auth plugin directory
+      ansible.builtin.file:
+        path: "{{ jellyfin_config_root }}/plugins/SSO-Auth"
+        state: directory
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0550'
+
+    - name: Unpack the SSO-Auth plugin
+      ansible.builtin.unarchive:
+        src: "{{ jellyfin_config_root }}/plugins/.cache/{{ jellyfin_sso_plugin_zip }}"
+        dest: "{{ jellyfin_config_root }}/plugins/SSO-Auth"
+        remote_src: true
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0644'
+        creates: "{{ jellyfin_config_root }}/plugins/SSO-Auth/SSO-Auth.dll"
+      notify: Restart jellyfin
+
+    - name: Record the deployed Mediathek Downloader plugin version
+      ansible.builtin.copy:
+        content: "{{ jellyfin_mediathek_plugin_version }}\n"
+        dest: "{{ jellyfin_config_root }}/plugins/.symbios-mediathek-version"
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0400'
+      register: jellyfin_mediathek_version
+      notify: Restart jellyfin
+
+    - name: Remove the previous Mediathek Downloader after a version change
+      ansible.builtin.file:
+        path: "{{ jellyfin_config_root }}/plugins/MediathekViewDL"
+        state: absent
+      when: jellyfin_mediathek_version.changed
+
+    - name: Create the Mediathek Downloader plugin directory
+      ansible.builtin.file:
+        path: "{{ jellyfin_config_root }}/plugins/MediathekViewDL"
+        state: directory
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0550'
+
+    # Same checksum-verified cache as the SSO plugin: the archive is shared by
+    # both, so the .cache directory already exists at this point.
+    - name: Download the checksum-verified Mediathek Downloader plugin
+      ansible.builtin.get_url:
+        url: "{{ jellyfin_mediathek_plugin_url }}"
+        dest: "{{ jellyfin_config_root }}/plugins/.cache/{{ jellyfin_mediathek_plugin_zip }}"
+        checksum: "{{ jellyfin_mediathek_plugin_checksum }}"
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0400'
+
+    - name: Unpack the Mediathek Downloader plugin
+      ansible.builtin.unarchive:
+        src: "{{ jellyfin_config_root }}/plugins/.cache/{{ jellyfin_mediathek_plugin_zip }}"
+        dest: "{{ jellyfin_config_root }}/plugins/MediathekViewDL"
+        remote_src: true
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0644'
+        creates: "{{ jellyfin_config_root }}/plugins/MediathekViewDL/Jellyfin.Plugin.MediathekViewDL.dll"
+      notify: Restart jellyfin
+
     - name: /symbios/services/jellyfin/docker-compose.yml Container Configuration
       blockinfile:
         path: /symbios/services/jellyfin/docker-compose.yml
@@ -129,6 +299,9 @@
               image: jellyfin/jellyfin:latest
               container_name: jellyfin
               restart: unless-stopped
+              # Local-only API access for the host-side provisioning helper.
+              ports:
+                - "127.0.0.1:8096:8096"
               #env_file: env
               user: "{{ jellyfin_uid }}{{ (':' + (jellyfin_gid | string)) if jellyfin_gid else '' }}"
               #environment:
@@ -138,10 +311,24 @@
                 - /etc/localtime:/etc/localtime
                 # Long syntax with create_host_path:false: fail closed when
                 # the volume is missing instead of serving empty libraries.
+                # Movies, series and downloads are writable because the
+                # Mediathek plugin stores new media directly in them.
                 - type: bind
-                  source: {{ jellyfin_videos_path }}
-                  target: /media/videos
-                  read_only: true
+                  source: {{ jellyfin_movies_path }}
+                  target: /media/movies
+                  read_only: false
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ jellyfin_tvshows_path }}
+                  target: /media/tvshows
+                  read_only: false
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ jellyfin_downloads_path }}
+                  target: /media/downloads
+                  read_only: false
                   bind:
                     create_host_path: false
                 - type: bind
@@ -178,12 +365,141 @@
     - name: Ensure jellyfin is running
       include_tasks: ../shared-tasks/docker-start.yml
 
+    # Authelia forward-auth only proves who the user is; Jellyfin still renders
+    # its own login page. Send the root URL straight into the plugin's OIDC
+    # start endpoint so an existing Authelia session completes the Jellyfin
+    # login without a second form. The callback path is untouched, otherwise
+    # the login would loop.
+    #
+    # Jellyfin Web sends its API token in an `Authorization: MediaBrowser ...`
+    # header. Authelia's default forward-auth tries that header first and
+    # short-circuits with 401, so the web client never gets past the login
+    # form. A Jellyfin-specific forward-auth filters the Authorization header
+    # out of the auth request while leaving it intact for the backend.
+    - name: Deploy Jellyfin Traefik SSO middlewares
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/traefik/providers/jellyfin-sso.yml
+        create: yes
+        mode: "0444"
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK jellyfin SSO START"
+        block: |
+          http:
+            middlewares:
+              jellyfin-sso-start:
+                redirectRegex:
+                  permanent: false
+                  regex: "^https://[^/]+/?$"
+                  replacement: "https://{{ service_domain }}/sso/OID/start/authelia"
+              jellyfin-authelia:
+                forwardAuth:
+                  address: "http://symbios-base-authelia:9091/api/authz/forward-auth?authelia_url=https://auth.{{ base_domain }}"
+                  trustForwardHeader: true
+                  authResponseHeaders:
+                    - "Remote-User"
+                    - "Remote-Groups"
+                    - "Remote-Name"
+                    - "Remote-Email"
+                    - "Remote-Method"
+                  authRequestHeaders:
+                    - "Accept"
+                    - "Accept-Language"
+                    - "Cookie"
+                    - "User-Agent"
+                    - "X-Forwarded-For"
+                    - "X-Forwarded-Host"
+                    - "X-Forwarded-Method"
+                    - "X-Forwarded-Port"
+                    - "X-Forwarded-Proto"
+                    - "X-Forwarded-Server"
+                    - "X-Forwarded-Uri"
+        backup: yes
+
     - name: Traefik provider snippet for jellyfin
       include_tasks: ../shared-tasks/traefik-provider.yml
       vars:
         traefik_backend_url: "http://jellyfin:8096"
         traefik_middlewares:
+          - "jellyfin-sso-start@file"
           - "secHeaders@file"
+          - "jellyfin-authelia@file"
+
+    - name: Ensure LDAP groups for Jellyfin OIDC login
+      include_tasks: ../shared-tasks/oidc-groups.yml
+
+    # The plugin reads roles from the ID token, so this client needs the
+    # id_token claims policy instead of Authelia's reduced default set.
+    - name: Write OIDC config in Authelia for Jellyfin
+      include_tasks: ../shared-tasks/authelia-oidc.yml
+      vars:
+        oidc_client_name: "Jellyfin"
+        oidc_claims_policy: id_token
+        oidc_redirect_uris:
+          - "https://jellyfin.{{ base_domain }}/sso/OID/redirect/authelia"
+
+    - name: Restrict the Jellyfin route to the LDAP groups
+      include_tasks: ../shared-tasks/authelia-acl.yml
+      vars:
+        authelia_subjects:
+          - ["group:jellyfin-users"]
+          - ["group:jellyfin-admins"]
+
+    # Restart before provisioning so Jellyfin loads the plugin and Authelia
+    # serves the new client configuration.
+    - name: Flush handlers before Jellyfin provisioning
+      ansible.builtin.meta: flush_handlers
+
+    - name: Complete first-run setup and configure Authelia SSO and libraries
+      ansible.builtin.command:
+        argv:
+          - "{{ git_root }}/scripts/symbios-jellyfin-provision.sh"
+          - "--base-url"
+          - "http://127.0.0.1:8096"
+          - "--config-dir"
+          - "{{ jellyfin_service_dir }}"
+          - "--public-url"
+          - "https://jellyfin.{{ base_domain }}"
+          - "--server-name"
+          - "jellyfin.{{ base_domain }}"
+          - "--oidc-endpoint"
+          - "https://auth.{{ base_domain }}"
+          - "--client-id"
+          - "jellyfin"
+          - "--provider-name"
+          - "{{ jellyfin_sso_provider }}"
+          - "--admin-user"
+          - "{{ jellyfin_bootstrap_admin }}"
+          - "--media-movies"
+          - "/media/movies"
+          - "--media-tvshows"
+          - "/media/tvshows"
+          - "--media-downloads"
+          - "/media/downloads"
+          - "--media-audio"
+          - "/media/audio"
+          - "--media-images"
+          - "/media/images"
+      register: jellyfin_provision
+      changed_when: "'jellyfin-provision-changed' in jellyfin_provision.stdout"
+      failed_when: "'jellyfin-provision-changed' not in jellyfin_provision.stdout and 'jellyfin-provision-unchanged' not in jellyfin_provision.stdout"
+
+    # Jellyfin does not reliably attach local cover files during the first
+    # scan. Wait for that scan in the background and refresh artwork once so
+    # album covers appear without manual metadata refreshes.
+    - name: Refresh local artwork after the first library scan
+      ansible.builtin.command:
+        argv:
+          - "{{ git_root }}/scripts/symbios-jellyfin-provision.sh"
+          - "--base-url"
+          - "http://127.0.0.1:8096"
+          - "--config-dir"
+          - "{{ jellyfin_service_dir }}"
+          - "--refresh-artwork"
+      register: jellyfin_artwork
+      changed_when: false
+      async: 86400
+      poll: 0
 
     # Deploy the shared HTTP healthcheck (shared-tasks/runcheck.yml)
     - name: Deploy healthcheck
@@ -195,4 +511,7 @@
   handlers:
     - name: Restart jellyfin
       include_tasks: ../shared-tasks/compose-recreate.yml
+
+    - name: Restart authelia
+      include_tasks: ../shared-tasks/authelia-restart.yml
 
