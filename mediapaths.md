@@ -17,9 +17,14 @@ WebUI, consumed by services instead of per-service vars.
 
 - Predefined names and default directory names are **English, lowercase**:
   `audio`, `images`, `videos`, `books`, `documents`, `inbox` below `media_root`.
-- Seventh variable `media_inbox` (`/symbios/media/inbox`): the only shared
-  writable ingest point (SFTP uploads, yt-dlp, Paperless consume source).
-  Libraries stay read-only.
+  The Jellyfin video libraries default to `videos/movies` and
+  `videos/tvshows`, but have their own inventory keys so they can live on a
+  different disk or use legacy directory names.
+- Seventh variable `media_inbox` (`/symbios/media/inbox`): the only general
+  shared writable ingest point (SFTP uploads, yt-dlp, Paperless consume
+  source). Libraries stay read-only, except the Jellyfin movie/series dirs,
+  which are group-writable because the Mediathek downloader stores finished
+  recordings there.
 - One shared filesystem GID `media_gid: 31000` (**fixed value**, never derived
   from the LDAP group hash). The LDAP `media` group is the access source of
   truth; the fixed GID owns the on-disk dirs (setgid + default ACLs).
@@ -45,7 +50,9 @@ WebUI, consumed by services instead of per-service vars.
 | `media_root` | Base dir for all media below | `/symbios/media` |
 | `media_audio` | Read-only audio library (music, podcasts, audiobooks) | `/symbios/media/audio` |
 | `media_images` | Photo/image library | `/symbios/media/images` |
-| `media_videos` | Video library / movies / series | `/symbios/media/videos` |
+| `media_videos` | Video library (other consumers, downloads) | `/symbios/media/videos` |
+| `media_movies` | Jellyfin movie library (group-writable) | `/symbios/media/videos/movies` |
+| `media_series` | Jellyfin series library (group-writable) | `/symbios/media/videos/tvshows` |
 | `media_books` | E-books, audiobooks | `/symbios/media/books` |
 | `media_documents` | Document library / archive (e.g. Paperless) | `/symbios/media/documents` |
 | `media_inbox` | Shared writable ingest | `/symbios/media/inbox` |
@@ -54,7 +61,10 @@ WebUI, consumed by services instead of per-service vars.
 
 Defaults live under `data_root`. Per-host overrides may point anywhere,
 including external volumes - which only exist after the volume is mounted,
-so validate (or offer creation) before pointing a library at them.
+so validate (or offer creation) before pointing a library at them. Custom
+`media_movies`/`media_series` paths inherit the `media_videos` project quota
+only while they stay below that tree; locations elsewhere are not covered by
+the current fixed quota IDs.
 
 ## Media volume (optional second disk)
 
@@ -156,8 +166,10 @@ coverage - rate-limit at the daemon (`MaxAuthTries 3`, `LoginGraceTime 60`,
   Migrated from `navidrome_music_path` / `navidrome_music_gid` to the global
   `media_audio` (+ `media_gid`), old vars kept as deprecated fallback
   (`navidrome_music_path` keeps its name: `/music` is Navidrome terminology).
-- **Jellyfin**: multiple libraries (videos/audio/images) from `media_videos` /
-  `media_audio` / `media_images`, `:ro` mounts, non-root user with
+- **Jellyfin**: Movies from `media_movies`, TV Shows from `media_series`,
+  Music from `media_audio`, Images from `media_images`. The movie/series dirs
+  and `media_videos/downloads` are mounted writable for Mediathek downloads;
+  audio/images stay `:ro`. The container runs as a non-root user with
   supplementary `media_gid`.
 - **sftp-share**: `sftp_share_datadir = media_root` (Chroot), read/write
   enforced by LDAP group membership (`AllowGroups media shared-*`) +
@@ -196,11 +208,15 @@ coverage - rate-limit at the daemon (`MaxAuthTries 3`, `LoginGraceTime 60`,
 
 ## Three semantics (do not conflate)
 
-1. **Read-only library** (Navidrome, Jellyfin): container needs read access
-   only. Solved via supplementary `media_gid` (fixed 31000) plus `:ro` mounts.
+1. **Read-only library** (Navidrome, Jellyfin audio/images): container needs
+   read access only. Solved via supplementary `media_gid` (fixed 31000) plus
+   `:ro` mounts.
 2. **Ingest directory** (Paperless consume, SFTP uploads, yt-dlp): container
-   writes, moves and deletes. Destructive. Must never point at a library dir -
-   use `media_inbox` (or a subdir of it).
+   writes, moves and deletes. Destructive. Must never point at a read-only
+   library dir - use `media_inbox` (or a subdir of it). The Jellyfin
+   movie/series dirs are a separate, app-managed writable case: they are
+   `root:media` `2770` so the Mediathek plugin can store finished recordings
+   next to the library content.
 3. **App-owned data** (Nextcloud data, thumbs, caches): belongs to the app
    alone, stays under `/symbios/services/<name>/`.
 

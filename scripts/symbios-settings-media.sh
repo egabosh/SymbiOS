@@ -18,8 +18,8 @@ Manage SymbiOS standard media paths.
 Commands:
   get [--json]                    Print current values (key=value lines,
                                   or a JSON object with --json)
-  set [--media-root P --audio P --images P --videos P --books P
-       --documents P --inbox P --shared P | --json-stdin] [--check]
+  set [--media-root P --audio P --images P --videos P --movies P --series P
+       --books P --documents P --inbox P --shared P | --json-stdin] [--check]
                                   Validate and write to inventory.yml.
                                   --json-stdin reads inventory key names.
                                   Every given path must be absolute.
@@ -46,7 +46,7 @@ EOF
 }
 
 # Inventory keys managed here (for apply + coverage check).
-f_managed_vars="media_root media_audio media_images media_videos media_books media_documents media_inbox media_shared"
+f_managed_vars="media_root media_audio media_images media_videos media_movies media_series media_books media_documents media_inbox media_shared"
 
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
@@ -54,7 +54,7 @@ source "$g_symbios_dir/symbios-lib.sh"
 source "$g_symbios_dir/symbios-settings-lib.sh"
 
 # Domain fields in stable order: "inventory-key|flag-name".
-f_fields="media_root|--media-root media_audio|--audio media_images|--images media_videos|--videos media_books|--books media_documents|--documents media_inbox|--inbox media_shared|--shared"
+f_fields="media_root|--media-root media_audio|--audio media_images|--images media_videos|--videos media_movies|--movies media_series|--series media_books|--books media_documents|--documents media_inbox|--inbox media_shared|--shared"
 
 f_command="${1:-}"
 case "${f_command}" in
@@ -89,6 +89,10 @@ then
    "required": true, "default": "/symbios/media/images", "secret": false},
   {"name": "media_videos", "type": "path", "label": "Videos library",
    "required": true, "default": "/symbios/media/videos", "secret": false},
+  {"name": "media_movies", "type": "path", "label": "Movies library",
+   "required": true, "default": "/symbios/media/videos/movies", "secret": false},
+  {"name": "media_series", "type": "path", "label": "Series library",
+   "required": true, "default": "/symbios/media/videos/tvshows", "secret": false},
   {"name": "media_books", "type": "path", "label": "Books library",
    "required": true, "default": "/symbios/media/books", "secret": false},
   {"name": "media_documents", "type": "path", "label": "Documents archive",

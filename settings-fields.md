@@ -143,6 +143,8 @@ Slug: `media`
 | `media_audio` | path | Audio library | yes | /symbios/media/audio |  |
 | `media_images` | path | Images library | yes | /symbios/media/images |  |
 | `media_videos` | path | Videos library | yes | /symbios/media/videos |  |
+| `media_movies` | path | Movies library | yes | /symbios/media/videos/movies |  |
+| `media_series` | path | Series library | yes | /symbios/media/videos/tvshows |  |
 | `media_books` | path | Books library | yes | /symbios/media/books |  |
 | `media_documents` | path | Documents archive | yes | /symbios/media/documents |  |
 | `media_inbox` | path | Inbox | yes | /symbios/media/inbox |  |

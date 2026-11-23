@@ -28,6 +28,7 @@
 #     - media_gid
 #     - media_images
 #     - media_inbox
+#     - media_movies
 #     - media_quota_audio
 #     - media_quota_books
 #     - media_quota_documents
@@ -37,6 +38,7 @@
 #     - media_quota_share
 #     - media_quota_videos
 #     - media_root
+#     - media_series
 #     - media_shared
 #     - media_videos
 #   name: Media
@@ -67,6 +69,11 @@
       - "{{ media_documents | default('/symbios/media/documents') }}"
     media_dirs_rw:
       - "{{ media_inbox | default('/symbios/media/inbox') }}"
+      # Jellyfin's Mediathek downloader writes finished recordings directly
+      # into these movie/series libraries and its temporary download dir.
+      - "{{ media_movies | default('/symbios/media/videos/movies') }}"
+      - "{{ media_series | default('/symbios/media/videos/tvshows') }}"
+      - "{{ media_videos | default('/symbios/media/videos') }}/downloads"
     # Base dir for named group shares (see symbios-media-share.sh). Each
     # share below it is owned by its own LDAP group (2770); the base stays
     # traversable so members find their shares.
@@ -141,7 +148,7 @@
         state: directory
       loop: "{{ media_dirs_ro }}"
 
-    - name: Create the writable media ingest directories
+    - name: Create the writable media directories
       ansible.builtin.file:
         path: "{{ item }}"
         owner: root
@@ -171,7 +178,7 @@
       loop: "{{ media_dirs_ro }}"
       changed_when: false
 
-    - name: Set default ACLs on ingest directories (group read/write, inherit group)
+    - name: Set default ACLs on writable media directories (group read/write, inherit group)
       ansible.builtin.shell: setfacl -d -m g::rwx "{{ item }}"
       loop: "{{ media_dirs_rw }}"
       changed_when: false

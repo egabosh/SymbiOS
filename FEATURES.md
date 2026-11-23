@@ -247,14 +247,14 @@ encrypted, with rollback/change-password/unmount operations.
 - Healthcheck: `disk`
 
 ### Media (`/settings/media/`)
-Central media locations (`audio`, `images`, `videos`, `books`, `documents`,
-`inbox`, `shared`) plus per-directory quotas. Services mount these instead
-of inventing their own paths; missing directories are created on apply.
-Details: `mediapaths.md`.
+Central media locations (`audio`, `images`, `videos`, `movies`, `series`,
+`books`, `documents`, `inbox`, `shared`) plus per-directory quotas. Services
+mount these instead of inventing their own paths; missing directories are
+created on apply. Details: `mediapaths.md`.
 - Playbook: `base-services/media.yml`
 - Vars: `media_root`, `media_audio`, `media_images`, `media_videos`,
-  `media_books`, `media_documents`, `media_inbox`, `media_shared`,
-  `media_gid` (fixed `31000`), `media_quota_*`
+  `media_movies`, `media_series`, `media_books`, `media_documents`,
+  `media_inbox`, `media_shared`, `media_gid` (fixed `31000`), `media_quota_*`
 
 ### Shares (`/settings/shares/`)
 Group directories below the media root (`shared/<name>`, mode 2770, owning

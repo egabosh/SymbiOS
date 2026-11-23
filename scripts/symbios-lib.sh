@@ -37,6 +37,8 @@
 #   g_media_audio        audio library (inventory media_audio)
 #   g_media_images       photo library (inventory media_images)
 #   g_media_videos       video library (inventory media_videos)
+#   g_media_movies       movie library (inventory media_movies)
+#   g_media_series       series library (inventory media_series)
 #   g_media_books        e-book library (inventory media_books)
 #   g_media_documents    document library (inventory media_documents)
 #   g_media_inbox        ingest dir (inventory media_inbox)
@@ -119,7 +121,8 @@ g_* globals. Provides helper functions:
 Exported globals: g_data_root, g_git_root, g_base_services_root,
 g_services_root, g_docker_root, g_containerd_root, g_backup_root,
 g_media_root, g_media_audio, g_media_images, g_media_videos,
-g_media_books, g_media_documents, g_media_inbox, g_media_shared, g_media_gid,
+g_media_movies, g_media_series, g_media_books, g_media_documents,
+g_media_inbox, g_media_shared, g_media_gid,
 g_config_dir, g_log_dir, g_inventory, g_state_file, g_base_domain,
 g_ldap_basedn.
 
@@ -287,6 +290,8 @@ function f_symbios_load_layout {
   g_media_audio=$(f_symbios_var media_audio "${g_media_root}/audio")
   g_media_images=$(f_symbios_var media_images "${g_media_root}/images")
   g_media_videos=$(f_symbios_var media_videos "${g_media_root}/videos")
+  g_media_movies=$(f_symbios_var media_movies "${g_media_videos}/movies")
+  g_media_series=$(f_symbios_var media_series "${g_media_videos}/tvshows")
   g_media_books=$(f_symbios_var media_books "${g_media_root}/books")
   g_media_documents=$(f_symbios_var media_documents "${g_media_root}/documents")
   g_media_inbox=$(f_symbios_var media_inbox "${g_media_root}/inbox")

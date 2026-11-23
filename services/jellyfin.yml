@@ -20,6 +20,8 @@
 #     - media_audio
 #     - media_gid
 #     - media_images
+#     - media_movies
+#     - media_series
 #     - media_videos
 #     - traefik_default_access
 #     - traefik_service_access
@@ -81,12 +83,11 @@
     jellyfin_uid: 992
     # Supplementary group for read-only media access (fixed media GID).
     jellyfin_gid: "{{ media_gid | default('') }}"
-    # Standard media libraries, mounted read-only (see mediapaths.md).
-    # The media_* vars are guaranteed by base-services/media.yml.
-    # Movies and TV Shows live below the shared video tree. They are writable
-    # because the Mediathek plugin stores downloaded media directly in them.
-    jellyfin_movies_path: "{{ media_videos | default('/symbios/media/videos') }}/movies"
-    jellyfin_tvshows_path: "{{ media_videos | default('/symbios/media/videos') }}/tvshows"
+    # Standard media libraries (see mediapaths.md). The global movie/series
+    # keys may point to separate disks; media.yml creates all three writable
+    # video dirs before this service mounts them.
+    jellyfin_movies_path: "{{ media_movies | default((media_videos | default('/symbios/media/videos')) + '/movies') }}"
+    jellyfin_tvshows_path: "{{ media_series | default((media_videos | default('/symbios/media/videos')) + '/tvshows') }}"
     jellyfin_downloads_path: "{{ media_videos | default('/symbios/media/videos') }}/downloads"
     jellyfin_audio_path: "{{ media_audio | default('/symbios/media/audio') }}"
     jellyfin_images_path: "{{ media_images | default('/symbios/media/images') }}"
@@ -139,20 +140,6 @@
       loop:
         - config
         - cache
-
-    # The split libraries and the plugin's temporary download area must exist
-    # before Docker mounts them. Setgid keeps new downloads in the media group.
-    - name: Create the Jellyfin movie, series and download directories
-      ansible.builtin.file:
-        path: "{{ item }}"
-        owner: root
-        group: "{{ media_gid | default(31000) }}"
-        state: directory
-        mode: '2770'
-      loop:
-        - "{{ jellyfin_movies_path }}"
-        - "{{ jellyfin_tvshows_path }}"
-        - "{{ jellyfin_downloads_path }}"
 
     # The OIDC client secret and the local bootstrap password are generated
     # once and reused on later runs. gen-oidc-client-secret.sh writes both the

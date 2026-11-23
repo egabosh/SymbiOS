@@ -300,9 +300,10 @@ Settings -> Access. The flag stays as the WebUI-router fallback for upgrades.
 
 ### 3.14 `symbios-settings-media.sh`
 
-The 8 standard media paths (all required, all absolute). Flags mirror the
-keys (`--media-root`, `--audio`, `--images`, `--videos`, `--books`,
-`--documents`, `--inbox`, `--shared`); omitted options keep their values.
+The 10 standard media paths (all required, all absolute). Flags mirror the
+keys (`--media-root`, `--audio`, `--images`, `--videos`, `--movies`, `--series`,
+`--books`, `--documents`, `--inbox`, `--shared`); omitted options keep their
+values.
 Values are stored with `printf -v`/indirect expansion, never `eval`
 (form values may hold quotes or `$()`).
 

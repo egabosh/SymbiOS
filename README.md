@@ -240,11 +240,13 @@ variables, editable as usual; see `mediapaths.md` for the full design):
 |----------|---------|-----|
 | `media_root` | `/symbios/media` | Base dir; SFTP chroot root |
 | `media_audio` / `media_images` / `media_videos` / `media_books` | `…/audio` … | Read-only libraries (mounted `:ro`, e.g. Navidrome, Jellyfin) |
+| `media_movies` / `media_series` | `…/videos/movies` / `…/videos/tvshows` | Jellyfin movie/series libraries (group-writable for Mediathek downloads) |
 | `media_documents` | `…/documents` | Document archive (e.g. Paperless) |
-| `media_inbox` | `…/inbox` | The only shared writable ingest (SFTP uploads, downloads) |
+| `media_inbox` | `…/inbox` | The only general shared writable ingest (SFTP uploads, downloads) |
 
-Rules: libraries are `2750` + group-read, the inbox is `2770` + group-write
-(both `root:media` with setgid and default ACLs, plus SFTP umask `0007`);
+Rules: libraries are `2750` + group-read; the inbox and the Jellyfin video
+dirs are `2770` + group-write (all `root:media` with setgid and default ACLs,
+plus SFTP umask `0007`);
 containers join via the supplementary `media` GID, SFTP enforces membership
 via `AllowGroups media`. App-owned data (caches, databases, thumbnails) stays
 under `/symbios/services/<name>/` and is never shared. New services must use
