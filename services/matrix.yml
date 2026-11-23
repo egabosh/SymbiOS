@@ -693,6 +693,8 @@
               image: docker.io/matrixdotorg/synapse:latest
               container_name: matrix-synapse
               restart: unless-stopped
+              # Healthcheck spawns curl; docker-init reaps it (Python PID 1 does not)
+              init: true
               user: "3000:3000"
               healthcheck:
                 timeout: 30s

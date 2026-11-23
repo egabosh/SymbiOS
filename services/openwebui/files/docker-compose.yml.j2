@@ -6,6 +6,8 @@ services:
     image: ghcr.io/open-webui/open-webui
     container_name: openwebui
     restart: unless-stopped
+    # Healthcheck spawns curl | jq; docker-init reaps them (Python PID 1 does not)
+    init: true
     # Wrapper makes chat requests wait for pending transcriptions.
     entrypoint:
       - /bin/bash
