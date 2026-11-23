@@ -517,10 +517,8 @@
             \"password\": \"${HA_ADMIN_PASSWORD}\",
             \"language\": \"de\"
           }" >>/symbios/services/home-assistant/home-assistant.init.log 2>&1
-          # HA 2026.11+ ships the native Marketplace and the HACS installer
-          # refuses to run. Keep the one-time init non-fatal so the rest of
-          # the deployment still finishes on current installations.
-          docker compose exec -T home-assistant wget -O - https://get.hacs.xyz | bash - >>/symbios/services/home-assistant/home-assistant.init.log 2>&1 || true
+          # HA 2026.11+ ships the Marketplace (HACS) in core, so there is no
+          # community store installer to deploy here.
         backup: yes
         validate: /bin/bash -n %s
 
