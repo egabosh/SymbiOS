@@ -132,8 +132,9 @@
       - { key: "network.wg_lan_{{ client_name }}.persistent_keepalive", value: "15" }
       - { key: "network.wg_lan_{{ client_name }}.description", value: "wg_lan_{{ client_name | replace('_', '-') }}" }
       - { key: "network.wg_lan_{{ client_name }}.route_allowed_ips", value: "1" }
-      - { key: "network.wg_lan_{{ client_name }}.endpoint_host", value: "{{ ddns_domain.stdout | trim }}" }
-      - { key: "network.wg_lan_{{ client_name }}.endpoint_port", value: "59666" }
+      # No endpoint on the server peer: it resolves to this router and makes
+      # netifd depend on local DNS. The client .conf still gets the public
+      # endpoint from ddns_domain below.
       # dns record
       - { key: "dhcp.host_{{ client_name }}", value: "domain" }
       - { key: "dhcp.host_{{ client_name }}.ip",   value: "192.168.44.{{ client_num_resolved }}" }
@@ -380,9 +381,26 @@
           # neutral and the aggregate decides whether a reload is needed.
           changed_when: false
 
+        # Older revisions stored an endpoint on the server peer too. The
+        # setter only adds values, so drop the stale pair explicitly.
+        - name: Drop stale server-side peer endpoint
+          ansible.builtin.raw: |
+            changed=0
+            for k in endpoint_host endpoint_port
+            do
+              if uci -q get network.wg_lan_{{ client_name }}.$k > /dev/null
+              then
+                uci -q delete network.wg_lan_{{ client_name }}.$k
+                changed=1
+              fi
+            done
+            if [ "$changed" = 1 ]; then echo changed; else echo unchanged; fi
+          register: endpoint_cleanup_result
+          changed_when: "endpoint_cleanup_result.stdout | trim == 'changed'"
+
         - name: Remember whether any uci value changed
           ansible.builtin.set_fact:
-            uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+            uci_changed: "{{ (uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0) or endpoint_cleanup_result.changed }}"
 
         - name: Generate the client keys if missing
           ansible.builtin.raw: |

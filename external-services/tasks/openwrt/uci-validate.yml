@@ -7,12 +7,13 @@
 - name: Validate UCI keys and values
   ansible.builtin.assert:
     that:
-      - item.key is match('^[A-Za-z0-9_.@-]+$')
+      # Anonymous UCI sections use @type[index], e.g. system.@system[0].timezone.
+      - item.key is match('^[A-Za-z0-9_.@\[\]-]+$')
       - item.value is string
       - item.value is not search('[\r\n\x00]')
     fail_msg: >-
-      Unsafe UCI input: a key may only contain letters, digits, '.', '_', '@'
-      and '-'; a value must be a single-line string without control characters.
+      Unsafe UCI input: a key may only contain letters, digits, '.', '_', '@',
+      '[', ']' and '-'; a value must be a single-line string without control characters.
     quiet: true
   loop: "{{ uci_vars }}"
   loop_control:

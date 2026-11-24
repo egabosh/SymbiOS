@@ -210,18 +210,23 @@
       - { key: "dhcp.lan.ra_default", value: "{{ '1' if resolver_role.stdout | trim == 'resolver' and (ipv6_uplink | bool) else '0' }}" }
       - { key: "dhcp.lan.ra_lifetime", value: "1800" }
       - { key: "dhcp.lan.force", value: "1" }
-      - { key: "dhcp.lan.dns", value: "$(uci get network.lan.ip6addr | cut -d/ -f1)" }
+      # Resolve values from inventory instead of shell substitutions: the
+      # setter quotes each value, so a literal $(...) would never be expanded.
+      - { key: "dhcp.lan.dns", value: "{{ effective_ip6.split('/')[0] }}" }
       - { key: "dhcp.lan_dnsmasq", value: "dnsmasq" }
       - { key: "dhcp.lan_dnsmasq.domain", value: "lan" }
-      - { key: "dhcp.lan_dnsmasq.listen_address", value: "127.0.0.1" }
-      - { key: "dhcp.lan_dnsmasq.listen_address", value: "$(uci get network.lan.ipaddr)" }
-      - { key: "dhcp.lan_dnsmasq.listen_address", value: "$(uci get network.lan.ip6addr | cut -d/ -f1)" }
+      # No 127.0.0.1 here: the zone dnsmasq instances cannot share the
+      # loopback socket, so /etc/resolv.conf points at the LAN address.
+      - { key: "dhcp.lan_dnsmasq.listen_address", value: "{{ effective_ip }}" }
+      - { key: "dhcp.lan_dnsmasq.listen_address", value: "{{ effective_ip6.split('/')[0] }}" }
       - { key: "dhcp.lan_dnsmasq.logqueries", value: "1" }
       - { key: "dhcp.lan_dnsmasq.authoritative", value: "1" }
       - { key: "dhcp.lan_dnsmasq.sequential_ip", value: "1" }
       - { key: "dhcp.lan_dnsmasq.readethers", value: "1" }
-      - { key: "dhcp.lan.dhcp_option", value: "119,{{ dhcp_domains }}" }
-      - { key: "dhcp.lan.dhcp_option", value: "6,$(uci get network.lan.ipaddr)" }
+      # UCI normalizes the domain-search list to commas; use the stored form
+      # so an unchanged run does not append the option again.
+      - { key: "dhcp.lan.dhcp_option", value: "119,{{ dhcp_domains | replace(' ', ',') }}" }
+      - { key: "dhcp.lan.dhcp_option", value: "6,{{ effective_ip }}" }
 
       ## Firewall defaults + LAN zone
       - { key: "firewall.defaults", value: "defaults" }
@@ -799,6 +804,21 @@
     - name: Validate UCI keys and values
       ansible.builtin.include_tasks: uci-validate.yml
 
+    # Older revisions appended the loopback address even though the zone
+    # instances cannot bind it. The setter below only adds values, so the
+    # stale entry needs an explicit removal.
+    - name: drop a stale loopback listen address
+      ansible.builtin.raw: |
+        if uci -q get dhcp.lan_dnsmasq.listen_address | grep -qFx '127.0.0.1'
+        then
+          uci -q del_list dhcp.lan_dnsmasq.listen_address=127.0.0.1
+          echo changed
+        else
+          echo unchanged
+        fi
+      register: listen_cleanup_result
+      changed_when: "listen_cleanup_result.stdout | trim == 'changed'"
+
     - name: set uci values if needed
       raw: |
         k={{ item.key | quote }}
@@ -823,6 +843,10 @@
       register: uci_set_result
       changed_when: "not 'unchanged' in uci_set_result.stdout"
 
+    - name: remember UCI changes including the listen-address cleanup
+      ansible.builtin.set_fact:
+        uci_changed: "{{ uci_set_result.changed or listen_cleanup_result.changed }}"
+
     - name: apply changes
       block:
         - name: commit enable and restart
@@ -840,7 +864,7 @@
             - "/etc/init.d/avahi-daemon enable"
             - "/etc/init.d/avahi-daemon restart"
             - "/etc/init.d/firewall reload"
-          when: uci_set_result.changed
+          when: uci_changed
 
     # netifd only picks up ipaddr/ip6addr changes when the interface is
     # re-applied; a plain uci commit leaves the old kernel addresses in
@@ -884,7 +908,7 @@
         - "/etc/init.d/odhcpd enable"
         - "/etc/init.d/odhcpd restart"
       when:
-        - uci_set_result.changed
+        - uci_changed
         - resolver_role.stdout | trim == 'resolver'
 
     # Record this playbook's resources in /etc/symbios/managed.json.
