@@ -36,7 +36,12 @@
 #     direct access is LAN-only, global access runs through Authelia/Traefik at
 #     kodi.<base_domain> (group kodi). Optional: MariaDB media database backend
 #     (see services/kodidb.yml), SFTP media sources and automatic addon
-#     installation from mirrors.kodi.tv. Optional: a game ROM source (Kodi
+#     installation from mirrors.kodi.tv. Optional: a Jellyfin server can be
+#     connected through the Jellyfin for Kodi addon (plugin.video.jellyfin);
+#     the addon is installed and preconfigured with the configured server URL,
+#     and the user signs in once in the Kodi UI. Jellyfin library sync and the
+#     KodiDB/MySQL backend both write into the Kodi library and should not be
+#     combined without testing. Optional: a game ROM source (Kodi
 #     Options "path_roms", local or SFTP-relative like the other media paths)
 #     that installs the libretro cores available as Debian packages on the
 #     target release (trixie: gb/gbc, gba, nes/fds, snes, Sega MD/MS/GG/
@@ -173,6 +178,14 @@
 #         label: Musikvideo-Pfad
 #         type: text
 #         placeholder: /media/musicvideos
+#       jellyfin_server:
+#         label: Jellyfin-Server
+#         type: text
+#         placeholder: https://jellyfin.example.invalid
+#       jellyfin_user:
+#         label: Jellyfin-Benutzer
+#         type: text
+#         placeholder: kodi
 #       path_roms:
 #         label: ROM-Pfad
 #         type: text
@@ -362,6 +375,24 @@
     # Index of the MediathekView plugin zips (repo-matrix = Kodi >= 19, this is
     # Kodi 21). The listing order ends with the newest zip, like mirrors.kodi.tv.
     kodi_addon_mediathekview_index_url: "https://kodirepo.mediathekview.de/repo-matrix/plugin.video.mediathekview/"
+    # Jellyfin for Kodi (plugin.video.jellyfin): optional addon that connects
+    # Kodi to a Jellyfin server. Pinned to the official Jellyfin repo release
+    # (not mirrors.kodi.tv - the addon is not in the Kodi omega mirror). The
+    # dependencies are installed from mirrors.kodi.tv when missing. The addon
+    # is installed while a jellyfin_server is configured; first login happens
+    # once in the Kodi UI (server/auth state is version-sensitive, so no
+    # credentials are preseeded).
+    kodi_jellyfin_addon: plugin.video.jellyfin
+    kodi_jellyfin_addon_version: "2.2.0+py3"
+    kodi_jellyfin_addon_url: "https://repo.jellyfin.org/releases/client/kodi/py3/plugin.video.jellyfin/plugin.video.jellyfin-2.2.0+py3.zip"
+    kodi_jellyfin_addon_sha256: "58cc72c0eedc624a98a255f5c95c64b6e0f6f906c9666d0893fee152eb4fb8b1"
+    kodi_jellyfin_repo_url: "https://kodi.jellyfin.org/repository.jellyfin.kodi.zip"
+    kodi_jellyfin_repo_sha256: "7409807249c9cc43c6b3b0df3fb9baa380bc62afcc8ad464444a95261a437ba6"
+    kodi_jellyfin_deps:
+      - script.module.requests
+      - script.module.dateutil
+      - script.module.websocket
+      - script.module.typing_extensions
     # Libretro cores for the ROM source, one entry per core. A core is either
     # a Debian package ("package") or a source build ("build", GitHub repo of
     # the libretro organization); entries whose package the target release
@@ -1442,6 +1473,100 @@
         creates: /home/kodi/.kodi/addons/{{ kodi_language }}
       register: kodi_language_install
       when: kodi_language_zip.stdout | trim | length > 0
+
+    # Jellyfin for Kodi: optional addon connecting Kodi to a Jellyfin server.
+    # The addon is not in the Kodi omega mirror, so it is fetched from the
+    # official Jellyfin repo release and verified by sha256. Dependencies come
+    # from mirrors.kodi.tv when missing. The addon is installed while a
+    # Jellyfin server is configured; first login is done once in the Kodi UI.
+    - name: Resolve whether a Jellyfin server is configured
+      ansible.builtin.set_fact:
+        kodi_jellyfin_configured: "{{ ((kodi_options | default({})).jellyfin_server | default('') | trim | length > 0) }}"
+
+    - name: Install Jellyfin Kodi addon dependencies from mirrors.kodi.tv
+      ansible.builtin.shell: |
+        cd /home/kodi/.kodi/addons
+        addonvers=$(wget -q https://mirrors.kodi.tv/addons/omega/{{ item }}/ -O - | egrep "{{ item }}-.+\.zip" | tail -n1 | cut -d\" -f2)
+        wget -q "https://mirrors.kodi.tv/addons/omega/{{ item }}/${addonvers}"
+        unzip -o "${addonvers}"
+      loop: "{{ kodi_jellyfin_deps }}"
+      args:
+        creates: "/home/kodi/.kodi/addons/{{ item }}"
+      when: kodi_jellyfin_configured
+
+    - name: Download Jellyfin Kodi repository addon (pinned)
+      ansible.builtin.get_url:
+        url: "{{ kodi_jellyfin_repo_url }}"
+        dest: /home/kodi/.kodi/addons/repository.jellyfin.kodi.zip
+        checksum: "sha256:{{ kodi_jellyfin_repo_sha256 }}"
+        mode: "0644"
+        owner: kodi
+        group: kodi
+      when: kodi_jellyfin_configured
+
+    - name: Install Jellyfin Kodi repository addon (pinned)
+      ansible.builtin.unarchive:
+        src: /home/kodi/.kodi/addons/repository.jellyfin.kodi.zip
+        dest: /home/kodi/.kodi/addons
+        remote_src: true
+        owner: kodi
+        group: kodi
+        creates: /home/kodi/.kodi/addons/repository.jellyfin.kodi
+      when: kodi_jellyfin_configured
+
+    - name: Download Jellyfin for Kodi addon (pinned)
+      ansible.builtin.get_url:
+        url: "{{ kodi_jellyfin_addon_url }}"
+        dest: "/home/kodi/.kodi/addons/{{ kodi_jellyfin_addon }}-{{ kodi_jellyfin_addon_version }}.zip"
+        checksum: "sha256:{{ kodi_jellyfin_addon_sha256 }}"
+        mode: "0644"
+        owner: kodi
+        group: kodi
+      when: kodi_jellyfin_configured
+
+    - name: Install Jellyfin for Kodi addon (pinned)
+      ansible.builtin.unarchive:
+        src: "/home/kodi/.kodi/addons/{{ kodi_jellyfin_addon }}-{{ kodi_jellyfin_addon_version }}.zip"
+        dest: /home/kodi/.kodi/addons
+        remote_src: true
+        owner: kodi
+        group: kodi
+        creates: "/home/kodi/.kodi/addons/{{ kodi_jellyfin_addon }}"
+      register: kodi_jellyfin_addon_install
+      when: kodi_jellyfin_configured
+
+    # Seed only the non-sensitive Jellyfin addon settings. Server/auth state
+    # lives in addon_data/data.json and is version-sensitive; the user signs in
+    # once in Kodi. The settings file is seeded on first install only.
+    - name: Create Jellyfin addon data directory
+      ansible.builtin.file:
+        path: "/home/kodi/.kodi/userdata/addon_data/{{ kodi_jellyfin_addon }}"
+        state: directory
+        owner: kodi
+        group: kodi
+        mode: "0750"
+      when: kodi_jellyfin_configured
+
+    - name: Seed Jellyfin addon settings (first install only)
+      ansible.builtin.copy:
+        dest: "/home/kodi/.kodi/userdata/addon_data/{{ kodi_jellyfin_addon }}/settings.xml"
+        owner: kodi
+        group: kodi
+        mode: "0600"
+        force: false
+        content: |
+          <settings version="2">
+              <setting id="ipaddress">{{ (kodi_options.jellyfin_server | default('')) | trim }}</setting>
+              <setting id="server">{{ (kodi_options.jellyfin_server | default('')) | trim }}</setting>
+              <setting id="sslverify">true</setting>
+          </settings>
+      when: kodi_jellyfin_configured
+
+    - name: Restart the Kodi session to register the Jellyfin addon
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-kodi-restart.sh"
+      register: kodi_restart_jellyfin
+      changed_when: "'kodi-session-restarted' in kodi_restart_jellyfin.stdout"
+      when: kodi_jellyfin_addon_install is changed
 
     # The mediathekview repository is not in the official Kodi repository; pin
     # the zip from the project's own kodirepo.
