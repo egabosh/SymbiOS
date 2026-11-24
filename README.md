@@ -694,12 +694,19 @@ services/<name>/
 SymbiOS includes or depends on the following third-party software components.
 Each is included under its respective license.
 
-### Frontend (CDN)
+### Frontend (pinned local assets)
 
 | Component | License | Source |
 |-----------|---------|--------|
-| Bootstrap | MIT | <https://getbootstrap.com/> |
-| Bootstrap Icons | MIT | <https://icons.getbootstrap.com/> |
+| Bootstrap 5.3.0 | MIT | <https://getbootstrap.com/> |
+| Bootstrap Icons 1.10.0 | MIT | <https://icons.getbootstrap.com/> |
+
+`base-services/symbios-ui.yml` downloads these files (including the icon
+fonts) once during installation. The WebUI serves them through WhiteNoise from
+its static directory, and the boot unlock page serves a rootfs copy before
+`/symbios` is mounted, so neither page contacts a CDN at request time. To
+change a version, update the pinned URLs in that playbook; the static paths in
+the templates stay the same.
 
 ### Python dependencies
 

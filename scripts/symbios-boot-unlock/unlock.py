@@ -45,6 +45,10 @@ CERT_DIR = "/usr/local/sbin/symbios-boot-unlock"
 CERT_FILE = os.path.join(CERT_DIR, "cert.pem")
 KEY_FILE = os.path.join(CERT_DIR, "key.pem")
 LUKS_SCRIPT = os.path.join(CERT_DIR, "symbios-boot-unlock-luks.sh")
+# The unlock page runs before /symbios is mounted, so its assets are pinned on
+# the rootfs by symbios-ui.yml instead of being fetched from a CDN.
+STATIC_DIR = os.path.join(CERT_DIR, "static")
+STATIC_TYPES = {".css": "text/css", ".woff": "font/woff", ".woff2": "font/woff2"}
 
 # Timeouts (seconds). A client that connects and stalls mid-handshake or
 # mid-request must never block the unlock server: while /symbios is locked,
@@ -120,8 +124,8 @@ HTML_UNLOCK = """<!DOCTYPE html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SymbiOS - Unlock /symbios</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="https://__HOSTNAME__/static/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link href="https://__HOSTNAME__/static/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
   <style>
     body { background: #1a1d23; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; }
     .unlock-card { max-width: 440px; margin: 0 auto; }
@@ -221,8 +225,8 @@ HTML_HTTP_HELP = """<!DOCTYPE html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SymbiOS - Unlock /symbios</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="https://__HOSTNAME__/static/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link href="https://__HOSTNAME__/static/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
   <style>
     body { background: #1a1d23; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; }
     .help-card { max-width: 480px; margin: 0 auto; }
@@ -259,8 +263,8 @@ HTML_DONE = """<!DOCTYPE html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SymbiOS - Starting...</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="https://__HOSTNAME__/static/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link href="https://__HOSTNAME__/static/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
   <style>
     body { background: #1a1d23; color: #e0e0e0; min-height: 100vh; display: flex; align-items: center; }
   </style>
@@ -493,9 +497,33 @@ class UnlockHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(f_body)
 
+    def _serve_static(self, f_path):
+        """Serve a pinned asset from STATIC_DIR; reject anything outside it."""
+        f_rel = f_path[len("/static/"):].split("?", 1)[0]
+        f_target = os.path.normpath(os.path.join(STATIC_DIR, f_rel))
+        if not f_target.startswith(STATIC_DIR + os.sep):
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        try:
+            with open(f_target, "rb") as f:
+                f_body = f.read()
+        except OSError:
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        f_type = STATIC_TYPES.get(
+            os.path.splitext(f_target)[1], "application/octet-stream")
+        self._send_body(f_body, f_type)
+
     def do_GET(self):
         if self.path == "/health":
             self._send_body(b"ok", "text/plain")
+            return
+        if self.path.startswith("/static/"):
+            self._serve_static(self.path)
             return
 
         hostname = get_hostname()
