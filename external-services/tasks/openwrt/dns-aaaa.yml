@@ -119,13 +119,8 @@
             then
               uci delete "dhcp.$sec"
             fi
-            # The effective answer lives in the LAN dnsmasq address list.
-            value={{ dns_address | quote }}
-            if uci -q get dhcp.lan_dnsmasq.address 2>/dev/null | grep -qFx "$value"
-            then
-              uci del_list dhcp.lan_dnsmasq.address="$value"
-              changed=1
-            fi
+            # The effective answer lives in the LAN dnsmasq address list;
+            # handle it in the shared task so present/absent use one check.
             if [ "$changed" = 1 ]
             then
               uci commit dhcp
@@ -133,12 +128,23 @@
             else
               echo unchanged
             fi
-          register: delete_result
-          changed_when: "delete_result.stdout | trim == 'changed'"
+          register: delete_section_result
+          changed_when: "delete_section_result.stdout | trim == 'changed'"
+
+        - name: Remove the dnsmasq AAAA override
+          ansible.builtin.include_tasks: dns-aaaa-override.yml
+          vars:
+            dns_aaaa_override_name: "{{ host_norm }}"
+            dns_aaaa_override_ip6: "{{ ip6 | default('') }}"
+            dns_aaaa_override_state: absent
+
+        - name: Commit the override removal
+          ansible.builtin.raw: uci commit dhcp
+          when: dns_aaaa_override_changed | bool
 
         - name: Reload DNS
           ansible.builtin.raw: /etc/init.d/dnsmasq reload
-          when: delete_result is changed
+          when: delete_section_result is changed or (dns_aaaa_override_changed | bool)
 
         # A removal must not leave a stale entry in managed.json. The id was
         # recorded under the original spelling, while create rewrites
@@ -176,24 +182,18 @@
           changed_when: false
 
         - name: Ensure the dnsmasq AAAA override is present
-          ansible.builtin.raw: |
-            value={{ dns_address | quote }}
-            if uci -q get dhcp.lan_dnsmasq.address 2>/dev/null | grep -qFx "$value"
-            then
-              echo unchanged
-            else
-              uci add_list dhcp.lan_dnsmasq.address="$value"
-              echo changed
-            fi
-          register: address_result
-          changed_when: false
+          ansible.builtin.include_tasks: dns-aaaa-override.yml
+          vars:
+            dns_aaaa_override_name: "{{ host_norm }}"
+            dns_aaaa_override_ip6: "{{ ip6 }}"
+            dns_aaaa_override_state: present
 
         - name: Remember whether any uci value changed
           ansible.builtin.set_fact:
             uci_changed: >-
               {{ (uci_set_result.results | map(attribute='stdout') | map('trim')
                   | select('equalto', 'changed') | list | length > 0)
-                 or (address_result.stdout | trim == 'changed') }}
+                 or (dns_aaaa_override_changed | bool) }}
 
         - name: Apply the changes
           ansible.builtin.raw: "{{ item }}"

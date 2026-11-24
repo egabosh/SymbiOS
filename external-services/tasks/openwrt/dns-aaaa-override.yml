@@ -1,0 +1,38 @@
+---
+# Manage one /<name>/<ipv6> address override in dnsmasq's lan instance.
+# Expects dns_aaaa_override_name, dns_aaaa_override_ip6 and
+# dns_aaaa_override_state (present/absent). The caller commits and reloads.
+- name: Read current address overrides
+  ansible.builtin.raw: uci -q get dhcp.lan_dnsmasq.address 2>/dev/null || true
+  changed_when: false
+  register: dns_aaaa_override_current
+
+- name: Set dnsmasq AAAA address override
+  ansible.builtin.raw: |
+    value="/{{ dns_aaaa_override_name }}/{{ dns_aaaa_override_ip6 }}"
+    found=0
+    # raw over an SSH PTY appends a CR to stdout, so strip it before the exact
+    # match: otherwise the last list entry never matches and is duplicated.
+    if printf '%s\n' "{{ dns_aaaa_override_current.stdout | default('') }}" | tr ' ' '\n' | tr -d '\r' | grep -qFx "$value"
+    then
+      found=1
+    fi
+    if [ "{{ dns_aaaa_override_state }}" = "present" ] && [ "$found" -eq 0 ]
+    then
+      uci -q add_list dhcp.lan_dnsmasq.address="$value"
+      echo changed
+    elif [ "{{ dns_aaaa_override_state }}" = "absent" ] && [ "$found" -eq 1 ]
+    then
+      uci -q del_list dhcp.lan_dnsmasq.address="$value"
+      echo changed
+    else
+      echo unchanged
+    fi
+  changed_when: dns_aaaa_override_result.stdout | trim == 'changed'
+  register: dns_aaaa_override_result
+
+# include_tasks cannot pass a register result back to the caller, so export
+# the verdict as a fact that the including playbook can test.
+- name: Export override change state
+  ansible.builtin.set_fact:
+    dns_aaaa_override_changed: "{{ dns_aaaa_override_result.stdout | trim == 'changed' }}"

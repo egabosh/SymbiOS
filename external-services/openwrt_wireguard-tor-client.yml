@@ -300,6 +300,15 @@
     - name: Remove the WireGuard Tor client
       when: state == 'absent'
       block:
+        # Read before deletion: the dnsmasq override is keyed by name+address
+        # and the address is no longer in UCI once the host section is gone.
+        - name: Read the AAAA address of the client
+          ansible.builtin.raw: |
+            uci -q get dhcp.host_{{ client_name }}.ip6 2>/dev/null \
+              | tr ' ' '\n' | grep -oE '^[0-9a-fA-F:.]+$' | head -1
+          register: client_ip6_result
+          changed_when: false
+
         - name: Delete the client sections
           ansible.builtin.raw: |
             changed=0
@@ -322,6 +331,18 @@
           register: delete_result
           changed_when: "delete_result.stdout | trim == 'changed'"
 
+        - name: Remove the AAAA override of the client
+          ansible.builtin.include_tasks: tasks/openwrt/dns-aaaa-override.yml
+          vars:
+            dns_aaaa_override_name: "wgtor-{{ client_name | replace('_', '-') }}.tor"
+            dns_aaaa_override_ip6: "{{ client_ip6_result.stdout | trim }}"
+            dns_aaaa_override_state: absent
+          when: client_ip6_result.stdout | trim | length > 0
+
+        - name: Commit the AAAA override removal
+          ansible.builtin.raw: uci commit dhcp
+          when: dns_aaaa_override_changed | default(false) | bool
+
         - name: Reload network and DNS
           ansible.builtin.raw: "{{ item }}"
           loop:
@@ -329,7 +350,7 @@
             - "/etc/init.d/dnsmasq reload"
             - "ifdown wg_tor 2>/dev/null || true"
             - "ifup wg_tor"
-          when: delete_result is changed
+          when: delete_result is changed or (dns_aaaa_override_changed | default(false) | bool)
 
         - name: Keep key material of the removed client
           ansible.builtin.debug:
@@ -385,9 +406,18 @@
           register: endpoint_cleanup_result
           changed_when: "endpoint_cleanup_result.stdout | trim == 'changed'"
 
+        # The effective AAAA answer is a dnsmasq address list entry; option
+        # ip6 alone is only metadata on OpenWrt 25.12.
+        - name: Ensure the AAAA override of the client
+          ansible.builtin.include_tasks: tasks/openwrt/dns-aaaa-override.yml
+          vars:
+            dns_aaaa_override_name: "wgtor-{{ client_name | replace('_', '-') }}.tor"
+            dns_aaaa_override_ip6: "fdaa:a192:b168:cd45::{{ client_num_resolved }}"
+            dns_aaaa_override_state: present
+
         - name: Remember whether any uci value changed
           ansible.builtin.set_fact:
-            uci_changed: "{{ (uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0) or endpoint_cleanup_result.changed }}"
+            uci_changed: "{{ (uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0) or endpoint_cleanup_result.changed or (dns_aaaa_override_changed | bool) }}"
 
         - name: Generate the client keys if missing
           ansible.builtin.raw: |
