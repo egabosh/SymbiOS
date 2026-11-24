@@ -18,7 +18,7 @@ their subnets are shown. The default-route subnet is listed first so the
 physical LAN sorts on top in the WebUI. Hosts with only a public IP on the
 default-route interface still get a valid payload with the uplink block.
 
-Results are cached for 60 seconds so a frequently reloaded dashboard does
+Results are cached for 5 minutes so a frequently reloaded dashboard does
 not hammer the network.
 
 Options:
@@ -45,7 +45,7 @@ fi
 # first so the physical LAN sorts on top in the WebUI. A public-only default
 # interface produces an empty device list, but still a valid uplink block.
 #
-# Results are cached for 60 seconds so a frequently reloaded dashboard does
+# Results are cached for 5 minutes so a frequently reloaded dashboard does
 # not hammer the network.
 #
 # Usage: symbios-network-scan.sh [--fresh]
@@ -55,9 +55,10 @@ g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
 
 # Use a STABLE cache location (not the per-PID g_tmp, which is removed on
-# exit) so the 60-second cache is shared across invocations and repeated
+# exit) so the 5-minute cache is shared across invocations and repeated
 # dashboard refreshes do not re-scan the network.
 f_cache="/tmp/symbios-network-scan.json"
+f_cache_minutes=5
 if [[ ! -w /tmp ]] || [[ ! -d /tmp ]]
 then
   f_cache="${g_tmp:-/tmp}/symbios-network-scan.json"
@@ -79,7 +80,7 @@ esac
 # Serve the cached result unless a fresh scan is requested.
 if [[ "${f_fresh}" -ne 1 ]] && [[ -s "${f_cache}" ]]
 then
-  if find "${f_cache}" -mmin -1 2>/dev/null | grep -q "${f_cache}"
+  if find "${f_cache}" -mmin "-${f_cache_minutes}" 2>/dev/null | grep -q "${f_cache}"
   then
     cat "${f_cache}"
     exit 0
@@ -113,6 +114,27 @@ f_is_dashboard_v6() {
   esac
 }
 
+# Escape into a global instead of stdout: a scan emits thousands of rows and
+# a command substitution per field would fork a shell for every single value.
+function f_escape_set {
+  local f_s="$1" f_c
+  f_s="${f_s//\\/\\\\}"
+  f_s="${f_s//\"/\\\"}"
+  f_s="${f_s//$'\t'/\\t}"
+  f_s="${f_s//$'\n'/\\n}"
+  f_s="${f_s//$'\r'/\\r}"
+  # Only the rare value with another control byte needs the slow replacement.
+  if [[ "$f_s" =~ [[:cntrl:]] ]]
+  then
+    for f_c in 01 02 03 04 05 06 07 08 0b 0c 0e 0f 10 11 12 13 14 15 16 17 \
+               18 19 1a 1b 1c 1d 1e 1f
+    do
+      f_s="${f_s//$(printf "\\x${f_c}")/\\u00${f_c}}"
+    done
+  fi
+  g_json_escaped="\"${f_s}\""
+}
+
 f_json_array() {
   local f_out="[" f_first=1 f_item
   for f_item in "$@"
@@ -123,7 +145,8 @@ f_json_array() {
     else
       f_out+=","
     fi
-    f_out+="$(printf '%s' "${f_item}" | f_json_escape)"
+    f_escape_set "${f_item}"
+    f_out+="${g_json_escaped}"
   done
   printf '%s]' "${f_out}"
 }
@@ -269,7 +292,7 @@ f_normmac() {
     fi
     f_out+="${f_oct}"
   done
-  printf '%s' "${f_out}"
+  g_normmac="${f_out}"
 }
 
 # Append a value to a comma-separated list without duplicates.
@@ -297,7 +320,8 @@ while read -r f_v6 f_v6mac
 do
   [[ -z "${f_v6}" ]] && continue
   f_is_dashboard_v6 "${f_v6}" || continue
-  f_v6mac="$(f_normmac "${f_v6mac}")"
+  f_normmac "${f_v6mac}"
+  f_v6mac="${g_normmac}"
   [[ -z "${f_v6mac}" ]] && continue
   f_v6mac="${f_v6mac,,}"
   g_v6_by_mac[${f_v6mac}]="$(f_append_csv "${g_v6_by_mac[${f_v6mac}]-}" "${f_v6}")"
@@ -311,22 +335,24 @@ do
   g_v6_by_iface[${f_ifn}]="$(f_append_csv "${g_v6_by_iface[${f_ifn}]-}" "${f_v6}")"
 done < <(ip -o -6 addr show scope global 2>/dev/null | awk '{print $2, $4}' | sed 's|/.*||')
 
+# Load the OUI databases once. A bash regex loop over the 214k-line IEEE file
+# alone cost ~20 s; awk emits just the prefix/vendor pairs we need.
+declare -A g_oui_map=()
+f_nmap_awk='length($1)==6 && $1 ~ /^[0-9A-Fa-f]+$/ { p=toupper($1); v=$0; sub(/^[^ \t]+[ \t]+/, "", v); if (v != "" && !(p in seen)) { seen[p]=1; print p "\t" v } }'
+f_oui_awk='/^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][ \t]/ { p=toupper($1); v=$0; sub(/^[0-9A-Fa-f]+[ \t]+\([^)]*\)[ \t]+/, "", v); sub(/\r$/, "", v); if (v != "" && !(p in seen)) { seen[p]=1; print p "\t" v } }'
+while IFS=$'\t' read -r f_prefix f_vendor
+do
+  # The IEEE list is emitted last and wins over nmap's additions.
+  g_oui_map["$f_prefix"]="$f_vendor"
+done < <(
+  [[ -r /usr/share/nmap/nmap-mac-prefixes ]] && awk "$f_nmap_awk" /usr/share/nmap/nmap-mac-prefixes 2>/dev/null
+  [[ -r /usr/share/ieee-data/oui.txt ]] && awk "$f_oui_awk" /usr/share/ieee-data/oui.txt 2>/dev/null
+)
+
 # Vendor from the OUI database (works for any row, not just self rows).
 f_oui_vendor() {
-  local f_oui="${1//:/}" f_v=""
-  f_oui="${f_oui:0:6}"
-  f_oui="${f_oui^^}"
-  if [[ -f /usr/share/ieee-data/oui.txt ]]
-  then
-    f_v="$(awk -v o="${f_oui}" '$1==o { sub(/^[^ \t]+[ \t]+\([^)]*\)[ \t]+/, ""); print; exit }' /usr/share/ieee-data/oui.txt 2>/dev/null)"
-  fi
-  # oui.txt uses CRLF line endings; strip the trailing carriage return.
-  f_v="${f_v%$'\r'}"
-  if [[ -z "${f_v}" ]] && [[ -f /usr/share/nmap/nmap-mac-prefixes ]]
-  then
-    f_v="$(awk -v o="${f_oui}" '$1==o { sub(/^[^ \t]+[ \t]+/, ""); print; exit }' /usr/share/nmap/nmap-mac-prefixes 2>/dev/null)"
-  fi
-  printf '%s' "${f_v}"
+  local f_oui="${1//:/}"
+  printf '%s' "${g_oui_map[${f_oui:0:6}]-}"
 }
 
 # (Device rows are collected further below, after the helper definitions.)
@@ -347,9 +373,13 @@ f_cidr_of() {
       f_mask=$(( (~((1 << f_shift) - 1)) & 0xffffffff ))
     fi
     f_net=$(( (f_addr & f_mask) & 0xffffffff ))
-    [[ "${f_net}" == "${g_nets[$f_i]}" ]] && echo "${g_cidrs[$f_i]}" && return 0
+    if [[ "${f_net}" == "${g_nets[$f_i]}" ]]
+    then
+      g_cidr_result="${g_cidrs[$f_i]}"
+      return 0
+    fi
   done
-  echo ""
+  g_cidr_result=""
   return 1
 }
 
@@ -369,9 +399,13 @@ f_iface_of() {
       f_mask=$(( (~((1 << f_shift) - 1)) & 0xffffffff ))
     fi
     f_net=$(( (f_addr & f_mask) & 0xffffffff ))
-    [[ "${f_net}" == "${g_nets[$f_i]}" ]] && echo "${g_links[$f_i]}" && return 0
+    if [[ "${f_net}" == "${g_nets[$f_i]}" ]]
+    then
+      g_iface_result="${g_links[$f_i]}"
+      return 0
+    fi
   done
-  echo ""
+  g_iface_result=""
   return 1
 }
 
@@ -388,11 +422,16 @@ f_emit() {
         f_ipv6="${8:-}"
   local f_is_self="false"
   local f_is_gw="false"
-  local f_subnet="$(f_cidr_of "${f_ip}")"
+  f_cidr_of "${f_ip}"
+  local f_subnet="${g_cidr_result}"
   # The interface a device is connected through: for WiFi stations it is the
   # AP interface itself, for everything else the interface of its subnet.
   local f_iface="${f_ap}"
-  [[ -z "${f_iface}" ]] && f_iface="$(f_iface_of "${f_ip}")"
+  if [[ -z "${f_iface}" ]]
+  then
+    f_iface_of "${f_ip}"
+    f_iface="${g_iface_result}"
+  fi
   [[ "${f_ip}" == "${f_gw4}" ]] && f_is_gw="true"
   local f_x
   for f_x in "${g_host_ips[@]}"
@@ -401,20 +440,20 @@ f_emit() {
   done
   local f_sig_json="null"
   [[ -n "${f_signal}" ]] && f_sig_json="${f_signal}"
+  local f_ip_j f_ipv6_j f_mac_j f_vendor_j f_name_j f_subnet_j f_iface_j f_ap_j
+  f_escape_set "${f_ip}"; f_ip_j="${g_json_escaped}"
+  f_escape_set "${f_ipv6}"; f_ipv6_j="${g_json_escaped}"
+  f_escape_set "${f_mac}"; f_mac_j="${g_json_escaped}"
+  f_escape_set "${f_vendor}"; f_vendor_j="${g_json_escaped}"
+  f_escape_set "${f_name}"; f_name_j="${g_json_escaped}"
+  f_escape_set "${f_subnet}"; f_subnet_j="${g_json_escaped}"
+  f_escape_set "${f_iface}"; f_iface_j="${g_json_escaped}"
+  f_escape_set "${f_ap}"; f_ap_j="${g_json_escaped}"
   local f_json
-  f_json=$(printf '{"ip":%s,"ipv6":%s,"mac":%s,"vendor":%s,"hostname":%s,"subnet":%s,"interface":%s,"self":%s,"gateway":%s,"wifi":%s,"ap":%s,"signal":%s}' \
-    "$(printf '%s' "${f_ip}" | f_json_escape)" \
-    "$(printf '%s' "${f_ipv6}" | f_json_escape)" \
-    "$(printf '%s' "${f_mac}" | f_json_escape)" \
-    "$(printf '%s' "${f_vendor}" | f_json_escape)" \
-    "$(printf '%s' "${f_name}" | f_json_escape)" \
-    "$(printf '%s' "${f_subnet}" | f_json_escape)" \
-    "$(printf '%s' "${f_iface}" | f_json_escape)" \
-    "${f_is_self}" \
-    "${f_is_gw}" \
-    "${f_wifi}" \
-    "$(printf '%s' "${f_ap}" | f_json_escape)" \
-    "${f_sig_json}")
+  printf -v f_json '{"ip":%s,"ipv6":%s,"mac":%s,"vendor":%s,"hostname":%s,"subnet":%s,"interface":%s,"self":%s,"gateway":%s,"wifi":%s,"ap":%s,"signal":%s}' \
+    "${f_ip_j}" "${f_ipv6_j}" "${f_mac_j}" "${f_vendor_j}" \
+    "${f_name_j}" "${f_subnet_j}" "${f_iface_j}" \
+    "${f_is_self}" "${f_is_gw}" "${f_wifi}" "${f_ap_j}" "${f_sig_json}"
   local f_key=""
   if [[ -n "${f_mac}" ]]
   then
@@ -438,10 +477,9 @@ f_emit() {
 f_mark_wifi() {
   local f_key="$1" f_ap="$2" f_sig="$3"
   local f_old="${f_row[${f_key}]}"
-  local f_suffix
-  f_suffix="$(printf '"wifi":true,"ap":%s,"signal":%s' \
-    "$(printf '%s' "${f_ap}" | f_json_escape)" \
-    "${f_sig:-null}")"
+  f_escape_set "${f_ap}"
+  local f_ap_j="${g_json_escaped}" f_suffix
+  printf -v f_suffix '"wifi":true,"ap":%s,"signal":%s' "${f_ap_j}" "${f_sig:-null}"
   f_old="${f_old/'"wifi":false,"ap":"","signal":null}'/${f_suffix}}"
   # Point the interface at the AP radio (e.g. wlan0) for wireless clients.
   f_row[${f_key}]="$(printf '%s' "${f_old}" \
@@ -453,15 +491,16 @@ f_mark_wifi() {
 # winning the merge in f_emit).
 while IFS= read -r f_line
 do
-  f_fip="$(echo "${f_line}" | awk '{print $1}')"
-  f_fmac="$(echo "${f_line}" | awk '{print $5}')"
-  f_state="$(echo "${f_line}" | awk '{print $6}')"
+  # ip neigh: IP dev <iface> lladdr <mac> <state>
+  read -r f_fip _ _ _ f_fmac f_state _ <<< "${f_line}"
   [[ "${f_fip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
-  [[ -z "$(f_cidr_of "${f_fip}")" ]] && continue
+  f_cidr_of "${f_fip}"
+  [[ -z "${g_cidr_result}" ]] && continue
   if [[ "${f_state}" == "REACHABLE" ]] || [[ "${f_state}" == "STALE" ]] \
      || [[ "${f_state}" == "DELAY" ]] || [[ "${f_state}" == "PROBE" ]]
   then
-    f_fmac="$(f_normmac "${f_fmac}")"
+    f_normmac "${f_fmac}"
+    f_fmac="${g_normmac}"
     f_fv6="${g_v6_by_mac[${f_fmac,,}]-}"
     f_emit "" "${f_fip}" "${f_fmac}" "" "false" "" "" "${f_fv6}"
   fi
@@ -472,9 +511,8 @@ do
   [[ -f "${f_dat}" ]] || continue
   while IFS= read -r f_line
   do
-    f_amac="$(echo "${f_line}" | awk '{print $1}')"
-    f_aip="$(echo "${f_line}" | awk '{print $2}')"
-    f_atime="$(echo "${f_line}" | awk '{print $3}')"
+    # arpwatch: <mac> <ip> <time> <hostname> <iface>
+    read -r f_amac f_aip f_atime f_aname _ <<< "${f_line}"
     [[ "${f_amac}" =~ ^([0-9A-Fa-f]{1,2}:){5}[0-9A-Fa-f]{1,2}$ ]] || continue
     [[ "${f_aip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
     [[ "${f_atime}" =~ ^[0-9]+$ ]] || continue
@@ -482,14 +520,15 @@ do
     then
       continue
     fi
-    [[ -z "$(f_cidr_of "${f_aip}")" ]] && continue
-    f_aname="$(echo "${f_line}" | awk '{print $4}')"
+    f_cidr_of "${f_aip}"
+    [[ -z "${g_cidr_result}" ]] && continue
     f_aname="${f_aname%.}"
     if [[ "${f_aname}" == "${f_aip}" ]]
     then
       f_aname=""
     fi
-    f_amac="$(f_normmac "${f_amac}")"
+    f_normmac "${f_amac}"
+    f_amac="${g_normmac}"
     f_av6="${g_v6_by_mac[${f_amac,,}]-}"
     f_emit "${f_aname}" "${f_aip}" "${f_amac}" "$(f_oui_vendor "${f_amac}")" \
       "false" "" "" "${f_av6}"
@@ -503,7 +542,8 @@ done
 # first so exactly one authoritative row per own IP remains.
 for f_sip in ${g_host_ips[@]+"${g_host_ips[@]}"}
 do
-  f_siface="$(f_iface_of "${f_sip}")"
+  f_iface_of "${f_sip}"
+  f_siface="${g_iface_result}"
   [[ -z "${f_siface}" ]] && continue
   f_smac="$(ip -o link show dev "${f_siface}" 2>/dev/null | awk '{ for (i=1;i<=NF;i++) if ($i=="link/ether") { print toupper($(i+1)); exit } }')"
   [[ -z "${f_smac}" ]] && continue
@@ -616,17 +656,24 @@ do
   else
     f_sub_json+=","
   fi
-  f_sub_json+="$(printf '{"cidr":%s,"interface":%s}' \
-    "$(printf '%s' "${g_cidrs[$f_i]}" | f_json_escape)" \
-    "$(printf '%s' "${g_links[$f_i]}" | f_json_escape)")"
+  f_escape_set "${g_cidrs[$f_i]}"
+  f_cidr_j="${g_json_escaped}"
+  f_escape_set "${g_links[$f_i]}"
+  printf -v f_item '{"cidr":%s,"interface":%s}' "${f_cidr_j}" "${g_json_escaped}"
+  f_sub_json+="${f_item}"
 done
 
-f_uplink_json="$(printf '{"interface":%s,"ipv4":%s,"ipv6":%s,"gateway_ipv4":%s,"gateway_ipv6":%s}' \
-  "$(printf '%s' "${f_uplink_iface}" | f_json_escape)" \
+f_escape_set "${f_uplink_iface}"
+f_uplink_iface_j="${g_json_escaped}"
+f_escape_set "${f_gw4}"
+f_gw4_j="${g_json_escaped}"
+f_escape_set "${f_gw6}"
+f_gw6_j="${g_json_escaped}"
+printf -v f_uplink_json '{"interface":%s,"ipv4":%s,"ipv6":%s,"gateway_ipv4":%s,"gateway_ipv6":%s}' \
+  "${f_uplink_iface_j}" \
   "$(f_json_array "${g_uplink4[@]}")" \
   "$(f_json_array "${g_uplink6[@]}")" \
-  "$(printf '%s' "${f_gw4}" | f_json_escape)" \
-  "$(printf '%s' "${f_gw6}" | f_json_escape)")"
+  "${f_gw4_j}" "${f_gw6_j}"
 
 f_payload="$(printf '{"scanned_at":"%s","subnets":[%s],"devices":[%s],"uplink":%s}\n' \
   "${f_scan_end}" "${f_sub_json}" "${f_devices}" "${f_uplink_json}")"

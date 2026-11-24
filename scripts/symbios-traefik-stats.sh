@@ -60,8 +60,8 @@ g_nice
 set -o pipefail
 
 # Required tools. jq normalizes the JSON records into the exact field order
-# expected by the GoAccess format string below.
-for f_tool in goaccess jq zcat
+# expected by the GoAccess format string below; python3 builds the summaries.
+for f_tool in goaccess jq python3 zcat
 do
   if ! command -v "$f_tool" >/dev/null 2>&1
   then
@@ -120,6 +120,10 @@ fi
 f_report_dir="${g_log_dir}/traefik-stats"
 f_staging="${f_report_dir}/.build.$$"
 mkdir -p "$f_report_dir" || exit 1
+# An interrupted run leaves a full staging tree behind (reboot, kill, OOM).
+# Only remove trees older than two hours so a still-running job is untouched.
+find "$f_report_dir" -maxdepth 1 -type d -name '.build.*' -mmin +120 \
+  -exec rm -rf {} + 2>/dev/null || true
 rm -rf "$f_staging"
 mkdir -p "$f_staging/hosts" "$f_staging/reports" "$f_staging/summaries" \
   "$f_staging/invalid" || exit 1
@@ -135,147 +139,41 @@ f_jq_filter='{ClientHost: (.ClientHost // "-"), ClientUsername: (.ClientUsername
 f_log_format='{"ClientHost":"%h","ClientUsername":"%e","DownstreamContentSize":"%b","DownstreamStatus":"%s","Duration":"%n","RequestHost":"%v","RequestMethod":"%m","RequestPath":"%U","RequestProtocol":"%H","request_Referer":"%R","request_User-Agent":"%u","time":"%dT%t"}'
 
 # The WebUI summary is built from the same normalized records, not from a
-# second GoAccess run. Keep the filter in a file so its structure stays readable.
-cat >"$f_staging/summary.jq" <<'SUMMARY_JQ'
-def static_path:
-  test("\\.(css|js|mjs|json|xml|txt|map|jpg|jpeg|png|gif|svg|webp|ico|woff2?|ttf|eot|pdf|zip|gz|mp[34]|webm|ogg|wav|flac)$"; "i");
+# second GoAccess run. symbios-traefik-summary.py accumulates all tables in
+# one pass; repeated jq group_by/unique passes dominated the hourly CPU load.
 
-def browser_group:
-  if test("googlebot"; "i") then "Googlebot"
-  elif test("bingbot"; "i") then "Bingbot"
-  elif test("bot|crawler|spider|slurp|bingpreview|facebookexternalhit"; "i") then "Other bots"
-  elif test("curl"; "i") then "curl"
-  elif test("wget"; "i") then "Wget"
-  elif test("python|httpie|postman|go-http-client"; "i") then "Other clients"
-  elif test("edg/|edgios|edga"; "i") then "Edge"
-  elif test("firefox|fxios"; "i") then "Firefox"
-  elif test("chrome|crios"; "i") then "Chrome"
-  elif test("safari"; "i") then "Safari"
-  else "Other" end;
-
-def os_group:
-  if test("windows"; "i") then "Windows"
-  elif test("android"; "i") then "Android"
-  elif test("iphone|ipad|ipod|cpu os"; "i") then "iOS"
-  elif test("mac os x|macintosh"; "i") then "macOS"
-  elif test("linux"; "i") then "Linux"
-  else "Other" end;
-
-def ref_host:
-  if . == "-" or . == "" then empty
-  elif test("://") then (split("://")[1] | split("/")[0] | split(":")[0])
-  else (split("/")[0] | split(":")[0]) end;
-
-# GoAccess counts a visitor once per IP, day and user agent, but excludes 4xx
-# responses unless --4xx-to-unique-count is set. Mirror that here so the
-# summary and the detailed report show the same number.
-def unique_visitors:
-  map(select(.DownstreamStatus < 400 or .DownstreamStatus >= 500)
-      | [.ClientHost, .time[0:10], .["request_User-Agent"]])
-  | unique | length;
-
-def top_group($key; $limit):
-  group_by(.[$key])
-  | map({
-      value: (.[0][$key] // "-"),
-      requests: length,
-      visitors: unique_visitors,
-      bytes: (map(.DownstreamContentSize) | add // 0)
-    })
-  | sort_by(-.requests, .value)
-  | .[:$limit];
-
-. as $records
-| ($records | length) as $total
-| def pct($n): if $total == 0 then 0 else ((($n * 1000 / $total) | round) / 10) end;
-{
-  host: $host,
-  generated_at: $generated,
-  period: {
-    from: ($records | map(.time) | min // ""),
-    to: ($records | map(.time) | max // "")
-  },
-  totals: {
-    requests: $total,
-    visitors: ($records | unique_visitors),
-    bytes: ($records | map(.DownstreamContentSize) | add // 0),
-    not_found: ($records | map(select(.DownstreamStatus == 404)) | length),
-    unique_files: ($records | map(.RequestPath) | unique | length),
-    unique_referrers: ($records | map(.request_Referer | select(. != "-" and . != "")) | unique | length)
-  },
-  daily: (
-    $records
-    | map({date: .time[0:10], ip: .ClientHost, ua: .["request_User-Agent"],
-           bytes: .DownstreamContentSize,
-           counted: (.DownstreamStatus < 400 or .DownstreamStatus >= 500)})
-    | group_by(.date)
-    | map({
-        date: .[0].date,
-        requests: length,
-        visitors: (map(select(.counted) | [.ip, .ua]) | unique | length),
-        bytes: (map(.bytes) | add // 0)
-      })
-    | sort_by(.date)
-  ),
-  hourly: (
-    $records
-    | group_by(.time[11:13])
-    | map({hour: .[0].time[11:13], requests: length})
-    | sort_by(.hour)
-  ),
-  status_codes: (
-    $records
-    | group_by(.DownstreamStatus)
-    | map({status: (.[0].DownstreamStatus // 0), requests: length, percent: pct(length)})
-    | sort_by(-.requests, .status)
-  ),
-  pages: (
-    $records
-    | map(select((.RequestPath | static_path) | not))
-    | top_group("RequestPath"; 15)
-  ),
-  assets: (
-    $records
-    | map(select(.RequestPath | static_path))
-    | top_group("RequestPath"; 10)
-  ),
-  not_found_paths: (
-    $records
-    | map(select(.DownstreamStatus == 404))
-    | top_group("RequestPath"; 10)
-  ),
-  referring_sites: (
-    $records
-    | map({site: (.request_Referer | ref_host), ClientHost: .ClientHost, time: .time, "request_User-Agent": .["request_User-Agent"], DownstreamContentSize: .DownstreamContentSize})
-    | map(select(.site != null))
-    | top_group("site"; 10)
-  ),
-  clients: (
-    $records
-    | top_group("ClientHost"; 10)
-  ),
-  browsers: (
-    $records
-    | map(. + {browser: (.["request_User-Agent"] | browser_group)})
-    | top_group("browser"; 10)
-  ),
-  operating_systems: (
-    $records
-    | map(. + {os: (.["request_User-Agent"] | os_group)})
-    | top_group("os"; 10)
-  )
-}
-SUMMARY_JQ
-
-# Normalize once, then filter the same records for every host report. The
-# normalized field order is fixed, so a literal grep is enough and much faster
-# than running jq over the whole file once per host.
-f_normalized="$f_staging/normalized.json"
+# Normalize and split in one pass. Writing each record straight to its host
+# file avoids re-reading the whole normalized log once per installed host.
 f_log_size="$(du -cb "${f_inputs[@]}" | tail -n 1 | cut -f1)"
-if ! zcat -f "${f_inputs[@]}" | jq -c "$f_jq_filter" >"$f_normalized"
+printf '%s\n' "${f_hosts[@]}" >"$f_staging/hosts.list" || exit 1
+for f_host in "${f_hosts[@]}"
+do
+  : >"$f_staging/hosts/${f_host}.json" || exit 1
+done
+if ! zcat -f "${f_inputs[@]}" \
+  | jq -c "$f_jq_filter" \
+  | awk -v f_dir="$f_staging/hosts" -v f_list="$f_staging/hosts.list" '
+      BEGIN {
+        while ((getline f_allowed_host < f_list) > 0) f_hosts[f_allowed_host] = 1
+        close(f_list)
+      }
+      {
+        if (match($0, /"RequestHost":"[^"]*"/))
+        {
+          f_hostname = substr($0, RSTART, RLENGTH)
+          sub(/^"RequestHost":"/, "", f_hostname)
+          sub(/"$/, "", f_hostname)
+          # Only installed hosts get a file: RequestHost comes from the log
+          # and must never become an arbitrary path below the staging dir.
+          if (f_hostname in f_hosts)
+          {
+            print > (f_dir "/" f_hostname ".json")
+          }
+        }
+      }'
 then
   rm -rf "$f_staging"
-  g_echo_error "Failed to normalize the Traefik access log"
+  g_echo_error "Failed to normalize and split the Traefik access log"
   exit 1
 fi
 
@@ -290,8 +188,6 @@ do
   f_host_invalid="$f_staging/invalid/${f_host}.log"
   : >"$f_host_invalid"
 
-  # A host with no requests is valid; grep returns 1 for an empty result.
-  grep -F "\"RequestHost\":\"$f_host\"" "$f_normalized" >"$f_host_log" || true
   if ! goaccess "$f_host_log" \
       --no-global-config \
       --log-format="$f_log_format" \
@@ -308,9 +204,9 @@ do
     g_echo_error "GoAccess failed to parse the Traefik log for $f_host"
     exit 1
   fi
-  if ! jq -s -f "$f_staging/summary.jq" \
-    --arg host "$f_host" \
-    --arg generated "$f_generated_at" \
+  if ! python3 "$g_symbios_dir/symbios-traefik-summary.py" \
+    --host "$f_host" \
+    --generated "$f_generated_at" \
     "$f_host_log" >"$f_host_summary"
   then
     rm -rf "$f_staging"
