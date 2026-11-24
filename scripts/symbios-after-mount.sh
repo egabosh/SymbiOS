@@ -24,11 +24,12 @@ Usage: ${g_script_name} [-h | --help]
 Start all /symbios-dependent host systemd units after the data volume was
 mounted (LUKS boot-unlock). Called from /etc/rc.local, not by hand.
 
-Order: container runtime (docker/containerd) -> network bridge assignments
--> libvirt default storage pool -> WoL watcher instances -> arpwatch
-reconcile -> nslcd -> RustDesk service -> hd-idle (only for real rotating
-disks) -> runchecks daemon + watchdog timer (delayed, backgrounded) ->
-generic units registered by playbooks in /etc/symbios/after-mount-units.
+Order: optional media volume (retry before containers) -> container runtime
+(docker/containerd) -> network bridge assignments -> libvirt default storage
+pool -> WoL watcher instances -> arpwatch reconcile -> nslcd -> RustDesk
+service -> hd-idle (only for real rotating disks) -> runchecks daemon and
+watchdog timer (delayed, backgrounded) -> generic units registered by
+playbooks in /etc/symbios/after-mount-units.
 
 Exit code is always 0. Single failures only print a warning.
 EOF
@@ -61,6 +62,44 @@ then
   function g_echo_warn {
     echo "WARN: $*" >&2
   }
+fi
+
+# 0. Optional SYMBIOS_MEDIA volume. rc.local already tries the mount right
+# after /symbios appears, but USB members can enumerate seconds later and
+# the mount helper then exits 0 without a warning. Retry here before Docker
+# starts: containers with bind mounts below the media root would otherwise
+# start against an empty directory (Jellyfin exits 127). Only wait when a
+# keyfile says a volume is expected, and only briefly so an unplugged volume
+# cannot delay the boot for long.
+function f_media_mounted {
+  mountpoint -q "${g_media_root}" 2>/dev/null
+}
+
+g_media_root="/symbios/media"
+if [[ -x "${g_git_root}/scripts/symbios-inventory.py" ]]
+then
+  g_media_root_from_inventory="$("${g_git_root}/scripts/symbios-inventory.py" get media_root 2>/dev/null || true)"
+  [[ -n "${g_media_root_from_inventory}" ]] && g_media_root="${g_media_root_from_inventory}"
+fi
+
+if [[ -s /symbios/.keys/media-volume.key ]] && ! f_media_mounted
+then
+  f_media_script="${g_git_root}/scripts/symbios-media-mount.sh"
+  if [[ -x "${f_media_script}" ]]
+  then
+    for f_i in $(seq 1 45)
+    do
+      "${f_media_script}" || true
+      f_media_mounted && break
+      sleep 2
+    done
+    if f_media_mounted
+    then
+      g_echo_note "media volume mounted before container start"
+    else
+      g_echo_warn "media volume still not mounted after 90s - starting containers anyway"
+    fi
+  fi
 fi
 
 # 1. Container runtime. Mounts below /symbios are its data-root, so the
