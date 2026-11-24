@@ -278,7 +278,7 @@
     - name: Validate stored Traefik host access modes
       ansible.builtin.assert:
         that:
-          - (traefik_default_access | default('internal')) in ['internal', 'internet']
+          - (traefik_default_access | default('internet')) in ['internal', 'internet']
           - (traefik_service_access | default({})).get('symbios-ui', 'default') in ['default', 'internal', 'internet']
           - (traefik_service_access | default({})).get('traefik-dashboard', 'default') in ['default', 'internal', 'internet']
         fail_msg: >-
@@ -287,15 +287,17 @@
           symbios-ui / traefik-dashboard keys of traefik_service_access.
         quiet: true
 
-    # The WebUI keeps the legacy webui_public_access switch only as a fallback:
-    # an explicit traefik_service_access['symbios-ui'] always wins.
+    # The deprecated webui_public_access switch keeps its original meaning on
+    # upgrades: true = internet, false = internal. Only hosts without the
+    # legacy key follow the global default; an explicit
+    # traefik_service_access['symbios-ui'] always wins.
     - name: Resolve WebUI Traefik host access mode
       ansible.builtin.set_fact:
-        traefik_ui_access_mode: "{{ (traefik_service_access | default({})).get('symbios-ui', 'default') if ((traefik_service_access | default({})).get('symbios-ui', 'default') != 'default') else ('internet' if (webui_public_access | default(false) | bool) else (traefik_default_access | default('internal'))) }}"
+        traefik_ui_access_mode: "{{ (traefik_service_access | default({})).get('symbios-ui', 'default') if ((traefik_service_access | default({})).get('symbios-ui', 'default') != 'default') else ('internet' if (webui_public_access is defined and (webui_public_access | bool)) else ('internal' if (webui_public_access is defined) else (traefik_default_access | default('internet')))) }}"
 
     - name: Resolve Traefik dashboard host access mode
       ansible.builtin.set_fact:
-        traefik_dashboard_access_mode: "{{ (traefik_service_access | default({})).get('traefik-dashboard', 'default') if ((traefik_service_access | default({})).get('traefik-dashboard', 'default') != 'default') else (traefik_default_access | default('internal')) }}"
+        traefik_dashboard_access_mode: "{{ (traefik_service_access | default({})).get('traefik-dashboard', 'default') if ((traefik_service_access | default({})).get('traefik-dashboard', 'default') != 'default') else (traefik_default_access | default('internet')) }}"
 
     - name: "{{ docker_path }}/providers/symbios-services.yml Routing Configuration"
       ansible.builtin.template:

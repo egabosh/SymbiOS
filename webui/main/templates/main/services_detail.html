@@ -233,6 +233,11 @@
           Authelia still handles logins. Global default: <code>{{ network_access.default }}</code>.
           {% if network_access.source == 'override' %}This service has an explicit override.{% endif %}
         </p>
+        <p class="text-muted small mb-3">
+          Internal mode only restricts traffic at the reverse proxy. Add an internal DNS
+          record pointing this host to its LAN/VPN IP, and keep the public DNS record with
+          the internet IP so Let's Encrypt can still validate and renew certificates via ACME.
+        </p>
         <form method="post" action="/services/{{ item.playbook }}/network-access/" data-exec="true"
               class="row g-2 align-items-center">
           {% csrf_token %}

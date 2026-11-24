@@ -376,14 +376,14 @@ one `apply` run resolved from `uses_vars`.
 symbios-settings-access.sh get [--json] [--service NAME]
 symbios-settings-access.sh set --default internal|internet [--check] [--no-apply]
 symbios-settings-access.sh set --service NAME --mode default|internal|internet [--check] [--no-apply]
-echo '{"traefik_default_access":"internal"}' | symbios-settings-access.sh set --json-stdin
+echo '{"traefik_default_access":"internet"}' | symbios-settings-access.sh set --json-stdin
 symbios-settings-access.sh schema
 symbios-settings-access.sh apply [--dry-run]
 ```
 
 `get --service NAME --json` reports the effective mode and whether it comes
 from the global default or a service override. `default` (or a missing map
-entry) follows `traefik_default_access`. There are no secrets; the WebUI starts one `set`
+entry) follows `traefik_default_access`, which defaults to `internet`. There are no secrets; the WebUI starts one `set`
 job and adds no explicit apply call.
 
 ## 3b. Config-file engine (Phase 4: beyond settings)

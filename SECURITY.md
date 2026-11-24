@@ -437,7 +437,7 @@ Enforced at all password change points:
 
 Configurable in the WebUI under Settings -> Access, with a "Network access"
 selector on supported service detail pages. Stored in `inventory.yml` as
-`traefik_default_access` (`internal` by default) and `traefik_service_access`
+`traefik_default_access` (`internet` by default) and `traefik_service_access`
 (a service name -> `default|internal|internet` map; a missing entry or
 `default` follows the global value).
 
@@ -459,8 +459,9 @@ separate decision about authentication.
 `webui_public_access` from Settings -> Security is deprecated and no longer
 shown there. It is honoured only as a fallback for the WebUI router, so
 existing installations keep their current exposure until the Settings ->
-Access page is used. The break-glass endpoint at localhost:8080 is unaffected
-by either setting.
+Access page is used; fresh installations no longer carry the flag and the
+WebUI follows the global default. The break-glass endpoint at localhost:8080
+is unaffected by either setting.
 
 ### Reboot Policy
 

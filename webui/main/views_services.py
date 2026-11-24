@@ -76,7 +76,7 @@ def _network_access_context(item, playbook):
     except Exception:
         vars_ = {}
     stored_default = vars_.get('traefik_default_access')
-    default = stored_default if stored_default in ('internal', 'internet') else 'internal'
+    default = stored_default if stored_default in ('internal', 'internet') else 'internet'
     overrides = vars_.get('traefik_service_access')
     service = get_service_name(playbook)
     override = overrides.get(service) if isinstance(overrides, dict) else None

@@ -78,7 +78,8 @@ still honoured as an upgrade fallback for the WebUI router only.
 
 ### Network Access (`/settings/access/`)
 Decides per Traefik host whether it accepts only internal traffic
-(LAN/VPN/loopback) or also internet traffic. `internal` adds the existing
+(LAN/VPN/loopback) or also internet traffic. Internet access is the default;
+`internal` adds the existing
 `allowlocalipsonly@file` middleware to the host's HTTPS router (RFC1918,
 IPv6 ULA, link-local, loopback); `internet` adds no network middleware. Ports
 80/443 stay open globally, so this is a layer-7 decision per hostname, and
@@ -92,7 +93,7 @@ choice stays independent of network exposure.
 - Playbooks: `base-services/traefik.yml` and every playbook rendering a
   Traefik provider snippet (via `shared-tasks/traefik-access.yml`)
 - Script: `scripts/symbios-settings-access.sh` (single source of truth)
-- Vars: `traefik_default_access` (`internal`|`internet`, default `internal`),
+- Vars: `traefik_default_access` (`internal`|`internet`, default `internet`),
   `traefik_service_access` (service name -> `default`|`internal`|`internet`)
 
 ### Security Certificates / TLS (`/settings/acme/`)

@@ -126,10 +126,11 @@ PAGE_EXPLAIN = {
     ),
     'access': (
         'Decide whether the Traefik hosts of your services accept traffic '
-        'from the internet or only from internal networks (LAN/VPN). Internal '
-        'hosts get the same source-IP restriction as the former LAN-only '
-        'WebUI; Authelia logins still work as before. Individual services can '
-        'override the global default on their detail page.'
+        'from the internet or only from internal networks (LAN/VPN). Internet '
+        'access is the default; internal hosts get the same source-IP '
+        'restriction as the former LAN-only WebUI. Authelia logins still work '
+        'as before. Individual services can override the global default on '
+        'their detail page.'
     ),
     'updates': (
         'SymbiOS keeps your server up to date automatically once a day: '

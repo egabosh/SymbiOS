@@ -6,7 +6,7 @@
 # script. It owns validation and the transactional inventory.yml write.
 #
 # Effective mode of a service: traefik_service_access[service] when set to
-# internal/internet, otherwise traefik_default_access (default: internal).
+# internal/internet, otherwise traefik_default_access (default: internet).
 # "internal" makes the playbooks attach the existing allowlocalipsonly@file
 # middleware to the service's Traefik router.
 
@@ -70,7 +70,7 @@ function f_current_default {
       echo "${f_val}"
       ;;
     *)
-      echo "internal"
+      echo "internet"
       ;;
   esac
 }
@@ -114,12 +114,12 @@ then
 [
   {"name": "traefik_default_access", "type": "select",
    "label": "Internet access for Traefik hosts",
-   "required": true, "default": "internal", "secret": false,
+   "required": true, "default": "internet", "secret": false,
    "options": [
      {"value": "internal", "label": "Internal only (LAN/VPN)"},
      {"value": "internet", "label": "Internet"}
    ],
-   "note": "Applies to all services unless a service overrides it. Authelia stays reachable from outside for login."}
+   "note": "Applies to all services unless a service overrides it. Internal mode only restricts traffic at the reverse proxy: add internal DNS records pointing these hosts to their LAN/VPN IPs, and keep the public DNS records with the internet IP so Let's Encrypt can still validate and renew certificates via ACME. Authelia stays reachable from outside for login."}
 ]
 EOF
   exit 0

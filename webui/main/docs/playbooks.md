@@ -986,8 +986,8 @@ still write `blockinfile` directly in the playbook.
 
 Resolves whether a service host accepts internal traffic only or also internet
 traffic. It reads `traefik_default_access` and `traefik_service_access` from
-`inventory.yml` (a missing entry or `default` follows the global default) and
-outputs:
+`inventory.yml` (a missing entry or `default` follows the global default,
+which is `internet`) and outputs:
 
 - `traefik_access_mode`: effective mode, `internal` or `internet`
 - `traefik_access_middlewares`: list for the HTTPS router

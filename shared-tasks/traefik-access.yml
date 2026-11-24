@@ -2,7 +2,7 @@
 #
 # Required vars:  service_name (key used in traefik_service_access)
 # Optional vars:  traefik_service_access (dict; default: {}),
-#                  traefik_default_access (internal|internet; default: internal)
+#                  traefik_default_access (internal|internet; default: internet)
 #
 # Outputs (facts):
 #   traefik_access_mode        - effective mode: internal or internet
@@ -16,18 +16,18 @@
 - name: Validate stored Traefik access modes for {{ service_name }}
   ansible.builtin.assert:
     that:
-      - (traefik_default_access | default('internal')) in ['internal', 'internet']
+      - (traefik_default_access | default('internet')) in ['internal', 'internet']
       - (traefik_service_access | default({})).get(service_name, 'default') in ['default', 'internal', 'internet']
     fail_msg: >-
       Invalid Traefik access mode for {{ service_name }}:
-      traefik_default_access={{ traefik_default_access | default('internal') }},
+      traefik_default_access={{ traefik_default_access | default('internet') }},
       traefik_service_access[{{ service_name }}]={{ (traefik_service_access | default({})).get(service_name, 'default') }}.
       Allowed values are default, internal, internet.
     quiet: true
 
 - name: Resolve effective Traefik access mode for {{ service_name }}
   ansible.builtin.set_fact:
-    traefik_access_mode: "{{ (traefik_default_access | default('internal')) if ((traefik_service_access | default({})).get(service_name, 'default') == 'default') else ((traefik_service_access | default({})).get(service_name)) }}"
+    traefik_access_mode: "{{ (traefik_default_access | default('internet')) if ((traefik_service_access | default({})).get(service_name, 'default') == 'default') else ((traefik_service_access | default({})).get(service_name)) }}"
 
 - name: Resolve Traefik access middlewares for {{ service_name }}
   ansible.builtin.set_fact:

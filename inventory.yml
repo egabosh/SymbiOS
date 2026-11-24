@@ -15,8 +15,7 @@ all:
                               # 'airgapped' (intranet without internet access)
     twofa_enabled: false      # Authelia 2FA enforcement for LDAP users
     password_policy: 'medium' # LDAP password strength (none|low|medium|high|paranoid)
-    webui_public_access: false  # deprecated: legacy fallback for the WebUI route (use traefik_default_access / traefik_service_access)
-    traefik_default_access: internal  # global default for Traefik hosts (internal|internet)
+    traefik_default_access: internet  # global default for Traefik hosts (internal|internet)
     traefik_service_access: {}        # per-service override: service name -> default|internal|internet
     # reboot policy: 0 disables it; otherwise warn as soon as a reboot is
     # pending (apt marker or newer installed kernel). reboot_auto applies the

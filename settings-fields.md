@@ -7,7 +7,7 @@ Slug: `access`
 
 | Name | Type | Label | Required | Default | Secret |
 |------|------|-------|----------|---------|--------|
-| `traefik_default_access` | select | Internet access for Traefik hosts | yes | internal |  |
+| `traefik_default_access` | select | Internet access for Traefik hosts | yes | internet |  |
 
 ## `symbios-settings-acme`
 Slug: `acme`
