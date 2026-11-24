@@ -39,9 +39,11 @@
 #     installation from mirrors.kodi.tv. Optional: a Jellyfin server can be
 #     connected through the Jellyfin for Kodi addon (plugin.video.jellyfin);
 #     the addon is installed and preconfigured with the configured server URL,
-#     and the user signs in once in the Kodi UI. Jellyfin library sync and the
-#     KodiDB/MySQL backend both write into the Kodi library and should not be
-#     combined without testing. Optional: a game ROM source (Kodi
+#     and a password entered in Kodi Options is used once to seed the addon's
+#     device token, so no manual sign-in is needed in the Kodi UI. Jellyfin
+#     library sync and the KodiDB/MySQL backend both write into the Kodi
+#     library and should not be combined without testing. Optional: a game ROM
+#     source (Kodi
 #     Options "path_roms", local or SFTP-relative like the other media paths)
 #     that installs the libretro cores available as Debian packages on the
 #     target release (trixie: gb/gbc, gba, nes/fds, snes, Sega MD/MS/GG/
@@ -186,6 +188,10 @@
 #         label: Jellyfin-Benutzer
 #         type: text
 #         placeholder: kodi
+#       jellyfin_password:
+#         label: Jellyfin-Passwort
+#         type: password
+#         placeholder: nur für die Anmeldung
 #       path_roms:
 #         label: ROM-Pfad
 #         type: text
@@ -383,13 +389,17 @@
     # Kodi to a Jellyfin server. Pinned to the official Jellyfin repo release
     # (not mirrors.kodi.tv - the addon is not in the Kodi omega mirror). The
     # dependencies are installed from mirrors.kodi.tv when missing. The addon
-    # is installed while a jellyfin_server is configured; first login happens
-    # once in the Kodi UI (server/auth state is version-sensitive, so no
-    # credentials are preseeded).
+    # is installed while a jellyfin_server is configured. If a password is
+    # entered in Kodi Options, symbios-kodi-jellyfin-login.sh authenticates
+    # with it and seeds addon_data/data.json; otherwise the first login still
+    # happens once in the Kodi UI.
     kodi_jellyfin_addon: plugin.video.jellyfin
     kodi_jellyfin_addon_version: "2.2.0+py3"
     kodi_jellyfin_addon_url: "https://repo.jellyfin.org/releases/client/kodi/py3/plugin.video.jellyfin/plugin.video.jellyfin-2.2.0+py3.zip"
     kodi_jellyfin_addon_sha256: "58cc72c0eedc624a98a255f5c95c64b6e0f6f906c9666d0893fee152eb4fb8b1"
+    # Transient root-only file used to hand the WebUI password to the login
+    # helper without putting it in argv. Removed in an always block.
+    kodi_jellyfin_password_file: /run/symbios-kodi-jellyfin-password
     kodi_jellyfin_repo_url: "https://kodi.jellyfin.org/repository.jellyfin.kodi.zip"
     kodi_jellyfin_repo_sha256: "7409807249c9cc43c6b3b0df3fb9baa380bc62afcc8ad464444a95261a437ba6"
     kodi_jellyfin_deps:
@@ -1487,6 +1497,10 @@
       ansible.builtin.set_fact:
         kodi_jellyfin_configured: "{{ ((kodi_options | default({})).jellyfin_server | default('') | trim | length > 0) }}"
 
+    - name: Resolve whether Jellyfin addon login should be seeded
+      ansible.builtin.set_fact:
+        kodi_jellyfin_login_configured: "{{ kodi_jellyfin_configured and (((kodi_options | default({})).jellyfin_password | default('') | trim | length) > 0) }}"
+
     - name: Install Jellyfin Kodi addon dependencies from mirrors.kodi.tv
       ansible.builtin.shell: |
         cd /home/kodi/.kodi/addons
@@ -1540,8 +1554,8 @@
       when: kodi_jellyfin_configured
 
     # Seed only the non-sensitive Jellyfin addon settings. Server/auth state
-    # lives in addon_data/data.json and is version-sensitive; the user signs in
-    # once in Kodi. The settings file is seeded on first install only.
+    # lives in addon_data/data.json and is seeded from the WebUI password when
+    # one is configured. The settings file is seeded on first install only.
     - name: Create Jellyfin addon data directory
       ansible.builtin.file:
         path: "/home/kodi/.kodi/userdata/addon_data/{{ kodi_jellyfin_addon }}"
@@ -1566,11 +1580,46 @@
           </settings>
       when: kodi_jellyfin_configured
 
+    # The password lives only in the transient root-only file; the helper
+    # exchanges it for a device token and writes data.json as the kodi user.
+    - name: Seed Jellyfin addon login from Kodi Options
+      when: kodi_jellyfin_login_configured
+      block:
+        - name: Write transient Jellyfin password for the login helper
+          ansible.builtin.copy:
+            content: "{{ (kodi_options.jellyfin_password | default('')) | trim }}"
+            dest: "{{ kodi_jellyfin_password_file }}"
+            owner: root
+            group: root
+            mode: "0600"
+          no_log: true
+
+        - name: Authenticate the Jellyfin addon and store its device token
+          ansible.builtin.command:
+            argv:
+              - "{{ git_root }}/scripts/symbios-kodi-jellyfin-login.sh"
+              - "--server"
+              - "{{ (kodi_options.jellyfin_server | default('')) | trim }}"
+              - "--user"
+              - "{{ (kodi_options.jellyfin_user | default('kodi')) | trim }}"
+              - "--password-file"
+              - "{{ kodi_jellyfin_password_file }}"
+              - "--data-dir"
+              - "/home/kodi/.kodi/userdata/addon_data/{{ kodi_jellyfin_addon }}"
+          register: kodi_jellyfin_login
+          changed_when: "'kodi-jellyfin-login-changed' in kodi_jellyfin_login.stdout"
+      always:
+        - name: Remove transient Jellyfin password
+          ansible.builtin.file:
+            path: "{{ kodi_jellyfin_password_file }}"
+            state: absent
+          no_log: true
+
     - name: Restart the Kodi session to register the Jellyfin addon
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-kodi-restart.sh"
       register: kodi_restart_jellyfin
       changed_when: "'kodi-session-restarted' in kodi_restart_jellyfin.stdout"
-      when: kodi_jellyfin_addon_install is changed
+      when: kodi_jellyfin_addon_install is changed or (kodi_jellyfin_login is defined and kodi_jellyfin_login is changed)
 
     # The mediathekview repository is not in the official Kodi repository; pin
     # the zip from the project's own kodirepo.
