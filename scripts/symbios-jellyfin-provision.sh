@@ -467,6 +467,16 @@ then
   exit 1
 fi
 
+# After a restart the public info can briefly report an incomplete wizard
+# while the user database is still loading. Let it settle before touching the
+# bootstrap user; a real first start stays false and is completed below.
+for f_try in {1..10}
+do
+  [[ "$(jq -r '.StartupWizardCompleted // false' "$g_info_file")" == "true" ]] && break
+  sleep 2
+  f_api_request GET "/System/Info/Public" "" "$g_info_file" || true
+done
+
 # The first start creates a password-less bootstrap user. Rename it, set its
 # password and close the startup wizard before any other API work.
 if [[ "$(jq -r '.StartupWizardCompleted // false' "$g_info_file")" != "true" ]]
