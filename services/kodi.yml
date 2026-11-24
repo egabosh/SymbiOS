@@ -241,6 +241,9 @@
     # options row, so the config block is marked "single: true" (the WebUI
     # offers exactly one row) and the playbook reads that row.
     kodi_options_file: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}/services/kodi/instances.yml"
+    # The one-time start marker lives in the service dir: the config dir for
+    # Kodi Options is created only when the WebUI saves the first options row.
+    kodi_switcher_marker: /symbios/services/kodi/switch-kodi-desk.started
     # Mount point and unit of the SFTP ROM share for cores that cannot read a
     # Kodi VFS URL (catalog key "local", see kodi_game_cores). sshfs mounts
     # the same SFTP endpoint the media sources use, so no ROM data is copied
@@ -1748,7 +1751,7 @@
 
     - name: Check whether the Kodi switcher was started once
       ansible.builtin.stat:
-        path: "{{ kodi_options_file | dirname }}/switch-kodi-desk.started"
+        path: "{{ kodi_switcher_marker }}"
       register: kodi_switcher_started
 
     # The unit stays disabled at boot (it reads /symbios), but a fresh install
@@ -1764,7 +1767,7 @@
     - name: Record the one-time switcher start
       ansible.builtin.copy:
         content: "started\n"
-        dest: "{{ kodi_options_file | dirname }}/switch-kodi-desk.started"
+        dest: "{{ kodi_switcher_marker }}"
         owner: root
         group: root
         mode: '0644'
