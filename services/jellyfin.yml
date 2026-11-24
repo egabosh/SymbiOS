@@ -286,6 +286,11 @@
               image: jellyfin/jellyfin:latest
               container_name: jellyfin
               restart: unless-stopped
+              # A full scan of a multi-TB library fans out ffprobe tasks that
+              # can stall the whole host (Jellyfin issue 11588). Keep a hard
+              # ceiling even if the in-app concurrency settings are reset.
+              cpus: 1.0
+              mem_limit: 2g
               # Local-only API access for the host-side provisioning helper.
               ports:
                 - "127.0.0.1:8096:8096"
@@ -431,6 +436,36 @@
         authelia_subjects:
           - ["group:jellyfin-users"]
           - ["group:jellyfin-admins"]
+
+    # Jellyfin 12 defaults the scan fanout to the CPU count. On a small host
+    # that turns the first library scan into a host-wide stall. Value 1 forces
+    # sequential operation and also avoids the parallel-queue stall in 12.x.
+    # The file is managed here because the provision script rewrites the whole
+    # server configuration through the API after the handler flush below.
+    - name: Ensure Jellyfin system configuration exists
+      ansible.builtin.copy:
+        content: |
+          <?xml version="1.0" encoding="utf-8"?>
+          <ServerConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+          </ServerConfiguration>
+        dest: "{{ jellyfin_config_root }}/config/system.xml"
+        owner: "{{ jellyfin_uid }}"
+        group: media
+        mode: '0644'
+        force: false
+
+    - name: Limit Jellyfin library scan concurrency
+      ansible.builtin.lineinfile:
+        path: "{{ jellyfin_config_root }}/config/system.xml"
+        regexp: '^\s*<{{ item }}>.*</{{ item }}>\s*$'
+        line: "  <{{ item }}>1</{{ item }}>"
+        insertbefore: '^</ServerConfiguration>$'
+        backup: yes
+      loop:
+        - LibraryScanFanoutConcurrency
+        - LibraryMetadataRefreshConcurrency
+        - ParallelImageEncodingLimit
+      notify: Restart jellyfin
 
     # Restart before provisioning so Jellyfin loads the plugin and Authelia
     # serves the new client configuration.
