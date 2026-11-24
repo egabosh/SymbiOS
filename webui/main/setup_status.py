@@ -117,13 +117,6 @@ PAGE_EXPLAIN = {
         'reboot warns immediately on the Health page, and if enabled the host '
         'reboots in the daily maintenance window once that uptime is reached.'
     ),
-    'secrets': (
-        'SymbiOS stores credentials encrypted with age instead of keeping '
-        'them in plain text in inventory files or service directories. '
-        'The list shows names and rotation metadata only. An explicit reveal '
-        'button can show one value in the browser on demand. Rotations are '
-        'event-driven and can be rolled back once.'
-    ),
     'access': (
         'Decide whether the Traefik hosts of your services accept traffic '
         'from the internet or only from internal networks (LAN/VPN). Internet '
@@ -182,6 +175,13 @@ PAGE_EXPLAIN = {
         '(e.g. an IoT network behind another router) or to a VPN provider. '
         'Upload the config of the peer, the server applies a sanitized '
         'copy and starts the tunnel.'
+    ),
+    'secrets': (
+        'SymbiOS stores credentials encrypted with age instead of keeping '
+        'them in plain text in inventory files or service directories. '
+        'The list shows names and rotation metadata only. An explicit reveal '
+        'button can show one value in the browser on demand. Rotations are '
+        'event-driven and can be rolled back once.'
     ),
 }
 
