@@ -296,7 +296,11 @@
                 - "127.0.0.1:8096:8096"
               #env_file: env
               user: "{{ jellyfin_uid }}{{ (':' + (jellyfin_gid | string)) if jellyfin_gid else '' }}"
-              #environment:
+              # Image extraction inspects many frames per item and is the main
+              # RAM hog during scans; this tradeoff exists for low-end hosts
+              # like this Pi (Jellyfin issue 13531).
+              environment:
+                JELLYFIN_FFmpeg_imgextract_perf_tradeoff: 'true'
               volumes:
                 - ./data/config:/config
                 - ./data/cache:/cache
