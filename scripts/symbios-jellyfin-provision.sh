@@ -388,6 +388,64 @@ function f_ensure_tmdb_only {
   g_echo_note "Jellyfin movie and series artwork restricted to TMDb"
 }
 
+# The Pi 5 has no hardware video encoder. Software ffmpeg transcoding saturates
+# all cores and can trip the hardware watchdog, so keep it to two threads as a
+# safety net while clients are moved to direct play.
+function f_limit_encoding_threads {
+  local f_config f_current f_desired
+
+  f_secret_tmp encodingconfig f_config
+  f_secret_tmp encodingcurrent f_current
+  f_secret_tmp encodingdesired f_desired
+  f_api_request GET "/System/Configuration/Encoding" "" "$f_config" "$g_token_file" || return 1
+  f_expect_code "$g_api_code" "200" "Could not read the Jellyfin encoding configuration" || return 1
+
+  jq -S '.' "$f_config" > "$f_current" || return 1
+  jq -S '.EncodingThreadCount = 2' "$f_config" > "$f_desired" || return 1
+  if cmp -s "$f_current" "$f_desired"
+  then
+    return 0
+  fi
+
+  f_api_request POST "/System/Configuration/Encoding" "$f_desired" "$g_plugin_file" "$g_token_file" || return 1
+  f_expect_code "$g_api_code" "204" "Could not limit Jellyfin encoding threads" || return 1
+  g_changed="true"
+  g_echo_note "Jellyfin encoding thread count limited to 2"
+}
+
+# The library is HEVC, which browser clients cannot decode directly. Prevent
+# server-side video transcoding so an unsuitable client fails clearly instead
+# of loading the Pi; remuxing and cheap audio transcoding stay enabled.
+function f_disable_video_transcoding {
+  local f_users f_user f_current f_desired f_id f_name
+
+  f_secret_tmp users f_users
+  f_api_request GET "/Users" "" "$f_users" "$g_token_file" || return 1
+  f_expect_code "$g_api_code" "200" "Could not read the Jellyfin user list" || return 1
+
+  while IFS=$'\t' read -r f_id f_name
+  do
+    [[ -n "$f_id" ]] || continue
+    f_secret_tmp userpolicy f_user
+    f_secret_tmp usercurrent f_current
+    f_secret_tmp userdesired f_desired
+    f_api_request GET "/Users/$f_id" "" "$f_user" "$g_token_file" || return 1
+    f_expect_code "$g_api_code" "200" "Could not read the Jellyfin policy for $f_name" || return 1
+
+    jq -S '.Policy' "$f_user" > "$f_current" || return 1
+    jq -S '.Policy | .EnableVideoPlaybackTranscoding = false' "$f_user" > "$f_desired" || return 1
+    if cmp -s "$f_current" "$f_desired"
+    then
+      continue
+    fi
+
+    f_api_request POST "/Users/$f_id/Policy" "$f_desired" "$g_plugin_file" "$g_token_file" || return 1
+    f_expect_code "$g_api_code" "204" "Could not update the Jellyfin policy for $f_name" || return 1
+    g_changed="true"
+    g_echo_note "Disabled Jellyfin video transcoding for $f_name"
+  done < <(jq -r '.[] | [.Id, .Name] | @tsv' "$f_users")
+}
+
 # The old mixed video library is replaced by separate Movies and TV Shows
 # libraries. Remove it once; refreshLibrary=false avoids a needless full scan.
 function f_remove_library {
@@ -636,6 +694,8 @@ then
 fi
 
 f_ensure_tmdb_only || exit 1
+f_limit_encoding_threads || exit 1
+f_disable_video_transcoding || exit 1
 
 # Create or repair the three standard media libraries. The container paths
 # come from media_* in the inventory and are mounted by the playbook.
