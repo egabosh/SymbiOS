@@ -256,6 +256,8 @@
   when: "'openvpn-iot' in (services | default('') | split(',') | map('trim') | list)"
 - ansible.builtin.import_playbook: tasks/openwrt/openvpn-tor.yml
   when: "'openvpn-tor' in (services | default('') | split(',') | map('trim') | list)"
+- ansible.builtin.import_playbook: tasks/openwrt/openvpn-tor-roam-watchdog.yml
+  when: "'openvpn-tor' in (services | default('') | split(',') | map('trim') | list)"
 - ansible.builtin.import_playbook: tasks/openwrt/wireguard-lan.yml
   when: "'wireguard-lan' in (services | default('') | split(',') | map('trim') | list)"
 - ansible.builtin.import_playbook: tasks/openwrt/wireguard-tor.yml

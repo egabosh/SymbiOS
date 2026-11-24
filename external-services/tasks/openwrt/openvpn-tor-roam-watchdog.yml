@@ -1,0 +1,109 @@
+# docs:
+#   name: "OpenWrt - OpenVPN Tor roam watchdog"
+#   short_description: "OpenWrt - OpenVPN Tor roam watchdog"
+#   description: "Detects stale OpenVPN client-to-client TAP MAC mappings after a Tor device roams back to the master AP and restarts only the Tor VPN server to purge them."
+#   category: "VPN"
+#   type: OpenWrt
+#   icon: "bi-wifi"
+#   requires:
+#     - playbook: "openwrt_openvpn-tor.yml"
+#       reason: "Tor OpenVPN server with client-to-client"
+#   actions:
+#     __playbook__: Install/Update
+#
+---
+- name: openvpn tor roam watchdog
+  hosts: all
+  gather_facts: no
+
+  tasks:
+    - name: install watchdog script and cronjob on the Tor VPN server
+      raw: |
+        if ! uci get openvpn.torvpn.port 2>/dev/null | grep -qx '1194'
+        then
+          echo "skip: no local OpenVPN Tor server on port 1194"
+          exit 0
+        fi
+        if ! uci get openvpn.torvpn.enabled 2>/dev/null | grep -qx '1'
+        then
+          echo "skip: OpenVPN Tor server is disabled"
+          exit 0
+        fi
+
+        mkdir -p /etc/scripts
+        cat << 'EOF' > /etc/scripts/openvpn-tor-roam-watchdog.sh
+        #!/bin/bash
+
+        # OpenVPN's client-to-client TAP MAC table never ages out (ticket #626).
+        # When a device roams from a remote AP to the local master AP, its MAC
+        # stays mapped to the old client and frames are sent into the wrong
+        # tunnel. Restart the local server to purge the stale mapping. This is
+        # the softest option available: the OpenWrt build has no management
+        # interface, so a targeted client-kill is not possible. All clients
+        # reconnect automatically; no slave needs to be touched.
+
+        STATUS_FILE="/var/log/openvpn-tor-status.log"
+        TOR_AP="phy1-ap2"
+        COOLDOWN=900
+        STAMP="/tmp/openvpn-tor-watchdog.last"
+
+        # Nothing to do while the status file is missing (server not up yet).
+        [ -r "$STATUS_FILE" ] || exit 0
+
+        # Collect MACs currently associated with the local Tor AP.
+        f_local_macs() {
+          iwinfo "$TOR_AP" assoclist 2>/dev/null \
+            | awk '{print tolower($1)}' \
+            | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' \
+            | sort -u
+        }
+
+        # Collect the MAC -> client mapping from OpenVPN's routing table.
+        # TAP addresses carry an "@0" suffix that has to be stripped.
+        f_stale_pairs() {
+          awk -F, '
+            /^ROUTING TABLE/ { inside=1; next }
+            /^GLOBAL STATS/  { inside=0 }
+            inside && $1 ~ /:/ {
+              mac = tolower($1)
+              sub(/@.*/, "", mac)
+              print mac "," $2
+            }
+          ' "$STATUS_FILE"
+        }
+
+        local_macs="$(f_local_macs)"
+        [ -n "$local_macs" ] || exit 0
+
+        # Find any locally associated MAC that is still mapped to a client.
+        f_stale="$(
+          f_stale_pairs | while IFS=, read -r f_mac f_cn
+          do
+            [ -n "$f_mac" ] && [ -n "$f_cn" ] || continue
+            echo "$local_macs" | grep -qF -- "$f_mac" && echo "$f_mac,$f_cn"
+          done
+        )"
+        [ -n "$f_stale" ] || exit 0
+
+        # Rate-limit: one restart per COOLDOWN seconds, even if several
+        # devices flap at the same time.
+        f_now="$(date +%s)"
+        if [ -s "$STAMP" ]
+        then
+          f_then="$(cat "$STAMP")"
+          if [ $((f_now - f_then)) -lt $COOLDOWN ]
+          then
+            echo "skip restart: cooldown active ($f_stale)"
+            exit 0
+          fi
+        fi
+
+        echo "$f_now" > "$STAMP"
+        echo "restart torvpn: stale mapping $f_stale"
+        /etc/init.d/openvpn restart torvpn
+        EOF
+        chmod 500 /etc/scripts/openvpn-tor-roam-watchdog.sh
+
+        cronjob="*/5 * * * *   /etc/scripts/openvpn-tor-roam-watchdog.sh"
+        grep -Fq "$cronjob" /etc/crontabs/root || echo "$cronjob" >>/etc/crontabs/root
+      changed_when: false
