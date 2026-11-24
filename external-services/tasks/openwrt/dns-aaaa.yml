@@ -1,7 +1,7 @@
 # docs:
 #   name: "OpenWrt - DNS AAAA record"
 #   short_description: "OpenWrt - DNS AAAA record"
-#   description: "Local AAAA record in dnsmasq."
+#   description: "Local AAAA record in dnsmasq. On OpenWrt 25.12 the effective answer is a dnsmasq address override; option ip6 stays as inventory metadata."
 #   category: "Network"
 #   type: OpenWrt
 #   icon: "bi-globe2"
@@ -61,6 +61,9 @@
     # A name may arrive with a trailing dot (e.g. copied from the inventory
     # listing); normalize it so the section name and the stored values agree.
     host_norm: "{{ host | regex_replace('\\.+$', '') }}"
+    # OpenWrt 25.12 ignores option ip6 on config domain sections, so the
+    # effective AAAA answer comes from a dnsmasq address list.
+    dns_address: "/{{ host_norm }}/{{ ip6 | default('') }}"
     managed_id: "openwrt_dns_aaaa.yml/{{ host_norm }}"
     managed_playbook: "openwrt_dns_aaaa.yml"
     managed_ref: "host={{ host_norm }} ip6={{ ip6 | default('') }}"
@@ -116,6 +119,13 @@
             then
               uci delete "dhcp.$sec"
             fi
+            # The effective answer lives in the LAN dnsmasq address list.
+            value={{ dns_address | quote }}
+            if uci -q get dhcp.lan_dnsmasq.address 2>/dev/null | grep -qFx "$value"
+            then
+              uci del_list dhcp.lan_dnsmasq.address="$value"
+              changed=1
+            fi
             if [ "$changed" = 1 ]
             then
               uci commit dhcp
@@ -165,9 +175,25 @@
           # neutral and the aggregate decides whether a reload is needed.
           changed_when: false
 
+        - name: Ensure the dnsmasq AAAA override is present
+          ansible.builtin.raw: |
+            value={{ dns_address | quote }}
+            if uci -q get dhcp.lan_dnsmasq.address 2>/dev/null | grep -qFx "$value"
+            then
+              echo unchanged
+            else
+              uci add_list dhcp.lan_dnsmasq.address="$value"
+              echo changed
+            fi
+          register: address_result
+          changed_when: false
+
         - name: Remember whether any uci value changed
           ansible.builtin.set_fact:
-            uci_changed: "{{ uci_set_result.results | map(attribute='stdout') | map('trim') | select('equalto', 'changed') | list | length > 0 }}"
+            uci_changed: >-
+              {{ (uci_set_result.results | map(attribute='stdout') | map('trim')
+                  | select('equalto', 'changed') | list | length > 0)
+                 or (address_result.stdout | trim == 'changed') }}
 
         - name: Apply the changes
           ansible.builtin.raw: "{{ item }}"

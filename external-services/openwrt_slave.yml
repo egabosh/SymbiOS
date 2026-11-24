@@ -68,7 +68,7 @@
 #     - name: "dhcp_ip_limit"
 #       label: "DHCP pool size (unused on a slave, kept for the foundation)"
 #       type: "text"
-#       default: "150"
+#       default: "100"
 #     - name: "iot_device"
 #       label: "IoT bridge"
 #       type: "text"

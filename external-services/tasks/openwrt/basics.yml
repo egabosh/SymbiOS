@@ -58,7 +58,7 @@
 #     - name: "dhcp_ip_limit"
 #       label: "DHCP pool size"
 #       type: "text"
-#       default: "150"
+#       default: "100"
 #   actions:
 #     __playbook__: Install/Update
 #
@@ -98,7 +98,7 @@
     # service, no tracking); override it per host or in the WebUI.
     ntp_server: "192.53.103.108"
     dhcp_ip_start: "100"
-    dhcp_ip_limit: "150"
+    dhcp_ip_limit: "100"
     managed_id: "openwrt_basics.yml"
     managed_playbook: "openwrt_basics.yml"
     managed_resource_type: "basics"
