@@ -28,7 +28,13 @@
 #     - twofa_enabled
 #   name: Jellyfin
 #   short_description: Deploy the Jellyfin media server
-#   description: Deploys Jellyfin, a free and open-source media server, exposed via Traefik.
+#   description: >-
+#     Deploys Jellyfin, a free and open-source media server, exposed via Traefik.
+#     Besides the Authelia-protected web UI it exposes a second LAN-only TLS
+#     route (jellyfin-api.<base_domain>) for clients that cannot complete a
+#     browser SSO flow, such as the Kodi addon. A local technical user "kodi"
+#     is provisioned on every run; its password is revealable and rotatable in
+#     Settings -> Secrets, and its device token is refreshed by the same hook.
 #   url: "https://jellyfin.{{ base_domain }}"
 #   access:
 #     user_group: jellyfin-users
@@ -58,6 +64,7 @@
 #       - /symbios/services/jellyfin/
 #       - /symbios/base-services/traefik/providers/jellyfin.yml
 #       - /symbios/base-services/traefik/providers/jellyfin-sso.yml
+#       - /symbios/base-services/traefik/providers/jellyfin-api.yml
 #       - /symbios/runchecks.d/symbios-healthcheck-jellyfin.check
 #     ldap_groups:
 #       - jellyfin-users
@@ -79,6 +86,11 @@
     service_domain: "jellyfin.{{ base_domain }}"
     jellyfin_service_dir: /symbios/services/jellyfin
     jellyfin_config_root: /symbios/services/jellyfin/data/config
+    jellyfin_config_dir: "{{ config_dir | default('/symbios/base-services/symbios-ui/config') }}"
+    jellyfin_api_domain: "jellyfin-api.{{ base_domain }}"
+    jellyfin_kodi_user: kodi
+    jellyfin_kodi_password_secret: jellyfin_kodi_password
+    jellyfin_kodi_token_secret: jellyfin_kodi_token
     # Local service user for the container (non-root, see mediapaths.md).
     jellyfin_uid: 992
     # Supplementary group for read-only media access (fixed media GID).
@@ -105,6 +117,65 @@
     jellyfin_mediathek_plugin_checksum: 'sha256:b51aab2531c9b634fba9473a40560561519e1dd51364694954f2daccc323a3be'
     jellyfin_mediathek_plugin_url: "https://github.com/CatNoir2006/jellyfin-plugin-MediathekViewDL/releases/download/v{{ jellyfin_mediathek_plugin_version }}/{{ jellyfin_mediathek_plugin_zip }}"
     jellyfin_bootstrap_admin: symbios-admin
+  pre_tasks:
+    # The Kodi addon cannot complete the Authelia browser flow. It gets a local
+    # Jellyfin user whose password lives in the central store so the WebUI can
+    # reveal and rotate it. Seed once, never overwrite a rotated value.
+    - name: Check whether the Jellyfin kodi password is already stored
+      ansible.builtin.stat:
+        path: "{{ jellyfin_config_dir }}/secrets/{{ jellyfin_kodi_password_secret }}.age"
+      register: jellyfin_kodi_password_stored
+
+    - name: Seed the Jellyfin kodi password into the central secret store
+      ansible.builtin.shell: |
+        set -euo pipefail
+        umask 077
+        f_tmp="$(mktemp "{{ jellyfin_config_dir }}/.jellyfin-kodi-pw-XXXXXX")"
+        trap 'shred -u "$f_tmp" 2>/dev/null || rm -f "$f_tmp"' EXIT
+        openssl rand -hex 32 > "$f_tmp"
+        "{{ git_root }}/scripts/symbios-secret.sh" init >/dev/null
+        "{{ git_root }}/scripts/symbios-secret.sh" put "{{ jellyfin_kodi_password_secret }}" --file "$f_tmp"
+      args:
+        executable: /bin/bash
+        creates: "{{ jellyfin_config_dir }}/secrets/{{ jellyfin_kodi_password_secret }}.age"
+      changed_when: true
+      no_log: true
+      when: not jellyfin_kodi_password_stored.stat.exists
+
+    - name: Create the central secret metadata directory
+      ansible.builtin.file:
+        path: "{{ jellyfin_config_dir }}/secrets/meta"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    # lineinfile preserves policy/last_rotated written by the rotation hook.
+    - name: Declare the Jellyfin kodi secret rotation contracts
+      ansible.builtin.lineinfile:
+        path: "{{ jellyfin_config_dir }}/secrets/meta/{{ item.file }}"
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        create: yes
+        owner: root
+        group: root
+        mode: '0600'
+      loop:
+        - file: jellyfin_kodi_password.meta
+          regexp: '^type='
+          line: 'type=generated'
+        - file: jellyfin_kodi_password.meta
+          regexp: '^consumers='
+          line: 'consumers=jellyfin/kodi-user'
+        - file: jellyfin_kodi_token.meta
+          regexp: '^type='
+          line: 'type=app-owned'
+        - file: jellyfin_kodi_token.meta
+          regexp: '^consumers='
+          line: 'consumers=jellyfin/kodi-user'
+      loop_control:
+        label: "{{ item.file }} {{ item.line }}"
+
   tasks:
 
     - name: Ensure the media LDAP group exists (fixed GID for library access)
@@ -421,6 +492,37 @@
           - "secHeaders@file"
           - "jellyfin-authelia@file"
 
+    # The Kodi addon sends its own credentials/device token and cannot do the
+    # Authelia browser redirect. This route stays LAN-only (no forward-auth)
+    # and is meant for API clients, not for interactive logins.
+    - name: Deploy the LAN-only Jellyfin API Traefik provider
+      ansible.builtin.blockinfile:
+        path: /symbios/base-services/traefik/providers/jellyfin-api.yml
+        create: yes
+        mode: "0444"
+        owner: root
+        group: docker
+        marker: "# {mark} ANSIBLE MANAGED BLOCK jellyfin API"
+        block: |
+          http:
+            routers:
+              jellyfin-api:
+                rule: "Host(`{{ jellyfin_api_domain }}`)"
+                service: jellyfin-api
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: {{ acme_resolver }}
+                middlewares:
+                  - "allowlocalipsonly@file"
+                  - "secHeaders@file"
+            services:
+              jellyfin-api:
+                loadBalancer:
+                  servers:
+                    - url: "http://jellyfin:8096"
+        backup: yes
+
     - name: Ensure LDAP groups for Jellyfin OIDC login
       include_tasks: ../shared-tasks/oidc-groups.yml
 
@@ -476,6 +578,19 @@
     - name: Flush handlers before Jellyfin provisioning
       ansible.builtin.meta: flush_handlers
 
+    # WebUI rotation calls this hook by secret name. A missing hook would leave
+    # the stored password out of sync with Jellyfin, so fail early.
+    - name: Check the Jellyfin kodi password rotation hook
+      ansible.builtin.stat:
+        path: "{{ git_root }}/scripts/secret-rotation.d/jellyfin_kodi_password.sh"
+      register: jellyfin_kodi_hook
+
+    - name: Verify the Jellyfin kodi password rotation hook is installed
+      ansible.builtin.assert:
+        that: jellyfin_kodi_hook.stat.exists
+        fail_msg: "Missing {{ git_root }}/scripts/secret-rotation.d/jellyfin_kodi_password.sh"
+        quiet: true
+
     - name: Complete first-run setup and configure Authelia SSO and libraries
       ansible.builtin.command:
         argv:
@@ -496,6 +611,8 @@
           - "{{ jellyfin_sso_provider }}"
           - "--admin-user"
           - "{{ jellyfin_bootstrap_admin }}"
+          - "--kodi-user"
+          - "{{ jellyfin_kodi_user }}"
           - "--media-movies"
           - "/media/movies"
           - "--media-tvshows"

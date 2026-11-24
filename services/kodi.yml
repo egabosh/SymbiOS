@@ -227,6 +227,7 @@
 #     stop: systemctl stop switch-kodi-desk kodi-standalone
 #     restart: systemctl restart switch-kodi-desk
 #     reload: systemctl restart switch-kodi-desk
+#     show_ssh_key: cat /home/kodi/.ssh/id_ed25519.pub
 #
 ---
 
@@ -1744,6 +1745,30 @@
       ansible.builtin.include_tasks: ../shared-tasks/after-mount-unit.yml
       vars:
         after_mount_unit: switch-kodi-desk.service
+
+    - name: Check whether the Kodi switcher was started once
+      ansible.builtin.stat:
+        path: "{{ kodi_options_file | dirname }}/switch-kodi-desk.started"
+      register: kodi_switcher_started
+
+    # The unit stays disabled at boot (it reads /symbios), but a fresh install
+    # must actually bring up Kodi on the TV. Start it once; later restarts stay
+    # a manual action through the service buttons.
+    - name: Start switch-kodi-desk once after installation
+      ansible.builtin.systemd:
+        name: switch-kodi-desk.service
+        state: started
+        enabled: false
+      when: not kodi_switcher_started.stat.exists
+
+    - name: Record the one-time switcher start
+      ansible.builtin.copy:
+        content: "started\n"
+        dest: "{{ kodi_options_file | dirname }}/switch-kodi-desk.started"
+        owner: root
+        group: root
+        mode: '0644'
+      when: not kodi_switcher_started.stat.exists
 
     # A profile that already exists keeps its own language (the seed above only
     # applies on the very first start). Two paths converge it: a stopped Kodi
