@@ -17,6 +17,7 @@
 #   uses_vars:
 #     - acme_resolver
 #     - base_domain
+#     - locale
 #     - media_audio
 #     - media_gid
 #     - media_images
@@ -117,6 +118,13 @@
     jellyfin_mediathek_plugin_checksum: 'sha256:b51aab2531c9b634fba9473a40560561519e1dd51364694954f2daccc323a3be'
     jellyfin_mediathek_plugin_url: "https://github.com/CatNoir2006/jellyfin-plugin-MediathekViewDL/releases/download/v{{ jellyfin_mediathek_plugin_version }}/{{ jellyfin_mediathek_plugin_zip }}"
     jellyfin_bootstrap_admin: symbios-admin
+    # Jellyfin follows the SymbiOS locale instead of keeping its own language.
+    # de_DE.UTF-8 becomes UI de-DE, metadata language de and country DE.
+    jellyfin_locale_base: "{{ locale.split('.')[0].split('@')[0] }}"
+    jellyfin_language: "{{ jellyfin_locale_base.split('_')[0] | lower }}"
+    jellyfin_region: "{{ jellyfin_locale_base.split('_')[1] | default('') }}"
+    jellyfin_ui_culture: "{{ jellyfin_language }}{{ '-' ~ jellyfin_region if jellyfin_region else '' }}"
+    jellyfin_metadata_country: "{{ jellyfin_region | default(jellyfin_language | upper, true) }}"
   pre_tasks:
     # The Kodi addon cannot complete the Authelia browser flow. It gets a local
     # Jellyfin user whose password lives in the central store so the WebUI can
@@ -571,6 +579,25 @@
         - LibraryScanFanoutConcurrency
         - LibraryMetadataRefreshConcurrency
         - ParallelImageEncodingLimit
+      notify: Restart jellyfin
+
+    # Keep Jellyfin UI and metadata language in sync with the system locale.
+    # The provision script posts the full configuration back through the API
+    # after this restart, so these values are part of the persisted config.
+    - name: Set Jellyfin language from the system locale
+      ansible.builtin.lineinfile:
+        path: "{{ jellyfin_config_root }}/config/system.xml"
+        regexp: '^\s*<{{ item.key }}>.*</{{ item.key }}>\s*$'
+        line: "  <{{ item.key }}>{{ item.value }}</{{ item.key }}>"
+        insertbefore: '^</ServerConfiguration>$'
+        backup: yes
+      loop:
+        - key: UICulture
+          value: "{{ jellyfin_ui_culture }}"
+        - key: PreferredMetadataLanguage
+          value: "{{ jellyfin_language }}"
+        - key: MetadataCountryCode
+          value: "{{ jellyfin_metadata_country }}"
       notify: Restart jellyfin
 
     # Restart before provisioning so Jellyfin loads the plugin and Authelia
