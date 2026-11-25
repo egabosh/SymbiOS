@@ -83,6 +83,7 @@
 #     stop: docker compose -f /symbios/services/sftp-share/docker-compose.yml down
 #     restart: docker compose -f /symbios/services/sftp-share/docker-compose.yml restart
 #     reload: docker compose -f /symbios/services/sftp-share/docker-compose.yml up -d
+#     show_sessions: symbios-sftp-status.sh
 #
 
 ---
