@@ -75,6 +75,8 @@
       - { key: "network.wg_lan.addresses", value: "fdaa:a192:b168:cd44::1/64" }
       - { key: "network.wg_lan.addresses", value: "192.168.44.1/24" }
       - { key: "network.wg_lan.ip6assign", value: "64" }
+      # Keep WireGuard LAN out of the LAN /60 pool delegated downstream.
+      - { key: "network.wg_lan.ip6hint", value: "11" }
       - { key: "network.wg_lan.ipv6", value: "1" }
 
       # allow connections from internet

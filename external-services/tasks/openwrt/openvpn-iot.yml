@@ -46,7 +46,7 @@
       - { key: "openvpn.iotvpn", value: "openvpn" }
       - { key: "openvpn.iotvpn.enabled", value: "1" }
       - { key: "openvpn.iotvpn.port", value: "1195" }
-      - { key: "openvpn.iotvpn.local", value: "$(uci get network.lan.ipaddr)" }
+      - { key: "openvpn.iotvpn.local", value: "{{ resolved_lan_ip }}" }
       - { key: "openvpn.iotvpn.proto", value: "udp" }
       - { key: "openvpn.iotvpn.dev", value: "tap1" }
       - { key: "openvpn.iotvpn.mode", value: "server" }
@@ -81,6 +81,9 @@
           - iot_clients is defined
         fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
         quiet: true
+
+    - name: resolve LAN IPv4 for the OpenVPN server
+      ansible.builtin.include_tasks: resolve-lan-ip.yml
 
   tasks:
     - name: update apk db

@@ -1,0 +1,14 @@
+# docs:
+#   name: "OpenWrt - FRITZ!Box IPv6"
+#   short_description: "OpenWrt - FRITZ!Box IPv6"
+#   description: "Enable DHCPv6 prefix delegation from the master router to a downstream FRITZ!Box, keep the LAN firewall rule on the delegated prefix, and allow the FRITZ!Box internal LAN."
+#   category: "Network"
+#   type: OpenWrt
+#   icon: "bi-router"
+#   requires:
+#     - playbook: "openwrt_master.yml"
+#       reason: "Base LAN, DHCPv6, Tor and WireGuard prefix setup"
+#   actions:
+#     __playbook__: Install/Update
+#
+- ansible.builtin.import_playbook: tasks/openwrt/fritzbox-ipv6.yml

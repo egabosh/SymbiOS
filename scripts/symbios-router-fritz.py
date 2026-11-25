@@ -586,7 +586,7 @@ def fb_add(host, user, password, ext_port, proto, int_port, int_client, desc,
     return 0
 
 
-def fb_delete(host, user, password, ext_port, proto):
+def fb_delete(host, user, password, ext_port, proto, rule_uid_filter=''):
     login = login_sid(host, user, password)
     if not login.get('ok'):
         print(json.dumps(login))
@@ -615,7 +615,9 @@ def fb_delete(host, user, password, ext_port, proto):
             target_dev = dev
             for r in dev.get('rules', []):
                 if (str(r.get('port', '')) == ext_port
-                        and r.get('protocol', '').upper() == proto.upper()):
+                        and r.get('protocol', '').upper() == proto.upper()
+                        and (not rule_uid_filter
+                             or r.get('UID', '') == rule_uid_filter)):
                     rule_uid = r.get('UID', '')
                     rule_accesstype = r.get('accesstype', '')
                     target_rule = r
@@ -626,7 +628,8 @@ def fb_delete(host, user, password, ext_port, proto):
         print(json.dumps({
             'ok': False,
             'router_type': 'fritzbox',
-            'error': f'No rule found for {proto}/{ext_port}',
+            'error': (f'No rule found for {proto}/{ext_port}'
+                      + (f' (UID={rule_uid_filter})' if rule_uid_filter else '')),
         }))
         return 1
 
@@ -926,12 +929,13 @@ def main():
         if len(sys.argv) < 3:
             print(json.dumps({
                 'ok': False,
-                'error': 'Usage: delete <ext_port> [protocol]',
+                'error': 'Usage: delete <ext_port> [protocol] [rule_uid]',
             }))
             return 1
         ext_port = sys.argv[2]
         proto = sys.argv[3].upper() if len(sys.argv) > 3 else 'TCP'
-        return fb_delete(host, user, password, ext_port, proto)
+        rule_uid = sys.argv[4] if len(sys.argv) > 4 else ''
+        return fb_delete(host, user, password, ext_port, proto, rule_uid)
 
     elif action == 'staticip':
         if len(sys.argv) < 3:
@@ -970,7 +974,7 @@ def main():
         print('  list                            List port forwarding rules')
         print('  add <ext> <proto> <int> <client> [desc] [accesstype]   Add rule')
         print('                                    accesstype: ipv4|ipv6|ipv4_ipv6')
-        print('  delete <ext> [proto]            Delete rule')
+        print('  delete <ext> [proto] [uid]      Delete rule (UID selects one of several)')
         print('  staticip <ip>                   Ensure static IPv4 for this device')
         print('  staticip-status [ip]            Report whether static IPv4 is active')
         print('  unset-staticip <ip>             Remove static IPv4 for this device')

@@ -1,0 +1,19 @@
+---
+# Resolve the LAN IPv4 address for UCI values that point at the local resolver.
+# uci-set.yml quotes every value, so embedding a shell command such as
+# "$(uci get network.lan.ipaddr)" would store the literal text and break
+# dnsmasq/OpenVPN configs. Included by the segment playbooks that need it.
+- name: Read LAN IPv4 from the target
+  ansible.builtin.raw: uci -q get network.lan.ipaddr 2>/dev/null || true
+  register: lan_ipv4_uci
+  changed_when: false
+
+- name: Provide resolved LAN IPv4 for dependent UCI values
+  ansible.builtin.set_fact:
+    resolved_lan_ip: "{{ lan_ip | default(ip | default(lan_ipv4_uci.stdout | trim)) }}"
+
+- name: Require a LAN IPv4 address
+  ansible.builtin.assert:
+    that: resolved_lan_ip | length > 0
+    fail_msg: "No LAN IPv4 address available for a dependent UCI value"
+    quiet: true

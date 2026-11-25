@@ -486,7 +486,9 @@ Actions:
   add <ext_port> <proto> <int_port> <int_client> [desc] [accesstype]
                                   Add a port forwarding rule
                                   (accesstype: ipv4|ipv6|ipv4_ipv6)
-  delete <ext_port> [protocol]    Delete a port forwarding rule
+  delete <ext_port> [protocol] [rule_uid]
+                                  Delete a port forwarding rule; the optional
+                                  FRITZ!Box UID selects one of several matches
   staticip <ip>                   Ensure static IPv4 (FRITZ!Box only)
   staticip-status [ip]            Report whether static IPv4 is active
                                   (FRITZ!Box only)

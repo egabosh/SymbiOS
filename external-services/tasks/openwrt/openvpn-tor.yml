@@ -46,7 +46,7 @@
       - { key: "openvpn.torvpn", value: "openvpn" }
       - { key: "openvpn.torvpn.enabled", value: "1" }
       - { key: "openvpn.torvpn.port", value: "1194" }
-      - { key: "openvpn.torvpn.local", value: "$(uci get network.lan.ipaddr)" }
+      - { key: "openvpn.torvpn.local", value: "{{ resolved_lan_ip }}" }
       - { key: "openvpn.torvpn.proto", value: "udp" }
       - { key: "openvpn.torvpn.dev", value: "tap2" }
       - { key: "openvpn.torvpn.mode", value: "server" }
@@ -81,6 +81,9 @@
           - tor_clients is defined
         fail_msg: "Missing required parameter(s). Pass them with -e <name>=<value>."
         quiet: true
+
+    - name: resolve LAN IPv4 for the OpenVPN server
+      ansible.builtin.include_tasks: resolve-lan-ip.yml
 
   tasks:
     - name: update apk db

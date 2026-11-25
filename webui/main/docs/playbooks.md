@@ -283,7 +283,12 @@ Before saving or running, both CLIs pipe the merged values through
 substitutions, backticks, shell operators or control characters, because the
 target playbooks use `raw` shell tasks (no Python on the routers). New shared
 setters should use `external-services/tasks/openwrt/uci-set.yml`, which quotes
-values with `| quote` and includes the reusable validation task.
+values with `| quote` and includes the reusable validation task. Because of
+that quoting, playbook values must never contain a literal `$(uci get ...)`:
+it would be written verbatim and break the consuming daemon. Playbooks that
+need the LAN address in a UCI value include
+`external-services/tasks/openwrt/resolve-lan-ip.yml` and use
+`{{ resolved_lan_ip }}`.
 
 Host-side credentials for external systems can be kept in the central store
 (`symbios-secret.sh`); use `f_secret_get_to_file <name>` from `symbios-lib.sh`

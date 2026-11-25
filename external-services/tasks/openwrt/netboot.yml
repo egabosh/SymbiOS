@@ -16,6 +16,10 @@
   hosts: all
   gather_facts: no
 
+  pre_tasks:
+    - name: resolve LAN IPv4 for the PXE DHCP option
+      ansible.builtin.include_tasks: resolve-lan-ip.yml
+
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
@@ -27,7 +31,7 @@
     uci_vars:
       - { key: "dhcp.lan_dnsmasq.tftp_root", value: "/srv/tftp" }
       - { key: "dhcp.lan_dnsmasq.enable_tftp", value: "1" }
-      - { key: "dhcp.lan.dhcp_option", value: "66,$(uci get network.lan.ipaddr)" }
+      - { key: "dhcp.lan.dhcp_option", value: "66,{{ resolved_lan_ip }}" }
       - { key: "dhcp.lan.dhcp_option", value: "67,netboot.xyz.efi" }
       - { key: "dhcp.lan.dhcp_option", value: "67,netboot.xyz-arm64.efi" }
       - { key: "dhcp.lan.dhcp_option", value: "67,netboot.xyz.kpxe" }

@@ -39,6 +39,9 @@
         that: resolver_role.stdout | trim == 'resolver'
         fail_msg: "{{ inventory_hostname }} is a plain access point; run openwrt_iot.yml on the master (resolver) only."
 
+    - name: resolve LAN IPv4 for dnsmasq forwarding
+      ansible.builtin.include_tasks: resolve-lan-ip.yml
+
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
@@ -93,8 +96,8 @@
       - { key: "dhcp.iot.ra_lifetime", value: '1800' }
       - { key: "dhcp.iot.force", value: "1" }
       - { key: "dhcp.iot.dhcp_option", value: "119,iot,lan" }
-      - { key: "dhcp.iot.dhcp_option", value: "6,$(uci get network.iot.ipaddr)" }
-      - { key: "dhcp.iot.dns",  value: "$(uci get network.iot.ip6addr | cut -d/ -f1)" }
+      - { key: "dhcp.iot.dhcp_option", value: "6,{{ iot_ip }}" }
+      - { key: "dhcp.iot.dns",  value: "{{ iot_ip6.split('/')[0] }}" }
       - { key: "dhcp.iot_dnsmasq", value: "dnsmasq" }
       - { key: "dhcp.iot_dnsmasq.domain", value: "iot" }
       - { key: "dhcp.iot_dnsmasq.resolvfile", value: "/etc/resolv.dnsmasq.iot" }
@@ -105,10 +108,10 @@
       - { key: "dhcp.iot_dnsmasq.authoritative", value: "1" }
       - { key: "dhcp.iot_dnsmasq.sequential_ip", value: "1" }
       - { key: "dhcp.iot_dnsmasq.readethers", value: "1" }
-      - { key: "dhcp.iot_dnsmasq.server", value: "/.lan/$(uci get network.lan.ipaddr)" }
+      - { key: "dhcp.iot_dnsmasq.server", value: "/.lan/{{ resolved_lan_ip }}" }
 
       # the lan dnsmasq forwards .iot queries to this instance
-      - { key: "dhcp.lan_dnsmasq.server", value: "/iot/$(uci get network.iot.ipaddr)" }
+      - { key: "dhcp.lan_dnsmasq.server", value: "/iot/{{ iot_ip }}" }
 
       # iot zone
       - { key: "firewall.zone_iot", value: "zone" }

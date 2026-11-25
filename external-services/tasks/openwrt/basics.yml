@@ -160,7 +160,11 @@
       - { key: "network.lan.ipaddr", value: "{{ effective_ip }}" }
       - { key: "network.lan.netmask", value: "{{ effective_mask }}" }
       - { key: "network.lan.ip6addr", value: "{{ effective_ip6 }}" }
-      - { key: "network.lan.ip6assign", value: "64" }
+      # Keep a /60 pool on the LAN interface so a downstream router can get
+      # a /62 via DHCPv6-PD. A ULA-only target keeps /64: there is no
+      # delegated prefix to subdivide there.
+      - { key: "network.lan.ip6assign", value: "{{ '60' if ipv6_uplink | bool else '64' }}" }
+      - { key: "network.lan.ip6hint", value: "0" }
 
       ## USB stick mount
       - { key: "fstab.@global[0].anon_mount", value: "0" }
@@ -200,6 +204,10 @@
       - { key: "dhcp.lan.rebind_protection", value: "1" }
       - { key: "dhcp.lan.dhcpv4", value: "server" }
       - { key: "dhcp.lan.dhcpv6", value: "server" }
+      # Explicit PD settings. These are odhcpd defaults, but spelling them out
+      # documents why LAN has a /60 and makes a later default change harmless.
+      - { key: "dhcp.lan.dhcpv6_pd", value: "{{ '1' if ipv6_uplink | bool else '0' }}" }
+      - { key: "dhcp.lan.dhcpv6_pd_min_len", value: "62" }
       - { key: "dhcp.lan.ra", value: "server" }
       # odhcpd RA flags (dnsmasq's legacy ra_management is ignored since 24.10):
       # managed-config sets the M flag so clients use stateful DHCPv6

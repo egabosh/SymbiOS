@@ -75,6 +75,8 @@
       - { key: "network.wg_tor.addresses", value: "fdaa:a192:b168:cd45::1/64" }
       - { key: "network.wg_tor.addresses", value: "192.168.45.1/24" }
       - { key: "network.wg_tor.ip6assign", value: "64" }
+      # Keep WireGuard Tor out of the LAN /60 pool delegated downstream.
+      - { key: "network.wg_tor.ip6hint", value: "12" }
       - { key: "network.wg_tor.ipv6", value: "1" }
 
       # allow connections from internet

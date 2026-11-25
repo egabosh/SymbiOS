@@ -39,6 +39,9 @@
         that: resolver_role.stdout | trim == 'resolver'
         fail_msg: "{{ inventory_hostname }} is a plain access point; run openwrt_tor.yml on the master (resolver) only."
 
+    - name: resolve LAN IPv4 for dnsmasq forwarding
+      ansible.builtin.include_tasks: resolve-lan-ip.yml
+
   vars:
     # Defaults keep the playbook runnable standalone; the WebUI passes
     # the same names as extra vars (which take precedence).
@@ -88,7 +91,9 @@
       - { key: "network.tor.netmask", value: "{{ tor_netmask }}" }
       - { key: "network.tor.dns", value: "{{ tor_dns }}" }
       - { key: "network.tor.ip6addr", value: "{{ tor_ip6 }}" }
-      - { key: 'network.tor.ip6assign', value: '64'}
+      - { key: "network.tor.ip6assign", value: "64" }
+      # Keep Tor out of the LAN /60 pool that is handed to the FRITZ!Box.
+      - { key: "network.tor.ip6hint", value: "10" }
 
       # dhcp for tor network
       - { key: "dhcp.tor", value: "dhcp" }
@@ -108,8 +113,8 @@
       - { key: "dhcp.tor.ra_lifetime", value: '1800' }
       - { key: "dhcp.tor.force", value: "1" }
       - { key: "dhcp.tor.dhcp_option", value: "119,tor,lan" }
-      - { key: "dhcp.tor.dhcp_option", value: "6,$(uci get network.tor.ipaddr)" }
-      - { key: "dhcp.tor.dns",  value: "$(uci get network.tor.ip6addr | cut -d/ -f1)" }
+      - { key: "dhcp.tor.dhcp_option", value: "6,{{ tor_ip }}" }
+      - { key: "dhcp.tor.dns",  value: "{{ tor_ip6.split('/')[0] }}" }
       - { key: "dhcp.tor_dnsmasq", value: "dnsmasq" }
       - { key: "dhcp.tor_dnsmasq.domain", value: "tor" }
       - { key: "dhcp.tor_dnsmasq.resolvfile", value: "/etc/resolv.dnsmasq.tor" }
@@ -120,11 +125,11 @@
       - { key: "dhcp.tor_dnsmasq.authoritative", value: "1" }
       - { key: "dhcp.tor_dnsmasq.sequential_ip", value: "1" }
       - { key: "dhcp.tor_dnsmasq.server", value: "/.onion/127.0.0.1#9053" }
-      - { key: "dhcp.tor_dnsmasq.server", value: "/.lan/$(uci get network.lan.ipaddr)" }
+      - { key: "dhcp.tor_dnsmasq.server", value: "/.lan/{{ resolved_lan_ip }}" }
       - { key: "dhcp.tor_dnsmasq.readethers", value: "1" }
 
       # the lan dnsmasq forwards .tor queries to this instance
-      - { key: "dhcp.lan_dnsmasq.server", value: "/tor/$(uci get network.tor.ipaddr)" }
+      - { key: "dhcp.lan_dnsmasq.server", value: "/tor/{{ tor_ip }}" }
 
       # tor zone
       - { key: "firewall.zone_tor", value: "zone" }
