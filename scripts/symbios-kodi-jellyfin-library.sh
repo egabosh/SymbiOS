@@ -114,6 +114,15 @@ if [[ "$g_force" == false && -s "$g_data_dir/sync.json" ]]
 then
   if [[ "$(jq -r '.Whitelist | length // 0' "$g_data_dir/sync.json" 2>/dev/null || printf '0')" != "0" ]]
   then
+    # A previous full sync can leave Libraries/RestorePoint behind when Kodi is
+    # restarted mid-sync. The addon then asks to resume that sync on startup and
+    # waits for a GUI answer, so clear the resume state on every managed run.
+    f_secret_file resume g_sync_resume
+    jq '.Libraries = [] | .RestorePoint = {}' "$g_data_dir/sync.json" > "$g_sync_resume" || exit 1
+    if ! cmp -s "$g_sync_resume" "$g_data_dir/sync.json"
+    then
+      install -o kodi -g kodi -m 0644 "$g_sync_resume" "$g_data_dir/sync.json" || exit 1
+    fi
     g_echo_note "kodi-jellyfin-library-unchanged"
     exit 0
   fi

@@ -1645,6 +1645,7 @@
               <setting id="useDirectPaths">1</setting>
               <setting id="SyncInstallRunDone">true</setting>
               <setting id="kodiCompanion">true</setting>
+              <setting id="limitIndex">100</setting>
           </settings>
       when: kodi_jellyfin_configured
 
@@ -1665,6 +1666,18 @@
         regexp: '(<setting id="useDirectPaths"[^>]*>)[^<]*(</setting>)'
         replace: '\g<1>1\g<2>'
       register: kodi_jellyfin_settings_direct
+      when: kodi_jellyfin_configured
+
+    # A full music sync pages through 130k songs. The addon default of 15 items
+    # per page turns that into nearly 9000 Jellyfin requests; 100 is the maximum
+    # accepted by Kodi's settings UI and keeps each page at the same response
+    # time while cutting the request count by two thirds.
+    - name: Raise the Jellyfin addon page size
+      ansible.builtin.replace:
+        path: "/home/kodi/.kodi/userdata/addon_data/{{ kodi_jellyfin_addon }}/settings.xml"
+        regexp: '(<setting id="limitIndex"[^>]*>)[^<]*(</setting>)'
+        replace: '\g<1>100\g<2>'
+      register: kodi_jellyfin_settings_limit
       when: kodi_jellyfin_configured
 
     # The addon only runs its fast startup sync when kodiCompanion is enabled.
@@ -1721,6 +1734,30 @@
         regexp: '^(DEFAULT_HTTP_TIMEOUT\s*=\s*)[0-9]+'
         replace: '\g<1>180'
       register: kodi_jellyfin_http_timeout
+      when: kodi_jellyfin_configured
+
+    # Jellyfin's "Optimize database" task holds an exclusive SQLite lock for
+    # minutes. During a large sync one GET then returns 500; the stock addon
+    # logs and ignores it, which aborts the whole library. Retry those transient
+    # server errors long enough to outlast the maintenance task.
+    - name: Retry transient Jellyfin HTTP 500 responses
+      ansible.builtin.replace:
+        path: /home/kodi/.kodi/addons/plugin.video.jellyfin/jellyfin_kodi/jellyfin/http.py
+        regexp: >-
+          (?P<indent>\s+)elif r\.status_code == 500:\s+# log and ignore\.\n
+          (?P=indent)\s+LOG\.error\("--\[ 500 response \] %s", error\)\n\n
+          (?P=indent)\s+return
+        replace: |
+          \g<indent>elif r.status_code == 500:
+          \g<indent>    # Jellyfin's database optimization can hold an exclusive
+          \g<indent>    # SQLite lock for minutes. Retry instead of returning None.
+          \g<indent>    LOG.warning("--[ 500 response, retrying ] %s", error)
+          \g<indent>    if retry < 20:
+          \g<indent>        retry = 20
+          \g<indent>    retry -= 1
+          \g<indent>    time.sleep(10)
+          \g<indent>    continue
+      register: kodi_jellyfin_http_500
       when: kodi_jellyfin_configured
 
     # The password lives only in the transient root-only file; the helper
@@ -1859,10 +1896,12 @@
         (kodi_jellyfin_login is defined and kodi_jellyfin_login is changed) or
         (kodi_jellyfin_settings_prompt is defined and kodi_jellyfin_settings_prompt is changed) or
         (kodi_jellyfin_settings_direct is defined and kodi_jellyfin_settings_direct is changed) or
+        (kodi_jellyfin_settings_limit is defined and kodi_jellyfin_settings_limit is changed) or
         (kodi_jellyfin_settings_companion is defined and kodi_jellyfin_settings_companion is changed) or
         (kodi_jellyfin_six is defined and kodi_jellyfin_six is changed) or
         (kodi_jellyfin_sync_hook is defined and kodi_jellyfin_sync_hook is changed) or
-        (kodi_jellyfin_http_timeout is defined and kodi_jellyfin_http_timeout is changed)
+        (kodi_jellyfin_http_timeout is defined and kodi_jellyfin_http_timeout is changed) or
+        (kodi_jellyfin_http_500 is defined and kodi_jellyfin_http_500 is changed)
 
     # Seed the addon's view database and queue a full sync without the GUI
     # library-selection dialog. The running (and freshly restarted) service
@@ -2284,7 +2323,7 @@
           chmod 0600 "$f_netrc"
           printf 'machine localhost login kodi password %s\n' "$f_pw" > "$f_netrc"
           f_resp=$(curl -fsS --basic --netrc-file "$f_netrc" \
-            --header="Content-Type: application/json" \
+            -H "Content-Type: application/json" \
             --data-binary '{"jsonrpc":"2.0","id":1,"method":"Player.GetActivePlayers"}' \
             http://localhost:8081/jsonrpc 2>/dev/null)
           f_rpc_rc=$?
