@@ -329,6 +329,7 @@ the matching feature is configured or installed.
 | **Digitalcourage DNS** (`5.9.164.112`, `2a01:4f8:251:554::2`) | TCP connectivity check in `symbios-detect-network-type.sh`. DoT only (port 853), not used as nameserver. | network detection |
 | **FRITZ!Box** (`192.168.188.1`) | DNS resolver for the openwrt-vm service (via NAT from host). | openwrt-vm |
 | **Qualys SSL Labs** (`api.ssllabs.com`) | Daily TLS grade scan written to `<log>/ssl-labs.json` for the SSL Labs healthcheck. | daily cron with Traefik |
+| **hstspreload.org** (`hstspreload.org`) | Preflight, opt-in submission and daily status for the HSTS preload list. | DNS setting `hsts_preload` |
 
 The host resolves DNS through its locally configured resolver (systemd-resolved
 / router DHCP), so every domain lookup also reaches the configured upstream

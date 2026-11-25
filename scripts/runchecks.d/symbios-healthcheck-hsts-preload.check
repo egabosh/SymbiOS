@@ -1,0 +1,67 @@
+CHECK_CATEGORY="network"
+CHECK_TITLE="HSTS Preload"
+CHECK_DESC="Reports the browser preload-list status of the opted-in base domain."
+CHECK_DETAIL="Reads <log>/hsts-preload.json written by symbios-hsts-preload.sh.|Stays quiet while the DNS setting hsts_preload is disabled.|preloaded is green, pending warns until the browser rollout finishes.|Preflight errors, rejected or removed entries fail.|A missing or more than 48h old snapshot warns.|The check never calls hstspreload.org; the daily cron refreshes the snapshot."
+
+# This file is sourced by runchecks.sh. Never call exit here.
+g_hsts_enabled="$(f_symbios_var hsts_preload "false")"
+case "${g_hsts_enabled,,}" in
+  true|1|yes|on)
+    ;;
+  *)
+    g_echo_note "HSTS preload is not enabled"
+    return 2>/dev/null || true
+    ;;
+esac
+
+g_hsts_snapshot="${g_log_dir}/hsts-preload.json"
+if [[ ! -s "${g_hsts_snapshot}" ]]
+then
+  g_echo_warn "HSTS preload snapshot missing - the daily status job has not produced a result yet"
+  return 2>/dev/null || true
+fi
+
+g_hsts_age=$(( $(date +%s) - $(date -r "${g_hsts_snapshot}" +%s 2>/dev/null || echo 0) ))
+if [[ "${g_hsts_age}" -gt 172800 ]]
+then
+  g_echo_warn "HSTS preload snapshot is $(( g_hsts_age / 3600 )) hours old - check the daily cron"
+  return 2>/dev/null || true
+fi
+
+g_hsts_state="$(jq -r '.status // "ok"' "${g_hsts_snapshot}" 2>/dev/null)"
+if [[ "${g_hsts_state}" == "error" ]]
+then
+  g_echo_error "HSTS preload check failed: $(jq -r '.error // "unknown error"' "${g_hsts_snapshot}" 2>/dev/null)"
+  return 2>/dev/null || true
+fi
+
+g_hsts_domain="$(jq -r '.domain // "unknown domain"' "${g_hsts_snapshot}" 2>/dev/null)"
+g_hsts_status="$(jq -r '.preload_status // "unknown"' "${g_hsts_snapshot}" 2>/dev/null)"
+g_hsts_issues="$(jq -r '[.errors[]?] | join(", ")' "${g_hsts_snapshot}" 2>/dev/null)"
+g_hsts_link="https://hstspreload.org/?domain=${g_hsts_domain}"
+
+case "${g_hsts_status}" in
+  preloaded)
+    g_echo_note "${g_hsts_domain} is on the HSTS preload list"
+    ;;
+  pending)
+    g_echo_warn "${g_hsts_domain} is pending browser rollout for HSTS preload: ${g_hsts_link}"
+    ;;
+  pending-removal|pending-automated-removal)
+    g_echo_warn "${g_hsts_domain} is pending HSTS preload removal: ${g_hsts_link}"
+    ;;
+  rejected|removed)
+    g_echo_error "${g_hsts_domain} has HSTS preload status ${g_hsts_status}: ${g_hsts_link}"
+    ;;
+  unknown)
+    if [[ -n "${g_hsts_issues}" ]]
+    then
+      g_echo_error "HSTS preload preflight issues for ${g_hsts_domain}: ${g_hsts_issues}"
+    else
+      g_echo_warn "${g_hsts_domain} is not on the HSTS preload list yet: ${g_hsts_link}"
+    fi
+    ;;
+  *)
+    g_echo_warn "Unknown HSTS preload status for ${g_hsts_domain}: ${g_hsts_status}"
+    ;;
+esac

@@ -797,13 +797,18 @@ without a playbook:
 - `symbios-healthcheck-ssl-labs.check` - reads the daily Qualys SSL Labs
   snapshot in `<log>/ssl-labs.json`, written by
   `traefik-qualys-ssl-labs-check.sh`. `A+` and `A` are green: without an
-  HSTS preload list entry (an external, irreversible step per domain) SSL
-  Labs caps a SymbiOS host at `A` even with TLS 1.3 and a one-year HSTS
-  header. `A-` and below, `T`, `M` and ungraded endpoints fail. Every
-  endpoint (IPv4 and IPv6) is graded separately. This exception is documented
-  as T1 in `SECURITY.md`.
+  HSTS preload list entry (an external, opt-in step per domain) SSL Labs caps
+  a SymbiOS host at `A` even with TLS 1.3 and a one-year HSTS header. `A-` and
+  below, `T`, `M` and ungraded endpoints fail. Every endpoint (IPv4 and IPv6)
+  is graded separately. This exception is documented as T1 in `SECURITY.md`.
   The check never calls the external API from the 5-minute runcheck loop;
   the rate-limited scan runs once per day from cron.
+- `symbios-healthcheck-hsts-preload.check` - reads the daily snapshot in
+  `<log>/hsts-preload.json`, written by `symbios-hsts-preload.sh`. It stays
+  quiet while the DNS setting `hsts_preload` is disabled; once enabled,
+  `preloaded` is green, `pending` warns until the browser rollout finishes,
+  and preflight errors, `rejected` or `removed` fail. The check itself never
+  calls hstspreload.org.
 - `reboot-required.check` - reports an error while a reboot is pending. It
   reads the Debian marker `/run/reboot-required` (with the package list that
   asked for the reboot) and, because Debian trixie dropped

@@ -1,0 +1,131 @@
+# SymbiOS - Debian-based server management platform
+# Copyright (c) 2026, Oliver Bohlen
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# docs:
+#   uses_vars:
+#     - acme_resolver
+#     - base_domain
+#     - hsts_preload
+#   name: HSTS Preload
+#   short_description: Opt in to browser HSTS preload for base_domain
+#   description: >-
+#     Adds a Traefik HTTPS redirect for www.<base_domain> and installs the
+#     daily status job for hstspreload.org. Submission itself is an explicit
+#     opt-in through the DNS settings page and is never done by a bare
+#     reapply. The preload entry affects all subdomains permanently.
+#   url: "https://hstspreload.org/"
+#   author: Oliver Bohlen
+#   version: '1.0'
+#   license: GPLv3
+#   copyright: Copyright (c) 2026, Oliver Bohlen
+#   min_ansible_version: '2.11'
+#   platforms:
+#   - name: Debian
+#     versions:
+#     - '13'
+#   category: Security
+#   install_mode: settings
+#   service_control:
+#     services:
+#     - name: hsts-preload
+#       type: config
+#       status: test -f /symbios/base-services/traefik/providers/hsts-preload.yml || exit 2
+#   uninstall:
+#     program_paths:
+#     - /symbios/base-services/traefik/providers/hsts-preload.yml
+#     - /etc/cron.d/symbios-hsts-preload
+#
+---
+- name: hsts-preload
+  hosts: all
+  gather_facts: no
+
+  vars:
+    docker_path: "{{ base_services_root }}/traefik"
+    hsts_provider: "{{ docker_path }}/providers/hsts-preload.yml"
+
+  pre_tasks:
+    - name: Fail if base_domain is not configured
+      ansible.builtin.include_tasks: ../shared-tasks/base-domain-guard.yml
+
+  tasks:
+    # Removing the provider is a real config change: Traefik must drop the
+    # stale router before the flag is reported as disabled.
+    - name: Remove HSTS preload www redirect provider when disabled
+      ansible.builtin.file:
+        path: "{{ hsts_provider }}"
+        state: absent
+      when: not (hsts_preload | default(false) | bool)
+      notify: Restart traefik
+
+    # The wildcard CNAME already points www at this host. A normal Host rule
+    # with the ACME resolver is enough to get a valid certificate; the
+    # redirect sends www to the apex and keeps the path.
+    - name: Write HSTS preload www redirect provider
+      ansible.builtin.copy:
+        dest: "{{ hsts_provider }}"
+        mode: '0444'
+        owner: root
+        group: docker
+        backup: yes
+        content: |
+          # {mark} ANSIBLE MANAGED BLOCK hsts-preload
+          http:
+            routers:
+              hsts-preload-www:
+                rule: "Host(`www.{{ base_domain }}`)"
+                service: noop@internal
+                entryPoints:
+                  - "https"
+                tls:
+                  certResolver: "{{ acme_resolver }}"
+                middlewares:
+                  - "secHeaders@file"
+                  - "hsts-preload-www@file"
+            middlewares:
+              hsts-preload-www:
+                redirectRegex:
+                  regex: "^https://[^/]+(/.*)?$"
+                  replacement: "https://{{ base_domain }}${1}"
+                  permanent: true
+      when: hsts_preload | default(false) | bool
+      notify: Restart traefik
+
+    # Status polling is cheap and must not wait for the long SSL Labs scan.
+    - name: /etc/cron.d/symbios-hsts-preload
+      ansible.builtin.blockinfile:
+        path: /etc/cron.d/symbios-hsts-preload
+        create: yes
+        mode: '0644'
+        owner: root
+        group: root
+        marker: "# {mark} ANSIBLE MANAGED BLOCK"
+        block: |
+          SHELL=/bin/bash
+          17 3 * * * root PATH={{ git_root }}/scripts:$PATH && [[ -x {{ git_root }}/scripts/symbios-hsts-preload.sh ]] && symbios-hsts-preload.sh run
+        backup: yes
+
+    - name: Register playbook as installed
+      ansible.builtin.include_tasks: ../shared-tasks/state-register.yml
+      vars:
+        service_name: "hsts-preload"
+        state_playbook: "base-services/hsts-preload.yml"
+
+  handlers:
+    - name: Restart traefik
+      ansible.builtin.shell: docker compose down && docker compose up -d
+      args:
+        chdir: "{{ docker_path }}"

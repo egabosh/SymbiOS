@@ -59,6 +59,8 @@ def settings_dns(request):
         is_ajax = is_ajax_request(request)
         action = request.POST.get('action', 'save')
         dns_mode = request.POST.get('dns_mode', 'desec')
+        hsts_preload = request.POST.get('hsts_preload', '0') in ('1', 'on', 'true', 'yes')
+        hsts_flag = '--hsts-preload' if hsts_preload else '--no-hsts-preload'
         # Validation and the inventory write live in the settings CLI
         # (single source of truth). Secrets travel via stdin JSON, never
         # as argv. The chain aborts on validation failure (&&): set writes,
@@ -69,14 +71,16 @@ def settings_dns(request):
             # auto-apply is suppressed here and the explicit chain keeps the
             # ordering: set -> hostname -> dynamic apply.
             if action == 'remove':
-                set_cmd = 'symbios-settings-dns.sh remove --no-apply'
+                set_cmd = ('symbios-settings-dns.sh remove --no-apply'
+                           f' {hsts_flag}')
                 stdin_data = None
                 message = 'DNS configuration removed.'
                 title = 'Removing DNS config and applying...'
             elif dns_mode == 'self-managed':
                 self_domain = request.POST.get('self_domain', '').strip()
                 set_cmd = ('symbios-settings-dns.sh set --mode self-managed'
-                           f' --domain {shlex.quote(self_domain)} --no-apply')
+                           f' --domain {shlex.quote(self_domain)}'
+                           f' {hsts_flag} --no-apply')
                 stdin_data = None
                 message = f'DNS settings saved for {self_domain}.'
                 title = 'Applying DNS...'
@@ -90,11 +94,18 @@ def settings_dns(request):
                     'ddns_ipv6': request.POST.get('ddns_ipv6', ''),
                 })
                 set_cmd = ('symbios-settings-dns.sh set --mode desec'
-                           ' --json-stdin --no-apply')
+                           f' --json-stdin {hsts_flag} --no-apply')
                 stdin_data = payload
                 message = 'DNS settings saved.'
                 title = 'Applying DNS...'
-            cmd = f'{set_cmd} && {_HOSTNAME_CMD} && {_APPLY_CMD}'
+            # The opt-in is completed only after the playbooks installed the
+            # www redirect and the daily status job. The worker also skips
+            # domains that are already pending or preloaded, so saving the
+            # page again cannot submit twice.
+            post_apply_cmd = _APPLY_CMD
+            if hsts_preload and action != 'remove':
+                post_apply_cmd += ' && symbios-hsts-preload.sh configure'
+            cmd = f'{set_cmd} && {_HOSTNAME_CMD} && {post_apply_cmd}'
             if is_ajax:
                 job_id = create_job(cmd, timeout=3600, stdin_data=stdin_data)
                 resp = {'ok': True, 'job': job_id,
@@ -111,7 +122,7 @@ def settings_dns(request):
                 return redirect('settings_dns')
             messages.success(request, message)
             messages.info(request, 'Applying DNS playbooks in the background...')
-            create_job(f'{_HOSTNAME_CMD} && {_APPLY_CMD}', timeout=3600)
+            create_job(f'{_HOSTNAME_CMD} && {post_apply_cmd}', timeout=3600)
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)

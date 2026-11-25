@@ -632,6 +632,7 @@ texts opportunistically).
 | `runchecks.sh` | Health daemon: `runchecks.d/*.check` every 5 min -> JSON | no args |
 | `runchecks.d/` | 46 check scripts (basic + per-service healthchecks) | via `runchecks.sh` |
 | `runchecks.d/symbios-healthcheck-ssl-labs.check` | Reports daily Qualys TLS grades from the snapshot | via `runchecks.sh` |
+| `runchecks.d/symbios-healthcheck-hsts-preload.check` | Reports the opted-in domain's HSTS preload status from the snapshot | via `runchecks.sh` |
 | `runchecks.d/reboot-uptime.check` | Warns as soon as a reboot is pending and reports the uptime policy | via `runchecks.sh` |
 | `runchecks-watchdog.sh` | Restarts `runchecks.service` when results JSON goes stale | no args |
 | `symbios-run-check.sh` | Single health check on demand (JSON result) | `<check-name>` |
@@ -641,6 +642,7 @@ texts opportunistically).
 | `symbios-dashboard-snapshot.sh` | Minutely dashboard snapshot + 7-day history (cron) | no args |
 | `symbios-traefik-stats.sh` | Build hourly GoAccess reports and WebUI summaries per installed host from the Traefik access log | no args |
 | `traefik-qualys-ssl-labs-check.sh` | Writes daily Qualys TLS grades to `<log>/ssl-labs.json` via API v3 | no args |
+| `symbios-hsts-preload.sh` | Preflight, opt-in submission and daily status snapshot for hstspreload.org | `status\|preflight\|submit\|configure\|run` |
 
 ### 4.7 Service admin sync and maintenance
 

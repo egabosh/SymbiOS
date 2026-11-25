@@ -291,6 +291,26 @@
               </select>
             </div>
 
+            <div class="mb-3">
+              <div class="form-check">
+                <input type="hidden" name="hsts_preload" value="0">
+                <input class="form-check-input" type="checkbox" name="hsts_preload"
+                       id="hsts_preload_desec" value="1" {% if vars.hsts_preload %}checked{% endif %}>
+                <label class="form-check-label" for="hsts_preload_desec">
+                  HTTPS-only mode for browsers (HSTS preload)
+                </label>
+              </div>
+              <div class="form-text">
+                Browsers will always use HTTPS for this domain and <strong>all
+                its subdomains</strong>. SymbiOS adds the missing
+                <code>www.{{ base_domain|default:vars.base_domain }}</code>
+                redirect and submits the domain for you. This is more secure,
+                but very slow to undo: any subdomain without working HTTPS
+                becomes unreachable. Only enable it when every current and
+                future subdomain can always use HTTPS.
+              </div>
+            </div>
+
             <div class="d-flex gap-2">
               <button type="submit" class="btn btn-primary">
                 <i class="bi bi-save"></i> Save
@@ -345,6 +365,26 @@
                 (auth.yourdomain.com, traefik.yourdomain.com, etc.) resolve to your server automatically.
                 If you use Let's Encrypt, also add a
                 <code>CAA</code> record: <code>0 issue "letsencrypt.org"</code>.
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <div class="form-check">
+                <input type="hidden" name="hsts_preload" value="0">
+                <input class="form-check-input" type="checkbox" name="hsts_preload"
+                       id="hsts_preload_self" value="1" {% if vars.hsts_preload %}checked{% endif %}>
+                <label class="form-check-label" for="hsts_preload_self">
+                  HTTPS-only mode for browsers (HSTS preload)
+                </label>
+              </div>
+              <div class="form-text">
+                Browsers will always use HTTPS for this domain and <strong>all
+                its subdomains</strong>. SymbiOS adds the missing
+                <code>www.{{ base_domain|default:vars.base_domain }}</code>
+                redirect and submits the domain for you. This is more secure,
+                but very slow to undo: any subdomain without working HTTPS
+                becomes unreachable. Only enable it when every current and
+                future subdomain can always use HTTPS.
               </div>
             </div>
 

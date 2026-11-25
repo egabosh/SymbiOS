@@ -83,24 +83,29 @@ acceptable because:
 
 ### T1: SSL Labs A+ Requires HSTS Preload List Membership
 
-**Status**: Accepted - A and A+ are both green in the TLS healthcheck
+**Status**: Accepted with opt-in - A and A+ are both green in the TLS healthcheck
 
 Qualys grades a configuration A+ only when HSTS is robust: at least one year
 `max-age`, `includeSubDomains`, `preload`, and the domain is actually present in
 the browser HSTS preload lists. SymbiOS sends the complete header through
 Traefik, but the `preload` directive only signals intent; adding the domain to
-the list is an external submission at `https://hstspreload.org/`. That step
-affects every subdomain and is slow to reverse, so it is an operator decision
-per base domain, not a SymbiOS setting. Until a domain is preloaded, SSL Labs
-caps an otherwise clean SymbiOS host at A (strong commercial security). The
-daily `ssl-labs` runcheck therefore accepts A and A+ as green and fails A- and
-below.
+the list is an external submission at `https://hstspreload.org/`. Until a domain
+is preloaded, SSL Labs caps an otherwise clean SymbiOS host at A (strong
+commercial security). The daily `ssl-labs` runcheck therefore accepts A and A+
+as green and fails A- and below.
 
-To request A+ for a domain, verify that every current and future subdomain is
-served over HTTPS, submit the base domain at `https://hstspreload.org/`, and
-wait for the browser list rollout; the next SSL Labs scan then reflects the
-preload status. Check the current status with
-`curl -sS 'https://hstspreload.org/api/v2/status?domain=<base-domain>'`.
+The DNS settings page offers a **HSTS preload** checkbox for `base_domain`.
+Tick it only when every current and future subdomain can always use HTTPS: the
+preload entry makes the whole domain HTTPS-only in browsers and is slow to
+reverse. On save SymbiOS adds a `www.<base_domain>` HTTPS redirect, runs a local
+and external preflight, and submits the domain only when the preflight passes.
+The daily `hsts-preload` status job and healthcheck report `pending` until the
+browser rollout finishes. Removal requires a deliberate manual step and can
+take weeks or months; SymbiOS never automates it.
+
+Check the current status with
+`curl -sS 'https://hstspreload.org/api/v2/status?domain=<base-domain>'` or with
+`symbios-hsts-preload.sh status`.
 
 **Mitigations**: TLS 1.3, modern ciphers and a one-year HSTS header are already
 enforced by SymbiOS; the remaining difference is first-load protection from the

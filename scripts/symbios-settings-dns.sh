@@ -27,14 +27,17 @@ Commands:
                                   or a JSON object with --json; the API
                                   key value is never printed, only whether
                                   one is set)
-  set --mode desec --host HOST [--ipv6 MODE | --json-stdin] [--check]
+  set --mode desec --host HOST [--ipv6 MODE | --json-stdin]
+      [--hsts-preload | --no-hsts-preload] [--check]
                                   deSEC mode: HOST is normalized (lowercase,
                                   .dedyn.io suffix ensured) and becomes
                                   base_domain. --json-stdin reads
                                   {"ddns_host":.., "ddns_apikey":..,
-                                  "ddns_ipv6":..} from stdin (REQUIRED for
-                                  the API key). --check changes nothing.
-  set --mode self-managed --domain DOMAIN [--check]
+                                  "ddns_ipv6":.., "hsts_preload":..} from
+                                  stdin (REQUIRED for the API key). --check
+                                  changes nothing.
+  set --mode self-managed --domain DOMAIN
+      [--hsts-preload | --no-hsts-preload] [--check]
                                   Self-managed mode: DOMAIN becomes
                                   base_domain (must be a valid FQDN).
   remove [--check]                Clear the DNS configuration (API key,
@@ -58,6 +61,13 @@ Examples:
   $(basename "$0") remove
 
 Options:
+  --hsts-preload                  Opt in to HSTS preload: create the
+                                  www.<base_domain> redirect, run the
+                                  preflight and submit the domain to
+                                  hstspreload.org when the preflight passes.
+                                  This affects all subdomains permanently.
+  --no-hsts-preload               Disable the HSTS preload opt-in. Without
+                                  either flag, the stored value is kept.
   --no-apply                      Skip the automatic playbook apply after a
                                   real inventory change (smoke tests).
 
@@ -69,7 +79,7 @@ EOF
 }
 
 # Inventory keys managed here (for apply + coverage check).
-f_managed_vars="ddns_host base_domain"
+f_managed_vars="ddns_host base_domain hsts_preload"
 
 source /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" && pwd)"
@@ -133,7 +143,10 @@ then
    "required": false, "default": "", "secret": false, "needs_mode": "desec"},
   {"name": "self_domain", "type": "text", "label": "Domain",
    "required": false, "default": "", "secret": false,
-   "placeholder": "example.com", "needs_mode": "self-managed"}
+   "placeholder": "example.com", "needs_mode": "self-managed"},
+  {"name": "hsts_preload", "type": "bool", "label": "HSTS preload",
+   "required": false, "default": false, "secret": false,
+   "help": "Make this domain and every subdomain HTTPS-only in browsers. Slow to reverse; only enable when all subdomains can always use HTTPS."}
 ]
 EOF
   exit 0
@@ -152,6 +165,15 @@ fi
 f_cur_host="$(f_symbios_var ddns_host "")"
 f_cur_ipv6="$(f_symbios_var ddns_ipv6 "")"
 f_cur_domain="$(f_symbios_var base_domain "")"
+f_cur_hsts="$(f_symbios_var hsts_preload "false")"
+case "${f_cur_hsts,,}" in
+  true|1|yes|on)
+    f_cur_hsts_bool="true"
+    ;;
+  *)
+    f_cur_hsts_bool="false"
+    ;;
+esac
 f_cur_configured="$(f_symbios_var dns_configured "")"
 if [[ "${f_cur_configured}" == "True" || "${f_cur_configured}" == "true" ]]
 then
@@ -166,12 +188,13 @@ if [[ "${f_command}" == "get" ]]
 then
   if [[ "${1:-}" == "--json" ]]
   then
-    printf '{"dns_mode": %s, "ddns_host": %s, "ddns_apikey_set": %s, "ddns_ipv6": %s, "base_domain": %s, "dns_configured": %s}\n' \
+    printf '{"dns_mode": %s, "ddns_host": %s, "ddns_apikey_set": %s, "ddns_ipv6": %s, "base_domain": %s, "hsts_preload": %s, "dns_configured": %s}\n' \
       "$(printf '%s' "${f_cur_mode}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_host}" | f_json_escape)" \
       "$([[ "${f_cur_key_set}" == "yes" ]] && echo "true" || echo "false")" \
       "$(printf '%s' "${f_cur_ipv6}" | f_json_escape)" \
       "$(printf '%s' "${f_cur_domain}" | f_json_escape)" \
+      "${f_cur_hsts_bool}" \
       "${f_cur_configured}"
     exit 0
   elif [[ $# -gt 0 ]]
@@ -184,6 +207,7 @@ then
   echo "ddns_apikey_set=${f_cur_key_set}"
   echo "ddns_ipv6=${f_cur_ipv6}"
   echo "base_domain=${f_cur_domain}"
+  echo "hsts_preload=${f_cur_hsts_bool}"
   echo "dns_configured=${f_cur_configured}"
   exit 0
 fi
@@ -201,6 +225,8 @@ f_given_key="no"
 f_json_stdin="no"
 f_remove="no"
 f_check="no"
+# Preserve an existing opt-in unless the caller explicitly changes it.
+f_hsts_preload="${f_cur_hsts_bool}"
 
 [[ "${f_command}" == "remove" ]] && f_remove="yes"
 
@@ -246,6 +272,14 @@ do
       f_json_stdin="yes"
       shift
       ;;
+    --hsts-preload)
+      f_hsts_preload="true"
+      shift
+      ;;
+    --no-hsts-preload)
+      f_hsts_preload="false"
+      shift
+      ;;
     --no-apply)
       g_ss_no_apply="yes"
       shift
@@ -267,7 +301,8 @@ done
 
 if [[ "${f_remove}" == "yes" ]]
 then
-  f_merge='{"ddns_apikey": "", "ddns_host": "", "ddns_ipv6": "", "dns_mode": "", "dns_configured": false, "base_domain": "symbios.local"}'
+  f_hsts_preload="false"
+  f_merge='{"ddns_apikey": "", "ddns_host": "", "ddns_ipv6": "", "dns_mode": "", "dns_configured": false, "base_domain": "symbios.local", "hsts_preload": false}'
 else
   [[ -z "${f_mode}" ]] && f_ss_fail_validation "Nothing to set - pass --mode desec|self-managed"
 
@@ -293,6 +328,13 @@ else
     then
       f_domain="$(f_json_get "${f_json}" "self_domain")" || f_domain=""
     fi
+    if [[ "${f_json}" == *'"hsts_preload"'* ]]
+    then
+      f_hsts_preload="$(f_json_get "${f_json}" "hsts_preload")" || f_hsts_preload="false"
+      f_ss_parse_bool "${f_hsts_preload}" >/dev/null \
+        || f_ss_fail_validation "hsts_preload must be a boolean"
+      f_hsts_preload="$(f_ss_parse_bool "${f_hsts_preload}")"
+    fi
   fi
 
   case "${f_mode}" in
@@ -306,9 +348,10 @@ else
       then
         f_ss_fail_validation "Invalid deSEC hostname: ${f_host}"
       fi
-      f_merge="$(printf '{"dns_mode": "desec", "ddns_host": %s, "base_domain": %s, "dns_configured": true' \
+      f_merge="$(printf '{"dns_mode": "desec", "ddns_host": %s, "base_domain": %s, "hsts_preload": %s, "dns_configured": true' \
         "$(printf '%s' "${f_host}" | f_json_escape)" \
-        "$(printf '%s' "${f_host}" | f_json_escape)")"
+        "$(printf '%s' "${f_host}" | f_json_escape)" \
+        "${f_hsts_preload}")"
       f_ss_secret_merge_add "ddns_apikey" "${f_new_key}" "${f_given_key}" "${f_check}"
       if [[ "${f_given_ipv6}" == "yes" ]]
       then
@@ -331,8 +374,9 @@ else
       then
         f_ss_fail_validation "Domain must not be an IPv4 address: ${f_domain}"
       fi
-      f_merge="$(printf '{"dns_mode": "self-managed", "ddns_apikey": "", "ddns_host": "", "ddns_ipv6": "", "base_domain": %s, "dns_configured": true}' \
-        "$(printf '%s' "${f_domain}" | f_json_escape)")"
+      f_merge="$(printf '{"dns_mode": "self-managed", "ddns_apikey": "", "ddns_host": "", "ddns_ipv6": "", "base_domain": %s, "hsts_preload": %s, "dns_configured": true}' \
+        "$(printf '%s' "${f_domain}" | f_json_escape)" \
+        "${f_hsts_preload}")"
       # Leaving deSEC mode drops any stored API token.
       if [[ "${f_check}" != "yes" ]]
       then
