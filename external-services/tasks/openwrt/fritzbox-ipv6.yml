@@ -1,7 +1,7 @@
 # docs:
 #   name: "OpenWrt - FRITZ!Box IPv6"
 #   short_description: "OpenWrt - FRITZ!Box IPv6"
-#   description: "IPv6 prefix delegation helpers for a FRITZ!Box uplink."
+#   description: "IPv6 prefix delegation and LAN hairpin workaround for a FRITZ!Box uplink; dev-host names resolve only through public deSEC DNS."
 #   category: "Network"
 #   type: OpenWrt
 #   icon: "bi-router"
@@ -48,6 +48,13 @@
       - { key: "dhcp.lan.dhcpv6_pd", value: "1" }
       - { key: "dhcp.lan.dhcpv6_pd_min_len", value: "62" }
 
+      ## dhcp: keep the FRITZ!Box own DNS name on its static lease. Local
+      ## CNAMEs for symbios-dev are removed below so public deSEC resolves
+      ## those names without the unreachable 172.23.0.228 A record.
+      - { key: "dhcp.host_fritzbox_dev",           value: "host" }
+      - { key: "dhcp.host_fritzbox_dev.name",      value: "fritzbox-dev" }
+      - { key: "dhcp.host_fritzbox_dev.dns",       value: "1" }
+
       ## firewall: allow the delegated FRITZ!Box prefix into the LAN
       # dest_ip is maintained by /etc/hotplug.d/iface/30-fritz-prefix
       - { key: "firewall.fritzbox_ipv6",           value: "rule" }
@@ -56,6 +63,25 @@
       - { key: "firewall.fritzbox_ipv6.dest",      value: "lan" }
       - { key: "firewall.fritzbox_ipv6.family",    value: "ipv6" }
       - { key: "firewall.fritzbox_ipv6.target",    value: "ACCEPT" }
+
+      ## firewall: source-NAT LAN clients reaching the FRITZ!Box prefix.
+      # FRITZ!Box does not hairpin WAN-side clients into its own LAN, but it
+      # accepts traffic from the upstream router. snat_ip/dest_ip are dynamic.
+      - { key: "firewall.fritzbox_lan_snat",       value: "nat" }
+      - { key: "firewall.fritzbox_lan_snat.name",  value: "SNAT-IPv6-fritzbox-LAN" }
+      - { key: "firewall.fritzbox_lan_snat.src",   value: "lan" }
+      - { key: "firewall.fritzbox_lan_snat.target", value: "SNAT" }
+
+      ## firewall: LAN alias port 44 -> 33 on the dev host.
+      # The FRITZ!Box forwards port 44 only on its WAN IP, which LAN clients
+      # cannot reach. src_dip/dest_ip are maintained by the prefix hotplug.
+      - { key: "firewall.fritzbox_dev_alias44",        value: "redirect" }
+      - { key: "firewall.fritzbox_dev_alias44.name",   value: "FRITZ-dev SSH alias 44 to 33" }
+      - { key: "firewall.fritzbox_dev_alias44.src",    value: "lan" }
+      - { key: "firewall.fritzbox_dev_alias44.src_dport", value: "44" }
+      - { key: "firewall.fritzbox_dev_alias44.dest_port", value: "33" }
+      - { key: "firewall.fritzbox_dev_alias44.proto",  value: "tcp" }
+      - { key: "firewall.fritzbox_dev_alias44.target", value: "DNAT" }
 
       ## firewall: bypass doh/tor ipset blocks for FRITZ/VM devices
       # Enables the VM behind FRITZ to run its own dnscrypt+Tor stack
@@ -86,9 +112,33 @@
   tasks:
     - name: Set UCI values (shell-safe)
       ansible.builtin.include_tasks: uci-set.yml
-    - name: Clear stale FRITZ!Box prefix from firewall rule
-      raw: uci -q delete firewall.fritzbox_ipv6.dest_ip
+    - name: Clear stale dynamic FRITZ!Box IPv6 values
+      raw: |
+        uci -q delete firewall.fritzbox_ipv6.dest_ip
+        uci -q delete firewall.fritzbox_lan_snat.dest_ip
+        uci -q delete firewall.fritzbox_lan_snat.snat_ip
+        uci -q delete firewall.fritzbox_dev_alias44.src_dip
+        uci -q delete firewall.fritzbox_dev_alias44.dest_ip
       changed_when: false
+
+    - name: Remove local DNS overrides for symbios-dev hostnames
+      raw: |
+        changed=0
+        # deSEC holds the apex AAAA and a wildcard CNAME, so local CNAMEs for
+        # symbios-dev.dedyn.io and its subdomains must not shadow public DNS.
+        for section in $(uci show dhcp 2>/dev/null | tr -d '\r' | grep -E "^dhcp\.[^.]+\.cname='([^']+\.)?symbios-dev\.dedyn\.io\.'$" | cut -d. -f2)
+        do
+          uci -q delete "dhcp.$section"
+          changed=1
+        done
+        for entry in $(uci -q get dhcp.lan_dnsmasq.address 2>/dev/null | tr ' ' '\n' | tr -d '\r' | grep -E '^/(symbios-dev-v6\.lan|fritzbox-dev\.lan)/' 2>/dev/null)
+        do
+          uci -q del_list dhcp.lan_dnsmasq.address="$entry"
+          changed=1
+        done
+        [ "$changed" -eq 1 ] && echo changed || echo unchanged
+      register: local_dns_result
+      changed_when: local_dns_result.stdout | trim == 'changed'
 
     # netifd can leave a /64 address on br-lan when ip6assign was raised from
     # 64 to 60 in place. odhcpd derives its PD pool from the shortest global
@@ -140,12 +190,18 @@
         cat << 'EOF' > /etc/hotplug.d/iface/30-fritz-prefix
         #!/bin/sh
         # /etc/hotplug.d/iface/30-fritz-prefix
-        # Keep firewall.fritzbox_ipv6.dest_ip on the FRITZ!Box delegated prefix.
+        # Keep the FRITZ!Box prefix in the firewall rule, the LAN SNAT rule
+        # and the dev-host port-44 alias in sync. DNS for the dev host is
+        # public only: deSEC serves the apex AAAA and a wildcard CNAME.
         # Runs on WAN/LAN ifup, ifupdate and ifadd. On an ISP prefix change netifd
         # emits ifupdate before the FRITZ!Box renewed its lease, so first allow the
         # new LAN pool, then narrow to the concrete delegated /62.
 
         section=fritzbox_ipv6
+        snat_section=fritzbox_lan_snat
+        alias_section=fritzbox_dev_alias44
+        # Stable EUI-64 interface identifier of the dev host behind the FRITZ!Box.
+        dev_iid=2ecf:67ff:fe6d:509d
 
         [ "$INTERFACE" = "wan6" ] || [ "$INTERFACE" = "wan" ] || [ "$INTERFACE" = "lan" ] || exit 0
         case "$ACTION" in
@@ -153,11 +209,34 @@
           *) exit 0 ;;
         esac
 
+        # First global address on br-lan: FRITZ!Box accepts hairpin traffic
+        # from the upstream router even though it drops other LAN sources.
+        f_router_ip() {
+          ip -6 addr show dev br-lan scope global 2>/dev/null | awk '/inet6 / {print $2}' | cut -d/ -f1 | grep -E '^[23]' | head -1
+        }
+
+        # Build the dev host address from the delegated network and its IID.
+        f_dev_ip() {
+          local f_net
+          f_net=${1%/*}
+          f_net=${f_net%%::*}
+          [ -n "$f_net" ] || return 1
+          printf '%s:%s\n' "$f_net" "$dev_iid"
+        }
+
         f_update() {
-          uci set "firewall.$section.dest_ip=$1"
+          local f_prefix="$1" f_src f_dev
+          f_src=$(f_router_ip)
+          f_dev=$(f_dev_ip "$f_prefix")
+          [ -n "$f_src" ] && [ -n "$f_dev" ] || return 1
+          uci set "firewall.$section.dest_ip=$f_prefix"
+          uci set "firewall.$snat_section.dest_ip=$f_prefix"
+          uci set "firewall.$snat_section.snat_ip=$f_src"
+          uci set "firewall.$alias_section.src_dip=$f_dev"
+          uci set "firewall.$alias_section.dest_ip=$f_dev"
           uci commit firewall
           fw4 reload
-          logger -t fritz-prefix "dest_ip set to $1"
+          logger -t fritz-prefix "dest_ip=$f_prefix snat=$f_src dev=$f_dev"
         }
 
         # Prefix assigned to br-lan from the ISP delegation.
@@ -176,11 +255,14 @@
         }
 
         f_sync() {
-          local f_prefix f_current
+          local f_prefix f_current f_complete
           f_prefix=$(f_get_valid) || return 1
           [ -n "$f_prefix" ] || return 1
           f_current=$(uci get "firewall.$section.dest_ip" 2>/dev/null)
-          [ "$f_prefix" = "$f_current" ] && return 0
+          f_complete=1
+          [ -n "$(uci -q get "firewall.$snat_section.snat_ip" 2>/dev/null)" ] || f_complete=0
+          [ -n "$(uci -q get "firewall.$alias_section.dest_ip" 2>/dev/null)" ] || f_complete=0
+          [ "$f_prefix" = "$f_current" ] && [ "$f_complete" -eq 1 ] && return 0
           f_update "$f_prefix"
         }
 
@@ -242,7 +324,12 @@
             - "/etc/init.d/firewall reload"
             - "/etc/init.d/network reload"
             - "/etc/init.d/odhcpd restart"
-          when: uci_changed or reorder_result.changed or lan_addr_result.changed
+          when: uci_changed or reorder_result.changed or lan_addr_result.changed or local_dns_result.changed
+
+    - name: restart dnsmasq after local DNS cleanup
+      raw: /etc/init.d/dnsmasq restart
+      when: local_dns_result.changed
+      changed_when: false
 
     # Record this playbook's resources in /etc/symbios/managed.json.
     - name: Record managed state

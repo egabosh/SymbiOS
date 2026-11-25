@@ -1,7 +1,7 @@
 # docs:
 #   name: "OpenWrt - FRITZ!Box IPv6"
 #   short_description: "OpenWrt - FRITZ!Box IPv6"
-#   description: "Enable DHCPv6 prefix delegation from the master router to a downstream FRITZ!Box, keep the LAN firewall rule on the delegated prefix, and allow the FRITZ!Box internal LAN."
+#   description: "Enable DHCPv6 prefix delegation from the master router to a downstream FRITZ!Box, keep the LAN firewall rule on the delegated prefix, and provide LAN access to the dev host behind it via SNAT and a port-44 alias while its names resolve only through public deSEC DNS."
 #   category: "Network"
 #   type: OpenWrt
 #   icon: "bi-router"
