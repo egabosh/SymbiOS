@@ -102,10 +102,31 @@ f_restart_kodi() {
   systemctl restart kodi-standalone.service
 }
 
+# Manually unpacked addons are registered by Kodi with enabled=0 at the first
+# start, which raises the "activate disabled addons?" dialog before the
+# runtime JSON-RPC pass below can run. Seed the installed table while Kodi is
+# stopped so the first frame is already clean. Addons installed later are
+# still covered by f_enable_addons once Kodi is up.
+f_enable_addons_in_db() {
+  local f_db=/home/kodi/.kodi/userdata/Database/Addons33.db
+  local f_xml f_id f_sql
+  command -v sqlite3 >/dev/null 2>&1 || return 0
+  [[ -f "$f_db" ]] || return 0
+  for f_xml in /home/kodi/.kodi/addons/*/addon.xml
+  do
+    [[ -f "$f_xml" ]] || continue
+    f_id="$(grep -o 'id="[^"]*"' "$f_xml" | head -n1 | cut -d'"' -f2)"
+    [[ -n "$f_id" ]] || continue
+    f_sql="INSERT INTO installed (addonID, enabled, disabledReason) VALUES ('${f_id//\'/\'\'}', 1, 0) ON CONFLICT(addonID) DO UPDATE SET enabled=1, disabledReason=0;"
+    sqlite3 "$f_db" "$f_sql" >/dev/null 2>&1 || true
+  done
+}
+
 # Start Kodi with the shared library when the database answers
 # within the grace period, with the local library otherwise.
 f_start_kodi() {
   local f_i
+  f_enable_addons_in_db
   if ! f_db_up
   then
     echo "waiting up to 60s for the media database $(f_db_target)"

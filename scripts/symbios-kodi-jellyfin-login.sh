@@ -133,21 +133,56 @@ g_lockfile
 # Remove a trailing slash so the URL joins below cannot produce a double slash.
 g_server="${g_server%/}"
 
+# A still-valid token avoids a new session (and a Kodi restart) on every
+# reapply. Check the existing token against the server first; the token travels
+# in a 0600 header file, never in argv or in a curl config value.
+if [[ -s "$g_data_dir/data.json" ]]
+then
+  f_existing_token="$(jq -er '.Servers[0].AccessToken // empty' \
+    "$g_data_dir/data.json" 2>/dev/null || true)"
+  f_existing_address="$(jq -er '.Servers[0].address // empty' \
+    "$g_data_dir/data.json" 2>/dev/null || true)"
+  if [[ -n "$f_existing_token" && "$f_existing_address" == "$g_server" ]]
+  then
+    f_secret_tmp jfcheckhdr f_check_hdr
+    f_secret_tmp jfcheck f_check
+    f_secret_tmp jfcheckcfg f_check_cfg
+    printf 'Authorization: MediaBrowser Client="SymbiOS", Device="Kodi Setup", DeviceId="symbios-kodi-login", Version="1.0", Token="%s"\n' \
+      "$f_existing_token" > "$f_check_hdr"
+    printf 'request = "GET"\n' > "$f_check_cfg"
+    printf 'url = "%s/Users/Me"\n' "$g_server" >> "$f_check_cfg"
+    printf 'header = "Accept: application/json"\n' >> "$f_check_cfg"
+    printf 'output = "%s"\n' "$f_check" >> "$f_check_cfg"
+    f_code="$(curl -sS --config "$f_check_cfg" -H @"$f_check_hdr" \
+      -w '%{http_code}' || true)"
+    if [[ "$f_code" == "200" ]]
+    then
+      g_echo_note "kodi-jellyfin-login-unchanged"
+      exit 0
+    fi
+  fi
+fi
+
 # Authenticate as the technical user. Jellyfin 12 needs the client metadata in
-# the Authorization header instead of the legacy X-Emby-* headers.
+# the Authorization header instead of the legacy X-Emby-* headers. The header
+# is read from a file: curl's config parser truncates a quoted header value at
+# the first embedded quote, which makes Jellyfin see an empty request.App.
 f_secret_tmp jfbody f_body
 f_secret_tmp jfauth f_auth
+f_secret_tmp jfauthhdr f_auth_hdr
 jq -n --arg f_user "$g_user" --rawfile f_pw "$g_password_file" \
   '{Username: $f_user, Pw: ($f_pw | rtrimstr("\n") | rtrimstr("\r"))}' > "$f_body" || exit 1
+printf 'Authorization: MediaBrowser Client="SymbiOS", Device="Kodi Setup", DeviceId="symbios-kodi-login", Version="1.0"\n' \
+  > "$f_auth_hdr"
 f_secret_tmp jfcurlauth f_curl_auth
 printf 'request = "POST"\n' > "$f_curl_auth"
 printf 'url = "%s/Users/AuthenticateByName"\n' "$g_server" >> "$f_curl_auth"
 printf 'header = "Accept: application/json"\n' >> "$f_curl_auth"
 printf 'header = "Content-Type: application/json"\n' >> "$f_curl_auth"
-printf 'header = "Authorization: MediaBrowser Client=\"SymbiOS\", Device=\"Kodi Setup\", DeviceId=\"symbios-kodi-login\", Version=\"1.0\""\n' >> "$f_curl_auth"
 printf 'data = "@%s"\n' "$f_body" >> "$f_curl_auth"
 printf 'output = "%s"\n' "$f_auth" >> "$f_curl_auth"
-f_code="$(curl -sS --config "$f_curl_auth" -w '%{http_code}' || true)"
+f_code="$(curl -sS --config "$f_curl_auth" -H @"$f_auth_hdr" \
+  -w '%{http_code}' || true)"
 if [[ "$f_code" != "200" ]]
 then
   g_echo_error "Jellyfin authentication failed for $g_user (HTTP $f_code)"
@@ -181,10 +216,20 @@ jq -er '.ServerName' "$f_info" > "$f_server_name" || exit 1
 
 # Build the addon credential file. Only the keys the addon itself consumes are
 # compared below, so an addon upgrade adding fields does not force a rewrite.
+# Native-mode path replacements live in the same file and have to survive a
+# token rotation, so carry the existing "paths" mapping into the new document.
 f_secret_tmp jfdesired f_desired
 f_secret_tmp jfdesiredown f_desired_own
 f_secret_tmp jfcurrent f_current
+f_secret_tmp jfpaths f_paths
+if [[ -s "$g_data_dir/data.json" ]]
+then
+  jq -c '.Servers[0].paths // {}' "$g_data_dir/data.json" > "$f_paths" || exit 1
+else
+  printf '{}\n' > "$f_paths"
+fi
 jq -n \
+  --argjson f_paths "$(< "$f_paths")" \
   --arg f_id "$(tr -d '\r\n' < "$f_server_id")" \
   --arg f_name "$(tr -d '\r\n' < "$f_server_name")" \
   --arg f_address "$g_server" \
@@ -195,13 +240,14 @@ jq -n \
       UserId: ($f_user | rtrimstr("\n") | rtrimstr("\r")),
       AccessToken: ($f_token | rtrimstr("\n") | rtrimstr("\r")),
       DateLastAccessed: $f_now,
+      paths: $f_paths,
       Users: [{Id: ($f_user | rtrimstr("\n") | rtrimstr("\r")), IsSignedInOffline: true}]}]}' > "$f_desired" || exit 1
-jq -S '{Servers: [.Servers[0] | {Id, Name, address, UserId, AccessToken, Users}]}' \
+jq -S '{Servers: [.Servers[0] | {Id, Name, address, UserId, AccessToken, paths, Users}]}' \
   "$f_desired" > "$f_desired_own" || exit 1
 : > "$f_current"
 if [[ -s "$g_data_dir/data.json" ]]
 then
-  jq -S '{Servers: [.Servers[0] | {Id, Name, address, UserId, AccessToken, Users}]}' \
+  jq -S '{Servers: [.Servers[0] | {Id, Name, address, UserId, AccessToken, paths, Users}]}' \
     "$g_data_dir/data.json" > "$f_current" || exit 1
 fi
 

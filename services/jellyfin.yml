@@ -128,6 +128,14 @@
     jellyfin_mediathek_plugin_zip: 'mediathek-downloader_0.8.4.0.zip'
     jellyfin_mediathek_plugin_checksum: 'sha256:b51aab2531c9b634fba9473a40560561519e1dd51364694954f2daccc323a3be'
     jellyfin_mediathek_plugin_url: "https://github.com/CatNoir2006/jellyfin-plugin-MediathekViewDL/releases/download/v{{ jellyfin_mediathek_plugin_version }}/{{ jellyfin_mediathek_plugin_zip }}"
+    # Official server-side companion for plugin.video.jellyfin. v16 declares
+    # targetAbi 12.0.0.0 and matches the deployed Jellyfin 12.x server. It lets
+    # Kodi replay changes made while it was offline instead of a full rescan.
+    jellyfin_kodi_sync_plugin_release: 'v16'
+    jellyfin_kodi_sync_plugin_version: '16.0.0.0'
+    jellyfin_kodi_sync_plugin_zip: 'kodi-sync-queue_16.0.0.0.zip'
+    jellyfin_kodi_sync_plugin_checksum: 'sha256:bed7170dcbb872c46c11cc131345c8f38b06d3f21778492b84a2a35575e445d0'
+    jellyfin_kodi_sync_plugin_url: "https://github.com/jellyfin/jellyfin-plugin-kodisyncqueue/releases/download/{{ jellyfin_kodi_sync_plugin_release }}/{{ jellyfin_kodi_sync_plugin_zip }}"
     jellyfin_bootstrap_admin: symbios-admin
     # Jellyfin follows the SymbiOS locale instead of keeping its own language.
     # de_DE.UTF-8 becomes UI de-DE, metadata language de and country DE.
@@ -357,6 +365,53 @@
         group: docker
         mode: '0644'
         creates: "{{ jellyfin_config_root }}/plugins/MediathekViewDL/Jellyfin.Plugin.MediathekViewDL.dll"
+      notify: Restart jellyfin
+
+    # Official Kodi Sync Queue plugin: installed from a pinned, checksummed
+    # release so plugin.video.jellyfin can replay offline library changes at
+    # startup and stops prompting for a missing server plugin.
+    - name: Record the deployed Kodi Sync Queue plugin version
+      ansible.builtin.copy:
+        content: "{{ jellyfin_kodi_sync_plugin_version }}\n"
+        dest: "{{ jellyfin_config_root }}/plugins/.symbios-kodi-sync-version"
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0400'
+      register: jellyfin_kodi_sync_version
+      notify: Restart jellyfin
+
+    - name: Remove the previous Kodi Sync Queue plugin after a version change
+      ansible.builtin.file:
+        path: "{{ jellyfin_config_root }}/plugins/KodiSyncQueue"
+        state: absent
+      when: jellyfin_kodi_sync_version.changed
+
+    - name: Download the checksum-verified Kodi Sync Queue plugin
+      ansible.builtin.get_url:
+        url: "{{ jellyfin_kodi_sync_plugin_url }}"
+        dest: "{{ jellyfin_config_root }}/plugins/.cache/{{ jellyfin_kodi_sync_plugin_zip }}"
+        checksum: "{{ jellyfin_kodi_sync_plugin_checksum }}"
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0400'
+
+    - name: Create the Kodi Sync Queue plugin directory
+      ansible.builtin.file:
+        path: "{{ jellyfin_config_root }}/plugins/KodiSyncQueue"
+        state: directory
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0550'
+
+    - name: Unpack the Kodi Sync Queue plugin
+      ansible.builtin.unarchive:
+        src: "{{ jellyfin_config_root }}/plugins/.cache/{{ jellyfin_kodi_sync_plugin_zip }}"
+        dest: "{{ jellyfin_config_root }}/plugins/KodiSyncQueue"
+        remote_src: true
+        owner: "{{ jellyfin_uid }}"
+        group: docker
+        mode: '0644'
+        creates: "{{ jellyfin_config_root }}/plugins/KodiSyncQueue/Jellyfin.Plugin.KodiSyncQueue.dll"
       notify: Restart jellyfin
 
     - name: /symbios/services/jellyfin/docker-compose.yml Container Configuration

@@ -394,6 +394,9 @@
     # with it and seeds addon_data/data.json; otherwise the first login still
     # happens once in the Kodi UI.
     kodi_jellyfin_addon: plugin.video.jellyfin
+    # Local sshfs root used by native mode. The addon's path replacements map
+    # Jellyfin's /media/* container paths into these read-only share mounts.
+    kodi_jellyfin_media_root: /symbios/services/kodi/media
     kodi_jellyfin_addon_version: "2.2.0+py3"
     kodi_jellyfin_addon_url: "https://repo.jellyfin.org/releases/client/kodi/py3/plugin.video.jellyfin/plugin.video.jellyfin-2.2.0+py3.zip"
     kodi_jellyfin_addon_sha256: "58cc72c0eedc624a98a255f5c95c64b6e0f6f906c9666d0893fee152eb4fb8b1"
@@ -405,6 +408,9 @@
     kodi_jellyfin_deps:
       - script.module.requests
       - script.module.dateutil
+      # python-dateutil 2.8.2 imports six at runtime; without this transitive
+      # dependency the Jellyfin service dies before it can read the token.
+      - script.module.six
       - script.module.websocket
       - script.module.typing_extensions
     # Libretro cores for the ROM source, one entry per core. A core is either
@@ -1408,6 +1414,25 @@
       changed_when: "'kodi-session-restarted' in kodi_restart_game_addon.stdout"
       when: kodi_game_addon_result is changed or kodi_game_addon_build_result is changed
 
+    # Kodi creates addon profiles only when an addon is first used. The core
+    # settings below are written before that can happen, so create the two
+    # profiles explicitly (idempotent and owned by kodi).
+    - name: Create addon profiles for game core settings
+      ansible.builtin.file:
+        path: "/home/kodi/.kodi/userdata/addon_data/{{ item }}"
+        state: directory
+        owner: kodi
+        group: kodi
+        mode: "0750"
+      loop:
+        - game.libretro.mupen64plus-nx
+        - game.libretro.dosbox-pure
+      loop_control:
+        label: "{{ item }}"
+      when:
+        - kodi_roms_configured
+        - kodi_game_cores_available | selectattr('addon', 'equalto', item) | list | length > 0
+
     # Mupen64Plus-Next's default RDP (GLideN64) renders through OpenGL, which
     # needs the HW framebuffer game stream - missing in Kodi 21.3, so the core
     # fails to load any game ("No stream implementation for type: 3"). The
@@ -1501,6 +1526,32 @@
       ansible.builtin.set_fact:
         kodi_jellyfin_login_configured: "{{ kodi_jellyfin_configured and (((kodi_options | default({})).jellyfin_password | default('') | trim | length) > 0) }}"
 
+    # Native mode needs the server's /media/* paths to exist locally. The SFTP
+    # paths are the Kodi Options values (the same paths the WebUI documents for
+    # the media sources); defaults match the SymbiOS standard media layout.
+    - name: Resolve Jellyfin native media mounts
+      ansible.builtin.set_fact:
+        kodi_jellyfin_media_mounts:
+          - name: movies
+            remote: "{{ (kodi_options | default({})).path_movies | default('/videos/movies') }}"
+            local: "{{ kodi_jellyfin_media_root }}/movies"
+            unit: symbios-services-kodi-media-movies.mount
+          - name: tvshows
+            remote: "{{ (kodi_options | default({})).path_series | default('/videos/tvshows') }}"
+            local: "{{ kodi_jellyfin_media_root }}/tvshows"
+            unit: symbios-services-kodi-media-tvshows.mount
+          - name: audio
+            remote: "{{ (kodi_options | default({})).path_music | default('/audio') }}"
+            local: "{{ kodi_jellyfin_media_root }}/audio"
+            unit: symbios-services-kodi-media-audio.mount
+        kodi_jellyfin_media_mounts_enabled: "{{ kodi_jellyfin_configured and ((kodi_options | default({})).sftp_server | default('') | length > 0) }}"
+
+    - name: Collect local mount units required by Kodi
+      ansible.builtin.set_fact:
+        kodi_required_mount_units: >-
+          {{ ([kodi_roms_mount_unit] if kodi_roms_needs_local | default(false) else []) +
+             (kodi_jellyfin_media_mounts | map(attribute='unit') | list if kodi_jellyfin_media_mounts_enabled else []) }}
+
     - name: Install Jellyfin Kodi addon dependencies from mirrors.kodi.tv
       ansible.builtin.shell: |
         cd /home/kodi/.kodi/addons
@@ -1510,6 +1561,20 @@
       loop: "{{ kodi_jellyfin_deps }}"
       args:
         creates: "/home/kodi/.kodi/addons/{{ item }}"
+      when: kodi_jellyfin_configured
+
+    # python-dateutil 2.8.2 imports six at runtime but does not declare the
+    # dependency in its Kodi addon.xml. Without this copy the Jellyfin service
+    # dies with ModuleNotFoundError before it can read the saved token.
+    - name: Copy six.py into the dateutil addon
+      ansible.builtin.copy:
+        src: /home/kodi/.kodi/addons/script.module.six/lib/six.py
+        dest: /home/kodi/.kodi/addons/script.module.dateutil/lib/six.py
+        remote_src: true
+        owner: kodi
+        group: kodi
+        mode: '0644'
+      register: kodi_jellyfin_six
       when: kodi_jellyfin_configured
 
     - name: Download Jellyfin Kodi repository addon (pinned)
@@ -1577,7 +1642,85 @@
               <setting id="ipaddress">{{ (kodi_options.jellyfin_server | default('')) | trim }}</setting>
               <setting id="server">{{ (kodi_options.jellyfin_server | default('')) | trim }}</setting>
               <setting id="sslverify">true</setting>
+              <setting id="useDirectPaths">1</setting>
+              <setting id="SyncInstallRunDone">true</setting>
+              <setting id="kodiCompanion">true</setting>
           </settings>
+      when: kodi_jellyfin_configured
+
+    # set_addon_mode() asks about native mode only while SyncInstallRunDone is
+    # false. Native mode itself is pinned by useDirectPaths=1; both values are
+    # written here so a fresh install and an existing profile converge.
+    - name: Mark Jellyfin first-run setup complete
+      ansible.builtin.replace:
+        path: "/home/kodi/.kodi/userdata/addon_data/{{ kodi_jellyfin_addon }}/settings.xml"
+        regexp: '(<setting id="SyncInstallRunDone"[^>]*>)[^<]*(</setting>)'
+        replace: '\g<1>true\g<2>'
+      register: kodi_jellyfin_settings_prompt
+      when: kodi_jellyfin_configured
+
+    - name: Keep Jellyfin addon in native mode
+      ansible.builtin.replace:
+        path: "/home/kodi/.kodi/userdata/addon_data/{{ kodi_jellyfin_addon }}/settings.xml"
+        regexp: '(<setting id="useDirectPaths"[^>]*>)[^<]*(</setting>)'
+        replace: '\g<1>1\g<2>'
+      register: kodi_jellyfin_settings_direct
+      when: kodi_jellyfin_configured
+
+    # The addon only runs its fast startup sync when kodiCompanion is enabled.
+    # services/jellyfin.yml installs the matching server plugin, so keep this
+    # enabled: no setup dialog appears and changes while Kodi was offline are
+    # replayed at startup instead of waiting for a full rescan.
+    - name: Keep the Jellyfin server companion sync enabled
+      ansible.builtin.lineinfile:
+        path: "/home/kodi/.kodi/userdata/addon_data/{{ kodi_jellyfin_addon }}/settings.xml"
+        regexp: '^\s*<setting id="kodiCompanion"'
+        line: '    <setting id="kodiCompanion">true</setting>'
+        insertbefore: '^\s*</settings>\s*$'
+      register: kodi_jellyfin_settings_companion
+      when: kodi_jellyfin_configured
+
+    # Kodi 21 does not deliver the addon's own NotifyAll(SyncLibrary) to the
+    # running service, so the host writes one library id per line into
+    # sync-requests. The service consumes the queue in its main loop and calls
+    # add_library() directly, which skips the GUI selection dialog.
+    - name: Add Jellyfin library sync queue to the addon service
+      ansible.builtin.blockinfile:
+        path: /home/kodi/.kodi/addons/plugin.video.jellyfin/jellyfin_kodi/entrypoint/service.py
+        marker: "# {mark} ANSIBLE MANAGED BLOCK symbios-kodi-jf-sync"
+        insertafter: '^        while self\.running:$'
+        block: |
+                                # Host-provided sync requests bypass Kodi's undelivered NotifyAll.
+                                            try:
+                                                f_queue = xbmcvfs.translatePath(
+                                                    "special://profile/addon_data/plugin.video.jellyfin/sync-requests"
+                                                )
+                                                if xbmcvfs.exists(f_queue):
+                                                    f_file = xbmcvfs.File(f_queue, "r")
+                                                    f_ids = [x.strip() for x in f_file.read().splitlines() if x.strip()]
+                                                    f_file.close()
+                                                    xbmcvfs.delete(f_queue)
+                                                    for f_library_id in f_ids:
+                                                        if self.library_thread is None:
+                                                            self.library_thread = library.Library(self)
+                                                            self.library_thread.start()
+                                                        self.library_thread.add_library(f_library_id)
+                                                    xbmc.executebuiltin("Container.Refresh")
+                                            except Exception as error:
+                                                LOG.exception(error)
+      register: kodi_jellyfin_sync_hook
+      when: kodi_jellyfin_configured
+
+    # A full music sync pages through 130k items. Jellyfin needs up to a minute
+    # for one page, so the addon's 30s default aborts the initial sync with
+    # ReadTimeout errors. The addon retries five times, which only multiplies
+    # the delay before it gives up on that library.
+    - name: Raise the Jellyfin addon HTTP timeout
+      ansible.builtin.replace:
+        path: /home/kodi/.kodi/addons/plugin.video.jellyfin/jellyfin_kodi/jellyfin/configuration.py
+        regexp: '^(DEFAULT_HTTP_TIMEOUT\s*=\s*)[0-9]+'
+        replace: '\g<1>180'
+      register: kodi_jellyfin_http_timeout
       when: kodi_jellyfin_configured
 
     # The password lives only in the transient root-only file; the helper
@@ -1615,11 +1758,128 @@
             state: absent
           no_log: true
 
+    # Native mode reads the media files through the Kodi SFTP account. One
+    # read-only sshfs mount per Jellyfin library makes /media/* paths from the
+    # server resolvable locally; the addon path replacements point at these
+    # directories. Mount units are pulled in by kodi-standalone.service (Wants=)
+    # and are not enabled at boot (the mount points live below /symbios).
+    - name: Install sshfs for the Jellyfin media mounts
+      ansible.builtin.apt:
+        name: sshfs
+        update_cache: no
+        install_recommends: no
+      when: kodi_jellyfin_media_mounts_enabled
+
+    - name: Allow other users on FUSE mounts (Jellyfin media shares)
+      ansible.builtin.lineinfile:
+        path: /etc/fuse.conf
+        regexp: '^#?\s*user_allow_other\s*$'
+        line: user_allow_other
+        create: true
+        mode: '0644'
+      when: kodi_jellyfin_media_mounts_enabled
+
+    - name: Create Jellyfin media mount points
+      ansible.builtin.file:
+        path: "{{ item.local }}"
+        owner: root
+        group: root
+        state: directory
+        mode: '0750'
+      loop: "{{ kodi_jellyfin_media_mounts }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when:
+        - kodi_jellyfin_media_mounts_enabled
+        - item.local not in ansible_mounts | map(attribute='mount') | list
+
+    - name: Grant kodi read access to Jellyfin media mount points
+      ansible.builtin.shell: setfacl -m u:kodi:rx "{{ item.local }}"
+      loop: "{{ kodi_jellyfin_media_mounts }}"
+      loop_control:
+        label: "{{ item.name }}"
+      changed_when: false
+      when:
+        - kodi_jellyfin_media_mounts_enabled
+        - item.local not in ansible_mounts | map(attribute='mount') | list
+
+    - name: Install systemd sshfs mount units for Jellyfin libraries
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/{{ item.unit }}"
+        owner: root
+        group: root
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=Jellyfin {{ item.name }} library of the Kodi media center (sshfs)
+          After=network-online.target
+          Wants=network-online.target
+
+          [Mount]
+          What={{ kodi_options.sftp_user | default('kodi') }}@{{ kodi_options.sftp_server }}:/{{ item.remote | trim('/') }}
+          Where={{ item.local }}
+          Type=fuse.sshfs
+          Options=port={{ kodi_options.sftp_port | default(28) }},IdentityFile=/home/kodi/.ssh/id_ed25519,UserKnownHostsFile=/home/kodi/.ssh/known_hosts,StrictHostKeyChecking=yes,ConnectTimeout=10,ServerAliveInterval=15,ServerAliveCountMax=3,reconnect,ro,allow_other,uid=kodi,gid=kodi,AddressFamily=inet
+          TimeoutSec=30
+      loop: "{{ kodi_jellyfin_media_mounts }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: kodi_jellyfin_media_unit_files
+      when: kodi_jellyfin_media_mounts_enabled
+
+    - name: Reload systemd after Jellyfin media mount changes
+      ansible.builtin.systemd:
+        daemon_reload: yes
+      when: kodi_jellyfin_media_unit_files is changed
+
+    - name: Mount the Jellyfin media shares
+      ansible.builtin.systemd:
+        name: "{{ item.unit }}"
+        state: started
+      loop: "{{ kodi_jellyfin_media_mounts }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: kodi_jellyfin_media_mounts_enabled
+
+    - name: Remove Jellyfin media mount units (not configured)
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item.unit }}"
+        state: absent
+      loop: "{{ kodi_jellyfin_media_mounts }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not kodi_jellyfin_media_mounts_enabled
+
     - name: Restart the Kodi session to register the Jellyfin addon
       ansible.builtin.command: "{{ git_root }}/scripts/symbios-kodi-restart.sh"
       register: kodi_restart_jellyfin
       changed_when: "'kodi-session-restarted' in kodi_restart_jellyfin.stdout"
-      when: kodi_jellyfin_addon_install is changed or (kodi_jellyfin_login is defined and kodi_jellyfin_login is changed)
+      when: >-
+        kodi_jellyfin_addon_install is changed or
+        (kodi_jellyfin_login is defined and kodi_jellyfin_login is changed) or
+        (kodi_jellyfin_settings_prompt is defined and kodi_jellyfin_settings_prompt is changed) or
+        (kodi_jellyfin_settings_direct is defined and kodi_jellyfin_settings_direct is changed) or
+        (kodi_jellyfin_settings_companion is defined and kodi_jellyfin_settings_companion is changed) or
+        (kodi_jellyfin_six is defined and kodi_jellyfin_six is changed) or
+        (kodi_jellyfin_sync_hook is defined and kodi_jellyfin_sync_hook is changed) or
+        (kodi_jellyfin_http_timeout is defined and kodi_jellyfin_http_timeout is changed)
+
+    # Seed the addon's view database and queue a full sync without the GUI
+    # library-selection dialog. The running (and freshly restarted) service
+    # consumes sync-requests and writes the nodes into Kodi's video/music tree.
+    - name: Seed and sync Jellyfin libraries in Kodi
+      ansible.builtin.command:
+        argv:
+          - "{{ git_root }}/scripts/symbios-kodi-jellyfin-library.sh"
+          - "--data-dir"
+          - "/home/kodi/.kodi/userdata/addon_data/{{ kodi_jellyfin_addon }}"
+          - "--database"
+          - /home/kodi/.kodi/userdata/Database/jellyfin.db
+          - "--media-root"
+          - "{{ kodi_jellyfin_media_root }}"
+      register: kodi_jellyfin_library
+      changed_when: "'kodi-jellyfin-library-triggered' in kodi_jellyfin_library.stdout"
+      when: kodi_jellyfin_configured
 
     # The mediathekview repository is not in the official Kodi repository; pin
     # the zip from the project's own kodirepo.
@@ -1711,8 +1971,8 @@
         content: |
           [Unit]
           Description=Kodi Media Center Standalone
-          After=systemd-user-sessions.service{{ ' ' ~ kodi_roms_mount_unit if kodi_roms_needs_local | default(false) else '' }}
-          {{ 'Wants=' ~ kodi_roms_mount_unit if kodi_roms_needs_local | default(false) else '' }}
+          After=systemd-user-sessions.service{{ ' ' ~ kodi_required_mount_units | join(' ') if kodi_required_mount_units | length > 0 else '' }}
+          {{ 'Wants=' ~ kodi_required_mount_units | join(' ') if kodi_required_mount_units | length > 0 else '' }}
           Conflicts=lightdm.service
 
           [Service]
@@ -2018,14 +2278,21 @@
             g_echo_error "Healthcheck failed for Kodi: web server password file missing"
             return 1
           fi
-          f_resp=$(wget -qO- --timeout=5 \
-            --header="Authorization: Basic $(printf 'kodi:%s' "$f_pw" | base64 -w0)" \
+          # The password goes through a 0600 netrc file: an Authorization
+          # header built in argv would be visible in the process list.
+          f_netrc=$(mktemp /run/symbios-kodi-rpc-netrc.XXXXXX) || return 1
+          chmod 0600 "$f_netrc"
+          printf 'machine localhost login kodi password %s\n' "$f_pw" > "$f_netrc"
+          f_resp=$(curl -fsS --basic --netrc-file "$f_netrc" \
             --header="Content-Type: application/json" \
-            --post-data='{"jsonrpc":"2.0","id":1,"method":"Player.GetActivePlayers"}' \
+            --data-binary '{"jsonrpc":"2.0","id":1,"method":"Player.GetActivePlayers"}' \
             http://localhost:8081/jsonrpc 2>/dev/null)
-          if ! printf '%s' "$f_resp" | grep -q '"result"'
+          f_rpc_rc=$?
+          shred -u "$f_netrc" 2>/dev/null || true
+          if [[ $f_rpc_rc -ne 0 ]] || ! printf '%s' "$f_resp" | grep -q '"result"'
           then
             g_echo_error "Healthcheck failed for Kodi: web server not responding on port 8081"
+            return 1
           fi
 
     # Register playbook as installed in the state file
