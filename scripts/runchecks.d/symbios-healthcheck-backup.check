@@ -1,7 +1,7 @@
 CHECK_CATEGORY="services"
 CHECK_TITLE="Backup"
 CHECK_DESC="Checks that backups ran recently and are not stored locally only."
-CHECK_DETAIL="Watches the success marker written by the backup phase of the daily maintenance window.|Daily snapshots protect all data below /symbios (services, databases, configuration).|If this fails, no recent backup exists - check Settings -> Backup (it shows the restic error log of the last run).|Warns when no backup exists at all or the newest one is older than 7 days (limit configurable via backup_max_age_days in the inventory).|Also warns while only the local restic repository is configured: it shares the fate of the machine (fire, lightning, theft) - a remote backup server provides off-site protection.|Also warns when the local snapshot count or repository size grow past the configured retention (disk full prevention).|Also warns when the configuration backup of a registered OpenWrt system is missing or older than 2 days - an offline router fails silently otherwise."
+CHECK_DETAIL="Watches the success marker written by the backup phase of the daily maintenance window.|Daily snapshots protect all data below /symbios (services, databases, configuration).|If this fails, no recent backup exists - check Settings -> Backup (it shows the restic error log of the last run).|Also reports a leftover 'running' status after a hard reset or kill, so a crashed backup is no longer shown as active.|Warns when no backup exists at all or the newest one is older than 7 days (limit configurable via backup_max_age_days in the inventory).|Also warns while only the local restic repository is configured: it shares the fate of the machine (fire, lightning, theft) - a remote backup server provides off-site protection.|Also warns when the local snapshot count or repository size grow past the configured retention (disk full prevention).|Also warns when the configuration backup of a registered OpenWrt system is missing or older than 2 days - an offline router fails silently otherwise."
 
 # Healthcheck for the backup phase of the daily maintenance window
 f_check_cache "symbios-healthcheck-backup" || return 2>/dev/null || true
@@ -15,6 +15,14 @@ fi
 
 g_backup_marker="${g_log_dir}/backup-last-success"
 g_backup_status="${g_log_dir}/backup-status.json"
+
+# A hard reset leaves the status at "running". The status subcommand detects
+# that no backup process is alive and rewrites it to "error" first, so the
+# check below reports the interrupted run instead of a phantom active backup.
+if [[ -x "${g_git_root}/scripts/symbios-backup.sh" ]]
+then
+  "${g_git_root}/scripts/symbios-backup.sh" status >/dev/null 2>&1 || true
+fi
 
 # A failed engine run is the most specific signal: the status JSON holds
 # the captured restic errors (rendered on the Settings -> Backup page).

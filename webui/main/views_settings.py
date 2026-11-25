@@ -251,11 +251,13 @@ def settings_config(request):
 
 
 def _backup_status():
-    """Read the backup status JSON written by the host's backup job."""
+    """Read the effective backup status from the host's backup engine."""
+    ok, stdout, stderr = run_command('symbios-backup.sh status', timeout=30)
+    if not ok or not stdout.strip():
+        return None
     try:
-        with open('/log/backup-status.json') as fh:
-            return json.load(fh)
-    except (FileNotFoundError, PermissionError, json.JSONDecodeError, ValueError):
+        return json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
         return None
 
 

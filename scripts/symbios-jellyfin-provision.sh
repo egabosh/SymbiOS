@@ -914,7 +914,7 @@ function f_ensure_library {
     # f_ensure_library_options cannot address it by id until it has content.
     f_secret_tmp folderbody f_body
     jq -n --argjson f_internet "$f_internet" \
-      '{LibraryOptions: {EnableRealtimeMonitor: true, AutomaticRefreshIntervalDays: 1, EnableInternetProviders: $f_internet}}' > "$f_body"
+      '{LibraryOptions: {EnableRealtimeMonitor: true, AutomaticRefreshIntervalDays: 0, EnableInternetProviders: $f_internet}}' > "$f_body"
     if ! f_api_request POST "/Library/VirtualFolders?name=$(f_urlencode "$f_name")&collectionType=$(f_urlencode "$f_type")&paths=$(f_urlencode "$f_path")&refreshLibrary=false" "$f_body" "$g_plugin_file" "$g_token_file"
     then
       # Jellyfin 12 can apply the library change and leave the response open.
@@ -956,9 +956,10 @@ f_ensure_library "TV Shows" "$g_media_tvshows" "tvshows" "true" || exit 1
 f_ensure_library "Music" "$g_media_audio" "music" "false" || exit 1
 f_ensure_library "Images" "$g_media_images" "homevideos" "false" || exit 1
 
-# Realtime monitoring and a daily refresh keep the libraries current when
-# files are added or removed after the initial scan. Defaults in a fresh
-# Jellyfin library are both off, so assert them explicitly on every run.
+# Realtime monitoring picks up added or removed files. Periodic online
+# refreshes of existing items stay off: providers should only fill in missing
+# metadata, which keeps MusicBrainz/TMDb traffic away from the daily window.
+# Defaults in a fresh Jellyfin library are both off, so assert them explicitly.
 f_api_request GET "/Library/VirtualFolders" "" "$g_folders_file" "$g_token_file" || exit 1
 f_expect_code "$g_api_code" "200" "Could not read the Jellyfin library list" || exit 1
 
@@ -971,11 +972,11 @@ function f_ensure_library_options {
   f_current=$(jq -c --arg f_name "$f_name" --arg f_id "$f_id" --argjson f_internet "$f_internet" \
     '.[]? | select(.Name == $f_name) |
      select((.LibraryOptions.EnableRealtimeMonitor // false) != true or
-            (.LibraryOptions.AutomaticRefreshIntervalDays // 0) != 1 or
+            (.LibraryOptions.AutomaticRefreshIntervalDays // 0) != 0 or
             (.LibraryOptions.EnableInternetProviders // false) != $f_internet) |
      {id: $f_id, LibraryOptions: (.LibraryOptions |
        .EnableRealtimeMonitor = true |
-       .AutomaticRefreshIntervalDays = 1 |
+       .AutomaticRefreshIntervalDays = 0 |
        .EnableInternetProviders = $f_internet)}' "$g_folders_file")
   [[ -n "$f_current" ]] || return 0
   f_secret_tmp folderopts f_body
@@ -986,9 +987,9 @@ function f_ensure_library_options {
   if [[ "$f_internet" == "true" ]]
   then
     g_metadata_changed="true"
-    g_echo_note "Enabled realtime monitoring, daily refresh and TMDb artwork for $f_name"
+    g_echo_note "Enabled realtime monitoring and TMDb artwork for $f_name (automatic refresh off)"
   else
-    g_echo_note "Enabled realtime monitoring and daily refresh for $f_name (online metadata disabled)"
+    g_echo_note "Enabled realtime monitoring for $f_name (online metadata and automatic refresh off)"
   fi
 }
 
@@ -1000,7 +1001,8 @@ f_ensure_library_options "Music" "false" || exit 1
 f_ensure_library_options "Images" "false" || exit 1
 
 # A provider switch alone does not refresh existing items, so queue one
-# metadata refresh per online library when the setting changed.
+# metadata refresh per online library when the setting changed. ValidationOnly
+# adds missing metadata without contacting providers for fields already set.
 if [[ "$g_metadata_changed" == "true" ]]
 then
   for f_name in "Movies" "TV Shows"
@@ -1011,7 +1013,7 @@ then
       g_echo_note "Jellyfin $f_name library has no items yet; skipping metadata refresh"
       continue
     fi
-    f_api_request POST "/Items/${f_library_id}/Refresh?Recursive=true&ReplaceAllMetadata=true&ReplaceAllArtwork=true&ImageRefreshMode=FullRefresh&MetadataRefreshMode=FullRefresh" "" "$g_plugin_file" "$g_token_file" || exit 1
+    f_api_request POST "/Items/${f_library_id}/Refresh?Recursive=true&ReplaceAllMetadata=false&ReplaceAllArtwork=false&ImageRefreshMode=ValidationOnly&MetadataRefreshMode=ValidationOnly" "" "$g_plugin_file" "$g_token_file" || exit 1
     f_expect_code "$g_api_code" "204" "Could not start the Jellyfin $f_name metadata refresh" || exit 1
     g_echo_note "Jellyfin $f_name metadata refresh started"
   done

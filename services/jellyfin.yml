@@ -370,6 +370,11 @@
               # ceiling even if the in-app concurrency settings are reset.
               cpus: 1.0
               mem_limit: 2g
+              # Relative priorities when the host is contended: the scan must
+              # not outrank systemd or the backup. BFQ honours the I/O weight.
+              cpu_shares: 128
+              blkio_config:
+                weight: 10
               # Local-only API access for the host-side provisioning helper.
               ports:
                 - "127.0.0.1:8096:8096"

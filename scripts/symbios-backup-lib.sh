@@ -217,17 +217,21 @@ function f_bk_sshargs {
 
 # Run one restic command. All stderr is captured in g_bk_err_file (error
 # details for syslog summaries and the status JSON / WebUI); callers log
-# a summary via the g_echo family after the run.
+# a summary via the g_echo family after the run. Restic is a background bulk
+# reader: nice 19 keeps CPU free for services, ionice best-effort/7 yields
+# disk time to latency-sensitive writers while still making progress (BFQ is
+# enabled globally, so the block priority is effective).
 # Usage: f_bk_restic <repo> <sshargs|''> <restic-args...>
 function f_bk_restic {
   local f_repo="$1" f_ssh="$2"
   shift 2
   local f_rc=0
+  local f_lowprio=(nice -n 19 ionice -c2 -n7)
   if [[ -n "$f_ssh" ]]
   then
-    RESTIC_REPOSITORY="$f_repo" restic "$@" -o "sftp.args=$f_ssh" 2>>"$g_bk_err_file" || f_rc=$?
+    RESTIC_REPOSITORY="$f_repo" "${f_lowprio[@]}" restic "$@" -o "sftp.args=$f_ssh" 2>>"$g_bk_err_file" || f_rc=$?
   else
-    RESTIC_REPOSITORY="$f_repo" restic "$@" 2>>"$g_bk_err_file" || f_rc=$?
+    RESTIC_REPOSITORY="$f_repo" "${f_lowprio[@]}" restic "$@" 2>>"$g_bk_err_file" || f_rc=$?
   fi
   return $f_rc
 }

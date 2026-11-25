@@ -75,6 +75,7 @@
       stat: 
         path: /lib/systemd/systemd
       register: nocontainer
+      tags: [hardware-resilience]
 
     - name: Replace /home with symlink
       ansible.builtin.shell: |
@@ -423,6 +424,25 @@
         sysctl_file: /etc/sysctl.d/90-symbios.conf
       when: nocontainer.stat.exists == true
 
+    # Keep writeback bursts small: without this the kernel may collect up to
+    # 20% of RAM before flushing it to a slow USB bridge, starving latency-
+    # sensitive I/O (and systemd's watchdog feed) under sustained load.
+    - ansible.posix.sysctl:
+        name: vm.dirty_background_ratio
+        value: '5'
+        state: present
+        sysctl_file: /etc/sysctl.d/90-symbios.conf
+      when: nocontainer.stat.exists == true
+      tags: [hardware-resilience]
+
+    - ansible.posix.sysctl:
+        name: vm.dirty_ratio
+        value: '10'
+        state: present
+        sysctl_file: /etc/sysctl.d/90-symbios.conf
+      when: nocontainer.stat.exists == true
+      tags: [hardware-resilience]
+
     # stop low-level messages on console (tty)
     - ansible.posix.sysctl:
         name: kernel.printk
@@ -462,6 +482,48 @@
         state: present
         sysctl_file: /etc/sysctl.d/90-symbios.conf
       when: nocontainer.stat.exists == true
+
+    # Some distros (notably Raspberry Pi OS) enable a 1m runtime watchdog.
+    # Under sustained I/O systemd can miss a feed and reset an otherwise
+    # healthy host. Five minutes still catches a genuine hang; kernel.panic
+    # handles actual kernel panics independently.
+    - name: Relax hardware watchdog timeout
+      ansible.builtin.copy:
+        dest: /etc/systemd/system.conf.d/50-symbios-watchdog.conf
+        content: |
+          # Managed by SymbiOS - overrides shorter distro watchdog defaults.
+          RuntimeWatchdogSec=5min
+        owner: root
+        group: root
+        mode: '0644'
+      when: nocontainer.stat.exists == true
+      register: symbios_watchdog_conf
+      tags: [hardware-resilience]
+
+    # BFQ keeps latency-sensitive writes (systemd, journal) from being
+    # starved by a single bulk reader. Devices without BFQ support simply
+    # ignore the write; loop/ram devices are skipped to avoid noise.
+    - name: Use BFQ as the default I/O scheduler
+      ansible.builtin.copy:
+        dest: /etc/udev/rules.d/60-symbios-io-scheduler.rules
+        content: |
+          # SymbiOS - fair I/O scheduling on all block devices with BFQ support.
+          ACTION=="add|change", SUBSYSTEM=="block", KERNEL!="loop*", KERNEL!="ram*", ATTR{queue/scheduler}="bfq"
+        owner: root
+        group: root
+        mode: '0644'
+      when: nocontainer.stat.exists == true
+      register: symbios_io_scheduler_rule
+      tags: [hardware-resilience]
+
+    - name: Apply changed scheduler and watchdog settings immediately
+      ansible.builtin.shell: |
+        systemctl daemon-reexec
+        udevadm control --reload-rules
+        udevadm trigger --action=change --subsystem-match=block
+      when: symbios_watchdog_conf.changed or symbios_io_scheduler_rule.changed
+      changed_when: false
+      tags: [hardware-resilience]
 
     - name: shell profile
       blockinfile:

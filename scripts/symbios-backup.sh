@@ -56,6 +56,8 @@ function f_usage {
   echo "Commands:"
   echo "  backup                Run the backup now (the default when no"
   echo "                        command is given - the form the cron job uses)"
+  echo "  status                Print the effective status JSON; repairs a"
+  echo "                        leftover 'running' state after a crash"
   echo "  get-restic-password  Print the restic repository password as JSON"
   echo "  gen-restic-password   Ensure the restic password file exists under"
   echo "                        /symbios (never overwrites an existing one)"
@@ -79,7 +81,7 @@ fi
 # backup - a harmless read but a surprise on a host that is busy with
 # something else, and it overwrites the run status of the nightly job.
 case "${1:-}" in
-  ""|backup|get-restic-password|gen-restic-password) ;;
+  ""|backup|status|get-restic-password|gen-restic-password) ;;
   *)
     echo "Unknown command: $1" >&2
     f_usage >&2
@@ -88,7 +90,7 @@ esac
 
 # Query subcommands print JSON on stdout: skip the gaboshlib stdout/stderr
 # FIFO redirection (g_all-to-syslog) so the output stays machine-parseable.
-[[ "${1:-}" == "get-restic-password" || "${1:-}" == "gen-restic-password" ]] && g_alltosyslog=1
+[[ "${1:-}" == "status" || "${1:-}" == "get-restic-password" || "${1:-}" == "gen-restic-password" ]] && g_alltosyslog=1
 . /etc/bash/gaboshlib.include
 g_symbios_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$g_symbios_dir/symbios-lib.sh"
@@ -96,6 +98,68 @@ source "$g_symbios_dir/symbios-backup-lib.sh"
 
 # Read all backup settings from inventory.yml.
 f_bk_read_vars
+
+# Write the run status for the WebUI/healthcheck.
+# Usage: f_write_status <state> <target> <snapshot-date> <message> [extra-json]
+# "errors" in <extra-json> carries the captured restic error lines (one per
+# target) so the WebUI can show the specific failure instead of "See syslog".
+function f_write_status {
+  local f_state="$1" f_target="$2" f_snap="$3" f_msg="$4" f_extra="$5"
+  local f_now
+  f_now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  {
+    printf '{"state":"%s","finished":"%s","target":"%s","snapshot":"%s","message":%s' \
+      "$f_state" "$f_now" "$f_target" "$f_snap" "$(printf '%s' "$f_msg" | f_json_escape)"
+    if [[ -n "$f_extra" ]]
+    then
+      printf ',%s' "$f_extra"
+    fi
+    printf '}'
+  } > "${g_log_dir}/backup-status.json.tmp"
+  mv "${g_log_dir}/backup-status.json.tmp" "${g_log_dir}/backup-status.json"
+  # Success marker consumed by the healthcheck (epoch seconds).
+  if [[ "$f_state" == "ok" ]]
+  then
+    date +%s > "${g_log_dir}/backup-last-success"
+  fi
+}
+
+# A hard reset or kill -9 leaves the status at "running" forever: no EXIT
+# trap runs in those cases. Treat it as interrupted when neither the backup
+# lock nor a restic process is alive, so the WebUI and the healthcheck stop
+# claiming that a backup is in progress after a reboot.
+# Usage: f_bk_status
+function f_bk_status {
+  local f_status_file="${g_log_dir}/backup-status.json"
+  local f_state f_target f_lockpid="" f_alive=0
+  [[ -r "$f_status_file" ]] || { printf 'null\n'; return 0; }
+  f_state=$(jq -r '.state // empty' "$f_status_file" 2>/dev/null)
+  if [[ "$f_state" == "running" ]]
+  then
+    [[ -r /var/lock/symbios-backup.sh.lock ]] && f_lockpid=$(cat /var/lock/symbios-backup.sh.lock 2>/dev/null)
+    # Only the process holding the backup lock counts as an active run; a
+    # coincidental restic process (restore, manual snapshot) must not keep a
+    # stale status alive.
+    if [[ -n "$f_lockpid" && -r "/proc/$f_lockpid/cmdline" ]] \
+      && tr '\0' ' ' < "/proc/$f_lockpid/cmdline" | grep -q "symbios-backup.sh"
+    then
+      f_alive=1
+    fi
+    if [[ "$f_alive" -eq 0 ]]
+    then
+      f_target=$(jq -r '.target // "unknown"' "$f_status_file" 2>/dev/null)
+      f_write_status "error" "$f_target" "" \
+        "Previous backup was interrupted (no active backup process) - see syslog."
+    fi
+  fi
+  cat "$f_status_file"
+}
+
+case "${1:-}" in
+  status)
+    f_bk_status
+    exit 0 ;;
+esac
 
 # Make sure the restic password file exists; generate one on first use so the
 # nightly cron never fails just because nobody opened the WebUI page.
@@ -149,31 +213,6 @@ g_lockfile
 g_nice
 g_all-to-syslog
 set -o pipefail
-
-# Write the run status for the WebUI/healthcheck.
-# Usage: f_write_status <state> <target> <snapshot-date> <message> [extra-json]
-# "errors" in <extra-json> carries the captured restic error lines (one per
-# target) so the WebUI can show the specific failure instead of "See syslog".
-function f_write_status {
-  local f_state="$1" f_target="$2" f_snap="$3" f_msg="$4" f_extra="$5"
-  local f_now
-  f_now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  {
-    printf '{"state":"%s","finished":"%s","target":"%s","snapshot":"%s","message":%s' \
-      "$f_state" "$f_now" "$f_target" "$f_snap" "$(printf '%s' "$f_msg" | f_json_escape)"
-    if [[ -n "$f_extra" ]]
-    then
-      printf ',%s' "$f_extra"
-    fi
-    printf '}'
-  } > "${g_log_dir}/backup-status.json.tmp"
-  mv "${g_log_dir}/backup-status.json.tmp" "${g_log_dir}/backup-status.json"
-  # Success marker consumed by the healthcheck (epoch seconds).
-  if [[ "$f_state" == "ok" ]]
-  then
-    date +%s > "${g_log_dir}/backup-last-success"
-  fi
-}
 
 # Append the currently captured restic errors of one target to the run-wide
 # error list (TSV file: target name \t error line). Reset by the caller
