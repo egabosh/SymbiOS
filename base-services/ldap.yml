@@ -352,13 +352,18 @@
         create: yes
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
-          FROM ghcr.io/egabosh/debian:latest
+          # Plain Debian: the custom base image ships a zero-byte adduser stub,
+          # so the uid-10001 user below was never created and slapd ran as 101
+          # without access to the host bind mounts.
+          FROM debian:latest
           RUN echo "slapd slapd/internal/generated_adminpw password admin" | debconf-set-selections && \
             echo "slapd slapd/password2 password admin" | debconf-set-selections && \
             echo "slapd slapd/internal/adminpw password admin" | debconf-set-selections && \
             echo "slapd slapd/password1 password admin" | debconf-set-selections && \
             echo "slapd slapd/domain string openldap.local" | debconf-set-selections && \
             DEBIAN_FRONTEND=noninteractive apt-get update && \
+            DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y && \
+            DEBIAN_FRONTEND=noninteractive apt-get install -y adduser && \
             addgroup --system --gid 10001 openldap && \
             adduser --system --disabled-password --disabled-login --gid 10001 --uid 10001 --home /var/lib/ldap openldap && \
             DEBIAN_FRONTEND=noninteractive apt-get install -y slapd ldap-utils && \
