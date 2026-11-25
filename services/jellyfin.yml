@@ -36,6 +36,13 @@
 #     browser SSO flow, such as the Kodi addon. A local technical user "kodi"
 #     is provisioned on every run; its password is revealable and rotatable in
 #     Settings -> Secrets, and its device token is refreshed by the same hook.
+#     Movie and series libraries are mounted read-only; Mediathek recordings
+#     are written below the downloads tree and exposed as two extra libraries.
+#     The Zapp Live TV tuner and guide provider are provisioned automatically;
+#     in the web UI they live under Dashboard -> Live TV (Tuner Devices and
+#     TV Guide Data Providers), playback uses the Live TV sidebar entry.
+#     All user policies allow direct play only: an unsupported client stops
+#     instead of starting a server-side ffmpeg remux or transcode.
 #   url: "https://jellyfin.{{ base_domain }}"
 #   access:
 #     user_group: jellyfin-users
@@ -97,11 +104,15 @@
     # Supplementary group for read-only media access (fixed media GID).
     jellyfin_gid: "{{ media_gid | default('') }}"
     # Standard media libraries (see mediapaths.md). The global movie/series
-    # keys may point to separate disks; media.yml creates all three writable
-    # video dirs before this service mounts them.
+    # keys may point to separate disks; media.yml creates them before this
+    # service mounts them read-only. Downloads stay writable for Mediathek.
     jellyfin_movies_path: "{{ media_movies | default((media_videos | default('/symbios/media/videos')) + '/movies') }}"
     jellyfin_tvshows_path: "{{ media_series | default((media_videos | default('/symbios/media/videos')) + '/tvshows') }}"
     jellyfin_downloads_path: "{{ media_videos | default('/symbios/media/videos') }}/downloads"
+    # Jellyfin only writes below the downloads tree. The main movie and series
+    # libraries stay read-only; finished Mediathek recordings land in these
+    # subdirectories and are exposed as separate libraries.
+    jellyfin_container_downloads_path: /media/downloads
     jellyfin_audio_path: "{{ media_audio | default('/symbios/media/audio') }}"
     jellyfin_images_path: "{{ media_images | default('/symbios/media/images') }}"
     # Third-party OIDC client. Pinned and checksum-verified because it runs
@@ -219,6 +230,7 @@
       loop:
         - config
         - cache
+        - cache/mediathek
 
     # The OIDC client secret and the local bootstrap password are generated
     # once and reused on later runs. gen-oidc-client-secret.sh writes both the
@@ -391,23 +403,35 @@
                 - /etc/localtime:/etc/localtime
                 # Long syntax with create_host_path:false: fail closed when
                 # the volume is missing instead of serving empty libraries.
-                # Movies, series and downloads are writable because the
-                # Mediathek plugin stores new media directly in them.
+                # The main libraries are read-only; only the Mediathek
+                # directories below downloads are writable.
                 - type: bind
                   source: {{ jellyfin_movies_path }}
                   target: /media/movies
-                  read_only: false
+                  read_only: true
                   bind:
                     create_host_path: false
                 - type: bind
                   source: {{ jellyfin_tvshows_path }}
                   target: /media/tvshows
-                  read_only: false
+                  read_only: true
                   bind:
                     create_host_path: false
                 - type: bind
                   source: {{ jellyfin_downloads_path }}
-                  target: /media/downloads
+                  target: {{ jellyfin_container_downloads_path }}
+                  read_only: false
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ jellyfin_downloads_path }}/Spielfilme
+                  target: {{ jellyfin_container_downloads_path }}/Spielfilme
+                  read_only: false
+                  bind:
+                    create_host_path: false
+                - type: bind
+                  source: {{ jellyfin_downloads_path }}/Serien
+                  target: {{ jellyfin_container_downloads_path }}/Serien
                   read_only: false
                   bind:
                     create_host_path: false
@@ -672,6 +696,22 @@
           - "{{ jellyfin_service_dir }}"
           - "--refresh-artwork"
       register: jellyfin_artwork
+      changed_when: false
+      async: 86400
+      poll: 0
+
+    # Items keep the description language from their first scan. Refetch them
+    # once per configured metadata language; artwork is handled separately.
+    - name: Refresh movie and series metadata in the configured language
+      ansible.builtin.command:
+        argv:
+          - "{{ git_root }}/scripts/symbios-jellyfin-provision.sh"
+          - "--base-url"
+          - "http://127.0.0.1:8096"
+          - "--config-dir"
+          - "{{ jellyfin_service_dir }}"
+          - "--refresh-metadata"
+      register: jellyfin_metadata
       changed_when: false
       async: 86400
       poll: 0

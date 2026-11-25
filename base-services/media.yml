@@ -69,11 +69,11 @@
       - "{{ media_documents | default('/symbios/media/documents') }}"
     media_dirs_rw:
       - "{{ media_inbox | default('/symbios/media/inbox') }}"
-      # Jellyfin's Mediathek downloader writes finished recordings directly
-      # into these movie/series libraries and its temporary download dir.
-      - "{{ media_movies | default('/symbios/media/videos/movies') }}"
-      - "{{ media_series | default('/symbios/media/videos/tvshows') }}"
+      # Jellyfin mounts the movie/series libraries read-only. The Mediathek
+      # downloader writes finished recordings below the downloads dir only.
       - "{{ media_videos | default('/symbios/media/videos') }}/downloads"
+      - "{{ media_videos | default('/symbios/media/videos') }}/downloads/Spielfilme"
+      - "{{ media_videos | default('/symbios/media/videos') }}/downloads/Serien"
     # Base dir for named group shares (see symbios-media-share.sh). Each
     # share below it is owned by its own LDAP group (2770); the base stays
     # traversable so members find their shares.
