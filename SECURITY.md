@@ -81,6 +81,31 @@ acceptable because:
   actually changes it. Reapply does not reset it once `.admin_initialized`
   exists; the forwarded login only sets a session flag.
 
+### T1: SSL Labs A+ Requires HSTS Preload List Membership
+
+**Status**: Accepted - A and A+ are both green in the TLS healthcheck
+
+Qualys grades a configuration A+ only when HSTS is robust: at least one year
+`max-age`, `includeSubDomains`, `preload`, and the domain is actually present in
+the browser HSTS preload lists. SymbiOS sends the complete header through
+Traefik, but the `preload` directive only signals intent; adding the domain to
+the list is an external submission at `https://hstspreload.org/`. That step
+affects every subdomain and is slow to reverse, so it is an operator decision
+per base domain, not a SymbiOS setting. Until a domain is preloaded, SSL Labs
+caps an otherwise clean SymbiOS host at A (strong commercial security). The
+daily `ssl-labs` runcheck therefore accepts A and A+ as green and fails A- and
+below.
+
+To request A+ for a domain, verify that every current and future subdomain is
+served over HTTPS, submit the base domain at `https://hstspreload.org/`, and
+wait for the browser list rollout; the next SSL Labs scan then reflects the
+preload status. Check the current status with
+`curl -sS 'https://hstspreload.org/api/v2/status?domain=<base-domain>'`.
+
+**Mitigations**: TLS 1.3, modern ciphers and a one-year HSTS header are already
+enforced by SymbiOS; the remaining difference is first-load protection from the
+browser preload list, not the TLS configuration of the host.
+
 ---
 
 ## CIS Benchmark Scope and Deviations

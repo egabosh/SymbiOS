@@ -794,6 +794,16 @@ without a playbook:
   out` case of the macb driver on the Raspberry Pi 5), it bounces the
   interface and reports the recovery. A dead peer (router down) is never
   bounced.
+- `symbios-healthcheck-ssl-labs.check` - reads the daily Qualys SSL Labs
+  snapshot in `<log>/ssl-labs.json`, written by
+  `traefik-qualys-ssl-labs-check.sh`. `A+` and `A` are green: without an
+  HSTS preload list entry (an external, irreversible step per domain) SSL
+  Labs caps a SymbiOS host at `A` even with TLS 1.3 and a one-year HSTS
+  header. `A-` and below, `T`, `M` and ungraded endpoints fail. Every
+  endpoint (IPv4 and IPv6) is graded separately. This exception is documented
+  as T1 in `SECURITY.md`.
+  The check never calls the external API from the 5-minute runcheck loop;
+  the rate-limited scan runs once per day from cron.
 - `reboot-required.check` - reports an error while a reboot is pending. It
   reads the Debian marker `/run/reboot-required` (with the package list that
   asked for the reboot) and, because Debian trixie dropped

@@ -1,0 +1,73 @@
+CHECK_CATEGORY="network"
+CHECK_TITLE="SSL Labs Grade"
+CHECK_DESC="Reports the TLS grade of public Traefik hosts from the daily Qualys scan."
+CHECK_DETAIL="Reads <log>/ssl-labs.json written by traefik-qualys-ssl-labs-check.sh.|A+ and A are green: A+ without HSTS preload list entry is not achievable through SymbiOS.|A- and below, T, M and ungraded fail.|Every endpoint (IPv4 and IPv6) is graded separately.|A missing or more than 48h old snapshot warns.|The check never calls the external API; the daily cron does that."
+
+# This file is sourced by runchecks.sh. Never call exit here.
+g_ssl_snapshot="${g_log_dir}/ssl-labs.json"
+if [[ ! -s "$g_ssl_snapshot" ]]
+then
+  g_echo_warn "SSL Labs snapshot missing - the daily scan has not produced a result yet"
+  return 2>/dev/null || true
+fi
+
+g_ssl_age=$(( $(date +%s) - $(date -r "$g_ssl_snapshot" +%s 2>/dev/null || echo 0) ))
+if [[ "$g_ssl_age" -gt 172800 ]]
+then
+  g_echo_warn "SSL Labs snapshot is $(( g_ssl_age / 3600 )) hours old - check the daily cron"
+  return 2>/dev/null || true
+fi
+
+g_ssl_status="$(jq -r '.status // "ok"' "$g_ssl_snapshot" 2>/dev/null)"
+if [[ "$g_ssl_status" == "error" ]]
+then
+  g_echo_warn "SSL Labs scan failed: $(jq -r '.error // "unknown error"' "$g_ssl_snapshot" 2>/dev/null)"
+  return 2>/dev/null || true
+fi
+
+g_ssl_count="$(jq -r '.hosts | length' "$g_ssl_snapshot" 2>/dev/null)"
+if [[ ! "$g_ssl_count" =~ ^[0-9]+$ ]]
+then
+  g_echo_error "SSL Labs snapshot is not valid JSON"
+  return 2>/dev/null || true
+fi
+if [[ "$g_ssl_count" -eq 0 ]]
+then
+  g_echo_note "No public Traefik hosts to grade"
+  return 2>/dev/null || true
+fi
+
+while IFS=$'\t' read -r g_ssl_host g_ssl_host_status g_ssl_ip g_ssl_grade g_ssl_ep_status g_ssl_error
+do
+  [[ -n "$g_ssl_host" ]] || continue
+  g_ssl_link="https://www.ssllabs.com/ssltest/analyze.html?d=${g_ssl_host}&hideResults=on"
+  # An API failure or an unfinished assessment is a warning, not a grade.
+  if [[ "$g_ssl_host_status" != "READY" && "$g_ssl_grade" == "ungraded" ]]
+  then
+    g_echo_warn "SSL Labs could not grade ${g_ssl_host} (${g_ssl_ip}): ${g_ssl_host_status} - ${g_ssl_error:-$g_ssl_ep_status} ${g_ssl_link}"
+    continue
+  fi
+  case "$g_ssl_grade" in
+    'A+')
+      continue
+      ;;
+    'A')
+      # A+ additionally requires an HSTS preload list entry, which is an
+      # external, irreversible step per domain and not a SymbiOS setting.
+      continue
+      ;;
+    'A-'|'B'|'C'|'D'|'E'|'F'|'T'|'M'|'null'|'ungraded'|'ERROR')
+      g_echo_error "SSL Labs grade for ${g_ssl_host} (${g_ssl_ip}) is ${g_ssl_grade}: ${g_ssl_link}"
+      ;;
+    *)
+      g_echo_warn "SSL Labs could not grade ${g_ssl_host} (${g_ssl_ip}): ${g_ssl_grade} - ${g_ssl_ep_status:-$g_ssl_host_status} ${g_ssl_error} ${g_ssl_link}"
+      ;;
+  esac
+done < <(jq -r '
+  .hosts[] |
+  .host as $h | .status as $s | (.error // "") as $e |
+  if (.endpoints | length) == 0
+  then [$h, $s, "-", "ungraded", "no endpoint data", $e] | @tsv
+  else .endpoints[] | [$h, $s, (.ip // "-"), (.grade // "ungraded"), (.status // ""), $e] | @tsv
+  end
+' "$g_ssl_snapshot")

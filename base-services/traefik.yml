@@ -308,9 +308,16 @@
         group: docker
       notify: Restart traefik
 
-    - name: /etc/cron.d/traefik-qualys-ssl-labs-check_local
-      blockinfile:
+    # Debian cron ignores files with a dot in /etc/cron.d, so the old
+    # *_check_local name never ran. Remove it once, then install the valid name.
+    - name: Remove obsolete dotted SSL Labs cron file
+      ansible.builtin.file:
         path: /etc/cron.d/traefik-qualys-ssl-labs-check_local
+        state: absent
+
+    - name: /etc/cron.d/traefik-qualys-ssl-labs-check
+      blockinfile:
+        path: /etc/cron.d/traefik-qualys-ssl-labs-check
         create: yes
         mode: 0644
         owner: root
