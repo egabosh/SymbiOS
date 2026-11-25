@@ -18,7 +18,8 @@
 #
 # This is a one-shot job container, not a service with a web interface. It has
 # no Traefik router and no authentication at all: it never listens on a port
-# and is only reachable from the host through the youtube-dl wrapper script.
+# and is only reachable from the host through symbios-youtube-dl.sh in the
+# repo scripts directory (on PATH there, no /usr/local/bin alias).
 # Start it with an arbitrary yt-dlp URL argument.
 #
 # docs:
@@ -27,7 +28,7 @@
 #     - media_videos
 #   name: yt-dlp
 #   short_description: Deploy a yt-dlp downloader for ad-hoc video downloads
-#   description: Deploys a one-shot yt-dlp (youtube-dl) container that downloads a video into a configurable target directory. It exposes no port and needs no authentication; start it with the youtube-dl wrapper on the host.
+#   description: Deploys a one-shot yt-dlp (youtube-dl) container that downloads a video into a configurable target directory. It exposes no port and needs no authentication; start it with symbios-youtube-dl.sh from the repo scripts directory on the host.
 #   author: Oliver Bohlen
 #   version: '1.0'
 #   license: GPLv3
@@ -51,7 +52,6 @@
 #     stop: docker compose -f /symbios/services/youtube-dl/docker-compose.yml down
 #     program_paths:
 #       - /symbios/services/youtube-dl/
-#       - /usr/local/bin/youtube-dl
 #       - /symbios/runchecks.d/symbios-healthcheck-youtube-dl.check
 #   actions:
 #     start: docker compose -f /symbios/services/youtube-dl/docker-compose.yml build
@@ -146,54 +146,12 @@
         backup: yes
       notify: Rebuild youtube-dl
 
-    # /usr/local/bin/youtube-dl wrapper so the tool is on the host PATH
-    - name: /usr/local/bin/youtube-dl
-      blockinfile:
-        path: "/usr/local/bin/youtube-dl"
-        create: yes
-        mode: 0550
-        owner: root
-        group: root
-        marker: "# {mark} ANSIBLE MANAGED BLOCK"
-        block: |
-          #!/bin/bash
-          # Download a video with yt-dlp into the youtube-dl target directory.
-          # Defaults merge to mp4 (Jellyfin direct play) and skip re-downloads
-          # via the archive file; extra arguments override them. After a
-          # successful download the Nextcloud file index is refreshed in the
-          # background (guarded, at most one scan at a time).
-
-          # Change to the service directory so the compose project resolves
-          cd /symbios/services/youtube-dl || exit 1
-
-          # Pass every argument through to yt-dlp. --build makes the wrapper
-          # self-healing: the nightly "docker system prune -af" deletes the
-          # image (no container ever references it between runs), so rebuild
-          # on demand instead of failing with "image not found".
-          f_rc=0
-          docker compose run --build --rm {{ service_name }} --no-playlist \
-            --download-archive /downloaddir/.download-archive \
-            --merge-output-format mp4 "$@" || f_rc=$?
-
-          if [[ ${f_rc} -eq 0 ]] && [[ -d /symbios/services/nextcloud ]]
-          then
-            # Index just the fresh download target (cheap even on TB
-            # libraries: --path limits the walk to this subtree).
-            (
-              flock -n 9 || exit 0
-              symbios-nextcloud-media-scan.sh "Media Videos" >/dev/null 2>&1 || true
-            ) 9>/tmp/youtube-dl-scan.lock &
-            disown || true
-          fi
-          exit ${f_rc}
-        backup: yes
-        validate: /bin/bash -n %s
-
-    - name: /usr/local/bin/youtube-dl shebang
-      ansible.builtin.lineinfile:
+    # Earlier releases installed a wrapper in /usr/local/bin. The script now
+    # lives only in git_root/scripts and is called by its bare name from PATH.
+    - name: Remove legacy /usr/local/bin/youtube-dl
+      ansible.builtin.file:
         path: /usr/local/bin/youtube-dl
-        insertbefore: BOF
-        line: "#!/bin/bash"
+        state: absent
 
     - name: Build the youtube-dl image
       ansible.builtin.shell: docker compose build

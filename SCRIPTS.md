@@ -648,6 +648,7 @@ texts opportunistically).
 | `symbios-nextcloud-admin-sync.sh` | Nextcloud admins from LDAP `nextcloud-admins` | no args |
 | `symbios-nextcloud-ai.sh` | Nextcloud AI providers (app `integration_openai`) from the inventory `ai_*` values | `[--check]` |
 | `symbios-nextcloud-media-scan.sh` | Index new files on Nextcloud external media mounts | `[mount ...]` |
+| `symbios-youtube-dl.sh` | Run the yt-dlp one-shot container and refresh the Nextcloud index after a download (youtube-dl.yml) | `<URL\|yt-dlp option> ...` |
 | `symbios-openwebui-admin-sync.sh` | OpenWebUI admin roles from LDAP `openwebui-admins` | no args |
 | `symbios-home-assistant-admin-sync.sh` | Home Assistant admins from LDAP group | no args |
 | `symbios-paperless-admin-sync.sh` | Paperless superuser flags from LDAP `paperless-admins` | no args |
