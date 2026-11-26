@@ -452,6 +452,11 @@
               # like this Pi (Jellyfin issue 13531).
               environment:
                 JELLYFIN_FFmpeg_imgextract_perf_tradeoff: 'true'
+                # Native clients cannot complete the Authelia browser SSO flow
+                # and must use the API host. Without an explicit published URL
+                # Jellyfin advertises its Docker bridge IP, which clients
+                # cannot reach, so they stop after server discovery.
+                JELLYFIN_PublishedServerUrl: "https://{{ jellyfin_api_domain }}"
               volumes:
                 - ./data/config:/config
                 - ./data/cache:/cache
