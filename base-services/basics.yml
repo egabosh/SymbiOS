@@ -490,6 +490,16 @@
     # Under sustained I/O systemd can miss a feed and reset an otherwise
     # healthy host. Five minutes still catches a genuine hang; kernel.panic
     # handles actual kernel panics independently.
+    - name: Create /etc/systemd/system.conf.d dir
+      ansible.builtin.file:
+        path: /etc/systemd/system.conf.d
+        owner: root
+        group: root
+        state: directory
+        mode: '0755'
+      when: nocontainer.stat.exists == true
+      tags: [hardware-resilience]
+
     - name: Relax hardware watchdog timeout
       ansible.builtin.copy:
         dest: /etc/systemd/system.conf.d/50-symbios-watchdog.conf
