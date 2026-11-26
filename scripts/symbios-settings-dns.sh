@@ -21,6 +21,9 @@ Usage: $(basename "$0") <command> [options]
 Manage SymbiOS DNS settings (deSEC DynDNS or a self-managed domain).
 The DDNS host (or self-managed domain) becomes base_domain, the shared
 parent domain for Traefik Host rules and the Authelia session cookie.
+A real change also applies base_domain as the system hostname (via
+symbios-set-hostname.sh), before any consuming playbook runs. --check
+never changes the hostname.
 
 Commands:
   get [--json]                    Print current values (key=value lines,
@@ -392,5 +395,17 @@ fi
 # --- transactional write ---------------------------------------------------------
 
 f_ss_merge "${f_merge}" "dns" "${f_check}"
+
+# The hostname must follow base_domain even when no playbook runs (for example
+# with --no-apply). 'remove' resets base_domain to the local placeholder, for
+# which the hostname script is a no-op, so only 'set' calls it. Keep its tokens
+# out of this output so the settings helper still reads the dns token.
+if [[ "${f_remove}" != "yes" && "${f_check}" != "yes" && "${g_ss_changed}" == "yes" ]]
+then
+  "${g_ss_dir}/symbios-set-hostname.sh" >/dev/null \
+    || f_ss_fail_technical "Failed to apply the hostname from base_domain"
+  g_echo "Hostname applied from base_domain: $(f_symbios_var base_domain "")"
+fi
+
 f_ss_finish
 exit $?

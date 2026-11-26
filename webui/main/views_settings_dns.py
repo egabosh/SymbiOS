@@ -32,11 +32,8 @@ import urllib.request
 import urllib.error
 
 
-# The system hostname follows base_domain. It is applied first so the apply
-# runs under the new name, and its output appears in the same exec modal.
-_HOSTNAME_CMD = 'symbios-set-hostname.sh'
-
-# After set + hostname, consumers resolve dynamically from uses_vars.
+# The settings CLI applies base_domain as the system hostname before it runs
+# the consuming playbooks, so the WebUI only chains set -> apply.
 _APPLY_CMD = 'symbios-settings-dns.sh apply'
 
 
@@ -63,13 +60,12 @@ def settings_dns(request):
         hsts_flag = '--hsts-preload' if hsts_preload else '--no-hsts-preload'
         # Validation and the inventory write live in the settings CLI
         # (single source of truth). Secrets travel via stdin JSON, never
-        # as argv. The chain aborts on validation failure (&&): set writes,
-        # then the hostname follows the new domain, then apply resolves
-        # consuming playbooks dynamically from uses_vars.
+        # as argv. The chain aborts on validation failure (&&): set writes
+        # and applies the new hostname, then apply resolves consuming
+        # playbooks dynamically from uses_vars.
         try:
-            # The hostname must change before the playbooks run, so the CLI
-            # auto-apply is suppressed here and the explicit chain keeps the
-            # ordering: set -> hostname -> dynamic apply.
+            # Auto-apply is suppressed so the CLI's hostname step and the
+            # dynamic apply both run in this exec modal job: set -> apply.
             if action == 'remove':
                 set_cmd = ('symbios-settings-dns.sh remove --no-apply'
                            f' {hsts_flag}')
@@ -105,7 +101,7 @@ def settings_dns(request):
             post_apply_cmd = _APPLY_CMD
             if hsts_preload and action != 'remove':
                 post_apply_cmd += ' && symbios-hsts-preload.sh configure'
-            cmd = f'{set_cmd} && {_HOSTNAME_CMD} && {post_apply_cmd}'
+            cmd = f'{set_cmd} && {post_apply_cmd}'
             if is_ajax:
                 job_id = create_job(cmd, timeout=3600, stdin_data=stdin_data)
                 resp = {'ok': True, 'job': job_id,
@@ -122,7 +118,7 @@ def settings_dns(request):
                 return redirect('settings_dns')
             messages.success(request, message)
             messages.info(request, 'Applying DNS playbooks in the background...')
-            create_job(f'{_HOSTNAME_CMD} && {post_apply_cmd}', timeout=3600)
+            create_job(post_apply_cmd, timeout=3600)
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'ok': False, 'error': str(e)}, status=500)

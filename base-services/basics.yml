@@ -363,10 +363,22 @@
         path: /etc/ssh/sshd_config.d/rename_user.conf
         state: absent
 
-    - name: Set a hostname
-      ansible.builtin.hostname:
-        name: "SymbiOS"
-    
+    # base_domain is authoritative for the system hostname. Apply it before
+    # the rest of the playbook so a later failure cannot leave the hardcoded
+    # image name behind; the script is idempotent and safe on fresh installs.
+    - name: Set system hostname from base_domain
+      ansible.builtin.command: "{{ git_root }}/scripts/symbios-set-hostname.sh"
+      register: hostname_result
+      changed_when: "'hostname-changed:' in hostname_result.stdout"
+      when: nocontainer.stat.exists == true
+
+    - name: Show hostname result
+      ansible.builtin.debug:
+        var: hostname_result.stdout_lines
+      when:
+        - nocontainer.stat.exists == true
+        - hostname_result.stdout | length > 0
+
     - name: Prefer ipv4 over ipv6 to avoid problems and waiting times
       ansible.builtin.lineinfile:
         path: /etc/gai.conf
@@ -1036,19 +1048,6 @@
             group: root
           when: not yq_binary.stat.exists
       when: nocontainer.stat.exists == true
-
-    - name: Set system hostname from base_domain
-      ansible.builtin.command: "{{ git_root }}/scripts/symbios-set-hostname.sh"
-      register: hostname_result
-      changed_when: "'hostname-changed:' in hostname_result.stdout"
-      when: nocontainer.stat.exists == true
-
-    - name: Show hostname result
-      ansible.builtin.debug:
-        var: hostname_result.stdout_lines
-      when:
-        - nocontainer.stat.exists == true
-        - hostname_result.stdout | length > 0
 
     - name: Encrypted fast swap on the data disk
       block:

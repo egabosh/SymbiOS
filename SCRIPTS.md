@@ -281,7 +281,10 @@ symbios-settings-dns.sh remove [--check]
 ```
 
 Host normalization (lowercase, `.dedyn.io` suffix) and FQDN validation
-live here; `ddns_apikey` only via `--json-stdin`.
+live here; `ddns_apikey` only via `--json-stdin`. A real `set` also applies
+`base_domain` as the system hostname via `symbios-set-hostname.sh`; `remove`
+leaves the current hostname (the `symbios.local` placeholder is not a FQDN)
+and `--check` never touches it.
 
 ### 3.13 `symbios-settings-security.sh`
 
