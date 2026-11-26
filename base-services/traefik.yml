@@ -382,7 +382,7 @@
         marker: "# {mark} ANSIBLE MANAGED BLOCK"
         block: |
           SHELL=/bin/bash
-          0 * * * * root PATH={{ git_root }}/scripts:$PATH && [[ -x {{ git_root }}/scripts/symbios-traefik-stats.sh ]] && symbios-traefik-stats.sh
+          0 * * * * root PATH={{ git_root }}/scripts:$PATH && [[ -x {{ git_root }}/scripts/symbios-traefik-stats.sh ]] && symbios-traefik-stats.sh >/dev/null 2>&1
         backup: yes
 
     - name: Ensure ACME account directories exist
