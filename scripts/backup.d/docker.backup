@@ -12,9 +12,18 @@ mkdir -p $g_backupdir
 for g_container_id in $g_container
 do
   # Get database credentials from container environment
-  g_db=$(docker exec $g_container_id env | grep -E "MARIADB_DATABASE|MYSQL_DATABASE" | tail -n1 | cut -d"=" -f2)
-  g_pwd=$(docker exec $g_container_id env | grep -E "MARIADB_PASSWORD|MYSQL_PASSWORD" | tail -n1 | cut -d"=" -f2)
-  g_usr=$(docker exec $g_container_id env | grep -E "MARIADB_USER|MYSQL_USER" | tail -n1 | cut -d"=" -f2)
+  g_db=$(docker exec $g_container_id env | grep -E "MARIADB_DATABASE|MYSQL_DATABASE" | tail -n1 | cut -d"=" -f2-)
+  g_pwd=$(docker exec $g_container_id env | grep -E "MARIADB_PASSWORD|MYSQL_PASSWORD" | tail -n1 | cut -d"=" -f2-)
+  g_usr=$(docker exec $g_container_id env | grep -E "MARIADB_USER|MYSQL_USER" | tail -n1 | cut -d"=" -f2-)
+
+  # Containers with only a root password (kodidb for example) have no single
+  # application database here. They are covered by their own backup.d module,
+  # which enumerates every database with the root credentials.
+  if [[ -z "$g_db" || -z "$g_usr" || -z "$g_pwd" ]]
+  then
+    g_echo "Skipping $g_container_id: no application DB credentials; a dedicated backup module is required."
+    continue
+  fi
 
   # Determine the dump command available in the container
   g_dumpcmd=""
@@ -41,8 +50,11 @@ do
   printf '[client]\npassword=%s\n' "$g_pwd" \
     | docker exec -i "$g_container_id" sh -c 'umask 077; cat > /tmp/.symbios-db.cnf'
 
-  if ! docker exec "$g_container_id" "$g_dumpcmd" --no-tablespaces \
-        --defaults-extra-file=/tmp/.symbios-db.cnf -u "$g_usr" "$g_db" \
+  # MariaDB client tools only accept --defaults-extra-file as the first
+  # option; anywhere else it is rejected as an unknown variable.
+  if ! docker exec "$g_container_id" "$g_dumpcmd" \
+        --defaults-extra-file=/tmp/.symbios-db.cnf --no-tablespaces \
+        -u "$g_usr" "$g_db" \
         2>${g_tmp}/dberr | gzip > $g_backupdir/$g_container_id-$g_db-$g_timestamp.sql.gz
   then
     g_echo_error "DB backup of $g_db failed: $(cat ${g_tmp}/dberr)"

@@ -417,9 +417,12 @@
 
     # sysctl.d instead of /etc/sysctl.conf: on Debian 13 nothing reads the
     # legacy file at boot anymore, systemd-sysctl only picks up sysctl.d
+    # A small non-zero value lets the kernel swap cold anonymous pages under
+    # pressure instead of dropping file cache and thrashing, or hitting OOM.
+    # Zero keeps the swapfile unused until memory is already exhausted.
     - ansible.posix.sysctl:
         name: vm.swappiness
-        value: '0'
+        value: '10'
         state: present
         sysctl_file: /etc/sysctl.d/90-symbios.conf
       when: nocontainer.stat.exists == true
@@ -492,6 +495,7 @@
         dest: /etc/systemd/system.conf.d/50-symbios-watchdog.conf
         content: |
           # Managed by SymbiOS - overrides shorter distro watchdog defaults.
+          [Manager]
           RuntimeWatchdogSec=5min
         owner: root
         group: root

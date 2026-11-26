@@ -68,6 +68,33 @@ g_all-to-syslog
 g_echo_ok "Starting $0"
 set -o pipefail
 
+# Btrfs scrub and device replace are long-lived kernel operations. They are
+# started by the update phase, but can still be running in the next night's
+# maintenance window. Stacking the nightly backup on top of them saturates the
+# USB bridge and can starve systemd's watchdog, so skip this window as a whole
+# instead of running the phases in parallel with storage maintenance.
+function f_storage_maintenance_active {
+  local f_mnt f_state
+  for f_mnt in $(awk '$3 == "btrfs" {print $2}' /proc/mounts 2>/dev/null | sort -u)
+  do
+    f_state=$(btrfs scrub status "$f_mnt" 2>/dev/null | sed -n 's/^[[:space:]]*Status:[[:space:]]*//p' | head -n 1)
+    if [[ "$f_state" == "running" ]]
+    then
+      return 0
+    fi
+  done
+  # The replace kernel thread stays present for the whole device replace and
+  # does not need a blocking `btrfs replace status` call to be detected.
+  pgrep -x btrfs-devrepl >/dev/null 2>&1 && return 0
+  return 1
+}
+
+if f_storage_maintenance_active
+then
+  g_echo_error "Btrfs scrub or device replace is still active - skipping backup and updates to avoid parallel disk load."
+  exit 1
+fi
+
 g_maintenance_rc=0
 
 # Phase 1: backup only while explicitly enabled (default off, needs space).

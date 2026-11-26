@@ -617,8 +617,10 @@
                 | docker exec -i symbios-wordpress-db sh -c \
                     'umask 077; cat > /tmp/.symbios-db.cnf'
               unset WORDPRESS_DB_ROOT_PASSWORD
+              # MariaDB client tools require --defaults-extra-file as the
+              # first option; elsewhere it is rejected as an unknown variable.
               if ! docker exec symbios-wordpress-db sh -c \
-                    'exec /usr/bin/mariadb-dump --no-tablespaces --defaults-extra-file=/tmp/.symbios-db.cnf -uroot --single-transaction --quick --routines --triggers --events --all-databases' \
+                    'exec /usr/bin/mariadb-dump --defaults-extra-file=/tmp/.symbios-db.cnf --no-tablespaces -uroot --single-transaction --quick --routines --triggers --events --all-databases' \
                     2>${g_tmp}/dberr | gzip > $g_backupdir/symbios-wordpress-db-all-$g_timestamp.sql.gz
               then
                 g_echo_error "WordPress DB backup failed: $(cat ${g_tmp}/dberr)"
