@@ -35,11 +35,11 @@
 #     - traefik_default_access
 #     - traefik_service_access
 #   name: Open WebUI
-#   short_description: Deploy the Open WebUI with SearXNG
-#   description: Deploys Open WebUI (web interface for local LLMs) with SearXNG for web search. Exposed via Traefik.
+#   short_description: Deploy Open WebUI with SearXNG and Open Terminal
+#   description: Deploys Open WebUI (web interface for local LLMs) with SearXNG for web search and an internal Open Terminal machine for file generation. Exposed via Traefik.
 #   url: "https://ai.{{ base_domain }}"
 #   author: Oliver Bohlen
-#   version: '1.0'
+#   version: '1.1'
 #   license: GPLv3
 #   copyright: Copyright (c) 2026, Oliver Bohlen
 #   min_ansible_version: '2.11'
@@ -57,15 +57,22 @@
 #       type: docker
 #       compose_file: /symbios/services/openwebui/docker-compose.yml
 #       status: test -d /symbios/services/openwebui || exit 2; docker compose -f /symbios/services/openwebui/docker-compose.yml ps | grep -q "Up "
+#     - name: open-terminal
+#       type: docker
+#       compose_file: /symbios/services/openwebui/docker-compose.yml
+#       status: test -d /symbios/services/openwebui || exit 2; docker compose -f /symbios/services/openwebui/docker-compose.yml ps | grep -q "open-terminal.*Up "
 #     logs:
 #     - name: openwebui
 #       command: docker compose -f /symbios/services/openwebui/docker-compose.yml logs -f --tail=100
+#     - name: open-terminal
+#       command: docker compose -f /symbios/services/openwebui/docker-compose.yml logs -f open-terminal --tail=100
 #   uninstall:
 #     stop: docker compose -f /symbios/services/openwebui/docker-compose.yml down
 #     program_paths:
 #       - /symbios/services/openwebui/
 #       - /symbios/base-services/traefik/providers/openwebui.yml
 #       - /symbios/runchecks.d/symbios-healthcheck-openwebui.check
+#       - /symbios/runchecks.d/symbios-healthcheck-open-terminal.check
 #     ldap_groups:
 #       - openwebui-users
 #       - openwebui-admins
@@ -88,8 +95,21 @@
       - ai_apikey
       - ai_stt_key
       - ai_tts_key
+      - openwebui_terminal_apikey
 
   pre_tasks:
+    - name: Ensure Open Terminal API key exists in the central store
+      ansible.builtin.shell: |
+        "{{ git_root }}/scripts/symbios-secret.sh" init >/dev/null
+        if ! "{{ git_root }}/scripts/symbios-secret.sh" list 2>/dev/null | grep -qx openwebui_terminal_apikey
+        then
+          openssl rand -hex 32 | "{{ git_root }}/scripts/symbios-secret.sh" put openwebui_terminal_apikey >/dev/null
+          echo created
+        fi
+      register: openwebui_terminal_secret_result
+      changed_when: "'created' in openwebui_terminal_secret_result.stdout"
+      no_log: true
+
     - name: Resolve secrets from the central store
       ansible.builtin.include_tasks: ../shared-tasks/secret-resolve.yml
 
@@ -176,6 +196,20 @@
         group: root
       notify: Restart openwebui
 
+    # The terminal container reads the key from a bind mount, so it never
+    # appears in `docker inspect` or in the process environment. 0444 is
+    # intentional: the image user is uid 1000, while the parent directory
+    # stays root:docker 0550.
+    - name: Deploy Open Terminal API key file
+      ansible.builtin.copy:
+        dest: /symbios/services/openwebui/open-terminal-api-key
+        content: "{{ openwebui_terminal_apikey }}"
+        owner: root
+        group: root
+        mode: '0444'
+      no_log: true
+      notify: Restart openwebui
+
     # Rendered AFTER the secret exists, so OAUTH_CLIENT_SECRET always holds
     # the real password (rendering before generation baked "placeholder" in).
     - name: /symbios/services/openwebui/docker-compose.yml Container Configuration
@@ -243,6 +277,14 @@
             DB="/symbios/services/openwebui/openwebui-data/webui.db"
             while [ ! -f "$DB" ]; do sleep 1; done
             until sqlite3 "$DB" ".tables" 2>/dev/null | grep -q api_key; do sleep 2; done
+          '
+      changed_when: false
+
+    - name: Wait for OpenWebUI container to accept docker exec
+      ansible.builtin.shell:
+        cmd: >
+          timeout 60 bash -c '
+            until docker exec openwebui true 2>/dev/null; do sleep 2; done
           '
       changed_when: false
 
@@ -329,6 +371,15 @@
       no_log: true
       when: (ai_tika_url | default('', true) | length > 0) or (ai_searxng_url | default('', true) | length > 0)
 
+    - name: Register Open Terminal machine and default model metadata
+      ansible.builtin.shell: "{{ git_root }}/scripts/symbios-openwebui-db.sh sync-terminal"
+      environment:
+        OWUI_TERMINAL_KEY_FILE: /symbios/services/openwebui/open-terminal-api-key
+      register: terminal_db_result
+      changed_when: "'changed' in terminal_db_result.stdout"
+      notify: Restart openwebui
+      no_log: true
+
     - name: Flush handlers - restart OpenWebUI to pick up DB config
       ansible.builtin.meta: flush_handlers
 
@@ -337,6 +388,16 @@
       include_tasks: ../shared-tasks/runcheck.yml
       vars:
         healthcheck_url: "https://ai.{{ base_domain }}"
+
+    - name: Deploy Open Terminal healthcheck
+      include_tasks: ../shared-tasks/runcheck-docker.yml
+      vars:
+        service_name: open-terminal
+        check_desc: "Verifies that the internal Open Terminal API answers /health."
+        check_error: "Open Terminal healthcheck failed: API unavailable."
+        check_command: >-
+          docker exec open-terminal curl -fsS http://127.0.0.1:8000/health
+          | jq -e '.status == "ok"' >/dev/null
 
     - name: Ensure openwebui is running
       include_tasks: ../shared-tasks/docker-start.yml

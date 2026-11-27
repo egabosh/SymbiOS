@@ -678,7 +678,7 @@ texts opportunistically).
 | `symbios-reactivate-swap.sh` | Reactivate encrypted swap without reboot (hardening.yml) | no args |
 | `symbios-home-assistant-http.sh` | HA .storage/http reverse-proxy settings (home-assistant.yml) | `<traefik_ip>` |
 | `symbios-nextcloud-external-storage.sh` | Nextcloud external media mounts via occ (nextcloud.yml) | `[--no-previews]` |
-| `symbios-openwebui-db.sh` | OpenWebUI webui.db maintenance: api-key, workflows, backend syncs | `<api-key\|patch-comfyui\|workflows\|sync-openai\|sync-speech\|sync-image\|sync-retrieval>` |
+| `symbios-openwebui-db.sh` | OpenWebUI webui.db maintenance: api-key, workflows, backend syncs | `<api-key\|patch-comfyui\|workflows\|sync-openai\|sync-speech\|sync-image\|sync-retrieval\|sync-terminal>` |
 | `symbios-openwrt-cleanup.sh` | Remove OpenWrt host bridges + helper units (uninstall command) | no args |
 | `symbios-openwrt-image.sh` | Build OpenWrt image (patch) + define libvirt domain | `<patch\|define> --root ...` |
 | `symbios-ldap-offline-acl.sh` | LDAP offline sftp-reader ACL import + bind account | `<rewrite\|add-reader> --ldif/--basedn ...` |

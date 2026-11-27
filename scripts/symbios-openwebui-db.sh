@@ -15,6 +15,7 @@
 #   sync-speech      STT/TTS backend rows (prints changed on drift)
 #   sync-image       ComfyUI image backend rows (prints changed on drift)
 #   sync-retrieval   Tika/SearXNG rows (prints changed on drift)
+#   sync-terminal    Open Terminal machine + default model metadata (OWUI_TERMINAL_KEY_FILE)
 
 function f_usage {
   cat << EOF
@@ -27,6 +28,8 @@ Usage: $(basename "$0") <subcommand>
   sync-speech      Sync STT/TTS rows (OWUI_STT_URL/KEY/MODEL, OWUI_TTS_URL/KEY/MODEL)
   sync-image       Sync image backend rows (OWUI_IMG_URL/MODEL/EDIT_URL/EDIT_MODEL)
   sync-retrieval   Sync Tika/SearXNG rows (OWUI_TIKA_URL, OWUI_SEARXNG_URL)
+  sync-terminal    Sync Open Terminal machine connection and model defaults
+                   (OWUI_TERMINAL_KEY_FILE points to a root-readable key file)
 
 Config values travel via OWUI_* environment, never argv. Must run in
 /symbios/services/openwebui (docker compose context).
@@ -91,7 +94,9 @@ function f_owui_api_key {
 function f_owui_patch_comfyui {
   local f_cid
   set -e
-  f_cid=$(docker compose ps -q 2>/dev/null | head -1)
+  # The compose stack now owns more than one container; select OpenWebUI by
+  # service name instead of relying on ps output order.
+  f_cid=$(docker compose ps -q openwebui 2>/dev/null | head -1)
   [[ -z "${f_cid}" ]] && return 0
   if docker exec "${f_cid}" grep -q "payload.negative_prompt is not None" \
     /app/backend/open_webui/utils/images/comfyui.py 2>/dev/null
@@ -258,6 +263,117 @@ function f_owui_sync_retrieval {
   echo "${f_changed}"
 }
 
+# Register the internal Open Terminal machine and give every model a default
+# machine. The API key is read from a transient host file, never from argv.
+function f_owui_sync_terminal {
+  local f_key_file="${OWUI_TERMINAL_KEY_FILE:-}"
+  if [[ -z "${f_key_file}" || ! -s "${f_key_file}" ]]
+  then
+    g_echo_error "OWUI_TERMINAL_KEY_FILE must point to a non-empty key file"
+    return 1
+  fi
+
+  OWUI_DB="${g_db}" OWUI_TERMINAL_KEY_FILE="${f_key_file}" python3 <<'PYEOF'
+import json
+import os
+import sqlite3
+import time
+
+DB = os.environ["OWUI_DB"]
+KEY_FILE = os.environ["OWUI_TERMINAL_KEY_FILE"]
+MACHINE_ID = "open-terminal"
+
+with open(KEY_FILE, encoding="ascii") as source:
+    api_key = source.read().strip()
+if not api_key:
+    raise SystemExit("Open Terminal API key file is empty")
+
+desired_connection = {
+    "id": MACHINE_ID,
+    "name": "Open Terminal",
+    "enabled": True,
+    "url": "http://open-terminal:8000",
+    "path": "/openapi.json",
+    "key": api_key,
+    "auth_type": "bearer",
+    "forward_cookies": False,
+    "service": "open_terminal",
+    "config": {
+        "access_grants": [
+            {"principal_type": "user", "principal_id": "*", "permission": "read"}
+        ],
+        "chat_uploads": "filesystem",
+        "working_directory_context": True,
+        "user_shell_tools": "auto",
+    },
+}
+
+
+def load_json(db, key, default):
+    row = db.execute("SELECT value FROM config WHERE key = ?", (key,)).fetchone()
+    if not row or row[0] is None:
+        return default
+    value = row[0]
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return default
+
+
+db = sqlite3.connect(DB)
+connections = load_json(db, "machines.connections", [])
+if not isinstance(connections, list):
+    connections = []
+
+metadata = load_json(db, "models.default_metadata", {})
+if not isinstance(metadata, dict):
+    metadata = {}
+capabilities = dict(metadata.get("capabilities") or {})
+capabilities["terminal"] = True
+metadata["capabilities"] = capabilities
+metadata["machineId"] = MACHINE_ID
+
+changed = False
+for index, connection in enumerate(connections):
+    if isinstance(connection, dict) and connection.get("id") == MACHINE_ID:
+        if connection != desired_connection:
+            connections[index] = desired_connection
+            changed = True
+        break
+else:
+    connections.append(desired_connection)
+    changed = True
+
+# Keep the stored metadata compact like the other OpenWebUI defaults.
+def encode(value):
+    return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+stored_metadata = load_json(db, "models.default_metadata", None)
+if stored_metadata != metadata:
+    changed = True
+
+with db:
+    if changed:
+        now = int(time.time() * 1000)
+        for key, value in (
+            ("machines.connections", connections),
+            ("models.default_metadata", metadata),
+        ):
+            db.execute(
+                "INSERT INTO config (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+                "updated_at = excluded.updated_at",
+                (key, encode(value), now),
+            )
+db.close()
+
+if changed:
+    print("changed")
+PYEOF
+}
+
 # Main: dispatch subcommand (DB path fixed, values via OWUI_* environment)
 f_cmd="${1:-}"
 case "${f_cmd}" in
@@ -281,6 +397,9 @@ case "${f_cmd}" in
     ;;
   sync-retrieval)
     f_owui_sync_retrieval
+    ;;
+  sync-terminal)
+    f_owui_sync_terminal
     ;;
   *)
     f_usage >&2

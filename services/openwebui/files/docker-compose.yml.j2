@@ -88,7 +88,7 @@ services:
 {% endif %}
       - ENABLE_OPENAI_API=true
       - BYPASS_MODEL_ACCESS_CONTROL=true
-      - DEFAULT_MODEL_METADATA={"capabilities":{"vision":true,"web_search":true,"image_generation":true,"builtin_tools":true}}
+      - DEFAULT_MODEL_METADATA={"capabilities":{"vision":true,"web_search":true,"image_generation":true,"builtin_tools":true,"terminal":true},"machineId":"open-terminal"}
       #- DEFAULT_MODEL_PARAMS={"function_calling":"native"}
       - DEFAULT_USER_SYSTEM_PROMPT=Antworte IMMER ausschließlich auf Deutsch oder Englisch. Schreibe niemals in einer anderen Sprache außer es ist ausdrücklich erwünscht. Sei präzise und halte Antworten kurz, es sei denn, der Nutzer wünscht detaillierte Erklärungen.
       - DEFAULT_MODEL=llamacpp-default
@@ -131,6 +131,25 @@ services:
     networks:
       openwebui--network: {}
       symbios_services: null
+
+  # File-producing backend for OpenWebUI machines. No host port is published:
+  # only OpenWebUI reaches the API over the internal compose network.
+  open-terminal:
+    image: ghcr.io/open-webui/open-terminal:latest
+    container_name: open-terminal
+    restart: unless-stopped
+    init: true
+    environment:
+      - OPEN_TERMINAL_API_KEY_FILE=/run/secrets/open-terminal-api-key
+      - OPEN_TERMINAL_MULTI_USER=true
+      - OPEN_TERMINAL_CORS_ALLOWED_ORIGINS=https://ai.{{ base_domain }}
+      - OPEN_TERMINAL_EXECUTE_TIMEOUT=120
+      - OPEN_TERMINAL_INFO=Create PDFs with LibreOffice (preferred) or Python, then call display_file for every deliverable.
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./open-terminal-api-key:/run/secrets/open-terminal-api-key:ro
+    networks:
+      openwebui--network: {}
 
 networks:
   openwebui--network:

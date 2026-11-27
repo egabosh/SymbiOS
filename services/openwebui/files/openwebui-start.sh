@@ -7,6 +7,8 @@
 #    so the model always sees the finished transcript. The wait has to live in
 #    process_chat_payload: the app sends a session_id, which disables the
 #    separate file-context handler.
+# 3. Chats inherit the machine configured on the model when they have no
+#    machine field, so terminal tools work even if the client never selected one.
 set -euo pipefail
 
 if ! python3 - <<'PY'
@@ -101,6 +103,73 @@ if new_marker not in source:
 if changed:
     middleware_py.write_text(source)
     print('openwebui-patch: chat waits for transcription')
+
+# Chats must inherit the machine configured on the model. The web UI can lose
+# the model default when its machine list loads late, and saved chats created
+# before that default existed have no machine field at all. Applying it on the
+# server keeps terminal tools available for both.
+main_py = Path('/app/backend/open_webui/main.py')
+main_source = main_py.read_text()
+old_marker = '# SymbiOS: default new chats to the model machine'
+machine_default_marker = '# SymbiOS: default chats to the model machine'
+if old_marker in main_source:
+    anchor = '    folder_defaults = {}\n'
+    start = main_source.index(old_marker)
+    end = main_source.find(anchor, start)
+    if end == -1:
+        sys.exit('openwebui-patch: old machine default block has no end')
+    main_source = main_source[:start] + main_source[end:]
+if machine_default_marker not in main_source:
+    anchor = '    folder_defaults = {}\n'
+    if anchor not in main_source:
+        sys.exit('openwebui-patch: chat folder defaults anchor not found')
+    block = """    # SymbiOS: default chats to the model machine
+    # A chat that explicitly cleared its machine keeps that choice; a chat that
+    # never had the field gets the model's default, however the client selected it.
+    if ENABLE_TOOL_SERVERS and 'machine_id' not in form_data:
+        chat_id = form_data.get('chat_id')
+        apply_machine_default = not chat_id
+        if chat_id:
+            try:
+                chat_item = await Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+                apply_machine_default = (
+                    chat_item is not None and 'machine_id' not in (chat_item.chat or {})
+                )
+            except Exception:
+                apply_machine_default = False
+        if apply_machine_default:
+            default_info = (request.app.state.MODELS.get(model_id) or {}).get('info') or {}
+            default_meta = default_info.get('meta') or {}
+            default_machine = default_meta.get('machineId') or default_meta.get('terminalId')
+            if default_machine and await can_use_machine(user, default_machine, request):
+                form_data['machine_id'] = default_machine
+
+"""
+    main_source = main_source.replace(anchor, block + anchor, 1)
+    main_py.write_text(main_source)
+    print('openwebui-patch: chats inherit the model machine')
+
+# Clients that speak the newer terminal API call /api/v1/terminals/ while this
+# Open WebUI release still mounts its machines at /api/v1/machines. Mounting the
+# same router under both prefixes keeps those clients able to discover and use
+# the configured terminal without a second connection.
+compat_marker = '# SymbiOS: Conduit terminal API compatibility'
+if compat_marker not in main_source:
+    machine_route = "app.include_router(machines.router, prefix='/api/v1/machines', tags=['machines'])\n"
+    if machine_route not in main_source:
+        sys.exit('openwebui-patch: machines router mount not found')
+    compat_route = (
+        compat_marker + "\n"
+        "app.include_router(\n"
+        "    machines.router,\n"
+        "    prefix='/api/v1/terminals',\n"
+        "    tags=['terminals'],\n"
+        "    include_in_schema=False,\n"
+        ")\n"
+    )
+    main_source = main_source.replace(machine_route, machine_route + compat_route, 1)
+    main_py.write_text(main_source)
+    print('openwebui-patch: terminal API alias mounted')
 PY
 then
   echo "openwebui-patch: WARNING: patch failed, continuing unpatched" >&2
