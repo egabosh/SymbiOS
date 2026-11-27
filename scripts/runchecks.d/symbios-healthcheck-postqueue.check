@@ -1,0 +1,69 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="Mail Queue"
+CHECK_DESC="Checks whether postfix messages are stuck in the queue."
+CHECK_DETAIL="Counts queued messages in incoming, active, deferred and hold.|Keeps the first-seen timestamp in the config dir.|Warns after 30 minutes and reports an error after 4 hours.|A short backlog is normal; a persistent one usually means the SMTP relay is unreachable."
+
+# Report a mail queue that does not drain. Counting queue files is much
+# cheaper than postqueue -p on hosts with a large deferred backlog.
+f_check_cache "symbios-healthcheck-postqueue" || return 2>/dev/null || true
+
+# Persistent state survives the five-minute runchecks cycles and a reboot.
+if [[ -n "${g_config_dir:-}" && -d "${g_config_dir}" ]]
+then
+  g_postqueue_state_dir="${g_config_dir}/runchecks"
+else
+  g_postqueue_state_dir="${g_tmp}"
+fi
+mkdir -p "$g_postqueue_state_dir" 2>/dev/null || true
+g_postqueue_state="${g_postqueue_state_dir}/postqueue-first-seen"
+
+# Count only the four directories that hold queued messages. Bounce and defer
+# records are delivery status, not messages, and are ignored here.
+g_postqueue_count=0
+for g_postqueue_dir in /var/spool/postfix/incoming /var/spool/postfix/active /var/spool/postfix/deferred /var/spool/postfix/hold
+do
+  if [[ -d "$g_postqueue_dir" ]]
+  then
+    g_postqueue_found=$(find "$g_postqueue_dir" -type f 2>/dev/null | wc -l)
+    g_postqueue_count=$(( g_postqueue_count + g_postqueue_found ))
+  fi
+done
+
+# An empty queue clears the marker so a later backlog starts a new timer.
+if [[ "$g_postqueue_count" -eq 0 ]]
+then
+  rm -f "$g_postqueue_state" 2>/dev/null || true
+  return 0
+fi
+
+# Start the timer on the first cycle that sees a non-empty queue.
+g_postqueue_now=$(date +%s)
+g_postqueue_first=""
+if [[ -r "$g_postqueue_state" ]]
+then
+  read -r g_postqueue_first < "$g_postqueue_state" 2>/dev/null || g_postqueue_first=""
+fi
+# An unreadable, empty or future timestamp means the timer starts now.
+g_postqueue_valid=0
+if [[ "$g_postqueue_first" =~ ^[0-9]+$ ]] \
+  && (( g_postqueue_first > 0 && g_postqueue_first <= g_postqueue_now ))
+then
+  g_postqueue_valid=1
+fi
+if [[ "$g_postqueue_valid" -eq 0 ]]
+then
+  g_postqueue_first="$g_postqueue_now"
+  printf '%s\n' "$g_postqueue_first" > "$g_postqueue_state" 2>/dev/null || true
+fi
+g_postqueue_age=$(( g_postqueue_now - g_postqueue_first ))
+g_postqueue_minutes=$(( g_postqueue_age / 60 ))
+
+# Warn after 30 minutes, escalate after four hours. runchecks.sh de-duplicates
+# repeated notifications, so the message stays visible without spamming.
+if (( g_postqueue_age >= 14400 ))
+then
+  g_echo_error "Mail queue: ${g_postqueue_count} messages queued for ${g_postqueue_minutes} min"
+elif (( g_postqueue_age >= 1800 ))
+then
+  g_echo_warn "Mail queue: ${g_postqueue_count} messages queued for ${g_postqueue_minutes} min"
+fi
