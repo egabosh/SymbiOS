@@ -93,7 +93,10 @@
 #     Snes9x package: that package advertises HD Mode 7 options but ignores
 #     them, while snes9x2010 really renders 4x_hv with stable bilinear
 #     filtering. The retired package/addon is removed and its saves are
-#     carried over, so only one client claims .sfc.
+#     carried over, so only one client claims .sfc. NES and Mega Drive use the
+#     cores' Blargg NTSC/RGB filters and correct pixel aspects instead of the
+#     softer defaults; Game Boy games get an automatic colour palette with
+#     GBC-only colour correction.
 #     The software rasterizer is CPU bound and cannot be tuned around: a
 #     Raspberry Pi 5 needs ~40 ms per frame and therefore emulates at ~0.8 of
 #     real time (measured over the audio clock and the frame rate), while
@@ -1496,6 +1499,9 @@
         - game.libretro.mupen64plus-nx
         - game.libretro.dosbox-pure
         - game.libretro.snes9x2010
+        - game.libretro.nestopia
+        - game.libretro.genplus
+        - game.libretro.gambatte
       loop_control:
         label: "{{ item }}"
       when:
@@ -1546,6 +1552,58 @@
       when:
         - kodi_roms_configured
         - kodi_game_cores_available | selectattr('addon', 'equalto', 'game.libretro.snes9x2010') | list | length > 0
+
+    # NES, Mega Drive and Game Boy keep the sharp NTSC/RGB signal instead of
+    # the cores' softer defaults. The Blargg filter removes composite colour
+    # bleed, the aspect options correct the pixel shape, and the Game Boy
+    # colour settings use the best available palette while keeping the
+    # hardware-accurate colour correction limited to GBC content. All three
+    # addons start without a settings.xml, so only the pinned values are
+    # written here; the wrappers fill in the rest from their own definitions.
+    - name: Use a sharp NTSC filter and pixel aspect for NES
+      ansible.builtin.copy:
+        dest: /home/kodi/.kodi/userdata/addon_data/game.libretro.nestopia/settings.xml
+        owner: kodi
+        group: kodi
+        mode: '0600'
+        content: |
+          <settings version="2">
+              <setting id="nestopia_blargg_ntsc_filter">rgb</setting>
+              <setting id="nestopia_aspect">ntsc</setting>
+          </settings>
+      when:
+        - kodi_roms_configured
+        - kodi_game_cores_available | selectattr('addon', 'equalto', 'game.libretro.nestopia') | list | length > 0
+
+    - name: Use a sharp NTSC filter and pixel aspect for Mega Drive
+      ansible.builtin.copy:
+        dest: /home/kodi/.kodi/userdata/addon_data/game.libretro.genplus/settings.xml
+        owner: kodi
+        group: kodi
+        mode: '0600'
+        content: |
+          <settings version="2">
+              <setting id="genesis_plus_gx_blargg_ntsc_filter">rgb</setting>
+              <setting id="genesis_plus_gx_aspect_ratio">NTSC PAR</setting>
+          </settings>
+      when:
+        - kodi_roms_configured
+        - kodi_game_cores_available | selectattr('addon', 'equalto', 'game.libretro.genplus') | list | length > 0
+
+    - name: Use colourised palettes for Game Boy games
+      ansible.builtin.copy:
+        dest: /home/kodi/.kodi/userdata/addon_data/game.libretro.gambatte/settings.xml
+        owner: kodi
+        group: kodi
+        mode: '0600'
+        content: |
+          <settings version="2">
+              <setting id="gambatte_gb_colorization">auto</setting>
+              <setting id="gambatte_gbc_color_correction">GBC only</setting>
+          </settings>
+      when:
+        - kodi_roms_configured
+        - kodi_game_cores_available | selectattr('addon', 'equalto', 'game.libretro.gambatte') | list | length > 0
 
     # DOSBox Pure ends a finished game in its own start menu and waits there,
     # but that menu can only be driven by a gamepad or by a mouse with absolute
