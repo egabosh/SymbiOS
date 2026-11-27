@@ -7,17 +7,6 @@
 # service to synchronise them through a file-based request queue. No GUI
 # interaction and no password on the command line is needed.
 
-g_secret_files=()
-
-function f_secret_cleanup {
-  local f_file
-  for f_file in "${g_secret_files[@]}"
-  do
-    [[ -e "$f_file" ]] && shred -u "$f_file" 2>/dev/null || true
-  done
-}
-trap f_secret_cleanup EXIT
-
 function f_secret_file {
   local f_prefix="$1"
   local f_target="$2"
@@ -107,6 +96,20 @@ done
 [[ -s "$g_data_dir/data.json" ]] || { g_echo_error "Jellyfin addon is not authenticated yet"; exit 1; }
 
 g_lockfile
+# gaboshlib's lock helper replaces the EXIT trap, so register the lib's shared
+# secret cleanup only after it has run. The lib owns g_secret_files.
+f_secret_cleanup_register
+
+# The native path replacements are refreshed on every managed run. A "stream://"
+# target marks Jellyfin downloads as stream-only: no local sshfs mount exists,
+# so the addon must write a plugin:// playback URL into Kodi's database.
+f_secret_file data g_data_json
+jq --arg f_movies "${g_media_root}/movies" \
+  --arg f_tvshows "${g_media_root}/tvshows" \
+  --arg f_audio "${g_media_root}/audio" \
+  '.Servers[0].paths = {"/media/movies": $f_movies, "/media/tvshows": $f_tvshows, "/media/audio": $f_audio, "/media/downloads": "stream://jellyfin"}' \
+  "$g_data_dir/data.json" > "$g_data_json" || exit 1
+install -o kodi -g kodi -m 0600 "$g_data_json" "$g_data_dir/data.json" || exit 1
 
 # The state file is written once by the first sync. Later reapplies must not
 # start another full sync of a large music library.
@@ -133,19 +136,6 @@ g_uid="$(jq -er '.Servers[0].UserId // empty' "$g_data_dir/data.json")" || exit 
 g_token="$(jq -er '.Servers[0].AccessToken // empty' "$g_data_dir/data.json")" || exit 1
 [[ -n "$g_server" && -n "$g_uid" && -n "$g_token" ]] || { g_echo_error "Incomplete Jellyfin addon state"; exit 1; }
 g_server="${g_server%/}"
-
-f_secret_file data g_data_json
-
-# Native mode writes the Jellyfin server's /media/* paths into the Kodi
-# database. The addon replaces them with the local sshfs paths configured here
-# before a file is opened; without this mapping the entries show up but cannot
-# be played. jq writes through a transient file so the token never enters argv.
-jq --arg f_movies "${g_media_root}/movies" \
-  --arg f_tvshows "${g_media_root}/tvshows" \
-  --arg f_audio "${g_media_root}/audio" \
-  '.Servers[0].paths = {"/media/movies": $f_movies, "/media/tvshows": $f_tvshows, "/media/audio": $f_audio}' \
-  "$g_data_dir/data.json" > "$g_data_json" || exit 1
-install -o kodi -g kodi -m 0600 "$g_data_json" "$g_data_dir/data.json" || exit 1
 
 f_secret_file auth g_auth_hdr
 printf 'Authorization: MediaBrowser Client="SymbiOS", Device="Kodi Library Setup", DeviceId="symbios-kodi-library", Version="1.0", Token="%s"\n' \

@@ -1837,11 +1837,10 @@
     # enabled: no setup dialog appears and changes while Kodi was offline are
     # replayed at startup instead of waiting for a full rescan.
     - name: Keep the Jellyfin server companion sync enabled
-      ansible.builtin.lineinfile:
+      ansible.builtin.replace:
         path: "/home/kodi/.kodi/userdata/addon_data/{{ kodi_jellyfin_addon }}/settings.xml"
-        regexp: '^\s*<setting id="kodiCompanion"'
-        line: '    <setting id="kodiCompanion">true</setting>'
-        insertbefore: '^\s*</settings>\s*$'
+        regexp: '(<setting id="kodiCompanion"[^>]*>)[^<]*(</setting>)'
+        replace: '\g<1>true\g<2>'
       register: kodi_jellyfin_settings_companion
       when: kodi_jellyfin_configured
 
@@ -1869,6 +1868,9 @@
                                                         if self.library_thread is None:
                                                             self.library_thread = library.Library(self)
                                                             self.library_thread.start()
+                                                        # Downloaded items have no local path. Skip the validation dialog;
+                                                        # playback falls back to a Jellyfin stream when the file is absent.
+                                                        window("jellyfin_pathverified.bool", True)
                                                         self.library_thread.add_library(f_library_id)
                                                     xbmc.executebuiltin("Container.Refresh")
                                             except Exception as error:
@@ -1910,6 +1912,18 @@
           \g<indent>    time.sleep(10)
           \g<indent>    continue
       register: kodi_jellyfin_http_500
+      when: kodi_jellyfin_configured
+
+    # Jellyfin downloads are reached through Jellyfin itself, not through an
+    # sshfs mount. The helper marks their /media/downloads paths with a
+    # "stream://" prefix in data.json; the addon must then store a plugin://
+    # playback URL in Kodi's database instead of the unreachable server path.
+    - name: Use Jellyfin streaming for stream-only library paths
+      ansible.builtin.replace:
+        path: /home/kodi/.kodi/addons/plugin.video.jellyfin/jellyfin_kodi/objects/tvshows.py
+        regexp: '(?P<indent>        )if self\.direct_path:\n\n(?P=indent)    if not validate\(obj\["Path"\]\):'
+        replace: '\g<indent>if self.direct_path and not obj["Path"].startswith("stream://"):\n\n\g<indent>    # Stream-only paths have no local file; write a plugin:// URL.\n\g<indent>    if not validate(obj["Path"]):'
+      register: kodi_jellyfin_stream_paths
       when: kodi_jellyfin_configured
 
     # The password lives only in the transient root-only file; the helper
@@ -2053,7 +2067,8 @@
         (kodi_jellyfin_six is defined and kodi_jellyfin_six is changed) or
         (kodi_jellyfin_sync_hook is defined and kodi_jellyfin_sync_hook is changed) or
         (kodi_jellyfin_http_timeout is defined and kodi_jellyfin_http_timeout is changed) or
-        (kodi_jellyfin_http_500 is defined and kodi_jellyfin_http_500 is changed)
+        (kodi_jellyfin_http_500 is defined and kodi_jellyfin_http_500 is changed) or
+        (kodi_jellyfin_stream_paths is defined and kodi_jellyfin_stream_paths is changed)
 
     # Seed the addon's view database and queue a full sync without the GUI
     # library-selection dialog. The running (and freshly restarted) service
