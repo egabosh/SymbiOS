@@ -23,6 +23,7 @@
 #
 # Usage:
 #   symbios-ldap-groups.sh --create --name <group> [--gid <number>]
+#     (no-op when the group already exists)
 #   symbios-ldap-groups.sh --delete --name <group>
 #   symbios-ldap-groups.sh --add-user --name <group> --uid <user>
 #   symbios-ldap-groups.sh --remove-user --name <group> --uid <user>
@@ -39,7 +40,7 @@ Usage: $(basename "$0") [options]
 Manage LDAP groups in SymbiOS.
 
 Actions (exactly one required):
-  --create --name <group> [--gid <number>]  Create a new group
+  --create --name <group> [--gid <number>]  Create a new group (no-op if it exists)
   --delete --name <group>           Delete a group (removes all members first)
   --add-user --name <group> --uid <user>   Add user to group
   --remove-user --name <group> --uid <user>  Remove user from group
@@ -138,6 +139,17 @@ f_group_dn="cn=${f_name},ou=groups,${f_base_dn}"
 case "${f_action}" in
 
   create)
+    # Playbooks call --create on every reapply, so an existing group is the
+    # desired state, not an error. Without this check ldapadd reports
+    # "Already exists (68)" and the notification daemon mails a spurious
+    # ERROR. Do not fire hooks or audit for a group that was not created.
+    if f_ldap_exec ldapsearch -x -H "${f_ldap_uri}" -D "${f_bind_dn}" -y "${f_ldap_pw_file}" \
+      -b "${f_group_dn}" -s base "(objectClass=posixGroup)" dn 2>/dev/null | grep -q '^dn: '
+    then
+      g_echo_note "Group '${f_name}' already exists, nothing to do"
+      exit 0
+    fi
+
     g_echo_note "Creating group: ${f_name}"
 
     # Fixed GID for infrastructure groups, deterministic checksum GID otherwise
