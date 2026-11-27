@@ -89,6 +89,11 @@
 #     ParaLLEl-RSP JIT instead of the HLE RSP, and that JIT needs the
 #     page-size patch applied before the build: upstream aligns its code
 #     windows to 4 KB and aborts on 16 KB page kernels (Raspberry Pi 4/5).
+#     The SNES core is built from snes9x2010 source instead of using the Debian
+#     Snes9x package: that package advertises HD Mode 7 options but ignores
+#     them, while snes9x2010 really renders 4x_hv with stable bilinear
+#     filtering. The retired package/addon is removed and its saves are
+#     carried over, so only one client claims .sfc.
 #     The software rasterizer is CPU bound and cannot be tuned around: a
 #     Raspberry Pi 5 needs ~40 ms per frame and therefore emulates at ~0.8 of
 #     real time (measured over the audio clock and the frame rate), while
@@ -440,9 +445,17 @@
         package: libretro-nestopia
         core: nestopia_libretro.so
         controllers: [game.controller.nes]
-      - addon: game.libretro.snes9x
-        package: libretro-snes9x
-        core: snes9x_libretro.so
+      # SNES: the Debian package (Snes9x 1.63) advertises HD Mode 7 options in
+      # the Kodi addon manifest but does not implement them - values such as
+      # 4x_hv and stable are dead entries there. snes9x2010 from source really
+      # renders Mode 7 at 1024 px with stable bilinear filtering and ships a
+      # Kodi wrapper whose option ids match the core. It replaces the packaged
+      # core; the retired entry below removes the old client, otherwise both
+      # claim .sfc and Kodi asks which one to use for every game.
+      - addon: game.libretro.snes9x2010
+        build: libretro/snes9x2010
+        makefile: Makefile.libretro
+        core: snes9x2010_libretro.so
         controllers: [game.controller.snes, game.controller.snes.mouse, game.controller.snes.multitap, game.controller.snes.super.scope, game.controller.konami.justifier.snes]
       - addon: game.libretro.genplus
         package: libretro-genesisplusgx
@@ -542,6 +555,13 @@
         local: true
         extensions: dosz|exe|com|bat|conf|ins|img|ima|vhd|jrc
         controllers: [game.controller.keyboard, game.controller.mouse]
+    # Cores replaced by a different client must disappear as well: two clients
+    # claiming the same extension make Kodi open a selection dialog. "migrate_to"
+    # carries the existing addon data and savestates over to the new client.
+    kodi_game_cores_retired:
+      - addon: game.libretro.snes9x
+        package: libretro-snes9x
+        migrate_to: game.libretro.snes9x2010
   tasks:
 
     # Load the options from the WebUI-managed config file. When the file does
@@ -731,6 +751,54 @@
       when:
         - kodi_roms_configured
         - kodi_game_cores_available | selectattr('build', 'defined') | list | length > 0
+
+    # Retired cores have to go before the new wrappers are generated: Kodi
+    # picks the game client by extension and asks the user whenever two
+    # clients claim the same one. The package is removed too, so a leftover
+    # core library does not keep the old client loadable.
+    - name: Remove retired game addons
+      ansible.builtin.file:
+        path: "/home/kodi/.kodi/addons/{{ item.addon }}"
+        state: absent
+      loop: "{{ kodi_game_cores_retired }}"
+      loop_control:
+        label: "{{ item.addon }}"
+      when: kodi_roms_configured
+
+    - name: Remove retired libretro core packages
+      ansible.builtin.apt:
+        name: "{{ item.package }}"
+        state: absent
+        update_cache: no
+      loop: "{{ kodi_game_cores_retired | selectattr('package', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.package }}"
+      when: kodi_roms_configured
+
+    # Saves live below the addon id. Copy them once to the replacement client
+    # so an existing library does not lose its progress; an already migrated
+    # directory is left alone. Both addon data and savestates are covered.
+    - name: Carry over save data of retired game cores
+      ansible.builtin.shell: |
+        set -e
+        for f_kind in addon_data Savestates; do
+          f_src="/home/kodi/.kodi/userdata/${f_kind}/{{ item.addon }}"
+          f_dest="/home/kodi/.kodi/userdata/${f_kind}/{{ item.migrate_to }}"
+          [[ -d $f_src ]] || continue
+          if [[ ! -e $f_dest ]]
+          then
+            cp -a "$f_src" "$f_dest"
+            echo migrated
+          fi
+        done
+      loop: "{{ kodi_game_cores_retired | selectattr('migrate_to', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.addon }}"
+      register: kodi_core_data_migration
+      changed_when: "'migrated' in kodi_core_data_migration.stdout"
+      args:
+        executable: /bin/bash
+      when: kodi_roms_configured
 
     # Dedicated user for the Kodi session (media-center mode). The home dir
     # lives below /symbios/home, so the profile survives reboots on the LUKS
@@ -1427,6 +1495,7 @@
       loop:
         - game.libretro.mupen64plus-nx
         - game.libretro.dosbox-pure
+        - game.libretro.snes9x2010
       loop_control:
         label: "{{ item }}"
       when:
@@ -1452,6 +1521,31 @@
       when:
         - kodi_roms_configured
         - kodi_game_cores_available | selectattr('addon', 'equalto', 'game.libretro.mupen64plus-nx') | list | length > 0
+
+    # The packaged Snes9x accepted the HD Mode 7 values in its addon manifest
+    # but ignored them, so they never reached the renderer. snes9x2010
+    # implements them; 4x_hv renders the rotating plane at 1024x448 and stable
+    # bilinear avoids shimmer on high-contrast Mode 7 textures. The old
+    # "hires blend = merge" intent becomes pseudo_hires_blend = enabled in the
+    # new core, and the previous 4:3 aspect is kept instead of the new auto
+    # default. Only the pinned options are written; Kodi fills the rest from
+    # the wrapper's settings.xml.
+    - name: Enable HD Mode 7 for the SNES core
+      ansible.builtin.copy:
+        dest: /home/kodi/.kodi/userdata/addon_data/game.libretro.snes9x2010/settings.xml
+        owner: kodi
+        group: kodi
+        mode: '0600'
+        content: |
+          <settings version="2">
+              <setting id="snes9x_2010_mode7_hires">4x_hv</setting>
+              <setting id="snes9x_2010_mode7_hires_bilinear">stable</setting>
+              <setting id="snes9x_2010_pseudo_hires_blend">enabled</setting>
+              <setting id="snes9x_2010_aspect">4:3</setting>
+          </settings>
+      when:
+        - kodi_roms_configured
+        - kodi_game_cores_available | selectattr('addon', 'equalto', 'game.libretro.snes9x2010') | list | length > 0
 
     # DOSBox Pure ends a finished game in its own start menu and waits there,
     # but that menu can only be driven by a gamepad or by a mouse with absolute
