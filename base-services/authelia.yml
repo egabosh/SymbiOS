@@ -237,6 +237,16 @@
               port: 6379
               password: "{{ redis_password.stdout }}"
 
+          # Stable host-visible log for the report-only fail2ban jail. INFO is
+          # enough: credential failures are logged at error level. DEBUG is
+          # deliberately not enabled because successful logins are reported
+          # from the local database instead.
+          log:
+            level: info
+            format: text
+            file_path: /config/logs/authelia.log
+            keep_stdout: true
+
           storage:
             local:
               path: /config/db.sqlite3
@@ -367,6 +377,26 @@
         backup: yes
       notify: Restart authelia
 
+    # Authelia keeps the log file open; copytruncate avoids signalling the
+    # container from a host logrotate job. The file lives on the rootfs so the
+    # boot-enabled fail2ban jail can read it before /symbios is mounted.
+    - name: Logrotate config for the Authelia auth log
+      ansible.builtin.copy:
+        dest: /etc/logrotate.d/authelia-auth
+        owner: root
+        group: root
+        mode: "0644"
+        backup: yes
+        content: |
+          /var/log/authelia/authelia.log {
+            daily
+            rotate 7
+            missingok
+            notifempty
+            compress
+            copytruncate
+          }
+
     - name: "{{ service_path }}/docker-compose.yml Container Configuration"
       blockinfile:
         path: "{{ service_path }}/docker-compose.yml"
@@ -391,6 +421,7 @@
                 - symbios_base_services
               volumes:
                 - ./authelia-data:/config
+                - /var/log/authelia:/config/logs
                 - /etc/localtime:/etc/localtime:ro
                 - /etc/hosts:/etc/hosts:ro
 
@@ -573,6 +604,7 @@
       ansible.builtin.shell: docker compose up -d
       args:
         chdir: "{{ service_path }}"
+      changed_when: false
 
     - name: Register playbook as installed
       include_tasks: ../shared-tasks/state-register.yml

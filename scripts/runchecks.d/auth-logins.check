@@ -1,0 +1,109 @@
+CHECK_CATEGORY="services"
+CHECK_TITLE="Successful Logins"
+CHECK_DESC="Reports successful Authelia and SSH logins as security warnings."
+CHECK_DETAIL="Reads new successful rows from Authelia's local database.|Reads accepted logins from the systemd SSH journal.|Reports each new login once and records it in the audit trail."
+
+# A successful login is not a health failure, so this check never changes the
+# check status. It sends the same warning notification directly instead, which
+# avoids the flap/recovery mails a WARN status would produce for rare events.
+f_login_db="${g_base_services_root}/authelia/authelia-data/db.sqlite3"
+f_login_state="${g_log_dir}/auth-logins.state"
+f_login_limit=20
+
+function f_login_safe {
+  local f_value="${1:--}"
+  f_value="${f_value//[^A-Za-z0-9._~/%?&+=@:+-]/_}"
+  printf '%s' "${f_value:0:200}"
+}
+
+# First run must not replay the complete history. Store the current Authelia
+# id and the current timestamp as the starting point.
+f_auth_last=0
+# Journal cursors use microseconds so entries in the same second are not
+# reported twice on the next run.
+f_ssh_last="$(date +%s%6N)"
+if [[ -r "${f_login_state}" ]]
+then
+  while IFS='=' read -r f_state_key f_state_value
+  do
+    case "${f_state_key}" in
+      authelia) [[ "${f_state_value}" =~ ^[0-9]+$ ]] && f_auth_last="${f_state_value}" ;;
+      ssh) [[ "${f_state_value}" =~ ^[0-9]+$ ]] && f_ssh_last="${f_state_value}" ;;
+    esac
+  done < "${f_login_state}"
+elif [[ -r "${f_login_db}" ]]
+then
+  f_auth_last="$(sqlite3 "${f_login_db}" 'SELECT coalesce(max(id), 0) FROM authentication_logs WHERE successful = 1;' 2>/dev/null || printf '0')"
+fi
+[[ "${f_auth_last}" =~ ^[0-9]+$ ]] || f_auth_last=0
+[[ "${f_ssh_last}" =~ ^[0-9]+$ ]] || f_ssh_last="$(date +%s%6N)"
+# Tolerate an older seconds-only cursor during local testing.
+if [[ ${#f_ssh_last} -le 10 ]]
+then
+  f_ssh_last="${f_ssh_last}000000"
+fi
+
+f_auth_max="${f_auth_last}"
+f_ssh_max="${f_ssh_last}"
+
+function f_login_report {
+  local f_kind="$1" f_user="$2" f_ip="$3" f_detail="$4" f_more="$5"
+  f_user="$(f_login_safe "${f_user}")"
+  f_ip="$(f_login_safe "${f_ip}")"
+  [[ -n "${f_user}" ]] || f_user="-"
+  [[ -n "${f_ip}" ]] || f_ip="-"
+  local f_full="source=${f_kind} user=${f_user} ip=${f_ip} ${f_detail}"
+  [[ -z "${f_more}" ]] || f_full="${f_full} ${f_more}"
+
+  if declare -F f_audit_event >/dev/null 2>&1
+  then
+    f_audit_event security auth-success "${f_full}"
+  fi
+  if [[ -x /usr/local/bin/notify.sh ]]
+  then
+    printf 'WARNING: Auth warning: successful login by %s from %s\n%s\n' "${f_user}" "${f_ip}" "${f_full}" \
+      | /usr/local/bin/notify.sh -s "Auth warning: successful login ${f_user} from ${f_ip}" >/dev/null 2>&1 || true
+  fi
+  g_echo_note "Successful login: ${f_user} from ${f_ip} (${f_kind})"
+}
+
+if [[ -r "${f_login_db}" ]]
+then
+  f_login_rows=$(sqlite3 -separator $'\t' "${f_login_db}" \
+    "SELECT id, time, username, auth_type, coalesce(remote_ip, '-'), coalesce(request_uri, '-') FROM authentication_logs WHERE successful = 1 AND id > ${f_auth_last} ORDER BY id LIMIT ${f_login_limit};" \
+    2>/dev/null)
+  while IFS=$'\t' read -r f_id f_ts f_user f_type f_ip f_uri
+  do
+    [[ "${f_id}" =~ ^[0-9]+$ ]] || continue
+    (( f_id > f_auth_max )) || continue
+    f_auth_max="${f_id}"
+    f_type="$(f_login_safe "${f_type}")"
+    f_login_report authelia "${f_user}" "${f_ip}" \
+      "auth=${f_type}" "uri=$(f_login_safe "${f_uri}") time=$(f_login_safe "${f_ts}")"
+  done <<< "${f_login_rows}"
+fi
+
+f_ssh_since="${f_ssh_last:0:10}"
+f_ssh_rows=$(journalctl -u ssh --since "@${f_ssh_since}" --no-pager -o json 2>/dev/null \
+  | jq -r '
+      select((.MESSAGE // "") | test("Accepted (password|publickey) for "))
+      | . as $f_entry
+      | ($f_entry.MESSAGE | capture("Accepted (?<method>\\S+) for (?<user>\\S+) from (?<ip>[0-9A-Fa-f:.]+)"))
+      | [($f_entry.__REALTIME_TIMESTAMP // "0"), .method, .user, .ip]
+      | @tsv
+    ' 2>/dev/null)
+while IFS=$'\t' read -r f_ts f_method f_user f_ip
+do
+  [[ "${f_ts}" =~ ^[0-9]+$ ]] || continue
+  (( f_ts > f_ssh_max )) || continue
+  f_ssh_max="${f_ts}"
+  f_login_report sshd "${f_user}" "${f_ip}" \
+    "method=${f_method}" "time=$(date -d "@${f_ts:0:10}" -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || printf 'unknown')"
+done <<< "${f_ssh_rows}"
+
+# Persist the new cursor only after all reports succeeded. The state file lives
+# in the log dir, so it survives restarts and follows a moved config location.
+f_state_tmp=$(mktemp "${f_login_state}.XXXXXX" 2>/dev/null) || return 0
+printf 'authelia=%s\nssh=%s\n' "${f_auth_max}" "${f_ssh_max}" > "${f_state_tmp}"
+mv -f "${f_state_tmp}" "${f_login_state}" 2>/dev/null || rm -f "${f_state_tmp}"
+return 0

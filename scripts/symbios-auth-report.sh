@@ -46,16 +46,18 @@ fi
 
 function f_usage {
   cat << EOF
-Usage: ${g_script_name} [--audit-only] <source> <ip> <failures> [user]
+Usage: ${g_script_name} [--audit-only] <source> <ip> <failures> [user [domain [path]]]
 
 Report an authentication failure pattern to the central audit trail and,
 unless --audit-only is given, to the configured notification targets.
 
 Arguments:
-  source        Jail or check name, e.g. sshd, sftp-auth, traefik-auth
+  source        Jail or check name, e.g. sshd, sftp-auth, authelia-auth
   ip            Offending address, or '-' when several sources are involved
   failures      Number of failed attempts in the detection window
   user          Optional account name (sanitized before it is recorded)
+  domain        Optional portal or service domain from the authentication log
+  path          Optional authentication endpoint path from the log
 
 Options:
   --audit-only  Write the audit event only; the caller notifies (healthchecks)
@@ -78,7 +80,7 @@ then
   f_audit_only=1
   shift
 fi
-if [[ $# -lt 3 || $# -gt 4 ]]
+if [[ $# -lt 3 || $# -gt 6 ]]
 then
   f_usage >&2
   exit 2
@@ -88,6 +90,8 @@ f_source="$1"
 f_ip="$2"
 f_failures="$3"
 f_user="${4:--}"
+f_domain="${5:--}"
+f_path="${6:--}"
 
 # Strict validation: at least one arg is always attacker-controlled (fail2ban
 # passes the log match, the check passes parsed log fields).
@@ -99,8 +103,17 @@ then
   exit 2
 fi
 f_user="${f_user//[^A-Za-z0-9._@-]/_}"
+f_domain="${f_domain//[^A-Za-z0-9._-]/_}"
+f_path="${f_path//[^A-Za-z0-9._~/%?&+=@:-]/_}"
+f_user="${f_user:0:100}"
+f_domain="${f_domain:0:200}"
+f_path="${f_path:0:160}"
 [[ -n "$f_user" ]] || f_user="-"
+[[ -n "$f_domain" ]] || f_domain="-"
+[[ -n "$f_path" ]] || f_path="-"
 f_detail="source=${f_source} ip=${f_ip} failures=${f_failures} user=${f_user}"
+[[ "$f_domain" == "-" ]] || f_detail="${f_detail} domain=${f_domain}"
+[[ "$f_path" == "-" ]] || f_detail="${f_detail} path=${f_path}"
 
 # symbios-lib.sh owns the audit path and the audit helper. It may be missing
 # before the data volume is mounted; then syslog and notify still work.

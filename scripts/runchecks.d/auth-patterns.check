@@ -1,7 +1,7 @@
 CHECK_CATEGORY="services"
-CHECK_TITLE="Auth Patterns"
-CHECK_DESC="Detects auth brute force and account abuse in the Traefik access log."
-CHECK_DETAIL="Counts 401/403 responses per client IP in the last 15 minutes.|Counts distinct source IPs per authenticated user in the same window.|The configured Authelia bypasses (Paperless API, Forgejo git) are reported separately.|Silent when the access log is missing."
+CHECK_TITLE="Auth Request Patterns"
+CHECK_DESC="Detects 401/403 bursts and authenticated-user spread in the Traefik access log."
+CHECK_DETAIL="Counts 401/403 responses per client IP in the last 15 minutes.|Counts distinct source IPs per authenticated user in the same window.|Reports the busiest host, router, service, path and user agent for each burst.|Real credential attacks are reported by the fail2ban authelia-auth jail; these 401/403 bursts are often scanners."
 
 # Both thresholds are per 15-minute window. The Traefik JSON access log keeps
 # Remote-User (deployed by base-services/traefik.yml) as request_Remote-User.
@@ -13,39 +13,74 @@ f_auth_log="${g_base_services_root}/traefik/log/access.log"
 if [[ -r "${f_auth_log}" ]]
 then
   f_auth_cutoff=$(( $(date +%s) - f_auth_window ))
+  # Sanitize attacker-controlled fields before they reach a mail body. The
+  # audit reporter still receives only source, address and failure count.
   f_auth_rows=$(jq -r --argjson cutoff "${f_auth_cutoff}" '
+    def safe: tostring | gsub("[^A-Za-z0-9._~/%?&+=@:;,() -]"; "_");
     select((.StartUTC // "") | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 | . >= $cutoff)
-    | [ (.ClientHost // "-"), ((.DownstreamStatus // 0) | tostring),
-        (.["request_Remote-User"] // "-"), (.RequestPath // "-") ]
+    | [ (.ClientHost // "-" | safe),
+        ((.DownstreamStatus // 0) | tostring),
+        (.["request_Remote-User"] // "-" | safe),
+        (.RequestPath // "-" | safe),
+        (.RequestHost // "-" | safe),
+        (.RouterName // "-" | safe),
+        (.ServiceName // "-" | safe),
+        (.["request_User-Agent"] // "-" | safe),
+        (.StartUTC // "-" | safe) ]
     | @tsv
   ' "${f_auth_log}" 2>/dev/null)
 
   f_auth_alerts=$(printf '%s\n' "${f_auth_rows}" | awk -F '\t' \
     -v max_fail="${f_auth_max_fail}" -v max_ips="${f_auth_max_ips}" '
+    function f_top(f_ip, f_arr,    f_key, f_part, f_count, f_best, f_best_count) {
+      f_best = "-"
+      f_best_count = 0
+      for (f_key in f_arr) {
+        split(f_key, f_part, SUBSEP)
+        if (f_part[1] != f_ip) continue
+        f_count = f_arr[f_key]
+        if (f_count > f_best_count) {
+          f_best = f_part[2]
+          f_best_count = f_count
+        }
+      }
+      return f_best
+    }
     ($2 == "401" || $2 == "403") {
       if ($4 ~ /^\/api\// || $4 ~ /\.git(\/|$)/) { bypass[$1]++; next }
       fail[$1]++
+      if (!(($1) in first)) first[$1] = $9
+      last[$1] = $9
+      hosts[$1 SUBSEP $5]++
+      routers[$1 SUBSEP $6]++
+      services[$1 SUBSEP $7]++
+      paths[$1 SUBSEP $4]++
+      agents[$1 SUBSEP $8]++
     }
     $3 != "-" && $3 != "" { users[$3 SUBSEP $1] = 1; seen[$3] = 1 }
     END {
       for (ip in fail)
-        if (fail[ip] >= max_fail) printf "fail %s %d %d\n", ip, fail[ip], bypass[ip] + 0
+        if (fail[ip] >= max_fail)
+          printf "fail\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", ip, fail[ip], bypass[ip] + 0,
+            f_top(ip, hosts), f_top(ip, routers), f_top(ip, services),
+            f_top(ip, paths), f_top(ip, agents), first[ip], last[ip]
       for (u in seen) {
         n = 0
         for (k in users) { split(k, a, SUBSEP); if (a[1] == u) n++ }
-        if (n >= max_ips) printf "spread %s %d\n", u, n
+        if (n >= max_ips) printf "spread\t%s\t%d\n", u, n
       }
     }
   ')
 
   # Both branches only audit here; the flap-protected check notification is
   # owned by runchecks.sh, so there is no duplicate mail or Matrix post.
-  while read -r f_auth_kind f_auth_a f_auth_b f_auth_c
+  while IFS=$'\t' read -r f_auth_kind f_auth_a f_auth_b f_auth_c f_auth_d \
+    f_auth_e f_auth_f f_auth_g f_auth_h f_auth_i f_auth_j
   do
     case "${f_auth_kind}" in
       fail)
         symbios-auth-report.sh --audit-only traefik-auth "${f_auth_a}" "${f_auth_b}" >/dev/null 2>&1 || true
-        g_echo_error "Traefik auth failures: ${f_auth_b} x 401/403 from ${f_auth_a} (${f_auth_c:-0} on bypass paths) in ${f_auth_window}s"
+        g_echo_error "Traefik 401/403 burst: ${f_auth_b} responses from ${f_auth_a} (${f_auth_c:-0} on bypass paths) in ${f_auth_window}s; host=${f_auth_d:- -} router=${f_auth_e:- -} service=${f_auth_f:- -} path=${f_auth_g:- -} ua=${f_auth_h:- -} first=${f_auth_i:- -} last=${f_auth_j:- -}"
         ;;
       spread)
         symbios-auth-report.sh --audit-only traefik-user "-" "${f_auth_b}" "${f_auth_a}" >/dev/null 2>&1 || true

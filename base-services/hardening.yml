@@ -15,7 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 # docs:
-#   uses_vars: []
+#   uses_vars:
+#     - base_domain
 #   name: Hardening
 #   short_description: Apply basic Debian Linux hardening
 #   description: 'Hardens the OS: tightens SSH configuration, encrypts swap with a random key per boot, applies kernel/sysctl and permission hardening, and reduces the attack surface of the host.'
@@ -123,7 +124,52 @@
       - Restart fail2ban
       when: nocontainer.stat.exists == true
 
-    - name: Configure report-only fail2ban sshd jail (5 failures in 10 minutes)
+    # fail2ban is boot-enabled on the rootfs, so the Authelia log it watches
+    # must exist there before /symbios is mounted. Authelia bind-mounts this
+    # file later; an empty placeholder is harmless until SSO is installed.
+    - name: Create Authelia auth log directory for fail2ban
+      ansible.builtin.file:
+        path: /var/log/authelia
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: nocontainer.stat.exists == true
+
+    - name: Ensure Authelia auth log exists for fail2ban
+      ansible.builtin.file:
+        path: /var/log/authelia/authelia.log
+        state: touch
+        owner: root
+        group: root
+        mode: "0644"
+        modification_time: preserve
+        access_time: preserve
+      when: nocontainer.stat.exists == true
+
+    - name: Deploy Authelia authentication failure filter
+      ansible.builtin.copy:
+        src: "{{ git_root }}/base-services/fail2ban/filter.d/authelia-auth.conf"
+        dest: /etc/fail2ban/filter.d/authelia-auth.conf
+        mode: "0444"
+        owner: root
+        group: root
+      notify:
+      - Restart fail2ban
+      when: nocontainer.stat.exists == true
+
+    - name: Deploy context-aware report-only fail2ban action
+      ansible.builtin.copy:
+        src: "{{ git_root }}/base-services/fail2ban/action.d/symbios-report-auth.conf"
+        dest: /etc/fail2ban/action.d/symbios-report-auth.conf
+        mode: "0444"
+        owner: root
+        group: root
+      notify:
+      - Restart fail2ban
+      when: nocontainer.stat.exists == true
+
+    - name: Configure report-only fail2ban jails (5 failures in 10 minutes)
       ansible.builtin.blockinfile:
         path: /etc/fail2ban/jail.local
         mode: "0444"
@@ -151,6 +197,17 @@
           # Match the whole ssh unit: OpenSSH >= 9.8 logs as sshd-session,
           # a _COMM=sshd constraint would blind the jail.
           journalmatch = _SYSTEMD_UNIT=ssh.service
+
+          [authelia-auth]
+          enabled = true
+          filter = authelia-auth
+          logpath = /var/log/authelia/authelia.log
+          backend = polling
+          usedns = no
+          maxretry = 5
+          findtime = 10m
+          bantime = 1m
+          action = symbios-report-auth[domain=auth.{{ base_domain }}]
         backup: yes
       notify:
       - Restart fail2ban

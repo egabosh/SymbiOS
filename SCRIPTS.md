@@ -708,7 +708,7 @@ texts opportunistically).
 | `symbios-fetch-docker-log.sh` | Container log slice + total count in one round-trip | `<container_id> [offset] [limit]` |
 | `symbios-file-manager.sh` | Web file manager host ops (list/stat/read/write/...) | verb subcommands |
 | `symbios-notify.sh` | Notification dispatcher (mail + Matrix), stdin pipe | `[-s subject] [-m mail] ...`, stdin |
-| `symbios-auth-report.sh` | Central auth-failure reporter for fail2ban and auth healthchecks; audit plus 15-minute deduplicated notification, no firewall action | `[--audit-only] <source> <ip> <failures> [user]` |
+| `symbios-auth-report.sh` | Central auth-failure reporter for fail2ban and auth healthchecks; audit plus 15-minute deduplicated notification, no firewall action | `[--audit-only] <source> <ip> <failures> [user [domain [path]]]` |
 | `symbios-feature-apply.sh` | Feature executor (plugin.yml params -> playbook) | `<service> <feature>` |
 | `symbios-feature-detect.sh` | Feature param detect script (`{value,label}` JSON) | `<service> <feature> <param>` |
 | `symbios-boot-unlock/` | Pre-mount boot-unlock helpers (3 files; hardcode paths by design) | boot-time only |

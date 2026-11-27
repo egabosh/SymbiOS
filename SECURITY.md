@@ -207,6 +207,11 @@ report cooldown rather than a lockout. No address is blocked by SymbiOS,
 including the host `sshd` jail on ports 22/33. Only loopback is ignored, so
 brute force from the LAN is reported too.
 
+The report-only jails use two actions: `symbios-report` for plain SSH failures
+and `symbios-report-auth` for Authelia credential attacks. The latter passes
+account, portal and authentication endpoint to the reporter, but never a
+password, token, cookie or complete log line.
+
 The reporter writes one `security/auth-failure` audit event and, unless called
 with `--audit-only`, one notification per source and address per 15 minutes.
 The auth healthchecks (`sftp-auth`, `auth-patterns`) use `--audit-only`: they
@@ -216,12 +221,26 @@ one event never produces two alerts.
 Coverage is deliberately narrow and stated openly:
 
 - host sshd (22/33): fail2ban jail on the systemd journal
+- Authelia: report-only `authelia-auth` jail on the host-visible auth log for
+  failed `1FA`/`TOTP` attempts and unknown-user probes. The log lives on the
+  rootfs so the boot-enabled fail2ban can read it before `/symbios` is mounted
 - SFTP (28): healthcheck on the container's authentication log
-- Traefik/Authelia: JSON access log, 401/403 per client IP and distinct source
-  IPs per `Remote-User`; the configured bypasses (Paperless `^/api/`, Forgejo
-  `\.git(/|$)`) are counted separately
+- Traefik: JSON access log, 401/403 bursts per client IP and distinct source
+  IPs per `Remote-User`. This is a request pattern, not proof of a credential
+  attack: the configured bypasses (Paperless `^/api/`, Forgejo `\.git(/|$)`)
+  are counted separately and the mail names the busiest host, router, service,
+  path and user agent
 - other services: no usable authentication failure log source today; they are
   not silently claimed as covered
+
+Successful logins are reported separately by the `auth-logins` check. It reads
+new `successful = 1` rows from Authelia's local database and accepted logins
+from the SSH journal, writes a `security/auth-success` audit event, and sends a
+warning notification with user, source address and service context. A state
+file under the log directory ensures each new login is reported once. This is
+intentionally not a fail2ban jail: a successful login is not a failure and
+Authelia only logs it at debug level, while the database already has the
+authoritative record.
 
 ---
 
