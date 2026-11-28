@@ -1,7 +1,7 @@
 # docs:
 #   name: "OpenWrt - OpenVPN Tor roam watchdog"
 #   short_description: "OpenWrt - OpenVPN Tor roam watchdog"
-#   description: "Detects stale OpenVPN client-to-client TAP MAC mappings after a Tor device roams back to the master AP and restarts only the Tor VPN server to purge them."
+#   description: "Detects stale OpenVPN client-to-client TAP MAC mappings when a Tor device roams between any access point, and restarts the Tor VPN server when its broadcast/multicast queue is saturated. Both conditions purge the stale mapping; only the local VPN server is restarted."
 #   category: "VPN"
 #   type: OpenWrt
 #   icon: "bi-wifi"
@@ -35,31 +35,53 @@
         #!/bin/bash
 
         # OpenVPN's client-to-client TAP MAC table never ages out (ticket #626).
-        # When a device roams from a remote AP to the local master AP, its MAC
-        # stays mapped to the old client and frames are sent into the wrong
-        # tunnel. Restart the local server to purge the stale mapping. This is
-        # the softest option available: the OpenWrt build has no management
-        # interface, so a targeted client-kill is not possible. All clients
-        # reconnect automatically; no slave needs to be touched.
+        # Two independent symptoms need a server restart:
+        #   1. A device roams to another AP but stays mapped to the old client,
+        #      so its frames are sent into the wrong tunnel.
+        #   2. The broadcast/multicast queue saturates (256) and ARP/mDNS are
+        #      dropped, although the MAC mapping in the status file is right.
+        # A restart is the only way to purge both on this build (there is no
+        # management interface for a targeted client-kill). All clients
+        # reconnect automatically; slaves are only read via SSH.
 
         STATUS_FILE="/var/log/openvpn-tor-status.log"
         TOR_AP="phy1-ap2"
+        VPN_NAME="torvpn"
+        TAG="openvpn-tor-roam-watchdog"
+        MAX_QUEUE=256
         COOLDOWN=900
         STAMP="/tmp/openvpn-tor-watchdog.last"
 
         # Nothing to do while the status file is missing (server not up yet).
         [ -r "$STATUS_FILE" ] || exit 0
 
-        # Collect MACs currently associated with the local Tor AP.
-        f_local_macs() {
-          iwinfo "$TOR_AP" assoclist 2>/dev/null \
+        # MACs of stations currently associated with one AP.
+        f_assoc_macs() {
+          iwinfo "$1" assoclist 2>/dev/null \
             | awk '{print tolower($1)}' \
             | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' \
             | sort -u
         }
 
-        # Collect the MAC -> client mapping from OpenVPN's routing table.
-        # TAP addresses carry an "@0" suffix that has to be stripped.
+        # OpenVPN client list as "common-name,peer-ip". The peer address is
+        # the LAN IP of the router running the remote AP; the master trusts
+        # those clients' SSH keys (and vice versa) from basics.yml.
+        f_client_peers() {
+          awk -F, '
+            /^OpenVPN CLIENT LIST/ { inside=1; next }
+            /^ROUTING TABLE/       { inside=0 }
+            inside && $2 ~ /^udp4:/ {
+              ip = $2
+              sub(/^udp4:/, "", ip)
+              sub(/:[0-9]+$/, "", ip)
+              if (ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/)
+                print $1 "," ip
+            }
+          ' "$STATUS_FILE"
+        }
+
+        # MAC -> client mapping from OpenVPN's routing table. TAP addresses
+        # carry an "@0" suffix that has to be stripped.
         f_stale_pairs() {
           awk -F, '
             /^ROUTING TABLE/ { inside=1; next }
@@ -72,18 +94,60 @@
           ' "$STATUS_FILE"
         }
 
-        local_macs="$(f_local_macs)"
-        [ -n "$local_macs" ] || exit 0
-
-        # Find any locally associated MAC that is still mapped to a client.
-        f_stale="$(
-          f_stale_pairs | while IFS=, read -r f_mac f_cn
+        # Every association as "mac,expected-client". "local" marks stations
+        # on the master's own AP: they must not be in the VPN table at all.
+        f_associations() {
+          f_assoc_macs "$TOR_AP" | while IFS= read -r f_mac
           do
-            [ -n "$f_mac" ] && [ -n "$f_cn" ] || continue
-            echo "$local_macs" | grep -qF -- "$f_mac" && echo "$f_mac,$f_cn"
+            echo "$f_mac,local"
           done
-        )"
-        [ -n "$f_stale" ] || exit 0
+          f_client_peers | while IFS=, read -r f_cn f_ip
+          do
+            [ -n "$f_cn" ] && [ -n "$f_ip" ] || continue
+            ssh -o BatchMode=yes -o ConnectTimeout=3 \
+              -o StrictHostKeyChecking=accept-new \
+              "root@$f_ip" "iwinfo $TOR_AP assoclist" </dev/null 2>/dev/null \
+              | awk -v f_cn="$f_cn" '{print tolower($1) "," f_cn}' \
+              | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2},' || true
+          done
+        }
+
+        f_reason=""
+
+        # Check 1: a station sits behind another client than the routing table
+        # says. This catches devices that roamed to a different AP.
+        f_assoc="$(f_associations)"
+        if [ -n "$f_assoc" ]
+        then
+          f_stale="$(
+            f_stale_pairs | while IFS=, read -r f_mac f_cn
+            do
+              [ -n "$f_mac" ] && [ -n "$f_cn" ] || continue
+              f_owner="$(printf '%s\n' "$f_assoc" \
+                | awk -F, -v m="$f_mac" '$1 == m {print $2; exit}')"
+              [ -n "$f_owner" ] || continue
+              if [ "$f_owner" = "local" ] || [ "$f_owner" != "$f_cn" ]
+              then
+                echo "$f_mac,$f_cn (now at $f_owner)"
+              fi
+            done
+          )"
+          [ -z "$f_stale" ] || f_reason="stale mapping $f_stale"
+        fi
+
+        # Check 2: the broadcast/multicast queue is a high-water mark since
+        # server start. Once it saturated, ARP and mDNS are dropped. Use 0 if
+        # the status line is not there yet (right after a restart).
+        f_queue="$(awk -F, '/^Max bcast\/mcast queue length/ {print $2; exit}' "$STATUS_FILE")"
+        case "$f_queue" in
+          ''|*[!0-9]*) f_queue=0 ;;
+        esac
+        if [ "$f_queue" -ge "$MAX_QUEUE" ]
+        then
+          [ -z "$f_reason" ] || f_reason="$f_reason; "
+          f_reason="${f_reason}queue $f_queue reached $MAX_QUEUE"
+        fi
+        [ -n "$f_reason" ] || exit 0
 
         # Rate-limit: one restart per COOLDOWN seconds, even if several
         # devices flap at the same time.
@@ -93,14 +157,16 @@
           f_then="$(cat "$STAMP")"
           if [ $((f_now - f_then)) -lt $COOLDOWN ]
           then
-            echo "skip restart: cooldown active ($f_stale)"
+            echo "skip restart: cooldown active ($f_reason)"
+            logger -t "$TAG" "skip restart: cooldown active ($f_reason)"
             exit 0
           fi
         fi
 
         echo "$f_now" > "$STAMP"
-        echo "restart torvpn: stale mapping $f_stale"
-        /etc/init.d/openvpn restart torvpn
+        echo "restart $VPN_NAME: $f_reason"
+        logger -t "$TAG" "restart $VPN_NAME: $f_reason"
+        /etc/init.d/openvpn restart "$VPN_NAME"
         EOF
         chmod 500 /etc/scripts/openvpn-tor-roam-watchdog.sh
 
