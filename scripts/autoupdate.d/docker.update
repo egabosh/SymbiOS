@@ -28,8 +28,11 @@ fi
 # Clean up Docker images
 docker system prune -af
 
-# Find all Docker compose directories excluding special ones
-find "${g_base_services_root}" "${g_services_root}" -maxdepth 1 -mindepth 1 -type d | grep -E -v "mailcow-dockerized$|.del$|.bak$|.old$|var-lib-docker$|var-lib-containerd$" | while read g_docker_dir
+# Find all Docker compose directories. Skip backup markers, special stacks and
+# legacy host-named dirs (<service>.<domain>.<tld>): they have no live compose
+# project, so `docker compose up` there fails every night with an external
+# network error while the real service keeps running under its plain name.
+find "${g_base_services_root}" "${g_services_root}" -maxdepth 1 -mindepth 1 -type d | grep -E -v "(^|/)(mailcow-dockerized|var-lib-docker|var-lib-containerd)$|\.(del|bak|old)$|/[^/]*\.[^/]*\.[^/]*$" | while read g_docker_dir
 do
   # Skip directories without a compose file
   if [ ! -f "$g_docker_dir/docker-compose.yml" ]

@@ -83,9 +83,17 @@ function f_storage_maintenance_active {
       return 0
     fi
   done
-  # The replace kernel thread stays present for the whole device replace and
-  # does not need a blocking `btrfs replace status` call to be detected.
-  pgrep -x btrfs-devrepl >/dev/null 2>&1 && return 0
+  # A replace may be driven by a dedicated kernel worker or inline by a
+  # userspace helper. Both expose the target through sysfs while active; read
+  # it directly instead of depending on a process name or a blocking status
+  # call (a `btrfs replace status` on the live filesystem can hang for minutes
+  # while the replace is progressing).
+  local f_target
+  for f_target in /sys/fs/btrfs/*/devinfo/*/replace_target
+  do
+    [[ -r "$f_target" ]] || continue
+    [[ "$(cat "$f_target" 2>/dev/null)" != "0" ]] && return 0
+  done
   return 1
 }
 
